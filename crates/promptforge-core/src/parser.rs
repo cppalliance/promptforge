@@ -15,6 +15,7 @@ use crate::{Error, Result};
 
 /// The parsed frontmatter of a prompt file.
 #[derive(Debug, Clone, serde::Deserialize)]
+#[non_exhaustive]
 pub struct Frontmatter {
     /// The prompt's identifier (becomes the MCP tool name).
     pub name: String,
@@ -28,6 +29,10 @@ pub struct Frontmatter {
     /// Value returned when the run falls off the last section. Optional.
     #[serde(default)]
     pub default_return: Option<String>,
+    /// Maximum model round trips a section's tool-call loop may take. Optional;
+    /// `None` means the runtime applies its default cap rather than zero.
+    #[serde(default)]
+    pub max_tool_iterations: Option<usize>,
 }
 
 /// One section of a prompt: a heading, an optional Lua block, prose, and any
@@ -402,6 +407,18 @@ Prose for the second section.\n";
         assert_eq!(a.children.len(), 1);
         assert_eq!(a.children[0].name, "D");
         assert_eq!(a.children[0].level, 4);
+    }
+
+    #[test]
+    fn max_tool_iterations_parses_when_declared_and_defaults_to_none() {
+        let declared =
+            "---\nname: x\ndescription: d\nversion: 1\nmax_tool_iterations: 20\n---\n\n## S\n\np\n";
+        let p = Prompt::parse(declared).unwrap();
+        assert_eq!(p.frontmatter.max_tool_iterations, Some(20));
+
+        let absent = "---\nname: x\ndescription: d\nversion: 1\n---\n\n## S\n\np\n";
+        let p = Prompt::parse(absent).unwrap();
+        assert_eq!(p.frontmatter.max_tool_iterations, None);
     }
 
     #[test]
