@@ -8,8 +8,10 @@
 use crate::Result;
 
 pub mod web_fetch;
+pub mod web_search;
 
 pub use web_fetch::WebFetch;
+pub use web_search::WebSearch;
 
 /// A tool the executor can dispatch during a model's tool-call loop.
 #[async_trait::async_trait]

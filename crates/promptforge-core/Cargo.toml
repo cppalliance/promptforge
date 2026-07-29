@@ -19,6 +19,7 @@ readabilityrs.workspace = true
 htmd.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
 tokio.workspace = true
 
 [lints]
