@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/promptforge-core", "crates/promptforge-cli", "crates/promptforge-gateway"]
+members = ["crates/promptforge-core", "crates/promptforge-webfetch", "crates/promptforge-cli", "crates/promptforge-gateway"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +10,7 @@ license = "MIT"
 
 [workspace.dependencies]
 promptforge-core = { path = "crates/promptforge-core", version = "0.1.0" }
+promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.1.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
