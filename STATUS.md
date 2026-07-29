@@ -12,23 +12,24 @@ longer holds any vendor credential, only the gateway URL and shared token.
 - `promptforge-cli` - `promptforge run <file.md>`.
 - `promptforge-gateway` - axum service: `gateway.toml` (Secret + ${VAR} interpolation), model routing, one OpenAI passthrough upstream, bearer auth, POST /v1/chat/completions, GET /health. Config + routing unit tests + 4 end-to-end tests (fake backend + real client).
 
-Lua commit 1 (echo): mlua embedded + sandboxed; `args` (single raw string) exposed
-to a section's Lua block; the finish case of the exit rule works - a chunk that
-returns a plain value ends the run with it. `promptforge run prompts/echo.md "x"`
-runs `return args` and prints `x` with no model call and no gateway.
+Lua + args + substitution. A section's Lua block runs in a sandbox with `args`
+(raw input) and `sys` (runtime metadata) exposed and a writable `var` table. A
+chunk that returns a plain value finishes the run (no model call); otherwise the
+prose is `{{ }}`-substituted and sent to the gateway.
 
-- `promptforge-core::lua::run_chunk` - sandboxed VM (string/table/math + base only; no io/os/require/load/debug), instruction-count hook, args in, top-level return out. 5 unit tests.
-- `execute::run(prompt, args)` - Lua chunk returns a value -> finish; else send prose to the gateway. Client built lazily so a Lua-only run needs no credentials.
-- CLI: `promptforge run <file> [input]` passes `input` as `args`.
+- `promptforge-core::lua::run_chunk` - sandboxed VM (string/table/math + base; no io/os/require/load/debug), instruction hook; exposes `args` + `sys`, returns the top-level value and the `var` table (as JSON). 7 unit tests.
+- `promptforge-core::subst::substitute` - resolves `{{ args }}` / `{{ var.x }}` / `{{ sys.x }}` (scalar->string, table->JSON, missing->error, single pass, no formulas). 7 unit tests.
+- `sys` (runtime, read-only): `sys.when` (launch, RFC3339), `sys.now` (build snapshot), `sys.id` (context id).
+- `execute::run(prompt, args)` - run Lua; returned value -> finish; else substitute prose -> gateway. Client built lazily.
+- `prompts/echo.md` (`return args`, no gateway), `prompts/greet.md` (Lua-computed `var` + substitution through the gateway).
 
 ## What's next
 
-Lua commit 2: `{{ args }}` / `{{ var.x }}` substitution + the writable `var`
-table, wired before the model turn (the greet.md demo). Then the control-flow
-tranche: the rest of the exit rule (nil = fall-through, goto/task/fanout
-descriptors), the tool-call loop, and multi-section flow. Gateway hardening
-(admission, pinning, packs, hot reload, Anthropic shim, streaming) deferred until
-self-hosted pods exist.
+Deferred and next: live time across turns (`sys.live("now")` replace-in-place tail
+refresh, or a `now()` tool); the `facts` bag; then the control-flow tranche - the
+rest of the exit rule (nil = fall-through, goto/task/fanout descriptors), the
+tool-call loop, multi-section flow. Gateway hardening (admission, pinning, packs,
+hot reload, Anthropic shim, streaming) deferred until self-hosted pods exist.
 
 ## How to run
 
@@ -62,6 +63,8 @@ cargo run -p promptforge-cli -- run prompts/hello.md
 - Lua via mlua (lua54, vendored); sandbox = string/table/math + safe base, no io/os/require/load/debug, instruction-budget hook
 - args is a single raw string (caller input); derived values are deduced+stored by the pipeline, not passed
 - Exit rule (finish case only so far): a Lua chunk that returns a plain value ends the run with it; no return / no Lua -> model path
+- Substitution namespaces: args (raw string), var (Lua-written), sys (runtime); pure path lookup, no formulas (compute in Lua)
+- sys names provenance not immutability: sys.when fixed, sys.now snapshot, sys.id per-context
 - Streaming later (Talktron needs it)
 
 ## Open questions
