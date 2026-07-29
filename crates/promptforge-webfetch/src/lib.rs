@@ -8,8 +8,8 @@
 
 use readabilityrs::{Readability, ReadabilityOptions};
 
-use crate::tools::Tool;
-use crate::{Error, Result};
+use promptforge_core::tools::Tool;
+use promptforge_core::{Error, Result};
 
 /// The request timeout applied to each fetch.
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -125,7 +125,7 @@ impl Tool for WebFetch {
             .timeout(FETCH_TIMEOUT)
             .send()
             .await
-            .map_err(Error::http)?;
+            .map_err(|source| Error::Http(Box::new(source)))?;
 
         let status = response.status();
         if !status.is_success() {
@@ -142,7 +142,10 @@ impl Tool for WebFetch {
             });
         }
 
-        let html = response.text().await.map_err(Error::http)?;
+        let html = response
+            .text()
+            .await
+            .map_err(|source| Error::Http(Box::new(source)))?;
         Ok(extract_markdown(&html, Some(url)))
     }
 }

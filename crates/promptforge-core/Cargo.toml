@@ -15,8 +15,6 @@ reqwest.workspace = true
 thiserror.workspace = true
 mlua.workspace = true
 time.workspace = true
-readabilityrs.workspace = true
-htmd.workspace = true
 
 [dev-dependencies]
 axum.workspace = true

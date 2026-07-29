@@ -1,0 +1,18 @@
+[package]
+name = "promptforge-webfetch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "PromptForge web_fetch tool: fetch a URL and return its main content as markdown"
+
+[dependencies]
+promptforge-core.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+readabilityrs.workspace = true
+htmd.workspace = true
+
+[lints]
+workspace = true

@@ -6,7 +6,8 @@
 //! proxies through the gateway and therefore needs the gateway base URL and
 //! bearer token.
 
-use promptforge_core::tools::{Tool, WebFetch, WebSearch};
+use promptforge_core::tools::{Tool, WebSearch};
+use promptforge_webfetch::WebFetch;
 
 /// Build the tool instances a prompt requested, resolving each canonical name
 /// to its implementation.

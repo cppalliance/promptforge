@@ -1032,6 +1032,7 @@ name = "promptforge-cli"
 version = "0.1.0"
 dependencies = [
  "promptforge-core",
+ "promptforge-webfetch",
  "tokio",
 ]
 
@@ -1041,10 +1042,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
- "htmd",
  "mlua",
  "pulldown-cmark",
- "readabilityrs",
  "reqwest",
  "serde",
  "serde_json",
@@ -1069,6 +1068,18 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "promptforge-webfetch"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "htmd",
+ "promptforge-core",
+ "readabilityrs",
+ "reqwest",
+ "serde_json",
 ]
 
 [[package]]
