@@ -63,6 +63,11 @@ pub enum Error {
     /// The model asked to call a tool that was not provided to the executor.
     #[error("model called unknown tool {0}")]
     UnknownTool(String),
+
+    /// A section's Lua block scoped a tool by a name absent from the run's
+    /// frontmatter tools, so no matching tool could be advertised or dispatched.
+    #[error("section scoped unknown tool {0}")]
+    UnknownScopedTool(String),
 }
 
 impl Error {

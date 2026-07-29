@@ -8,6 +8,10 @@ max_tool_iterations: 20
 
 ## Research
 
+```lua
+tools.add("web_search", "web_fetch")
+```
+
 You research people using live web tools and return a compact, factual summary.
 
 Your input is a request about a person:
