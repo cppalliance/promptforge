@@ -167,6 +167,11 @@ impl Tool for WebFetch {
                 "url": {
                     "type": "string",
                     "description": "The URL to fetch."
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum number of characters of text to return for this call, overriding the configured default. Longer text is truncated on a character boundary and the result is flagged as truncated."
                 }
             },
             "required": ["url"]
@@ -178,6 +183,10 @@ impl Tool for WebFetch {
             .get("url")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| Error::Parse("web_fetch: missing url argument".into()))?;
+
+        // A per-call `max_chars` overrides the configured default for this
+        // fetch; absent, the config default applies.
+        let max_chars = parse_max_chars(&args, self.config.max_chars)?;
 
         // Enforce the URL-admission policy before any network access.
         let url = check_url(url, &self.config)?;
@@ -209,29 +218,120 @@ impl Tool for WebFetch {
             });
         }
 
-        let html = response
-            .text()
-            .await
-            .map_err(|source| Error::Http(Box::new(source)))?;
+        // Read the body under the byte cap. A declared Content-Length over the
+        // cap is refused before any body is read; otherwise the decompressed
+        // stream is counted as it arrives and aborted the moment it exceeds the
+        // cap. For the HTML/structured path this is an all-or-nothing refusal.
+        let body = read_body_capped(response, final_url.as_str(), self.config.max_bytes).await?;
+        let html = String::from_utf8_lossy(&body);
         let markdown = extract_markdown(&html, Some(final_url.as_str()));
 
-        // Provenance header: a leading `url:` line naming the final URL, then a
-        // blank line, then the content. Later steps add truncated and extraction
-        // mode to this header.
-        Ok(format!("url: {final_url}\n\n{markdown}"))
+        // Cap the returned text at `max_chars`, cutting on a character boundary
+        // so a multibyte character is never split.
+        let (text, truncated) = truncate_to_chars(&markdown, max_chars);
+
+        // Provenance header: a `url:` line naming the final URL, then a
+        // `truncated:` line, then a blank line, then the content. Later steps
+        // add the extraction mode to this header.
+        Ok(format!(
+            "url: {final_url}\ntruncated: {truncated}\n\n{text}"
+        ))
+    }
+}
+
+/// Parses the optional `max_chars` argument, falling back to `default`.
+///
+/// # Errors
+/// Returns [`Error::Parse`] if `max_chars` is present but is not a positive
+/// integer that fits in `usize`.
+fn parse_max_chars(args: &serde_json::Value, default: usize) -> Result<usize> {
+    let Some(value) = args.get("max_chars") else {
+        return Ok(default);
+    };
+    if value.is_null() {
+        return Ok(default);
+    }
+    let n = value
+        .as_u64()
+        .filter(|n| *n >= 1)
+        .ok_or_else(|| Error::Parse("web_fetch: max_chars must be a positive integer".into()))?;
+    Ok(usize::try_from(n).unwrap_or(usize::MAX))
+}
+
+/// Reads a response body into memory under a decompressed-byte cap.
+///
+/// A declared `Content-Length` greater than `max_bytes` is refused before the
+/// body is read. Otherwise the body is streamed and counted as it arrives
+/// (reqwest decompresses in the stream, so the count is on decompressed bytes),
+/// and the read is aborted the moment the running total exceeds `max_bytes`. A
+/// body of exactly `max_bytes` is accepted.
+///
+/// # Errors
+/// Returns [`FetchError::TooLarge`] (as [`Error::Parse`]) if the response
+/// exceeds `max_bytes`, or [`Error::Http`] on a transport failure mid-stream.
+async fn read_body_capped(
+    mut response: reqwest::Response,
+    url: &str,
+    max_bytes: usize,
+) -> Result<Vec<u8>> {
+    let too_large = || -> Error {
+        FetchError::TooLarge {
+            url: url.to_string(),
+            limit: max_bytes,
+        }
+        .into()
+    };
+
+    // Precheck: an honest Content-Length over the cap is refused before any
+    // body is read. A compressed response reports no usable length here, so the
+    // streamed counter below is what catches an expanding payload.
+    if let Some(len) = response.content_length() {
+        if len > max_bytes as u64 {
+            return Err(too_large());
+        }
+    }
+
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|source| Error::Http(Box::new(source)))?
+    {
+        if body.len() + chunk.len() > max_bytes {
+            return Err(too_large());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+/// Truncates `text` to at most `max_chars` characters on a character boundary.
+///
+/// Returns the (possibly shortened) text and whether it was truncated. The cut
+/// falls on a [`char`] boundary, so a multibyte character is never split. Text
+/// of exactly `max_chars` characters is returned untruncated.
+fn truncate_to_chars(text: &str, max_chars: usize) -> (&str, bool) {
+    match text.char_indices().nth(max_chars) {
+        Some((idx, _)) => (&text[..idx], true),
+        None => (text, false),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
     use std::net::IpAddr;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use axum::Router;
+    use axum::body::Body;
     use axum::extract::State;
-    use axum::response::{Html, Redirect};
+    use axum::http::header::{CONTENT_ENCODING, CONTENT_LENGTH};
+    use axum::response::{Html, IntoResponse, Redirect, Response};
     use axum::routing::get;
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
 
     use super::{WebFetch, extract_markdown};
     use crate::config::FetchConfig;
@@ -247,6 +347,20 @@ mod tests {
                deliberately long enough to be treated as real article content.</p>
             <p>A second paragraph continues the prose so the extractor keeps the
                body and the character count stays comfortably above threshold.</p>
+          </article>
+        </body></html>
+    ";
+
+    /// An article whose prose is full of multibyte characters, so a truncation
+    /// that split a character would produce invalid UTF-8.
+    const UNICODE_HTML: &str = r"
+        <html><body>
+          <article>
+            <h1>Café Résumé Naïve</h1>
+            <p>Café résumé naïve façade jalapeño piñata. Café résumé naïve façade
+               jalapeño piñata. Café résumé naïve façade jalapeño piñata.</p>
+            <p>Café résumé naïve façade jalapeño piñata. Café résumé naïve façade
+               jalapeño piñata. Café résumé naïve façade jalapeño piñata.</p>
           </article>
         </body></html>
     ";
@@ -275,6 +389,70 @@ mod tests {
         "reached the internal target"
     }
 
+    async fn unicode() -> Html<&'static str> {
+        Html(UNICODE_HTML)
+    }
+
+    /// A plain HTML page far larger than the small `max_bytes` used in tests.
+    ///
+    /// It carries an honest `Content-Length`, so the size cap can refuse it on
+    /// the pre-read check.
+    async fn large() -> Html<String> {
+        let filler = "x".repeat(200_000);
+        Html(format!("<html><body><p>{filler}</p></body></html>"))
+    }
+
+    /// A response declaring `Content-Encoding: gzip` whose compressed body is
+    /// tiny on the wire but decompresses far past the small `max_bytes`.
+    ///
+    /// Highly compressible payload: 200_000 identical bytes shrink to a few
+    /// hundred on the wire, so a wire-byte counter would accept it and only a
+    /// decompressed-byte counter refuses it.
+    async fn gzip_bomb() -> impl IntoResponse {
+        let raw = "A".repeat(200_000);
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder
+            .write_all(raw.as_bytes())
+            .expect("writing to an in-memory gzip encoder must succeed");
+        let compressed = encoder
+            .finish()
+            .expect("finishing an in-memory gzip encoder must succeed");
+        ([(CONTENT_ENCODING, "gzip")], compressed)
+    }
+
+    /// A response that lies about its size: it declares a `Content-Length`
+    /// far over any test cap while its actual body is a handful of bytes.
+    ///
+    /// The declared length is what the size precheck reads, before the body is
+    /// streamed. The tiny real body is well under the cap, so the streamed byte
+    /// counter would accept it; only the precheck refuses this response. That is
+    /// what makes the test fail if the precheck were removed.
+    ///
+    /// The body is built from a stream so it carries no known length of its own,
+    /// which lets the manually set `Content-Length` header stand (a body with a
+    /// known size makes hyper reject the mismatched header instead of sending
+    /// it). The stream emits one small chunk, then holds briefly before ending
+    /// short of the declared length. The hold lets the client's `send` resolve
+    /// on the headers first, so the precheck refuses on the declared length
+    /// alone; were the precheck gone, the short body would surface as a
+    /// transport error rather than the expected `TooLarge`, so the assertion
+    /// still fails.
+    async fn liar_content_length() -> Response {
+        use futures_util::StreamExt as _;
+
+        let head = futures_util::stream::once(async {
+            Ok::<_, std::io::Error>("<html><body><p>x</p></body></html>")
+        });
+        let tail = futures_util::stream::once(async {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            Ok::<_, std::io::Error>("")
+        });
+        Response::builder()
+            .header(CONTENT_LENGTH, "1000000")
+            .body(Body::from_stream(head.chain(tail)))
+            .expect("building the oversized-content-length response must succeed")
+    }
+
     /// Binds a loopback axum server on an ephemeral port and serves it.
     ///
     /// Returns the port and the `/target` hit counter.
@@ -295,6 +473,10 @@ mod tests {
             .route("/", get(root))
             .route("/redir", get(redir))
             .route("/target", get(target))
+            .route("/unicode", get(unicode))
+            .route("/large", get(large))
+            .route("/gzip", get(gzip_bomb))
+            .route("/liar", get(liar_content_length))
             .with_state(state);
         tokio::spawn(async move {
             axum::serve(listener, app)
@@ -397,6 +579,148 @@ mod tests {
                 "expected policy reason {reason:?} for {raw}, got: {err}"
             );
         }
+    }
+
+    /// Splits a `web_fetch` return into its provenance header and its body.
+    ///
+    /// The header is the lines before the first blank line; the body is the
+    /// rest. Panics if the blank-line separator is missing.
+    fn split_header(out: &str) -> (&str, &str) {
+        out.split_once("\n\n")
+            .expect("the return must carry a header and a blank-line separator")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn oversized_html_is_refused() {
+        let (port, _hits) = spawn_server().await;
+        let config = FetchConfig {
+            max_bytes: 4096,
+            ..loopback_config(port)
+        };
+        let tool = WebFetch::with_config(config);
+
+        let url = format!("http://localhost:{port}/large");
+        let err = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect_err("an oversized HTML body must be refused");
+
+        assert!(
+            matches!(&err, Error::Parse(msg) if msg.contains("exceeds") && msg.contains("4096")),
+            "expected a TooLarge refusal naming the cap, got: {err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn declared_content_length_over_cap_is_refused_before_read() {
+        let (port, _hits) = spawn_server().await;
+        // The cap sits far below the declared 1_000_000-byte Content-Length but
+        // far above the tiny real body. A streamed byte counter would accept the
+        // real body, so the only thing that can produce a refusal here is the
+        // pre-read Content-Length check: deleting that precheck turns this fetch
+        // into a success and breaks this test.
+        let config = FetchConfig {
+            max_bytes: 4096,
+            ..loopback_config(port)
+        };
+        let tool = WebFetch::with_config(config);
+
+        let url = format!("http://localhost:{port}/liar");
+        let err = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect_err("a declared Content-Length over the cap must be refused before the read");
+
+        assert!(
+            matches!(&err, Error::Parse(msg) if msg.contains("exceeds") && msg.contains("4096")),
+            "expected a TooLarge refusal naming the cap from the precheck, got: {err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn gzip_bomb_refused_on_decompressed_count() {
+        let (port, _hits) = spawn_server().await;
+        // The cap is far larger than the compressed wire size (a few hundred
+        // bytes) but far smaller than the 200_000-byte decompressed body, so a
+        // refusal can only come from counting decompressed bytes.
+        let config = FetchConfig {
+            max_bytes: 4096,
+            ..loopback_config(port)
+        };
+        let tool = WebFetch::with_config(config);
+
+        let url = format!("http://localhost:{port}/gzip");
+        let err = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect_err("a gzip body that decompresses past the cap must be refused");
+
+        assert!(
+            matches!(&err, Error::Parse(msg) if msg.contains("exceeds")),
+            "expected a TooLarge refusal on the decompressed count, got: {err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn text_over_max_chars_is_truncated_on_char_boundary() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        // A small per-call cap forces a cut; the body is full of two-byte
+        // characters, so a byte-wise cut would land mid-character.
+        let max_chars = 25usize;
+        let url = format!("http://localhost:{port}/unicode");
+        let out = tool
+            .call(serde_json::json!({ "url": url, "max_chars": max_chars }))
+            .await
+            .expect("a unicode fetch through allow_exact must succeed");
+
+        let (header, body) = split_header(&out);
+        assert!(
+            header.contains("truncated: true"),
+            "the header must flag truncation, got: {header}"
+        );
+        assert_eq!(
+            body.chars().count(),
+            max_chars,
+            "the body must be cut to exactly max_chars characters, got: {body:?}"
+        );
+        assert!(
+            body.contains('é') || body.contains('ï') || body.contains('ç'),
+            "the truncated body must retain multibyte characters, got: {body:?}"
+        );
+        assert!(
+            !body.contains('\u{FFFD}'),
+            "the cut must fall on a char boundary, never splitting a character, got: {body:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn body_one_byte_under_cap_succeeds_untruncated() {
+        let (port, _hits) = spawn_server().await;
+        // The article body is served verbatim, so a cap one byte above its
+        // length admits it with room to spare for no byte.
+        let config = FetchConfig {
+            max_bytes: ARTICLE_HTML.len() + 1,
+            ..loopback_config(port)
+        };
+        let tool = WebFetch::with_config(config);
+
+        let url = format!("http://localhost:{port}/");
+        let out = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect("a body one byte under the cap must be accepted");
+
+        let (header, body) = split_header(&out);
+        assert!(
+            header.contains("truncated: false"),
+            "a short body must not be flagged truncated, got: {header}"
+        );
+        assert!(
+            body.contains("substantial paragraph"),
+            "the extracted article content must survive intact, got: {body}"
+        );
     }
 
     #[test]

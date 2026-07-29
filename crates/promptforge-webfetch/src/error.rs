@@ -83,6 +83,21 @@ pub enum FetchError {
         reason: String,
     },
 
+    /// The response body exceeded the byte cap.
+    ///
+    /// The cap is counted on decompressed bytes, so a compressed payload that
+    /// expands past `limit` is refused on its expanded size. The model-facing
+    /// text names both the cap and the URL so the model can retry a smaller or
+    /// different resource.
+    #[non_exhaustive]
+    #[error("response from {url} exceeds the {limit}-byte size cap")]
+    TooLarge {
+        /// The URL whose response exceeded the cap.
+        url: String,
+        /// The byte cap that was exceeded.
+        limit: usize,
+    },
+
     /// DNS resolution for a host failed at the system level.
     #[non_exhaustive]
     #[error("dns resolution failed for {host}: {message}")]
