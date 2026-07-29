@@ -6,17 +6,25 @@
 //! HTML-to-markdown conversion with [`htmd`], so the tool always returns
 //! something useful when the fetch itself succeeds.
 
+use std::sync::Arc;
+
 use readabilityrs::{Readability, ReadabilityOptions};
 
 use promptforge_core::tools::Tool;
 use promptforge_core::{Error, Result};
 
+pub mod address;
 pub mod config;
 pub mod error;
+pub mod redirect;
+pub mod resolver;
 pub mod url_policy;
 
+pub use address::{BLOCKED_CIDRS, addr_allowed, addr_allowed_for_host};
 pub use config::FetchConfig;
 pub use error::FetchError;
+pub use redirect::{check_redirect, redirect_policy};
+pub use resolver::{GuardedResolver, Lookup, SystemLookup};
 pub use url_policy::check_url;
 
 /// The request timeout applied to each fetch.
@@ -48,13 +56,48 @@ impl WebFetch {
     }
 
     /// Construct a `WebFetch` with a fresh HTTP client and the given policy.
+    ///
+    /// The client installs a [`GuardedResolver`], so every connection (on the
+    /// first hop and after each redirect) is made only to an address the policy
+    /// allows, and a [`redirect_policy`] that re-checks each hop's URL and
+    /// refuses an `https` to `http` downgrade.
+    ///
+    /// # Panics
+    /// Panics if the underlying HTTP client cannot be built, which for this
+    /// static, valid configuration means the TLS backend failed to initialize:
+    /// a defect in the environment, not a condition a caller can act on.
     #[must_use]
     pub fn with_config(config: FetchConfig) -> WebFetch {
-        WebFetch {
-            http: reqwest::Client::new(),
-            config,
-        }
+        let resolver = Arc::new(GuardedResolver::system(config.clone()));
+        let http = reqwest::Client::builder()
+            .dns_resolver(resolver)
+            .redirect(redirect_policy(config.clone()))
+            .build()
+            // The builder is fed a static, valid configuration; a failure here
+            // means the TLS backend could not initialize, which is a defect, not
+            // a condition a caller can act on.
+            .expect(
+                "building the web_fetch HTTP client cannot fail with a valid static configuration",
+            );
+        WebFetch { http, config }
     }
+}
+
+/// Recovers a [`FetchError`] carried as a source of a reqwest error.
+///
+/// The guarded resolver and the redirect policy report refusals by boxing a
+/// [`FetchError`] into the error reqwest ultimately returns. Walking the source
+/// chain recovers it so the model sees the policy reason ([`Error::Parse`])
+/// rather than an opaque transport error. Anything else stays an [`Error::Http`].
+fn map_send_error(err: reqwest::Error) -> Error {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&err);
+    while let Some(current) = source {
+        if let Some(fetch_err) = current.downcast_ref::<FetchError>() {
+            return Error::Parse(fetch_err.model_facing());
+        }
+        source = current.source();
+    }
+    Error::Http(Box::new(err))
 }
 
 impl Default for WebFetch {
@@ -145,7 +188,11 @@ impl Tool for WebFetch {
             .timeout(FETCH_TIMEOUT)
             .send()
             .await
-            .map_err(|source| Error::Http(Box::new(source)))?;
+            .map_err(map_send_error)?;
+
+        // The final URL after any redirects; this is the provenance the model
+        // cites, since the bytes came from here, not from where it aimed.
+        let final_url = response.url().clone();
 
         let status = response.status();
         if !status.is_success() {
@@ -166,15 +213,152 @@ impl Tool for WebFetch {
             .text()
             .await
             .map_err(|source| Error::Http(Box::new(source)))?;
-        Ok(extract_markdown(&html, Some(url.as_str())))
+        let markdown = extract_markdown(&html, Some(final_url.as_str()));
+
+        // Provenance header: a leading `url:` line naming the final URL, then a
+        // blank line, then the content. Later steps add truncated and extraction
+        // mode to this header.
+        Ok(format!("url: {final_url}\n\n{markdown}"))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::IpAddr;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use axum::Router;
+    use axum::extract::State;
+    use axum::response::{Html, Redirect};
+    use axum::routing::get;
+
     use super::{WebFetch, extract_markdown};
+    use crate::config::FetchConfig;
     use promptforge_core::Error;
     use promptforge_core::tools::Tool;
+
+    /// An article page long enough for readability extraction to fire.
+    const ARTICLE_HTML: &str = r"
+        <html><body>
+          <article>
+            <h1>Loopback Test Article</h1>
+            <p>This is the first substantial paragraph of a loopback test page,
+               deliberately long enough to be treated as real article content.</p>
+            <p>A second paragraph continues the prose so the extractor keeps the
+               body and the character count stays comfortably above threshold.</p>
+          </article>
+        </body></html>
+    ";
+
+    /// Shared state for the loopback server: its own port and a target hit count.
+    #[derive(Clone)]
+    struct AppState {
+        /// The port the server bound to, embedded in the redirect target.
+        port: u16,
+        /// How many times `/target` was requested.
+        hits: Arc<AtomicUsize>,
+    }
+
+    async fn root() -> Html<&'static str> {
+        Html(ARTICLE_HTML)
+    }
+
+    async fn redir(State(state): State<AppState>) -> Redirect {
+        // Redirect to an IP-literal internal target; the redirect policy must
+        // refuse it before any connection is attempted.
+        Redirect::temporary(&format!("http://127.0.0.1:{}/target", state.port))
+    }
+
+    async fn target(State(state): State<AppState>) -> &'static str {
+        state.hits.fetch_add(1, Ordering::SeqCst);
+        "reached the internal target"
+    }
+
+    /// Binds a loopback axum server on an ephemeral port and serves it.
+    ///
+    /// Returns the port and the `/target` hit counter.
+    async fn spawn_server() -> (u16, Arc<AtomicUsize>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("binding a loopback listener must succeed");
+        let port = listener
+            .local_addr()
+            .expect("the listener must have a local address")
+            .port();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let state = AppState {
+            port,
+            hits: Arc::clone(&hits),
+        };
+        let app = Router::new()
+            .route("/", get(root))
+            .route("/redir", get(redir))
+            .route("/target", get(target))
+            .with_state(state);
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("the loopback server must serve");
+        });
+        (port, hits)
+    }
+
+    /// A config that can reach the loopback server: http allowed, its port on
+    /// the allowlist, and `localhost` pinned to `127.0.0.1` via `allow_exact`.
+    fn loopback_config(port: u16) -> FetchConfig {
+        let loopback: IpAddr = "127.0.0.1".parse().expect("loopback literal parses");
+        FetchConfig {
+            allow_http: true,
+            allow_ports: vec![80, 443, port],
+            allow_exact: vec![("localhost".to_string(), loopback)],
+            ..FetchConfig::default()
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fetch_returns_provenance_line_then_content() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/");
+        let out = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect("a loopback fetch through allow_exact must succeed");
+
+        let expected = format!("url: http://localhost:{port}/");
+        assert!(
+            out.starts_with(&expected),
+            "output must begin with the final-url provenance line, got: {out}"
+        );
+        assert!(
+            out.contains("substantial paragraph"),
+            "the extracted article content must follow the header, got: {out}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn redirect_to_internal_is_refused_and_target_untouched() {
+        let (port, hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/redir");
+        let err = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect_err("a redirect to an internal ip literal must be refused");
+
+        assert!(
+            matches!(&err, Error::Parse(msg) if msg.contains("refused")),
+            "expected a redirect-refused policy error, got: {err:?}"
+        );
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            0,
+            "the internal redirect target must never be requested"
+        );
+    }
 
     /// Bad URLs must be refused by `WebFetch::call` before any network request.
     #[tokio::test]
