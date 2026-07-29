@@ -5,7 +5,7 @@
 
 use std::process::ExitCode;
 
-use promptforge_core::{client::Client, execute, parser::Prompt};
+use promptforge_core::{client::GatewayClient, execute, parser::Prompt};
 
 /// Entry point. Dispatches subcommands and maps errors to a non-zero exit.
 #[tokio::main]
@@ -49,7 +49,7 @@ async fn run(path: &str) -> ExitCode {
         }
     };
 
-    let client = match Client::from_env() {
+    let client = match GatewayClient::from_env() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {e}");
