@@ -7,7 +7,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 ## Components
 
 - executor: parses and executes prompt pipelines and agent programs; depends on: gateway, store, Lua VM boundary, shared substrate
-- gateway: lean server process that owns model routing, provider access, and local inference lifecycle; depends on: shared substrate
+- gateway: lean server process that owns model routing, provider access, and local inference lifecycle; exposes protocol data rather than shared crate types; depends on: shared substrate
 - CLI: thin shell adapter that supplies inputs and host resources to the executor; depends on: executor, gateway, store, shared substrate
 - workshop UI: desktop authoring shell and server that host the executor in-process and attach to the gateway; depends on: executor, gateway, store, shared substrate
 - store: run-scoped virtual filesystem contract with interchangeable memory and file backends; depends on: none
