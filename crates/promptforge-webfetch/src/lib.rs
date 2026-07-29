@@ -28,9 +28,6 @@ pub use redirect::{check_redirect, redirect_policy};
 pub use resolver::{GuardedResolver, Lookup, SystemLookup};
 pub use url_policy::check_url;
 
-/// The request timeout applied to each fetch.
-const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-
 /// The largest error body kept for diagnostics, in characters.
 const MAX_ERROR_BODY: usize = 2000;
 
@@ -61,7 +58,11 @@ impl WebFetch {
     /// The client installs a [`GuardedResolver`], so every connection (on the
     /// first hop and after each redirect) is made only to an address the policy
     /// allows, and a [`redirect_policy`] that re-checks each hop's URL and
-    /// refuses an `https` to `http` downgrade.
+    /// refuses an `https` to `http` downgrade. It also applies the configured
+    /// connect and total timeouts and a bounded pool idle timeout, sets the
+    /// configured `User-Agent`, and carries no cookie store and no credential or
+    /// `Authorization` header, so no request sends an ambient identity on any
+    /// hop, including after a redirect.
     ///
     /// # Panics
     /// Panics if the underlying HTTP client cannot be built, which for this
@@ -73,6 +74,14 @@ impl WebFetch {
         let http = reqwest::Client::builder()
             .dns_resolver(resolver)
             .redirect(redirect_policy(config.clone()))
+            // Bound each hop's connect time, the whole request's time, and how
+            // long an idle pooled socket lives (which bounds the DNS-rebinding
+            // window). No cookie store is enabled and no default headers are
+            // set, so the client sends no Cookie or Authorization on any hop.
+            .connect_timeout(config.connect_timeout)
+            .timeout(config.timeout)
+            .pool_idle_timeout(config.pool_idle_timeout)
+            .user_agent(config.user_agent.clone())
             .build()
             // The builder is fed a static, valid configuration; a failure here
             // means the TLS backend could not initialize, which is a defect, not
@@ -89,14 +98,21 @@ impl WebFetch {
 /// The guarded resolver and the redirect policy report refusals by boxing a
 /// [`FetchError`] into the error reqwest ultimately returns. Walking the source
 /// chain recovers it so the model sees the policy reason ([`Error::Parse`])
-/// rather than an opaque transport error. Anything else stays an [`Error::Http`].
-fn map_send_error(err: reqwest::Error) -> Error {
+/// rather than an opaque transport error. A reqwest timeout maps to
+/// [`FetchError::Timeout`] for `url`. Anything else stays an [`Error::Http`].
+fn map_send_error(err: reqwest::Error, url: &str) -> Error {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&err);
     while let Some(current) = source {
         if let Some(fetch_err) = current.downcast_ref::<FetchError>() {
             return Error::Parse(fetch_err.model_facing());
         }
         source = current.source();
+    }
+    if err.is_timeout() {
+        return FetchError::Timeout {
+            url: url.to_string(),
+        }
+        .into();
     }
     Error::Http(Box::new(err))
 }
@@ -338,10 +354,9 @@ impl Tool for WebFetch {
         let response = self
             .http
             .get(url.clone())
-            .timeout(FETCH_TIMEOUT)
             .send()
             .await
-            .map_err(map_send_error)?;
+            .map_err(|err| map_send_error(err, url.as_str()))?;
 
         // The final URL after any redirects; this is the provenance the model
         // cites, since the bytes came from here, not from where it aimed.
@@ -575,12 +590,13 @@ fn truncate_to_chars(text: &str, max_chars: usize) -> (&str, bool) {
 mod tests {
     use std::io::Write;
     use std::net::IpAddr;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use axum::Router;
     use axum::body::Body;
     use axum::extract::State;
+    use axum::http::HeaderMap;
     use axum::http::header::{CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE};
     use axum::response::{Html, IntoResponse, Redirect, Response};
     use axum::routing::get;
@@ -865,6 +881,164 @@ mod tests {
             allow_exact: vec![("localhost".to_string(), loopback)],
             ..FetchConfig::default()
         }
+    }
+
+    /// Shared state for the recording server: its own port and the header maps
+    /// of every request that reached a recording route.
+    #[derive(Clone)]
+    struct RecordingState {
+        /// The port the server bound to, embedded in the redirect target.
+        port: u16,
+        /// The headers of each request that hit a recording route, in order.
+        recorded: Arc<Mutex<Vec<HeaderMap>>>,
+    }
+
+    /// Records the incoming request headers, then serves the article page.
+    ///
+    /// Used to assert that the request `web_fetch` makes carries no `Cookie` or
+    /// `Authorization` header.
+    async fn record_headers(
+        State(state): State<RecordingState>,
+        headers: HeaderMap,
+    ) -> Html<&'static str> {
+        state
+            .recorded
+            .lock()
+            .expect("the recorded-headers mutex must not be poisoned")
+            .push(headers);
+        Html(ARTICLE_HTML)
+    }
+
+    /// Redirects once to the recording route on the same loopback host.
+    ///
+    /// The target is an allowed `localhost` path, so the hop is followed and the
+    /// final request's headers are recorded, letting a test assert no credential
+    /// survives the redirect.
+    async fn redirect_to_record(State(state): State<RecordingState>) -> Redirect {
+        Redirect::temporary(&format!("http://localhost:{}/record", state.port))
+    }
+
+    /// Sleeps well past any small test timeout, then responds.
+    ///
+    /// A fetch with a short total timeout aborts before this returns, surfacing
+    /// as [`FetchError::Timeout`].
+    async fn slow() -> Html<&'static str> {
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        Html(ARTICLE_HTML)
+    }
+
+    /// Binds a loopback axum server exposing the recording and slow routes.
+    ///
+    /// Returns the port and the shared vector of recorded request headers.
+    async fn spawn_recording_server() -> (u16, Arc<Mutex<Vec<HeaderMap>>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("binding a loopback listener must succeed");
+        let port = listener
+            .local_addr()
+            .expect("the listener must have a local address")
+            .port();
+        let recorded = Arc::new(Mutex::new(Vec::new()));
+        let state = RecordingState {
+            port,
+            recorded: Arc::clone(&recorded),
+        };
+        let app = Router::new()
+            .route("/record", get(record_headers))
+            .route("/redir-record", get(redirect_to_record))
+            .route("/slow", get(slow))
+            .with_state(state);
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("the loopback recording server must serve");
+        });
+        (port, recorded)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn slow_server_past_total_timeout_yields_timeout() {
+        let (port, _recorded) = spawn_recording_server().await;
+        // A tiny total timeout so the test is fast; the slow route sleeps far
+        // past it, so the request must abort with a timeout rather than wait for
+        // the default 20-second budget.
+        let config = FetchConfig {
+            timeout: std::time::Duration::from_millis(200),
+            ..loopback_config(port)
+        };
+        let tool = WebFetch::with_config(config);
+
+        let url = format!("http://localhost:{port}/slow");
+        let err = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect_err("a server slower than the total timeout must yield a timeout");
+
+        assert!(
+            matches!(&err, Error::Parse(msg) if msg.contains("timed out")),
+            "expected a Timeout error naming the timeout, got: {err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn request_carries_no_cookie_or_credential() {
+        let (port, recorded) = spawn_recording_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/record");
+        tool.call(serde_json::json!({ "url": url }))
+            .await
+            .expect("a loopback fetch through allow_exact must succeed");
+
+        let recorded = recorded
+            .lock()
+            .expect("the recorded-headers mutex must not be poisoned");
+        assert_eq!(
+            recorded.len(),
+            1,
+            "the recording route must have been hit exactly once"
+        );
+        let headers = &recorded[0];
+        assert!(
+            !headers.contains_key(axum::http::header::COOKIE),
+            "the request must carry no Cookie header, got: {headers:?}"
+        );
+        assert!(
+            !headers.contains_key(axum::http::header::AUTHORIZATION),
+            "the request must carry no Authorization header, got: {headers:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn no_credential_survives_a_redirect() {
+        let (port, recorded) = spawn_recording_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        // A redirect between two loopback paths: the first hop redirects to the
+        // recording route, and the final request's headers must still carry no
+        // Cookie or Authorization.
+        let url = format!("http://localhost:{port}/redir-record");
+        tool.call(serde_json::json!({ "url": url }))
+            .await
+            .expect("a redirect between loopback paths must succeed");
+
+        let recorded = recorded
+            .lock()
+            .expect("the recorded-headers mutex must not be poisoned");
+        assert_eq!(
+            recorded.len(),
+            1,
+            "the final recording route must have been reached exactly once"
+        );
+        let headers = &recorded[0];
+        assert!(
+            !headers.contains_key(axum::http::header::COOKIE),
+            "no Cookie header may survive a redirect, got: {headers:?}"
+        );
+        assert!(
+            !headers.contains_key(axum::http::header::AUTHORIZATION),
+            "no Authorization header may survive a redirect, got: {headers:?}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
