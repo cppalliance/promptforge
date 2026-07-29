@@ -13,6 +13,11 @@ serde_json.workspace = true
 reqwest.workspace = true
 readabilityrs.workspace = true
 htmd.workspace = true
+url.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
 
 [lints]
 workspace = true

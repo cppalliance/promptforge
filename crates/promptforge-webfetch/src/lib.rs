@@ -11,6 +11,14 @@ use readabilityrs::{Readability, ReadabilityOptions};
 use promptforge_core::tools::Tool;
 use promptforge_core::{Error, Result};
 
+pub mod config;
+pub mod error;
+pub mod url_policy;
+
+pub use config::FetchConfig;
+pub use error::FetchError;
+pub use url_policy::check_url;
+
 /// The request timeout applied to each fetch.
 const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -28,14 +36,23 @@ const MIN_CONTENT_LEN: usize = 100;
 pub struct WebFetch {
     /// The HTTP client used for outbound requests.
     http: reqwest::Client,
+    /// The security policy applied to each fetch.
+    config: FetchConfig,
 }
 
 impl WebFetch {
-    /// Construct a `WebFetch` with a fresh HTTP client.
+    /// Construct a `WebFetch` with a fresh HTTP client and the default policy.
     #[must_use]
     pub fn new() -> WebFetch {
+        WebFetch::with_config(FetchConfig::default())
+    }
+
+    /// Construct a `WebFetch` with a fresh HTTP client and the given policy.
+    #[must_use]
+    pub fn with_config(config: FetchConfig) -> WebFetch {
         WebFetch {
             http: reqwest::Client::new(),
+            config,
         }
     }
 }
@@ -119,9 +136,12 @@ impl Tool for WebFetch {
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| Error::Parse("web_fetch: missing url argument".into()))?;
 
+        // Enforce the URL-admission policy before any network access.
+        let url = check_url(url, &self.config)?;
+
         let response = self
             .http
-            .get(url)
+            .get(url.clone())
             .timeout(FETCH_TIMEOUT)
             .send()
             .await
@@ -146,13 +166,54 @@ impl Tool for WebFetch {
             .text()
             .await
             .map_err(|source| Error::Http(Box::new(source)))?;
-        Ok(extract_markdown(&html, Some(url)))
+        Ok(extract_markdown(&html, Some(url.as_str())))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::extract_markdown;
+    use super::{WebFetch, extract_markdown};
+    use promptforge_core::Error;
+    use promptforge_core::tools::Tool;
+
+    /// Bad URLs must be refused by `WebFetch::call` before any network request.
+    #[tokio::test]
+    async fn call_rejects_bad_urls_before_network() {
+        let tool = WebFetch::new();
+
+        // Each case pairs a bad URL with the policy reason that must appear in
+        // the rejection. Asserting the specific reason (and that the error is
+        // Error::Parse, the policy-rejection channel, not Error::Http) proves
+        // the URL was refused by policy before any network access: a network
+        // timeout would surface as Error::Http and carry none of these strings.
+        let cases = [
+            (
+                "https://user:pass@example.com/",
+                "url must not contain userinfo",
+            ),
+            ("https://example.com:8080/", "port not allowed: 8080"),
+            ("http://example.com/", "scheme not allowed: http"),
+            ("https://0177.0.0.1/", "ip literal host not allowed"),
+            ("https://2130706433/", "ip literal host not allowed"),
+            ("https://[::1]/", "ip literal host not allowed"),
+            ("https://127.1/", "ip literal host not allowed"),
+        ];
+
+        for (raw, reason) in cases {
+            let err = tool
+                .call(serde_json::json!({ "url": raw }))
+                .await
+                .expect_err(&format!("expected {raw} to be refused before any network"));
+            assert!(
+                matches!(err, Error::Parse(_)),
+                "expected a policy rejection (Error::Parse) for {raw}, got: {err:?}"
+            );
+            assert!(
+                err.to_string().contains(reason),
+                "expected policy reason {reason:?} for {raw}, got: {err}"
+            );
+        }
+    }
 
     #[test]
     fn extracts_article_body_and_drops_boilerplate() {
