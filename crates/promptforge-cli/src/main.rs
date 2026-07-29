@@ -52,7 +52,7 @@ async fn run(path: &str, input: &str) -> ExitCode {
         }
     };
 
-    match execute::run(&prompt, input).await {
+    match execute::run(&prompt, input, &[]).await {
         Ok(result) => {
             println!("{result}");
             ExitCode::SUCCESS
