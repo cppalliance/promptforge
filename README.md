@@ -66,6 +66,29 @@ Any string value may contain `${VAR}`, expanded from the process environment at
 load time; `$$` is a literal `$`. An unset variable fails the load, so the gateway
 never starts with a blank credential.
 
+### Tool configuration
+
+The gateway can also hold credentials for tools that need one. Today that is
+`web_search`, backed by the Brave Search API. The section is optional: without
+it the gateway still serves chat completions, and the `web_search` tool simply
+returns a 404.
+
+```toml
+[tools.web_search]
+provider = "brave"                   # v0 supports only "brave"
+api_key = "${BRAVE_API_KEY}"         # the Brave Search subscription token; only the gateway sees it
+base_url = "https://api.search.brave.com/res/v1"  # optional; override for a proxy or a test server
+```
+
+- `provider` - the search backend. Only `brave` is supported in v0.
+- `api_key` - the Brave subscription token. Like every credential, it lives only
+  in the gateway and is redacted from logs.
+- `base_url` - optional; defaults to the Brave endpoint above. Override it to
+  point at a mirror or a test server.
+
+With this configured, the gateway exposes `POST /v1/tools/web_search` (bearer-authed
+with the same shared token as `/v1/chat/completions`).
+
 ## Prompt file anatomy
 
 ```
@@ -156,3 +179,46 @@ Repeat exactly, with no extra words: {{ var.greeting }}
 `promptforge run prompts/greet.md "World"` sends `Repeat exactly, with no extra
 words: Hello, World!` to the model. `prompts/echo.md` (just `return args`) prints
 its input with no model call and no gateway.
+
+## Tools
+
+A prompt can let the model reach outside itself while a section runs. Two tools
+ship built in:
+
+- `web_fetch` - fetch a URL and get back its main content as markdown. It runs
+  locally in the CLI (no credential), extracting the article body with a
+  readability pass and falling back to a whole-page conversion for pages that
+  are not article-shaped.
+- `web_search` - search the web and get back a list of results (title, URL,
+  description). It proxies through the gateway, which holds the Brave API key,
+  so the credential never reaches the CLI.
+
+A prompt declares the tools it needs in its frontmatter:
+
+```
+---
+name: research
+description: Research a topic and summarize it
+version: 1
+tools: [web_search, web_fetch]
+---
+
+## Main
+
+Research the topic "{{ args }}". Search the web, read the most relevant
+pages, and write a short summary with links.
+```
+
+`web_fetch` is always available. `web_search` needs the gateway, so
+`PROMPTFORGE_BASE_URL` and `PROMPTFORGE_TOKEN` must be set; a prompt that asks
+for it without a configured gateway fails fast with a clear error.
+
+### The tool-call loop
+
+When a section declares tools, the executor advertises their JSON schemas to the
+model on that section's call. If the model replies with a tool call instead of
+text, the executor dispatches it (locally for `web_fetch`, or to the gateway for
+`web_search`), appends the result to the conversation, and re-sends. This repeats
+until the model returns a final text reply, capped at 10 round trips per section
+to prevent a runaway loop. Sections without a `tools` list behave exactly as
+before - one round trip, no tool advertising.
