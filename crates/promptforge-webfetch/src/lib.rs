@@ -313,6 +313,13 @@ impl Tool for WebFetch {
         "Fetch a web page and return its main content as markdown."
     }
 
+    /// Fetched page text is attacker-controllable, so it is untrusted external
+    /// data: the runtime wraps this tool's result in a guard block before it
+    /// reaches the model.
+    fn untrusted_output(&self) -> bool {
+        true
+    }
+
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",
@@ -1481,6 +1488,13 @@ mod tests {
             "the flat-text prefix must be cut to the byte cap, got {} bytes",
             body.len()
         );
+    }
+
+    #[test]
+    fn web_fetch_reports_untrusted_output() {
+        // Fetched page text is attacker-controllable, so the tool opts in to
+        // guard-wrapping by overriding the trait's defaulted `false`.
+        assert!(WebFetch::new().untrusted_output());
     }
 
     #[test]
