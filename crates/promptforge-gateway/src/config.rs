@@ -69,6 +69,10 @@ pub struct Config {
     /// The routing table from model name to backend.
     #[serde(rename = "model")]
     pub models: Vec<ModelConfig>,
+    /// Optional built-in tool configuration. Absent when no `[tools]` section
+    /// is present.
+    #[serde(default)]
+    pub tools: Option<ToolsConfig>,
 }
 
 /// Server-level settings.
@@ -109,6 +113,35 @@ pub struct ModelConfig {
     /// A `max_tokens` default supplied when the caller omits one.
     #[serde(default)]
     pub default_max_tokens: Option<u32>,
+}
+
+/// Built-in tool configuration under the `[tools]` section.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolsConfig {
+    /// The web-search tool configuration. Absent when no `[tools.web_search]`
+    /// section is present.
+    #[serde(default)]
+    pub web_search: Option<WebSearchConfig>,
+}
+
+/// Configuration for the web-search tool.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebSearchConfig {
+    /// The search provider backing the tool.
+    pub provider: SearchProvider,
+    /// The credential sent to the search provider.
+    pub api_key: Secret,
+}
+
+/// A web-search provider. v0 supports only Brave.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum SearchProvider {
+    /// The Brave Search API.
+    Brave,
 }
 
 impl Config {
@@ -352,6 +385,41 @@ endpoints = []
             Config::from_toml_str(toml),
             Err(ConfigError::Validation(_))
         ));
+    }
+
+    #[test]
+    fn parses_web_search_tool_config() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[[endpoint]]
+id = "anthropic"
+protocol = "openai"
+base_url = "https://api.anthropic.com/v1"
+api_key = ""
+
+[[model]]
+name = "m1"
+upstream = "u1"
+endpoints = ["anthropic"]
+
+[tools.web_search]
+provider = "brave"
+api_key = "secret-key"
+"#;
+        let config = Config::from_toml_str(toml).unwrap();
+        let tools = config.tools.expect("tools section present");
+        let web_search = tools.web_search.expect("web_search section present");
+        assert_eq!(web_search.provider, SearchProvider::Brave);
+        assert_eq!(web_search.api_key.expose(), "secret-key");
+    }
+
+    #[test]
+    fn parses_config_without_tools_section() {
+        let config = Config::from_toml_str(SAMPLE).unwrap();
+        assert!(config.tools.is_none());
     }
 
     #[test]
