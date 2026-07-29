@@ -14,6 +14,7 @@
 pub mod config;
 pub mod error;
 pub mod routing;
+pub mod tools;
 pub mod upstream;
 pub mod wire;
 
@@ -26,26 +27,44 @@ use axum::http::header::AUTHORIZATION;
 use axum::routing::{get, post};
 use axum::{Router, response::IntoResponse};
 
-use crate::config::Secret;
+use crate::config::{Secret, WebSearchConfig};
 use crate::error::GatewayError;
 use crate::routing::Routing;
+use crate::tools::WebSearchState;
 use crate::wire::{ChatRequest, ChatResponse};
 
-/// Shared handler state: the routing table and the shared bearer token.
+/// Shared handler state: the routing table, the shared bearer token, and the
+/// optional web-search capability.
 #[derive(Clone)]
 pub struct AppState {
     routing: Arc<Routing>,
     token: Arc<Secret>,
+    web_search: Option<Arc<WebSearchState>>,
 }
 
 impl AppState {
-    /// Build handler state from a routing table and the server token.
+    /// Build handler state from a routing table and the server token. The
+    /// web-search capability is absent; add it with [`AppState::with_web_search`].
     #[must_use]
     pub fn new(routing: Arc<Routing>, token: Secret) -> AppState {
         AppState {
             routing,
             token: Arc::new(token),
+            web_search: None,
         }
+    }
+
+    /// Enable the web-search tool from its configuration.
+    #[must_use]
+    pub fn with_web_search(mut self, cfg: &WebSearchConfig) -> AppState {
+        self.web_search = Some(Arc::new(WebSearchState::new(cfg)));
+        self
+    }
+
+    /// The web-search capability, when configured.
+    #[must_use]
+    pub(crate) fn web_search(&self) -> Option<&WebSearchState> {
+        self.web_search.as_deref()
     }
 }
 
@@ -53,6 +72,7 @@ impl AppState {
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/tools/web_search", post(tools::web_search))
         .route("/health", get(health))
         .with_state(state)
 }
@@ -79,7 +99,7 @@ async fn chat_completions(
 }
 
 /// Compare the request's bearer token against the configured token.
-fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), GatewayError> {
+pub(crate) fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), GatewayError> {
     let presented = headers
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())

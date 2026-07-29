@@ -16,6 +16,10 @@ pub enum GatewayError {
     #[error("unknown model {0}")]
     UnknownModel(String),
 
+    /// A tool endpoint was reached but the tool is not configured.
+    #[error("tool not configured: {0}")]
+    ToolNotConfigured(&'static str),
+
     /// The request body could not be understood.
     #[error("malformed request: {0}")]
     MalformedRequest(String),
@@ -54,6 +58,9 @@ impl GatewayError {
                 "invalid_request_error",
                 "model_not_found",
             ),
+            GatewayError::ToolNotConfigured(_) => {
+                (StatusCode::NOT_FOUND, "invalid_request_error", "not_found")
+            }
             GatewayError::MalformedRequest(_) => (
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",

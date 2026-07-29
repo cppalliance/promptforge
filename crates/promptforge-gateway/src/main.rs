@@ -36,7 +36,11 @@ fn serve(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::load(Path::new(path))?;
     let routing = Arc::new(Routing::from_config(&config)?);
     let bind = config.server.bind;
-    let state = AppState::new(routing, config.server.token);
+    let web_search = config.tools.and_then(|tools| tools.web_search);
+    let mut state = AppState::new(routing, config.server.token);
+    if let Some(cfg) = &web_search {
+        state = state.with_web_search(cfg);
+    }
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

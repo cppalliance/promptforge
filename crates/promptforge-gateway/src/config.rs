@@ -133,6 +133,15 @@ pub struct WebSearchConfig {
     pub provider: SearchProvider,
     /// The credential sent to the search provider.
     pub api_key: Secret,
+    /// The search API base URL. Defaults to the Brave Search endpoint;
+    /// override to point at a proxy or a test server.
+    #[serde(default = "default_brave_base_url")]
+    pub base_url: String,
+}
+
+/// The default Brave Search API base URL.
+fn default_brave_base_url() -> String {
+    "https://api.search.brave.com/res/v1".to_string()
 }
 
 /// A web-search provider. v0 supports only Brave.
@@ -414,6 +423,7 @@ api_key = "secret-key"
         let web_search = tools.web_search.expect("web_search section present");
         assert_eq!(web_search.provider, SearchProvider::Brave);
         assert_eq!(web_search.api_key.expose(), "secret-key");
+        assert_eq!(web_search.base_url, "https://api.search.brave.com/res/v1");
     }
 
     #[test]
