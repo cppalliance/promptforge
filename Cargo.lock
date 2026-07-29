@@ -783,6 +783,7 @@ dependencies = [
 name = "promptforge-core"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "mlua",
  "pulldown-cmark",
  "reqwest",

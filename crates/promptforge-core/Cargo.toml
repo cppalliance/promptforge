@@ -6,6 +6,7 @@ license.workspace = true
 description = "PromptForge runtime core: prompt parser, HTTP client, section execution"
 
 [dependencies]
+async-trait.workspace = true
 pulldown-cmark.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
