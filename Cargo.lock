@@ -1075,13 +1075,16 @@ name = "promptforge-webfetch"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
  "htmd",
+ "ipnet",
  "promptforge-core",
  "readabilityrs",
  "reqwest",
  "serde_json",
  "thiserror 2.0.19",
  "tokio",
+ "tracing",
  "url",
 ]
 

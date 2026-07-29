@@ -14,10 +14,14 @@ reqwest.workspace = true
 readabilityrs.workspace = true
 htmd.workspace = true
 url.workspace = true
+ipnet.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
+tokio = { workspace = true }
 
 [dev-dependencies]
 tokio.workspace = true
+axum.workspace = true
 
 [lints]
 workspace = true
