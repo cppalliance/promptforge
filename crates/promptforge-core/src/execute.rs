@@ -1,15 +1,21 @@
-//! Section execution.
+//! Section execution and fall-through.
 //!
-//! The entry section's Lua chunk runs first. If it returns a plain value, that
-//! value is the run's result (the finish case of the exit rule, no model call).
-//! Otherwise the harness resolves `{{ }}` substitutions in the prose - over
-//! `args`, the `var` table the block populated, and the runtime `sys` table -
-//! and sends the substituted prose to the gateway for one round trip.
+//! The run walks the top-level sections in file order, each in a fresh context.
+//! For each section: run its Lua block; if the chunk returns a plain value that
+//! value is the run's result and the run ends immediately (this doubles as the
+//! return fence - sections after it are not reached by fall-through). Otherwise
+//! the section's prose is `{{ }}`-substituted (over `args`, the `var` the block
+//! wrote, and the runtime `sys`) and, if non-empty, sent to the gateway for one
+//! round trip; then control falls through to the next section.
 //!
-//! The remaining exit cases (nil = fall through, a descriptor = goto/task/fanout)
-//! and the tool-call loop arrive in later commits.
+//! Running off the last section ends the run: the result is `default_return`
+//! from the frontmatter, else the last model reply, else a generic completion.
+//!
+//! Still to come: the other exit cases (a descriptor = goto/task/fanout), the
+//! tool-call loop, and durable state to carry a non-terminal section's work
+//! forward (today an intermediate section's model reply is not retained).
 
-use serde_json::{Value as Json, json};
+use serde_json::json;
 
 use crate::Result;
 use crate::client::{GatewayClient, Message};
@@ -17,44 +23,113 @@ use crate::lua;
 use crate::parser::Prompt;
 use crate::subst;
 
-/// Execute a prompt's entry section and return the run's result.
+/// Execute a prompt and return the run's result.
 ///
 /// `args` is the single raw input string, exposed to Lua and to `{{ args }}`.
 ///
 /// # Errors
-/// Returns [`crate::Error::Lua`] if the Lua block fails,
+/// Returns [`crate::Error::Lua`] if a Lua block fails,
 /// [`crate::Error::Substitution`] if a `{{ }}` path cannot be resolved,
 /// [`crate::Error::MissingEnv`] if the gateway client cannot be built when a
-/// model call is needed, or any transport/backend error from the model call.
+/// model call is needed, or any transport/backend error from a model call.
 pub async fn run(prompt: &Prompt, args: &str) -> Result<String> {
-    let section = prompt.entry();
-    let sys = build_sys();
+    let when = now_rfc3339();
+    let mut client: Option<GatewayClient> = None;
+    let mut last_reply: Option<String> = None;
 
-    // Run the section's Lua block (if any): a returned value finishes the run;
-    // otherwise the block has populated `var` for substitution.
-    let var = if let Some(source) = &section.lua {
-        let outcome = lua::run_chunk(source, args, &sys)?;
-        if let Some(value) = outcome.returned {
-            return Ok(value);
+    for (index, section) in prompt.sections.iter().enumerate() {
+        let sys = json!({ "when": when, "now": now_rfc3339(), "id": index + 1 });
+
+        // Run the section's Lua block. A returned value ends the whole run.
+        let var = if let Some(source) = &section.lua {
+            let outcome = lua::run_chunk(source, args, &sys)?;
+            if let Some(value) = outcome.returned {
+                return Ok(value);
+            }
+            outcome.var
+        } else {
+            json!({})
+        };
+
+        // Substitute the prose; if there is any, take one model round trip.
+        let prose = subst::substitute(&section.prose, args, &var, &sys)?;
+        if !prose.trim().is_empty() {
+            if client.is_none() {
+                client = Some(GatewayClient::from_env()?);
+            }
+            if let Some(client) = &client {
+                last_reply = Some(client.complete(&[Message::user(prose)]).await?);
+            }
         }
-        outcome.var
-    } else {
-        json!({})
-    };
+        // Fall through to the next section (context clears - nothing is carried).
+    }
 
-    // Resolve {{ args / var / sys }} in the prose, then one model round trip.
-    let prose = subst::substitute(&section.prose, args, &var, &sys)?;
-    let client = GatewayClient::from_env()?;
-    let messages = [Message::user(prose)];
-    client.complete(&messages).await
+    // Ran off the end.
+    Ok(prompt
+        .frontmatter
+        .default_return
+        .clone()
+        .or(last_reply)
+        .unwrap_or_else(|| "done".to_string()))
 }
 
-/// Build the runtime `sys` table for this run: launch timestamp, current time,
-/// and the context id. For a single-section run `when` and `now` coincide and
-/// `id` is 1; multi-section flow will differentiate them in a later commit.
-fn build_sys() -> Json {
-    let stamp = time::OffsetDateTime::now_utc()
+/// The current UTC time as an RFC 3339 string, or empty on a formatting error.
+fn now_rfc3339() -> String {
+    time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default();
-    json!({ "when": stamp, "now": stamp, "id": 1 })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Lua-only prompts never build the gateway client, so these run offline.
+    fn parse(md: &str) -> Prompt {
+        Prompt::parse(md).unwrap()
+    }
+
+    #[tokio::test]
+    async fn falls_through_to_next_section() {
+        let md = "---\nname: t\ndescription: d\nversion: 1\n---\n\n\
+## First\n\n```lua\nlocal x = 1\n```\n\n\
+## Second\n\n```lua\nreturn \"second\"\n```\n";
+        let out = run(&parse(md), "").await.unwrap();
+        assert_eq!(out, "second");
+    }
+
+    #[tokio::test]
+    async fn explicit_return_stops_fall_through() {
+        let md = "---\nname: t\ndescription: d\nversion: 1\n---\n\n\
+## First\n\n```lua\nreturn \"first\"\n```\n\n\
+## Second\n\n```lua\nreturn \"unreached\"\n```\n";
+        let out = run(&parse(md), "").await.unwrap();
+        assert_eq!(out, "first");
+    }
+
+    #[tokio::test]
+    async fn runs_off_end_to_default_return() {
+        let md = "---\nname: t\ndescription: d\nversion: 1\ndefault_return: \"fell off\"\n---\n\n\
+## Only\n\n```lua\nlocal x = 1\n```\n";
+        let out = run(&parse(md), "").await.unwrap();
+        assert_eq!(out, "fell off");
+    }
+
+    #[tokio::test]
+    async fn generic_result_when_nothing_produced() {
+        let md = "---\nname: t\ndescription: d\nversion: 1\n---\n\n\
+## Only\n\n```lua\nlocal x = 1\n```\n";
+        let out = run(&parse(md), "").await.unwrap();
+        assert_eq!(out, "done");
+    }
+
+    #[tokio::test]
+    async fn sys_id_increments_per_section() {
+        // First section files nothing and falls through; second returns its id.
+        let md = "---\nname: t\ndescription: d\nversion: 1\n---\n\n\
+## First\n\n```lua\nlocal x = 1\n```\n\n\
+## Second\n\n```lua\nreturn tostring(sys.id)\n```\n";
+        let out = run(&parse(md), "").await.unwrap();
+        assert_eq!(out, "2");
+    }
 }
