@@ -19,10 +19,11 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 thiserror = "2"
 axum = "0.8"
 async-trait = "0.1"
-mlua = { version = "0.10", features = ["lua54", "vendored"] }
+mlua = { version = "0.10", features = ["lua54", "vendored", "serialize"] }
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+time = { version = "0.3", features = ["formatting"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

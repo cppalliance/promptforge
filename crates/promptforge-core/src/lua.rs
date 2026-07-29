@@ -2,12 +2,16 @@
 //!
 //! A section's Lua chunk runs in a fresh, restricted `mlua` VM: only the
 //! `string`, `table`, and `math` standard libraries plus the safe base
-//! functions are available, `args` (the single raw input string) is exposed,
-//! and an instruction-count hook aborts a runaway block. The chunk's top-level
-//! return value becomes the section's result (the finish case of the exit
-//! rule); a chunk that returns nothing yields `None`.
+//! functions are available; the raw input `args` string and the runtime `sys`
+//! table are exposed; a writable `var` table is provided for the block to
+//! populate; and an instruction-count hook aborts a runaway block.
+//!
+//! The chunk's top-level return value becomes the section's result (the finish
+//! case of the exit rule). The `var` table is read back afterward as JSON for
+//! prose substitution.
 
-use mlua::{HookTriggers, Lua, LuaOptions, MultiValue, StdLib, Value, VmState};
+use mlua::{HookTriggers, Lua, LuaOptions, LuaSerdeExt, MultiValue, StdLib, Value, VmState};
+use serde_json::Value as Json;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -18,14 +22,23 @@ const HOOK_INTERVAL: u32 = 10_000;
 /// Maximum number of hook firings before a block is aborted (~1e7 instructions).
 const HOOK_BUDGET: u64 = 1_000;
 
-/// Run a section's Lua chunk with `args` exposed, returning its top-level return
-/// value as a string, or `None` if the chunk returned nothing.
+/// The result of running a section's Lua block.
+#[derive(Debug, Clone)]
+pub struct LuaOutcome {
+    /// The chunk's top-level return value, if it returned one (the finish case).
+    pub returned: Option<String>,
+    /// The `var` table after the block ran, as JSON, for prose substitution.
+    pub var: Json,
+}
+
+/// Run a section's Lua chunk with `args` and `sys` exposed and a writable `var`
+/// table available, returning the chunk's return value and the final `var`.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the sandbox cannot be built, the chunk fails to run
-/// (including hitting the instruction budget), or it returns a value that cannot
-/// be rendered as a result string.
-pub fn run_chunk(source: &str, args: &str) -> Result<Option<String>> {
+/// Returns [`Error::Lua`] if the sandbox cannot be built, `sys`/`var` cannot be
+/// bridged, the chunk fails to run (including hitting the instruction budget),
+/// or it returns a value that cannot be rendered as a result string.
+pub fn run_chunk(source: &str, args: &str, sys: &Json) -> Result<LuaOutcome> {
     let lua = Lua::new_with(
         StdLib::STRING | StdLib::TABLE | StdLib::MATH,
         LuaOptions::default(),
@@ -33,20 +46,37 @@ pub fn run_chunk(source: &str, args: &str) -> Result<Option<String>> {
     .map_err(|e| Error::Lua(e.to_string()))?;
 
     harden(&lua)?;
-    lua.globals()
+
+    let globals = lua.globals();
+    globals
         .set("args", args)
         .map_err(|e| Error::Lua(e.to_string()))?;
+    let sys_value = lua.to_value(sys).map_err(|e| Error::Lua(e.to_string()))?;
+    globals
+        .set("sys", sys_value)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+    let var_table = lua.create_table().map_err(|e| Error::Lua(e.to_string()))?;
+    globals
+        .set("var", var_table)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+
     install_instruction_budget(&lua);
 
     let returned: MultiValue = lua
         .load(source)
         .eval()
         .map_err(|e| Error::Lua(e.to_string()))?;
+    let returned = match returned.into_iter().next() {
+        None | Some(Value::Nil) => None,
+        Some(value) => Some(value_to_string(&value)?),
+    };
 
-    match returned.into_iter().next() {
-        None | Some(Value::Nil) => Ok(None),
-        Some(value) => Ok(Some(value_to_string(&value)?)),
-    }
+    let var_value: Value = globals.get("var").map_err(|e| Error::Lua(e.to_string()))?;
+    let var: Json = lua
+        .from_value(var_value)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+
+    Ok(LuaOutcome { returned, var })
 }
 
 /// Remove code-loading and reflection globals the base library provides. The
@@ -108,39 +138,60 @@ fn value_to_string(value: &Value) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn run(source: &str, args: &str) -> Result<LuaOutcome> {
+        run_chunk(source, args, &json!({ "id": 1, "when": "t" }))
+    }
 
     #[test]
     fn returns_args_verbatim() {
         assert_eq!(
-            run_chunk("return args", "hello").unwrap().as_deref(),
+            run("return args", "hello").unwrap().returned.as_deref(),
             Some("hello")
         );
     }
 
     #[test]
     fn no_return_is_none() {
-        assert_eq!(run_chunk("local x = 1", "hello").unwrap(), None);
+        assert_eq!(run("local x = 1", "hello").unwrap().returned, None);
+    }
+
+    #[test]
+    fn reads_sys() {
+        assert_eq!(
+            run("return sys.id", "").unwrap().returned.as_deref(),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn var_is_read_back() {
+        let out = run("var.greeting = 'hi ' .. args", "bob").unwrap();
+        assert_eq!(
+            out.var.get("greeting").and_then(|v| v.as_str()),
+            Some("hi bob")
+        );
     }
 
     #[test]
     fn safe_stdlib_present() {
-        // string/table/math and base tostring are available.
-        let out = run_chunk("return tostring(#args) .. ',' .. string.upper(args)", "hi").unwrap();
-        assert_eq!(out.as_deref(), Some("2,HI"));
+        let out = run("return string.upper(args)", "hi").unwrap();
+        assert_eq!(out.returned.as_deref(), Some("HI"));
     }
 
     #[test]
     fn dangerous_globals_absent() {
-        let out = run_chunk(
+        let out = run(
             "return tostring(io) .. ',' .. tostring(os) .. ',' .. tostring(require) .. ',' .. tostring(load)",
             "",
         )
         .unwrap();
-        assert_eq!(out.as_deref(), Some("nil,nil,nil,nil"));
+        assert_eq!(out.returned.as_deref(), Some("nil,nil,nil,nil"));
     }
 
     #[test]
     fn instruction_budget_aborts_runaway() {
-        assert!(run_chunk("while true do end", "").is_err());
+        assert!(run("while true do end", "").is_err());
     }
 }
