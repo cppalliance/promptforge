@@ -24,9 +24,10 @@ use crate::subst;
 use crate::tools::Tool;
 use crate::{Error, Result};
 
-/// The maximum number of model round trips a single section's tool-call loop
-/// will take before giving up.
-const MAX_TOOL_ITERATIONS: usize = 10;
+/// The default maximum number of model round trips a single section's
+/// tool-call loop will take before giving up, applied when a prompt's
+/// frontmatter does not declare its own `max_tool_iterations`.
+const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 
 /// Execute a prompt and return the run's result.
 ///
@@ -34,8 +35,9 @@ const MAX_TOOL_ITERATIONS: usize = 10;
 ///
 /// `tools` are the tools advertised to the model for each section's model call.
 /// When the model asks to call one, the executor dispatches it, appends the
-/// result to the conversation, and re-sends, looping up to
-/// `MAX_TOOL_ITERATIONS` times until the model returns a final text reply.
+/// result to the conversation, and re-sends, looping until the model returns a
+/// final text reply. The cap on those round trips is the prompt's
+/// `max_tool_iterations` when set, otherwise a raised runtime default.
 /// Pass an empty slice to disable tools entirely.
 ///
 /// # Errors
@@ -50,6 +52,13 @@ pub async fn run(prompt: &Prompt, args: &str, tools: &[&dyn Tool]) -> Result<Str
     let when = now_rfc3339();
     let mut client: Option<GatewayClient> = None;
     let mut last_reply: Option<String> = None;
+
+    // Resolve the tool-loop cap once: the prompt's declared budget, or the
+    // runtime default when it declares none.
+    let max_tool_iterations = prompt
+        .frontmatter
+        .max_tool_iterations
+        .unwrap_or(DEFAULT_MAX_TOOL_ITERATIONS);
 
     // Advertise the provided tools to the model on every section's model call.
     let schemas: Vec<ToolSchema> = tools
@@ -82,7 +91,8 @@ pub async fn run(prompt: &Prompt, args: &str, tools: &[&dyn Tool]) -> Result<Str
                 client = Some(GatewayClient::from_env()?);
             }
             if let Some(client) = &client {
-                let text = run_tool_loop(client, &schemas, tools, prose).await?;
+                let text =
+                    run_tool_loop(client, &schemas, tools, prose, max_tool_iterations).await?;
                 last_reply = Some(text);
             }
         }
@@ -105,7 +115,7 @@ pub async fn run(prompt: &Prompt, args: &str, tools: &[&dyn Tool]) -> Result<Str
 /// round trip either yields text (returned immediately) or a batch of tool
 /// calls; for the latter, the assistant turn is echoed back verbatim, each tool
 /// is dispatched and its result appended as a `tool` turn, and the conversation
-/// is re-sent. The loop is capped at [`MAX_TOOL_ITERATIONS`] round trips.
+/// is re-sent. The loop is capped at `max_tool_iterations` round trips.
 ///
 /// # Errors
 /// Returns [`Error::UnknownTool`] if the model calls a tool not in `tools`,
@@ -116,6 +126,7 @@ async fn run_tool_loop(
     schemas: &[ToolSchema],
     tools: &[&dyn Tool],
     prose: String,
+    max_tool_iterations: usize,
 ) -> Result<String> {
     let mut conversation = vec![Message::user(prose)];
     let tool_arg = if schemas.is_empty() {
@@ -124,7 +135,7 @@ async fn run_tool_loop(
         Some(schemas)
     };
 
-    for _ in 0..MAX_TOOL_ITERATIONS {
+    for _ in 0..max_tool_iterations {
         match client.complete(&conversation, tool_arg).await? {
             CompletionResult::Text(text) => return Ok(text),
             CompletionResult::ToolCalls(calls) => {
@@ -344,15 +355,27 @@ mod tests {
         let tools: &[&dyn Tool] = &[&echo];
         let schemas = schemas_for(tools);
 
-        let out = run_tool_loop(&client, &schemas, tools, "ask the model".to_string())
-            .await
-            .unwrap();
+        let out = run_tool_loop(
+            &client,
+            &schemas,
+            tools,
+            "ask the model".to_string(),
+            DEFAULT_MAX_TOOL_ITERATIONS,
+        )
+        .await
+        .unwrap();
         assert_eq!(out, "final answer");
     }
 
-    /// A mock gateway that always asks for a tool call, never converging.
-    async fn spawn_always_tool_call() -> SocketAddr {
-        async fn completions(Json(_body): Json<Value>) -> Json<Value> {
+    /// A mock gateway that always asks for a tool call, never converging. The
+    /// returned counter records how many completion requests it served, so a
+    /// test can assert the loop stopped after exactly its cap of round trips.
+    async fn spawn_always_tool_call() -> (SocketAddr, Arc<AtomicUsize>) {
+        async fn completions(
+            State(calls): State<Arc<AtomicUsize>>,
+            Json(_body): Json<Value>,
+        ) -> Json<Value> {
+            calls.fetch_add(1, Ordering::SeqCst);
             Json(json!({
                 "choices": [{
                     "message": {
@@ -367,34 +390,94 @@ mod tests {
                 }]
             }))
         }
-        let router = Router::new().route("/v1/chat/completions", post(completions));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let router = Router::new()
+            .route("/v1/chat/completions", post(completions))
+            .with_state(Arc::clone(&calls));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
-        addr
+        (addr, calls)
     }
 
     #[tokio::test]
-    async fn tool_loop_gives_up_after_iteration_cap() {
-        let addr = spawn_always_tool_call().await;
+    async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
+        // A small explicit cap: the loop must make exactly that many round
+        // trips against a never-converging model, then exhaust.
+        let cap = 3;
+        let (addr, calls) = spawn_always_tool_call().await;
         let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
 
         let echo = EchoTool;
         let tools: &[&dyn Tool] = &[&echo];
         let schemas = schemas_for(tools);
 
-        let err = run_tool_loop(&client, &schemas, tools, "loop forever".to_string())
+        let err = run_tool_loop(&client, &schemas, tools, "loop forever".to_string(), cap)
             .await
             .expect_err("a never-converging model should exhaust the loop");
         assert!(matches!(err, Error::ToolLoopExhausted));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            cap,
+            "the loop must make exactly `cap` round trips before giving up"
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_loop_uses_the_default_cap_when_unspecified() {
+        // Threading `DEFAULT_MAX_TOOL_ITERATIONS` (what `run` passes when a
+        // prompt declares no budget) makes exactly that many round trips.
+        let (addr, calls) = spawn_always_tool_call().await;
+        let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
+
+        let echo = EchoTool;
+        let tools: &[&dyn Tool] = &[&echo];
+        let schemas = schemas_for(tools);
+
+        let err = run_tool_loop(
+            &client,
+            &schemas,
+            tools,
+            "loop forever".to_string(),
+            DEFAULT_MAX_TOOL_ITERATIONS,
+        )
+        .await
+        .expect_err("a never-converging model should exhaust the loop");
+        assert!(matches!(err, Error::ToolLoopExhausted));
+        assert_eq!(calls.load(Ordering::SeqCst), DEFAULT_MAX_TOOL_ITERATIONS);
+        assert_eq!(DEFAULT_MAX_TOOL_ITERATIONS, 24);
+    }
+
+    #[test]
+    fn run_resolves_cap_from_frontmatter_else_default() {
+        // Mirrors the resolution in `run`: a declared budget wins, an absent
+        // one falls back to the raised default.
+        let declared =
+            "---\nname: t\ndescription: d\nversion: 1\nmax_tool_iterations: 5\n---\n\n## S\n\np\n";
+        let p = Prompt::parse(declared).unwrap();
+        assert_eq!(
+            p.frontmatter
+                .max_tool_iterations
+                .unwrap_or(DEFAULT_MAX_TOOL_ITERATIONS),
+            5
+        );
+
+        let absent = "---\nname: t\ndescription: d\nversion: 1\n---\n\n## S\n\np\n";
+        let p = Prompt::parse(absent).unwrap();
+        assert_eq!(
+            p.frontmatter
+                .max_tool_iterations
+                .unwrap_or(DEFAULT_MAX_TOOL_ITERATIONS),
+            DEFAULT_MAX_TOOL_ITERATIONS
+        );
     }
 
     #[tokio::test]
     async fn tool_loop_errors_on_unknown_tool() {
         // The model asks for "echo" but no tools are provided to the loop.
-        let addr = spawn_always_tool_call().await;
+        let (addr, _calls) = spawn_always_tool_call().await;
         let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
 
         // Advertise schemas so the request carries tools, but pass no dispatch
@@ -402,9 +485,15 @@ mod tests {
         let echo = EchoTool;
         let schemas = schemas_for(&[&echo]);
 
-        let err = run_tool_loop(&client, &schemas, &[], "call unknown".to_string())
-            .await
-            .expect_err("an unprovided tool should be rejected");
+        let err = run_tool_loop(
+            &client,
+            &schemas,
+            &[],
+            "call unknown".to_string(),
+            DEFAULT_MAX_TOOL_ITERATIONS,
+        )
+        .await
+        .expect_err("an unprovided tool should be rejected");
         match err {
             Error::UnknownTool(name) => assert_eq!(name, "echo"),
             other => panic!("expected UnknownTool, got {other:?}"),
