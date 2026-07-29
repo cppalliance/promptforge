@@ -17,11 +17,11 @@
 
 use serde_json::json;
 
-use crate::Result;
-use crate::client::{GatewayClient, Message};
+use crate::client::{CompletionResult, GatewayClient, Message};
 use crate::lua;
 use crate::parser::Prompt;
 use crate::subst;
+use crate::{Error, Result};
 
 /// Execute a prompt and return the run's result.
 ///
@@ -58,7 +58,15 @@ pub async fn run(prompt: &Prompt, args: &str) -> Result<String> {
                 client = Some(GatewayClient::from_env()?);
             }
             if let Some(client) = &client {
-                last_reply = Some(client.complete(&[Message::user(prose)]).await?);
+                let text = match client.complete(&[Message::user(prose)], None).await? {
+                    CompletionResult::Text(text) => text,
+                    CompletionResult::ToolCalls(_) => {
+                        return Err(Error::MalformedResponse(
+                            "tool calls not supported without tools".into(),
+                        ));
+                    }
+                };
+                last_reply = Some(text);
             }
         }
         // Fall through to the next section (context clears - nothing is carried).
