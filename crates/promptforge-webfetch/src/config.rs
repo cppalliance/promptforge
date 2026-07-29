@@ -9,6 +9,7 @@
 //! needed.
 
 use std::net::IpAddr;
+use std::time::Duration;
 
 use ipnet::IpNet;
 
@@ -17,6 +18,18 @@ const DEFAULT_ALLOW_PORTS: [u16; 2] = [80, 443];
 
 /// The default cap on redirect hops a single fetch may follow.
 const DEFAULT_MAX_REDIRECTS: usize = 5;
+
+/// The default time allowed to establish a TCP connection.
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The default cap on the total time a single request may take.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// The default time an idle connection is kept in the pool before it is closed.
+const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The default `User-Agent` header sent on every request.
+const DEFAULT_USER_AGENT: &str = "promptforge-webfetch/0.1";
 
 /// The default cap on a response body's decompressed size, in bytes (8 MiB).
 const DEFAULT_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -61,6 +74,30 @@ pub struct FetchConfig {
     /// longer than the effective cap is truncated on a character boundary and
     /// the return is flagged as truncated.
     pub max_chars: usize,
+    /// The time allowed to establish a TCP connection on any hop.
+    ///
+    /// Applied as [`reqwest::ClientBuilder::connect_timeout`].
+    pub connect_timeout: Duration,
+    /// The cap on the total time a single request may take, connect through
+    /// body.
+    ///
+    /// Applied as [`reqwest::ClientBuilder::timeout`]. A request that exceeds it
+    /// is aborted and surfaces as [`FetchError::Timeout`].
+    ///
+    /// [`FetchError::Timeout`]: crate::error::FetchError::Timeout
+    pub timeout: Duration,
+    /// How long an idle pooled connection is kept before it is closed.
+    ///
+    /// Applied as [`reqwest::ClientBuilder::pool_idle_timeout`]. A short value
+    /// bounds the DNS-rebinding window left by connection reuse, since a
+    /// kept-alive socket is not re-resolved.
+    pub pool_idle_timeout: Duration,
+    /// The `User-Agent` header sent on every request.
+    ///
+    /// Set with [`reqwest::ClientBuilder::user_agent`]. No cookie store is
+    /// installed and no credential or `Authorization` header is sent by
+    /// default, so the client carries no ambient identity beyond this string.
+    pub user_agent: String,
 }
 
 impl Default for FetchConfig {
@@ -74,6 +111,10 @@ impl Default for FetchConfig {
             max_redirects: DEFAULT_MAX_REDIRECTS,
             max_bytes: DEFAULT_MAX_BYTES,
             max_chars: DEFAULT_MAX_CHARS,
+            connect_timeout: DEFAULT_CONNECT_TIMEOUT,
+            timeout: DEFAULT_TIMEOUT,
+            pool_idle_timeout: DEFAULT_POOL_IDLE_TIMEOUT,
+            user_agent: DEFAULT_USER_AGENT.to_string(),
         }
     }
 }

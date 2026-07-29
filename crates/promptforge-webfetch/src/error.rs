@@ -138,6 +138,18 @@ pub enum FetchError {
         url: String,
     },
 
+    /// The request exceeded its time budget.
+    ///
+    /// Either the connection could not be established in time or the total
+    /// request took longer than the configured timeout. The message names the
+    /// URL and suggests a retry, since a timeout is often transient.
+    #[non_exhaustive]
+    #[error("request to {url} timed out; try again or use a different URL")]
+    Timeout {
+        /// The URL whose request timed out.
+        url: String,
+    },
+
     /// The response declared a charset that could not be decoded.
     ///
     /// The charset label was not one the decoder recognizes, so the bytes
