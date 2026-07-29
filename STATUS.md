@@ -12,12 +12,23 @@ longer holds any vendor credential, only the gateway URL and shared token.
 - `promptforge-cli` - `promptforge run <file.md>`.
 - `promptforge-gateway` - axum service: `gateway.toml` (Secret + ${VAR} interpolation), model routing, one OpenAI passthrough upstream, bearer auth, POST /v1/chat/completions, GET /health. Config + routing unit tests + 4 end-to-end tests (fake backend + real client).
 
+Lua commit 1 (echo): mlua embedded + sandboxed; `args` (single raw string) exposed
+to a section's Lua block; the finish case of the exit rule works - a chunk that
+returns a plain value ends the run with it. `promptforge run prompts/echo.md "x"`
+runs `return args` and prints `x` with no model call and no gateway.
+
+- `promptforge-core::lua::run_chunk` - sandboxed VM (string/table/math + base only; no io/os/require/load/debug), instruction-count hook, args in, top-level return out. 5 unit tests.
+- `execute::run(prompt, args)` - Lua chunk returns a value -> finish; else send prose to the gateway. Client built lazily so a Lua-only run needs no credentials.
+- CLI: `promptforge run <file> [input]` passes `input` as `args`.
+
 ## What's next
 
-Tranche 2: the `call` control-flow tool, the tool-call loop, and multi-section
-fall-through (context clears on each transition). Then Lua. Gateway hardening
-(admission control, pinning, packs, hot reload, Anthropic shim, streaming) is
-deferred until self-hosted pods exist.
+Lua commit 2: `{{ args }}` / `{{ var.x }}` substitution + the writable `var`
+table, wired before the model turn (the greet.md demo). Then the control-flow
+tranche: the rest of the exit rule (nil = fall-through, goto/task/fanout
+descriptors), the tool-call loop, and multi-section flow. Gateway hardening
+(admission, pinning, packs, hot reload, Anthropic shim, streaming) deferred until
+self-hosted pods exist.
 
 ## How to run
 
@@ -48,7 +59,10 @@ cargo run -p promptforge-cli -- run prompts/hello.md
 - Section ends when the model returns text with no tool calls (auto termination)
 - tool_choice: auto when tools present, required when only call is present, omitted when no tools
 - `call` is the unified control-flow tool (type discriminator: return, goto, task, fanout) - keeps control-flow tool count at 1
-- No Lua yet (tranche 2). Streaming later (Talktron needs it).
+- Lua via mlua (lua54, vendored); sandbox = string/table/math + safe base, no io/os/require/load/debug, instruction-budget hook
+- args is a single raw string (caller input); derived values are deduced+stored by the pipeline, not passed
+- Exit rule (finish case only so far): a Lua chunk that returns a plain value ends the run with it; no return / no Lua -> model path
+- Streaming later (Talktron needs it)
 
 ## Open questions
 
