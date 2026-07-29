@@ -121,6 +121,110 @@ async fn wrong_token_is_401() {
     assert_eq!(response.status().as_u16(), 401);
 }
 
+/// A fake Brave Search backend returning one canned result.
+async fn fake_brave() -> SocketAddr {
+    async fn search() -> Json<Value> {
+        Json(serde_json::json!({
+            "web": {
+                "results": [{
+                    "title": "T",
+                    "url": "https://e.com",
+                    "description": "D",
+                    "age": "2026-01-01"
+                }]
+            }
+        }))
+    }
+    let router = Router::new().route("/web/search", axum::routing::get(search));
+    spawn(router).await
+}
+
+/// Start a gateway wired to a fake Brave backend for the web-search tool.
+async fn gateway_with_web_search(brave: SocketAddr) -> SocketAddr {
+    let toml = format!(
+        r#"
+[server]
+bind = "127.0.0.1:0"
+token = "test-token"
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{brave}"
+api_key = ""
+
+[[model]]
+name = "test-model"
+upstream = "backend-model"
+endpoints = ["fake"]
+
+[tools.web_search]
+provider = "brave"
+api_key = "brave-key"
+base_url = "http://{brave}"
+"#
+    );
+    let config = Config::from_toml_str(&toml).unwrap();
+    let routing = Arc::new(Routing::from_config(&config).unwrap());
+    let web_search = config.tools.and_then(|tools| tools.web_search).unwrap();
+    let state = AppState::new(routing, config.server.token).with_web_search(&web_search);
+    spawn(build_router(state)).await
+}
+
+#[tokio::test]
+async fn web_search_returns_results() {
+    let brave = fake_brave().await;
+    let gateway = gateway_with_web_search(brave).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{gateway}/v1/tools/web_search"))
+        .bearer_auth("test-token")
+        .json(&serde_json::json!({ "query": "hi" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+
+    let body: Value = response.json().await.unwrap();
+    let results = body.get("results").and_then(Value::as_array).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].get("title").and_then(Value::as_str), Some("T"));
+    assert_eq!(
+        results[0].get("url").and_then(Value::as_str),
+        Some("https://e.com")
+    );
+}
+
+#[tokio::test]
+async fn web_search_wrong_token_is_401() {
+    let brave = fake_brave().await;
+    let gateway = gateway_with_web_search(brave).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{gateway}/v1/tools/web_search"))
+        .bearer_auth("wrong-token")
+        .json(&serde_json::json!({ "query": "hi" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 401);
+}
+
+#[tokio::test]
+async fn web_search_not_configured_is_404() {
+    let backend = fake_backend().await;
+    let gateway = gateway_for(backend).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{gateway}/v1/tools/web_search"))
+        .bearer_auth("test-token")
+        .json(&serde_json::json!({ "query": "hi" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 404);
+}
+
 #[tokio::test]
 async fn health_needs_no_auth() {
     let backend = fake_backend().await;
