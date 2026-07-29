@@ -10,7 +10,7 @@ description = "PromptForge web_fetch tool: fetch a URL and return its main conte
 promptforge-core.workspace = true
 async-trait.workspace = true
 serde_json.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["gzip", "brotli", "stream"] }
 readabilityrs.workspace = true
 htmd.workspace = true
 url.workspace = true
@@ -22,6 +22,8 @@ tokio = { workspace = true }
 [dev-dependencies]
 tokio.workspace = true
 axum.workspace = true
+flate2.workspace = true
+futures-util.workspace = true
 
 [lints]
 workspace = true

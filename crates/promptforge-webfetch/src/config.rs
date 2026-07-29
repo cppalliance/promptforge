@@ -2,8 +2,9 @@
 //!
 //! [`FetchConfig`] carries the knobs that govern what a fetch may do. This step
 //! reads the URL-policy fields (`allow_http`, `allow_ports`, `allow_ip_literals`)
-//! plus the address-policy fields (`deny_extra`, `allow_exact`, `max_redirects`);
-//! later steps extend the struct with size, content-type, and timeout settings.
+//! plus the address-policy fields (`deny_extra`, `allow_exact`, `max_redirects`)
+//! and the size caps (`max_bytes`, `max_chars`); later steps extend the struct
+//! with content-type and timeout settings.
 //! Construct it with [`FetchConfig::default`] and override individual fields as
 //! needed.
 
@@ -16,6 +17,12 @@ const DEFAULT_ALLOW_PORTS: [u16; 2] = [80, 443];
 
 /// The default cap on redirect hops a single fetch may follow.
 const DEFAULT_MAX_REDIRECTS: usize = 5;
+
+/// The default cap on a response body's decompressed size, in bytes (8 MiB).
+const DEFAULT_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+/// The default cap on the returned text length, in characters.
+const DEFAULT_MAX_CHARS: usize = 40_000;
 
 /// Security policy for the `web_fetch` tool.
 ///
@@ -42,6 +49,18 @@ pub struct FetchConfig {
     pub allow_exact: Vec<(String, IpAddr)>,
     /// The maximum number of redirect hops a single fetch may follow.
     pub max_redirects: usize,
+    /// The largest response body accepted, counted on decompressed bytes.
+    ///
+    /// A structured response larger than this is refused outright; the counter
+    /// runs over the decompressed stream, so a compressed payload that expands
+    /// past the cap is refused on its expanded size, not its wire size.
+    pub max_bytes: usize,
+    /// The default cap on the returned text length, in characters.
+    ///
+    /// A per-call `max_chars` input overrides this for a single fetch. Text
+    /// longer than the effective cap is truncated on a character boundary and
+    /// the return is flagged as truncated.
+    pub max_chars: usize,
 }
 
 impl Default for FetchConfig {
@@ -53,6 +72,8 @@ impl Default for FetchConfig {
             deny_extra: Vec::new(),
             allow_exact: Vec::new(),
             max_redirects: DEFAULT_MAX_REDIRECTS,
+            max_bytes: DEFAULT_MAX_BYTES,
+            max_chars: DEFAULT_MAX_CHARS,
         }
     }
 }
