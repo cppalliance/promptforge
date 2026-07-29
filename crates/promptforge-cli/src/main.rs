@@ -6,7 +6,10 @@
 
 use std::process::ExitCode;
 
+use promptforge_core::tools::Tool;
 use promptforge_core::{execute, parser::Prompt};
+
+mod tools;
 
 /// Entry point. Dispatches subcommands and maps errors to a non-zero exit.
 #[tokio::main]
@@ -52,7 +55,22 @@ async fn run(path: &str, input: &str) -> ExitCode {
         }
     };
 
-    match execute::run(&prompt, input, &[]).await {
+    let base_url = std::env::var("PROMPTFORGE_BASE_URL").ok();
+    let token = std::env::var("PROMPTFORGE_TOKEN").ok();
+    let boxed = match tools::select_tools(
+        &prompt.frontmatter.tools,
+        base_url.as_deref(),
+        token.as_deref(),
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let tools: Vec<&dyn Tool> = boxed.iter().map(AsRef::as_ref).collect();
+
+    match execute::run(&prompt, input, &tools).await {
         Ok(result) => {
             println!("{result}");
             ExitCode::SUCCESS
