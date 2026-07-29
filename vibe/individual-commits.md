@@ -6,3 +6,5 @@
 
 ## 2026-07-29 Walk top-level sections with fall-through in execute::run
 
+## 2026-07-29 core: render MAX_TOOL_ITERATIONS as code in run docs
+

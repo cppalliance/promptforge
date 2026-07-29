@@ -35,7 +35,7 @@ const MAX_TOOL_ITERATIONS: usize = 10;
 /// `tools` are the tools advertised to the model for each section's model call.
 /// When the model asks to call one, the executor dispatches it, appends the
 /// result to the conversation, and re-sends, looping up to
-/// [`MAX_TOOL_ITERATIONS`] times until the model returns a final text reply.
+/// `MAX_TOOL_ITERATIONS` times until the model returns a final text reply.
 /// Pass an empty slice to disable tools entirely.
 ///
 /// # Errors
