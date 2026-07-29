@@ -18,7 +18,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 ## Invariants
 
 - A1. The gateway runs in a process separate from every caller.
-- A2. The gateway is the sole holder of vendor credentials.
+- A2. The gateway is the sole holder of vendor and remote-service credentials.
 - A3. The executor installs no process-global state.
 - A4. The CLI and workshop UI delegate all prompt execution to the executor.
 - A5. The store confines every path to its configured backend root.
