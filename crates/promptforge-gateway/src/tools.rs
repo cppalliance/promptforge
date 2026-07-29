@@ -182,3 +182,47 @@ pub async fn web_search(
     .await?;
     Ok(Json(response))
 }
+
+#[cfg(test)]
+mod live_tests {
+    use super::brave_search;
+
+    /// Hits the real Brave Search API to validate the request shape and the
+    /// `web.results` parsing against Brave's actual JSON.
+    ///
+    /// Ignored by default so the normal test run needs no credential. Run it
+    /// manually with `BRAVE_API_KEY` set in the environment:
+    /// `cargo test -p promptforge-gateway -- --ignored live_brave_search --nocapture`
+    #[tokio::test]
+    #[ignore = "hits the real Brave API; requires BRAVE_API_KEY, run with --ignored"]
+    async fn live_brave_search() {
+        let api_key =
+            std::env::var("BRAVE_API_KEY").expect("set BRAVE_API_KEY to run this live test");
+        let http = reqwest::Client::new();
+
+        let response = brave_search(
+            &http,
+            "https://api.search.brave.com/res/v1",
+            &api_key,
+            "rust programming language",
+            5,
+        )
+        .await
+        .expect("brave search should succeed");
+
+        assert!(
+            !response.results.is_empty(),
+            "expected at least one result from Brave"
+        );
+        assert!(
+            response.results[0].url.starts_with("http"),
+            "expected a real URL, got: {}",
+            response.results[0].url
+        );
+
+        // Printed for eyeballing when run manually with --nocapture.
+        for result in &response.results {
+            println!("- {} :: {}", result.title, result.url);
+        }
+    }
+}
