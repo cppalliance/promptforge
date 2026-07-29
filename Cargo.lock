@@ -1040,6 +1040,7 @@ name = "promptforge-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
  "htmd",
  "mlua",
  "pulldown-cmark",
