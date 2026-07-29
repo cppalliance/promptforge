@@ -13,6 +13,7 @@ pub mod execute;
 pub mod lua;
 pub mod parser;
 pub mod subst;
+pub mod tools;
 
 /// The crate's error type, spanning parsing, HTTP, and execution failures.
 ///
