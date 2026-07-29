@@ -30,15 +30,35 @@ pub trait Tool: Send + Sync {
     /// Returns [`crate::Error`] if the tool call fails (bad arguments, network,
     /// or a backend failure).
     async fn call(&self, args: serde_json::Value) -> Result<String>;
+
+    /// Whether this tool's result is untrusted external data.
+    ///
+    /// A tool that returns `true` has its result wrapped in a self-contained
+    /// guard block (a data-not-instructions rule plus a random-tagged,
+    /// escape-protected delimiter) before it reaches the model, reducing the
+    /// risk that attacker-controlled content (for example a fetched web page)
+    /// is followed as instructions. Defaults to `false`, so a tool is trusted
+    /// and its result appended verbatim unless it opts in; the default means
+    /// existing implementations need no change.
+    fn untrusted_output(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Tool;
+    use super::{Tool, WebSearch};
 
     #[test]
     fn trait_is_dyn_compatible() {
         let tools: Vec<Box<dyn Tool>> = Vec::new();
         assert!(tools.is_empty());
+    }
+
+    #[test]
+    fn trusted_tool_defaults_to_not_untrusted() {
+        // A tool that does not opt in (here the structured-snippet web search)
+        // inherits the defaulted `false`, so its result is appended verbatim.
+        assert!(!WebSearch::new("http://localhost", "test").untrusted_output());
     }
 }

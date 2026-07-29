@@ -7,6 +7,7 @@ description = "PromptForge runtime core: prompt parser, HTTP client, section exe
 
 [dependencies]
 async-trait.workspace = true
+fastrand.workspace = true
 pulldown-cmark.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
