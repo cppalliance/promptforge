@@ -1,0 +1,17 @@
+[package]
+name = "promptforge-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PromptForge runtime core: prompt parser, HTTP client, section execution"
+
+[dependencies]
+pulldown-cmark.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

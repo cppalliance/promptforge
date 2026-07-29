@@ -1,0 +1,17 @@
+[package]
+name = "promptforge-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PromptForge command-line tool"
+
+[[bin]]
+name = "promptforge"
+path = "src/main.rs"
+
+[dependencies]
+promptforge-core.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true
