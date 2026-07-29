@@ -6,7 +6,7 @@
 //! tranches.
 
 use crate::Result;
-use crate::client::{Client, Message};
+use crate::client::{GatewayClient, Message};
 use crate::parser::Prompt;
 
 /// Execute a prompt's entry section and return the model's text reply.
@@ -14,7 +14,7 @@ use crate::parser::Prompt;
 /// # Errors
 /// Propagates any [`crate::Error`] from the underlying model call (transport,
 /// backend status, or malformed response).
-pub async fn run(prompt: &Prompt, client: &Client) -> Result<String> {
+pub async fn run(prompt: &Prompt, client: &GatewayClient) -> Result<String> {
     let section = prompt.entry();
     let messages = [Message::user(section.prose.clone())];
     client.complete(&messages).await
