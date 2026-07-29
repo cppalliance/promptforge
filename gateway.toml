@@ -16,3 +16,10 @@ api_key = "${ANTHROPIC_API_KEY}"
 name = "claude-sonnet-4-6"
 upstream = "claude-sonnet-4-6"
 endpoints = ["anthropic"]
+
+# The web_search tool proxies through the gateway so the Brave key stays here,
+# never in the executor. web_fetch runs locally in the executor and needs no
+# gateway configuration.
+[tools.web_search]
+provider = "brave"
+api_key = "${BRAVE_API_KEY}"
