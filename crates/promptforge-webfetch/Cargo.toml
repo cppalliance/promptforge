@@ -10,9 +10,11 @@ description = "PromptForge web_fetch tool: fetch a URL and return its main conte
 promptforge-core.workspace = true
 async-trait.workspace = true
 serde_json.workspace = true
-reqwest = { workspace = true, features = ["gzip", "brotli", "stream"] }
+reqwest = { workspace = true, features = ["gzip", "brotli", "stream", "charset"] }
 readabilityrs.workspace = true
 htmd.workspace = true
+mime.workspace = true
+encoding_rs.workspace = true
 url.workspace = true
 ipnet.workspace = true
 thiserror.workspace = true

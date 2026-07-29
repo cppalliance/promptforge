@@ -107,6 +107,50 @@ pub enum FetchError {
         /// The underlying failure text.
         message: String,
     },
+
+    /// The response declared a content type this tool does not return as text.
+    ///
+    /// PDFs and every binary type (octet-stream, images, audio, video,
+    /// archives) land here. The message names the type and points the model at
+    /// a next move so it does not simply retry the same URL.
+    #[non_exhaustive]
+    #[error(
+        "content type {content_type} from {url} cannot be returned as text; try an HTML version of the page or a different URL"
+    )]
+    UnsupportedContentType {
+        /// The URL whose response carried the unsupported type.
+        url: String,
+        /// The unsupported content type, verbatim from the response header.
+        content_type: String,
+    },
+
+    /// The response carried no `Content-Type` header.
+    ///
+    /// The tool refuses to sniff an absent type, so the URL is rejected rather
+    /// than guessed at. The message points the model at a URL that declares a
+    /// type.
+    #[non_exhaustive]
+    #[error(
+        "response from {url} declared no content type; refusing to guess its format; try a different URL"
+    )]
+    NoContentType {
+        /// The URL whose response carried no content type.
+        url: String,
+    },
+
+    /// The response declared a charset that could not be decoded.
+    ///
+    /// The charset label was not one the decoder recognizes, so the bytes
+    /// cannot be turned into text. The message names the label so the failure
+    /// is actionable.
+    #[non_exhaustive]
+    #[error("response from {url} declared unknown charset {charset}; cannot decode its text")]
+    Undecodable {
+        /// The URL whose response declared the charset.
+        url: String,
+        /// The unrecognized charset label, verbatim from the response header.
+        charset: String,
+    },
 }
 
 impl FetchError {
