@@ -125,6 +125,20 @@ Scalars render as strings, tables as JSON, and a missing path is an error.
 Substitution does no arithmetic - compute in Lua and reference the result
 (`var.total = var.a + var.b`, then `{{ var.total }}`).
 
+### Fall-through and the result
+
+Top-level `##` sections run in file order, each in a fresh context (nothing is
+carried between them). A section ends by either:
+
+- **returning a value from Lua** (`return ...`) - this finishes the whole run
+  with that value, so sections after it are not reached by fall-through; or
+- **falling through** - if it doesn't return, its prose (if any) is sent to the
+  model and control moves to the next section.
+
+Running off the last section ends the run. The result is `default_return` from
+the frontmatter if set, otherwise the last model reply, otherwise a generic
+completion. `sys.id` counts sections as you go (1, 2, 3, ...).
+
 ### Example
 
 `prompts/greet.md`:
