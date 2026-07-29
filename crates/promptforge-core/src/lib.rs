@@ -10,6 +10,7 @@
 
 pub mod client;
 pub mod execute;
+pub mod lua;
 pub mod parser;
 
 /// The crate's error type, spanning parsing, HTTP, and execution failures.
@@ -44,6 +45,10 @@ pub enum Error {
     /// The backend response could not be understood (missing choices, etc.).
     #[error("malformed response: {0}")]
     MalformedResponse(String),
+
+    /// A section's Lua block failed to build, run, or return a usable value.
+    #[error("lua error: {0}")]
+    Lua(String),
 }
 
 impl Error {

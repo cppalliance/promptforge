@@ -1,11 +1,12 @@
 //! The `promptforge` command-line tool.
 //!
-//! Tranche 1 supports one command: `promptforge run <file.md>`. It parses the
-//! prompt, executes the entry section against the model, and prints the reply.
+//! `promptforge run <file.md> [input]` parses the prompt and executes its entry
+//! section. `input` is the single raw argument string exposed to the prompt as
+//! `args`; it defaults to empty.
 
 use std::process::ExitCode;
 
-use promptforge_core::{client::GatewayClient, execute, parser::Prompt};
+use promptforge_core::{execute, parser::Prompt};
 
 /// Entry point. Dispatches subcommands and maps errors to a non-zero exit.
 #[tokio::main]
@@ -15,24 +16,26 @@ async fn main() -> ExitCode {
     match command.as_deref() {
         Some("run") => {
             let Some(path) = args.next() else {
-                eprintln!("usage: promptforge run <file.md>");
+                eprintln!("usage: promptforge run <file.md> [input]");
                 return ExitCode::FAILURE;
             };
-            run(&path).await
+            let input = args.next().unwrap_or_default();
+            run(&path, &input).await
         }
         Some(other) => {
-            eprintln!("unknown command: {other}\nusage: promptforge run <file.md>");
+            eprintln!("unknown command: {other}\nusage: promptforge run <file.md> [input]");
             ExitCode::FAILURE
         }
         None => {
-            eprintln!("usage: promptforge run <file.md>");
+            eprintln!("usage: promptforge run <file.md> [input]");
             ExitCode::FAILURE
         }
     }
 }
 
-/// Parse the file, execute its entry section, and print the model's reply.
-async fn run(path: &str) -> ExitCode {
+/// Parse the file, execute its entry section with `input` as `args`, and print
+/// the result.
+async fn run(path: &str, input: &str) -> ExitCode {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -49,17 +52,9 @@ async fn run(path: &str) -> ExitCode {
         }
     };
 
-    let client = match GatewayClient::from_env() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    match execute::run(&prompt, &client).await {
-        Ok(reply) => {
-            println!("{reply}");
+    match execute::run(&prompt, input).await {
+        Ok(result) => {
+            println!("{result}");
             ExitCode::SUCCESS
         }
         Err(e) => {
