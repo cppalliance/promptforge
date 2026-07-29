@@ -5,3 +5,4 @@
 - [2026-07-29-4-webfetch-crate-extraction] fetch provenance contract: Return final URL, truncation, and extraction mode with fetched text so consumers know what they received.
 - [2026-07-29-5-multi-turn-research-prompt] prompt-owned tool budget: Let a prompt declare its tool-iteration budget while retaining a finite default.
 - [2026-07-29-5-multi-turn-research-prompt] soft output target: A prose token target is guidance, not an enforced output limit.
+- [2026-07-29-6-per-section-tool-scoping] add-only scope API: The current Lua scoping surface accumulates and deduplicates names but has no remove or clear operation.
