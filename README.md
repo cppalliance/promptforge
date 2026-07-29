@@ -81,6 +81,64 @@ Human-readable description (not executed).
 
 ## Section
 
-Prose the model reads. Sections fall through in file order; context clears on
-each transition.
+Prose the model reads.
 ```
+
+- `---` delimited YAML frontmatter (`name`, `description`, `version` required; `tools`, `default_return` optional).
+- `# Title` and the text before the first `##` are human-readable, not executed.
+- `## Section` headings are executable units; the first one is the entry point. Each may begin with a single ` ```lua ` block followed by prose.
+
+## Prompt language
+
+A run takes one raw input string and executes the entry section:
+
+```
+promptforge run <file.md> [input]
+```
+
+`input` is exposed to the prompt as `args`.
+
+### The Lua block
+
+A section may open with one ` ```lua ` fence. It runs before the model, in a
+sandbox (no filesystem, network, or `os`). It can read `args` and `sys`, write
+the `var` table, and end the run early by returning a value:
+
+```lua
+return args              -- finishes the run with this value; no model call
+```
+
+If the block returns nothing (or there is no block), the section's prose is sent
+to the model.
+
+### Substitution
+
+Before the model sees the prose, `{{ path }}` placeholders are resolved from
+three namespaces:
+
+- `{{ args }}` - the raw input string.
+- `{{ var.x }}` - values the Lua block wrote (`var.x = ...`).
+- `{{ sys.when }}` / `{{ sys.now }}` / `{{ sys.id }}` - runtime metadata: the run's
+  launch timestamp, a build-time timestamp, and the context id.
+
+Scalars render as strings, tables as JSON, and a missing path is an error.
+Substitution does no arithmetic - compute in Lua and reference the result
+(`var.total = var.a + var.b`, then `{{ var.total }}`).
+
+### Example
+
+`prompts/greet.md`:
+
+```
+## Main
+
+` ` `lua
+var.greeting = "Hello, " .. args .. "!"
+` ` `
+
+Repeat exactly, with no extra words: {{ var.greeting }}
+```
+
+`promptforge run prompts/greet.md "World"` sends `Repeat exactly, with no extra
+words: Hello, World!` to the model. `prompts/echo.md` (just `return args`) prints
+its input with no model call and no gateway.

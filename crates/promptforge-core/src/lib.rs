@@ -12,6 +12,7 @@ pub mod client;
 pub mod execute;
 pub mod lua;
 pub mod parser;
+pub mod subst;
 
 /// The crate's error type, spanning parsing, HTTP, and execution failures.
 ///
@@ -49,6 +50,10 @@ pub enum Error {
     /// A section's Lua block failed to build, run, or return a usable value.
     #[error("lua error: {0}")]
     Lua(String),
+
+    /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
+    #[error("substitution error: {0}")]
+    Substitution(String),
 }
 
 impl Error {
