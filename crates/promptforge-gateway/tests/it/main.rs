@@ -84,11 +84,14 @@ async fn happy_path_through_the_real_client() {
     let gateway = gateway_for(backend).await;
 
     let client = GatewayClient::new(&format!("http://{gateway}/v1"), "test-token", "test-model");
-    let reply = client
-        .complete(&[promptforge_core::client::Message::user("ping")])
+    let result = client
+        .complete(&[promptforge_core::client::Message::user("ping")], None)
         .await
         .unwrap();
-    assert_eq!(reply, "pong");
+    match result {
+        promptforge_core::client::CompletionResult::Text(reply) => assert_eq!(reply, "pong"),
+        other => panic!("expected text reply, got {other:?}"),
+    }
 }
 
 #[tokio::test]
