@@ -10,8 +10,12 @@
 //! case of the exit rule). The `var` table is read back afterward as JSON for
 //! prose substitution.
 
-use mlua::{HookTriggers, Lua, LuaOptions, LuaSerdeExt, MultiValue, StdLib, Value, VmState};
+use mlua::{
+    HookTriggers, Lua, LuaOptions, LuaSerdeExt, MultiValue, StdLib, Value, Variadic, VmState,
+};
 use serde_json::Value as Json;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -29,6 +33,11 @@ pub struct LuaOutcome {
     pub returned: Option<String>,
     /// The `var` table after the block ran, as JSON, for prose substitution.
     pub var: Json,
+    /// The tool names the block advertised with `tools.add(...)`, in first-seen
+    /// order and de-duplicated. Empty when the block never called `tools.add`.
+    /// These names are recorded verbatim and are not validated here against any
+    /// tool registry; the executor resolves them per section.
+    pub scoped_tools: Vec<String>,
 }
 
 /// Run a section's Lua chunk with `args` and `sys` exposed and a writable `var`
@@ -60,6 +69,8 @@ pub fn run_chunk(source: &str, args: &str, sys: &Json) -> Result<LuaOutcome> {
         .set("var", var_table)
         .map_err(|e| Error::Lua(e.to_string()))?;
 
+    let scoped = install_tools_table(&lua, &globals)?;
+
     install_instruction_budget(&lua);
 
     let returned: MultiValue = lua
@@ -76,7 +87,49 @@ pub fn run_chunk(source: &str, args: &str, sys: &Json) -> Result<LuaOutcome> {
         .from_value(var_value)
         .map_err(|e| Error::Lua(e.to_string()))?;
 
-    Ok(LuaOutcome { returned, var })
+    let scoped_tools = scoped.borrow().clone();
+
+    Ok(LuaOutcome {
+        returned,
+        var,
+        scoped_tools,
+    })
+}
+
+/// Expose a `tools` table whose `add` host function records tool names into a
+/// shared, ordered, de-duplicated collection, and return a handle to that
+/// collection so the caller can read the accumulated names back after the
+/// chunk runs. `add` only records names; it validates nothing and never
+/// touches the model.
+///
+/// The VM is single-threaded and non-async, so an `Rc<RefCell<..>>` moved into
+/// the function is sufficient shared state.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the `tools` table or its `add` function cannot be
+/// created or installed into the sandbox globals.
+fn install_tools_table(lua: &Lua, globals: &mlua::Table) -> Result<Rc<RefCell<Vec<String>>>> {
+    let scoped: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    let recorder = Rc::clone(&scoped);
+    let add = lua
+        .create_function(move |_, names: Variadic<String>| {
+            let mut acc = recorder.borrow_mut();
+            for name in names {
+                if !acc.iter().any(|existing| existing == &name) {
+                    acc.push(name);
+                }
+            }
+            Ok(())
+        })
+        .map_err(|e| Error::Lua(e.to_string()))?;
+    let tools = lua.create_table().map_err(|e| Error::Lua(e.to_string()))?;
+    tools
+        .set("add", add)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+    globals
+        .set("tools", tools)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+    Ok(scoped)
 }
 
 /// Remove code-loading and reflection globals the base library provides. The
@@ -193,5 +246,33 @@ mod tests {
     #[test]
     fn instruction_budget_aborts_runaway() {
         assert!(run("while true do end", "").is_err());
+    }
+
+    #[test]
+    fn single_add_records_its_names() {
+        let out = run("tools.add('web_search', 'web_fetch')", "").unwrap();
+        assert_eq!(out.scoped_tools, vec!["web_search", "web_fetch"]);
+    }
+
+    #[test]
+    fn multiple_adds_accumulate_and_dedupe() {
+        let out = run(
+            "tools.add('web_search')\ntools.add('web_fetch', 'web_search')",
+            "",
+        )
+        .unwrap();
+        assert_eq!(out.scoped_tools, vec!["web_search", "web_fetch"]);
+    }
+
+    #[test]
+    fn add_inside_if_branch_records() {
+        let out = run("if true then tools.add('web_search') end", "").unwrap();
+        assert_eq!(out.scoped_tools, vec!["web_search"]);
+    }
+
+    #[test]
+    fn no_add_leaves_scoped_tools_empty() {
+        let out = run("local x = 1", "").unwrap();
+        assert!(out.scoped_tools.is_empty());
     }
 }
