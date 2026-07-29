@@ -1,14 +1,15 @@
-//! An `OpenAI`-compatible chat completions client.
+//! An `OpenAI`-compatible chat completions client, pointed at the gateway.
 //!
 //! Tranche 1 speaks the plain `/chat/completions` shape: a list of messages in,
-//! one text reply out. No tools, no streaming. The base URL defaults to
-//! Anthropic's `OpenAI`-compatible endpoint but can be repointed at a local
-//! server or the future gateway with one environment variable.
+//! one text reply out. No tools, no streaming. The client holds only the
+//! gateway's URL and the shared token; the vendor credential lives in the
+//! gateway, so the executor never sees it. Point `PROMPTFORGE_BASE_URL` at a
+//! local server or another gateway to retarget it.
 
 use crate::{Error, Result};
 
-/// Default backend base URL (Anthropic's `OpenAI`-compatible endpoint).
-const DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1";
+/// Default backend base URL (the local development gateway).
+const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8081/v1";
 /// Default model used when `PROMPTFORGE_MODEL` is unset.
 const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
 
@@ -32,38 +33,47 @@ impl Message {
     }
 }
 
-/// A chat completions client bound to one backend, key, and model.
+/// A chat completions client bound to one gateway, token, and model.
 #[derive(Debug, Clone)]
-pub struct Client {
+pub struct GatewayClient {
     http: reqwest::Client,
     base_url: String,
-    api_key: String,
+    token: String,
     model: String,
 }
 
-impl Client {
+impl GatewayClient {
+    /// Build a client from explicit parts (used by tests and by
+    /// [`GatewayClient::from_env`]). A trailing slash on `base_url` is trimmed.
+    #[must_use]
+    pub fn new(
+        base_url: &str,
+        token: impl Into<String>,
+        model: impl Into<String>,
+    ) -> GatewayClient {
+        GatewayClient {
+            http: reqwest::Client::new(),
+            base_url: base_url.trim_end_matches('/').to_string(),
+            token: token.into(),
+            model: model.into(),
+        }
+    }
+
     /// Build a client from the environment.
     ///
-    /// - Base URL: `PROMPTFORGE_BASE_URL`, else Anthropic's endpoint.
+    /// - Base URL: `PROMPTFORGE_BASE_URL`, else the local gateway.
     /// - Model: `PROMPTFORGE_MODEL`, else a sane default.
-    /// - API key: `PROMPTFORGE_API_KEY`, else `ANTHROPIC_API_KEY`. Required.
+    /// - Token: `PROMPTFORGE_TOKEN`, the gateway's shared bearer. Required.
     ///
     /// # Errors
-    /// Returns [`Error::MissingEnv`] when neither `PROMPTFORGE_API_KEY` nor
-    /// `ANTHROPIC_API_KEY` is set.
-    pub fn from_env() -> Result<Client> {
-        let api_key = std::env::var("PROMPTFORGE_API_KEY")
-            .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
-            .map_err(|_| Error::MissingEnv("ANTHROPIC_API_KEY".into()))?;
+    /// Returns [`Error::MissingEnv`] when `PROMPTFORGE_TOKEN` is not set.
+    pub fn from_env() -> Result<GatewayClient> {
+        let token = std::env::var("PROMPTFORGE_TOKEN")
+            .map_err(|_| Error::MissingEnv("PROMPTFORGE_TOKEN".into()))?;
         let base_url =
             std::env::var("PROMPTFORGE_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.into());
         let model = std::env::var("PROMPTFORGE_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into());
-        Ok(Client {
-            http: reqwest::Client::new(),
-            base_url: base_url.trim_end_matches('/').to_string(),
-            api_key,
-            model,
-        })
+        Ok(GatewayClient::new(&base_url, token, model))
     }
 
     /// The model this client will call.
@@ -76,7 +86,7 @@ impl Client {
     ///
     /// # Errors
     /// Returns [`Error::Http`] on a transport failure, [`Error::Backend`] when
-    /// the backend responds with a non-success status, and
+    /// the gateway responds with a non-success status, and
     /// [`Error::MalformedResponse`] when the response carries no usable content.
     pub async fn complete(&self, messages: &[Message]) -> Result<String> {
         let request = ChatRequest {
@@ -86,7 +96,7 @@ impl Client {
         let response = self
             .http
             .post(format!("{}/chat/completions", self.base_url))
-            .bearer_auth(&self.api_key)
+            .bearer_auth(&self.token)
             .json(&request)
             .send()
             .await
