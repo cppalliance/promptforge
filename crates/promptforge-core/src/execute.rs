@@ -33,21 +33,25 @@ const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 ///
 /// `args` is the single raw input string, exposed to Lua and to `{{ args }}`.
 ///
-/// `tools` are the tools advertised to the model for each section's model call.
-/// When the model asks to call one, the executor dispatches it, appends the
-/// result to the conversation, and re-sends, looping until the model returns a
-/// final text reply. The cap on those round trips is the prompt's
-/// `max_tool_iterations` when set, otherwise a raised runtime default.
-/// Pass an empty slice to disable tools entirely.
+/// `tools` is the run's full pool of available tools. Tool scoping is opt-in
+/// per section: a section advertises only the tools its Lua block named with
+/// `tools.add(...)`, and a section with no Lua block (or one that never calls
+/// `tools.add`) advertises none. Only a section's scoped subset is shown to and
+/// dispatchable by the model for that section. When the model asks to call one,
+/// the executor dispatches it, appends the result to the conversation, and
+/// re-sends, looping until the model returns a final text reply. The cap on
+/// those round trips is the prompt's `max_tool_iterations` when set, otherwise
+/// a raised runtime default. Pass an empty slice to disable tools entirely.
 ///
 /// # Errors
 /// Returns [`crate::Error::Lua`] if a Lua block fails,
 /// [`crate::Error::Substitution`] if a `{{ }}` path cannot be resolved,
 /// [`crate::Error::MissingEnv`] if the gateway client cannot be built when a
-/// model call is needed, [`crate::Error::UnknownTool`] if the model calls a
-/// tool that was not provided, [`crate::Error::ToolLoopExhausted`] if a
-/// section's tool-call loop does not converge within its iteration cap, or any
-/// transport/backend error from a model call.
+/// model call is needed, [`crate::Error::UnknownScopedTool`] if a section
+/// scopes a tool name absent from `tools`, [`crate::Error::UnknownTool`] if the
+/// model calls a tool that was not provided, [`crate::Error::ToolLoopExhausted`]
+/// if a section's tool-call loop does not converge within its iteration cap, or
+/// any transport/backend error from a model call.
 pub async fn run(prompt: &Prompt, args: &str, tools: &[&dyn Tool]) -> Result<String> {
     let when = now_rfc3339();
     let mut client: Option<GatewayClient> = None;
@@ -60,29 +64,34 @@ pub async fn run(prompt: &Prompt, args: &str, tools: &[&dyn Tool]) -> Result<Str
         .max_tool_iterations
         .unwrap_or(DEFAULT_MAX_TOOL_ITERATIONS);
 
-    // Advertise the provided tools to the model on every section's model call.
-    let schemas: Vec<ToolSchema> = tools
-        .iter()
-        .map(|t| ToolSchema {
-            name: t.name().to_string(),
-            description: t.description().to_string(),
-            parameters: t.parameters_schema(),
-        })
-        .collect();
-
     for (index, section) in prompt.sections.iter().enumerate() {
         let sys = json!({ "when": when, "now": now_rfc3339(), "id": index + 1 });
 
         // Run the section's Lua block. A returned value ends the whole run.
-        let var = if let Some(source) = &section.lua {
+        // The block's `tools.add(...)` names (empty without a Lua block) scope
+        // which tools this section may advertise and dispatch.
+        let (var, scoped_names) = if let Some(source) = &section.lua {
             let outcome = lua::run_chunk(source, args, &sys)?;
             if let Some(value) = outcome.returned {
                 return Ok(value);
             }
-            outcome.var
+            (outcome.var, outcome.scoped_tools)
         } else {
-            json!({})
+            (json!({}), Vec::new())
         };
+
+        // Resolve the scoped names against the run's tool pool. A name absent
+        // from the pool is a hard error, never a silent drop. The model can
+        // only be shown, and only dispatch, this filtered subset.
+        let section_tools = scoped_tools(tools, &scoped_names)?;
+        let schemas: Vec<ToolSchema> = section_tools
+            .iter()
+            .map(|t| ToolSchema {
+                name: t.name().to_string(),
+                description: t.description().to_string(),
+                parameters: t.parameters_schema(),
+            })
+            .collect();
 
         // Substitute the prose; if there is any, take one model round trip.
         let prose = subst::substitute(&section.prose, args, &var, &sys)?;
@@ -92,7 +101,8 @@ pub async fn run(prompt: &Prompt, args: &str, tools: &[&dyn Tool]) -> Result<Str
             }
             if let Some(client) = &client {
                 let text =
-                    run_tool_loop(client, &schemas, tools, prose, max_tool_iterations).await?;
+                    run_tool_loop(client, &schemas, &section_tools, prose, max_tool_iterations)
+                        .await?;
                 last_reply = Some(text);
             }
         }
@@ -106,6 +116,27 @@ pub async fn run(prompt: &Prompt, args: &str, tools: &[&dyn Tool]) -> Result<Str
         .clone()
         .or(last_reply)
         .unwrap_or_else(|| "done".to_string()))
+}
+
+/// Resolve a section's scoped tool names against the run's tool pool, in
+/// first-named order, returning the matching subset the section may advertise
+/// and dispatch.
+///
+/// # Errors
+/// Returns [`Error::UnknownScopedTool`] if a scoped name has no matching tool
+/// in `tools`, so a typo or an undeclared tool fails loudly rather than being
+/// silently dropped.
+fn scoped_tools<'a>(tools: &[&'a dyn Tool], names: &[String]) -> Result<Vec<&'a dyn Tool>> {
+    let mut selected: Vec<&'a dyn Tool> = Vec::with_capacity(names.len());
+    for name in names {
+        let tool = tools
+            .iter()
+            .copied()
+            .find(|t| t.name() == name)
+            .ok_or_else(|| Error::UnknownScopedTool(name.clone()))?;
+        selected.push(tool);
+    }
+    Ok(selected)
 }
 
 /// Drive one section's model call to a final text reply, dispatching any tool
@@ -279,6 +310,67 @@ mod tests {
         async fn call(&self, args: Value) -> Result<String> {
             let value = args.get("value").and_then(Value::as_str).unwrap_or("");
             Ok(format!("echoed: {value}"))
+        }
+    }
+
+    /// A second trivial tool, so scoping tests can distinguish which tools a
+    /// section selects from a pool of more than one.
+    struct NoopTool;
+
+    #[async_trait::async_trait]
+    impl Tool for NoopTool {
+        #[expect(
+            clippy::unnecessary_literal_bound,
+            reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        )]
+        fn name(&self) -> &str {
+            "noop"
+        }
+
+        #[expect(
+            clippy::unnecessary_literal_bound,
+            reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+        )]
+        fn description(&self) -> &str {
+            "Do nothing."
+        }
+
+        fn parameters_schema(&self) -> Value {
+            json!({ "type": "object", "properties": {} })
+        }
+
+        async fn call(&self, _args: Value) -> Result<String> {
+            Ok(String::new())
+        }
+    }
+
+    #[test]
+    fn section_scoped_to_one_tool_selects_only_that_one() {
+        let echo = EchoTool;
+        let noop = NoopTool;
+        let pool: &[&dyn Tool] = &[&echo, &noop];
+        let selected = scoped_tools(pool, &["echo".to_string()]).unwrap();
+        let names: Vec<&str> = selected.iter().map(|t| t.name()).collect();
+        assert_eq!(names, vec!["echo"]);
+    }
+
+    #[test]
+    fn section_with_no_scope_selects_no_tools() {
+        let echo = EchoTool;
+        let noop = NoopTool;
+        let pool: &[&dyn Tool] = &[&echo, &noop];
+        let selected = scoped_tools(pool, &[]).unwrap();
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn scoped_name_absent_from_pool_is_an_error() {
+        let echo = EchoTool;
+        let pool: &[&dyn Tool] = &[&echo];
+        match scoped_tools(pool, &["web_search".to_string()]) {
+            Err(Error::UnknownScopedTool(name)) => assert_eq!(name, "web_search"),
+            Err(other) => panic!("expected UnknownScopedTool, got {other:?}"),
+            Ok(_) => panic!("a scoped name absent from the pool must error"),
         }
     }
 
