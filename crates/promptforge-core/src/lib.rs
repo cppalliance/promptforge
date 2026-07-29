@@ -55,6 +55,14 @@ pub enum Error {
     /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
     #[error("substitution error: {0}")]
     Substitution(String),
+
+    /// The tool-call loop ran its iteration cap without a final text reply.
+    #[error("tool-call loop did not converge")]
+    ToolLoopExhausted,
+
+    /// The model asked to call a tool that was not provided to the executor.
+    #[error("model called unknown tool {0}")]
+    UnknownTool(String),
 }
 
 impl Error {
