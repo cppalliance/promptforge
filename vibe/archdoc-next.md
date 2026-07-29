@@ -3,3 +3,4 @@
 - [2026-07-29-1-gateway-v0] caller-model alias: Restore the caller's model name after upstream routing; this may remain a wire-level detail.
 - [2026-07-29-2-lua-args-substitution] runtime metadata snapshots: Clarify which system values are fixed per run, fixed per step, or refreshed live.
 - [2026-07-29-3-brave-web-search-tools] bounded tool loop: Keep model tool loops finite; defer the exact cap until workload evidence exists.
+- [2026-07-29-4-webfetch-crate-extraction] fetch provenance contract: Return final URL, truncation, and extraction mode with fetched text so consumers know what they received.

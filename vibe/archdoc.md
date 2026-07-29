@@ -26,6 +26,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A7. Runtime code never invokes build tooling.
 - A8. Long-running operations report progress only through shared substrate.
 - A9. Template expansion is single-pass lookup; computation stays in sandboxed Lua.
+- A10. Every model-chosen network destination is revalidated after DNS and on each redirect; private addresses are denied by default.
 
 ## Principles
 
