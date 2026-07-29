@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use readabilityrs::{Readability, ReadabilityOptions};
+use reqwest::header::CONTENT_TYPE;
 
 use promptforge_core::tools::Tool;
 use promptforge_core::{Error, Result};
@@ -106,14 +107,147 @@ impl Default for WebFetch {
     }
 }
 
-/// Extract a page's main content as markdown, with a whole-page fallback.
+/// How a response body was turned into the returned text.
 ///
-/// First tries [`readabilityrs`] with markdown output enabled. If article
-/// extraction yields nothing usable (no article, or fewer than
-/// [`MIN_CONTENT_LEN`] characters), the whole page is converted with
-/// [`htmd::convert`] instead. Extraction never fails: the worst case is an
-/// empty string when even the fallback conversion produces no text.
-fn extract_markdown(html: &str, base_url: Option<&str>) -> String {
+/// The mode is reported on the provenance header's `extraction:` line so the
+/// model knows whether it is holding an extracted article, a whole-page
+/// rendering, or decoded plain text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Extraction {
+    /// An HTML page's main article, isolated by [`readabilityrs`].
+    Readability,
+    /// A whole HTML document rendered to markdown, with no article extraction.
+    RawHtml,
+    /// A non-HTML text body decoded and returned verbatim, with no extraction.
+    Plain,
+}
+
+impl Extraction {
+    /// The label written on the provenance header's `extraction:` line.
+    fn label(self) -> &'static str {
+        match self {
+            Extraction::Readability => "readability",
+            Extraction::RawHtml => "raw-html",
+            Extraction::Plain => "plain",
+        }
+    }
+}
+
+/// How a response's `Content-Type` routes through the fetch pipeline.
+///
+/// The route is decided from the response header before the body is read, so a
+/// binary or absent type is refused without downloading it, and the body's
+/// size discipline (all-or-nothing versus truncating) is chosen before any
+/// bytes arrive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Route {
+    /// `text/html` and `application/xhtml+xml`: readability plus htmd.
+    Html,
+    /// A non-HTML text body returned as decoded plain text, with no extraction.
+    ///
+    /// `structured` distinguishes JSON and XML (where a truncated prefix is
+    /// invalid, so the body is read all-or-nothing on the byte cap) from
+    /// genuinely flat text (where a prefix is a legitimate result, so an
+    /// oversized body is truncated and flagged rather than refused).
+    Plain {
+        /// Whether the body is a structured format (JSON or XML) that must be
+        /// read all-or-nothing rather than truncated to a prefix.
+        structured: bool,
+    },
+}
+
+/// Classifies a parsed content type into its fetch [`Route`].
+///
+/// `text/html` and `application/xhtml+xml` route to [`Route::Html`].
+/// `application/json`, `application/xml`, `text/xml`, and any `+json`/`+xml`
+/// suffix route to a structured [`Route::Plain`] (all-or-nothing on the byte
+/// cap). Every other `text/*` routes to a flat [`Route::Plain`] (truncated on
+/// oversize). Everything else (PDF, octet-stream, images, audio, video,
+/// archives) returns [`None`], meaning refuse.
+fn classify(mime: &mime::Mime) -> Option<Route> {
+    let type_ = mime.type_();
+    let subtype = mime.subtype();
+    let suffix = mime.suffix();
+
+    let is_html = (type_ == mime::TEXT && subtype == mime::HTML)
+        || (type_ == mime::APPLICATION && subtype == "xhtml" && suffix == Some(mime::XML));
+    if is_html {
+        return Some(Route::Html);
+    }
+
+    // JSON and XML, by exact subtype or by a `+json`/`+xml` suffix. A prefix of
+    // either is invalid, so these are structured and read all-or-nothing.
+    let is_json_or_xml = subtype == mime::JSON
+        || subtype == mime::XML
+        || suffix == Some(mime::JSON)
+        || suffix == Some(mime::XML);
+
+    // `application/*` is accepted only when it is JSON or XML; anything else
+    // (PDF, octet-stream, ...) is refused. Those accepted are structured.
+    if type_ == mime::APPLICATION && is_json_or_xml {
+        return Some(Route::Plain { structured: true });
+    }
+
+    // Every `text/*` is accepted. `text/xml` (and any textual `+json`/`+xml`)
+    // is structured; all other flat text may be truncated to a prefix.
+    if type_ == mime::TEXT {
+        return Some(Route::Plain {
+            structured: is_json_or_xml,
+        });
+    }
+
+    None
+}
+
+/// Decodes response bytes to text using the declared charset.
+///
+/// An absent charset, or UTF-8, decodes as UTF-8 with lossy replacement of
+/// invalid sequences. A declared non-UTF-8 charset is decoded through
+/// [`encoding_rs`]. The header charset is authoritative: no embedded `meta`
+/// charset is consulted.
+///
+/// # Errors
+/// Returns [`FetchError::Undecodable`] if `charset` names a label
+/// [`encoding_rs`] does not recognize.
+fn decode_body(
+    bytes: &[u8],
+    charset: Option<&str>,
+    url: &str,
+) -> std::result::Result<String, FetchError> {
+    match charset {
+        None => Ok(String::from_utf8_lossy(bytes).into_owned()),
+        Some(label)
+            if label.eq_ignore_ascii_case("utf-8") || label.eq_ignore_ascii_case("utf8") =>
+        {
+            Ok(String::from_utf8_lossy(bytes).into_owned())
+        }
+        Some(label) => {
+            let encoding = encoding_rs::Encoding::for_label(label.as_bytes()).ok_or_else(|| {
+                FetchError::Undecodable {
+                    url: url.to_string(),
+                    charset: label.to_string(),
+                }
+            })?;
+            Ok(encoding.decode(bytes).0.into_owned())
+        }
+    }
+}
+
+/// Renders an HTML page to markdown, reporting how it was produced.
+///
+/// When `raw` is true the whole document is converted with [`htmd::convert`] and
+/// the mode is [`Extraction::RawHtml`], skipping article extraction entirely.
+/// Otherwise [`readabilityrs`] isolates the main article; if that yields fewer
+/// than [`MIN_CONTENT_LEN`] characters, the whole document is converted instead
+/// and the mode is [`Extraction::RawHtml`]. Rendering never fails: the worst
+/// case is an empty string when even the whole-page conversion produces no text.
+fn extract_html(html: &str, base_url: Option<&str>, raw: bool) -> (String, Extraction) {
+    if raw {
+        // Forced whole-page rendering: skip readability so a page that is mostly
+        // a table or list keeps its content.
+        return (htmd::convert(html).unwrap_or_default(), Extraction::RawHtml);
+    }
+
     let options = ReadabilityOptions {
         output_markdown: true,
         ..ReadabilityOptions::default()
@@ -134,12 +268,15 @@ fn extract_markdown(html: &str, base_url: Option<&str>) -> String {
         .unwrap_or_default();
 
     if article_markdown.trim().len() >= MIN_CONTENT_LEN {
-        return article_markdown;
+        return (article_markdown, Extraction::Readability);
     }
 
     // Fallback: convert the whole document. If even this fails, return
     // whatever the article extraction produced (possibly empty).
-    htmd::convert(html).unwrap_or(article_markdown)
+    (
+        htmd::convert(html).unwrap_or(article_markdown),
+        Extraction::RawHtml,
+    )
 }
 
 #[async_trait::async_trait]
@@ -172,6 +309,10 @@ impl Tool for WebFetch {
                     "type": "integer",
                     "minimum": 1,
                     "description": "Maximum number of characters of text to return for this call, overriding the configured default. Longer text is truncated on a character boundary and the result is flagged as truncated."
+                },
+                "raw": {
+                    "type": "boolean",
+                    "description": "Skip article extraction and render the whole HTML document. Use for a page that is mostly a table or list, where extraction would discard the content. Ignored for non-HTML responses. Defaults to false."
                 }
             },
             "required": ["url"]
@@ -187,6 +328,9 @@ impl Tool for WebFetch {
         // A per-call `max_chars` overrides the configured default for this
         // fetch; absent, the config default applies.
         let max_chars = parse_max_chars(&args, self.config.max_chars)?;
+
+        // `raw` forces whole-page rendering of an HTML response.
+        let raw = parse_raw(&args)?;
 
         // Enforce the URL-admission policy before any network access.
         let url = check_url(url, &self.config)?;
@@ -218,23 +362,86 @@ impl Tool for WebFetch {
             });
         }
 
-        // Read the body under the byte cap. A declared Content-Length over the
-        // cap is refused before any body is read; otherwise the decompressed
-        // stream is counted as it arrives and aborted the moment it exceeds the
-        // cap. For the HTML/structured path this is an all-or-nothing refusal.
-        let body = read_body_capped(response, final_url.as_str(), self.config.max_bytes).await?;
-        let html = String::from_utf8_lossy(&body);
-        let markdown = extract_markdown(&html, Some(final_url.as_str()));
+        // Route on the response Content-Type, read before the body: a binary or
+        // absent type is refused without downloading it, and a flat-text body is
+        // read under a truncating cap rather than an all-or-nothing one. The
+        // charset parameter (if any) drives decoding.
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+
+        let Some(content_type) = content_type else {
+            // Absent Content-Type: refuse rather than sniff.
+            return Err(FetchError::NoContentType {
+                url: final_url.to_string(),
+            }
+            .into());
+        };
+
+        let parsed_mime: mime::Mime =
+            content_type
+                .parse()
+                .map_err(|_| FetchError::UnsupportedContentType {
+                    url: final_url.to_string(),
+                    content_type: content_type.clone(),
+                })?;
+
+        let Some(route) = classify(&parsed_mime) else {
+            // PDF and any other binary type: refuse with an actionable message.
+            return Err(FetchError::UnsupportedContentType {
+                url: final_url.to_string(),
+                content_type: content_type.clone(),
+            }
+            .into());
+        };
+
+        let charset = parsed_mime
+            .get_param(mime::CHARSET)
+            .map(|name| name.as_str().to_owned());
+
+        let (decoded, extraction, size_truncated) = match route {
+            Route::Html => {
+                // Structured extraction is all-or-nothing on size: an oversized
+                // HTML body is a hard refusal, never a prefix.
+                let body =
+                    read_body_capped(response, final_url.as_str(), self.config.max_bytes).await?;
+                let decoded = decode_body(&body, charset.as_deref(), final_url.as_str())?;
+                let (markdown, extraction) = extract_html(&decoded, Some(final_url.as_str()), raw);
+                (markdown, extraction, false)
+            }
+            Route::Plain { structured: true } => {
+                // JSON and XML are structured: a truncated prefix is invalid, so
+                // an oversized body is a hard refusal on the byte cap, never a
+                // prefix. Extraction mode is still plain (no readability).
+                let body =
+                    read_body_capped(response, final_url.as_str(), self.config.max_bytes).await?;
+                let decoded = decode_body(&body, charset.as_deref(), final_url.as_str())?;
+                (decoded, Extraction::Plain, false)
+            }
+            Route::Plain { structured: false } => {
+                // Flat text is a legitimate prefix: a body over the cap is
+                // truncated at the cap and flagged, not refused.
+                let (body, size_truncated) =
+                    read_body_truncating(response, self.config.max_bytes).await?;
+                let decoded = decode_body(&body, charset.as_deref(), final_url.as_str())?;
+                (decoded, Extraction::Plain, size_truncated)
+            }
+        };
 
         // Cap the returned text at `max_chars`, cutting on a character boundary
-        // so a multibyte character is never split.
-        let (text, truncated) = truncate_to_chars(&markdown, max_chars);
+        // so a multibyte character is never split. On the plain path this
+        // stacks with any byte-level truncation already applied.
+        let (text, char_truncated) = truncate_to_chars(&decoded, max_chars);
+        let truncated = size_truncated || char_truncated;
 
-        // Provenance header: a `url:` line naming the final URL, then a
-        // `truncated:` line, then a blank line, then the content. Later steps
-        // add the extraction mode to this header.
+        // Provenance header: a `url:` line naming the final URL, a `truncated:`
+        // line, and an `extraction:` line naming how the text was produced, then
+        // a blank line, then the content.
         Ok(format!(
-            "url: {final_url}\ntruncated: {truncated}\n\n{text}"
+            "url: {final_url}\ntruncated: {truncated}\nextraction: {}\n\n{text}",
+            extraction.label()
         ))
     }
 }
@@ -256,6 +463,53 @@ fn parse_max_chars(args: &serde_json::Value, default: usize) -> Result<usize> {
         .filter(|n| *n >= 1)
         .ok_or_else(|| Error::Parse("web_fetch: max_chars must be a positive integer".into()))?;
     Ok(usize::try_from(n).unwrap_or(usize::MAX))
+}
+
+/// Parses the optional `raw` argument, defaulting to `false`.
+///
+/// # Errors
+/// Returns [`Error::Parse`] if `raw` is present and is neither null nor a
+/// boolean.
+fn parse_raw(args: &serde_json::Value) -> Result<bool> {
+    match args.get("raw") {
+        None => Ok(false),
+        Some(value) if value.is_null() => Ok(false),
+        Some(value) => value
+            .as_bool()
+            .ok_or_else(|| Error::Parse("web_fetch: raw must be a boolean".into())),
+    }
+}
+
+/// Reads a response body into memory, truncating at a decompressed-byte cap.
+///
+/// Unlike [`read_body_capped`], a body over `max_bytes` is not refused: the read
+/// stops at `max_bytes` and the returned flag is `true`, because a flat-text
+/// prefix is still useful. The count runs over the decompressed stream, so a
+/// compressed payload is measured on its expanded size.
+///
+/// # Errors
+/// Returns [`Error::Http`] on a transport failure mid-stream.
+async fn read_body_truncating(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<(Vec<u8>, bool)> {
+    let mut body: Vec<u8> = Vec::new();
+    let mut truncated = false;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|source| Error::Http(Box::new(source)))?
+    {
+        let remaining = max_bytes - body.len();
+        if chunk.len() > remaining {
+            // This chunk crosses the cap: keep its prefix and stop.
+            body.extend_from_slice(&chunk[..remaining]);
+            truncated = true;
+            break;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok((body, truncated))
 }
 
 /// Reads a response body into memory under a decompressed-byte cap.
@@ -327,13 +581,13 @@ mod tests {
     use axum::Router;
     use axum::body::Body;
     use axum::extract::State;
-    use axum::http::header::{CONTENT_ENCODING, CONTENT_LENGTH};
+    use axum::http::header::{CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE};
     use axum::response::{Html, IntoResponse, Redirect, Response};
     use axum::routing::get;
     use flate2::Compression;
     use flate2::write::GzEncoder;
 
-    use super::{WebFetch, extract_markdown};
+    use super::{WebFetch, extract_html};
     use crate::config::FetchConfig;
     use promptforge_core::Error;
     use promptforge_core::tools::Tool;
@@ -417,7 +671,12 @@ mod tests {
         let compressed = encoder
             .finish()
             .expect("finishing an in-memory gzip encoder must succeed");
-        ([(CONTENT_ENCODING, "gzip")], compressed)
+        // A text/html type routes this through the all-or-nothing HTML path,
+        // where the streamed cap counts decompressed bytes.
+        (
+            [(CONTENT_ENCODING, "gzip"), (CONTENT_TYPE, "text/html")],
+            compressed,
+        )
     }
 
     /// A response that lies about its size: it declares a `Content-Length`
@@ -449,8 +708,109 @@ mod tests {
         });
         Response::builder()
             .header(CONTENT_LENGTH, "1000000")
+            // A text/html type routes this through the HTML path, where the
+            // Content-Length precheck refuses the declared oversize.
+            .header(CONTENT_TYPE, "text/html")
             .body(Body::from_stream(head.chain(tail)))
             .expect("building the oversized-content-length response must succeed")
+    }
+
+    /// An HTML page whose payload is a table readability would discard, so
+    /// only whole-page rendering (`raw = true`) keeps the cell text.
+    const TABLE_HTML: &str = r"
+        <html><body>
+          <p>Prices.</p>
+          <table>
+            <tr><th>Item</th><th>Cost</th></tr>
+            <tr><td>WIDGETROW</td><td>4.20</td></tr>
+            <tr><td>GADGETROW</td><td>6.90</td></tr>
+          </table>
+        </body></html>
+    ";
+
+    /// A JSON document served with an `application/json` type.
+    const JSON_BODY: &str = r#"{"key":"value","numbers":[1,2,3],"nested":{"ok":true}}"#;
+
+    /// Serves an HTML table page for the `raw` whole-page-render test.
+    async fn table() -> Response {
+        Response::builder()
+            .header(CONTENT_TYPE, "text/html; charset=utf-8")
+            .body(Body::from(TABLE_HTML))
+            .expect("building the table html response must succeed")
+    }
+
+    /// Serves a JSON document verbatim under `application/json`.
+    async fn json_route() -> Response {
+        Response::builder()
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(JSON_BODY))
+            .expect("building the json response must succeed")
+    }
+
+    /// Serves an `application/json` document far larger than the test cap.
+    ///
+    /// It carries an honest `Content-Length`, so the size cap refuses it. A
+    /// truncated prefix of this JSON would be invalid, which is why the
+    /// structured route must hard-refuse rather than truncate.
+    async fn jsonbig_route() -> Response {
+        let filler = "x".repeat(200_000);
+        let body = format!(r#"{{"filler":"{filler}"}}"#);
+        Response::builder()
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .expect("building the large json response must succeed")
+    }
+
+    /// Serves a body under a `Content-Type` naming a charset the decoder does
+    /// not recognize, which the tool must refuse as [`FetchError::Undecodable`].
+    async fn badcharset_route() -> Response {
+        Response::builder()
+            .header(CONTENT_TYPE, "text/plain; charset=not-a-charset")
+            .body(Body::from("some plain body text"))
+            .expect("building the bad-charset response must succeed")
+    }
+
+    /// Serves a small PDF-typed body, which the tool must refuse.
+    async fn pdf_route() -> Response {
+        Response::builder()
+            .header(CONTENT_TYPE, "application/pdf")
+            .body(Body::from(&b"%PDF-1.4 not a real pdf"[..]))
+            .expect("building the pdf response must succeed")
+    }
+
+    /// Serves an octet-stream body, which the tool must refuse.
+    async fn octet_route() -> Response {
+        Response::builder()
+            .header(CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from(vec![0u8, 1, 2, 3, 4, 5]))
+            .expect("building the octet-stream response must succeed")
+    }
+
+    /// Serves a body with no `Content-Type` header, which the tool must refuse.
+    async fn notype_route() -> Response {
+        Response::builder()
+            .body(Body::from("a body with no declared content type"))
+            .expect("building the no-content-type response must succeed")
+    }
+
+    /// Serves `Café` encoded in ISO-8859-1 under a declared latin-1 charset.
+    ///
+    /// The `é` is byte `0xE9`, which is invalid standalone UTF-8, so a correct
+    /// decode requires honoring the declared charset.
+    async fn latin1_route() -> Response {
+        let body = vec![b'C', b'a', b'f', 0xE9];
+        Response::builder()
+            .header(CONTENT_TYPE, "text/plain; charset=ISO-8859-1")
+            .body(Body::from(body))
+            .expect("building the latin-1 response must succeed")
+    }
+
+    /// Serves a large `text/plain` body used to exercise flat-text truncation.
+    async fn plainbig_route() -> Response {
+        Response::builder()
+            .header(CONTENT_TYPE, "text/plain; charset=utf-8")
+            .body(Body::from("y".repeat(200_000)))
+            .expect("building the large text response must succeed")
     }
 
     /// Binds a loopback axum server on an ephemeral port and serves it.
@@ -477,6 +837,15 @@ mod tests {
             .route("/large", get(large))
             .route("/gzip", get(gzip_bomb))
             .route("/liar", get(liar_content_length))
+            .route("/table", get(table))
+            .route("/json", get(json_route))
+            .route("/jsonbig", get(jsonbig_route))
+            .route("/badcharset", get(badcharset_route))
+            .route("/pdf", get(pdf_route))
+            .route("/octet", get(octet_route))
+            .route("/notype", get(notype_route))
+            .route("/latin1", get(latin1_route))
+            .route("/plainbig", get(plainbig_route))
             .with_state(state);
         tokio::spawn(async move {
             axum::serve(listener, app)
@@ -723,6 +1092,223 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn html_is_extracted_and_reports_readability() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/");
+        let out = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect("a loopback html fetch must succeed");
+
+        let (header, body) = split_header(&out);
+        assert!(
+            header.contains("extraction: readability"),
+            "an article page must report readability extraction, got: {header}"
+        );
+        assert!(
+            body.contains("substantial paragraph"),
+            "the extracted article content must appear, got: {body}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn raw_forces_whole_page_render_keeping_table() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/table");
+        let out = tool
+            .call(serde_json::json!({ "url": url, "raw": true }))
+            .await
+            .expect("a raw table fetch must succeed");
+
+        let (header, body) = split_header(&out);
+        assert!(
+            header.contains("extraction: raw-html"),
+            "raw must force whole-page rendering, got: {header}"
+        );
+        assert!(
+            body.contains("WIDGETROW") && body.contains("GADGETROW"),
+            "raw whole-page rendering must retain the table cells, got: {body}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn json_is_returned_verbatim_as_plain() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/json");
+        let out = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect("a json fetch must succeed");
+
+        let (header, body) = split_header(&out);
+        assert!(
+            header.contains("extraction: plain"),
+            "json must be returned as plain, got: {header}"
+        );
+        assert_eq!(
+            body, JSON_BODY,
+            "json must be returned verbatim with no extraction, got: {body}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn oversized_json_is_hard_refused_not_truncated() {
+        let (port, _hits) = spawn_server().await;
+        // A structured JSON body over the cap must be refused whole: a truncated
+        // prefix would be invalid JSON. The cap sits far below the body, so a
+        // refusal here proves the structured route reads all-or-nothing rather
+        // than routing JSON down the truncating flat-text path.
+        let config = FetchConfig {
+            max_bytes: 4096,
+            ..loopback_config(port)
+        };
+        let tool = WebFetch::with_config(config);
+
+        let url = format!("http://localhost:{port}/jsonbig");
+        let err = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect_err("an oversized json body must be hard-refused, not truncated");
+
+        assert!(
+            matches!(&err, Error::Parse(msg) if msg.contains("exceeds") && msg.contains("4096")),
+            "expected a TooLarge refusal for oversized json, not a truncated prefix, got: {err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn unrecognized_charset_is_refused_naming_the_label() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/badcharset");
+        let err = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect_err("an unrecognized charset label must be refused as Undecodable");
+
+        assert!(
+            matches!(&err, Error::Parse(msg) if msg.contains("not-a-charset")),
+            "expected an Undecodable refusal naming the charset label, got: {err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn pdf_is_refused_naming_the_type() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/pdf");
+        let err = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect_err("a pdf response must be refused");
+
+        assert!(
+            matches!(&err, Error::Parse(msg) if msg.contains("application/pdf")),
+            "expected an unsupported-type refusal naming the pdf type, got: {err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn octet_stream_is_refused() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/octet");
+        let err = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect_err("an octet-stream response must be refused");
+
+        assert!(
+            matches!(&err, Error::Parse(msg) if msg.contains("application/octet-stream")),
+            "expected an unsupported-type refusal naming the octet-stream type, got: {err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn absent_content_type_is_refused() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/notype");
+        let err = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect_err("an absent content type must be refused, not sniffed");
+
+        assert!(
+            matches!(&err, Error::Parse(msg) if msg.contains("no content type")),
+            "expected a no-content-type refusal, got: {err:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn latin1_page_decodes_with_declared_charset() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/latin1");
+        let out = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect("a latin-1 fetch must succeed");
+
+        let (header, body) = split_header(&out);
+        assert!(
+            header.contains("extraction: plain"),
+            "a text/plain body must be returned as plain, got: {header}"
+        );
+        assert!(
+            body.contains('é'),
+            "the latin-1 byte 0xE9 must decode to 'é', got: {body:?}"
+        );
+        assert!(
+            !body.contains('\u{FFFD}'),
+            "a correct charset decode must not produce replacement chars, got: {body:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn plain_text_over_cap_is_truncated_not_refused() {
+        let (port, _hits) = spawn_server().await;
+        let config = FetchConfig {
+            max_bytes: 4096,
+            ..loopback_config(port)
+        };
+        let tool = WebFetch::with_config(config);
+
+        let url = format!("http://localhost:{port}/plainbig");
+        let out = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect("an oversized flat-text body must be truncated, not refused");
+
+        let (header, body) = split_header(&out);
+        assert!(
+            header.contains("truncated: true"),
+            "an oversized flat-text body must be flagged truncated, got: {header}"
+        );
+        assert!(
+            header.contains("extraction: plain"),
+            "flat text must be returned as plain, got: {header}"
+        );
+        assert_eq!(
+            body.len(),
+            4096,
+            "the flat-text prefix must be cut to the byte cap, got {} bytes",
+            body.len()
+        );
+    }
+
     #[test]
     fn extracts_article_body_and_drops_boilerplate() {
         let html = r#"
@@ -743,7 +1329,7 @@ mod tests {
             </html>
         "#;
 
-        let markdown = extract_markdown(html, Some("https://example.com/article"));
+        let (markdown, _mode) = extract_html(html, Some("https://example.com/article"), false);
 
         assert!(
             markdown.contains("first substantial paragraph"),
@@ -759,7 +1345,7 @@ mod tests {
     fn falls_back_for_non_article_html() {
         let html = "<div>short</div>";
 
-        let markdown = extract_markdown(html, None);
+        let (markdown, _mode) = extract_html(html, None, false);
 
         assert!(
             !markdown.trim().is_empty(),
