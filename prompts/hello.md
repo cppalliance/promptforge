@@ -2,6 +2,7 @@
 name: hello
 description: Say hello
 version: 1
+promptforge: 1
 ---
 
 # Hello World

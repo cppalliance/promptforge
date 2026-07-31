@@ -29,7 +29,11 @@ export PROMPTFORGE_BASE_URL=http://127.0.0.1:8081/v1
 cargo run -p promptforge-cli -- run prompts/hello.md
 ```
 
-Prints the model's response to the first section of the prompt.
+Runs the prompt's sections top to bottom and prints the run's result.
+
+Only a **promptforge prompt** runs: the file's frontmatter must declare a
+`promptforge:` version (see below). A file without it is not a promptforge
+prompt, and the CLI declines to run it with a non-zero exit.
 
 ## Gateway configuration
 
@@ -96,6 +100,7 @@ with the same shared token as `/v1/chat/completions`).
 name: hello
 description: Say hello
 version: 1
+promptforge: 1
 ---
 
 # Title
@@ -107,13 +112,15 @@ Human-readable description (not executed).
 Prose the model reads.
 ```
 
-- `---` delimited YAML frontmatter (`name`, `description`, `version` required; `tools`, `default_return` optional).
+- `---` delimited YAML frontmatter (`name`, `description`, `version`, `promptforge` required; `tools`, `default_return`, `max_tool_iterations` optional).
+- `promptforge:` is the **engine version** that marks the file as a promptforge prompt (supported major: `1`). It is distinct from `version:`, which is the author's own revision of the prompt. A file without a `promptforge:` version is not a promptforge prompt and the CLI declines to run it; an unsupported major is refused, never silently degraded.
 - `# Title` and the text before the first `##` are human-readable, not executed.
-- `## Section` headings are executable units; the first one is the entry point. Each may begin with a single ` ```lua ` block followed by prose.
+- `## Section` headings are executable units; they run top to bottom (fall-through). Each may begin with a single ` ```lua ` block followed by prose.
 
 ## Prompt language
 
-A run takes one raw input string and executes the entry section:
+A run takes one raw input string and executes the prompt's sections top to
+bottom (fall-through):
 
 ```
 promptforge run <file.md> [input]
@@ -219,6 +226,7 @@ When a section declares tools, the executor advertises their JSON schemas to the
 model on that section's call. If the model replies with a tool call instead of
 text, the executor dispatches it (locally for `web_fetch`, or to the gateway for
 `web_search`), appends the result to the conversation, and re-sends. This repeats
-until the model returns a final text reply, capped at 10 round trips per section
-to prevent a runaway loop. Sections without a `tools` list behave exactly as
+until the model returns a final text reply, capped at 24 round trips per section
+(the default when a prompt does not set `max_tool_iterations`) to prevent a
+runaway loop. Sections without a `tools` list behave exactly as
 before - one round trip, no tool advertising.
