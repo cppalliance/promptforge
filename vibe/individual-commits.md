@@ -10,3 +10,5 @@
 
 ## 2026-07-31 chore: apply workspace style and lint conformance sweep
 
+## 2026-07-31 chore: gitignore vibe-review and conformance-audit files
+
