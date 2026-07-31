@@ -81,7 +81,10 @@ fn make_nonce() -> String {
 /// a raised runtime default. Pass an empty slice to disable tools entirely.
 ///
 /// # Errors
-/// Returns [`crate::Error::Lua`] if a Lua block fails,
+/// Returns [`crate::Error::UnsupportedVersion`] if the prompt declares a
+/// `promptforge:` major this build does not support,
+/// [`crate::Error::Parse`] if the file has no `promptforge:` version (it is not
+/// a promptforge prompt), [`crate::Error::Lua`] if a Lua block fails,
 /// [`crate::Error::Substitution`] if a `{{ }}` path cannot be resolved,
 /// [`crate::Error::MissingEnv`] if the gateway client cannot be built when a
 /// model call is needed, [`crate::Error::UnknownScopedTool`] if a section
@@ -90,6 +93,21 @@ fn make_nonce() -> String {
 /// if a section's tool-call loop does not converge within its iteration cap, or
 /// any transport/backend error from a model call.
 pub async fn run(prompt: &Prompt, args: &str, tools: &[&dyn Tool]) -> Result<String> {
+    // Gate on the declared engine major before doing any work: promptforge runs
+    // only its own prompts, and refuses an unsupported major rather than
+    // silently degrading. A file with no `promptforge:` version is not a
+    // promptforge prompt at all, which is the caller's concern, not ours.
+    const SUPPORTED_MAJOR: u32 = 1;
+    match prompt.frontmatter.promptforge {
+        Some(SUPPORTED_MAJOR) => {}
+        Some(other) => return Err(Error::UnsupportedVersion(other)),
+        None => {
+            return Err(Error::Parse(
+                "not a promptforge prompt: no promptforge version".into(),
+            ));
+        }
+    }
+
     let when = now_rfc3339();
     let mut client: Option<GatewayClient> = None;
     let mut last_reply: Option<String> = None;
@@ -309,7 +327,7 @@ mod tests {
 
     #[tokio::test]
     async fn falls_through_to_next_section() {
-        let md = "---\nname: t\ndescription: d\nversion: 1\n---\n\n\
+        let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nreturn \"second\"\n```\n";
         let out = run(&parse(md), "", &[]).await.unwrap();
@@ -318,7 +336,7 @@ mod tests {
 
     #[tokio::test]
     async fn explicit_return_stops_fall_through() {
-        let md = "---\nname: t\ndescription: d\nversion: 1\n---\n\n\
+        let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
 ## First\n\n```lua\nreturn \"first\"\n```\n\n\
 ## Second\n\n```lua\nreturn \"unreached\"\n```\n";
         let out = run(&parse(md), "", &[]).await.unwrap();
@@ -327,7 +345,7 @@ mod tests {
 
     #[tokio::test]
     async fn runs_off_end_to_default_return() {
-        let md = "---\nname: t\ndescription: d\nversion: 1\ndefault_return: \"fell off\"\n---\n\n\
+        let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\ndefault_return: \"fell off\"\n---\n\n\
 ## Only\n\n```lua\nlocal x = 1\n```\n";
         let out = run(&parse(md), "", &[]).await.unwrap();
         assert_eq!(out, "fell off");
@@ -335,7 +353,7 @@ mod tests {
 
     #[tokio::test]
     async fn generic_result_when_nothing_produced() {
-        let md = "---\nname: t\ndescription: d\nversion: 1\n---\n\n\
+        let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nlocal x = 1\n```\n";
         let out = run(&parse(md), "", &[]).await.unwrap();
         assert_eq!(out, "done");
@@ -344,11 +362,51 @@ mod tests {
     #[tokio::test]
     async fn sys_id_increments_per_section() {
         // First section files nothing and falls through; second returns its id.
-        let md = "---\nname: t\ndescription: d\nversion: 1\n---\n\n\
+        let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nreturn tostring(sys.id)\n```\n";
         let out = run(&parse(md), "", &[]).await.unwrap();
         assert_eq!(out, "2");
+    }
+
+    // --- Version gate at the top of `run` ---
+
+    #[tokio::test]
+    async fn supported_major_one_proceeds() {
+        // A `promptforge: 1` prompt clears the gate and runs to completion.
+        let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+## Only\n\n```lua\nreturn \"ran\"\n```\n";
+        let out = run(&parse(md), "", &[]).await.unwrap();
+        assert_eq!(out, "ran");
+    }
+
+    #[tokio::test]
+    async fn unsupported_major_is_refused() {
+        // A future major is refused, never silently degraded to major 1.
+        let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 2\n---\n\n\
+## Only\n\n```lua\nreturn \"ran\"\n```\n";
+        let err = run(&parse(md), "", &[])
+            .await
+            .expect_err("an unsupported major must be refused");
+        assert!(matches!(err, Error::UnsupportedVersion(2)));
+    }
+
+    #[tokio::test]
+    async fn missing_version_is_not_a_promptforge_prompt() {
+        // No `promptforge:` key: not our prompt, so `run` declines with a Parse
+        // error rather than executing it.
+        let md = "---\nname: t\ndescription: d\nversion: 1\n---\n\n\
+## Only\n\n```lua\nreturn \"ran\"\n```\n";
+        let err = run(&parse(md), "", &[])
+            .await
+            .expect_err("a prompt with no promptforge version must be declined");
+        match err {
+            Error::Parse(msg) => assert!(
+                msg.contains("not a promptforge prompt"),
+                "the Parse message must name the missing version, got: {msg}"
+            ),
+            other => panic!("expected Parse, got {other:?}"),
+        }
     }
 
     // --- Tool-call loop test (exercises the model round trip via a mock) ---
