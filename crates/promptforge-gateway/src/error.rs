@@ -13,22 +13,27 @@ pub enum GatewayError {
     Unauthorized,
 
     /// The request named a model with no `[[model]]` entry.
+    #[non_exhaustive]
     #[error("unknown model {0}")]
     UnknownModel(String),
 
     /// A tool endpoint was reached but the tool is not configured.
+    #[non_exhaustive]
     #[error("tool not configured: {0}")]
     ToolNotConfigured(&'static str),
 
     /// The request body could not be understood.
+    #[non_exhaustive]
     #[error("malformed request: {0}")]
     MalformedRequest(String),
 
     /// The upstream backend could not be reached (transport-layer failure).
+    #[non_exhaustive]
     #[error("upstream transport error")]
     UpstreamTransport(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// The upstream backend returned a non-success status.
+    #[non_exhaustive]
     #[error("upstream returned {status}")]
     UpstreamStatus {
         /// The status code the backend returned.
@@ -98,6 +103,7 @@ impl IntoResponse for GatewayError {
 #[non_exhaustive]
 pub enum ConfigError {
     /// The configuration file could not be read.
+    #[non_exhaustive]
     #[error("read config {path}")]
     Read {
         /// The path that could not be read.
@@ -108,18 +114,22 @@ pub enum ConfigError {
     },
 
     /// The configuration was not valid TOML.
+    #[non_exhaustive]
     #[error("parse config: {0}")]
     Parse(String),
 
     /// A `${VAR}` referenced an environment variable that was not set.
+    #[non_exhaustive]
     #[error("unresolved environment variable {0}")]
     UnresolvedVar(String),
 
     /// A `${...}` interpolation was malformed (for example, unclosed).
+    #[non_exhaustive]
     #[error("interpolation: {0}")]
     Interpolation(String),
 
     /// The configuration parsed but failed a semantic check.
+    #[non_exhaustive]
     #[error("invalid config: {0}")]
     Validation(String),
 }

@@ -8,3 +8,5 @@
 
 ## 2026-07-29 core: render MAX_TOOL_ITERATIONS as code in run docs
 
+## 2026-07-31 chore: apply workspace style and lint conformance sweep
+

@@ -11,6 +11,7 @@ use serde_json::{Map, Value};
 
 /// An incoming chat completions request.
 #[derive(Debug, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct ChatRequest {
     /// The model name, resolved against the routing table.
     pub model: String,
@@ -23,6 +24,7 @@ pub struct ChatRequest {
 
 /// An outgoing chat completions response.
 #[derive(Debug, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct ChatResponse {
     /// The model name, rewritten to the caller's requested name.
     pub model: String,

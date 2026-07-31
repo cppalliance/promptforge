@@ -62,6 +62,10 @@ pub const BLOCKED_CIDRS: &[&str] = &[
 ];
 
 /// The parsed form of [`BLOCKED_CIDRS`], built once on first use.
+#[expect(
+    clippy::expect_used,
+    reason = "every entry in BLOCKED_CIDRS is a compile-time CIDR literal, so parsing cannot fail at runtime"
+)]
 static BLOCKED_NETS: LazyLock<Vec<IpNet>> = LazyLock::new(|| {
     BLOCKED_CIDRS
         .iter()

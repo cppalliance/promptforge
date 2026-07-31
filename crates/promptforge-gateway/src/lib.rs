@@ -35,7 +35,7 @@ use crate::wire::{ChatRequest, ChatResponse};
 
 /// Shared handler state: the routing table, the shared bearer token, and the
 /// optional web-search capability.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct AppState {
     routing: Arc<Routing>,
     token: Arc<Secret>,
