@@ -20,7 +20,7 @@ prose is `{{ }}`-substituted and sent to the gateway.
 - `promptforge-core::lua::run_chunk` - sandboxed VM (string/table/math + base; no io/os/require/load/debug), instruction hook; exposes `args` + `sys`, returns the top-level value and the `var` table (as JSON). 7 unit tests.
 - `promptforge-core::subst::substitute` - resolves `{{ args }}` / `{{ var.x }}` / `{{ sys.x }}` (scalar->string, table->JSON, missing->error, single pass, no formulas). 7 unit tests.
 - `sys` (runtime, read-only): `sys.when` (launch, RFC3339), `sys.now` (build snapshot), `sys.id` (context id).
-- `execute::run(prompt, args)` - fall-through loop over top-level sections; Lua `return` finishes early (the return fence); else substitute prose -> gateway; run off the end -> `default_return`/last reply/generic. `sys.id` increments per section. Client built lazily.
+- `execute::run(prompt, args, tools, store)` - fall-through loop over top-level sections; Lua `return` finishes early; else substitute prose -> gateway; run off the end -> `default_return`/last reply/generic. `sys.id` increments per section. Client built lazily. The `store` is a run-scoped `Store` created once by the caller and shared across sections (a Lua `store` table exposes it).
 - `prompts/echo.md` (`return args`, no gateway), `prompts/greet.md` (Lua-computed `var` + substitution through the gateway).
 
 ## What's next

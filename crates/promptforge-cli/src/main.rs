@@ -8,6 +8,7 @@
 
 use std::process::ExitCode;
 
+use promptforge_core::store::Store;
 use promptforge_core::tools::Tool;
 use promptforge_core::{execute, parser::Prompt};
 
@@ -79,7 +80,11 @@ async fn run(path: &str, input: &str) -> ExitCode {
     };
     let tools: Vec<&dyn Tool> = boxed.iter().map(AsRef::as_ref).collect();
 
-    match execute::run(&prompt, input, &tools).await {
+    // One run-scoped store, created once and shared by every section. The CLI
+    // uses the in-memory sandbox backend by default.
+    let store = Store::memory();
+
+    match execute::run(&prompt, input, &tools, &store).await {
         Ok(result) => {
             println!("{result}");
             ExitCode::SUCCESS

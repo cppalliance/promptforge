@@ -4,11 +4,19 @@
 //! `string`, `table`, and `math` standard libraries plus the safe base
 //! functions are available; the raw input `args` string and the runtime `sys`
 //! table are exposed; a writable `var` table is provided for the block to
-//! populate; and an instruction-count hook aborts a runaway block.
+//! populate; an always-on `store` table gives the block the run's virtual
+//! files; and an instruction-count hook aborts a runaway block.
 //!
 //! The chunk's top-level return value becomes the section's result (the finish
 //! case of the exit rule). The `var` table is read back afterward as JSON for
 //! prose substitution.
+//!
+//! The `store` table is a deterministic host capability (like `var`), always
+//! present and independent of tool scoping. Its methods are backed by the
+//! run-scoped [`Store`] handle threaded in from the executor, so every section
+//! in a run shares one set of virtual files even though contexts clear on each
+//! transition. A failed store op raises a Lua error, which surfaces from
+//! [`run_chunk`] as [`Error::Lua`].
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -20,6 +28,7 @@ use mlua::{
 };
 use serde_json::Value as Json;
 
+use crate::store::Store;
 use crate::{Error, Result};
 
 /// How many instructions between hook firings.
@@ -41,14 +50,21 @@ pub struct LuaOutcome {
     pub scoped_tools: Vec<String>,
 }
 
-/// Run a section's Lua chunk with `args` and `sys` exposed and a writable `var`
-/// table available, returning the chunk's return value and the final `var`.
+/// Run a section's Lua chunk with `args` and `sys` exposed, a writable `var`
+/// table available, and a `store` table backed by `store`, returning the
+/// chunk's return value and the final `var`.
+///
+/// `store` is the run-scoped virtual-file handle; every section in a run is
+/// given the same handle, so files a section writes persist for later sections
+/// even though each section starts a fresh context. The exposed `store` table
+/// is always present (a host capability, not a scoped tool).
 ///
 /// # Errors
-/// Returns [`Error::Lua`] if the sandbox cannot be built, `sys`/`var` cannot be
-/// bridged, the chunk fails to run (including hitting the instruction budget),
-/// or it returns a value that cannot be rendered as a result string.
-pub fn run_chunk(source: &str, args: &str, sys: &Json) -> Result<LuaOutcome> {
+/// Returns [`Error::Lua`] if the sandbox cannot be built, `sys`/`var`/`store`
+/// cannot be bridged, the chunk fails to run (including hitting the instruction
+/// budget or a failing `store` op, which raises a Lua error), or it returns a
+/// value that cannot be rendered as a result string.
+pub fn run_chunk(source: &str, args: &str, sys: &Json, store: &Store) -> Result<LuaOutcome> {
     let lua = Lua::new_with(
         StdLib::STRING | StdLib::TABLE | StdLib::MATH,
         LuaOptions::default(),
@@ -71,6 +87,7 @@ pub fn run_chunk(source: &str, args: &str, sys: &Json) -> Result<LuaOutcome> {
         .map_err(|e| Error::Lua(e.to_string()))?;
 
     let scoped = install_tools_table(&lua, &globals)?;
+    install_store_table(&lua, &globals, store)?;
 
     install_instruction_budget(&lua);
 
@@ -131,6 +148,104 @@ fn install_tools_table(lua: &Lua, globals: &mlua::Table) -> Result<Rc<RefCell<Ve
         .set("tools", tools)
         .map_err(|e| Error::Lua(e.to_string()))?;
     Ok(scoped)
+}
+
+/// Expose an always-on `store` table whose six methods (`write`, `append`,
+/// `read`, `str_replace`, `delete`, `glob`) are backed by the run-scoped
+/// [`Store`] handle, cloned into each host function's closure so every section
+/// shares one set of virtual files.
+///
+/// The table is a deterministic host capability, present regardless of tool
+/// scoping. The mutating ops (`write`/`append`/`str_replace`/`delete`) return
+/// nil; `read` returns the file's numbered-line string; `glob` returns an
+/// array table of matching paths. A [`StoreError`] from any op is mapped into
+/// an `mlua` error via [`mlua::Error::external`], so it aborts the chunk and
+/// surfaces from [`run_chunk`] as [`Error::Lua`].
+///
+/// The `Store` handle locks a mutex internally per call and is synchronous, so
+/// nothing is held across an await and a `RefCell` is neither used nor needed.
+///
+/// [`StoreError`]: crate::store::StoreError
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the `store` table or any of its functions cannot
+/// be created or installed into the sandbox globals.
+fn install_store_table(lua: &Lua, globals: &mlua::Table, store: &Store) -> Result<()> {
+    let table = lua.create_table().map_err(|e| Error::Lua(e.to_string()))?;
+
+    let handle = store.clone();
+    let write = lua
+        .create_function(move |_, (path, contents): (String, String)| {
+            handle
+                .write(&path, &contents)
+                .map_err(mlua::Error::external)?;
+            Ok(())
+        })
+        .map_err(|e| Error::Lua(e.to_string()))?;
+    table
+        .set("write", write)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+
+    let handle = store.clone();
+    let append = lua
+        .create_function(move |_, (path, contents): (String, String)| {
+            handle
+                .append(&path, &contents)
+                .map_err(mlua::Error::external)?;
+            Ok(())
+        })
+        .map_err(|e| Error::Lua(e.to_string()))?;
+    table
+        .set("append", append)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+
+    let handle = store.clone();
+    let read = lua
+        .create_function(move |_, path: String| handle.read(&path).map_err(mlua::Error::external))
+        .map_err(|e| Error::Lua(e.to_string()))?;
+    table
+        .set("read", read)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+
+    let handle = store.clone();
+    let str_replace = lua
+        .create_function(move |_, (path, old, new): (String, String, String)| {
+            handle
+                .str_replace(&path, &old, &new)
+                .map_err(mlua::Error::external)?;
+            Ok(())
+        })
+        .map_err(|e| Error::Lua(e.to_string()))?;
+    table
+        .set("str_replace", str_replace)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+
+    let handle = store.clone();
+    let delete = lua
+        .create_function(move |_, path: String| {
+            handle.delete(&path).map_err(mlua::Error::external)?;
+            Ok(())
+        })
+        .map_err(|e| Error::Lua(e.to_string()))?;
+    table
+        .set("delete", delete)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+
+    let handle = store.clone();
+    let glob = lua
+        .create_function(move |lua, pattern: String| {
+            let paths = handle.glob(&pattern).map_err(mlua::Error::external)?;
+            lua.create_sequence_from(paths)
+        })
+        .map_err(|e| Error::Lua(e.to_string()))?;
+    table
+        .set("glob", glob)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+
+    globals
+        .set("store", table)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+    Ok(())
 }
 
 /// Remove code-loading and reflection globals the base library provides. The
@@ -195,7 +310,18 @@ mod tests {
     use serde_json::json;
 
     fn run(source: &str, args: &str) -> Result<LuaOutcome> {
-        run_chunk(source, args, &json!({ "id": 1, "when": "t" }))
+        run_chunk(
+            source,
+            args,
+            &json!({ "id": 1, "when": "t" }),
+            &Store::memory(),
+        )
+    }
+
+    /// Run a chunk against a caller-supplied store, so a test can inspect the
+    /// store after the chunk has run.
+    fn run_with(source: &str, store: &Store) -> Result<LuaOutcome> {
+        run_chunk(source, "", &json!({ "id": 1, "when": "t" }), store)
     }
 
     #[test]
@@ -275,5 +401,94 @@ mod tests {
     fn no_add_leaves_scoped_tools_empty() {
         let out = run("local x = 1", "").unwrap();
         assert!(out.scoped_tools.is_empty());
+    }
+
+    // --- The always-on `store` table ---
+
+    #[test]
+    fn store_write_then_read_returns_numbered_content() {
+        let out = run(
+            "store.write('a.txt', 'first\\nsecond')\nreturn store.read('a.txt')",
+            "",
+        )
+        .unwrap();
+        assert_eq!(out.returned.as_deref(), Some("1| first\n2| second"));
+    }
+
+    #[test]
+    fn store_append_extends_the_file() {
+        let out = run(
+            "store.append('log.txt', 'one\\n')\nstore.append('log.txt', 'two')\nreturn store.read('log.txt')",
+            "",
+        )
+        .unwrap();
+        assert_eq!(out.returned.as_deref(), Some("1| one\n2| two"));
+    }
+
+    #[test]
+    fn store_str_replace_edits_in_place() {
+        let out = run(
+            "store.write('a.txt', 'the quick brown fox')\nstore.str_replace('a.txt', 'quick', 'slow')\nreturn store.read('a.txt')",
+            "",
+        )
+        .unwrap();
+        assert_eq!(out.returned.as_deref(), Some("1| the slow brown fox"));
+    }
+
+    #[test]
+    fn store_delete_then_read_raises() {
+        let err = run(
+            "store.write('a.txt', 'gone soon')\nstore.delete('a.txt')\nreturn store.read('a.txt')",
+            "",
+        )
+        .expect_err("reading a deleted file must raise");
+        match err {
+            Error::Lua(msg) => assert!(
+                msg.contains("file not found"),
+                "the Lua error must carry the store message, got: {msg}"
+            ),
+            other => panic!("expected Error::Lua, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn store_glob_returns_a_sorted_array() {
+        let out = run(
+            "store.write('src/b.rs', '')\nstore.write('src/a.rs', '')\nlocal g = store.glob('src/*.rs')\nreturn g[1] .. ',' .. g[2]",
+            "",
+        )
+        .unwrap();
+        assert_eq!(out.returned.as_deref(), Some("src/a.rs,src/b.rs"));
+    }
+
+    #[test]
+    fn store_error_surfaces_as_lua_error() {
+        // An ambiguous `str_replace` anchor is a `StoreError`, which must reach
+        // the caller as `Error::Lua` (mapped through `mlua::Error::external`).
+        let err = run(
+            "store.write('a.txt', 'na na na')\nstore.str_replace('a.txt', 'na', 'la')",
+            "",
+        )
+        .expect_err("an ambiguous anchor must raise");
+        match err {
+            Error::Lua(msg) => assert!(
+                msg.contains("expected exactly one"),
+                "the Lua error must carry the ambiguity message, got: {msg}"
+            ),
+            other => panic!("expected Error::Lua, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn store_writes_are_visible_on_the_shared_handle() {
+        // The table is backed by the caller's handle, so a write from Lua is
+        // observable through a clone of that same handle after the chunk ends.
+        let store = Store::memory();
+        run_with("store.write('shared.txt', 'from lua')", &store).unwrap();
+        assert_eq!(
+            store.read("shared.txt").expect("read"),
+            "1| from lua",
+            "a Lua write must land in the shared store"
+        );
     }
 }
