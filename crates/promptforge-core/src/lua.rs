@@ -10,14 +10,15 @@
 //! case of the exit rule). The `var` table is read back afterward as JSON for
 //! prose substitution.
 
-use mlua::{
-    HookTriggers, Lua, LuaOptions, LuaSerdeExt, MultiValue, StdLib, Value, Variadic, VmState,
-};
-use serde_json::Value as Json;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use mlua::{
+    HookTriggers, Lua, LuaOptions, LuaSerdeExt, MultiValue, StdLib, Value, Variadic, VmState,
+};
+use serde_json::Value as Json;
 
 use crate::{Error, Result};
 

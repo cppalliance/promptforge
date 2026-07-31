@@ -25,6 +25,7 @@ url = "2"
 ipnet = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 thiserror = "2"
+anyhow = "1"
 axum = "0.8"
 async-trait = "0.1"
 flate2 = "1"
@@ -38,14 +39,20 @@ time = { version = "0.3", features = ["formatting"] }
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
+missing_debug_implementations = "warn"
 unreachable_pub = "warn"
 unsafe_op_in_unsafe_fn = "deny"
 future_incompatible = { level = "warn", priority = -1 }
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
 
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 unwrap_used = "deny"
+expect_used = "deny"
 dbg_macro = "warn"
 # Cherry-picked out of pedantic: it flags product names (PromptForge, OpenAI) in
 # prose, which reads worse backticked than the lint is worth.

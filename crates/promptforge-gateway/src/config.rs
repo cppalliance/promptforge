@@ -60,6 +60,7 @@ pub enum Protocol {
 /// The whole gateway configuration.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[non_exhaustive]
 pub struct Config {
     /// Server bind address and shared token.
     pub server: ServerConfig,
@@ -78,6 +79,7 @@ pub struct Config {
 /// Server-level settings.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ServerConfig {
     /// The socket address to bind.
     pub bind: SocketAddr,
@@ -88,6 +90,7 @@ pub struct ServerConfig {
 /// One backend the gateway can forward to.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[non_exhaustive]
 pub struct EndpointConfig {
     /// The endpoint's id: an operator-chosen handle referenced by `[[model]]`
     /// entries. Distinct from a model's caller-facing `name`.
@@ -103,6 +106,7 @@ pub struct EndpointConfig {
 /// One model name and the backend it resolves to.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ModelConfig {
     /// The name callers request and that a slot resolves to.
     pub name: String,
@@ -118,6 +122,7 @@ pub struct ModelConfig {
 /// Built-in tool configuration under the `[tools]` section.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ToolsConfig {
     /// The web-search tool configuration. Absent when no `[tools.web_search]`
     /// section is present.
@@ -128,6 +133,7 @@ pub struct ToolsConfig {
 /// Configuration for the web-search tool.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[non_exhaustive]
 pub struct WebSearchConfig {
     /// The search provider backing the tool.
     pub provider: SearchProvider,

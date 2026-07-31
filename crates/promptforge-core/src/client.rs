@@ -21,6 +21,7 @@ const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
 /// optional `tool_call_id` and `tool_calls` fields are emitted only when set,
 /// which keeps the wire shape of ordinary messages unchanged.
 #[derive(Debug, Clone, serde::Serialize)]
+#[non_exhaustive]
 pub struct Message {
     /// The role: `system`, `user`, `assistant`, or `tool`.
     pub role: String,
@@ -80,6 +81,7 @@ impl Message {
 /// When serialized into a request the wrapping code turns this into
 /// `{"type":"function","function":{"name":..,"description":..,"parameters":..}}`.
 #[derive(Debug, Clone, serde::Serialize)]
+#[non_exhaustive]
 pub struct ToolSchema {
     /// The tool's wire name.
     pub name: String,
@@ -95,6 +97,7 @@ pub struct ToolSchema {
 /// string; this type holds that string parsed into a [`Value`] (falling back to
 /// a string `Value` if it is not valid JSON).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ToolCall {
     /// The id the model assigned to this call, echoed back with its result.
     pub id: String,

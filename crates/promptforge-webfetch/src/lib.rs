@@ -71,6 +71,10 @@ impl WebFetch {
     #[must_use]
     pub fn with_config(config: FetchConfig) -> WebFetch {
         let resolver = Arc::new(GuardedResolver::system(config.clone()));
+        #[expect(
+            clippy::expect_used,
+            reason = "the builder is fed a static, valid configuration; a failure means the TLS backend could not initialize, a defect, not a caller-actionable condition"
+        )]
         let http = reqwest::Client::builder()
             .dns_resolver(resolver)
             .redirect(redirect_policy(config.clone()))

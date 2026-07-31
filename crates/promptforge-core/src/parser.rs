@@ -8,8 +8,9 @@
 //!
 //! The parser does no execution. It turns bytes into a [`Prompt`] tree.
 
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::ops::Range;
+
+use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use crate::{Error, Result};
 
@@ -43,6 +44,7 @@ pub struct Frontmatter {
 /// One section of a prompt: a heading, an optional Lua block, prose, and any
 /// nested child sections.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Section {
     /// The heading text (the section's address).
     pub name: String,
@@ -58,6 +60,7 @@ pub struct Section {
 
 /// A fully parsed prompt file.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Prompt {
     /// The parsed YAML frontmatter.
     pub frontmatter: Frontmatter,
