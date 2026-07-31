@@ -1,8 +1,10 @@
 //! The `promptforge` command-line tool.
 //!
-//! `promptforge run <file.md> [input]` parses the prompt and executes its entry
-//! section. `input` is the single raw argument string exposed to the prompt as
-//! `args`; it defaults to empty.
+//! `promptforge run <file.md> [input]` parses the prompt and executes its
+//! sections top to bottom (fall-through). `input` is the single raw argument
+//! string exposed to the prompt as `args`; it defaults to empty. The file must
+//! be a promptforge prompt - its frontmatter must declare a `promptforge:`
+//! version - or the CLI declines to run it.
 
 use std::process::ExitCode;
 
@@ -36,8 +38,8 @@ async fn main() -> ExitCode {
     }
 }
 
-/// Parse the file, execute its entry section with `input` as `args`, and print
-/// the result.
+/// Parse the file, execute its sections with `input` as `args`, and print the
+/// result.
 async fn run(path: &str, input: &str) -> ExitCode {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
@@ -46,6 +48,13 @@ async fn run(path: &str, input: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    if promptforge_core::promptforge_version(&source).is_none() {
+        eprintln!(
+            "error: {path} is not a promptforge prompt: its frontmatter declares no `promptforge:` version. promptforge runs only promptforge prompts."
+        );
+        return ExitCode::FAILURE;
+    }
 
     let prompt = match Prompt::parse(&source) {
         Ok(p) => p,

@@ -2,6 +2,7 @@
 name: greet
 description: Greet the named input using a Lua-computed value
 version: 1
+promptforge: 1
 ---
 
 # Greet

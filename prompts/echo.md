@@ -2,6 +2,7 @@
 name: echo
 description: Return the input argument unchanged
 version: 1
+promptforge: 1
 ---
 
 # Echo

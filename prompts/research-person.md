@@ -2,6 +2,7 @@
 name: research-person
 description: Research a person from the open web and return a concise, factual summary.
 version: 1
+promptforge: 1
 tools: [web_search, web_fetch]
 max_tool_iterations: 20
 ---
