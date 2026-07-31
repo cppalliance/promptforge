@@ -22,7 +22,7 @@ pub(crate) fn select_tools(
     requested: &[String],
     base_url: Option<&str>,
     token: Option<&str>,
-) -> Result<Vec<Box<dyn Tool>>, String> {
+) -> anyhow::Result<Vec<Box<dyn Tool>>> {
     let mut tools: Vec<Box<dyn Tool>> = Vec::with_capacity(requested.len());
     for name in requested {
         let tool: Box<dyn Tool> = match name.as_str() {
@@ -30,14 +30,13 @@ pub(crate) fn select_tools(
             "web_search" => match (base_url, token) {
                 (Some(base_url), Some(token)) => Box::new(WebSearch::new(base_url, token)),
                 _ => {
-                    return Err(
+                    anyhow::bail!(
                         "prompt requests web_search but no gateway is configured (set \
                          PROMPTFORGE_BASE_URL and PROMPTFORGE_TOKEN)"
-                            .to_string(),
                     );
                 }
             },
-            other => return Err(format!("unknown tool: {other}")),
+            other => anyhow::bail!("unknown tool: {other}"),
         };
         tools.push(tool);
     }
@@ -67,6 +66,7 @@ mod tests {
         let Err(err) = select_tools(&["web_search".into()], None, None) else {
             panic!("web_search should require a gateway")
         };
+        let err = err.to_string();
         assert!(
             err.contains("gateway"),
             "error should mention the gateway, got: {err}"
@@ -86,6 +86,7 @@ mod tests {
         let Err(err) = select_tools(&["nope".into()], None, None) else {
             panic!("unknown tool should error")
         };
+        let err = err.to_string();
         assert!(
             err.contains("unknown"),
             "error should mention unknown tool, got: {err}"

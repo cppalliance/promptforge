@@ -2,7 +2,9 @@
 name = "promptforge-cli"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+publish = false
 description = "PromptForge command-line tool"
 
 [[bin]]
@@ -12,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 promptforge-core.workspace = true
 promptforge-webfetch.workspace = true
+anyhow.workspace = true
 tokio.workspace = true
 
 [lints]
