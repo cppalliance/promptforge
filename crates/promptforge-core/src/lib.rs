@@ -15,6 +15,8 @@ pub mod parser;
 pub mod subst;
 pub mod tools;
 
+pub use crate::parser::promptforge_version;
+
 /// The crate's error type, spanning parsing, HTTP, and execution failures.
 ///
 /// Marked `#[non_exhaustive]` so future variants are not a breaking change, and

@@ -23,6 +23,11 @@ pub struct Frontmatter {
     pub description: String,
     /// Contract version, bumped when the interface changes.
     pub version: u32,
+    /// The promptforge engine major this file targets, distinct from the
+    /// author-facing [`version`](Self::version). Its presence marks the file as
+    /// a promptforge prompt; `None` means the file is not one. Optional.
+    #[serde(default)]
+    pub promptforge: Option<u32>,
     /// Canonical tool names this prompt needs bound. Optional; defaults empty.
     #[serde(default)]
     pub tools: Vec<String>,
@@ -149,6 +154,37 @@ fn split_frontmatter(input: &str) -> Result<(String, String)> {
     }
     let body = lines.collect::<Vec<_>>().join("\n");
     Ok((yaml, body))
+}
+
+/// Reports the promptforge engine major declared in `source`'s frontmatter.
+///
+/// Returns `Some(major)` when `source` opens with a YAML frontmatter block that
+/// declares a `promptforge:` key, and `None` otherwise. The check is lenient by
+/// design and never errors or panics: a source with no frontmatter block,
+/// malformed or unclosed frontmatter, or a frontmatter that simply omits the
+/// key all read as `None` ("not a promptforge prompt"). No other frontmatter
+/// field is required for detection.
+///
+/// # Examples
+/// ```
+/// use promptforge_core::promptforge_version;
+///
+/// assert_eq!(promptforge_version("---\npromptforge: 1\n---\n\n## S\n\np\n"), Some(1));
+/// assert_eq!(promptforge_version("just prose, no frontmatter"), None);
+/// ```
+#[must_use]
+pub fn promptforge_version(source: &str) -> Option<u32> {
+    /// Reads only the `promptforge` key, ignoring every other field so
+    /// detection does not depend on a complete, valid [`Frontmatter`].
+    #[derive(serde::Deserialize)]
+    struct Probe {
+        #[serde(default)]
+        promptforge: Option<u32>,
+    }
+
+    let (yaml, _body) = split_frontmatter(source).ok()?;
+    let probe: Probe = serde_yaml::from_str(&yaml).ok()?;
+    probe.promptforge
 }
 
 /// Convert a `HeadingLevel` to its numeric level.
@@ -426,5 +462,52 @@ Prose for the second section.\n";
         let src = "---\nname: x\ndescription: d\nversion: 1\n---\n\n## Zebra\n\nfirst\n\n## Main\n\nsecond\n";
         let p = Prompt::parse(src).unwrap();
         assert_eq!(p.entry().name, "Zebra");
+    }
+
+    #[test]
+    fn detection_reads_promptforge_major() {
+        let src = "---\nname: x\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n## S\n\np\n";
+        assert_eq!(promptforge_version(src), Some(1));
+    }
+
+    #[test]
+    fn detection_needs_only_the_promptforge_key() {
+        // No name/description/version, but the key is present.
+        let src = "---\npromptforge: 2\n---\n\n## S\n\np\n";
+        assert_eq!(promptforge_version(src), Some(2));
+    }
+
+    #[test]
+    fn detection_absent_key_is_none() {
+        let src = "---\nname: x\ndescription: d\nversion: 1\n---\n\n## S\n\np\n";
+        assert_eq!(promptforge_version(src), None);
+    }
+
+    #[test]
+    fn detection_no_frontmatter_is_none() {
+        let src = "# Just a title\n\nPlain prose with no frontmatter block at all.\n";
+        assert_eq!(promptforge_version(src), None);
+    }
+
+    #[test]
+    fn detection_malformed_frontmatter_is_none() {
+        // Opening delimiter but never closed.
+        let unclosed = "---\npromptforge: 1\nname: x\n\n## S\n\np\n";
+        assert_eq!(promptforge_version(unclosed), None);
+
+        // Closed, but not valid YAML.
+        let bad_yaml = "---\npromptforge: 1\n  : : oops\n---\n\n## S\n\np\n";
+        assert_eq!(promptforge_version(bad_yaml), None);
+    }
+
+    #[test]
+    fn frontmatter_exposes_promptforge_field() {
+        let with = "---\nname: x\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n## S\n\np\n";
+        let p = Prompt::parse(with).unwrap();
+        assert_eq!(p.frontmatter.promptforge, Some(1));
+
+        let without = "---\nname: x\ndescription: d\nversion: 1\n---\n\n## S\n\np\n";
+        let p = Prompt::parse(without).unwrap();
+        assert_eq!(p.frontmatter.promptforge, None);
     }
 }
