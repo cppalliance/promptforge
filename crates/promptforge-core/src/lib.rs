@@ -70,6 +70,11 @@ pub enum Error {
     /// frontmatter tools, so no matching tool could be advertised or dispatched.
     #[error("section scoped unknown tool {0}")]
     UnknownScopedTool(String),
+
+    /// The prompt declares a `promptforge:` major this build does not support,
+    /// so it is refused rather than run under mismatched rules.
+    #[error("unsupported promptforge version: {0} (this build supports major 1)")]
+    UnsupportedVersion(u32),
 }
 
 impl Error {
