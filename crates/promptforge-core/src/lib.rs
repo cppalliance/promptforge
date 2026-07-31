@@ -15,6 +15,7 @@ mod error;
 pub mod execute;
 pub mod lua;
 pub mod parser;
+pub mod store;
 pub mod subst;
 pub mod tools;
 
