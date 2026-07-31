@@ -11,15 +11,22 @@
 //! Running off the last section ends the run: the result is `default_return`
 //! from the frontmatter, else the last model reply, else a generic completion.
 //!
+//! One run-scoped [`Store`] is created once by the caller and threaded through
+//! every section (both its Lua block and, later, the model's file tools), so
+//! bulk state persists across the context-clearing transitions even though a
+//! section's conversation never does.
+//!
 //! Still to come: the other exit cases (a descriptor = goto/task/fanout), the
-//! tool-call loop, and durable state to carry a non-terminal section's work
-//! forward (today an intermediate section's model reply is not retained).
+//! tool-call loop, and durable state to carry a non-terminal section's model
+//! reply forward (today an intermediate section's model reply is not retained;
+//! the store is the durable channel).
 
 use serde_json::json;
 
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::lua;
 use crate::parser::Prompt;
+use crate::store::Store;
 use crate::subst;
 use crate::tools::Tool;
 use crate::{Error, Result};
@@ -80,6 +87,12 @@ fn make_nonce() -> String {
 /// those round trips is the prompt's `max_tool_iterations` when set, otherwise
 /// a raised runtime default. Pass an empty slice to disable tools entirely.
 ///
+/// `store` is the run's virtual-file handle. Create it once (typically with
+/// [`Store::memory`]) and pass it in; the same handle is given to every
+/// section's Lua block, so files persist across sections even though each
+/// section's context is cleared on entry. It is a shared handle, so passing
+/// `&store` (not a fresh store per section) is what makes the state durable.
+///
 /// # Errors
 /// Returns [`crate::Error::UnsupportedVersion`] if the prompt declares a
 /// `promptforge:` major this build does not support,
@@ -92,7 +105,12 @@ fn make_nonce() -> String {
 /// model calls a tool that was not provided, [`crate::Error::ToolLoopExhausted`]
 /// if a section's tool-call loop does not converge within its iteration cap, or
 /// any transport/backend error from a model call.
-pub async fn run(prompt: &Prompt, args: &str, tools: &[&dyn Tool]) -> Result<String> {
+pub async fn run(
+    prompt: &Prompt,
+    args: &str,
+    tools: &[&dyn Tool],
+    store: &Store,
+) -> Result<String> {
     // Gate on the declared engine major before doing any work: promptforge runs
     // only its own prompts, and refuses an unsupported major rather than
     // silently degrading. A file with no `promptforge:` version is not a
@@ -126,7 +144,7 @@ pub async fn run(prompt: &Prompt, args: &str, tools: &[&dyn Tool]) -> Result<Str
         // The block's `tools.add(...)` names (empty without a Lua block) scope
         // which tools this section may advertise and dispatch.
         let (var, scoped_names) = if let Some(source) = &section.lua {
-            let outcome = lua::run_chunk(source, args, &sys)?;
+            let outcome = lua::run_chunk(source, args, &sys, store)?;
             if let Some(value) = outcome.returned {
                 return Ok(value);
             }
@@ -287,6 +305,13 @@ mod tests {
         Prompt::parse(md).unwrap()
     }
 
+    /// Parse `md` and run it offline with empty `args`, no tools, and a fresh
+    /// in-memory store created for the run - the ergonomic path for the
+    /// Lua-only tests that do not care about the store's contents.
+    async fn run_offline(md: &str) -> Result<String> {
+        run(&parse(md), "", &[], &Store::memory()).await
+    }
+
     #[test]
     fn wrap_untrusted_frames_content_with_rule_and_tags() {
         let out = wrap_untrusted("hello world", "abc123");
@@ -330,7 +355,7 @@ mod tests {
         let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nreturn \"second\"\n```\n";
-        let out = run(&parse(md), "", &[]).await.unwrap();
+        let out = run_offline(md).await.unwrap();
         assert_eq!(out, "second");
     }
 
@@ -339,7 +364,7 @@ mod tests {
         let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
 ## First\n\n```lua\nreturn \"first\"\n```\n\n\
 ## Second\n\n```lua\nreturn \"unreached\"\n```\n";
-        let out = run(&parse(md), "", &[]).await.unwrap();
+        let out = run_offline(md).await.unwrap();
         assert_eq!(out, "first");
     }
 
@@ -347,7 +372,7 @@ mod tests {
     async fn runs_off_end_to_default_return() {
         let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\ndefault_return: \"fell off\"\n---\n\n\
 ## Only\n\n```lua\nlocal x = 1\n```\n";
-        let out = run(&parse(md), "", &[]).await.unwrap();
+        let out = run_offline(md).await.unwrap();
         assert_eq!(out, "fell off");
     }
 
@@ -355,7 +380,7 @@ mod tests {
     async fn generic_result_when_nothing_produced() {
         let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nlocal x = 1\n```\n";
-        let out = run(&parse(md), "", &[]).await.unwrap();
+        let out = run_offline(md).await.unwrap();
         assert_eq!(out, "done");
     }
 
@@ -365,7 +390,7 @@ mod tests {
         let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nreturn tostring(sys.id)\n```\n";
-        let out = run(&parse(md), "", &[]).await.unwrap();
+        let out = run_offline(md).await.unwrap();
         assert_eq!(out, "2");
     }
 
@@ -376,7 +401,7 @@ mod tests {
         // A `promptforge: 1` prompt clears the gate and runs to completion.
         let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
-        let out = run(&parse(md), "", &[]).await.unwrap();
+        let out = run_offline(md).await.unwrap();
         assert_eq!(out, "ran");
     }
 
@@ -385,7 +410,7 @@ mod tests {
         // A future major is refused, never silently degraded to major 1.
         let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 2\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
-        let err = run(&parse(md), "", &[])
+        let err = run_offline(md)
             .await
             .expect_err("an unsupported major must be refused");
         assert!(matches!(err, Error::UnsupportedVersion(2)));
@@ -397,7 +422,7 @@ mod tests {
         // error rather than executing it.
         let md = "---\nname: t\ndescription: d\nversion: 1\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
-        let err = run(&parse(md), "", &[])
+        let err = run_offline(md)
             .await
             .expect_err("a prompt with no promptforge version must be declined");
         match err {
@@ -407,6 +432,32 @@ mod tests {
             ),
             other => panic!("expected Parse, got {other:?}"),
         }
+    }
+
+    // --- Cross-section store persistence ---
+
+    #[tokio::test]
+    async fn store_persists_across_sections() {
+        // One store is created for the run and threaded to every section. The
+        // first section's Lua writes a file; the second, in a fresh context,
+        // reads it back - proving the store outlives the context-clearing
+        // transition. The read lands in `var`, so it round-trips the value.
+        let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+## Writer\n\n```lua\nstore.write('note.txt', 'carried across')\n```\n\n\
+## Reader\n\n```lua\nvar.seen = store.read('note.txt')\nreturn var.seen\n```\n";
+        let store = Store::memory();
+        let out = run(&parse(md), "", &[], &store).await.unwrap();
+        assert_eq!(
+            out, "1| carried across",
+            "the second section must read what the first wrote"
+        );
+        // The very same handle still holds the file after the run, confirming
+        // both sections shared one store rather than each getting a fresh one.
+        assert_eq!(
+            store.read("note.txt").expect("read"),
+            "1| carried across",
+            "the run's store must retain the written file"
+        );
     }
 
     // --- Tool-call loop test (exercises the model round trip via a mock) ---
