@@ -7,3 +7,4 @@
 - [2026-07-29-5-multi-turn-research-prompt] soft output target: A prose token target is guidance, not an enforced output limit.
 - [2026-07-29-6-per-section-tool-scoping] add-only scope API: The current Lua scoping surface accumulates and deduplicates names but has no remove or clear operation.
 - [2026-07-29-7-guard-wrap-untrusted-output] nonce delimiter mechanics: Random XML-style tags and escaping are model-specific mitigation details, not an isolation guarantee.
+- [2026-07-31-1-orchestrator-only] three-axis budgets: Track nesting, section transitions, and tool calls independently rather than using one global limit.
