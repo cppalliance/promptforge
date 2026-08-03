@@ -9,7 +9,7 @@
 //! first needs a real filesystem event, which one integration test covers.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -138,6 +138,18 @@ fn modified(path: &Path) -> notify::Event {
     notify::Event::new(EventKind::Modify(ModifyKind::Any)).add_path(path.to_path_buf())
 }
 
+/// The same absolute path spelled as a Windows verbatim path, which is the form
+/// `std::fs::canonicalize` returns there and the form `notify` does not deliver.
+fn verbatim(path: &Path) -> PathBuf {
+    PathBuf::from(format!(r"\\?\{}", path.display()))
+}
+
+/// An absolute spelling of `path`, resolving no symlink and reading no
+/// directory, so the result holds whether or not the path exists.
+fn absolute(path: &str) -> PathBuf {
+    std::path::absolute(path).expect("an absolute spelling of a relative path")
+}
+
 #[test]
 fn a_prompt_under_the_watched_directory_is_interesting() {
     let root = Path::new("/srv/pf");
@@ -195,6 +207,58 @@ fn a_relative_configured_path_still_matches_the_event_it_gets() {
     assert!(
         interesting.matches(&modified(&relative.join("watch.rs"))),
         "the configured form still matches, since a backend may deliver either"
+    );
+}
+
+#[test]
+fn a_relative_configured_root_matches_a_plain_absolute_event_path() {
+    // The Windows case, and the one that shipped broken: `[paths].prompts` is
+    // the relative `prompts` and `notify` delivers a plain absolute path.
+    // Neither the configured spelling nor the verbatim path `canonicalize`
+    // returns there is a prefix of that, so every event was dropped and the
+    // server watched successfully and never reloaded. The crate's own `src`
+    // stands in for the directory: the test reads nothing under it.
+    let interesting = Interesting::new(Path::new("src"), Path::new("prompts.toml"));
+
+    assert!(interesting.matches(&modified(&absolute("src").join("watch.rs"))));
+    assert!(
+        interesting.matches(&modified(&absolute("src").join("watch").join("tests.rs"))),
+        "a nested path under the root counts too"
+    );
+}
+
+#[test]
+fn a_relative_configured_root_matches_a_verbatim_event_path() {
+    // The other direction, which is what a backend that canonicalizes its own
+    // watch root delivers on Windows.
+    let interesting = Interesting::new(Path::new("src"), Path::new("prompts.toml"));
+
+    assert!(interesting.matches(&modified(&verbatim(&absolute("src").join("watch.rs")))));
+}
+
+#[test]
+fn an_absolute_configured_root_matches_an_event_path_in_the_other_form() {
+    // Neither side may be allowed to decide the answer by its spelling: a
+    // verbatim prefix on one and not the other is not a difference in path.
+    let plain_root = Interesting::new(&absolute("src"), Path::new("prompts.toml"));
+    assert!(plain_root.matches(&modified(&verbatim(&absolute("src").join("watch.rs")))));
+
+    let verbatim_root = Interesting::new(&verbatim(&absolute("src")), Path::new("prompts.toml"));
+    assert!(verbatim_root.matches(&modified(&absolute("src").join("watch.rs"))));
+}
+
+#[test]
+fn a_path_outside_the_prompts_directory_is_still_not_interesting() {
+    // Normalizing both sides must not widen what matches: a sibling of the
+    // watched directory is not under it in any spelling.
+    let interesting = Interesting::new(Path::new("src"), Path::new("prompts.toml"));
+    let sibling = absolute("Cargo.toml");
+
+    assert!(!interesting.matches(&modified(&sibling)));
+    assert!(!interesting.matches(&modified(&verbatim(&sibling))));
+    assert!(
+        !interesting.matches(&modified(Path::new("/elsewhere/src/watch.rs"))),
+        "a directory named the same somewhere else is not the watched root"
     );
 }
 
