@@ -1,0 +1,13 @@
+[package]
+name = "promptforge-tool-picker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "PromptForge tool picker: resolve a plain-English capability need to a tool from an abstract catalog"
+
+[dependencies]
+
+[lints]
+workspace = true
