@@ -78,7 +78,7 @@ struct Session {
 }
 
 impl Session {
-    /// Spawns `promptforge-mcp serve --stdio <config>` over a one-prompt
+    /// Spawns `promptforge-mcp-server serve --stdio <config>` over a one-prompt
     /// catalog. The configuration names a bind address the transport must
     /// ignore.
     fn spawn() -> Session {
@@ -89,7 +89,7 @@ impl Session {
 
     /// Spawns the same command over an already-written configuration.
     fn spawn_at(dir: tempfile::TempDir, config: &Path) -> Session {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_promptforge-mcp"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_promptforge-mcp-server"))
             .arg("serve")
             .arg("--stdio")
             .arg(config)
@@ -152,7 +152,7 @@ async fn stdio_completes_initialize_and_lists_its_tools() {
     assert_eq!(initialized["id"], json!(1));
     assert_eq!(
         initialized["result"]["serverInfo"]["name"],
-        json!("promptforge-mcp"),
+        json!("promptforge-mcp-server"),
         "no token was presented and the handshake completed anyway"
     );
 
@@ -207,7 +207,7 @@ async fn stdio_serves_a_configuration_that_carries_no_token() {
     assert_eq!(initialized["id"], json!(1));
     assert_eq!(
         initialized["result"]["serverInfo"]["name"],
-        json!("promptforge-mcp"),
+        json!("promptforge-mcp-server"),
         "the file carries no [server].token and stdio serves anyway"
     );
 
@@ -229,7 +229,7 @@ async fn a_catalog_with_two_faults_refuses_to_serve_and_prints_both() {
         ],
     );
 
-    let output = Command::new(env!("CARGO_BIN_EXE_promptforge-mcp"))
+    let output = Command::new(env!("CARGO_BIN_EXE_promptforge-mcp-server"))
         .arg("serve")
         .arg(&config)
         .stdin(Stdio::null())

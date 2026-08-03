@@ -23,7 +23,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use promptforge_mcp::{
+use promptforge_mcp_server::{
     Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Retrieval, Watcher,
 };
 use rmcp::ServiceExt;

@@ -20,7 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
-use promptforge_mcp::{Catalog, Config, OnBroken};
+use promptforge_mcp_server::{Catalog, Config, OnBroken};
 
 /// The shipped configuration, read at compile time so a rename breaks the build
 /// rather than the test.
@@ -80,7 +80,7 @@ fn the_shipped_configuration_resolves_the_shipped_prompts() {
     let names: Vec<&str> = catalog
         .entries()
         .iter()
-        .map(promptforge_mcp::Entry::name)
+        .map(promptforge_mcp_server::Entry::name)
         .collect();
     assert_eq!(names, ["echo", "greet", "hello", "research_person"]);
     for entry in catalog.entries() {
@@ -99,7 +99,7 @@ fn the_shipped_catalog_reaches_tools_list_through_the_built_ins_alone() {
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the shipped catalog resolves");
 
-    let published: Vec<String> = promptforge_mcp::tool_definitions()
+    let published: Vec<String> = promptforge_mcp_server::tool_definitions()
         .iter()
         .map(|tool| tool.name.to_string())
         .collect();

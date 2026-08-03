@@ -103,7 +103,7 @@ struct Frame {
 /// # Examples
 /// ```
 /// use promptforge_core::observe::{Event, Observer};
-/// use promptforge_mcp::McpObserver;
+/// use promptforge_mcp_server::McpObserver;
 ///
 /// let observer = McpObserver::silent();
 /// observer.on_event(&Event::RunFinished { turns: 3, elapsed_ms: 40, ok: true });
