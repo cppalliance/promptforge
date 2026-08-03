@@ -18,7 +18,6 @@ use notify::event::{AccessKind, CreateKind, ModifyKind};
 use tokio::sync::mpsc;
 
 use super::fixture::config_source;
-use super::sessions::{ListChanged, Sessions};
 use super::{Interesting, Watcher, debounce};
 use crate::catalog::{Catalog, CatalogHandle};
 use crate::config::Config;
@@ -295,7 +294,6 @@ async fn watch_false_starts_nothing() {
         &source,
         Arc::new(config),
         catalog,
-        Arc::new(Sessions::new()),
         Arc::new(Retrieval::idle()),
     )
     .expect("starting nothing cannot fail");
@@ -321,16 +319,7 @@ async fn an_unwatchable_prompts_directory_is_an_error() {
         &source,
         Arc::new(config),
         catalog,
-        Arc::new(Sessions::new()),
         Arc::new(Retrieval::idle()),
     );
     assert!(started.is_err());
-}
-
-#[tokio::test]
-async fn an_empty_session_list_announces_to_nobody() {
-    let sessions = Sessions::new();
-    assert!(sessions.is_empty());
-    sessions.list_changed();
-    assert_eq!(sessions.len(), 0);
 }

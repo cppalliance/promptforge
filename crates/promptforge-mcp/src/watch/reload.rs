@@ -5,10 +5,14 @@
 //! driven directly by a test and by the watcher alike. It re-reads
 //! `prompts.toml`, runs the boot pass's own resolution over the prompts
 //! directory under [`OnBroken::Retain`], swaps the result into the
-//! [`CatalogHandle`], rebuilds retrieval when the text it ranks on moved, and
-//! announces the swap when the published tool set moved. The rebuild rides this
-//! swap rather than a task of its own, so `need_prompt` and the runner never
-//! disagree for longer than one atomic store.
+//! [`CatalogHandle`], and rebuilds retrieval when the text it ranks on moved.
+//! The rebuild rides this swap rather than a task of its own, so `need_prompt`
+//! and the runner never disagree for longer than one atomic store.
+//!
+//! Nothing is announced to a client. `tools/list` is the same four built-ins
+//! whatever the catalog holds, and every call reads the catalog fresh, so a
+//! prompt saved a moment ago is callable on the next call with no notification
+//! and no reconnect.
 //!
 //! Two rules make a reload safe to run under a live service. A prompt that
 //! fails validation becomes a broken entry carrying its error, so one typo
@@ -31,21 +35,15 @@ use std::sync::Arc;
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::{Config, Secret};
 use crate::retrieval::Retrieval;
-use crate::watch::sessions::ListChanged;
 
 /// What one reload changed.
 ///
-/// The two flags are read by different things. `published_changed` is what sent
-/// the `tools/list_changed` announcement, and covers every prompt's name,
-/// description, and problem - the whole of what a client can read about one;
-/// `ranking_changed` reports that
-/// [`Catalog::hash`] moved, which is what tells retrieval its index is stale, so
-/// an edit to a prompt's body alone costs no rebuild.
+/// `ranking_changed` reports that [`Catalog::hash`] moved, which is what tells
+/// retrieval its index is stale, so an edit to a prompt's body alone costs no
+/// rebuild.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Reload {
-    /// The published tool set changed, and every session was told.
-    pub published_changed: bool,
     /// The text retrieval ranks on changed, so any index over it is stale.
     pub ranking_changed: bool,
     /// The candidate was refused and the previous catalog is still live.
@@ -62,7 +60,7 @@ impl Reload {
     }
 }
 
-/// The live state a reload replaces, and where it announces the replacement.
+/// The live state a reload replaces.
 ///
 /// Cheap to share: everything it holds is either read-only or already behind an
 /// `Arc`.
@@ -74,8 +72,6 @@ pub struct Reloader {
     boot: Arc<Config>,
     /// The catalog a reload swaps.
     catalog: Arc<CatalogHandle>,
-    /// Where a changed tool set is announced.
-    listener: Arc<dyn ListChanged>,
     /// The retrieval index a reload rebuilds when the ranking text moved.
     retrieval: Arc<Retrieval>,
 }
@@ -88,14 +84,12 @@ impl Reloader {
         source: &Path,
         boot: Arc<Config>,
         catalog: Arc<CatalogHandle>,
-        listener: Arc<dyn ListChanged>,
         retrieval: Arc<Retrieval>,
     ) -> Reloader {
         Reloader {
             source: source.to_path_buf(),
             boot,
             catalog,
-            listener,
             retrieval,
         }
     }
@@ -112,12 +106,6 @@ impl Reloader {
     /// useful answer to a candidate that cannot be resolved is to keep serving
     /// the previous catalog and say so in the log. The refusal is visible in
     /// [`Reload::refused`].
-    ///
-    /// # Panics
-    /// Panics if the announcement its listener makes needs a Tokio runtime and
-    /// there is none. [`Sessions`](crate::watch::Sessions) is such a listener, so
-    /// a reload over one must be called from inside a runtime - which the
-    /// watcher's own `spawn_blocking` call satisfies.
     pub fn reload(&self) -> Reload {
         let Some(config) = self.candidate_config() else {
             return Reload::refusal();
@@ -131,7 +119,6 @@ impl Reloader {
         };
 
         let previous = self.catalog.load();
-        let published_changed = published(&previous) != published(&candidate);
         let ranking_changed = previous.hash() != candidate.hash();
         let broken = candidate
             .entries()
@@ -139,13 +126,8 @@ impl Reloader {
             .filter(|entry| entry.problem().is_some())
             .count();
         tracing::info!(
-            "reloaded {} prompt(s), {broken} broken; tools/list {}, ranking {}",
+            "reloaded {} prompt(s), {broken} broken; ranking {}",
             candidate.len(),
-            if published_changed {
-                "changed"
-            } else {
-                "unchanged"
-            },
             if ranking_changed {
                 "changed"
             } else {
@@ -165,11 +147,7 @@ impl Reloader {
             // belongs on a blocking task.
             self.retrieval.rebuild(&self.catalog.load());
         }
-        if published_changed {
-            self.listener.list_changed();
-        }
         Reload {
-            published_changed,
             ranking_changed,
             refused: false,
         }
@@ -253,30 +231,4 @@ pub(super) fn ignored_changes(boot: &Config, candidate: &Config) -> Vec<&'static
         ignored.push("[gateway].model");
     }
     ignored
-}
-
-/// The published surface as one line per prompt: its name, its description, and
-/// its problem.
-///
-/// Those three are exactly what a client can read about a prompt, all of it
-/// through `list_prompts`, so comparing them is what makes the announcement
-/// mean what it says. Comparing the serialized tool list instead would say
-/// nothing at all: that list is the same four built-ins whatever the catalog
-/// holds.
-///
-/// A separator that cannot occur in any of the three keeps two fields from
-/// running together into one that happens to match.
-fn published(catalog: &Catalog) -> Vec<String> {
-    catalog
-        .entries()
-        .iter()
-        .map(|entry| {
-            format!(
-                "{}\u{1f}{}\u{1f}{}",
-                entry.name(),
-                entry.description(),
-                entry.problem().unwrap_or_default()
-            )
-        })
-        .collect()
 }

@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use promptforge_mcp::{
-    Catalog, CatalogHandle, Config, OnBroken, Retrieval, Sessions, Watcher, serve_http, serve_stdio,
+    Catalog, CatalogHandle, Config, OnBroken, Retrieval, Watcher, serve_http, serve_stdio,
 };
 
 /// What the process prints when the arguments are not the two shapes it takes.
@@ -108,7 +108,6 @@ fn run(invocation: &Invocation) -> Result<(), Box<dyn std::error::Error>> {
     let retrieval = Arc::new(Retrieval::start(&catalog));
     let config = Arc::new(config);
     let catalog = Arc::new(CatalogHandle::new(catalog));
-    let sessions = Arc::new(Sessions::new());
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -122,13 +121,12 @@ fn run(invocation: &Invocation) -> Result<(), Box<dyn std::error::Error>> {
             source,
             Arc::clone(&config),
             Arc::clone(&catalog),
-            Arc::clone(&sessions),
             Arc::clone(&retrieval),
         )?;
         if stdio {
-            serve_stdio(config, catalog, sessions, retrieval).await?;
+            serve_stdio(config, catalog, retrieval).await?;
         } else {
-            serve_http(config, catalog, sessions, retrieval).await?;
+            serve_http(config, catalog, retrieval).await?;
         }
         Ok::<(), Box<dyn std::error::Error>>(())
     })?;
