@@ -13,7 +13,15 @@
 //!
 //! Mapping a resolved descriptor onto a callable tool is the caller's job; this
 //! crate only decides which descriptor the need refers to.
+//!
+//! # Building this crate
+//!
+//! The model is compiled in, so the *first* build downloads it (about 130MB
+//! from the Hugging Face Hub) and needs network access. Later builds reuse the
+//! Hugging Face cache and run offline. See [`assets`] for the details and for
+//! what to set when the Hub is unreachable.
 
+pub mod assets;
 pub mod catalog;
 pub mod config;
 pub mod error;
