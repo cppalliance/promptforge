@@ -19,3 +19,5 @@ pub mod config;
 pub mod error;
 
 pub use catalog::{Catalog, ToolAnnotations, ToolDescriptor, ToolId};
+pub use config::{Config, ModelId};
+pub use error::{Error, Result};
