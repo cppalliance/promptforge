@@ -1,10 +1,13 @@
 //! An `OpenAI`-compatible chat completions client, pointed at the gateway.
 //!
-//! Tranche 1 speaks the plain `/chat/completions` shape: a list of messages in,
-//! one text reply out. No tools, no streaming. The client holds only the
-//! gateway's URL and the shared token; the vendor credential lives in the
-//! gateway, so the executor never sees it. Point `PROMPTFORGE_BASE_URL` at a
-//! local server or another gateway to retarget it.
+//! The client speaks the non-streaming `/chat/completions` shape: a list of
+//! messages in, and either one text reply out or the tool calls the model
+//! asked for. [`GatewayClient::complete`] sends a `tools` array when the caller
+//! supplies one, so the executor's tool-call loop runs over this client.
+//! Streaming is not supported. The client holds only the gateway's URL and the
+//! shared token; the vendor credential lives in the gateway, so the executor
+//! never sees it. Point `PROMPTFORGE_BASE_URL` at a local server or another
+//! gateway to retarget it.
 
 use serde_json::Value;
 

@@ -1,10 +1,11 @@
 //! Configuration for the `web_fetch` tool's security policy.
 //!
-//! [`FetchConfig`] carries the knobs that govern what a fetch may do. This step
-//! reads the URL-policy fields (`allow_http`, `allow_ports`, `allow_ip_literals`)
-//! plus the address-policy fields (`deny_extra`, `allow_exact`, `max_redirects`)
-//! and the size caps (`max_bytes`, `max_chars`); later steps extend the struct
-//! with content-type and timeout settings.
+//! [`FetchConfig`] carries the knobs that govern what a fetch may do: the
+//! URL-policy fields (`allow_http`, `allow_ports`, `allow_ip_literals`), the
+//! address-policy fields (`deny_extra`, `allow_exact`, `max_redirects`), the
+//! size caps (`max_bytes`, `max_chars`), the timeouts (`connect_timeout`,
+//! `timeout`, `pool_idle_timeout`), and the `user_agent`. The set of accepted
+//! content types is fixed rather than configured.
 //! Construct it with [`FetchConfig::default`] and override individual fields as
 //! needed.
 

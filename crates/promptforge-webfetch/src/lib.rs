@@ -1,10 +1,13 @@
-//! The `web_fetch` tool: fetch a URL and return its main content as markdown.
+//! The `web_fetch` tool: fetch a URL and return its content as text, markdown
+//! for an HTML page.
 //!
-//! This tool runs locally in-process. It performs a plain HTTP GET, extracts
-//! the page's main article content with [`readabilityrs`], and renders it to
-//! markdown. Pages that are not article-shaped fall back to a whole-page
-//! HTML-to-markdown conversion with [`htmd`], so the tool always returns
-//! something useful when the fetch itself succeeds.
+//! This tool runs locally in-process. It performs a GET, routes the response on
+//! its `Content-Type`, and refuses a type it cannot render. An HTML page has its
+//! main article content extracted with [`readabilityrs`] and rendered to
+//! markdown; a page that is not article-shaped falls back to a whole-page
+//! HTML-to-markdown conversion with [`htmd`], so an HTML fetch that succeeds
+//! always returns something useful. A non-HTML text body (JSON, XML, plain
+//! text) is returned decoded, with no extraction.
 
 use std::sync::Arc;
 
