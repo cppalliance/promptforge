@@ -43,7 +43,7 @@ mod watch;
 
 pub use crate::catalog::{Catalog, CatalogHandle, Entry, OnBroken};
 pub use crate::config::{
-    CatalogConfig, Config, Expose, GatewayConfig, PathsConfig, PromptConfig, Secret, ServerConfig,
+    CatalogConfig, Config, GatewayConfig, PathsConfig, PromptConfig, Secret, ServerConfig,
 };
 pub use crate::error::{CatalogError, ConfigError, Fault, ServeError, WatchError};
 pub use crate::progress::{McpObserver, ProgressPump};

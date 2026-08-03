@@ -35,7 +35,7 @@ pub(super) fn config_source(root: &Path, extra: &str) -> String {
         "[server]\ntoken = \"shared\"\n{extra}\n\n\
          [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
-         [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"list\"\n",
+         [catalog]\ninclude = [\"*.md\"]\n",
         root.join("prompts").display()
     )
 }
