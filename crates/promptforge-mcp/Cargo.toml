@@ -13,6 +13,7 @@ axum.workspace = true
 glob.workspace = true
 humantime-serde.workspace = true
 notify.workspace = true
+promptforge-core.workspace = true
 promptforge-tool-picker = { workspace = true, optional = true }
 rmcp.workspace = true
 serde.workspace = true
