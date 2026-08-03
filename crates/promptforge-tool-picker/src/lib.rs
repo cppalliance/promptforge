@@ -64,15 +64,15 @@
 //! what to set when the Hub is unreachable.
 
 pub mod assets;
-pub mod catalog;
-pub mod config;
-pub mod embed;
-pub mod error;
-pub mod picker;
-pub mod policy;
+mod catalog;
+mod config;
+mod embed;
+mod error;
+mod picker;
+mod policy;
 mod rank;
 
-pub use catalog::{Catalog, ToolAnnotations, ToolDescriptor, ToolId};
+pub use catalog::{Catalog, QUALIFIED_KEY_SEPARATOR, ToolAnnotations, ToolDescriptor, ToolId};
 pub use config::{Config, ModelId};
 pub use embed::{EMBEDDING_DIMENSIONS, Embedder};
 pub use error::{Error, Result};

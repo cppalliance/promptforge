@@ -254,6 +254,31 @@ pub struct Catalog {
 
 impl Catalog {
     /// Builds a catalog from descriptors, preserving their order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId};
+    /// use serde_json::json;
+    ///
+    /// let catalog = Catalog::new(vec![
+    ///     ToolDescriptor::new(
+    ///         ToolId::new("files", "read_file"),
+    ///         "Read a file from disk",
+    ///         json!({"properties": {"path": {"type": "string"}}}),
+    ///     ),
+    ///     ToolDescriptor::new(
+    ///         ToolId::new("net", "fetch_url"),
+    ///         "Fetch a web page over HTTP",
+    ///         json!({"properties": {"url": {"type": "string"}}}),
+    ///     ),
+    /// ]);
+    ///
+    /// assert_eq!(catalog.len(), 2);
+    /// // The order given is the order kept, and it is the order every
+    /// // per-tool accessor on an engine is indexed by.
+    /// assert_eq!(catalog.tools()[0].name(), "read_file");
+    /// ```
     #[must_use]
     pub fn new(tools: Vec<ToolDescriptor>) -> Self {
         Self { tools }
@@ -278,6 +303,7 @@ impl Catalog {
     }
 
     /// Iterates the descriptors in the order they were given.
+    #[must_use = "iterators are lazy and visit nothing unless consumed"]
     pub fn iter(&self) -> std::slice::Iter<'_, ToolDescriptor> {
         self.tools.iter()
     }
