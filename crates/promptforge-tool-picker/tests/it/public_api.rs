@@ -9,7 +9,11 @@
 //! One engine is built per test and each build loads the compiled-in model, so
 //! the catalog is kept to two tools and the file to a few tests.
 
-use promptforge_tool_picker::{Catalog, Config, Outcome, ToolDescriptor, ToolId, ToolPicker};
+use std::sync::Arc;
+
+use promptforge_tool_picker::{
+    Catalog, Config, Embedder, Outcome, ToolDescriptor, ToolId, ToolPicker,
+};
 use serde_json::json;
 
 /// Two plainly unrelated tools: enough to bind one and to miss both.
@@ -62,6 +66,42 @@ fn a_shortlist_offers_nothing_for_a_need_that_resolves_absent() {
         picker.shortlist(need, 2).unwrap().is_empty(),
         "a shortlist must not offer candidates the engine declined to match"
     );
+}
+
+#[test]
+fn a_caller_holding_one_encoder_can_build_an_engine_per_catalog() {
+    // The whole point of the constructor: one model load, several engines. A
+    // caller with a catalog that changes rebuilds instead of reloading.
+    let embedder = Arc::new(Embedder::new().unwrap());
+    let files =
+        ToolPicker::build_with(Arc::clone(&embedder), catalog(), Config::default()).unwrap();
+
+    let weather = Catalog::new(vec![ToolDescriptor::new(
+        ToolId::new("weather", "get_forecast"),
+        "Get the weather forecast for a city",
+        json!({"properties": {"city": {"type": "string"}}}),
+    )]);
+    let forecasts =
+        ToolPicker::build_with(Arc::clone(&embedder), weather.clone(), Config::default()).unwrap();
+
+    match forecasts
+        .resolve("get the weather forecast for a city")
+        .unwrap()
+    {
+        Outcome::Bind(tool) => assert_eq!(tool.id, ToolId::new("weather", "get_forecast")),
+        outcome => panic!("expected a binding, got {outcome:?}"),
+    }
+    // Each engine answers from its own catalog alone.
+    assert_eq!(
+        forecasts.resolve("read a file from disk").unwrap(),
+        Outcome::Absent
+    );
+    assert_eq!(files.tools(), catalog().tools());
+
+    // A rebuild is the same path reached from an engine rather than an `Arc`.
+    let rebuilt = files.rebuild(weather).unwrap();
+    assert_eq!(rebuilt.tools(), forecasts.tools());
+    assert_eq!(rebuilt.vector(0), forecasts.vector(0));
 }
 
 #[test]
