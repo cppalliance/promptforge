@@ -17,6 +17,7 @@ promptforge-core.workspace = true
 promptforge-tool-picker = { workspace = true, optional = true }
 rmcp.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
