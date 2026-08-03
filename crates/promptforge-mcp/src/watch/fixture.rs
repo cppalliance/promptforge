@@ -7,7 +7,6 @@
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tempfile::TempDir;
 
@@ -15,27 +14,6 @@ use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::Config;
 use crate::retrieval::Retrieval;
 use crate::watch::reload::{Reload, Reloader};
-use crate::watch::sessions::ListChanged;
-
-/// A listener that counts announcements instead of sending them.
-#[derive(Debug, Default)]
-pub(super) struct Recorder {
-    /// How many announcements have been made.
-    announced: AtomicUsize,
-}
-
-impl Recorder {
-    /// How many announcements have been made.
-    pub(super) fn announced(&self) -> usize {
-        self.announced.load(Ordering::Relaxed)
-    }
-}
-
-impl ListChanged for Recorder {
-    fn list_changed(&self) {
-        let _previous = self.announced.fetch_add(1, Ordering::Relaxed);
-    }
-}
 
 /// A prompt whose Lua returns at once, so it needs no gateway.
 pub(super) fn prompt(name: &str, description: &str, value: &str) -> String {
@@ -62,8 +40,8 @@ pub(super) fn config_source(root: &Path, extra: &str) -> String {
     )
 }
 
-/// Everything one reload test needs: a written configuration, two prompts, the
-/// live catalog, and the recorder the reload announces to.
+/// Everything one reload test needs: a written configuration, two prompts, and
+/// the live catalog.
 pub(super) struct Fixture {
     /// The temporary root, held so it outlives the test.
     dir: TempDir,
@@ -73,8 +51,6 @@ pub(super) struct Fixture {
     reloader: Reloader,
     /// The catalog a reload swaps.
     pub(super) catalog: Arc<CatalogHandle>,
-    /// What the reload announced to.
-    pub(super) recorder: Arc<Recorder>,
 }
 
 impl Fixture {
@@ -98,14 +74,11 @@ impl Fixture {
         let config = Config::load(&source).expect("the fixture configuration loads");
         let catalog = Catalog::resolve(&config, OnBroken::Reject).expect("boot resolves");
         let catalog = Arc::new(CatalogHandle::new(catalog));
-        let recorder = Arc::new(Recorder::default());
-        let listener: Arc<dyn ListChanged> = recorder.clone();
         let config = Arc::new(config);
         let reloader = Reloader::new(
             &source,
             Arc::clone(&config),
             Arc::clone(&catalog),
-            listener,
             retrieval,
         );
         Fixture {
@@ -113,7 +86,6 @@ impl Fixture {
             config,
             reloader,
             catalog,
-            recorder,
         }
     }
 

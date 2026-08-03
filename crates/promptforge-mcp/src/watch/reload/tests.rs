@@ -18,7 +18,6 @@ use crate::config::Config;
 use crate::retrieval::Retrieval;
 use crate::server::PromptForgeServer;
 use crate::watch::fixture::{Fixture, config_source};
-use crate::watch::sessions::Sessions;
 
 /// One `tools/call` request over an object of arguments.
 fn call(name: &'static str, arguments: Value) -> CallToolRequestParams {
@@ -46,19 +45,14 @@ fn an_edited_prompt_replaces_the_live_one() {
 
     assert!(!reload.refused);
     assert!(
-        reload.published_changed,
-        "the description a client reads moved"
-    );
-    assert!(
         reload.ranking_changed,
         "retrieval ranks on that description"
     );
     assert_eq!(fixture.description("alpha"), "Do the alpha thing, better");
-    assert_eq!(fixture.recorder.announced(), 1);
 }
 
 #[test]
-fn a_body_only_edit_changes_neither_the_tool_list_nor_the_ranking() {
+fn a_body_only_edit_leaves_the_ranking_alone() {
     let fixture = Fixture::new();
     fixture.rewrite("alpha", "Do the alpha thing", "alpha v2");
 
@@ -67,15 +61,9 @@ fn a_body_only_edit_changes_neither_the_tool_list_nor_the_ranking() {
     assert_eq!(
         reload,
         Reload {
-            published_changed: false,
             ranking_changed: false,
             refused: false,
         }
-    );
-    assert_eq!(
-        fixture.recorder.announced(),
-        0,
-        "nothing a client can see changed, so nothing is announced"
     );
 }
 
@@ -100,7 +88,6 @@ fn a_deleted_file_leaves_the_catalog() {
     let reload = fixture.reload();
 
     assert!(!reload.refused);
-    assert!(reload.published_changed);
     let catalog = fixture.catalog.load();
     assert_eq!(catalog.len(), 1);
     assert!(catalog.find("beta").is_none());
@@ -143,7 +130,6 @@ fn a_catalog_level_fault_keeps_the_previous_catalog() {
 
     assert!(reload.refused, "an empty resolved catalog is not an answer");
     assert_eq!(fixture.catalog.load().len(), 2);
-    assert_eq!(fixture.recorder.announced(), 0);
 }
 
 #[test]
@@ -307,7 +293,6 @@ async fn a_call_after_a_reload_runs_the_new_body_and_a_broken_prompt_answers_wit
     let server = PromptForgeServer::new(
         Arc::clone(&fixture.config),
         Arc::clone(&fixture.catalog),
-        Arc::new(Sessions::new()),
         Arc::new(Retrieval::idle()),
     );
 
@@ -341,4 +326,38 @@ async fn a_call_after_a_reload_runs_the_new_body_and_a_broken_prompt_answers_wit
         "a prompt broken by a save must not run the last good copy: {}",
         text_of(&broken)
     );
+}
+
+#[tokio::test]
+async fn a_prompt_added_mid_session_is_callable_on_the_same_handler() {
+    // The whole of what replaced the announcement: nothing is told to anyone,
+    // and the one handler a session holds runs a prompt written after it
+    // connected, because every call reads the catalog fresh.
+    let fixture = Fixture::new();
+    let server = PromptForgeServer::new(
+        Arc::clone(&fixture.config),
+        Arc::clone(&fixture.catalog),
+        Arc::new(Retrieval::idle()),
+    );
+
+    let missing = server
+        .dispatch(call("run_prompt", json!({ "prompt": "gamma" })))
+        .await
+        .expect("an unresolvable name is a result, not a protocol error");
+    assert_eq!(missing.is_error, Some(true));
+
+    Fixture::write_prompt(fixture.root(), "gamma", "Do the gamma thing", "gamma v1");
+    assert!(!fixture.reload().refused);
+
+    let listed = server
+        .dispatch(call("list_prompts", json!({})))
+        .await
+        .expect("the listing answers");
+    assert!(text_of(&listed).contains("gamma"));
+
+    let ran = server
+        .dispatch(call("run_prompt", json!({ "prompt": "gamma" })))
+        .await
+        .expect("the runner answers");
+    assert_eq!(text_of(&ran), "gamma v1");
 }

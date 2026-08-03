@@ -15,7 +15,6 @@ use super::fixture::{self, PROMPTS};
 use super::{Candidate, Retrieval, Shortlist};
 use crate::catalog::{Catalog, Entry};
 use crate::server::PromptForgeServer;
-use crate::watch::Sessions;
 use crate::{CatalogHandle, NEED_PROMPT};
 
 /// The candidate names a capability retrieves, best first.
@@ -41,7 +40,6 @@ fn server(retrieval: Retrieval) -> PromptForgeServer {
     PromptForgeServer::new(
         Arc::clone(&prompts.config),
         Arc::new(CatalogHandle::new(prompts.catalog.clone())),
-        Arc::new(Sessions::new()),
         Arc::new(retrieval),
     )
 }

@@ -34,7 +34,7 @@ use rmcp::model::{
     Implementation, InitializeResult, JsonObject, ListToolsResult, PaginatedRequestParams,
     ProgressToken, ServerCapabilities, ServerInfo,
 };
-use rmcp::service::{NotificationContext, Peer, RequestContext, RoleServer};
+use rmcp::service::{Peer, RequestContext, RoleServer};
 use serde_json::{Value, json};
 
 use crate::catalog::{Catalog, CatalogHandle, Entry};
@@ -46,7 +46,6 @@ use crate::tools::{
     CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, prompt_value, publishes_built_in,
     tool_definitions,
 };
-use crate::watch::Sessions;
 
 /// What the session-level instructions tell a client once, so a model that
 /// never reads a tool description still learns the two rules that matter: this
@@ -91,33 +90,28 @@ type Reporting = (Peer<RoleServer>, ProgressToken);
 ///
 /// Cloning is how the HTTP transport gives each session a handler: every field
 /// is shared, so a clone publishes the same catalog and, more importantly, the
-/// same registry - a run started in one session is collectable from another -
-/// and registers its session in the same list the watcher announces to.
+/// same registry - a run started in one session is collectable from another.
 #[derive(Debug, Clone)]
 pub struct PromptForgeServer {
     config: Arc<Config>,
     catalog: Arc<CatalogHandle>,
     registry: Arc<RunRegistry>,
-    sessions: Arc<Sessions>,
     retrieval: Arc<Retrieval>,
 }
 
 impl PromptForgeServer {
-    /// Builds a server over a configuration, a live catalog, the session list a
-    /// reload announces a changed tool set to, and the index `need_prompt`
-    /// answers from.
+    /// Builds a server over a configuration, a live catalog, and the index
+    /// `need_prompt` answers from.
     ///
     /// The run registry is built from `[server]` here rather than passed in:
-    /// its limits are that table's, and one server has exactly one. The session
-    /// list and the retrieval index are passed in, because the watcher holds the
-    /// other end of both - it announces to the one and rebuilds the other.
-    /// [`Retrieval::idle`] is the retrieval of a server that publishes no
-    /// `need_prompt` or could not load its model.
+    /// its limits are that table's, and one server has exactly one. The
+    /// retrieval index is passed in, because the watcher holds the other end of
+    /// it and rebuilds it on a save. [`Retrieval::idle`] is the retrieval of a
+    /// server that publishes no `need_prompt` or could not load its model.
     #[must_use]
     pub fn new(
         config: Arc<Config>,
         catalog: Arc<CatalogHandle>,
-        sessions: Arc<Sessions>,
         retrieval: Arc<Retrieval>,
     ) -> PromptForgeServer {
         let registry = Arc::new(RunRegistry::new(&config.server));
@@ -125,7 +119,6 @@ impl PromptForgeServer {
             config,
             catalog,
             registry,
-            sessions,
             retrieval,
         }
     }
@@ -244,31 +237,16 @@ impl PromptForgeServer {
 }
 
 impl ServerHandler for PromptForgeServer {
+    /// The tool-list capability is advertised without `listChanged`, which is
+    /// the honest answer: the published set is the same four built-ins for the
+    /// life of the process, so there is nothing a client could be told.
     fn get_info(&self) -> ServerInfo {
-        InitializeResult::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_tool_list_changed()
-                .build(),
-        )
-        .with_server_info(Implementation::new(
-            env!("CARGO_PKG_NAME"),
-            env!("CARGO_PKG_VERSION"),
-        ))
-        .with_instructions(INSTRUCTIONS)
-    }
-
-    /// Registers the session, so a reload that changes the tool set can tell it.
-    ///
-    /// This is the one hook that names a live client. The list is kept here
-    /// rather than in the transport because stdio has no session manager to ask,
-    /// and a handler clone per session is exactly one registration per session.
-    fn on_initialized(
-        &self,
-        context: NotificationContext<RoleServer>,
-    ) -> impl Future<Output = ()> + Send + '_ {
-        self.sessions.register(context.peer);
-        std::future::ready(())
+        InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new(
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION"),
+            ))
+            .with_instructions(INSTRUCTIONS)
     }
 
     async fn list_tools(

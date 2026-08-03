@@ -27,7 +27,6 @@ use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::Config;
 use crate::result::NO_TURNS;
 use crate::retrieval::Retrieval;
-use crate::watch::Sessions;
 
 /// A prompt that returns its input without calling a model.
 fn echo_prompt(name: &str, description: &str) -> String {
@@ -82,7 +81,6 @@ fn server_with(server_lines: &str) -> (TempDir, PromptForgeServer) {
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
-        Arc::new(Sessions::new()),
         Arc::new(Retrieval::idle()),
     );
     (dir, server)
@@ -206,7 +204,6 @@ async fn a_hyphen_resolves_to_the_underscore_it_stands_for() {
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
-        Arc::new(Sessions::new()),
         Arc::new(Retrieval::idle()),
     );
 
@@ -359,7 +356,6 @@ async fn list_prompts_carries_the_problem_that_stops_a_prompt_running() {
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
-        Arc::new(Sessions::new()),
         Arc::new(Retrieval::idle()),
     );
 
@@ -460,7 +456,6 @@ fn speaking_server_with(gateway: SocketAddr, server_lines: &str) -> (TempDir, Pr
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
-        Arc::new(Sessions::new()),
         Arc::new(Retrieval::idle()),
     );
     (dir, server)

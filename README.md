@@ -339,11 +339,12 @@ tables reload. A candidate that cannot be resolved at all - an unparsable
 leaves the previous catalog serving and logs why, since there is no partial
 answer to give.
 
-When the reload changed anything a client can read about a prompt - its name, its
-description, or the problem that stops it running - every connected session is
-sent `notifications/tools/list_changed`. Nothing turns on it: the published tool
-list is the same four built-ins either way, and the catalog behind them is read
-fresh on every call.
+No client is told anything, and none needs to be. The published tool list is the
+same four built-ins whatever the catalog holds, and the catalog behind them is
+read fresh on every call, so a prompt saved a moment ago is callable on the next
+call - on the session that is already open, with no notification and no
+reconnect. The server does not advertise `listChanged` on its tool capability,
+because there is no change it could announce.
 
 `watch = false` turns the whole thing off: nothing is watched, and the catalog is
 exactly what boot resolved for the life of the process. A directory that cannot

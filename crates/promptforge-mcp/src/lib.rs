@@ -16,15 +16,16 @@
 //! [`RunResult`]; [`McpObserver`] reports that run as it goes, so a client sees
 //! a caption change rather than one silent multi-minute call; and
 //! [`RunRegistry`] admits the run, hands the caller a `run_id` when it outlasts
-//! the client's patience, and keeps the result collectable afterwards. [`build_router`] puts that handler behind a shared
-//! bearer at `/mcp` with an unauthenticated `/healthz` beside it, and
-//! [`serve_http`] and [`serve_stdio`] are the two transports it is reached on.
-//! [`Watcher`] keeps the catalog current while the server runs, so writing a
-//! prompt is an edit-and-call loop rather than an edit-restart-call one, and
-//! [`Sessions`] is who a changed tool list is announced to. [`Retrieval`] is
-//! what answers `need_prompt`: a plain-English capability in, up to three
-//! candidate prompts out, rebuilt on the same swap when a save changed what it
-//! ranks on.
+//! the client's patience, and keeps the result collectable afterwards.
+//! [`build_router`] puts that handler behind a shared bearer at `/mcp` with an
+//! unauthenticated `/healthz` beside it, and [`serve_http`] and [`serve_stdio`]
+//! are the two transports it is reached on. [`Watcher`] keeps the catalog
+//! current while the server runs, so writing a prompt is an edit-and-call loop
+//! rather than an edit-restart-call one: no client is notified and none needs
+//! to be, since the tool list never moves and every call reads the catalog
+//! fresh. [`Retrieval`] is what answers `need_prompt`: a plain-English
+//! capability in, up to three candidate prompts out, rebuilt on the same swap
+//! when a save changed what it ranks on.
 
 mod catalog;
 mod config;
@@ -52,4 +53,4 @@ pub use crate::retrieval::{Candidate, Retrieval, Shortlist};
 pub use crate::server::PromptForgeServer;
 pub use crate::tools::{CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, tool_definitions};
 pub use crate::transport::{HEALTHZ_PATH, MCP_PATH, build_router, serve_http, serve_stdio};
-pub use crate::watch::{ListChanged, Reload, Reloader, Sessions, Watcher};
+pub use crate::watch::{Reload, Reloader, Watcher};

@@ -19,7 +19,6 @@ use crate::config::{Config, Secret};
 use crate::error::ServeError;
 use crate::retrieval::Retrieval;
 use crate::server::PromptForgeServer;
-use crate::watch::Sessions;
 
 /// The shared bearer every fixture router is built with.
 const TOKEN: &str = "shared-bearer";
@@ -43,7 +42,6 @@ fn router_with(token: Secret) -> (TempDir, axum::Router) {
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
-        Arc::new(Sessions::new()),
         Arc::new(Retrieval::idle()),
     );
     (dir, build_router(server, Arc::new(token)))
@@ -237,7 +235,6 @@ async fn serving_over_http_without_a_token_is_refused_by_name() {
     let error = serve_http(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
-        Arc::new(Sessions::new()),
         Arc::new(Retrieval::idle()),
     )
     .await
