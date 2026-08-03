@@ -22,6 +22,12 @@
 //! [`ToolPicker::shortlist`] hands back the candidates instead, for a caller
 //! that would rather choose for itself.
 //!
+//! Loading the model is the expensive part, so a caller serving several
+//! catalogs - or one catalog that changes - loads it once:
+//! [`ToolPicker::build_with`] takes an already-loaded [`Embedder`] behind an
+//! `Arc`, and [`ToolPicker::rebuild`] makes a new engine over this one's
+//! encoder and configuration for the cost of one forward pass per tool.
+//!
 //! ```
 //! use promptforge_tool_picker::{Catalog, Config, Outcome, ToolDescriptor, ToolId, ToolPicker};
 //! use serde_json::json;

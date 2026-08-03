@@ -6,7 +6,7 @@ This crate answers one question for a caller: given a set of tools described onl
 
 The engine is self-contained by construction. The catalog of tool descriptors is the sole input, the embedding model is compiled into the library, and nothing is read from disk or the network at run time. It carries no scripting language, no tool-calling protocol, and no client: mapping a chosen descriptor onto something callable is the caller's job. The same catalog, need, and configuration always produce the same answer, on the same machine and across processes, because every ordering in the pipeline is a total order and every text is embedded on its own rather than in a batch.
 
-Two numbers set the caller's expectations. The default similarity floor of 0.825 was calibrated to hold false bindings at or under five percent, and it earns that budget by binding only near-restatements of a tool's own description: a need phrased as a person actually speaks ("what will the weather be like in Paris this week") scores 0.651 against a weather tool that a restatement ("get the weather forecast for a city") carries to 0.865 and a binding. So `resolve` is the entry point for author-register capability descriptions, and conversational traffic should expect abstention far more often; `shortlist` with a lowered floor is the honest entry point for that traffic. Building an engine loads tens of megabytes of weights and is the one expensive call in the crate's life cycle; build once per catalog and keep the value.
+Two numbers set the caller's expectations. The default similarity floor of 0.825 was calibrated to hold false bindings at or under five percent, and it earns that budget by binding only near-restatements of a tool's own description: a need phrased as a person actually speaks ("what will the weather be like in Paris this week") scores 0.651 against a weather tool that a restatement ("get the weather forecast for a city") carries to 0.865 and a binding. So `resolve` is the entry point for author-register capability descriptions, and conversational traffic should expect abstention far more often; `shortlist` with a lowered floor is the honest entry point for that traffic. Loading the encoder is the one expensive call in the crate's life cycle, and it is paid once: the weights load once per process and an engine is built per catalog over them, through `build_with` for a fresh catalog and `rebuild` for a changed one. A caller whose catalog changes at run time - a watched directory, a reconnected server - therefore pays only one forward pass per tool per change, rather than tens of megabytes of weights again.
 
 ## The key design choices
 
@@ -33,16 +33,21 @@ Two numbers set the caller's expectations. The default similarity floor of 0.825
 
    The error type carrying that arm never exposes a dependency's error type: each variant carries a `detail` string instead, and both the enum and its variants are `#[non_exhaustive]`. A new release of the tensor library or the tokenizer therefore cannot become a breaking change to this crate's public surface, and a new failure mode or a new field on an existing one is additive. Every variant names the offending value, because a configuration rejected without saying which field was wrong is a worse failure than the misbehaviour it prevented.
 
-7. **The public surface is four operations, and the expensive one is named as such.** Ownership is explicit: `build` consumes the catalog, the value is immutable afterwards, and a changed catalog calls for a new engine rather than a mutation.
+7. **The public surface names its expensive operation, and offers a way not to pay it twice.** Ownership is explicit: a constructor consumes the catalog, the value is immutable afterwards, and a changed catalog calls for a new engine rather than a mutation. What is costly is loading the model, not indexing, so the encoder is a shared value a caller may hold: `build_with` takes one and is the single path every engine is indexed by, `build` loads one and calls it, and `rebuild` calls it with this engine's own encoder and configuration. A caller whose catalog changes - a watched directory, a reconnected server - therefore pays the weights once for the life of the process and one forward pass per tool per change. The alternative, a `build` that always loads, made a rebuild cost seconds of CPU on every save; the cost of this one is that the encoder's shape (`Arc<Embedder>`) is now part of the public contract.
 
 ```rust
 impl ToolPicker {
-    pub fn build(catalog: Catalog, config: Config) -> Result<ToolPicker>; // loads the model, embeds every tool
+    pub fn build(catalog: Catalog, config: Config) -> Result<ToolPicker>; // loads the model, then build_with
+    pub fn build_with(embedder: Arc<Embedder>, catalog: Catalog, config: Config) -> Result<ToolPicker>;
+    pub fn rebuild(&self, catalog: Catalog) -> Result<ToolPicker>;       // same encoder, same configuration
+    pub fn embedder(&self) -> &Arc<Embedder>;
     pub fn resolve(&self, need: &str) -> Result<Outcome>;
     pub fn shortlist(&self, need: &str, k: usize) -> Result<Vec<ToolDescriptor>>;
     pub fn tools(&self) -> &[ToolDescriptor];
 }
 ```
+
+   Configuration is validated in `build_with`, so no engine is indexed under a configuration `build` would have refused, and `build` validates once more before loading anything, so a rejected threshold still costs no weights. A rebuild carries the configuration over rather than taking a new one, because a rebuild is a change of data and not of policy; changing a threshold is `build_with` over `embedder()`.
 
 8. **`shortlist` reports where `resolve` decides, and the two can never contradict each other.** A shortlist applies the similarity floor and nothing else - no margin, no twin check - so for any `k` above zero it is empty in exactly the cases `resolve` abstains. Returning the raw top `k` whatever they scored was the alternative, and it lost because it would let one entry point abstain on a need while the other offered three tools for it, and a caller feeding those into a prompt would be offering tools the engine had already judged irrelevant. A caller who wants near-misses lowers the floor, stating that intent in configuration rather than hiding it in a choice of method.
 
@@ -92,13 +97,12 @@ The duplicate threshold is sensitive to description **length**, not only to how 
 
 The floor is stricter than it reads, and that is the design working as calibrated rather than a defect. The consequence for callers is stated in the executive summary and repeated here because it changes which entry point a caller should reach for: `resolve` suits author-register capability text, and end-user phrasing belongs on `shortlist` with a floor the caller has chosen.
 
-Loading the model twice in one process is measurably slower than once, since the loader materializes roughly 133MB of f32 weights, and proving determinism across two builds costs about 6.6 seconds. The `Embedder` is public and `Send + Sync` so it can be shared behind an `Arc`, but `build` still loads its own. Letting a caller hand in an already-loaded embedder is the obvious next improvement and is deliberately deferred, since it widens the constructor's contract for a cost only heavy multi-engine callers currently pay.
+Loading the model twice in one process is measurably slower than once, since the loader materializes roughly 133MB of f32 weights, and proving determinism across two builds costs about 6.6 seconds. That is what `build_with` and `rebuild` exist to stop paying: the `Embedder` is public, `Send + Sync`, and shared behind an `Arc`, so a caller holds one and builds an engine per catalog. Reusing an encoder cannot change an answer - two engines over one encoder embed identical text to identical vectors, which the tests assert - so the saving is free of a correctness trade-off, and the test that a rebuild skips the loading path is written as an identity check on the shared encoder rather than as a wall-clock comparison, which would measure the machine.
 
 ## Decide by use
 
-- Sharing one loaded encoder across several engines, which is a constructor-shape question and cheap to add later.
 - A second embedded model, and with it mean pooling, which the model identifier's shape already accommodates as an added variant.
 - A persistent vector cache. None exists: an index is a process-lifetime thing, and a cache keyed on catalog content would have to be invalidated by the same content hash it is keyed on, which costs more correctness risk than embedding a realistic catalog costs time.
 - Tuning `margin` against a real catalog, which is the one default carrying no measurement behind it.
 
-*2026-08-02 - claude-opus-5*
+*2026-08-02 - claude-opus-5, revised 2026-08-03 for the shared-encoder constructors*
