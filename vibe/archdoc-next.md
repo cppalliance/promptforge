@@ -10,3 +10,5 @@
 - [2026-07-31-1-orchestrator-only] three-axis budgets: Track nesting, section transitions, and tool calls independently rather than using one global limit.
 - [2026-08-02-1-tool-picker] picker threshold calibration: Similarity floors and duplicate thresholds are workload evidence, not general architecture.
 - [2026-08-02-2-mcp-server] coherent catalog snapshots: Boot requires a complete catalog; reloads expose per-entry faults while in-flight runs retain their starting snapshot.
+- [2026-08-03-1-mcp-server-correction] reuse before machinery: The existing principle already requires Lua, store, or catalog reuse before new configuration or APIs.
+- [2026-08-03-1-mcp-server-correction] as-built document ownership: Co-locate each existing crate's as-built design document and keep unbuilt design as separate residue.
