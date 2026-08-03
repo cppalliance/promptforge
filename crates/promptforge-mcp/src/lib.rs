@@ -14,14 +14,16 @@
 //! the set of prompts a harness may call, either refusing to start over an
 //! incomplete result or keeping the failures visible as broken entries;
 //! [`tool_definitions`] turns the resolved catalog into what `tools/list`
-//! answers with; and [`PromptForgeServer`] runs a call to completion against
-//! the gateway and reports it as a [`RunResult`]. Progress while a run is in
-//! flight, collecting a run that outlived its call, and the transports that
-//! carry one come next.
+//! answers with; [`PromptForgeServer`] runs a call to completion against the
+//! gateway and reports it as a [`RunResult`]; and [`McpObserver`] reports that
+//! run as it goes, so a client sees a caption change rather than one silent
+//! multi-minute call. Collecting a run that outlived its call, and the
+//! transports that carry one, come next.
 
 mod catalog;
 mod config;
 mod error;
+mod progress;
 mod result;
 mod server;
 mod tools;
@@ -31,6 +33,7 @@ pub use crate::config::{
     CatalogConfig, Config, Expose, GatewayConfig, PathsConfig, PromptConfig, Secret, ServerConfig,
 };
 pub use crate::error::{CatalogError, ConfigError, Fault};
+pub use crate::progress::{McpObserver, ProgressPump};
 pub use crate::result::{RunResult, RunStatus};
 pub use crate::server::PromptForgeServer;
 pub use crate::tools::{CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, tool_definitions};

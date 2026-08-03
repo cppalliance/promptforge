@@ -21,12 +21,18 @@ rmcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+# `time` is the bounded flush in `progress.rs`, which times the pump out rather
+# than letting a stalled peer hold a reply open.
+tokio = { workspace = true, features = ["time"] }
 toml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+# The client half of `rmcp`, so the progress tests drive the handler over a
+# real session and assert the notifications a client actually receives.
+rmcp = { workspace = true, features = ["client"] }
 tempfile.workspace = true
+tokio = { workspace = true, features = ["io-util", "test-util", "time"] }
 
 [features]
 default = ["picker"]
