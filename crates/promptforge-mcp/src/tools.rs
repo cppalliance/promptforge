@@ -60,11 +60,36 @@ macro_rules! capability_register {
 
 const CAPABILITY_REGISTER: &str = capability_register!();
 
+/// What a prompt's returned value is, said wherever that value is published.
+///
+/// A caller that reads no such statement treats the value as source material
+/// and paraphrases it, which throws away the artifact the prompt was asked for.
+/// The sentence names what the value is and who it is for, and says nothing
+/// about any client or any way of displaying a result, so it stays true whether
+/// the caller is a terminal, an editor, a web application, or a script. It is a
+/// macro so every copy is the same literal and none can drift.
+macro_rules! prompt_value {
+    () => {
+        "A prompt's value is a finished artifact written for the user to read, so pass it through as it stands rather than restating it."
+    };
+}
+
+pub(crate) use prompt_value;
+
+const PROMPT_VALUE: &str = prompt_value!();
+
 const LIST_PROMPTS_DESCRIPTION: &str = "List every PromptForge prompt this server can run. Each entry carries the prompt's name, its description, its version, whether it also has its own tool, and any problem that currently stops it running. The listing is live, so a prompt written or edited since this conversation began is already in it. Run one with run_prompt.";
 
-const RUN_PROMPT_DESCRIPTION: &str = "Run a PromptForge prompt and return what it produced. If you are unsure of a prompt's name, call list_prompts first and use a name from it rather than guessing.";
+const RUN_PROMPT_DESCRIPTION: &str = concat!(
+    "Run a PromptForge prompt and return what it produced. ",
+    prompt_value!(),
+    " If you are unsure of a prompt's name, call list_prompts first and use a name from it rather than guessing."
+);
 
-const CHECK_RUN_DESCRIPTION: &str = "Collect a PromptForge run that outlived the call which started it. Pass the run id from a result whose status was running, and get that run's status now, with its value once it has finished.";
+const CHECK_RUN_DESCRIPTION: &str = concat!(
+    "Collect a PromptForge run that outlived the call which started it. Pass the run id from a result whose status was running, and get that run's status now, with its value once it has finished. ",
+    prompt_value!()
+);
 
 const NEED_PROMPT_DESCRIPTION: &str = concat!(
     "Find the PromptForge prompts closest to a capability you need, up to three of them, best first. ",
@@ -105,12 +130,16 @@ pub fn tool_definitions(catalog: &Catalog) -> Vec<Tool> {
 }
 
 /// The tool a directly exposed prompt publishes: its frontmatter name, its
-/// frontmatter description, and the one-string argument schema every prompt
-/// shares, since a run takes a single raw `args` string and nothing else.
+/// frontmatter description followed by [`PROMPT_VALUE`], and the one-string
+/// argument schema every prompt shares, since a run takes a single raw `args`
+/// string and nothing else.
+///
+/// A broken entry gets the problem instead, and no value statement with it,
+/// because it returns no value to say anything about.
 fn prompt_tool(entry: &Entry) -> Tool {
     let description = match entry.problem() {
         Some(problem) => format!("unavailable: {problem}"),
-        None => entry.description().to_owned(),
+        None => format!("{}\n\n{PROMPT_VALUE}", entry.description()),
     };
     Tool::new(entry.name().to_owned(), description, args_schema())
 }

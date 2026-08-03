@@ -65,7 +65,31 @@ fn a_direct_prompt_carries_its_frontmatter_name_and_description() {
     let tools = tool_definitions(&mixed());
     let echo = &tools[0];
     assert_eq!(echo.name, "echo");
-    assert_eq!(echo.description.as_deref(), Some("Echo the input back"));
+    let description = echo
+        .description
+        .as_deref()
+        .expect("a healthy prompt carries a description");
+    assert!(
+        description.starts_with("Echo the input back"),
+        "{description}"
+    );
+    assert!(description.ends_with(super::PROMPT_VALUE), "{description}");
+}
+
+#[test]
+fn every_tool_returning_a_prompt_value_says_what_that_value_is() {
+    let tools = tool_definitions(&mixed());
+    for name in ["echo", "greet", "run_prompt", "check_run"] {
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == name)
+            .expect("the mixed catalog publishes this tool");
+        let description = tool
+            .description
+            .as_deref()
+            .expect("the tool carries a description");
+        assert!(description.contains(super::PROMPT_VALUE), "{name}");
+    }
 }
 
 #[test]

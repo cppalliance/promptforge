@@ -44,14 +44,19 @@ use crate::registry::RunRegistry;
 use crate::result::{RunResult, RunStatus};
 use crate::retrieval::{Retrieval, Shortlist};
 use crate::tools::{
-    CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, publishes_built_in, tool_definitions,
+    CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, prompt_value, publishes_built_in,
+    tool_definitions,
 };
 use crate::watch::Sessions;
 
 /// What the session-level instructions tell a client once, so a model that
-/// never reads a tool description still learns the one rule that matters: the
-/// runner takes a name from the listing, not a guessed one.
-const INSTRUCTIONS: &str = "This server runs PromptForge prompts. Some prompts have their own tool; the rest are reached with run_prompt. Call list_prompts to see every prompt this server can run, and pass run_prompt a name from that listing rather than guessing one.";
+/// never reads a tool description still learns the two rules that matter: the
+/// runner takes a name from the listing, not a guessed one, and what comes back
+/// is the artifact the user asked for rather than material to work from.
+const INSTRUCTIONS: &str = concat!(
+    "This server runs PromptForge prompts. Some prompts have their own tool; the rest are reached with run_prompt. Call list_prompts to see every prompt this server can run, and pass run_prompt a name from that listing rather than guessing one. ",
+    prompt_value!()
+);
 
 /// What a caller of `need_prompt` is told when the retrieval index is not
 /// loaded: that this one tool cannot answer, and where an answer still is. The
