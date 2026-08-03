@@ -1,19 +1,23 @@
 //! Handler tests.
 //!
-//! None of these needs a gateway: every fixture prompt's Lua block returns a
-//! value, which finishes the run before any model call is made. A turn against
-//! the model is the subject of a later step, and only that step needs a backend
-//! to talk to.
+//! Almost none of these needs a gateway: every fixture prompt's Lua block
+//! returns a value, which finishes the run before any model call is made. The
+//! exception is the turn count, which is a statement about model round trips
+//! and so needs a backend to take one against.
 
 use std::fs;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
+use axum::Json;
+use axum::Router;
+use axum::routing::post;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ErrorCode, JsonObject};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-use super::{PromptForgeServer, UNCOUNTED_TURNS};
+use super::{NO_TURNS, PromptForgeServer};
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::Config;
 
@@ -382,12 +386,69 @@ async fn without_the_picker_the_retrieval_tool_is_not_a_method_at_all() {
     assert_eq!(absent.code, ErrorCode::METHOD_NOT_FOUND);
 }
 
-/// Step 7 wires the counting observer in, and this assertion is what makes
-/// forgetting it loud: the moment a run reports a turn it took, this fails and
-/// the constant behind it has to go.
+/// Spawn a gateway that answers every request with the same assistant message,
+/// so a prose section takes exactly one model round trip.
+async fn spawn_text_gateway() -> SocketAddr {
+    async fn completions(Json(_body): Json<Value>) -> Json<Value> {
+        Json(json!({
+            "choices": [{ "message": { "role": "assistant", "content": "spoken" } }]
+        }))
+    }
+
+    let router = Router::new().route("/v1/chat/completions", post(completions));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind an ephemeral port");
+    let addr = listener.local_addr().expect("read the bound address");
+    tokio::spawn(async move {
+        let _served = axum::serve(listener, router).await;
+    });
+    addr
+}
+
+/// A server over one direct prompt whose single section is prose, pointed at
+/// `gateway`.
+fn speaking_server(gateway: SocketAddr) -> (TempDir, PromptForgeServer) {
+    let dir = tempfile::tempdir().expect("create a temporary prompts directory");
+    write(
+        dir.path(),
+        "speak.md",
+        "---\nname: speak\ndescription: Say something\nversion: 1\npromptforge: 1\n---\n\n\
+         ## Only\n\nSay something.\n",
+    );
+    let config = Config::from_toml_str(&format!(
+        "[server]\ntoken = \"t\"\n\n\
+         [gateway]\nurl = \"http://{gateway}/v1\"\ntoken = \"gw\"\n\n\
+         [paths]\nprompts = '{}'\n\n\
+         [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"tool\"\n",
+        dir.path().display()
+    ))
+    .expect("the fixture configuration parses");
+    let catalog =
+        Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
+    let server = PromptForgeServer::new(Arc::new(config), Arc::new(CatalogHandle::new(catalog)));
+    (dir, server)
+}
+
 #[tokio::test]
-async fn step_7_must_replace_the_uncounted_turn_total() {
-    assert_eq!(UNCOUNTED_TURNS, 0);
+async fn the_reported_turn_total_is_the_one_the_run_took() {
+    // The observer is the only thing that knows: a turn happens inside the
+    // executor, and the handler learns of it through the event stream.
+    let gateway = spawn_text_gateway().await;
+    let (_dir, server) = speaking_server(gateway);
+    let result = server
+        .dispatch(call("speak", json!({})))
+        .await
+        .expect("a direct call is not a protocol error");
+
+    let structured = structured_of(&result);
+    assert_eq!(structured["status"], json!("completed"));
+    assert_eq!(structured["value"], json!("spoken"));
+    assert_eq!(structured["turns"], json!(1), "one prose section, one turn");
+}
+
+#[tokio::test]
+async fn a_run_that_never_started_reports_no_turns() {
     let (_dir, server) = server();
     let result = server
         .dispatch(call("echo", json!({ "args": "hello" })))
@@ -395,7 +456,7 @@ async fn step_7_must_replace_the_uncounted_turn_total() {
         .expect("a direct call is not a protocol error");
     assert_eq!(
         structured_of(&result)["turns"],
-        json!(0),
-        "nothing counts turns until step 7 replaces the null observer"
+        json!(NO_TURNS),
+        "a Lua-only prompt reaches no model"
     );
 }

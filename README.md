@@ -8,7 +8,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. A run reports through it as it goes (see "Watching a run" below)
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-mcp` - library (a binary follows): the MCP server that publishes prompts to an agentic harness as callable tools. Today it parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, and answers a call by running the prompt against the gateway (see "MCP server configuration" below); progress while a run is in flight, collecting a run that outlived its call, and the transports that carry one are being built on top of it
+- `crates/promptforge-mcp` - library (a binary follows): the MCP server that publishes prompts to an agentic harness as callable tools. Today it parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, answers a call by running the prompt against the gateway, and reports that run as it goes through `notifications/progress` (see "MCP server configuration" below); collecting a run that outlived its call, and the transports that carry one, are being built on top of it
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. No Lua, no MCP, no network
 
 ## Build
@@ -270,6 +270,35 @@ statement, so they cannot disagree.
 returns a result saying so, rather than a fault, since the tool was advertised
 and the caller did nothing wrong. Their behavior arrives with the run registry and the picker
 respectively.
+
+### Progress while a run is in flight
+
+A call that carries a `progressToken` gets `notifications/progress` as the run
+walks the prompt, which is what turns one silent multi-minute call into a
+caption a client updates in place. The frames are:
+
+| When | `progress` | `message` |
+|---|---|---|
+| the run starts | 0 | the prompt's name |
+| each section starts | sections entered so far, from 1 | the section's heading |
+
+Nothing else is sent. A section's end would repeat the frame already on the
+wire, and a model turn or a tool call is written to the log instead, where a
+reader can ask for it without every caller paying for it.
+
+`total` is always absent. An early return means the number of sections a run
+will visit is not known when it starts, so a denominator would be a guess
+wearing a measurement's clothes; the client shows a changing caption rather
+than a filling bar. `progress` never decreases, which the protocol requires.
+
+Progress buys visibility and never time: no client resets its call timeout on a
+notification, so a long run is kept alive by the reply deadline rather than by
+this.
+
+A call carrying no `progressToken` is answered identically, with no channel and
+no forwarding task behind it. Either way the run's reported `turns` is the count
+the executor itself reported, since the observer that receives progress is also
+what hears the run's final tally.
 
 ## Prompt file anatomy
 
