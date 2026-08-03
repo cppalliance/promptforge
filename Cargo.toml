@@ -42,6 +42,7 @@ tracing-subscriber = "0.3"
 rmcp = { version = "=3.1.0", features = ["server", "schemars", "transport-streamable-http-server"] }
 arc-swap = "1"
 glob = "0.3"
+humantime = "2"
 humantime-serde = "1"
 notify = "8"
 tempfile = "3"

@@ -12,6 +12,9 @@ arc-swap.workspace = true
 axum.workspace = true
 fastrand.workspace = true
 glob.workspace = true
+# The durations `prompts.toml` carries, read back out to a caller: a refusal
+# names the wait it spent and an unknown run id names the retention window.
+humantime.workspace = true
 humantime-serde.workspace = true
 notify.workspace = true
 promptforge-core.workspace = true
@@ -21,9 +24,9 @@ rmcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-# `time` is the bounded flush in `progress.rs`, which times the pump out rather
-# than letting a stalled peer hold a reply open.
-tokio = { workspace = true, features = ["time"] }
+# `time` is the bounded flush in `progress.rs` and both deadlines in
+# `registry.rs`; `sync` is the admission semaphore and the progress queue.
+tokio = { workspace = true, features = ["sync", "time"] }
 toml.workspace = true
 tracing.workspace = true
 

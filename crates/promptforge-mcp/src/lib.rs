@@ -7,7 +7,8 @@
 //! MCP prompt.
 //!
 //! What exists so far is the crate's configuration, its catalog, the tool
-//! surface those two produce, and the handler that answers a call. [`Config`]
+//! surface those two produce, the handler that answers a call, and the registry
+//! that outlives one. [`Config`]
 //! parses the `prompts.toml` that names the bind address, the shared token, the
 //! prompts directory, the gateway, and which prompts the harness sees;
 //! [`Catalog::resolve`] turns that configuration and the prompts directory into
@@ -15,15 +16,17 @@
 //! incomplete result or keeping the failures visible as broken entries;
 //! [`tool_definitions`] turns the resolved catalog into what `tools/list`
 //! answers with; [`PromptForgeServer`] runs a call to completion against the
-//! gateway and reports it as a [`RunResult`]; and [`McpObserver`] reports that
-//! run as it goes, so a client sees a caption change rather than one silent
-//! multi-minute call. Collecting a run that outlived its call, and the
-//! transports that carry one, come next.
+//! gateway and reports it as a [`RunResult`]; [`McpObserver`] reports that run
+//! as it goes, so a client sees a caption change rather than one silent
+//! multi-minute call; and [`RunRegistry`] admits the run, hands the caller a
+//! `run_id` when it outlasts the client's patience, and keeps the result
+//! collectable afterwards. The transports that carry all of this come next.
 
 mod catalog;
 mod config;
 mod error;
 mod progress;
+mod registry;
 mod result;
 mod server;
 mod tools;
@@ -34,6 +37,7 @@ pub use crate::config::{
 };
 pub use crate::error::{CatalogError, ConfigError, Fault};
 pub use crate::progress::{McpObserver, ProgressPump};
+pub use crate::registry::{RunRegistry, RunSlot};
 pub use crate::result::{RunResult, RunStatus};
 pub use crate::server::PromptForgeServer;
 pub use crate::tools::{CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, tool_definitions};
