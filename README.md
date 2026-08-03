@@ -8,7 +8,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. A run reports through it as it goes (see "Watching a run" below)
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-mcp` - library (a binary follows): the MCP server that publishes prompts to an agentic harness as callable tools. Today it parses its `prompts.toml`, resolves the catalog that configuration names, and turns that catalog into the tool list a harness sees (see "MCP server configuration" below); executing a call and the transports that carry one are being built on top of it
+- `crates/promptforge-mcp` - library (a binary follows): the MCP server that publishes prompts to an agentic harness as callable tools. Today it parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, and answers a call by running the prompt against the gateway (see "MCP server configuration" below); progress while a run is in flight, collecting a run that outlived its call, and the transports that carry one are being built on top of it
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. No Lua, no MCP, no network
 
 ## Build
@@ -178,7 +178,11 @@ happens to contain the word.
 A prompt's identity is its frontmatter `name`. That name is used verbatim as the
 MCP tool name rather than transformed into one, so it must match
 `^[a-z][a-z0-9_]{0,47}$`; transforming would let two different frontmatter names
-collide in `tools/list`.
+collide in `tools/list`. The four built-in names - `list_prompts`,
+`run_prompt`, `need_prompt`, and `check_run` - are reserved: a call is matched
+against the built-ins first, so a prompt claiming one of those names would be
+published as a tool that could never run, and the boot refuses it instead,
+naming the collision.
 
 Boot either produces a complete catalog or the server refuses to start. Every
 resolved file must be readable, must parse, and must declare a legal name; two
@@ -231,6 +235,41 @@ prompt far more often than the same need phrased as a user goal, and no ranking
 engine closes that gap. The instruction and its two examples sit both in the
 tool's description and in the parameter's own, since a client may surface only
 one of the two.
+
+### What a call returns
+
+A call at a prompt's own tool and a call at `run_prompt` end in the same place:
+one run against the configured gateway, reported as a `RunResult`. The result's
+`structuredContent` carries the whole record - `run_id`, `prompt`, `version`,
+`status` (`running`, `completed`, or `failed`), `value`, `turns`, `elapsed_ms`,
+`error` - and the text block beside it carries the plain product: the returned
+value verbatim on completion, the error on failure. A failed run also sets
+`isError`. The value is the whole product, since the runtime writes no output
+files and so has no path to hand back instead.
+
+`run_prompt` resolves the name it is given leniently in exactly two ways: letter
+case folds, and `-` and `_` are the same character. That is safe because a legal
+prompt name may contain neither uppercase nor a hyphen, so normalizing cannot
+merge two names. Past that the match is exact, and a near miss is never run - a
+guess ranked onto a different prompt would spend minutes of gateway time
+producing the wrong artifact, and the caller could not tell. A name that
+resolves to nothing comes back as a result carrying every enabled name, closest
+first, which is what the calling model needs to correct itself on its next call.
+
+Where a failure lands is decided by who can fix it. A malformed argument shape
+is the client's own bug and comes back as a JSON-RPC `-32602`; a name the model
+guessed, or a run that started and failed, comes back as a result the model
+reads and acts on. A tool name this catalog does not publish at all comes back
+as `-32601`: that covers an unknown name, a listed prompt called as though it
+had its own tool, and a built-in the table above leaves out - `need_prompt` in a
+build without the `picker` feature, or the listing tools over an all-direct
+catalog. What the server answers and what it advertises are read from the same
+statement, so they cannot disagree.
+
+`check_run` and `need_prompt`, where published, are not yet answered: each
+returns a result saying so, rather than a fault, since the tool was advertised
+and the caller did nothing wrong. Their behavior arrives with the run registry and the picker
+respectively.
 
 ## Prompt file anatomy
 
