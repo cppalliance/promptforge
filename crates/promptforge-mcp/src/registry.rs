@@ -26,6 +26,15 @@
 //! each read and each write rather than a timer task: the map holds one small
 //! record per run, and a stale record costs nothing until somebody looks.
 //!
+//! What the log carries is what an operator cannot otherwise see. A run handed
+//! back as `running` is `info`, naming the same id the caller was given, and so
+//! is that run reaching its terminal state later, which is the only place its
+//! outcome is observable once the call has gone. Between them they are the
+//! symptom of a `reply_deadline` set too short. A refusal is `warn`, because it
+//! means `max_concurrent_runs` is biting and calls are being turned away.
+//! Eviction is `debug`: a record ageing out is bookkeeping, and the run it
+//! belonged to was reported when it ended.
+//!
 //! The map sits behind a [`std::sync::Mutex`], and every method that takes it is
 //! synchronous, so no guard can be held across an `.await`. The one asynchronous
 //! method, [`RunRegistry::admit`], touches the semaphore and nothing else.
@@ -144,10 +153,12 @@ impl RunRegistry {
         let admission = Arc::clone(&self.admission);
         // The semaphore is never closed, so an `Err` here and a timeout are the
         // same answer to the caller: there is no slot.
-        match tokio::time::timeout(self.admission_timeout, admission.acquire_owned()).await {
-            Ok(Ok(permit)) => Some(RunSlot { _permit: permit }),
-            Ok(Err(_)) | Err(_) => None,
-        }
+        let waited = tokio::time::timeout(self.admission_timeout, admission.acquire_owned()).await;
+        let Ok(Ok(permit)) = waited else {
+            tracing::warn!("no run slot came free: refusing the call, which can be retried");
+            return None;
+        };
+        Some(RunSlot { _permit: permit })
     }
 
     /// Records a run as started. Called before the task that runs it is spawned,
@@ -210,6 +221,11 @@ impl RunRegistry {
                 result
             }
             Err(_elapsed) => {
+                tracing::info!(
+                    run_id = %run_id,
+                    prompt = %prompt,
+                    "the run outlived its call and is collectable by run id"
+                );
                 self.supervise(run_id.to_owned(), prompt.to_owned(), version, task);
                 // The record was written before the task was spawned and a
                 // running one is never evicted, so the fallback is the
@@ -224,10 +240,14 @@ impl RunRegistry {
     /// terminal result of one that ends without producing its own.
     ///
     /// A run that finishes normally has already recorded itself, so the
-    /// supervisor writes nothing. A run that panics or is aborted records
-    /// nothing, and without this task its record would stay `running` for the
-    /// life of the process - never answerable by `check_run`, and never evicted,
-    /// since eviction only reaches a record that finished.
+    /// supervisor writes no record for it. A run that panics or is aborted
+    /// records nothing, and without this task its record would stay `running`
+    /// for the life of the process - never answerable by `check_run`, and never
+    /// evicted, since eviction only reaches a record that finished.
+    ///
+    /// Either way the outcome is logged here, because this task is the last
+    /// thing that observes such a run: the call that asked for it was answered
+    /// while it was still going.
     fn supervise(
         self: &Arc<Self>,
         run_id: String,
@@ -239,10 +259,21 @@ impl RunRegistry {
         // Detached deliberately: the handle is the last thing that could observe
         // this run, and there is no later caller to hand it to.
         let _supervisor = tokio::spawn(async move {
-            if let Err(join) = task.await {
-                let result = registry.unfinished(&run_id, &prompt, version, &join);
-                registry.finished(&run_id, result);
-            }
+            let result = match task.await {
+                Ok(result) => result,
+                Err(join) => {
+                    let result = registry.unfinished(&run_id, &prompt, version, &join);
+                    registry.finished(&run_id, result.clone());
+                    result
+                }
+            };
+            tracing::info!(
+                run_id = %run_id,
+                prompt = %prompt,
+                status = ?result.status,
+                elapsed_ms = result.elapsed_ms,
+                "a backgrounded run reached its terminal state"
+            );
         });
     }
 
@@ -278,10 +309,15 @@ impl RunRegistry {
 /// Drops every record that finished longer than `retain` ago.
 fn evict(records: &mut HashMap<String, Record>, retain: Duration) {
     let now = Instant::now();
+    let held = records.len();
     records.retain(|_, record| match &record.finished {
         Some(finished) => now.saturating_duration_since(finished.at) < retain,
         None => true,
     });
+    let evicted = held - records.len();
+    if evicted > 0 {
+        tracing::debug!(evicted, "evicted run record(s) past the retention window");
+    }
 }
 
 /// Milliseconds since `started`, saturating rather than wrapping.

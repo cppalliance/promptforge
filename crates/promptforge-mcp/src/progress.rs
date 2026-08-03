@@ -33,6 +33,17 @@
 //! renders the caption in place, so a second identical frame is invisible to
 //! the reader and pure cost on the stream.
 //!
+//! What each event logs, which is a separate question from what it sends: the
+//! two run boundaries are `info`, so an operator at the default level sees that
+//! a run happened, what it was, how long it took, and how many model turns it
+//! needed - a run that quietly takes too long is this service's characteristic
+//! failure, and those two lines are what make it visible. Everything inside a
+//! run is `debug`, because a section can make dozens of tool calls and burying
+//! the boundaries under them defeats the purpose. The one exception is a tool
+//! call that failed, which is `warn`: a search that came back empty is a thing
+//! an operator wants without turning on debug, and it is rare enough not to
+//! flood.
+//!
 //! `total` is never sent. A `goto` or an early return means the number of
 //! sections a run will visit is unknown when it starts, so a denominator would
 //! be a guess wearing a measurement's clothes; the client shows a changing
@@ -206,7 +217,7 @@ impl Observer for McpObserver {
     fn on_event(&self, ev: &Event) {
         match ev {
             Event::RunStarted { prompt, sections } => {
-                tracing::debug!(%prompt, sections, "run started");
+                tracing::info!(%prompt, sections, "run started");
                 self.queue(0, prompt);
             }
             Event::SectionStarted { completed, name } => {
@@ -220,7 +231,11 @@ impl Observer for McpObserver {
                 tracing::debug!(section = %section, turn, "model turn");
             }
             Event::ToolCalled { section, tool, ok } => {
-                tracing::debug!(section = %section, tool = %tool, ok, "tool called");
+                if *ok {
+                    tracing::debug!(section = %section, tool = %tool, ok, "tool called");
+                } else {
+                    tracing::warn!(section = %section, tool = %tool, ok, "tool call failed");
+                }
             }
             Event::RunFinished {
                 turns,
@@ -228,7 +243,7 @@ impl Observer for McpObserver {
                 ok,
             } => {
                 self.turns.store(*turns, Ordering::Relaxed);
-                tracing::debug!(turns, elapsed_ms, ok, "run finished");
+                tracing::info!(turns, elapsed_ms, ok, "run finished");
             }
             // `Event` is `#[non_exhaustive]`, so a variant added upstream
             // reaches here rather than breaking the build. An unreported event
@@ -290,10 +305,13 @@ mod tests {
     use std::fmt::Write;
 
     use super::{Frame, McpObserver, ProgressPump, Receiver};
+    use crate::levels::Levels;
     use promptforge_core::execute::{self, RunOptions};
     use promptforge_core::observe::{Event, Observer};
     use promptforge_core::parser::Prompt;
     use promptforge_core::store::Store;
+    use tracing::Level;
+    use tracing_subscriber::layer::SubscriberExt;
 
     /// Every frame the queue is holding.
     fn drain(frames: &mut Receiver<Frame>) -> Vec<Frame> {
@@ -447,6 +465,28 @@ mod tests {
             started.elapsed(),
             super::FLUSH_GRACE,
             "the flush waits its grace and no longer"
+        );
+    }
+
+    #[test]
+    fn only_the_run_boundaries_and_a_failed_tool_call_reach_the_default_level() {
+        let levels = Levels::default();
+        let subscriber = tracing_subscriber::registry().with(levels.clone());
+        let observer = McpObserver::silent();
+        tracing::subscriber::with_default(subscriber, || {
+            for ev in three_section_run() {
+                observer.on_event(&ev);
+            }
+            observer.on_event(&Event::ToolCalled {
+                section: "First".to_string(),
+                tool: "WebSearch".to_string(),
+                ok: false,
+            });
+        });
+        assert_eq!(
+            levels.operator_visible(),
+            vec![Level::INFO, Level::INFO, Level::WARN],
+            "the two run boundaries, then the failed tool call"
         );
     }
 
