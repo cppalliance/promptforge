@@ -8,10 +8,12 @@
 //! containing any delimiter a caller might have chosen stays unambiguous.
 //!
 //! The prose an embedding sees is [`ToolDescriptor::enriched_text`]: the tool
-//! name, its description, and the names of its top-level parameters. That
-//! derivation is deterministic - the same descriptor always yields the same
-//! string - because ranking is only reproducible if the text behind each vector
-//! is.
+//! name with its underscores opened out, its description, and the names of its
+//! top-level parameters, joined in a fixed shape. That derivation is
+//! deterministic - the same descriptor always yields the same string - because
+//! ranking is only reproducible if the text behind each vector is, and the
+//! shape is fixed because the crate's calibrated thresholds were measured
+//! against text in exactly that shape.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -173,7 +175,10 @@ impl ToolDescriptor {
     /// an error.
     ///
     /// The order is ascending by byte value rather than the order the keys
-    /// happened to arrive in, so the result does not depend on how the JSON was
+    /// happened to arrive in. A JSON object is an unordered set of members, and
+    /// the ordering the keys had in the source text is not recoverable once the
+    /// document is parsed, so sorting is the one ordering that can be produced
+    /// identically every time; the result does not depend on how the JSON was
     /// parsed or which map the parser used.
     #[must_use]
     pub fn parameter_names(&self) -> Vec<&str> {
@@ -190,10 +195,29 @@ impl ToolDescriptor {
 
     /// The text the engine embeds for this tool.
     ///
-    /// It is the tool's name, then its description, then its parameter names,
-    /// separated by single spaces. Parameters are included because a name and
-    /// a one-line description often under-describe a tool, while its argument
-    /// names say concretely what it operates on.
+    /// The text is built from up to three parts, in this order:
+    ///
+    /// 1. the tool's name with every `_` replaced by a single space, so
+    ///    `read_file` reads as `read file`;
+    /// 2. the description exactly as its author wrote it;
+    /// 3. the literal `parameters: ` followed by the parameter names joined
+    ///    with `, `, present only when there is at least one parameter.
+    ///
+    /// Empty parts are dropped, and the parts that remain are joined with
+    /// `. ` - a period and a space. A description that already ends in a
+    /// period therefore yields a doubled period before the parameter part;
+    /// that is intended and is not collapsed. Parameters are included because
+    /// a name and a one-line description often under-describe a tool, while
+    /// its argument names say concretely what it operates on, and the name is
+    /// de-underscored because the embedding model reads a snake_case
+    /// identifier as one opaque token rather than as its words.
+    ///
+    /// The exact shape matters beyond taste. The thresholds in
+    /// [`Config`](crate::Config) - the similarity floor above all - are
+    /// calibrated numbers, and they are only meaningful against vectors of
+    /// text in this shape. Changing the punctuation, the ordering, or the
+    /// `parameters: ` prefix moves every similarity score and silently
+    /// invalidates those defaults.
     ///
     /// The result is a pure function of the descriptor: parameter names are
     /// ordered by [`ToolDescriptor::parameter_names`], so repeated calls, and
@@ -202,13 +226,14 @@ impl ToolDescriptor {
     #[must_use]
     pub fn enriched_text(&self) -> String {
         let parameters = self.parameter_names();
-        let mut parts: Vec<&str> = Vec::with_capacity(2 + parameters.len());
-        parts.push(self.name());
-        if !self.description.is_empty() {
-            parts.push(&self.description);
+        let mut parts: Vec<String> = Vec::with_capacity(3);
+        parts.push(self.name().replace('_', " "));
+        parts.push(self.description.clone());
+        if !parameters.is_empty() {
+            parts.push(format!("parameters: {}", parameters.join(", ")));
         }
-        parts.extend(parameters);
-        parts.join(" ")
+        parts.retain(|part| !part.is_empty());
+        parts.join(". ")
     }
 }
 
@@ -314,7 +339,7 @@ mod tests {
         }));
         assert_eq!(
             tool.enriched_text(),
-            "read_file Read a file from disk encoding offset path"
+            "read file. Read a file from disk. parameters: encoding, offset, path"
         );
     }
 
@@ -323,7 +348,7 @@ mod tests {
         for schema in [json!({}), json!({"type": "object", "properties": {}})] {
             let tool = descriptor(schema);
             assert!(tool.parameter_names().is_empty());
-            assert_eq!(tool.enriched_text(), "read_file Read a file from disk");
+            assert_eq!(tool.enriched_text(), "read file. Read a file from disk");
         }
     }
 
@@ -334,7 +359,26 @@ mod tests {
             "",
             json!({"properties": {"path": {"type": "string"}}}),
         );
-        assert_eq!(tool.enriched_text(), "read_file path");
+        assert_eq!(tool.enriched_text(), "read file. parameters: path");
+    }
+
+    #[test]
+    fn a_description_ending_in_a_period_keeps_the_doubled_period() {
+        let tool = ToolDescriptor::new(
+            ToolId::new("files", "read_file"),
+            "Read a file from disk.",
+            json!({"properties": {"path": {}, "encoding": {}}}),
+        );
+        assert_eq!(
+            tool.enriched_text(),
+            "read file. Read a file from disk.. parameters: encoding, path"
+        );
+    }
+
+    #[test]
+    fn a_tool_without_parameters_omits_the_parameters_part() {
+        let tool = ToolDescriptor::new(ToolId::new("meta", "list_tools"), "List tools.", json!({}));
+        assert_eq!(tool.enriched_text(), "list tools. List tools.");
     }
 
     #[test]
@@ -345,7 +389,7 @@ mod tests {
                 tool.parameter_names().is_empty(),
                 "a non-object schema must not produce parameter names"
             );
-            assert_eq!(tool.enriched_text(), "read_file Read a file from disk");
+            assert_eq!(tool.enriched_text(), "read file. Read a file from disk");
         }
     }
 
@@ -450,7 +494,7 @@ mod tests {
         assert_eq!(parsed.annotations.destructive, None);
         assert_eq!(
             parsed.enriched_text(),
-            "read_file Read a file from disk path"
+            "read file. Read a file from disk. parameters: path"
         );
     }
 
