@@ -8,6 +8,8 @@
 
 use std::process::ExitCode;
 
+use promptforge_core::execute::RunOptions;
+use promptforge_core::observe::NullObserver;
 use promptforge_core::store::Store;
 use promptforge_core::tools::Tool;
 use promptforge_core::{execute, parser::Prompt};
@@ -84,7 +86,15 @@ async fn run(path: &str, input: &str) -> ExitCode {
     // uses the in-memory sandbox backend by default.
     let store = Store::memory();
 
-    match execute::run(&prompt, input, &tools, &store).await {
+    // The CLI prints the run's result and nothing else, so it discards
+    // progress; its gateway client comes from the environment, which is what
+    // `client: None` selects.
+    let options = RunOptions {
+        observer: &NullObserver,
+        client: None,
+    };
+
+    match execute::run(&prompt, input, &tools, &store, options).await {
         Ok(result) => {
             println!("{result}");
             ExitCode::SUCCESS
