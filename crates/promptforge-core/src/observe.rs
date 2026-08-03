@@ -2,7 +2,7 @@
 //!
 //! A run is otherwise silent until it returns, which for a multi-section prompt
 //! is minutes. [`Observer`] is the seam a caller hooks to watch one: the
-//! executor will hand it an [`Event`] at each point a reader would want to see,
+//! executor hands it an [`Event`] at each point a reader would want to see,
 //! and the caller forwards, records, or discards it. [`NullObserver`] is the
 //! discarding implementation, and is what a caller that wants no progress
 //! passes.
@@ -18,12 +18,13 @@
 //! {"SectionStarted": {"completed": 1, "name": "Gather"}}
 //! ```
 //!
-//! Nothing emits an [`Event`] yet: this module is the seam alone, and
-//! [`crate::execute`] is what will emit through it.
+//! [`crate::execute::run`] emits through this seam: it takes a
+//! [`crate::execute::RunOptions`] carrying the observer, and reports the run's
+//! start and end, each section boundary, each model turn, and each tool call.
 
 /// A sink for [`Event`]s produced by a run.
 ///
-/// The executor will call [`on_event`] from whatever task is driving the run,
+/// The executor calls [`on_event`] from whatever task is driving the run,
 /// so an implementation must be `Send + Sync`. It must also be cheap:
 /// `on_event` is synchronous and sits on the run's own path, so an
 /// implementation that forwards elsewhere hands the event to a channel and

@@ -4,9 +4,11 @@
 //! call: the [`parser`] that reads the file into a [`parser::Prompt`], the
 //! [`client`] that talks to an `OpenAI`-compatible chat completions endpoint, and
 //! [`execute`] that walks a prompt's sections top to bottom (fall-through) and
-//! returns the run's result. [`observe`] is the seam through which a run will
-//! report its progress, for a caller that wants to watch a long run in flight;
-//! it is declared but not yet wired, so nothing emits an event today.
+//! returns the run's result. [`observe`] is the seam through which a run
+//! reports its progress, for a caller that wants to watch a long run in
+//! flight; [`execute::run`] takes an [`execute::RunOptions`] carrying the
+//! [`observe::Observer`] the events go to, and
+//! [`observe::NullObserver`] is what a caller wanting silence passes.
 //!
 //! A source is a promptforge prompt only when its frontmatter declares a
 //! `promptforge:` version; [`promptforge_version`] reports it (or `None`), and

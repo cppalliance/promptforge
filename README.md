@@ -5,7 +5,7 @@ markdown is the program, the model is the CPU.
 
 ## Workspace
 
-- `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. The seam is declared but not yet wired: nothing emits an event today
+- `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. A run reports through it as it goes (see "Watching a run" below)
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. No Lua, no MCP, no network
@@ -191,6 +191,38 @@ Repeat exactly, with no extra words: {{ var.greeting }}
 `promptforge run prompts/greet.md "World"` sends `Repeat exactly, with no extra
 words: Hello, World!` to the model. `prompts/echo.md` (just `return args`) prints
 its input with no model call and no gateway.
+
+## Watching a run
+
+A multi-section run is minutes long, so `execute::run` reports itself as it
+goes. Its last parameter is a `RunOptions`:
+
+```rust
+use promptforge_core::execute::{self, RunOptions};
+use promptforge_core::observe::NullObserver;
+
+let opts = RunOptions {
+    observer: &NullObserver,   // or your own Observer
+    client: None,              // None builds the gateway client from the environment
+};
+let result = execute::run(&prompt, input, &tools, &store, opts).await?;
+```
+
+- `observer` receives an `Event` when the run starts and ends, at each section
+  boundary, at each model turn, and after each tool call. `on_event` is
+  synchronous and sits on the run's own path, so an implementation that
+  forwards elsewhere queues the event and returns rather than blocking. Events
+  are a report, never a decision: dropping them cannot change the result, which
+  is why `NullObserver` (the discarding one) is what the CLI passes.
+- `Event::SectionStarted` carries `completed`, the number of sections entered so
+  far counting from 1. It never decreases. There is deliberately no total: an
+  early return means the number of sections a run will visit is not known when
+  it starts, so a denominator would be a guess.
+- `client` is the gateway client the run's model calls go through. `None` builds
+  one from `PROMPTFORGE_BASE_URL` / `PROMPTFORGE_TOKEN` / `PROMPTFORGE_MODEL` on
+  the first call that needs it, which is what the CLI uses. A caller configured
+  from a file passes its own, because setting a process environment variable is
+  `unsafe` under edition 2024 and this workspace forbids unsafe.
 
 ## Tools
 
