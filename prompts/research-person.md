@@ -1,5 +1,5 @@
 ---
-name: research-person
+name: research_person
 description: Research a person from the open web and return a concise, factual summary.
 version: 1
 promptforge: 1

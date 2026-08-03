@@ -27,8 +27,10 @@ pub enum ConfigError {
     /// `[server].token` was present but carried nothing: empty, or only
     /// whitespace. An empty shared bearer would make a request presenting no
     /// credential compare equal, so it is refused where it is read rather than
-    /// where it is used.
-    #[error("[server].token is required and must not be empty")]
+    /// where it is used. An absent token is a different statement and is
+    /// allowed: only the HTTP transport reads one, and it refuses to bind
+    /// without one.
+    #[error("[server].token must not be empty")]
     EmptyToken,
 
     /// A `${VAR}` referenced an environment variable that was not set.
@@ -46,6 +48,12 @@ pub enum ConfigError {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ServeError {
+    /// `[server].token` was absent and the streamable-HTTP transport has no
+    /// shared bearer to check. Refused before the socket is bound, since a
+    /// `/mcp` served without one would be open to anything that can reach it.
+    #[error("[server].token is required to serve over http")]
+    MissingToken,
+
     /// The configured socket could not be bound.
     #[non_exhaustive]
     #[error("bind {addr}")]

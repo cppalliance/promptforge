@@ -53,7 +53,10 @@ fn parses_a_full_config() {
     let config = Config::from_toml_str(FULL).expect("full config parses");
 
     assert_eq!(config.server.bind.port(), 9310);
-    assert_eq!(config.server.token.expose(), "shared-bearer");
+    assert_eq!(
+        config.server.token.as_ref().map(Secret::expose),
+        Some("shared-bearer")
+    );
     assert_eq!(config.server.max_concurrent_runs.get(), 4);
     assert_eq!(config.server.admission_timeout, Duration::from_secs(30));
     assert_eq!(config.server.reply_deadline, Duration::from_secs(240));
@@ -131,7 +134,11 @@ fn a_named_block_can_carry_a_file() {
 }
 
 #[test]
-fn a_missing_server_token_is_an_error() {
+fn a_config_with_no_server_token_loads() {
+    // The token is a property of the HTTP surface: `serve` refuses to bind
+    // without one, and `serve --stdio` never reads it. Requiring it here is
+    // what stopped a local stdio install over a credential its transport does
+    // not use.
     let toml = r#"
 [server]
 bind = "127.0.0.1:9310"
@@ -140,9 +147,37 @@ bind = "127.0.0.1:9310"
 url = "http://127.0.0.1:8081/v1"
 token = "t"
 "#;
-    let err = Config::from_toml_str(toml).expect_err("a config with no token is refused");
-    assert!(matches!(err, ConfigError::Parse(_)), "{err}");
-    assert!(err.to_string().contains("token"), "{err}");
+    let config = Config::from_toml_str(toml).expect("a config with no token loads");
+    assert!(config.server.token.is_none());
+    assert_eq!(config.gateway.token.expose(), "t");
+}
+
+#[test]
+fn an_unset_variable_in_the_server_token_leaves_it_absent() {
+    // Interpolation happens after the parse, so an unset variable is
+    // attributed to the field that carried it. This is the one field that
+    // survives one, because stdio boots without a token at all.
+    let toml = MINIMAL.replace(
+        "token = \"shared-bearer\"",
+        "token = \"${NOT_SET_ANYWHERE}\"",
+    );
+    let config = Config::from_toml_str(&toml).expect("an unset server token is not a load failure");
+    assert!(config.server.token.is_none());
+}
+
+#[test]
+fn an_unset_variable_outside_the_server_token_is_still_an_error() {
+    // The gateway token is required on both transports, so an unset variable
+    // there fails the load rather than starting with a blank credential.
+    let toml = MINIMAL.replace(
+        "token = \"gateway-bearer\"",
+        "token = \"${NOT_SET_ANYWHERE}\"",
+    );
+    let err = Config::from_toml_str(&toml).expect_err("an unset gateway token is refused");
+    assert!(
+        matches!(err, ConfigError::UnresolvedVar(ref name) if name == "NOT_SET_ANYWHERE"),
+        "{err}"
+    );
 }
 
 #[test]

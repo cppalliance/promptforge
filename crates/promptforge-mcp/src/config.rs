@@ -112,7 +112,15 @@ pub struct ServerConfig {
     #[serde(default = "default_bind")]
     pub bind: SocketAddr,
     /// The shared bearer token every `/mcp` request must present.
-    pub token: Secret,
+    ///
+    /// Optional, because the token is a property of the HTTP surface alone:
+    /// `serve` refuses to bind without one and `serve --stdio` never reads it.
+    /// A `${VAR}` here that the environment does not set leaves the token
+    /// absent rather than failing the load, so a local stdio install is not
+    /// stopped by a credential its transport never reads. Present, it must
+    /// carry something.
+    #[serde(default)]
+    pub token: Option<Secret>,
     /// How many prompts may run at once before a call waits for admission.
     #[serde(default = "default_max_concurrent_runs")]
     pub max_concurrent_runs: NonZeroUsize,
@@ -213,7 +221,7 @@ impl Config {
     /// [`ConfigError::Interpolation`] or [`ConfigError::UnresolvedVar`] if a
     /// `${VAR}` is malformed or unset, [`ConfigError::Parse`] if the TOML is
     /// invalid or carries an unknown key, and [`ConfigError::EmptyToken`] if
-    /// `[server].token` carries nothing.
+    /// `[server].token` is present and carries nothing.
     pub fn load(path: &Path) -> Result<Config, ConfigError> {
         let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
             path: path.display().to_string(),
@@ -224,11 +232,17 @@ impl Config {
 
     /// Interpolates and parses a configuration from a TOML string.
     ///
+    /// The TOML is parsed first and every string value interpolated after, so
+    /// an unset `${VAR}` is attributed to the field that carried it. That is
+    /// what lets `[server].token` alone survive one: it is optional, and the
+    /// transport that reads it refuses to bind without it.
+    ///
     /// # Errors
     /// Returns [`ConfigError::Interpolation`] or [`ConfigError::UnresolvedVar`]
-    /// for a malformed or unset `${VAR}`, [`ConfigError::Parse`] for invalid
-    /// TOML or an unknown key, and [`ConfigError::EmptyToken`] for a
-    /// `[server].token` that is empty or whitespace alone.
+    /// for a malformed or unset `${VAR}` outside `[server].token`,
+    /// [`ConfigError::Parse`] for invalid TOML or an unknown key, and
+    /// [`ConfigError::EmptyToken`] for a `[server].token` that is present and
+    /// empty or whitespace alone.
     ///
     /// # Examples
     /// ```
@@ -246,9 +260,12 @@ impl Config {
     /// # Ok::<(), promptforge_mcp::ConfigError>(())
     /// ```
     pub fn from_toml_str(raw: &str) -> Result<Config, ConfigError> {
-        let interpolated = interpolate(raw)?;
-        let config: Config =
-            toml::from_str(&interpolated).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        let mut document: toml::Table =
+            toml::from_str(raw).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        interpolate_document(&mut document)?;
+        let config: Config = toml::Value::Table(document)
+            .try_into()
+            .map_err(|e: toml::de::Error| ConfigError::Parse(e.to_string()))?;
         config.validate()?;
         Ok(config)
     }
@@ -257,10 +274,12 @@ impl Config {
     ///
     /// The shared bearer is the whole of it: an empty token would make a request
     /// presenting no credential compare equal to it, so the load refuses one
-    /// rather than leaving the surface open to a typo. The bearer layer refuses
-    /// an absent header on its own too, so the two defences are independent.
+    /// rather than leaving the surface open to a typo. An absent token is a
+    /// different statement - stdio needs none - and `serve` refuses to bind
+    /// without one. The bearer layer refuses an absent header on its own too,
+    /// so the two defences are independent.
     fn validate(&self) -> Result<(), ConfigError> {
-        if self.server.token.is_blank() {
+        if self.server.token.as_ref().is_some_and(Secret::is_blank) {
             return Err(ConfigError::EmptyToken);
         }
         Ok(())
@@ -312,6 +331,51 @@ fn default_prompts_dir() -> PathBuf {
 /// A named block publishes its prompt unless it says otherwise.
 fn default_enabled() -> bool {
     true
+}
+
+/// Expands `${VAR}` in every string the parsed document carries.
+///
+/// Interpolating after the parse rather than over the raw text is what lets one
+/// field be treated differently from the rest. `[server].token` is that field:
+/// an unset variable there drops the token, because the HTTP transport refuses
+/// to bind without one anyway and the stdio transport never reads it, so
+/// failing the load would stop a local install over a credential it does not
+/// use. Everywhere else an unset variable still fails the load, which is what
+/// keeps the gateway from starting with a blank credential.
+fn interpolate_document(document: &mut toml::Table) -> Result<(), ConfigError> {
+    if let Some(server) = document
+        .get_mut("server")
+        .and_then(toml::Value::as_table_mut)
+        && let Some(toml::Value::String(token)) = server.get("token")
+        && matches!(interpolate(token), Err(ConfigError::UnresolvedVar(_)))
+    {
+        server.remove("token");
+    }
+    interpolate_table(document)
+}
+
+/// Expands `${VAR}` in every string under one table.
+fn interpolate_table(table: &mut toml::Table) -> Result<(), ConfigError> {
+    for (_, value) in table.iter_mut() {
+        interpolate_value(value)?;
+    }
+    Ok(())
+}
+
+/// Expands `${VAR}` in one value, reaching through arrays and tables. A number,
+/// a boolean, and a datetime carry no text to expand.
+fn interpolate_value(value: &mut toml::Value) -> Result<(), ConfigError> {
+    match value {
+        toml::Value::String(text) => *text = interpolate(text)?,
+        toml::Value::Array(items) => {
+            for item in items {
+                interpolate_value(item)?;
+            }
+        }
+        toml::Value::Table(table) => interpolate_table(table)?,
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Expands `${VAR}` from the process environment; `$$` is a literal `$`.
