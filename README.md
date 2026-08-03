@@ -8,6 +8,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. A run reports through it as it goes (see "Watching a run" below)
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
+- `crates/promptforge-mcp` - library (a binary follows): the MCP server that publishes prompts to an agentic harness as callable tools. Today it parses its `prompts.toml` (see "MCP server configuration" below); the catalog, the tool surface, and the transports are being built on top of it
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. No Lua, no MCP, no network
 
 ## Build
@@ -97,6 +98,73 @@ base_url = "https://api.search.brave.com/res/v1"  # optional; override for a pro
 
 With this configured, the gateway exposes `POST /v1/tools/web_search` (bearer-authed
 with the same shared token as `/v1/chat/completions`).
+
+## MCP server configuration
+
+The MCP server reads one `prompts.toml`. It names the socket and the shared
+bearer, the prompts directory, the gateway runs go through, and which prompts
+the harness sees. Only `[server]` and `[gateway]` are required; every other
+table and key has a default, and an unknown key fails the load rather than being
+silently ignored.
+
+```toml
+[server]
+bind = "127.0.0.1:9310"              # default
+token = "${PROMPTFORGE_MCP_TOKEN}"   # shared bearer; every /mcp request must present it
+max_concurrent_runs = 4              # default; runs beyond it wait for admission
+admission_timeout = "30s"            # default; how long a call waits for a slot
+reply_deadline = "240s"              # default; past it a call returns a run id and the run continues
+retain_completed = "1h"              # default; how long a finished run stays collectable
+watch = true                         # default; re-read prompts on save
+watch_debounce = "500ms"             # default
+
+[paths]
+prompts = 'C:\ProgramData\promptforge\prompts'   # default: prompts
+
+[gateway]
+url = "http://127.0.0.1:8081/v1"
+token = "${PROMPTFORGE_TOKEN}"
+model = "claude-sonnet-4-6"          # optional; the core default otherwise
+
+# Whole directories. Patterns are relative to [paths].prompts; `*` does not
+# cross a separator and `**` does. Omit this table to enumerate by hand.
+[catalog]
+include = ["*.md", "governance/**/*.md"]
+exclude = ["_*.md", "drafts/**"]
+default_expose = "list"              # default
+
+# Individual prompts, keyed by the prompt's frontmatter name. A block with no
+# `file` is an exception to the globs.
+[prompts.research_person]
+expose = "tool"                      # promote one globbed prompt to its own tool
+
+[prompts.scratch_test]
+enabled = false                      # drop one the globs caught
+
+[prompts.staker]
+file = "experiments/staker-v3.md"    # reach a file no glob matches
+expose = "tool"
+```
+
+Two exposures. `expose = "list"` (the default) keeps a prompt out of the
+harness's tool list and reachable through the server's own listing and retrieval
+tools, which costs one extra round trip and no permanent context slot.
+`expose = "tool"` gives the prompt its own entry in `tools/list` for the calling
+model to select directly. Direct exposure is a promotion, not a starting point:
+a client caches its tool list for the life of its process, so a newly added or
+renamed direct tool is invisible until it restarts, while the listing tools have
+fixed names and their catalog changes freely.
+
+Durations are plain strings (`500ms`, `30s`, `1h`). As in `gateway.toml`, any
+string value may contain `${VAR}`, expanded from the process environment at load
+time, with `$$` for a literal `$`; an unset variable fails the load, so the
+server never starts with a blank credential.
+
+`reply_deadline` must stay under the calling client's own ceiling. Cursor's
+remote calls fail at about 300 seconds and a progress notification does not
+reset that clock, so the default leaves margin and a run that outlives it is
+collected by id rather than lost. A stdio-only deployment can raise it, since no
+such limit applies there.
 
 ## Prompt file anatomy
 
