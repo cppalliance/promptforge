@@ -71,15 +71,15 @@ const SSE_KEEP_ALIVE: Duration = Duration::from_secs(15);
 /// # Examples
 /// ```
 /// # use std::sync::Arc;
-/// # use promptforge_mcp::{
+/// # use promptforge_mcp_server::{
 /// #     Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Retrieval,
 /// # };
-/// # fn demo(config: Config, catalog: Catalog, token: promptforge_mcp::Secret) {
+/// # fn demo(config: Config, catalog: Catalog, token: promptforge_mcp_server::Secret) {
 /// let token = Arc::new(token);
 /// let config = Arc::new(config);
 /// let catalog = Arc::new(CatalogHandle::new(catalog));
 /// let server = PromptForgeServer::new(config, catalog, Arc::new(Retrieval::idle()));
-/// let router = promptforge_mcp::build_router(server, token);
+/// let router = promptforge_mcp_server::build_router(server, token);
 /// # let _ = router;
 /// # }
 /// ```
@@ -134,7 +134,7 @@ pub async fn serve_http(
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .map_err(|source| ServeError::Bind { addr: bind, source })?;
-    tracing::info!("promptforge-mcp serving on http://{bind}{MCP_PATH}");
+    tracing::info!("promptforge-mcp-server serving on http://{bind}{MCP_PATH}");
     axum::serve(listener, build_router(server, token))
         .await
         .map_err(|source| ServeError::Http { source })
@@ -158,7 +158,7 @@ pub async fn serve_stdio(
     retrieval: Arc<Retrieval>,
 ) -> Result<(), ServeError> {
     tracing::info!(
-        "promptforge-mcp serving on stdio; [server].bind ({}) and [server].token are not used on this transport",
+        "promptforge-mcp-server serving on stdio; [server].bind ({}) and [server].token are not used on this transport",
         config.server.bind
     );
     let server = PromptForgeServer::new(config, catalog, retrieval);

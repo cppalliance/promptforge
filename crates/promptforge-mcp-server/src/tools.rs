@@ -94,7 +94,7 @@ const NEED_PROMPT_DESCRIPTION: &str = concat!(
 ///
 /// # Examples
 /// ```
-/// # use promptforge_mcp::tool_definitions;
+/// # use promptforge_mcp_server::tool_definitions;
 /// let published = tool_definitions();
 /// let names: Vec<&str> = published.iter().map(|t| t.name.as_ref()).collect();
 /// assert!(names.contains(&"run_prompt"));

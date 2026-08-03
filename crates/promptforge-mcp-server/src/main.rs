@@ -1,4 +1,5 @@
-//! The `promptforge-mcp` binary: `promptforge-mcp serve [--stdio] <prompts.toml>`.
+//! The `promptforge-mcp-server` binary:
+//! `promptforge-mcp-server serve [--stdio] <prompts.toml>`.
 //!
 //! Boot either produces a complete catalog or the process refuses to serve.
 //! Every fault the resolution pass found is printed before the nonzero exit, so
@@ -8,12 +9,12 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use promptforge_mcp::{
+use promptforge_mcp_server::{
     Catalog, CatalogHandle, Config, OnBroken, Retrieval, Watcher, serve_http, serve_stdio,
 };
 
 /// What the process prints when the arguments are not the two shapes it takes.
-const USAGE: &str = "usage: promptforge-mcp serve [--stdio] <prompts.toml>";
+const USAGE: &str = "usage: promptforge-mcp-server serve [--stdio] <prompts.toml>";
 
 /// Entry point. The runtime is built inside `main` rather than by an attribute
 /// macro, matching the gateway, so a future service wrapper can construct it

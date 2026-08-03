@@ -21,7 +21,9 @@ use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
 
-use promptforge_mcp::{Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Retrieval};
+use promptforge_mcp_server::{
+    Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Retrieval,
+};
 use rmcp::model::{CallToolRequestParams, CallToolResponse, ProgressNotificationParam};
 use rmcp::service::NotificationContext;
 use rmcp::{ClientHandler, RoleClient, ServiceExt};
