@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/promptforge-core", "crates/promptforge-webfetch", "crates/promptforge-cli", "crates/promptforge-gateway"]
+members = ["crates/promptforge-core", "crates/promptforge-webfetch", "crates/promptforge-cli", "crates/promptforge-gateway", "crates/promptforge-tool-picker"]
 
 [workspace.package]
 version = "0.1.0"
