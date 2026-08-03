@@ -6,15 +6,20 @@
 //! happens here, against the gateway, so a prompt is always a tool and never an
 //! MCP prompt.
 //!
-//! What exists so far is the crate's configuration: [`Config`] parses the
-//! `prompts.toml` that names the bind address, the shared token, the prompts
-//! directory, the gateway, and which prompts the harness sees. The catalog, the
-//! MCP surface, and the transports come next.
+//! What exists so far is the crate's configuration and its catalog. [`Config`]
+//! parses the `prompts.toml` that names the bind address, the shared token, the
+//! prompts directory, the gateway, and which prompts the harness sees;
+//! [`Catalog::resolve`] turns that configuration and the prompts directory into
+//! the set of prompts a harness may call, either refusing to start over an
+//! incomplete result or keeping the failures visible as broken entries. The MCP
+//! surface and the transports come next.
 
+mod catalog;
 mod config;
 mod error;
 
+pub use crate::catalog::{Catalog, CatalogHandle, Entry, OnBroken};
 pub use crate::config::{
     CatalogConfig, Config, Expose, GatewayConfig, PathsConfig, PromptConfig, Secret, ServerConfig,
 };
-pub use crate::error::ConfigError;
+pub use crate::error::{CatalogError, ConfigError, Fault};

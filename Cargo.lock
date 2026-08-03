@@ -2762,6 +2762,7 @@ dependencies = [
  "glob",
  "humantime-serde",
  "notify",
+ "promptforge-core",
  "promptforge-tool-picker",
  "rmcp",
  "serde",

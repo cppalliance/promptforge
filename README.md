@@ -8,7 +8,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. A run reports through it as it goes (see "Watching a run" below)
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-mcp` - library (a binary follows): the MCP server that publishes prompts to an agentic harness as callable tools. Today it parses its `prompts.toml` (see "MCP server configuration" below); the catalog, the tool surface, and the transports are being built on top of it
+- `crates/promptforge-mcp` - library (a binary follows): the MCP server that publishes prompts to an agentic harness as callable tools. Today it parses its `prompts.toml` and resolves the catalog that configuration names (see "MCP server configuration" below); the tool surface and the transports are being built on top of it
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. No Lua, no MCP, no network
 
 ## Build
@@ -165,6 +165,37 @@ remote calls fail at about 300 seconds and a progress notification does not
 reset that clock, so the default leaves margin and a run that outlives it is
 collected by id rather than lost. A stdio-only deployment can raise it, since no
 such limit applies there.
+
+### How the catalog is resolved
+
+The server expands `include`, subtracts `exclude`, and then applies the
+`[prompts.NAME]` blocks. A block promotes one globbed prompt, drops one with
+`enabled = false`, or reaches a file no glob matches by naming it. Patterns are
+relative to `[paths].prompts`, and `exclude` is matched against that same
+relative path, so `drafts/**` means the `drafts` directory and not any path that
+happens to contain the word.
+
+A prompt's identity is its frontmatter `name`. That name is used verbatim as the
+MCP tool name rather than transformed into one, so it must match
+`^[a-z][a-z0-9_]{0,47}$`; transforming would let two different frontmatter names
+collide in `tools/list`.
+
+Boot either produces a complete catalog or the server refuses to start. Every
+resolved file must be readable, must parse, and must declare a legal name; two
+prompts declaring one name is an error naming both files, a block with no `file`
+that matches no globbed prompt is a stale override and an error, and an empty
+catalog is an error. Failures accumulate and all of them print before the
+non-zero exit, so fixing a configuration takes one pass rather than one restart
+per mistake. The one thing a glob skips in silence is a markdown file that
+declares no `promptforge:` version: a glob names a directory, and a file in it
+that is not a prompt is not the operator's mistake.
+
+Once the server is running, `watch = true` re-runs that same resolution on save
+with one difference: a prompt that fails validation is kept as a broken entry
+carrying its error - still listed, and answering a call with the failure -
+instead of stopping the process. Refusing the whole catalog is right at boot,
+where nothing depends on the server yet, and wrong on save, where one typo in one
+file would freeze every other prompt.
 
 ## Prompt file anatomy
 
