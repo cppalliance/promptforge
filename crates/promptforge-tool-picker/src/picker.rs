@@ -1,13 +1,23 @@
 //! The engine itself: a catalog embedded once and held ready to be queried.
 //!
-//! [`ToolPicker::build`] is the only way to make one. It takes ownership of a
-//! catalog, embeds every tool in it, and keeps the descriptors and their
-//! vectors together for the life of the value. Nothing is written to disk and
-//! nothing is read from it: an index is a process-lifetime thing, rebuilt from
-//! the catalog whenever the catalog changes. A cache keyed on catalog content
-//! would have to be invalidated by the same content hash it is keyed on, and
-//! embedding a realistic catalog costs less than the correctness risk of
-//! serving a stale one.
+//! An engine takes ownership of a catalog, embeds every tool in it, and keeps
+//! the descriptors and their vectors together for the life of the value.
+//! Nothing is written to disk and nothing is read from it: an index is a
+//! process-lifetime thing, rebuilt from the catalog whenever the catalog
+//! changes. A cache keyed on catalog content would have to be invalidated by
+//! the same content hash it is keyed on, and embedding a realistic catalog
+//! costs less than the correctness risk of serving a stale one.
+//!
+//! # One encoder, many engines
+//!
+//! [`ToolPicker::build_with`] is the constructor everything else is written in
+//! terms of: it takes an already-loaded encoder behind an `Arc` and pays only
+//! one forward pass per tool. [`ToolPicker::build`] loads an encoder and calls
+//! it, and [`ToolPicker::rebuild`] calls it with this engine's own encoder and
+//! configuration. There is therefore one indexing path and one policy, and a
+//! caller whose catalog changes - a watched directory, a reconnected server -
+//! pays the weights once for the life of the process rather than once per
+//! catalog.
 //!
 //! # An empty catalog builds
 //!
@@ -35,6 +45,8 @@
 //! them that way. The cosine similarity between a need and a tool is therefore
 //! the plain dot product of their vectors, with no magnitudes to divide out.
 
+use std::sync::Arc;
+
 use crate::catalog::{Catalog, ToolDescriptor};
 use crate::config::Config;
 use crate::embed::{EMBEDDING_DIMENSIONS, Embedder};
@@ -42,18 +54,26 @@ use crate::error::Result;
 use crate::policy::{self, Outcome};
 use crate::rank::{self, Candidate, Vectors};
 
+#[cfg(test)]
+mod tests;
+
 /// A catalog embedded and held in memory, ready to answer needs.
 ///
 /// The expensive work - loading the model and embedding every tool - happens
 /// once, in [`ToolPicker::build`]. The value is immutable afterwards: a
-/// catalog that has changed calls for a new engine, not a mutated one.
+/// catalog that has changed calls for a new engine, not a mutated one, and
+/// [`ToolPicker::rebuild`] makes that new engine over the encoder this one
+/// already holds.
 pub struct ToolPicker {
     /// The tools, in the order the catalog gave them.
     catalog: Catalog,
     /// The thresholds and model this engine was built with.
     config: Config,
     /// The encoder, kept so a need is embedded by the same model as the tools.
-    embedder: Embedder,
+    ///
+    /// Shared rather than owned outright, so several engines over different
+    /// catalogs can hold one set of weights.
+    embedder: Arc<Embedder>,
     /// Every tool's vector, end to end, [`EMBEDDING_DIMENSIONS`] apart.
     ///
     /// Row `i` is `vectors[i * EMBEDDING_DIMENSIONS..][..EMBEDDING_DIMENSIONS]`
@@ -78,7 +98,9 @@ impl ToolPicker {
     /// This is the costly call in the crate's life cycle: it parses tens of
     /// megabytes of weights and runs one forward pass per tool. An empty
     /// catalog still loads the model, since the model is what a later need
-    /// will be embedded with.
+    /// will be embedded with. A caller building several engines, or rebuilding
+    /// one over a catalog that changed, pays the weights once by reaching for
+    /// [`ToolPicker::build_with`] or [`ToolPicker::rebuild`] instead.
     ///
     /// # Errors
     ///
@@ -108,9 +130,55 @@ impl ToolPicker {
     /// [`Error::Tokenize`]: crate::Error::Tokenize
     /// [`Error::Embed`]: crate::Error::Embed
     pub fn build(catalog: Catalog, config: Config) -> Result<Self> {
+        // Validated before the model is loaded, which is the whole reason this
+        // check is not left to `build_with` alone: a rejected threshold must
+        // not cost tens of megabytes of weights first.
+        config.validate()?;
+        Self::build_with(Arc::new(Embedder::new()?), catalog, config)
+    }
+
+    /// Embeds a whole catalog with an encoder that is already loaded.
+    ///
+    /// The one indexing path in the crate: [`ToolPicker::build`] loads an
+    /// encoder and calls this, and [`ToolPicker::rebuild`] calls it with an
+    /// existing engine's encoder, so every engine is indexed under the same
+    /// policy and the same enriched text.
+    ///
+    /// This is the constructor to reach for when one process serves several
+    /// catalogs, or one catalog that changes. Loading the model is what makes
+    /// [`ToolPicker::build`] costly; here the cost is one forward pass per
+    /// tool, and the encoder is shared rather than reloaded. Two engines built
+    /// from one encoder embed identical text to identical vectors, because the
+    /// weights are the same object and each text is embedded on its own.
+    ///
+    /// # Errors
+    ///
+    /// Returns whatever [`Config::validate`] rejects the configuration with,
+    /// and [`Error::Tokenize`] or [`Error::Embed`] if a tool's text cannot be
+    /// embedded, naming the first failure and abandoning the rest. It cannot
+    /// return [`Error::ModelLoad`]: the caller has already loaded the model.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::sync::Arc;
+    ///
+    /// use promptforge_tool_picker::{Catalog, Config, Embedder, ToolPicker};
+    ///
+    /// // One set of weights, an engine per catalog.
+    /// let embedder = Arc::new(Embedder::new()?);
+    /// let first = ToolPicker::build_with(Arc::clone(&embedder), Catalog::default(), Config::default())?;
+    /// let second = ToolPicker::build_with(embedder, Catalog::default(), Config::default())?;
+    /// assert_eq!(first.len(), second.len());
+    /// # Ok::<(), promptforge_tool_picker::Error>(())
+    /// ```
+    ///
+    /// [`Error::ModelLoad`]: crate::Error::ModelLoad
+    /// [`Error::Tokenize`]: crate::Error::Tokenize
+    /// [`Error::Embed`]: crate::Error::Embed
+    pub fn build_with(embedder: Arc<Embedder>, catalog: Catalog, config: Config) -> Result<Self> {
         config.validate()?;
 
-        let embedder = Embedder::new()?;
         let mut vectors = Vec::with_capacity(catalog.len() * EMBEDDING_DIMENSIONS);
         for tool in &catalog {
             // `embed` guarantees the length, which is what makes every row of
@@ -124,6 +192,53 @@ impl ToolPicker {
             embedder,
             vectors,
         })
+    }
+
+    /// A new engine over `catalog`, sharing this engine's encoder and configuration.
+    ///
+    /// The answer to a catalog that changed. This engine is untouched - it is
+    /// immutable, and a run using it finishes under the catalog it started
+    /// with - and the returned one indexes the new catalog for the cost of one
+    /// forward pass per tool. No weights are loaded, so a rebuild costs what
+    /// the catalog costs and nothing more.
+    ///
+    /// The configuration carries over, because a rebuild is a change of data
+    /// and not of policy; a caller changing a threshold builds with
+    /// [`ToolPicker::build_with`] instead, handing it
+    /// [`ToolPicker::embedder`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Tokenize`] or [`Error::Embed`] if a tool's text cannot
+    /// be embedded. The configuration was validated when this engine was
+    /// built, so it cannot be rejected here.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use promptforge_tool_picker::{Catalog, Config, ToolPicker};
+    ///
+    /// let picker = ToolPicker::build(Catalog::default(), Config::default())?;
+    /// let rebuilt = picker.rebuild(Catalog::default())?;
+    /// assert_eq!(rebuilt.config(), picker.config());
+    /// # Ok::<(), promptforge_tool_picker::Error>(())
+    /// ```
+    ///
+    /// [`Error::Tokenize`]: crate::Error::Tokenize
+    /// [`Error::Embed`]: crate::Error::Embed
+    pub fn rebuild(&self, catalog: Catalog) -> Result<Self> {
+        Self::build_with(Arc::clone(&self.embedder), catalog, self.config.clone())
+    }
+
+    /// The loaded encoder behind this engine, for building another over it.
+    ///
+    /// Handed to [`ToolPicker::build_with`] to index a second catalog, or a
+    /// changed one under a changed configuration, without paying for the
+    /// weights again. It is also the encoder every need this engine answers is
+    /// embedded by, so a caller embedding text itself compares like with like.
+    #[must_use]
+    pub fn embedder(&self) -> &Arc<Embedder> {
+        &self.embedder
     }
 
     /// The number of tools indexed.
@@ -349,339 +464,5 @@ impl std::fmt::Debug for ToolPicker {
             .field("embedder", &self.embedder)
             .field("config", &self.config)
             .finish_non_exhaustive()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ToolPicker;
-    use crate::catalog::{Catalog, ToolDescriptor, ToolId};
-    use crate::config::Config;
-    use crate::embed::EMBEDDING_DIMENSIONS;
-    use crate::error::Error;
-    use crate::policy::Outcome;
-    use serde_json::json;
-
-    /// Two tools: enough to prove rows are kept apart, cheap enough to embed.
-    ///
-    /// Every build in this module loads the whole model, so each tool added
-    /// here is paid for by every test in the file.
-    fn tiny_catalog() -> Catalog {
-        Catalog::new(vec![
-            ToolDescriptor::new(
-                ToolId::new("files", "read_file"),
-                "Read a file from disk",
-                json!({"properties": {"path": {"type": "string"}}}),
-            ),
-            ToolDescriptor::new(
-                ToolId::new("net", "fetch_url"),
-                "Fetch a web page over HTTP",
-                json!({"properties": {"url": {"type": "string"}}}),
-            ),
-        ])
-    }
-
-    #[test]
-    fn building_indexes_every_tool_as_a_unit_vector() {
-        let catalog = tiny_catalog();
-        let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
-
-        assert_eq!(picker.len(), catalog.len());
-        assert!(!picker.is_empty());
-        assert_eq!(picker.tools(), catalog.tools());
-        assert_eq!(picker.config(), &Config::default());
-        assert_eq!(picker.vector(picker.len()), None);
-
-        for index in 0..picker.len() {
-            let vector = picker.vector(index).expect("every indexed tool has a row");
-            assert_eq!(vector.len(), EMBEDDING_DIMENSIONS);
-            let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt();
-            assert!(
-                (norm - 1.0).abs() < 1e-5,
-                "row {index} has length {norm}; a dot product is only a cosine at 1"
-            );
-        }
-
-        // Distinct tools must not share a row, or the flat buffer is misread.
-        assert_ne!(picker.vector(0), picker.vector(1));
-    }
-
-    /// How `build` and `validate` each reject one configuration, side by side.
-    ///
-    /// Both verdicts come from the same value so a caller can be shown that
-    /// building adds nothing to the configuration check and subtracts nothing
-    /// from it. Because `build` validates first, neither call reaches the model.
-    fn rejections(config: &Config) -> (Error, Error) {
-        let built = ToolPicker::build(tiny_catalog(), config.clone())
-            .expect_err("an invalid configuration must not build an engine");
-        let validated = config
-            .validate()
-            .expect_err("the same configuration must fail validation");
-        (built, validated)
-    }
-
-    #[test]
-    fn a_zero_length_shortlist_is_rejected_as_validate_rejects_it() {
-        let (built, validated) = rejections(&Config {
-            top_k: 0,
-            ..Config::default()
-        });
-        assert!(
-            matches!(
-                (&built, &validated),
-                (Error::EmptyShortlist, Error::EmptyShortlist)
-            ),
-            "build gave {built:?} where validate gave {validated:?}"
-        );
-        assert_eq!(built.to_string(), validated.to_string());
-    }
-
-    #[test]
-    fn a_threshold_outside_the_cosine_range_is_rejected_as_validate_rejects_it() {
-        let (built, validated) = rejections(&Config {
-            margin: 1.5,
-            ..Config::default()
-        });
-        assert!(
-            matches!(
-                (&built, &validated),
-                (
-                    Error::ThresholdOutOfRange { .. },
-                    Error::ThresholdOutOfRange { .. }
-                )
-            ),
-            "build gave {built:?} where validate gave {validated:?}"
-        );
-        assert_eq!(built.to_string(), validated.to_string());
-    }
-
-    #[test]
-    fn an_empty_catalog_builds_an_engine_that_indexes_nothing() {
-        let picker = ToolPicker::build(Catalog::default(), Config::default()).unwrap();
-        assert!(picker.is_empty());
-        assert_eq!(picker.len(), 0);
-        assert!(picker.tools().is_empty());
-        assert_eq!(picker.vector(0), None);
-    }
-
-    #[test]
-    fn a_need_restating_a_tools_text_ranks_that_tool_first() {
-        let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
-        for (index, need) in [
-            (0, "read the contents of a file from disk"),
-            (1, "fetch a web page over HTTP"),
-        ] {
-            let ranked = picker.rank(need, picker.len()).unwrap();
-            assert_eq!(ranked.len(), picker.len());
-            assert_eq!(
-                ranked[0].index,
-                index,
-                "{need:?} ranked {:?} first",
-                picker.tools()[ranked[0].index].name()
-            );
-            assert!(
-                ranked[0].score > ranked[1].score,
-                "the restated tool scored {} against the other's {}",
-                ranked[0].score,
-                ranked[1].score
-            );
-            for candidate in &ranked {
-                assert!(
-                    (-1.0..=1.0).contains(&candidate.score),
-                    "score {} is outside the cosine range of unit vectors",
-                    candidate.score
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn a_shortlist_longer_than_the_catalog_is_not_padded() {
-        let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
-        let ranked = picker.rank("read a file", 50).unwrap();
-        assert_eq!(ranked.len(), picker.len());
-    }
-
-    #[test]
-    fn an_empty_index_ranks_nothing() {
-        let picker = ToolPicker::build(Catalog::default(), Config::default()).unwrap();
-        assert!(picker.rank("read a file", 3).unwrap().is_empty());
-    }
-
-    #[test]
-    fn ranking_the_same_need_twice_yields_the_same_order() {
-        let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
-        let first = picker
-            .rank("store a document somewhere", picker.len())
-            .unwrap();
-        let second = picker
-            .rank("store a document somewhere", picker.len())
-            .unwrap();
-        assert_eq!(first, second);
-    }
-
-    /// The same tool published twice, under the given servers.
-    ///
-    /// Identical text embeds to identical vectors, so the pair is
-    /// indistinguishable to any need - which is the situation both ambiguity
-    /// outcomes exist to report, differing only in the servers.
-    fn republished(first: &str, second: &str) -> Catalog {
-        let tool = ToolDescriptor::new(
-            ToolId::new(first, "read_file"),
-            "Read a file from disk",
-            json!({"properties": {"path": {"type": "string"}}}),
-        );
-        let mut twin = tool.clone();
-        twin.id = ToolId::new(second, "read_file");
-        Catalog::new(vec![tool, twin])
-    }
-
-    #[test]
-    fn a_need_restating_one_tool_binds_that_tool() {
-        let catalog = tiny_catalog();
-        let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
-        let need = catalog.tools()[1].enriched_text();
-        assert_eq!(
-            picker.resolve(&need).unwrap(),
-            Outcome::Bind(catalog.tools()[1].clone())
-        );
-    }
-
-    #[test]
-    fn a_need_no_tool_covers_abstains() {
-        let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
-        assert_eq!(
-            picker
-                .resolve("compose a haiku about the sorrow of autumn rain")
-                .unwrap(),
-            Outcome::Absent
-        );
-    }
-
-    #[test]
-    fn a_tool_republished_across_servers_yields_a_shortlist() {
-        let catalog = republished("files", "blobs");
-        let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
-        let need = catalog.tools()[0].enriched_text();
-        assert_eq!(
-            picker.resolve(&need).unwrap(),
-            Outcome::Ambiguous(catalog.tools().to_vec())
-        );
-    }
-
-    #[test]
-    fn one_server_publishing_the_same_tool_twice_is_reported_as_a_fault() {
-        let catalog = republished("files", "files");
-        let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
-        let need = catalog.tools()[0].enriched_text();
-        assert_eq!(
-            picker.resolve(&need).unwrap(),
-            Outcome::Duplicate(catalog.tools().to_vec())
-        );
-    }
-
-    #[test]
-    fn a_shortlist_of_one_still_sees_the_runner_up() {
-        // `top_k: 1` is a valid configuration, and ranking exactly one
-        // candidate would hide every ambiguity: the twin would never be
-        // ranked, and the server's fault would bind silently instead.
-        let catalog = republished("files", "files");
-        let config = Config {
-            top_k: 1,
-            ..Config::default()
-        };
-        assert!(config.validate().is_ok());
-        let picker = ToolPicker::build(catalog.clone(), config).unwrap();
-        let need = catalog.tools()[0].enriched_text();
-        assert_eq!(
-            picker.resolve(&need).unwrap(),
-            Outcome::Duplicate(catalog.tools().to_vec())
-        );
-    }
-
-    #[test]
-    fn deciding_the_same_need_twice_yields_the_same_outcome() {
-        let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
-        let first = picker.resolve("read a file from disk").unwrap();
-        for _ in 0..4 {
-            assert_eq!(picker.resolve("read a file from disk").unwrap(), first);
-        }
-    }
-
-    #[test]
-    fn a_shortlist_offers_the_matching_tools_best_first() {
-        let catalog = tiny_catalog();
-        let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
-        let need = catalog.tools()[1].enriched_text();
-        assert_eq!(
-            picker.shortlist(&need, 2).unwrap(),
-            vec![catalog.tools()[1].clone()],
-            "the unrelated tool is below the floor and is not offered"
-        );
-    }
-
-    #[test]
-    fn a_shortlist_is_empty_exactly_where_resolution_abstains() {
-        let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
-        let need = "compose a haiku about the sorrow of autumn rain";
-        assert_eq!(picker.resolve(need).unwrap(), Outcome::Absent);
-        assert!(picker.shortlist(need, 5).unwrap().is_empty());
-    }
-
-    #[test]
-    fn a_shortlist_takes_its_length_from_k_and_not_from_the_config() {
-        // `top_k` bounds the shortlist a resolution reports; `k` is what this
-        // caller asked for on this call, and nothing clamps one to the other.
-        let catalog = republished("files", "blobs");
-        let config = Config {
-            top_k: 1,
-            ..Config::default()
-        };
-        let picker = ToolPicker::build(catalog.clone(), config).unwrap();
-        let need = catalog.tools()[0].enriched_text();
-        assert_eq!(
-            picker.shortlist(&need, 2).unwrap(),
-            catalog.tools().to_vec()
-        );
-        assert_eq!(
-            picker.shortlist(&need, 1).unwrap(),
-            vec![catalog.tools()[0].clone()]
-        );
-        assert!(picker.shortlist(&need, 0).unwrap().is_empty());
-        // Asking for more than there is returns what there is, unpadded.
-        assert_eq!(
-            picker.shortlist(&need, 99).unwrap(),
-            catalog.tools().to_vec()
-        );
-    }
-
-    #[test]
-    fn an_empty_index_abstains() {
-        let picker = ToolPicker::build(Catalog::default(), Config::default()).unwrap();
-        assert_eq!(picker.resolve("read a file").unwrap(), Outcome::Absent);
-    }
-
-    #[test]
-    fn a_picker_can_be_shared_across_threads() {
-        // The type callers put behind an `Arc`. It holds the `Embedder`, and
-        // through it two external crates' types, so a dependency upgrade could
-        // take `Send` or `Sync` away without changing a signature here.
-        const fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<ToolPicker>();
-    }
-
-    #[test]
-    fn building_twice_over_one_catalog_yields_the_same_vectors() {
-        let first = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
-        let second = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
-
-        assert_eq!(first.len(), second.len());
-        for index in 0..first.len() {
-            assert_eq!(
-                first.vector(index),
-                second.vector(index),
-                "row {index} moved between builds; resolution cannot be deterministic"
-            );
-        }
     }
 }
