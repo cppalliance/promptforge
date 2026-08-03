@@ -39,6 +39,7 @@ use crate::catalog::{Catalog, ToolDescriptor};
 use crate::config::Config;
 use crate::embed::{EMBEDDING_DIMENSIONS, Embedder};
 use crate::error::Result;
+use crate::rank::{self, Candidate};
 
 /// A catalog embedded and held in memory, ready to answer needs.
 ///
@@ -138,6 +139,31 @@ impl ToolPicker {
     #[must_use]
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// Embeds a need and returns the best `k` tools for it, best first.
+    ///
+    /// The need takes the same path through the same encoder the tools took,
+    /// so its vector is unit length too and each score is a cosine similarity.
+    /// Ordering, ties, and what a `k` larger than the catalog returns are
+    /// [`rank::top_k`]'s contract.
+    ///
+    /// This ranks and decides nothing: every candidate is returned on its
+    /// score alone, with no threshold applied and no candidate withheld.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Tokenize`] or [`Error::Embed`] if the need cannot be
+    /// embedded. Ranking itself cannot fail.
+    ///
+    /// [`Error::Tokenize`]: crate::Error::Tokenize
+    /// [`Error::Embed`]: crate::Error::Embed
+    // Exercised by this module's tests; the decision layer that will call it
+    // in earnest is not written yet.
+    #[allow(dead_code)]
+    pub(crate) fn rank(&self, need: &str, k: usize) -> Result<Vec<Candidate>> {
+        let query = self.embedder.embed(need)?;
+        Ok(rank::top_k(&query, &self.vectors, k))
     }
 
     /// The stored vector for the tool at `index` in [`ToolPicker::tools`].
@@ -297,6 +323,62 @@ mod tests {
         assert_eq!(picker.len(), 0);
         assert!(picker.tools().is_empty());
         assert_eq!(picker.vector(0), None);
+    }
+
+    #[test]
+    fn a_need_restating_a_tools_text_ranks_that_tool_first() {
+        let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
+        for (index, need) in [
+            (0, "read the contents of a file from disk"),
+            (1, "fetch a web page over HTTP"),
+        ] {
+            let ranked = picker.rank(need, picker.len()).unwrap();
+            assert_eq!(ranked.len(), picker.len());
+            assert_eq!(
+                ranked[0].index,
+                index,
+                "{need:?} ranked {:?} first",
+                picker.tools()[ranked[0].index].name()
+            );
+            assert!(
+                ranked[0].score > ranked[1].score,
+                "the restated tool scored {} against the other's {}",
+                ranked[0].score,
+                ranked[1].score
+            );
+            for candidate in &ranked {
+                assert!(
+                    (-1.0..=1.0).contains(&candidate.score),
+                    "score {} is outside the cosine range of unit vectors",
+                    candidate.score
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_shortlist_longer_than_the_catalog_is_not_padded() {
+        let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
+        let ranked = picker.rank("read a file", 50).unwrap();
+        assert_eq!(ranked.len(), picker.len());
+    }
+
+    #[test]
+    fn an_empty_index_ranks_nothing() {
+        let picker = ToolPicker::build(Catalog::default(), Config::default()).unwrap();
+        assert!(picker.rank("read a file", 3).unwrap().is_empty());
+    }
+
+    #[test]
+    fn ranking_the_same_need_twice_yields_the_same_order() {
+        let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
+        let first = picker
+            .rank("store a document somewhere", picker.len())
+            .unwrap();
+        let second = picker
+            .rank("store a document somewhere", picker.len())
+            .unwrap();
+        assert_eq!(first, second);
     }
 
     #[test]
