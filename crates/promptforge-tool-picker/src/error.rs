@@ -1,11 +1,12 @@
 //! The error type returned by fallible engine operations.
 //!
-//! Resolution itself is infallible and reports abstention as an outcome; the
-//! errors here cover building an engine from a catalog. This step introduces
-//! [`Error`] with the configuration failures alone. The type is
-//! `#[non_exhaustive]`, so the later steps that can fail - loading the embedded
-//! model, tokenizing, running the forward pass - add their own variants without
-//! that being a breaking change.
+//! Resolution itself is infallible and reports abstention as an outcome, so
+//! [`Error`] is the crate's one error type and its variants cover configuration
+//! validation: a threshold outside the cosine range, a zero-length shortlist,
+//! and a duplicate threshold below the similarity floor. The type is
+//! `#[non_exhaustive]`, so other failure modes - loading the embedded model,
+//! tokenizing, running the forward pass - can add variants without that being a
+//! breaking change.
 
 /// Something that went wrong before the engine could answer a need.
 ///
