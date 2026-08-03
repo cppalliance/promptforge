@@ -8,7 +8,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. A run reports through it as it goes (see "Watching a run" below)
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-mcp` - library (a binary follows): the MCP server that publishes prompts to an agentic harness as callable tools. Today it parses its `prompts.toml` and resolves the catalog that configuration names (see "MCP server configuration" below); the tool surface and the transports are being built on top of it
+- `crates/promptforge-mcp` - library (a binary follows): the MCP server that publishes prompts to an agentic harness as callable tools. Today it parses its `prompts.toml`, resolves the catalog that configuration names, and turns that catalog into the tool list a harness sees (see "MCP server configuration" below); executing a call and the transports that carry one are being built on top of it
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. No Lua, no MCP, no network
 
 ## Build
@@ -196,6 +196,41 @@ carrying its error - still listed, and answering a call with the failure -
 instead of stopping the process. Refusing the whole catalog is right at boot,
 where nothing depends on the server yet, and wrong on save, where one typo in one
 file would freeze every other prompt.
+
+### What the harness sees
+
+Each prompt exposed as `tool` gets its own entry in `tools/list`, named and
+described from its frontmatter. Its input schema is one optional string property
+named `args`, which is a run's whole input; omitting it passes the empty string.
+A prompt the reload left broken keeps its tool, described by the problem that
+stops it running, since every connected client is still holding a cached copy of
+the list and would send the call regardless.
+
+Alongside them are the built-ins, published by what the catalog holds rather
+than by configuration:
+
+| Tool | Arguments | Published when |
+|---|---|---|
+| `list_prompts` | none | at least one prompt is `list` |
+| `run_prompt` | `prompt`, optional `args` | at least one prompt is `list` |
+| `need_prompt` | `capability` | at least one prompt is `list`, and the `picker` feature is compiled in |
+| `check_run` | `run_id` | anything at all is published |
+
+`list_prompts` reports every enabled prompt with its name, description, version,
+whether it is also direct, and any problem; `run_prompt` runs one by name and
+its description sends a caller unsure of a name to `list_prompts` first;
+`need_prompt` takes a plain-English capability and hands back up to three
+candidates for the caller to choose among, never running one. `check_run`
+collects a run that outlived the call which started it, which a direct call can
+do just as a listed one can, so it is published whenever anything is.
+
+`need_prompt` asks for its `capability` in author register - an imperative
+phrase naming the operation and what it acts on, with no entity names or
+conversational framing - because a need phrased that way retrieves the right
+prompt far more often than the same need phrased as a user goal, and no ranking
+engine closes that gap. The instruction and its two examples sit both in the
+tool's description and in the parameter's own, since a client may surface only
+one of the two.
 
 ## Prompt file anatomy
 
