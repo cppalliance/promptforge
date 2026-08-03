@@ -4,7 +4,9 @@
 //! call: the [`parser`] that reads the file into a [`parser::Prompt`], the
 //! [`client`] that talks to an `OpenAI`-compatible chat completions endpoint, and
 //! [`execute`] that walks a prompt's sections top to bottom (fall-through) and
-//! returns the run's result.
+//! returns the run's result. [`observe`] is the seam through which a run will
+//! report its progress, for a caller that wants to watch a long run in flight;
+//! it is declared but not yet wired, so nothing emits an event today.
 //!
 //! A source is a promptforge prompt only when its frontmatter declares a
 //! `promptforge:` version; [`promptforge_version`] reports it (or `None`), and
@@ -14,6 +16,7 @@ pub mod client;
 mod error;
 pub mod execute;
 pub mod lua;
+pub mod observe;
 pub mod parser;
 pub mod store;
 pub mod subst;
