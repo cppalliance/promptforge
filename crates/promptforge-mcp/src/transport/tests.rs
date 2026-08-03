@@ -17,6 +17,7 @@ use super::{HEALTHZ_PATH, MCP_PATH, SSE_KEEP_ALIVE, build_router, streamable_con
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::{Config, Secret};
 use crate::server::PromptForgeServer;
+use crate::watch::Sessions;
 
 /// The shared bearer every fixture router is built with.
 const TOKEN: &str = "shared-bearer";
@@ -46,7 +47,11 @@ fn router_with(token: Secret) -> (TempDir, axum::Router) {
     .expect("the fixture configuration parses");
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
-    let server = PromptForgeServer::new(Arc::new(config), Arc::new(CatalogHandle::new(catalog)));
+    let server = PromptForgeServer::new(
+        Arc::new(config),
+        Arc::new(CatalogHandle::new(catalog)),
+        Arc::new(Sessions::new()),
+    );
     (dir, build_router(server, Arc::new(token)))
 }
 

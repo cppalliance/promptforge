@@ -6,3 +6,4 @@
 
 mod progress;
 mod stdio;
+mod watch;
