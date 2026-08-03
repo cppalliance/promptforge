@@ -1,0 +1,67 @@
+[
+  {
+    "server": "weather",
+    "name": "get_forecast",
+    "description": "Get the weather forecast for a city over the next several days",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "city": { "type": "string" },
+        "days": { "type": "integer" }
+      }
+    },
+    "annotations": { "readOnlyHint": true }
+  },
+  {
+    "server": "files",
+    "name": "read_file",
+    "description": "Read the contents of a file from the local disk",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" }
+      }
+    },
+    "annotations": { "readOnlyHint": true }
+  },
+  {
+    "server": "blobs",
+    "name": "read_text_file",
+    "description": "Read the contents of a file from the local disk",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" }
+      }
+    },
+    "annotations": { "readOnlyHint": true }
+  },
+  {
+    "server": "calendar",
+    "name": "create_event",
+    "description": "Create a new calendar event on the authenticated user's primary calendar, with a title, a start time, an end time, and an optional list of attendees who will each be sent an invitation",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "start": { "type": "string" },
+        "end": { "type": "string" },
+        "attendees": { "type": "array" }
+      }
+    }
+  },
+  {
+    "server": "calendar",
+    "name": "add_event",
+    "description": "Create a new calendar event on the authenticated user's primary calendar, with a title, a start time, an end time, and an optional list of attendees who will each be sent an invitation",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "start": { "type": "string" },
+        "end": { "type": "string" },
+        "attendees": { "type": "array" }
+      }
+    }
+  }
+]
