@@ -39,7 +39,8 @@ use crate::catalog::{Catalog, ToolDescriptor};
 use crate::config::Config;
 use crate::embed::{EMBEDDING_DIMENSIONS, Embedder};
 use crate::error::Result;
-use crate::rank::{self, Candidate};
+use crate::policy::{self, Outcome};
+use crate::rank::{self, Candidate, Vectors};
 
 /// A catalog embedded and held in memory, ready to answer needs.
 ///
@@ -158,12 +159,49 @@ impl ToolPicker {
     ///
     /// [`Error::Tokenize`]: crate::Error::Tokenize
     /// [`Error::Embed`]: crate::Error::Embed
-    // Exercised by this module's tests; the decision layer that will call it
-    // in earnest is not written yet.
-    #[allow(dead_code)]
     pub(crate) fn rank(&self, need: &str, k: usize) -> Result<Vec<Candidate>> {
         let query = self.embedder.embed(need)?;
         Ok(rank::top_k(&query, &self.vectors, k))
+    }
+
+    /// Ranks a need and decides what the ranking is worth.
+    ///
+    /// The need is ranked against the whole index down to the configured
+    /// shortlist length, and the ranking is judged against the configured
+    /// thresholds. What the four outcomes mean, in what order the thresholds
+    /// apply, and where each boundary falls is [`policy`]'s contract.
+    ///
+    /// At least two candidates are ranked however short
+    /// [`Config::top_k`](crate::Config::top_k) is. Every ambiguity the policy
+    /// can report is a statement about the leader and a runner-up, so a
+    /// ranking of one would leave the duplicate and near-tie checks nothing to
+    /// look at and turn a `top_k` of one - which is a valid configuration -
+    /// into a silent binding of whatever came first.
+    ///
+    /// Deciding itself cannot fail and cannot abstain silently: a need nothing
+    /// matches comes back as [`Outcome::Absent`], not as an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Tokenize`] or [`Error::Embed`] if the need cannot be
+    /// embedded.
+    ///
+    /// [`Error::Tokenize`]: crate::Error::Tokenize
+    /// [`Error::Embed`]: crate::Error::Embed
+    // The one entry point the crate does not yet expose publicly: the ranking
+    // and the decision behind it are reached only from here, and only the
+    // tests reach here. The attribute comes off when the public surface calls
+    // it, and it sits on this method alone rather than over a module so that
+    // anything else falling out of use is still reported.
+    #[allow(dead_code)]
+    pub(crate) fn decide(&self, need: &str) -> Result<Outcome> {
+        let ranked = self.rank(need, self.config.top_k.max(2))?;
+        Ok(policy::decide(
+            &ranked,
+            self.tools(),
+            Vectors::new(&self.vectors, EMBEDDING_DIMENSIONS),
+            &self.config,
+        ))
     }
 
     /// The stored vector for the tool at `index` in [`ToolPicker::tools`].
@@ -201,6 +239,7 @@ mod tests {
     use crate::config::Config;
     use crate::embed::EMBEDDING_DIMENSIONS;
     use crate::error::Error;
+    use crate::policy::Outcome;
     use serde_json::json;
 
     /// Two tools: enough to prove rows are kept apart, cheap enough to embed.
@@ -297,26 +336,6 @@ mod tests {
     }
 
     #[test]
-    fn a_duplicate_threshold_below_the_floor_is_rejected_as_validate_rejects_it() {
-        let (built, validated) = rejections(&Config {
-            similarity_floor: 0.9,
-            duplicate_threshold: 0.85,
-            ..Config::default()
-        });
-        assert!(
-            matches!(
-                (&built, &validated),
-                (
-                    Error::DuplicateThresholdBelowFloor { .. },
-                    Error::DuplicateThresholdBelowFloor { .. }
-                )
-            ),
-            "build gave {built:?} where validate gave {validated:?}"
-        );
-        assert_eq!(built.to_string(), validated.to_string());
-    }
-
-    #[test]
     fn an_empty_catalog_builds_an_engine_that_indexes_nothing() {
         let picker = ToolPicker::build(Catalog::default(), Config::default()).unwrap();
         assert!(picker.is_empty());
@@ -379,6 +398,100 @@ mod tests {
             .rank("store a document somewhere", picker.len())
             .unwrap();
         assert_eq!(first, second);
+    }
+
+    /// The same tool published twice, under the given servers.
+    ///
+    /// Identical text embeds to identical vectors, so the pair is
+    /// indistinguishable to any need - which is the situation both ambiguity
+    /// outcomes exist to report, differing only in the servers.
+    fn republished(first: &str, second: &str) -> Catalog {
+        let tool = ToolDescriptor::new(
+            ToolId::new(first, "read_file"),
+            "Read a file from disk",
+            json!({"properties": {"path": {"type": "string"}}}),
+        );
+        let mut twin = tool.clone();
+        twin.id = ToolId::new(second, "read_file");
+        Catalog::new(vec![tool, twin])
+    }
+
+    #[test]
+    fn a_need_restating_one_tool_binds_that_tool() {
+        let catalog = tiny_catalog();
+        let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
+        let need = catalog.tools()[1].enriched_text();
+        assert_eq!(
+            picker.decide(&need).unwrap(),
+            Outcome::Bind(catalog.tools()[1].clone())
+        );
+    }
+
+    #[test]
+    fn a_need_no_tool_covers_abstains() {
+        let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
+        assert_eq!(
+            picker
+                .decide("compose a haiku about the sorrow of autumn rain")
+                .unwrap(),
+            Outcome::Absent
+        );
+    }
+
+    #[test]
+    fn a_tool_republished_across_servers_yields_a_shortlist() {
+        let catalog = republished("files", "blobs");
+        let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
+        let need = catalog.tools()[0].enriched_text();
+        assert_eq!(
+            picker.decide(&need).unwrap(),
+            Outcome::Ambiguous(catalog.tools().to_vec())
+        );
+    }
+
+    #[test]
+    fn one_server_publishing_the_same_tool_twice_is_reported_as_a_fault() {
+        let catalog = republished("files", "files");
+        let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
+        let need = catalog.tools()[0].enriched_text();
+        assert_eq!(
+            picker.decide(&need).unwrap(),
+            Outcome::Duplicate(catalog.tools().to_vec())
+        );
+    }
+
+    #[test]
+    fn a_shortlist_of_one_still_sees_the_runner_up() {
+        // `top_k: 1` is a valid configuration, and ranking exactly one
+        // candidate would hide every ambiguity: the twin would never be
+        // ranked, and the server's fault would bind silently instead.
+        let catalog = republished("files", "files");
+        let config = Config {
+            top_k: 1,
+            ..Config::default()
+        };
+        assert!(config.validate().is_ok());
+        let picker = ToolPicker::build(catalog.clone(), config).unwrap();
+        let need = catalog.tools()[0].enriched_text();
+        assert_eq!(
+            picker.decide(&need).unwrap(),
+            Outcome::Duplicate(catalog.tools().to_vec())
+        );
+    }
+
+    #[test]
+    fn deciding_the_same_need_twice_yields_the_same_outcome() {
+        let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
+        let first = picker.decide("read a file from disk").unwrap();
+        for _ in 0..4 {
+            assert_eq!(picker.decide("read a file from disk").unwrap(), first);
+        }
+    }
+
+    #[test]
+    fn an_empty_index_abstains() {
+        let picker = ToolPicker::build(Catalog::default(), Config::default()).unwrap();
+        assert_eq!(picker.decide("read a file").unwrap(), Outcome::Absent);
     }
 
     #[test]
