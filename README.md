@@ -8,7 +8,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. A run reports through it as it goes (see "Watching a run" below)
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-mcp` - library (a binary follows): the MCP server that publishes prompts to an agentic harness as callable tools. Today it parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, answers a call by running the prompt against the gateway, reports that run as it goes through `notifications/progress`, and hands back a run id rather than losing the work when a run outlasts the client's patience (see "MCP server configuration" below); the transports that carry all of this are being built on top of it
+- `crates/promptforge-mcp` - binary: the MCP server that publishes prompts to an agentic harness as callable tools. It parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, answers a call by running the prompt against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. No Lua, no MCP, no network
 
 ## Build
@@ -98,6 +98,36 @@ base_url = "https://api.search.brave.com/res/v1"  # optional; override for a pro
 
 With this configured, the gateway exposes `POST /v1/tools/web_search` (bearer-authed
 with the same shared token as `/v1/chat/completions`).
+
+## Running the MCP server
+
+```
+cargo run -p promptforge-mcp -- serve prompts.toml            # streamable HTTP on [server].bind
+cargo run -p promptforge-mcp -- serve --stdio prompts.toml    # stdio, for a local harness
+```
+
+Over HTTP the MCP endpoint is `/mcp` and every request to it must present the
+shared bearer from `[server].token`; a request that does not - no
+`Authorization` header at all, or one whose scheme is not `Bearer` - is refused
+with `401` and a `WWW-Authenticate: Bearer` header before anything is compared.
+A `[server].token` that is empty or whitespace alone is refused when the
+configuration loads, so an unset variable cannot quietly leave `/mcp` open. The
+check is per HTTP request
+rather than per MCP session, so rotating the token refuses the next call on a
+session that already initialized. `/healthz` is the one unauthenticated route,
+and it is exempt because it is registered outside the auth layer rather than
+because anything inside the layer looks at the path. SSE streams are pinged
+every 15 seconds, since a run reports its progress on the stream its call
+opened and an idle proxy must not close it.
+
+Over stdio nothing is bound and no token is read: the harness that spawned the
+process already has whatever authority the process has. `[server].bind` is
+logged as ignored rather than silently obeyed, and `[server].token` is never
+consulted even though the file must still carry one. Logs go to stdout on HTTP
+and to stderr on stdio, where stdout is the protocol wire.
+
+Either way, boot resolves the whole catalog first and refuses to serve on an
+incomplete one, printing every fault before a non-zero exit.
 
 ## MCP server configuration
 

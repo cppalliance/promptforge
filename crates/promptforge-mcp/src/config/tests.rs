@@ -146,6 +146,26 @@ token = "t"
 }
 
 #[test]
+fn an_empty_or_whitespace_server_token_is_an_error() {
+    // An empty shared bearer would make a request presenting no credential
+    // compare equal, so a token that carries nothing is refused where it is
+    // read. Whitespace alone is the same mistake with a space in it.
+    // The third spelling reaches TOML as an escape, so the parsed token is a
+    // real tab and a real newline rather than four characters of prose.
+    for token in ["", " ", r"\t\n"] {
+        let toml = format!(
+            "[server]\ntoken = \"{token}\"\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"t\"\n"
+        );
+        let err = Config::from_toml_str(&toml).expect_err("a token carrying nothing is refused");
+        assert!(matches!(err, ConfigError::EmptyToken), "{err}");
+        let text = err.to_string();
+        assert!(text.contains("token"), "{text}");
+        assert!(text.contains("must not be empty"), "{text}");
+    }
+}
+
+#[test]
 fn an_unknown_key_is_an_error() {
     let toml = format!("{MINIMAL}\n[catalog]\ninculde = [\"*.md\"]\n");
     let err = Config::from_toml_str(&toml).expect_err("a misspelled key is refused");
@@ -232,4 +252,7 @@ fn secret_redacts() {
     assert_eq!(format!("{secret:?}"), "Secret(redacted)");
     assert_eq!(secret.expose(), "hunter2");
     assert!(!secret.is_empty());
+    assert!(!secret.is_blank());
+    assert!(Secret::from(String::new()).is_empty());
+    assert!(Secret::from("  \t".to_string()).is_blank());
 }

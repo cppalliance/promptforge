@@ -251,7 +251,7 @@ pub struct ProgressPump {
 }
 
 impl ProgressPump {
-    /// Waits up to [`FLUSH_GRACE`] for every frame queued before the observer
+    /// Waits a bounded grace period for every frame queued before the observer
     /// was dropped, then abandons what is left.
     ///
     /// Awaiting this before answering the call is what keeps the last frame
