@@ -8,12 +8,14 @@
 //! broken by a save answers with the error rather than the last good copy.
 
 use std::fs;
+use std::sync::Arc;
 
 use rmcp::model::{CallToolRequestParams, CallToolResult, JsonObject};
 use serde_json::{Value, json};
 
 use super::{Reload, ignored_changes};
 use crate::config::Config;
+use crate::retrieval::Retrieval;
 use crate::server::PromptForgeServer;
 use crate::watch::fixture::{Fixture, config_source};
 use crate::watch::sessions::Sessions;
@@ -255,13 +257,82 @@ fn every_setting_a_reload_cannot_apply_is_named() {
     assert!(named.contains(&"[paths].prompts"), "{named:?}");
 }
 
+/// What a reload does to the retrieval index behind `need_prompt`.
+///
+/// These share the test binary's one loaded model, so a rebuild here costs one
+/// forward pass per prompt and no weights - which is the whole point of the
+/// rebuild path this rides.
+#[cfg(feature = "picker")]
+mod retrieval {
+    use super::{Arc, Fixture, fs};
+    use crate::retrieval::{Retrieval, Shortlist, fixture as retrieval_fixture};
+
+    /// The names a capability retrieves, best first.
+    fn names(retrieval: &Retrieval, capability: &str) -> Vec<String> {
+        match retrieval.shortlist(capability) {
+            Shortlist::Candidates(candidates) => candidates.into_iter().map(|c| c.name).collect(),
+            other => panic!("expected candidates, got {other:?}"),
+        }
+    }
+
+    /// A fixture whose retrieval index is loaded over its own catalog.
+    fn indexed() -> (Fixture, Arc<Retrieval>) {
+        let retrieval = Arc::new(Retrieval::idle());
+        let fixture = Fixture::with_retrieval(Arc::clone(&retrieval));
+        retrieval.install_with(retrieval_fixture::embedder(), &fixture.catalog.load());
+        (fixture, retrieval)
+    }
+
+    #[test]
+    fn a_renamed_prompt_is_retrievable_under_its_new_name() {
+        let (fixture, retrieval) = indexed();
+        let capability = "Do the alpha thing";
+        assert!(names(&retrieval, capability).contains(&"alpha".to_owned()));
+
+        fs::remove_file(fixture.root().join("prompts").join("alpha.md"))
+            .expect("remove the old file");
+        Fixture::write_prompt(
+            fixture.root(),
+            "alpha_two",
+            "Do the alpha thing",
+            "alpha v2",
+        );
+        let reload = fixture.reload();
+
+        assert!(reload.ranking_changed, "a name is part of what is ranked");
+        assert_eq!(retrieval.rebuilds(), 1);
+        let retrieved = names(&retrieval, capability);
+        assert!(retrieved.contains(&"alpha_two".to_owned()), "{retrieved:?}");
+        assert!(
+            !retrieved.contains(&"alpha".to_owned()),
+            "a name the catalog no longer has must not be recommended: {retrieved:?}"
+        );
+    }
+
+    #[test]
+    fn a_body_only_edit_does_not_rebuild_the_index() {
+        let (fixture, retrieval) = indexed();
+
+        fixture.rewrite("alpha", "Do the alpha thing", "alpha v2");
+        let reload = fixture.reload();
+
+        assert!(!reload.ranking_changed);
+        assert_eq!(
+            retrieval.rebuilds(),
+            0,
+            "a body nothing ranks on changed, so the embedding cost is not paid"
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_call_after_a_reload_runs_the_new_body_and_a_broken_prompt_answers_with_its_error() {
     let fixture = Fixture::new();
     let server = PromptForgeServer::new(
-        std::sync::Arc::clone(&fixture.config),
-        std::sync::Arc::clone(&fixture.catalog),
-        std::sync::Arc::new(Sessions::new()),
+        Arc::clone(&fixture.config),
+        Arc::clone(&fixture.catalog),
+        Arc::new(Sessions::new()),
+        Arc::new(Retrieval::idle()),
     );
 
     let before = server
