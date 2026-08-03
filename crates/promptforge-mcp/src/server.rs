@@ -10,21 +10,25 @@
 //! shape is the client's own bug and comes back as `-32602`, which the calling
 //! model never sees and never could act on. Anything the model itself can
 //! correct comes back as a result with `isError` set and the information needed
-//! to correct it: an unresolvable prompt name carries the enabled names, and a
-//! run that started and failed carries its error and its whole `RunResult`.
-//! Everything left over is `-32603`.
+//! to correct it: an unresolvable prompt name carries the enabled names, a
+//! refused admission names the wait, an unknown or evicted `run_id` names the
+//! retention window, and a run that started and failed carries its error and
+//! its whole `RunResult`. Everything left over is `-32603`.
+//!
+//! A call that outruns `reply_deadline` is answered with a `running` result
+//! naming its `run_id`, while the run itself continues; `check_run` collects it
+//! afterwards. [`runner`] holds that race and [`crate::registry`] the records
+//! it leaves.
 
 mod bind;
 mod resolve;
+mod runner;
 #[cfg(test)]
 mod tests;
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::Duration;
 
-use promptforge_core::execute::{self, RunOptions};
-use promptforge_core::store::Store;
-use promptforge_core::tools::Tool;
 use rmcp::ServerHandler;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode, ErrorData,
@@ -36,7 +40,7 @@ use serde_json::{Value, json};
 
 use crate::catalog::{Catalog, CatalogHandle, Entry};
 use crate::config::Config;
-use crate::progress::McpObserver;
+use crate::registry::RunRegistry;
 use crate::result::{RunResult, RunStatus};
 use crate::tools::{
     CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, publishes_built_in, tool_definitions,
@@ -53,31 +57,47 @@ fn not_yet_answered(tool: &str) -> String {
     format!("{tool} is published but not answered yet by this build of the server.")
 }
 
-/// The turn count of a run that never started. A prompt that will not parse,
-/// or whose tools cannot be bound, reaches no model at all, so its zero is a
-/// fact rather than a missing measurement.
-const NO_TURNS: u32 = 0;
+/// What a caller collecting an id nobody holds is told: that the id is unknown
+/// and how long a finished run stays collectable, so a model that polled too
+/// late learns why rather than reading it as a fault.
+fn unknown_run(run_id: &str, retained: Duration) -> String {
+    format!(
+        "no run {run_id}. A run is collectable while it is going and for {} after it finishes; anything older has been evicted.",
+        humantime::format_duration(retained)
+    )
+}
 
 /// Who a run reports its progress to: the peer that asked for it, under the
 /// token it supplied. Absent when the call carried no `progressToken`.
 type Reporting = (Peer<RoleServer>, ProgressToken);
 
-/// The MCP server: a configuration, and the catalog it publishes.
+/// The MCP server: a configuration, the catalog it publishes, and the runs it
+/// has started.
 ///
-/// Both are shared rather than owned, because the watcher replaces the catalog
-/// underneath a live server and a run in flight keeps the snapshot it started
-/// with.
+/// The first two are shared rather than owned, because the watcher replaces the
+/// catalog underneath a live server and a run in flight keeps the snapshot it
+/// started with. The registry is shared with every background run, which is what
+/// lets one that outlived its call still record what it produced.
 #[derive(Debug)]
 pub struct PromptForgeServer {
     config: Arc<Config>,
     catalog: Arc<CatalogHandle>,
+    registry: Arc<RunRegistry>,
 }
 
 impl PromptForgeServer {
     /// Builds a server over a configuration and a live catalog.
+    ///
+    /// The run registry is built from `[server]` here rather than passed in:
+    /// its limits are that table's, and one server has exactly one.
     #[must_use]
     pub fn new(config: Arc<Config>, catalog: Arc<CatalogHandle>) -> PromptForgeServer {
-        PromptForgeServer { config, catalog }
+        let registry = Arc::new(RunRegistry::new(&config.server));
+        PromptForgeServer {
+            config,
+            catalog,
+            registry,
+        }
     }
 
     /// Answers one `tools/call` that asked for no progress.
@@ -141,7 +161,17 @@ impl PromptForgeServer {
                     Err(message) => Ok(text_error(message)),
                 }
             }
-            CHECK_RUN | NEED_PROMPT if publishes_built_in(&catalog, name) => {
+            CHECK_RUN if publishes_built_in(&catalog, name) => {
+                let run_id = required_string(arguments, "run_id")?;
+                match self.registry.check(&run_id) {
+                    Some(result) => run_result(&result),
+                    None => Ok(text_error(unknown_run(
+                        &run_id,
+                        self.registry.retain_completed(),
+                    ))),
+                }
+            }
+            NEED_PROMPT if publishes_built_in(&catalog, name) => {
                 Ok(text_error(not_yet_answered(name)))
             }
             _ => match catalog.find(name) {
@@ -158,100 +188,18 @@ impl PromptForgeServer {
         }
     }
 
-    /// Runs one catalog entry and reports it.
+    /// Runs one catalog entry and reports it, either as its result or as a
+    /// `run_id` to collect the result by.
     ///
-    /// A broken entry never runs: its recorded problem becomes the failure,
-    /// which is what makes a prompt that stopped parsing say so instead of
-    /// quietly running its last good copy.
-    ///
-    /// A run that reports carries an [`McpObserver`] over a channel the pump
-    /// drains; one that does not carries the same observer with no channel
-    /// behind it, and the two produce the same result. Either way the observer
-    /// is what the reported turn total comes from, since only the executor
-    /// knows how many round trips a run took.
+    /// See [`runner`] for the gates a run passes and what the reply deadline
+    /// does to a slow one.
     async fn run(
         &self,
         entry: &Entry,
         args: &str,
         reporting: Option<Reporting>,
     ) -> Result<CallToolResult, ErrorData> {
-        let run_id = new_run_id();
-        let started = Instant::now();
-
-        let Some(prompt) = entry.prompt() else {
-            let problem = entry
-                .problem()
-                .unwrap_or("the prompt is unavailable")
-                .to_owned();
-            return run_result(&RunResult::failed(
-                run_id,
-                entry.name(),
-                entry.version(),
-                problem,
-                NO_TURNS,
-                0,
-            ));
-        };
-
-        let owned = match bind::select_tools(&prompt.frontmatter.tools, &self.config.gateway) {
-            Ok(tools) => tools,
-            Err(message) => {
-                return run_result(&RunResult::failed(
-                    run_id,
-                    entry.name(),
-                    entry.version(),
-                    message,
-                    NO_TURNS,
-                    elapsed_ms(started),
-                ));
-            }
-        };
-        let tools: Vec<&dyn Tool> = owned.iter().map(AsRef::as_ref).collect();
-
-        let (observer, pump) = match reporting {
-            Some((peer, token)) => {
-                let (observer, pump) = McpObserver::reporting(peer, token);
-                (observer, Some(pump))
-            }
-            None => (McpObserver::silent(), None),
-        };
-
-        let store = Store::memory();
-        let options = RunOptions {
-            observer: &observer,
-            client: Some(bind::gateway_client(&self.config.gateway)),
-        };
-        let outcome = execute::run(prompt, args, &tools, &store, options).await;
-
-        let turns = observer.turns();
-        // Timed here rather than after the flush, so the run's duration is the
-        // run's own and not the client's reading speed.
-        let elapsed = elapsed_ms(started);
-        // Dropping the observer closes the queue, which is what lets the pump
-        // finish rather than wait for a frame that will never come.
-        drop(observer);
-        if let Some(pump) = pump {
-            pump.finish().await;
-        }
-
-        match outcome {
-            Ok(value) => run_result(&RunResult::completed(
-                run_id,
-                entry.name(),
-                entry.version(),
-                value,
-                turns,
-                elapsed,
-            )),
-            Err(error) => run_result(&RunResult::failed(
-                run_id,
-                entry.name(),
-                entry.version(),
-                error.to_string(),
-                turns,
-                elapsed,
-            )),
-        }
+        runner::run(&self.config, &self.registry, entry, args, reporting).await
     }
 }
 
@@ -383,15 +331,4 @@ fn optional_string(arguments: Option<&JsonObject>, key: &str) -> Result<String, 
             None,
         )),
     }
-}
-
-/// A fresh run identifier: 128 random bits in hex, which is unguessable enough
-/// for a value that only has to be unique within one process's lifetime.
-fn new_run_id() -> String {
-    format!("{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..))
-}
-
-/// Milliseconds since `started`, saturating rather than wrapping.
-fn elapsed_ms(started: Instant) -> u64 {
-    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }

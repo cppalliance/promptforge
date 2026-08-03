@@ -8,7 +8,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. A run reports through it as it goes (see "Watching a run" below)
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-mcp` - library (a binary follows): the MCP server that publishes prompts to an agentic harness as callable tools. Today it parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, answers a call by running the prompt against the gateway, and reports that run as it goes through `notifications/progress` (see "MCP server configuration" below); collecting a run that outlived its call, and the transports that carry one, are being built on top of it
+- `crates/promptforge-mcp` - library (a binary follows): the MCP server that publishes prompts to an agentic harness as callable tools. Today it parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, answers a call by running the prompt against the gateway, reports that run as it goes through `notifications/progress`, and hands back a run id rather than losing the work when a run outlasts the client's patience (see "MCP server configuration" below); the transports that carry all of this are being built on top of it
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. No Lua, no MCP, no network
 
 ## Build
@@ -266,10 +266,45 @@ build without the `picker` feature, or the listing tools over an all-direct
 catalog. What the server answers and what it advertises are read from the same
 statement, so they cannot disagree.
 
-`check_run` and `need_prompt`, where published, are not yet answered: each
-returns a result saying so, rather than a fault, since the tool was advertised
-and the caller did nothing wrong. Their behavior arrives with the run registry and the picker
-respectively.
+`need_prompt`, where published, is not yet answered: it returns a result saying
+so, rather than a fault, since the tool was advertised and the caller did
+nothing wrong. Its behavior arrives with the picker.
+
+### A run that outlasts the call
+
+A call blocks for at most `reply_deadline`. Past it the caller is answered with
+a result whose `status` is `running`, carrying the `run_id` and a line telling
+it to collect with `check_run`; the run itself continues, and its value is
+waiting when the caller comes back for it. A `running` result does not set
+`isError`, because nothing has gone wrong.
+
+The run is detached, not cancelled. That is the whole point of the deadline:
+Cursor's remote calls fail at about 300 seconds whatever the server does, so a
+prompt that takes longer either survives the call or is wasted. `check_run`
+answers for a run still going as well as one that finished, and a run that
+finished inside its deadline is collectable by id too, so a caller never has to
+know which happened.
+
+A finished run stays collectable for `retain_completed` and is then evicted. An
+id that is unknown or evicted comes back as a result naming that window rather
+than as a protocol fault, since a model that polled too late should learn why. A
+run still going is never evicted.
+
+Before any of that, a call has to be admitted: `max_concurrent_runs` prompts run
+at once and a call waits up to `admission_timeout` for a slot. One that does not
+get a slot is refused with a result naming the wait it spent, which the calling
+model can act on by retrying. Refusing is deliberate - every waiting call holds a
+client connection, and a queue long enough to outlast the reply deadline would
+turn into a crowd of background runs the operator never sized for.
+
+Progress belongs to the call that asked for it. A run that outlives its deadline
+gets one bounded flush of whatever it had queued, and then reports into a stream
+that has been answered and closed: the frames after that are counted and
+dropped, and the run itself is never slowed by them. The record `check_run`
+returns is what a caller follows a backgrounded run with.
+
+The registry is in memory. A restart forgets every run, finished or not, which
+is the right trade for a service whose recovery is to fire the prompt again.
 
 ### Progress while a run is in flight
 
