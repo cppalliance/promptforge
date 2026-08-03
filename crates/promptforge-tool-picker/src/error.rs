@@ -2,9 +2,9 @@
 //!
 //! Resolution itself is infallible and reports abstention as an outcome, so
 //! [`Error`] is the crate's one error type and its variants cover configuration
-//! validation - a threshold outside the cosine range, a zero-length shortlist,
-//! a duplicate threshold below the similarity floor - and the embedding
-//! backend: loading the compiled-in model, tokenizing, and the forward pass.
+//! validation - a threshold outside the cosine range, a zero-length shortlist -
+//! and the embedding backend: loading the compiled-in model, tokenizing, and
+//! the forward pass.
 //! The type is `#[non_exhaustive]`, so a later failure mode can add a variant
 //! without that being a breaking change.
 //!
@@ -82,22 +82,6 @@ pub enum Error {
     Embed {
         /// What went wrong, in the underlying library's own words.
         detail: String,
-    },
-
-    /// The duplicate threshold sat below the similarity floor.
-    ///
-    /// Two tools are twins only if they are both plausible and nearly
-    /// indistinguishable, so the duplicate threshold is the stricter of the
-    /// two. Below the floor it would flag pairs the floor has already rejected.
-    #[non_exhaustive]
-    #[error(
-        "duplicate_threshold {duplicate_threshold} must be at least similarity_floor {similarity_floor}"
-    )]
-    DuplicateThresholdBelowFloor {
-        /// The configured similarity floor.
-        similarity_floor: f32,
-        /// The configured duplicate threshold, which fell below it.
-        duplicate_threshold: f32,
     },
 }
 

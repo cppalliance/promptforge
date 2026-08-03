@@ -3,8 +3,9 @@
 //! This crate is a pure, deterministic, embedding-based tool-resolution engine.
 //! It takes a catalog of tool descriptors, embeds each one locally on the CPU,
 //! and answers a plain-English need with one of four outcomes: a single bound
-//! tool, an ambiguous duplicate pair to fail loudly on, a shortlist of
-//! plausible foreign candidates, or an abstention when nothing fits.
+//! tool, a pair of one server's own duplicate tools to fail loudly on, a
+//! shortlist of candidates it could not separate, or an abstention when
+//! nothing fits.
 //!
 //! The engine is deliberately self-contained. It carries no Lua, no MCP or any
 //! other protocol, and no network dependency: the catalog is the sole input
@@ -27,6 +28,7 @@ pub mod config;
 pub mod embed;
 pub mod error;
 pub mod picker;
+pub mod policy;
 mod rank;
 
 pub use catalog::{Catalog, ToolAnnotations, ToolDescriptor, ToolId};
@@ -34,3 +36,4 @@ pub use config::{Config, ModelId};
 pub use embed::{EMBEDDING_DIMENSIONS, Embedder};
 pub use error::{Error, Result};
 pub use picker::ToolPicker;
+pub use policy::Outcome;
