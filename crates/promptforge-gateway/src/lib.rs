@@ -6,8 +6,9 @@
 //! in the system with an edge to an LLM backend, so the executor above it never
 //! holds a vendor key.
 //!
-//! v0 is a walking skeleton: one OpenAI passthrough endpoint, bearer auth, model
-//! routing, `POST /v1/chat/completions`, and `GET /health`. Admission control,
+//! What ships: one OpenAI passthrough at `POST /v1/chat/completions` with
+//! bearer auth and model routing, a Brave-backed `POST /v1/tools/web_search`
+//! configured by `[tools.web_search]`, and `GET /health`. Admission control,
 //! endpoint pinning, model packs, hot reload, streaming, and the Anthropic
 //! protocol shim are deferred.
 
