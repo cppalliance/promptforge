@@ -27,6 +27,7 @@ pub mod config;
 pub mod embed;
 pub mod error;
 pub mod picker;
+mod rank;
 
 pub use catalog::{Catalog, ToolAnnotations, ToolDescriptor, ToolId};
 pub use config::{Config, ModelId};
