@@ -8,9 +8,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::time::Instant;
+use tracing::Level;
+use tracing_subscriber::layer::SubscriberExt;
 
 use super::RunRegistry;
 use crate::config::Config;
+use crate::levels::Levels;
 use crate::result::{RunResult, RunStatus};
 
 /// A registry over a `[server]` table carrying `lines` on top of the defaults.
@@ -21,6 +24,16 @@ fn registry(lines: &str) -> Arc<RunRegistry> {
     ))
     .expect("the fixture configuration parses");
     Arc::new(RunRegistry::new(&config.server))
+}
+
+/// A level recorder installed for the rest of the calling thread, which is also
+/// where a current-thread runtime polls every task the registry spawns.
+///
+/// The guard the caller holds is what uninstalls it.
+fn recording() -> (Levels, tracing::subscriber::DefaultGuard) {
+    let levels = Levels::default();
+    let recorder = tracing_subscriber::registry().with(levels.clone());
+    (levels, tracing::subscriber::set_default(recorder))
 }
 
 /// The result a finished run of `prompt` leaves behind.
@@ -127,7 +140,42 @@ async fn a_backgrounded_run_that_panics_becomes_a_collectable_failure() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_backgrounded_run_logs_the_id_it_handed_back_and_the_outcome_that_followed() {
+    let (levels, _recording) = recording();
+    let registry = registry("reply_deadline = \"50ms\"");
+    registry.started("r1", "slow", 1);
+    let task = tokio::spawn({
+        let registry = Arc::clone(&registry);
+        async move {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            let result = completed("r1", "slow");
+            registry.finished("r1", result.clone());
+            result
+        }
+    });
+
+    let reply = registry.settle("r1", "slow", 1, task).await;
+    assert_eq!(reply.status, RunStatus::Running);
+    tokio::time::sleep(Duration::from_secs(6)).await;
+
+    assert_eq!(
+        levels.operator_visible(),
+        vec![Level::INFO, Level::INFO],
+        "the run leaving its call and the run ending, and nothing else: {levels:?}"
+    );
+    assert!(
+        levels.said(Level::INFO, "outlived its call"),
+        "the id the caller was handed: {levels:?}"
+    );
+    assert!(
+        levels.said(Level::INFO, "terminal state"),
+        "the outcome nobody else observed: {levels:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_call_is_refused_once_every_slot_is_taken_and_admitted_when_one_returns() {
+    let (levels, _recording) = recording();
     let registry = registry("max_concurrent_runs = 1\nadmission_timeout = \"30s\"");
     let slot = registry.admit().await.expect("the only slot is free");
 
@@ -137,6 +185,16 @@ async fn a_call_is_refused_once_every_slot_is_taken_and_admitted_when_one_return
         started.elapsed(),
         Duration::from_secs(30),
         "a refusal costs exactly the configured wait"
+    );
+
+    assert_eq!(
+        levels.operator_visible(),
+        vec![Level::WARN],
+        "a refusal is what the concurrency limit looks like from outside: {levels:?}"
+    );
+    assert!(
+        levels.said(Level::WARN, "no run slot came free"),
+        "{levels:?}"
     );
 
     drop(slot);

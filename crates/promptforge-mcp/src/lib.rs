@@ -30,6 +30,8 @@
 mod catalog;
 mod config;
 mod error;
+#[cfg(test)]
+mod levels;
 mod progress;
 mod registry;
 mod result;
