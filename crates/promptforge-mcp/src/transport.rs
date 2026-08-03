@@ -47,7 +47,6 @@ use crate::config::{Config, Secret};
 use crate::error::ServeError;
 use crate::retrieval::Retrieval;
 use crate::server::PromptForgeServer;
-use crate::watch::Sessions;
 
 /// Where the MCP endpoint is nested. Everything under it is behind the bearer.
 pub const MCP_PATH: &str = "/mcp";
@@ -73,18 +72,13 @@ const SSE_KEEP_ALIVE: Duration = Duration::from_secs(15);
 /// ```
 /// # use std::sync::Arc;
 /// # use promptforge_mcp::{
-/// #     Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Retrieval, Sessions,
+/// #     Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Retrieval,
 /// # };
 /// # fn demo(config: Config, catalog: Catalog, token: promptforge_mcp::Secret) {
 /// let token = Arc::new(token);
 /// let config = Arc::new(config);
 /// let catalog = Arc::new(CatalogHandle::new(catalog));
-/// let server = PromptForgeServer::new(
-///     config,
-///     catalog,
-///     Arc::new(Sessions::new()),
-///     Arc::new(Retrieval::idle()),
-/// );
+/// let server = PromptForgeServer::new(config, catalog, Arc::new(Retrieval::idle()));
 /// let router = promptforge_mcp::build_router(server, token);
 /// # let _ = router;
 /// # }
@@ -124,7 +118,6 @@ fn streamable_config() -> StreamableHttpServerConfig {
 pub async fn serve_http(
     config: Arc<Config>,
     catalog: Arc<CatalogHandle>,
-    sessions: Arc<Sessions>,
     retrieval: Arc<Retrieval>,
 ) -> Result<(), ServeError> {
     let bind = config.server.bind;
@@ -137,7 +130,7 @@ pub async fn serve_http(
             .clone()
             .ok_or(ServeError::MissingToken)?,
     );
-    let server = PromptForgeServer::new(Arc::clone(&config), catalog, sessions, retrieval);
+    let server = PromptForgeServer::new(Arc::clone(&config), catalog, retrieval);
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .map_err(|source| ServeError::Bind { addr: bind, source })?;
@@ -162,14 +155,13 @@ pub async fn serve_http(
 pub async fn serve_stdio(
     config: Arc<Config>,
     catalog: Arc<CatalogHandle>,
-    sessions: Arc<Sessions>,
     retrieval: Arc<Retrieval>,
 ) -> Result<(), ServeError> {
     tracing::info!(
         "promptforge-mcp serving on stdio; [server].bind ({}) and [server].token are not used on this transport",
         config.server.bind
     );
-    let server = PromptForgeServer::new(config, catalog, sessions, retrieval);
+    let server = PromptForgeServer::new(config, catalog, retrieval);
     let running = server
         .serve(rmcp::transport::stdio())
         .await

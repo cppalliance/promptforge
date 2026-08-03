@@ -25,7 +25,6 @@
 #[cfg(test)]
 mod fixture;
 mod reload;
-mod sessions;
 #[cfg(test)]
 mod tests;
 
@@ -46,7 +45,6 @@ use crate::error::WatchError;
 use crate::retrieval::Retrieval;
 
 pub use crate::watch::reload::{Reload, Reloader};
-pub use crate::watch::sessions::{ListChanged, Sessions};
 
 /// How many "something changed" tokens the queue holds.
 ///
@@ -86,7 +84,6 @@ impl Watcher {
         source: &Path,
         config: Arc<Config>,
         catalog: Arc<CatalogHandle>,
-        sessions: Arc<Sessions>,
         retrieval: Arc<Retrieval>,
     ) -> Result<Option<Watcher>, WatchError> {
         if !config.server.watch {
@@ -138,7 +135,7 @@ impl Watcher {
             humantime::format_duration(window)
         );
 
-        let reloader = Arc::new(Reloader::new(source, config, catalog, sessions, retrieval));
+        let reloader = Arc::new(Reloader::new(source, config, catalog, retrieval));
         let repair = Arc::downgrade(&watcher);
         let task = tokio::spawn(async move {
             debounce(pending, window, move || {
