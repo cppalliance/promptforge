@@ -20,7 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
-use promptforge_mcp::{Catalog, Config, Expose, OnBroken};
+use promptforge_mcp::{Catalog, Config, OnBroken};
 
 /// The shipped configuration, read at compile time so a rename breaks the build
 /// rather than the test.
@@ -94,27 +94,21 @@ fn the_shipped_configuration_resolves_the_shipped_prompts() {
 }
 
 #[test]
-fn the_shipped_configuration_promotes_one_prompt_and_lists_the_rest() {
+fn the_shipped_catalog_reaches_tools_list_through_the_built_ins_alone() {
     let config = shipped_config();
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the shipped catalog resolves");
 
-    // The named block is an exception to `default_expose`, which is what makes
-    // the file a demonstration of the promotion rather than a description of it.
-    let promoted = catalog
-        .find("research_person")
-        .expect("the promoted prompt resolved");
-    assert_eq!(promoted.expose(), Expose::Tool);
-    for entry in catalog
-        .entries()
+    let published: Vec<String> = promptforge_mcp::tool_definitions()
         .iter()
-        .filter(|e| e.name() != "research_person")
-    {
-        assert_eq!(
-            entry.expose(),
-            Expose::List,
-            "{} takes default_expose",
+        .map(|tool| tool.name.to_string())
+        .collect();
+    for entry in catalog.entries() {
+        assert!(
+            !published.iter().any(|name| name == entry.name()),
+            "{} reached tools/list",
             entry.name()
         );
     }
+    assert!(published.contains(&"run_prompt".to_owned()));
 }

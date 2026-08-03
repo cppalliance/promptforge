@@ -1,10 +1,9 @@
 //! The MCP handler: what the server answers `tools/list` and `tools/call` with.
 //!
-//! A call arrives either at a prompt's own tool or at the runner, and both end
-//! in the same place - one prompt run against the configured gateway, reported
-//! as a [`RunResult`]. The listing tool answers from the catalog snapshot the
-//! call loaded, so a prompt written since the client connected is already in
-//! it.
+//! Every call arrives at one of the built-ins, and a prompt is run only because
+//! the runner was handed its name. The listing tool answers from the catalog
+//! snapshot the call loaded, so a prompt written since the client connected is
+//! already in it.
 //!
 //! Where a failure lands is decided by who can fix it. A malformed argument
 //! shape is the client's own bug and comes back as `-32602`, which the calling
@@ -50,11 +49,15 @@ use crate::tools::{
 use crate::watch::Sessions;
 
 /// What the session-level instructions tell a client once, so a model that
-/// never reads a tool description still learns the two rules that matter: the
-/// runner takes a name from the listing, not a guessed one, and what comes back
-/// is the artifact the user asked for rather than material to work from.
-const INSTRUCTIONS: &str = concat!(
-    "This server runs PromptForge prompts. Some prompts have their own tool; the rest are reached with run_prompt. Call list_prompts to see every prompt this server can run, and pass run_prompt a name from that listing rather than guessing one. ",
+/// never reads a tool description still learns the two rules that matter: this
+/// server executes a prompt the caller names, and what comes back is the
+/// artifact the user asked for rather than material to work from.
+///
+/// It is written in the register of a command interpreter. It makes no claim on
+/// any situation and invites no selection, because a prompt is a command and a
+/// model that never calls this server is behaving correctly.
+pub(crate) const INSTRUCTIONS: &str = concat!(
+    "This server executes PromptForge prompts. It runs a prompt only when a caller names one: list_prompts reports the names it can run, and run_prompt takes one of those names. ",
     prompt_value!()
 );
 
@@ -164,9 +167,9 @@ impl PromptForgeServer {
 
     /// Routes one call and answers it.
     ///
-    /// The built-ins are matched before the catalog, and each only while this
-    /// catalog publishes it: a built-in absent from `tools/list` is a name that
-    /// does not exist here, not one the handler answers anyway.
+    /// Only a built-in this build publishes is routed: a name absent from
+    /// `tools/list` - a prompt's own name included - does not exist here, and
+    /// is not one the handler answers anyway.
     ///
     /// # Errors
     /// The same as [`dispatch_with_progress`](Self::dispatch_with_progress).
@@ -179,8 +182,8 @@ impl PromptForgeServer {
         let arguments = request.arguments.as_ref();
         let name = request.name.as_ref();
         match name {
-            LIST_PROMPTS if publishes_built_in(&catalog, name) => list_prompts_result(&catalog),
-            RUN_PROMPT if publishes_built_in(&catalog, name) => {
+            LIST_PROMPTS if publishes_built_in(name) => list_prompts_result(&catalog),
+            RUN_PROMPT if publishes_built_in(name) => {
                 let requested = required_string(arguments, "prompt")?;
                 let args = optional_string(arguments, "args")?;
                 match resolve::resolve(&catalog, &requested) {
@@ -188,7 +191,7 @@ impl PromptForgeServer {
                     Err(message) => Ok(text_error(message)),
                 }
             }
-            CHECK_RUN if publishes_built_in(&catalog, name) => {
+            CHECK_RUN if publishes_built_in(name) => {
                 let run_id = required_string(arguments, "run_id")?;
                 match self.registry.check(&run_id) {
                     Some(result) => run_result(&result),
@@ -198,7 +201,7 @@ impl PromptForgeServer {
                     ))),
                 }
             }
-            NEED_PROMPT if publishes_built_in(&catalog, name) => {
+            NEED_PROMPT if publishes_built_in(name) => {
                 let capability = required_string(arguments, "capability")?;
                 // Embedding the capability is a transformer forward pass, which
                 // has no business on a runtime worker. The index behind it is
@@ -217,17 +220,11 @@ impl PromptForgeServer {
                         })?;
                 need_prompt_result(&shortlist)
             }
-            _ => match catalog.find(name) {
-                Some(entry) if entry.is_direct() => {
-                    let args = optional_string(arguments, "args")?;
-                    self.run(entry, &args, reporting).await
-                }
-                _ => Err(ErrorData::new(
-                    ErrorCode::METHOD_NOT_FOUND,
-                    format!("no tool named {name}"),
-                    None,
-                )),
-            },
+            _ => Err(ErrorData::new(
+                ErrorCode::METHOD_NOT_FOUND,
+                format!("no tool named {name}"),
+                None,
+            )),
         }
     }
 
@@ -279,9 +276,7 @@ impl ServerHandler for PromptForgeServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(tool_definitions(
-            &self.catalog.load(),
-        )))
+        Ok(ListToolsResult::with_all_items(tool_definitions()))
     }
 
     async fn call_tool(
@@ -316,7 +311,6 @@ fn list_prompts_result(catalog: &Catalog) -> Result<CallToolResult, ErrorData> {
                 "name": entry.name(),
                 "description": entry.description(),
                 "version": entry.version(),
-                "direct": entry.is_direct(),
                 "problem": entry.problem(),
             })
         })
