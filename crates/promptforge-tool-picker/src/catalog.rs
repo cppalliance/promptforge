@@ -83,7 +83,11 @@ impl ToolId {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolAnnotations {
     /// The tool does not modify its environment.
-    #[serde(default, rename = "readOnlyHint", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "readOnlyHint",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub read_only: Option<bool>,
     /// The tool may perform destructive updates.
     #[serde(
