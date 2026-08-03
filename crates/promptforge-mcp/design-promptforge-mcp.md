@@ -22,7 +22,7 @@ To operate it: run `promptforge-mcp serve prompts.toml` for streamable HTTP behi
 
 6. **A reload is judged per prompt, and a broken prompt stays visible carrying its error.** Refusing a whole candidate is right at boot, where nothing depends on the service yet, and wrong on save, where one typo in one file would freeze every other prompt in the catalog. A prompt that fails revalidation is retained as a broken entry: still in `list_prompts` with its `problem`, and answering a call with that parse failure. Serving the last good copy instead would be the worst of the three options, because the developer would watch a stale version run with no way to tell.
 
-7. **The catalog is assembled by glob and corrected by name.** `[catalog].include` and `exclude` are glob lists over the prompts directory carrying a `default_expose`, and a `[prompts.NAME]` block is an exception: promote one prompt, drop one with `enabled = false`, or reach a file no glob matches by naming it. Directory patterns are what make "everything I write here is available" a one-line statement, while a named block keeps per-prompt control without turning folder layout into policy. The rejected alternative, an include block per pattern each with its own exposure, would mean moving a file silently changes what the harness sees and two matching patterns need a precedence rule. A named block with no `file` that matches no globbed prompt fails the boot, so a stale override is never a silent no-op.
+7. **The catalog is assembled by glob and corrected by name.** `[catalog].include` and `exclude` are glob lists over the prompts directory, and a `[prompts.NAME]` block is an exception: drop one with `enabled = false`, or reach a file no glob matches by naming it. Directory patterns are what make "everything I write here is available" a one-line statement, while a named block keeps per-prompt control without turning folder layout into policy. The rejected alternative, an include block per pattern each with its own exposure, would mean moving a file silently changes what the harness sees and two matching patterns need a precedence rule. A named block with no `file` that matches no globbed prompt fails the boot, so a stale override is never a silent no-op.
 
 8. **A prompt's frontmatter name is its tool name verbatim, and nothing derives it.** A transformation could map two legal, distinct prompt names onto one tool name, and a name is what the calling model types. So the name must match `^[a-z][a-z0-9_]{0,47}$`, two prompts declaring one name fails the boot naming both files, and the four built-in names are reserved, because dispatch matches the built-ins first and a prompt claiming one would be published as a tool that could never run.
 
@@ -68,17 +68,12 @@ model = "claude-sonnet-4-6"          # optional; the runtime default otherwise
 [catalog]
 include = ["*.md", "governance/**/*.md"]
 exclude = ["**/_*.md", "drafts/**"]
-default_expose = "list"              # default
-
-[prompts.research_person]
-expose = "tool"                      # promote one globbed prompt
 
 [prompts.scratch_test]
 enabled = false                      # drop one the globs caught
 
 [prompts.staker]
 file = "experiments/staker-v3.md"    # reach a file no glob matches
-expose = "tool"
 ```
 
 Only `[server]` and `[gateway]` are required; every other table and key has a default. Resolution order is: expand `include`, subtract `exclude`, then apply the named blocks. Patterns are relative to `[paths].prompts`, `*` stops at a separator and `**` crosses one, and `exclude` matches that same relative path so `drafts/**` means the directory rather than any path containing the word. An unknown key fails the load rather than being silently ignored, which is what keeps a misspelled setting from reading as a default.

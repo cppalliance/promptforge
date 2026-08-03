@@ -56,7 +56,7 @@ fn fixture(server_lines: &str) -> (TempDir, Config) {
         "[server]\n{server_lines}\n\
          [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
-         [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"tool\"\n",
+         [catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
     ))
     .expect("the fixture configuration parses");
