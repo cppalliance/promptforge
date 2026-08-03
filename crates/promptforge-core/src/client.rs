@@ -12,8 +12,14 @@ use crate::{Error, Result};
 
 /// Default backend base URL (the local development gateway).
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8081/v1";
-/// Default model used when `PROMPTFORGE_MODEL` is unset.
-const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
+/// The model a run uses when nothing names one.
+///
+/// [`GatewayClient::from_env`] falls back to it when `PROMPTFORGE_MODEL` is
+/// unset. It is public because a caller configured from a file rather than the
+/// environment - the MCP server is one - needs the same fallback when its
+/// configuration leaves the model out, and two spellings of "the default model"
+/// would drift.
+pub const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
 
 /// A single chat message.
 ///

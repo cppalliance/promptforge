@@ -16,9 +16,20 @@ use promptforge_core::promptforge_version;
 use crate::catalog::{Catalog, Entry, OnBroken};
 use crate::config::{Config, Expose};
 use crate::error::{CatalogError, Fault};
+use crate::tools::{CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT};
 
 /// The longest a derived tool name may be, per `^[a-z][a-z0-9_]{0,47}$`.
 const MAX_TOOL_NAME_LEN: usize = 48;
+
+/// The names the built-ins own, all four legal under the name regex.
+///
+/// Dispatch matches a built-in before it looks in the catalog, so a prompt
+/// declaring one of these would be published as a tool that can never run. The
+/// name is refused here instead, at the one moment the author can act on it.
+/// `need_prompt` is reserved whether or not the `picker` feature publishes it,
+/// since a name that is legal in one build and not in another is worse than a
+/// name that is never legal.
+const RESERVED_NAMES: [&str; 4] = [LIST_PROMPTS, RUN_PROMPT, NEED_PROMPT, CHECK_RUN];
 
 /// Resolves the catalog. See [`Catalog::resolve`] for the contract.
 pub(crate) fn resolve(config: &Config, on_broken: OnBroken) -> Result<Catalog, CatalogError> {
@@ -166,6 +177,15 @@ fn admit(path: PathBuf, expose: Expose, prompt: Prompt, block_key: Option<&str>)
         );
         let fallback = block_key.map_or_else(|| stem_name(&path), ToString::to_string);
         return Entry::broken(fallback, path, expose, detail);
+    }
+    if RESERVED_NAMES.contains(&name.as_str()) {
+        let detail = format!(
+            "tool name {name:?} is reserved for the built-in of that name, which dispatch answers first"
+        );
+        // The broken entry falls back to the file stem rather than keeping the
+        // reserved name, so a reload that retains it cannot publish a second
+        // tool under the built-in's own name.
+        return Entry::broken(stem_name(&path), path, expose, detail);
     }
     if let Some(key) = block_key
         && key != name
@@ -374,6 +394,62 @@ mod tests {
         let text = fault_text(&error);
         assert!(text.contains("Research-Person"), "{text}");
         assert!(text.contains("bad.md"), "{text}");
+    }
+
+    #[test]
+    fn a_prompt_named_for_a_built_in_fails_the_boot_naming_the_collision() {
+        let dir = TempDir::new().expect("temporary prompts directory");
+        let root = dir.path();
+        write_prompt(root, "ok.md", "fine", "Fine");
+        for (file, name) in [
+            ("lister.md", "list_prompts"),
+            ("runner.md", "run_prompt"),
+            ("needer.md", "need_prompt"),
+            ("checker.md", "check_run"),
+        ] {
+            write_prompt(root, file, name, "Shadows a built-in");
+        }
+
+        let config = config_at(root, "[catalog]\ninclude = [\"*.md\"]\n");
+        let error =
+            Catalog::resolve(&config, OnBroken::Reject).expect_err("a reserved name is a fault");
+        assert_eq!(error.faults().len(), 4);
+        let text = fault_text(&error);
+        for name in ["list_prompts", "run_prompt", "need_prompt", "check_run"] {
+            assert!(text.contains(name), "the collision is named: {text}");
+        }
+        for file in ["lister.md", "runner.md", "needer.md", "checker.md"] {
+            assert!(text.contains(file), "the file is named: {text}");
+        }
+    }
+
+    #[test]
+    fn a_reload_keeps_a_built_in_name_collision_to_the_one_prompt() {
+        let dir = TempDir::new().expect("temporary prompts directory");
+        let root = dir.path();
+        write_prompt(root, "good.md", "good", "The one that works");
+        write_prompt(root, "lister.md", "list_prompts", "Shadows a built-in");
+
+        let config = config_at(root, "[catalog]\ninclude = [\"*.md\"]\n");
+        let catalog = Catalog::resolve(&config, OnBroken::Retain)
+            .expect("one badly named prompt does not freeze a reload");
+        assert!(
+            catalog
+                .find("good")
+                .is_some_and(|entry| entry.prompt().is_some()),
+            "every other prompt keeps serving"
+        );
+        assert!(
+            catalog.find("list_prompts").is_none(),
+            "the broken entry never takes the built-in's name"
+        );
+        let broken = catalog.find("lister").expect("the entry keeps its place");
+        assert!(broken.prompt().is_none());
+        assert!(
+            broken.problem().is_some_and(|p| p.contains("reserved")),
+            "{:?}",
+            broken.problem()
+        );
     }
 
     #[test]
