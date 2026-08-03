@@ -26,8 +26,10 @@ pub mod catalog;
 pub mod config;
 pub mod embed;
 pub mod error;
+pub mod picker;
 
 pub use catalog::{Catalog, ToolAnnotations, ToolDescriptor, ToolId};
 pub use config::{Config, ModelId};
 pub use embed::{EMBEDDING_DIMENSIONS, Embedder};
 pub use error::{Error, Result};
+pub use picker::ToolPicker;
