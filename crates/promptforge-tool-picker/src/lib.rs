@@ -24,8 +24,10 @@
 pub mod assets;
 pub mod catalog;
 pub mod config;
+pub mod embed;
 pub mod error;
 
 pub use catalog::{Catalog, ToolAnnotations, ToolDescriptor, ToolId};
 pub use config::{Config, ModelId};
+pub use embed::{EMBEDDING_DIMENSIONS, Embedder};
 pub use error::{Error, Result};
