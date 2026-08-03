@@ -93,7 +93,16 @@ pub struct Config {
     /// whatever is being asked of them. It is unrelated to
     /// `similarity_floor`, which measures a need against a tool.
     pub duplicate_threshold: f32,
-    /// How many candidates a shortlist carries.
+    /// How many candidates an ambiguous or duplicate outcome reports.
+    ///
+    /// This bounds the group [`Outcome::Ambiguous`] and [`Outcome::Duplicate`]
+    /// carry when resolution declines to pick one tool. It does not bound
+    /// [`ToolPicker::shortlist`], whose `k` argument is that caller's own
+    /// request and is honored as given.
+    ///
+    /// [`Outcome::Ambiguous`]: crate::Outcome::Ambiguous
+    /// [`Outcome::Duplicate`]: crate::Outcome::Duplicate
+    /// [`ToolPicker::shortlist`]: crate::ToolPicker::shortlist
     pub top_k: usize,
 }
 

@@ -255,6 +255,35 @@ pub(crate) fn decide(
     Outcome::Ambiguous(descriptors(&tied))
 }
 
+/// The candidates worth offering, best first, under the deciding order.
+///
+/// The same ranking [`decide`] would read, ordered the same way and cut by the
+/// same floor, but reported rather than judged: no margin is applied, no twin
+/// is looked for, and nothing is collapsed to a single answer. A caller that
+/// wants to choose for itself is handed exactly the candidates the engine
+/// would have chosen among.
+///
+/// A candidate scoring below `similarity_floor` is left out, so this yields
+/// nothing in precisely the cases [`decide`] answers [`Outcome::Absent`]. The
+/// floor is the one threshold that says whether a tool matches the need at
+/// all; the margin and the duplicate threshold only say which of the matches
+/// wins, and neither question is asked here.
+///
+/// The list is as long as the ranking it is given, less whatever the floor
+/// removed. Cutting it to a length is the caller's business, since the caller
+/// chose how many candidates to rank.
+pub(crate) fn shortlist(
+    candidates: &[Candidate],
+    tools: &[ToolDescriptor],
+    config: &Config,
+) -> Vec<ToolDescriptor> {
+    order(candidates, tools)
+        .into_iter()
+        .filter(|candidate| candidate.score >= config.similarity_floor)
+        .map(|candidate| candidate.tool.clone())
+        .collect()
+}
+
 /// How many candidates a shortlist may carry.
 ///
 /// `top_k`, but never fewer than two. A shortlist of one would name a single

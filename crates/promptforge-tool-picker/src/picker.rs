@@ -164,12 +164,13 @@ impl ToolPicker {
         Ok(rank::top_k(&query, &self.vectors, k))
     }
 
-    /// Ranks a need and decides what the ranking is worth.
+    /// Resolves a need to one of the four outcomes.
     ///
-    /// The need is ranked against the whole index down to the configured
-    /// shortlist length, and the ranking is judged against the configured
-    /// thresholds. What the four outcomes mean, in what order the thresholds
-    /// apply, and where each boundary falls is [`policy`]'s contract.
+    /// This is the engine's answer to "which tool does this need mean". The
+    /// need is embedded by the model the tools were embedded with, ranked
+    /// against the whole index, and judged against the configured thresholds;
+    /// what the four outcomes mean, in what order the thresholds apply, and
+    /// where each boundary falls is [`policy`]'s contract.
     ///
     /// At least two candidates are ranked however short
     /// [`Config::top_k`](crate::Config::top_k) is. Every ambiguity the policy
@@ -178,23 +179,29 @@ impl ToolPicker {
     /// look at and turn a `top_k` of one - which is a valid configuration -
     /// into a silent binding of whatever came first.
     ///
-    /// Deciding itself cannot fail and cannot abstain silently: a need nothing
-    /// matches comes back as [`Outcome::Absent`], not as an error.
+    /// # An abstention is an answer, not a failure
+    ///
+    /// A need that matches nothing resolves to `Ok(`[`Outcome::Absent`]`)`.
+    /// The `Err` arm means something else entirely: the engine could not run -
+    /// the need could not be tokenized or the forward pass failed - so there
+    /// is no answer at all rather than an answer of "nothing". A caller that
+    /// treats an error as "no tool matched" is discarding a real fault, and
+    /// one that treats an abstention as an error is treating the engine's
+    /// most careful answer as a bug.
+    ///
+    /// # Determinism
+    ///
+    /// The same engine and the same need always resolve to the same outcome,
+    /// as do two engines built from the same catalog and configuration.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Tokenize`] or [`Error::Embed`] if the need cannot be
-    /// embedded.
+    /// embedded. Ranking and deciding cannot fail.
     ///
     /// [`Error::Tokenize`]: crate::Error::Tokenize
     /// [`Error::Embed`]: crate::Error::Embed
-    // The one entry point the crate does not yet expose publicly: the ranking
-    // and the decision behind it are reached only from here, and only the
-    // tests reach here. The attribute comes off when the public surface calls
-    // it, and it sits on this method alone rather than over a module so that
-    // anything else falling out of use is still reported.
-    #[allow(dead_code)]
-    pub(crate) fn decide(&self, need: &str) -> Result<Outcome> {
+    pub fn resolve(&self, need: &str) -> Result<Outcome> {
         let ranked = self.rank(need, self.config.top_k.max(2))?;
         Ok(policy::decide(
             &ranked,
@@ -202,6 +209,58 @@ impl ToolPicker {
             Vectors::new(&self.vectors, EMBEDDING_DIMENSIONS),
             &self.config,
         ))
+    }
+
+    /// The best `k` tools for a need, best first, for a caller that will choose.
+    ///
+    /// Where [`ToolPicker::resolve`] decides, this reports. It is the entry
+    /// point for a caller that has context the engine does not - a
+    /// conversation, a user to ask, a policy of its own - and wants the
+    /// candidates rather than a verdict. The order is the one
+    /// [`ToolPicker::resolve`] decides under: score descending, with an exact
+    /// tie broken by the behavioural hints and then by catalog position.
+    ///
+    /// # Only candidates above the floor are offered
+    ///
+    /// A candidate scoring below [`Config::similarity_floor`] is left out, so
+    /// a need nothing matches yields an empty list rather than the least bad
+    /// of the mismatches. The alternative - returning the raw top `k` whatever
+    /// they scored - would make the two public entry points contradict each
+    /// other, with [`ToolPicker::resolve`] abstaining on a need while this
+    /// method offered three tools for it, and a caller feeding those
+    /// candidates into a prompt would be offering tools the engine had already
+    /// judged irrelevant.
+    ///
+    /// A caller who does want to see near-misses lowers
+    /// [`Config::similarity_floor`], which is exactly the dial that says how
+    /// good a match has to be to count as one. That is a deliberate choice
+    /// stated in the configuration rather than a silent property of which
+    /// method was called.
+    ///
+    /// # `k` is authoritative
+    ///
+    /// `k` is the number of candidates asked for, and it is not clamped
+    /// against [`Config::top_k`]. The two describe different things:
+    /// `top_k` is how long a shortlist [`ToolPicker::resolve`] reports when it
+    /// cannot separate the leaders, while `k` is this caller's own request, on
+    /// this call. A `k` beyond the catalog returns everything that clears the
+    /// floor and never a padded list, and a `k` of zero returns nothing.
+    ///
+    /// Fewer than `k` tools may come back for either reason: the catalog was
+    /// shorter, or the floor removed some. The list is never longer than `k`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Tokenize`] or [`Error::Embed`] if the need cannot be
+    /// embedded. Ranking cannot fail.
+    ///
+    /// [`Config::similarity_floor`]: crate::Config::similarity_floor
+    /// [`Config::top_k`]: crate::Config::top_k
+    /// [`Error::Tokenize`]: crate::Error::Tokenize
+    /// [`Error::Embed`]: crate::Error::Embed
+    pub fn shortlist(&self, need: &str, k: usize) -> Result<Vec<ToolDescriptor>> {
+        let ranked = self.rank(need, k)?;
+        Ok(policy::shortlist(&ranked, self.tools(), &self.config))
     }
 
     /// The stored vector for the tool at `index` in [`ToolPicker::tools`].
@@ -422,7 +481,7 @@ mod tests {
         let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
         let need = catalog.tools()[1].enriched_text();
         assert_eq!(
-            picker.decide(&need).unwrap(),
+            picker.resolve(&need).unwrap(),
             Outcome::Bind(catalog.tools()[1].clone())
         );
     }
@@ -432,7 +491,7 @@ mod tests {
         let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
         assert_eq!(
             picker
-                .decide("compose a haiku about the sorrow of autumn rain")
+                .resolve("compose a haiku about the sorrow of autumn rain")
                 .unwrap(),
             Outcome::Absent
         );
@@ -444,7 +503,7 @@ mod tests {
         let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
         let need = catalog.tools()[0].enriched_text();
         assert_eq!(
-            picker.decide(&need).unwrap(),
+            picker.resolve(&need).unwrap(),
             Outcome::Ambiguous(catalog.tools().to_vec())
         );
     }
@@ -455,7 +514,7 @@ mod tests {
         let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
         let need = catalog.tools()[0].enriched_text();
         assert_eq!(
-            picker.decide(&need).unwrap(),
+            picker.resolve(&need).unwrap(),
             Outcome::Duplicate(catalog.tools().to_vec())
         );
     }
@@ -474,7 +533,7 @@ mod tests {
         let picker = ToolPicker::build(catalog.clone(), config).unwrap();
         let need = catalog.tools()[0].enriched_text();
         assert_eq!(
-            picker.decide(&need).unwrap(),
+            picker.resolve(&need).unwrap(),
             Outcome::Duplicate(catalog.tools().to_vec())
         );
     }
@@ -482,16 +541,63 @@ mod tests {
     #[test]
     fn deciding_the_same_need_twice_yields_the_same_outcome() {
         let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
-        let first = picker.decide("read a file from disk").unwrap();
+        let first = picker.resolve("read a file from disk").unwrap();
         for _ in 0..4 {
-            assert_eq!(picker.decide("read a file from disk").unwrap(), first);
+            assert_eq!(picker.resolve("read a file from disk").unwrap(), first);
         }
+    }
+
+    #[test]
+    fn a_shortlist_offers_the_matching_tools_best_first() {
+        let catalog = tiny_catalog();
+        let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
+        let need = catalog.tools()[1].enriched_text();
+        assert_eq!(
+            picker.shortlist(&need, 2).unwrap(),
+            vec![catalog.tools()[1].clone()],
+            "the unrelated tool is below the floor and is not offered"
+        );
+    }
+
+    #[test]
+    fn a_shortlist_is_empty_exactly_where_resolution_abstains() {
+        let picker = ToolPicker::build(tiny_catalog(), Config::default()).unwrap();
+        let need = "compose a haiku about the sorrow of autumn rain";
+        assert_eq!(picker.resolve(need).unwrap(), Outcome::Absent);
+        assert!(picker.shortlist(need, 5).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_shortlist_takes_its_length_from_k_and_not_from_the_config() {
+        // `top_k` bounds the shortlist a resolution reports; `k` is what this
+        // caller asked for on this call, and nothing clamps one to the other.
+        let catalog = republished("files", "blobs");
+        let config = Config {
+            top_k: 1,
+            ..Config::default()
+        };
+        let picker = ToolPicker::build(catalog.clone(), config).unwrap();
+        let need = catalog.tools()[0].enriched_text();
+        assert_eq!(
+            picker.shortlist(&need, 2).unwrap(),
+            catalog.tools().to_vec()
+        );
+        assert_eq!(
+            picker.shortlist(&need, 1).unwrap(),
+            vec![catalog.tools()[0].clone()]
+        );
+        assert!(picker.shortlist(&need, 0).unwrap().is_empty());
+        // Asking for more than there is returns what there is, unpadded.
+        assert_eq!(
+            picker.shortlist(&need, 99).unwrap(),
+            catalog.tools().to_vec()
+        );
     }
 
     #[test]
     fn an_empty_index_abstains() {
         let picker = ToolPicker::build(Catalog::default(), Config::default()).unwrap();
-        assert_eq!(picker.decide("read a file").unwrap(), Outcome::Absent);
+        assert_eq!(picker.resolve("read a file").unwrap(), Outcome::Absent);
     }
 
     #[test]
