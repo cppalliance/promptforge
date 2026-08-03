@@ -45,14 +45,15 @@ pub fn check_redirect(
         });
     }
 
-    if let Some(from) = from {
-        if from.scheme() == "https" && next.scheme() == "http" {
-            return Err(FetchError::RedirectRefused {
-                from: from_str,
-                to: to_str,
-                reason: "refusing https to http downgrade".to_string(),
-            });
-        }
+    if let Some(from) = from
+        && from.scheme() == "https"
+        && next.scheme() == "http"
+    {
+        return Err(FetchError::RedirectRefused {
+            from: from_str,
+            to: to_str,
+            reason: "refusing https to http downgrade".to_string(),
+        });
     }
 
     if let Err(err) = check_url(next.as_str(), config) {

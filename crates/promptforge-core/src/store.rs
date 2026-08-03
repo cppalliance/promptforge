@@ -510,10 +510,10 @@ fn glob_match(pattern: &[u8], text: &[u8]) -> bool {
     if first == b'*' {
         if let Some((&b'*', double_rest)) = pattern_rest.split_first() {
             // `**/` also matches zero path segments, so `a/**/b` matches `a/b`.
-            if let Some((&b'/', after_slash)) = double_rest.split_first() {
-                if glob_match(after_slash, text) {
-                    return true;
-                }
+            if let Some((&b'/', after_slash)) = double_rest.split_first()
+                && glob_match(after_slash, text)
+            {
+                return true;
             }
             return (0..=text.len()).any(|skip| glob_match(double_rest, &text[skip..]));
         }

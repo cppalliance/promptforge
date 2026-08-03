@@ -49,7 +49,7 @@ cargo run -p promptforge-cli -- run prompts/hello.md
 ## Decisions settled
 
 - Rust multi-crate workspace: promptforge-core (lib), promptforge-cli (bin)
-- Edition 2024, resolver 3, rust-version 1.85
+- Edition 2024, resolver 3, rust-version 1.89 (floor set by transitive deps of candle and hf-hub)
 - Lint policy in [workspace.lints]: unsafe_code forbid, missing_docs, clippy all=deny + pedantic=warn, unwrap_used deny (doc_markdown allowed for product names); tests allowed unwrap/expect via clippy.toml
 - Public error types are #[non_exhaustive] and do not leak dependency error types
 - Gateway is the only process with an edge to a backend; it holds vendor keys

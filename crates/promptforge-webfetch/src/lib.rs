@@ -565,10 +565,10 @@ async fn read_body_capped(
     // Precheck: an honest Content-Length over the cap is refused before any
     // body is read. A compressed response reports no usable length here, so the
     // streamed counter below is what catches an expanding payload.
-    if let Some(len) = response.content_length() {
-        if len > max_bytes as u64 {
-            return Err(too_large());
-        }
+    if let Some(len) = response.content_length()
+        && len > max_bytes as u64
+    {
+        return Err(too_large());
     }
 
     let mut body: Vec<u8> = Vec::new();
