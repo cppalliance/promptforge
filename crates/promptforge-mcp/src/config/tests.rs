@@ -25,17 +25,12 @@ model = "claude-sonnet-4-6"
 [catalog]
 include = ["*.md", "governance/**/*.md"]
 exclude = ["_*.md", "drafts/**"]
-default_expose = "list"
-
-[prompts.research_person]
-expose = "tool"
 
 [prompts.scratch_test]
 enabled = false
 
 [prompts.staker]
 file = "experiments/staker-v3.md"
-expose = "tool"
 "#;
 
 /// The smallest configuration that parses: the two required sections.
@@ -75,9 +70,8 @@ fn parses_a_full_config() {
 
     assert_eq!(config.catalog.include, ["*.md", "governance/**/*.md"]);
     assert_eq!(config.catalog.exclude, ["_*.md", "drafts/**"]);
-    assert_eq!(config.catalog.default_expose, Expose::List);
 
-    assert_eq!(config.prompts.len(), 3);
+    assert_eq!(config.prompts.len(), 2);
 }
 
 #[test]
@@ -101,27 +95,19 @@ fn parses_without_a_catalog_section() {
 
     assert!(config.catalog.include.is_empty());
     assert!(config.catalog.exclude.is_empty());
-    assert_eq!(config.catalog.default_expose, Expose::List);
     assert!(config.prompts.is_empty());
 }
 
 #[test]
-fn named_blocks_override_the_default_exposure() {
+fn a_named_block_drops_a_globbed_prompt() {
     let toml = format!(
-        "{MINIMAL}\n[catalog]\ndefault_expose = \"tool\"\n\n[prompts.listed]\nexpose = \"list\"\n\n[prompts.dropped]\nenabled = false\n"
+        "{MINIMAL}\n[catalog]\ninclude = [\"*.md\"]\n\n[prompts.dropped]\nenabled = false\n"
     );
     let config = Config::from_toml_str(&toml).expect("config parses");
 
-    assert_eq!(config.catalog.default_expose, Expose::Tool);
-
-    let listed = &config.prompts["listed"];
-    assert_eq!(listed.expose, Some(Expose::List));
-    assert!(listed.enabled);
-    assert!(listed.file.is_none());
-
     let dropped = &config.prompts["dropped"];
-    assert_eq!(dropped.expose, None);
     assert!(!dropped.enabled);
+    assert!(dropped.file.is_none());
 }
 
 #[test]
@@ -130,7 +116,7 @@ fn a_named_block_can_carry_a_file() {
 
     let staker = &config.prompts["staker"];
     assert_eq!(staker.file, Some(PathBuf::from("experiments/staker-v3.md")));
-    assert_eq!(staker.expose, Some(Expose::Tool));
+    assert!(staker.enabled);
 }
 
 #[test]
@@ -209,10 +195,22 @@ fn an_unknown_key_is_an_error() {
 }
 
 #[test]
-fn an_unknown_exposure_is_an_error() {
-    let toml = format!("{MINIMAL}\n[catalog]\ndefault_expose = \"everywhere\"\n");
-    let err = Config::from_toml_str(&toml).expect_err("an unknown exposure is refused");
+fn a_catalog_default_expose_is_rejected_by_name() {
+    // Every prompt is reached through `run_prompt`, so there is nothing left to
+    // promote. Ignoring the key would leave an operator believing a prompt was
+    // published under its own name, so the load fails and names the key.
+    let toml = format!("{MINIMAL}\n[catalog]\ndefault_expose = \"tool\"\n");
+    let err = Config::from_toml_str(&toml).expect_err("default_expose is refused");
     assert!(matches!(err, ConfigError::Parse(_)), "{err}");
+    assert!(err.to_string().contains("default_expose"), "{err}");
+}
+
+#[test]
+fn a_per_prompt_expose_is_rejected_by_name() {
+    let toml = format!("{MINIMAL}\n[prompts.staker]\nexpose = \"tool\"\n");
+    let err = Config::from_toml_str(&toml).expect_err("a per-prompt expose is refused");
+    assert!(matches!(err, ConfigError::Parse(_)), "{err}");
+    assert!(err.to_string().contains("expose"), "{err}");
 }
 
 #[test]

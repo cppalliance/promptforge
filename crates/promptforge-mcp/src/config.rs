@@ -67,21 +67,6 @@ impl fmt::Display for Secret {
     }
 }
 
-/// How much of the harness's attention a prompt occupies.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum Expose {
-    /// Its own entry in `tools/list`, named and described for the calling model
-    /// to select directly. A promotion: a new or renamed direct tool is
-    /// invisible until the client restarts.
-    Tool,
-    /// Reachable only through the built-in listing and retrieval tools, which
-    /// costs one extra round trip and no permanent context slot.
-    #[default]
-    List,
-}
-
 /// The whole MCP server configuration.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -177,8 +162,7 @@ pub struct GatewayConfig {
     pub model: Option<String>,
 }
 
-/// The globs that assemble the catalog, and the exposure a globbed prompt gets
-/// when no named block says otherwise.
+/// The globs that assemble the catalog.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -190,9 +174,6 @@ pub struct CatalogConfig {
     /// Patterns to subtract from the included set.
     #[serde(default)]
     pub exclude: Vec<String>,
-    /// The exposure a globbed prompt gets absent a named block.
-    #[serde(default)]
-    pub default_expose: Expose,
 }
 
 /// One `[prompts.NAME]` block: an exception to the globs.
@@ -200,9 +181,6 @@ pub struct CatalogConfig {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct PromptConfig {
-    /// The exposure for this prompt, overriding `default_expose`.
-    #[serde(default)]
-    pub expose: Option<Expose>,
     /// Whether the prompt is published at all. `false` drops one the globs
     /// caught.
     #[serde(default = "default_enabled")]

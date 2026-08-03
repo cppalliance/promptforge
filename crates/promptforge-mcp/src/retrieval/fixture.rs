@@ -49,7 +49,7 @@ pub(crate) struct Prompts {
     _dir: TempDir,
     /// The configuration the catalog was resolved from.
     pub(crate) config: Arc<Config>,
-    /// The resolved catalog, every prompt exposed as `list`.
+    /// The catalog resolved from `config`, every prompt healthy.
     pub(crate) catalog: Catalog,
 }
 
@@ -67,7 +67,7 @@ pub(crate) fn catalog(prompts: &[(&str, &str)]) -> Prompts {
         "[server]\ntoken = \"t\"\n\n\
          [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
-         [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"list\"\n",
+         [catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
     ))
     .expect("the fixture configuration parses");
