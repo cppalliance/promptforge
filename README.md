@@ -8,7 +8,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-core` - library: prompt parser, gateway client, section execution
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog (in progress: catalog types)
+- `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog (in progress: catalog, config, and error types)
 
 ## Build
 
