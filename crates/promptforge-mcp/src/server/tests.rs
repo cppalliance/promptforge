@@ -50,8 +50,8 @@ fn write(root: &Path, relative: &str, contents: &str) {
     fs::write(root.join(relative), contents).expect("write the fixture prompt");
 }
 
-/// A server over a prompts directory holding one direct prompt (`echo`), two
-/// listed ones (`greet`, `summarize`), and one whose Lua will not compile.
+/// A server over a prompts directory holding three prompts that run offline
+/// (`echo`, `greet`, `summarize`) and one whose Lua will not compile.
 fn server() -> (TempDir, PromptForgeServer) {
     server_with("")
 }
@@ -73,34 +73,7 @@ fn server_with(server_lines: &str) -> (TempDir, PromptForgeServer) {
         "[server]\ntoken = \"t\"\n{server_lines}\n\n\
          [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
-         [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"list\"\n\n\
-         [prompts.echo]\nexpose = \"tool\"\n",
-        root.display()
-    ))
-    .expect("the fixture configuration parses");
-    let catalog =
-        Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
-    let server = PromptForgeServer::new(
-        Arc::new(config),
-        Arc::new(CatalogHandle::new(catalog)),
-        Arc::new(Sessions::new()),
-        Arc::new(Retrieval::idle()),
-    );
-    (dir, server)
-}
-
-/// A server over a prompts directory whose every prompt has its own tool, so
-/// the catalog publishes neither listing tool.
-fn all_direct_server() -> (TempDir, PromptForgeServer) {
-    let dir = tempfile::tempdir().expect("create a temporary prompts directory");
-    let root = dir.path();
-    write(root, "echo.md", &echo_prompt("echo", "Echo the input back"));
-
-    let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
-         [paths]\nprompts = '{}'\n\n\
-         [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"tool\"\n",
+         [catalog]\ninclude = [\"*.md\"]\n",
         root.display()
     ))
     .expect("the fixture configuration parses");
@@ -145,12 +118,15 @@ fn structured_of(result: &CallToolResult) -> Value {
 }
 
 #[tokio::test]
-async fn a_direct_tool_runs_its_prompt_and_reports_the_value_twice() {
+async fn the_runner_runs_the_named_prompt_and_reports_the_value_twice() {
     let (_dir, server) = server();
     let result = server
-        .dispatch(call("echo", json!({ "args": "hello" })))
+        .dispatch(call(
+            "run_prompt",
+            json!({ "prompt": "echo", "args": "hello" }),
+        ))
         .await
-        .expect("a direct call is not a protocol error");
+        .expect("running a named prompt is not a protocol error");
 
     assert_eq!(result.is_error, Some(false));
     assert_eq!(text_of(&result), "hello");
@@ -171,14 +147,14 @@ async fn a_direct_tool_runs_its_prompt_and_reports_the_value_twice() {
 async fn a_missing_args_argument_is_the_empty_string() {
     let (_dir, server) = server();
     let result = server
-        .dispatch(call("echo", json!({})))
+        .dispatch(call("run_prompt", json!({ "prompt": "echo" })))
         .await
         .expect("omitting args is legal");
     assert_eq!(text_of(&result), "");
 }
 
 #[tokio::test]
-async fn run_prompt_reaches_a_listed_prompt() {
+async fn run_prompt_reaches_any_prompt_in_the_catalog() {
     let (_dir, server) = server();
     let result = server
         .dispatch(call(
@@ -186,7 +162,7 @@ async fn run_prompt_reaches_a_listed_prompt() {
             json!({ "prompt": "greet", "args": "Ada" }),
         ))
         .await
-        .expect("running a listed prompt is not a protocol error");
+        .expect("running a named prompt is not a protocol error");
     assert_eq!(text_of(&result), "Ada");
     assert_eq!(structured_of(&result)["prompt"], json!("greet"));
 }
@@ -292,7 +268,10 @@ async fn a_malformed_argument_shape_is_a_protocol_error() {
     assert_eq!(mistyped.code, ErrorCode::INVALID_PARAMS);
 
     let Err(bad_args) = server
-        .dispatch(call("echo", json!({ "args": ["a"] })))
+        .dispatch(call(
+            "run_prompt",
+            json!({ "prompt": "echo", "args": ["a"] }),
+        ))
         .await
     else {
         panic!("a non-string args is the client's bug")
@@ -319,19 +298,17 @@ async fn a_prompt_that_fails_reports_the_failure_as_a_result() {
 }
 
 #[tokio::test]
-async fn a_tool_this_catalog_does_not_publish_is_a_protocol_error() {
+async fn a_prompt_called_under_its_own_name_is_a_protocol_error() {
     let (_dir, server) = server();
 
-    // `greet` is listed, not direct, so it has no tool of its own.
-    let Err(listed) = server.dispatch(call("greet", json!({}))).await else {
-        panic!("a listed prompt has no direct tool")
-    };
-    assert_eq!(listed.code, ErrorCode::METHOD_NOT_FOUND);
-
-    let Err(absent) = server.dispatch(call("nonesuch", json!({}))).await else {
-        panic!("an unpublished name is unroutable")
-    };
-    assert_eq!(absent.code, ErrorCode::METHOD_NOT_FOUND);
+    // No prompt is published as a tool, so its name is not a method here: the
+    // only way in is to name it to the runner.
+    for name in ["echo", "greet", "summarize", "explode", "nonesuch"] {
+        let Err(unroutable) = server.dispatch(CallToolRequestParams::new(name)).await else {
+            panic!("{name} is not a tool this server publishes")
+        };
+        assert_eq!(unroutable.code, ErrorCode::METHOD_NOT_FOUND, "{name}");
+    }
 }
 
 #[tokio::test]
@@ -352,9 +329,63 @@ async fn list_prompts_reports_every_enabled_prompt() {
         .map(|entry| entry["name"].as_str().unwrap_or_default())
         .collect();
     assert_eq!(names, ["echo", "explode", "greet", "summarize"]);
-    assert_eq!(prompts[0]["direct"], json!(true));
-    assert_eq!(prompts[2]["direct"], json!(false));
     assert_eq!(prompts[2]["version"], json!(3));
+    assert!(
+        prompts.iter().all(|entry| entry.get("direct").is_none()),
+        "no prompt has a tool of its own to report"
+    );
+}
+
+#[tokio::test]
+async fn list_prompts_carries_the_problem_that_stops_a_prompt_running() {
+    // The catalog is resolved under the reload's rule, where a prompt that
+    // fails validation keeps its place carrying its error.
+    let dir = tempfile::tempdir().expect("create a temporary prompts directory");
+    let root = dir.path();
+    write(root, "good.md", &echo_prompt("good", "Runs"));
+    write(
+        root,
+        "bad.md",
+        "---\npromptforge: 1\nname: placeholder\n---\n\n## S\n\np\n",
+    );
+    let config = Config::from_toml_str(&format!(
+        "[server]\ntoken = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
+        root.display()
+    ))
+    .expect("the fixture configuration parses");
+    let catalog = Catalog::resolve(&config, OnBroken::Retain).expect("a reload keeps going");
+    let server = PromptForgeServer::new(
+        Arc::new(config),
+        Arc::new(CatalogHandle::new(catalog)),
+        Arc::new(Sessions::new()),
+        Arc::new(Retrieval::idle()),
+    );
+
+    let result = server
+        .dispatch(call("list_prompts", json!({})))
+        .await
+        .expect("listing is not a protocol error");
+    let structured = structured_of(&result);
+    let prompts = structured["prompts"]
+        .as_array()
+        .expect("the listing is an array");
+    let broken = prompts
+        .iter()
+        .find(|entry| entry["name"] == json!("bad"))
+        .expect("the broken prompt keeps its place");
+    assert!(
+        broken["problem"]
+            .as_str()
+            .is_some_and(|problem| problem.contains("does not parse")),
+        "{broken}"
+    );
+    let healthy = prompts
+        .iter()
+        .find(|entry| entry["name"] == json!("good"))
+        .expect("the healthy prompt is listed");
+    assert!(healthy["problem"].is_null());
 }
 
 #[tokio::test]
@@ -366,28 +397,6 @@ async fn a_published_built_in_called_with_no_arguments_at_all_is_the_client_s_bu
         .await
         .expect_err("the schema declared a required argument");
     assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
-}
-
-#[tokio::test]
-async fn a_built_in_this_catalog_does_not_publish_is_a_protocol_error() {
-    let (_dir, server) = all_direct_server();
-
-    // Nothing is listed, so the listing tools are absent from `tools/list` and
-    // a call to either asks for something this server does not have.
-    for name in ["list_prompts", "run_prompt", "need_prompt"] {
-        let Err(unpublished) = server.dispatch(CallToolRequestParams::new(name)).await else {
-            panic!("{name} is not published by an all-direct catalog")
-        };
-        assert_eq!(unpublished.code, ErrorCode::METHOD_NOT_FOUND, "{name}");
-    }
-
-    // The collector is published whenever anything is, since a direct call can
-    // outlive its deadline too.
-    let collector = server
-        .dispatch(call("check_run", json!({ "run_id": "nonesuch" })))
-        .await
-        .expect("check_run is published here");
-    assert_eq!(collector.is_error, Some(true));
 }
 
 #[tokio::test]
@@ -423,7 +432,7 @@ async fn spawn_text_gateway() -> SocketAddr {
     addr
 }
 
-/// A server over one direct prompt whose single section is prose, pointed at
+/// A server over one prompt whose single section is prose, pointed at
 /// `gateway`.
 fn speaking_server(gateway: SocketAddr) -> (TempDir, PromptForgeServer) {
     speaking_server_with(gateway, "")
@@ -442,7 +451,7 @@ fn speaking_server_with(gateway: SocketAddr, server_lines: &str) -> (TempDir, Pr
         "[server]\ntoken = \"t\"\n{server_lines}\n\n\
          [gateway]\nurl = \"http://{gateway}/v1\"\ntoken = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
-         [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"tool\"\n",
+         [catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
     ))
     .expect("the fixture configuration parses");
@@ -464,9 +473,9 @@ async fn the_reported_turn_total_is_the_one_the_run_took() {
     let gateway = spawn_text_gateway().await;
     let (_dir, server) = speaking_server(gateway);
     let result = server
-        .dispatch(call("speak", json!({})))
+        .dispatch(call("run_prompt", json!({ "prompt": "speak" })))
         .await
-        .expect("a direct call is not a protocol error");
+        .expect("running a named prompt is not a protocol error");
 
     let structured = structured_of(&result);
     assert_eq!(structured["status"], json!("completed"));
@@ -493,9 +502,12 @@ async fn a_build_without_the_picker_has_no_need_prompt_at_all() {
 async fn a_run_that_never_started_reports_no_turns() {
     let (_dir, server) = server();
     let result = server
-        .dispatch(call("echo", json!({ "args": "hello" })))
+        .dispatch(call(
+            "run_prompt",
+            json!({ "prompt": "echo", "args": "hello" }),
+        ))
         .await
-        .expect("a direct call is not a protocol error");
+        .expect("running a named prompt is not a protocol error");
     assert_eq!(
         structured_of(&result)["turns"],
         json!(NO_TURNS),

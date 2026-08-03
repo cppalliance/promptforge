@@ -37,8 +37,8 @@ use crate::watch::sessions::ListChanged;
 ///
 /// The two flags are read by different things. `published_changed` is what sent
 /// the `tools/list_changed` announcement, and covers every prompt's name,
-/// description, exposure, and problem - the whole of what a client can read
-/// about one; `ranking_changed` reports that
+/// description, and problem - the whole of what a client can read about one;
+/// `ranking_changed` reports that
 /// [`Catalog::hash`] moved, which is what tells retrieval its index is stale, so
 /// an edit to a prompt's body alone costs no rebuild.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -255,18 +255,16 @@ pub(super) fn ignored_changes(boot: &Config, candidate: &Config) -> Vec<&'static
     ignored
 }
 
-/// The published surface as one line per prompt: its name, its description, its
-/// exposure, and its problem.
+/// The published surface as one line per prompt: its name, its description, and
+/// its problem.
 ///
-/// Those four are exactly what a client can read about a prompt, whether it
-/// reads them from `tools/list` or from `list_prompts`, so comparing them is
-/// what makes the announcement mean what it says. Comparing the serialized tool
-/// list instead would be narrower than the contract: a listed prompt's
-/// description is part of what a caller sees and none of what `tools/list`
-/// carries, so a renamed listed prompt would change the catalog visibly and
-/// announce nothing.
+/// Those three are exactly what a client can read about a prompt, all of it
+/// through `list_prompts`, so comparing them is what makes the announcement
+/// mean what it says. Comparing the serialized tool list instead would say
+/// nothing at all: that list is the same four built-ins whatever the catalog
+/// holds.
 ///
-/// A separator that cannot occur in any of the four keeps two fields from
+/// A separator that cannot occur in any of the three keeps two fields from
 /// running together into one that happens to match.
 fn published(catalog: &Catalog) -> Vec<String> {
     catalog
@@ -274,10 +272,9 @@ fn published(catalog: &Catalog) -> Vec<String> {
         .iter()
         .map(|entry| {
             format!(
-                "{}\u{1f}{}\u{1f}{:?}\u{1f}{}",
+                "{}\u{1f}{}\u{1f}{}",
                 entry.name(),
                 entry.description(),
-                entry.expose(),
                 entry.problem().unwrap_or_default()
             )
         })

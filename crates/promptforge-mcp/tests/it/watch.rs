@@ -75,7 +75,7 @@ async fn a_saved_prompt_reaches_the_catalog_and_the_client() {
             "[server]\ntoken = \"shared\"\nwatch_debounce = \"50ms\"\n\n\
              [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
              [paths]\nprompts = '{}'\n\n\
-             [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"list\"\n",
+             [catalog]\ninclude = [\"*.md\"]\n",
             root.join("prompts").display()
         ),
     )

@@ -2,7 +2,7 @@
 //!
 //! The catalog becomes a tool catalog the engine understands: one descriptor per
 //! runnable prompt, all on one server, each carrying the prompt's name, its
-//! description, and the same one-string `args` schema its tool carries. That is
+//! description, and the one-string `args` schema `run_prompt` takes. That is
 //! the whole mapping - the engine never learns anything about a prompt a client
 //! could not read for itself.
 //!
@@ -136,11 +136,11 @@ pub(crate) fn descriptors(catalog: &Catalog) -> Descriptors {
         .collect()
 }
 
-/// The one-string `args` schema every prompt's tool carries.
+/// The one-string `args` schema a run takes.
 ///
 /// The engine reads the top-level property names to enrich the text it embeds,
 /// so this contributes the same word to every prompt and separates none of them
-/// from another. It is here because the descriptor is meant to say what the tool
+/// from another. It is here because the descriptor is meant to say what a call
 /// really takes, and what a prompt takes is one raw string.
 fn args_schema() -> serde_json::Value {
     json!({"type": "object", "properties": {"args": {"type": "string"}}})

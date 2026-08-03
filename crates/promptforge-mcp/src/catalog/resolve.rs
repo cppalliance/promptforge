@@ -14,7 +14,7 @@ use promptforge_core::parser::Prompt;
 use promptforge_core::promptforge_version;
 
 use crate::catalog::{Catalog, Entry, OnBroken};
-use crate::config::{Config, Expose};
+use crate::config::Config;
 use crate::error::{CatalogError, Fault};
 use crate::tools::{CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT};
 
@@ -23,9 +23,10 @@ const MAX_TOOL_NAME_LEN: usize = 48;
 
 /// The names the built-ins own, all four legal under the name regex.
 ///
-/// Dispatch matches a built-in before it looks in the catalog, so a prompt
-/// declaring one of these would be published as a tool that can never run. The
-/// name is refused here instead, at the one moment the author can act on it.
+/// No prompt is published as a tool, so the collision is no longer structural.
+/// It is still refused, because "run `check_run`" is ambiguous to a person and
+/// to a model alike, and a boot refusal naming the file is the one version of
+/// that a prompt author can act on.
 /// `need_prompt` is reserved whether or not the `picker` feature publishes it,
 /// since a name that is legal in one build and not in another is worse than a
 /// name that is never legal.
@@ -34,7 +35,6 @@ const RESERVED_NAMES: [&str; 4] = [LIST_PROMPTS, RUN_PROMPT, NEED_PROMPT, CHECK_
 /// Resolves the catalog. See [`Catalog::resolve`] for the contract.
 pub(crate) fn resolve(config: &Config, on_broken: OnBroken) -> Result<Catalog, CatalogError> {
     let root = config.paths.prompts.as_path();
-    let default_expose = config.catalog.default_expose;
     let mut faults: Vec<Fault> = Vec::new();
     let mut entries: Vec<Entry> = Vec::new();
 
@@ -42,12 +42,7 @@ pub(crate) fn resolve(config: &Config, on_broken: OnBroken) -> Result<Catalog, C
         let source = match read(&path) {
             Ok(source) => source,
             Err(detail) => {
-                entries.push(Entry::broken(
-                    stem_name(&path),
-                    path,
-                    default_expose,
-                    detail,
-                ));
+                entries.push(Entry::broken(stem_name(&path), path, detail));
                 continue;
             }
         };
@@ -57,8 +52,8 @@ pub(crate) fn resolve(config: &Config, on_broken: OnBroken) -> Result<Catalog, C
             continue;
         }
         entries.push(match parse(&source) {
-            Ok(prompt) => admit(path, default_expose, prompt, None),
-            Err(detail) => Entry::broken(stem_name(&path), path, default_expose, detail),
+            Ok(prompt) => admit(path, prompt, None),
+            Err(detail) => Entry::broken(stem_name(&path), path, detail),
         });
     }
 
@@ -168,7 +163,7 @@ fn parse(source: &str) -> Result<Prompt, String> {
 
 /// Turns a parsed prompt into an entry, checking the frontmatter name and, for
 /// a named block, that the name is the one the block was keyed on.
-fn admit(path: PathBuf, expose: Expose, prompt: Prompt, block_key: Option<&str>) -> Entry {
+fn admit(path: PathBuf, prompt: Prompt, block_key: Option<&str>) -> Entry {
     let name = prompt.frontmatter.name.clone();
     if !is_valid_tool_name(&name) {
         let detail = format!(
@@ -176,24 +171,24 @@ fn admit(path: PathBuf, expose: Expose, prompt: Prompt, block_key: Option<&str>)
             MAX_TOOL_NAME_LEN - 1
         );
         let fallback = block_key.map_or_else(|| stem_name(&path), ToString::to_string);
-        return Entry::broken(fallback, path, expose, detail);
+        return Entry::broken(fallback, path, detail);
     }
     if RESERVED_NAMES.contains(&name.as_str()) {
         let detail = format!(
-            "tool name {name:?} is reserved for the built-in of that name, which dispatch answers first"
+            "prompt name {name:?} is reserved: a built-in already answers to it, so \"run {name}\" is ambiguous"
         );
         // The broken entry falls back to the file stem rather than keeping the
-        // reserved name, so a reload that retains it cannot publish a second
-        // tool under the built-in's own name.
-        return Entry::broken(stem_name(&path), path, expose, detail);
+        // reserved name, so a reload that retains it cannot offer a prompt
+        // under a built-in's own name.
+        return Entry::broken(stem_name(&path), path, detail);
     }
     if let Some(key) = block_key
         && key != name
     {
         let detail = format!("frontmatter name {name:?} does not match its [prompts.{key}] block");
-        return Entry::broken(key.to_string(), path, expose, detail);
+        return Entry::broken(key.to_string(), path, detail);
     }
-    Entry::healthy(path, expose, prompt)
+    Entry::healthy(path, prompt)
 }
 
 /// One fault per name two or more healthy prompts declare, each naming every

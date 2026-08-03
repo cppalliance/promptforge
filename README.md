@@ -202,19 +202,16 @@ relative prompts directory is resolved against it.
 
 ### The developer loop
 
-Write a prompt as `list`, iterate on it, and promote it to `expose = "tool"` only
-once its name and description have stopped moving.
+Write a prompt, save it, call it. No step in between, and no client restart at
+any point.
 
-That order is forced by what the two clients cache. Both freeze the tool list for
-the life of their process - in Cursor a new chat, the MCP pane's reload button,
-and `Developer: Reload Window` all carry the old snapshot over, and Claude Code
-fixes its tool index when the session starts - so a newly added or renamed direct
-tool is invisible until the client restarts, whatever the server announces. The
-listing tools have fixed names, so the catalog behind them is free to change: a
-prompt saved a second ago is in `list_prompts` and callable through `run_prompt`
-on the very next call, with no reconnect and no restart. That is the loop to
-iterate in. A promotion to `tool` costs one client restart, which is a price
-worth paying once and not once per edit.
+That is a consequence of publishing no prompt as a tool of its own. Both clients
+freeze the tool list for the life of their process - in Cursor a new chat, the
+MCP pane's reload button, and `Developer: Reload Window` all carry the old
+snapshot over, and Claude Code fixes its tool index when the session starts - and
+none of that matters here, because the published list is the same four built-ins
+whatever the catalog holds. A prompt saved a second ago is in `list_prompts` and
+callable through `run_prompt` on the very next call.
 
 `watch = true` is what makes the edit half of the loop work: the prompts
 directory is re-read on save, so the next call runs the version on disk. Keep the
@@ -254,29 +251,20 @@ model = "claude-sonnet-4-6"          # optional; the core default otherwise
 [catalog]
 include = ["*.md", "governance/**/*.md"]
 exclude = ["**/_*.md", "drafts/**"]
-default_expose = "list"              # default
 
 # Individual prompts, keyed by the prompt's frontmatter name. A block with no
 # `file` is an exception to the globs.
-[prompts.research_person]
-expose = "tool"                      # promote one globbed prompt to its own tool
-
 [prompts.scratch_test]
 enabled = false                      # drop one the globs caught
 
 [prompts.staker]
 file = "experiments/staker-v3.md"    # reach a file no glob matches
-expose = "tool"
 ```
 
-Two exposures. `expose = "list"` (the default) keeps a prompt out of the
-harness's tool list and reachable through the server's own listing and retrieval
-tools, which costs one extra round trip and no permanent context slot.
-`expose = "tool"` gives the prompt its own entry in `tools/list` for the calling
-model to select directly. Direct exposure is a promotion, not a starting point:
-a client caches its tool list for the life of its process, so a newly added or
-renamed direct tool is invisible until it restarts, while the listing tools have
-fixed names and their catalog changes freely.
+Every prompt in the catalog is reached the same way: `list_prompts` names it and
+`run_prompt` runs it. No prompt has an entry of its own in `tools/list`, so
+nothing this server offers can be selected for a task the caller did not ask for
+by name, and nothing a client caches goes stale.
 
 Durations are plain strings (`500ms`, `30s`, `1h`). As in `gateway.toml`, any
 string value may contain `${VAR}`, expanded from the process environment at load
@@ -300,20 +288,18 @@ such limit applies there.
 ### How the catalog is resolved
 
 The server expands `include`, subtracts `exclude`, and then applies the
-`[prompts.NAME]` blocks. A block promotes one globbed prompt, drops one with
+`[prompts.NAME]` blocks. A block drops one globbed prompt with
 `enabled = false`, or reaches a file no glob matches by naming it. Patterns are
 relative to `[paths].prompts`, and `exclude` is matched against that same
 relative path, so `drafts/**` means the `drafts` directory and not any path that
 happens to contain the word.
 
-A prompt's identity is its frontmatter `name`. That name is used verbatim as the
-MCP tool name rather than transformed into one, so it must match
+A prompt's identity is its frontmatter `name`, which is the name a caller passes
+to `run_prompt` verbatim rather than transformed, so it must match
 `^[a-z][a-z0-9_]{0,47}$`; transforming would let two different frontmatter names
-collide in `tools/list`. The four built-in names - `list_prompts`,
-`run_prompt`, `need_prompt`, and `check_run` - are reserved: a call is matched
-against the built-ins first, so a prompt claiming one of those names would be
-published as a tool that could never run, and the boot refuses it instead,
-naming the collision.
+collide. The four built-in names - `list_prompts`, `run_prompt`, `need_prompt`,
+and `check_run` - are reserved: "run `check_run`" is ambiguous to a person and to
+a model alike, so the boot refuses such a prompt, naming the collision.
 
 Boot either produces a complete catalog or the server refuses to start. Every
 resolved file must be readable, must parse, and must declare a legal name; two
@@ -354,14 +340,10 @@ leaves the previous catalog serving and logs why, since there is no partial
 answer to give.
 
 When the reload changed anything a client can read about a prompt - its name, its
-description, its exposure, or the problem that stops it running - every connected
-session is sent
-`notifications/tools/list_changed`. Most clients ignore it, since a tool list is
-cached for the life of the client process, but a client that honors it is
-strictly better off. This is also why `expose = "tool"` is a promotion rather
-than a starting point: the listing tools have fixed names, so the catalog behind
-them changes freely, while a new or renamed direct tool waits for the client to
-restart whatever the server announces.
+description, or the problem that stops it running - every connected session is
+sent `notifications/tools/list_changed`. Nothing turns on it: the published tool
+list is the same four built-ins either way, and the catalog behind them is read
+fresh on every call.
 
 `watch = false` turns the whole thing off: nothing is watched, and the catalog is
 exactly what boot resolved for the life of the process. A directory that cannot
@@ -378,43 +360,45 @@ that is still answering calls.
 
 ### What the harness sees
 
-Each prompt exposed as `tool` gets its own entry in `tools/list`, named and
-described from its frontmatter. Its input schema is one optional string property
-named `args`, which is a run's whole input; omitting it passes the empty string.
-A prompt the reload left broken keeps its tool, described by the problem that
-stops it running, since every connected client is still holding a cached copy of
-the list and would send the call regardless.
-
-Alongside them are the built-ins, published by what the catalog holds rather
-than by configuration:
+Four tools, and never a prompt. The list does not depend on the catalog and does
+not change while the process runs:
 
 | Tool | Arguments | Published when |
 |---|---|---|
-| `list_prompts` | none | at least one prompt is `list` |
-| `run_prompt` | `prompt`, optional `args` | at least one prompt is `list` |
-| `need_prompt` | `capability` | at least one prompt is `list`, and the `picker` feature is compiled in |
-| `check_run` | `run_id` | anything at all is published |
+| `list_prompts` | none | always |
+| `run_prompt` | `prompt`, optional `args` | always |
+| `need_prompt` | `capability` | the `picker` feature is compiled in |
+| `check_run` | `run_id` | always |
 
 `list_prompts` reports every enabled prompt with its name, description, version,
-whether it is also direct, and any problem; `run_prompt` runs one by name and
-its description sends a caller unsure of a name to `list_prompts` first;
-`need_prompt` takes a plain-English capability and hands back up to three
-candidates for the caller to choose among, never running one. `check_run`
-collects a run that outlived the call which started it, which a direct call can
-do just as a listed one can, so it is published whenever anything is.
+and any problem that stops it running; `run_prompt` runs one by name, taking the
+run's whole input as one optional string, where omitting it passes the empty
+string; `need_prompt` resolves a description of a prompt to the names of up to
+three close ones, running none of them. `check_run` collects a run that outlived
+the call which started it. A prompt the reload left broken stays in the listing
+carrying its problem, and a call naming it answers with that problem.
+
+That surface follows from what a PromptForge prompt is. A prompt is a command,
+invoked because someone named it, so its text reads as a command interpreter's:
+it says what the server executes and that a caller supplies the name, and it
+makes no claim on any situation. A model that never calls this server is
+behaving correctly. The rejected alternative was one tool per prompt, which put
+the catalog into every conversation's context, made a prompt something a model
+could reach for unbidden, and went stale the moment a prompt was saved, because
+every client caches its tool list for the life of its process.
 
 `need_prompt` asks for its `capability` in author register - an imperative
 phrase naming the operation and what it acts on, with no entity names or
-conversational framing - because a need phrased that way retrieves the right
-prompt far more often than the same need phrased as a user goal, and no ranking
-engine closes that gap. The instruction and its two examples sit both in the
-tool's description and in the parameter's own, since a client may surface only
-one of the two.
+conversational framing - because a description phrased that way resolves to the
+right prompt far more often than the same one phrased as a user goal, and no
+ranking engine closes that gap. The instruction and its two examples sit both in
+the tool's description and in the parameter's own, since a client may surface
+only one of the two.
 
 ### What a call returns
 
-A call at a prompt's own tool and a call at `run_prompt` end in the same place:
-one run against the configured gateway, reported as a `RunResult`. The result's
+A call at `run_prompt` is one run against the configured gateway, reported as a
+`RunResult`. The result's
 `structuredContent` carries the whole record - `run_id`, `prompt`, `version`,
 `status` (`running`, `completed`, or `failed`), `value`, `turns`, `elapsed_ms`,
 `error` - and the text block beside it carries the plain product: the returned
@@ -434,12 +418,11 @@ first, which is what the calling model needs to correct itself on its next call.
 Where a failure lands is decided by who can fix it. A malformed argument shape
 is the client's own bug and comes back as a JSON-RPC `-32602`; a name the model
 guessed, or a run that started and failed, comes back as a result the model
-reads and acts on. A tool name this catalog does not publish at all comes back
-as `-32601`: that covers an unknown name, a listed prompt called as though it
-had its own tool, and a built-in the table above leaves out - `need_prompt` in a
-build without the `picker` feature, or the listing tools over an all-direct
-catalog. What the server answers and what it advertises are read from the same
-statement, so they cannot disagree.
+reads and acts on. A tool name this server does not publish comes back as
+`-32601`: that covers an unknown name, a prompt called as though it had a tool
+of its own, and `need_prompt` in a build without the `picker` feature. What the
+server answers and what it advertises are read from the same statement, so they
+cannot disagree.
 
 ### What `need_prompt` retrieves
 

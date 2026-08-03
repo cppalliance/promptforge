@@ -1,9 +1,9 @@
 //! The `[prompts.NAME]` blocks: the per-prompt exceptions the globs alone
 //! cannot express.
 //!
-//! A block reaches a file no glob matches, promotes or demotes one a glob did,
-//! or drops one outright. It runs after the globs, so whatever it says is the
-//! last word on the prompt it names.
+//! A block reaches a file no glob matches, or drops one a glob caught. It runs
+//! after the globs, so whatever it says is the last word on the prompt it
+//! names.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -14,23 +14,21 @@ use crate::config::Config;
 use crate::error::Fault;
 
 /// Applies the `[prompts.NAME]` blocks: a `file` reaches a prompt no glob
-/// matches, an `expose` promotes or demotes one, and `enabled = false` drops
-/// one. A block with no `file` that matches no globbed prompt is a stale
-/// override and a fault, so a rename never leaves a silent no-op behind.
+/// matches, and `enabled = false` drops one. A block with no `file` that
+/// matches no globbed prompt is a stale override and a fault, so a rename never
+/// leaves a silent no-op behind.
 pub(super) fn apply(
     config: &Config,
     root: &Path,
     entries: &mut Vec<Entry>,
     faults: &mut Vec<Fault>,
 ) {
-    let default_expose = config.catalog.default_expose;
     let mut disabled: BTreeSet<&str> = BTreeSet::new();
 
     for (key, block) in &config.prompts {
         if !block.enabled {
             disabled.insert(key.as_str());
         }
-        let expose = block.expose.unwrap_or(default_expose);
         match &block.file {
             Some(file) => {
                 if !block.enabled {
@@ -40,22 +38,23 @@ pub(super) fn apply(
                 // A block names one file deliberately, so whatever is there has
                 // to parse: the silent skip is a property of globbing alone.
                 let entry = match read(&path).and_then(|source| parse(&source)) {
-                    Ok(prompt) => admit(path.clone(), expose, prompt, Some(key)),
-                    Err(detail) => Entry::broken(key.clone(), path.clone(), expose, detail),
+                    Ok(prompt) => admit(path.clone(), prompt, Some(key)),
+                    Err(detail) => Entry::broken(key.clone(), path.clone(), detail),
                 };
                 match entries.iter().position(|held| held.path() == path) {
                     Some(index) => entries[index] = entry,
                     None => entries.push(entry),
                 }
             }
-            None => match entries.iter_mut().find(|held| held.name() == key) {
-                Some(held) => held.expose = expose,
-                None => faults.push(Fault::new(
-                    Some(key.clone()),
-                    None,
-                    "[prompts] block matches no prompt; it names no file and no glob found it",
-                )),
-            },
+            None => {
+                if !entries.iter().any(|held| held.name() == key) {
+                    faults.push(Fault::new(
+                        Some(key.clone()),
+                        None,
+                        "[prompts] block matches no prompt; it names no file and no glob found it",
+                    ));
+                }
+            }
         }
     }
 
@@ -68,10 +67,9 @@ mod tests {
 
     use crate::catalog::fixture::{config_at, fault_text, write_prompt};
     use crate::catalog::{Catalog, OnBroken};
-    use crate::config::Expose;
 
     #[test]
-    fn a_named_block_promotes_one_globbed_prompt_and_drops_another() {
+    fn a_named_block_drops_one_globbed_prompt_and_leaves_the_rest() {
         let dir = TempDir::new().expect("temporary prompts directory");
         let root = dir.path();
         write_prompt(
@@ -81,26 +79,19 @@ mod tests {
             "Research one person",
         );
         write_prompt(root, "scratch.md", "scratch_test", "A scratch prompt");
-        write_prompt(root, "plain.md", "plain", "Left at the default");
+        write_prompt(root, "plain.md", "plain", "Left to the globs");
 
         let config = config_at(
             root,
-            "[catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"list\"\n\n\
-             [prompts.research_person]\nexpose = \"tool\"\n\n\
+            "[catalog]\ninclude = [\"*.md\"]\n\n\
              [prompts.scratch_test]\nenabled = false\n",
         );
         let catalog = Catalog::resolve(&config, OnBroken::Reject).expect("the catalog resolves");
 
         assert_eq!(catalog.len(), 2);
         assert!(catalog.find("scratch_test").is_none());
-        let promoted = catalog
-            .find("research_person")
-            .expect("the promoted prompt");
-        assert_eq!(promoted.expose(), Expose::Tool);
-        assert!(promoted.is_direct());
-        let plain = catalog.find("plain").expect("the default-exposed prompt");
-        assert_eq!(plain.expose(), Expose::List);
-        assert!(!plain.is_direct());
+        assert!(catalog.find("research_person").is_some());
+        assert!(catalog.find("plain").is_some());
     }
 
     #[test]
@@ -118,12 +109,11 @@ mod tests {
         let config = config_at(
             root,
             "[catalog]\ninclude = [\"*.md\"]\n\n\
-             [prompts.staker]\nfile = \"experiments/staker-v3.md\"\nexpose = \"tool\"\n",
+             [prompts.staker]\nfile = \"experiments/staker-v3.md\"\n",
         );
         let catalog = Catalog::resolve(&config, OnBroken::Reject).expect("the catalog resolves");
         assert_eq!(catalog.len(), 2);
         let staker = catalog.find("staker").expect("the file-reached prompt");
-        assert_eq!(staker.expose(), Expose::Tool);
         assert_eq!(staker.description(), "Reached by name");
     }
 
@@ -135,17 +125,19 @@ mod tests {
 
         let config = config_at(
             root,
-            "[catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"list\"\n\n\
-             [prompts.top]\nfile = \"top.md\"\nexpose = \"tool\"\n",
+            "[catalog]\ninclude = [\"*.md\"]\n\n\
+             [prompts.top]\nfile = \"top.md\"\n",
         );
         let catalog = Catalog::resolve(&config, OnBroken::Reject).expect("the catalog resolves");
         assert_eq!(
             catalog.len(),
             1,
-            "the block promotes the globbed entry rather than adding a second"
+            "the block replaces the globbed entry rather than adding a second"
         );
-        let top = catalog.find("top").expect("the promoted prompt");
-        assert_eq!(top.expose(), Expose::Tool);
+        assert_eq!(
+            catalog.find("top").expect("the named prompt").description(),
+            "Globbed and then named"
+        );
     }
 
     #[test]
@@ -176,7 +168,7 @@ mod tests {
 
         let config = config_at(
             root,
-            "[catalog]\ninclude = [\"*.md\"]\n\n[prompts.renamed_away]\nexpose = \"tool\"\n",
+            "[catalog]\ninclude = [\"*.md\"]\n\n[prompts.renamed_away]\nenabled = true\n",
         );
         let error =
             Catalog::resolve(&config, OnBroken::Reject).expect_err("the stale override is a fault");
@@ -192,7 +184,7 @@ mod tests {
         write_prompt(root, "top.md", "top", "Globbed");
         let config = config_at(
             root,
-            "[catalog]\ninclude = [\"*.md\"]\n\n[prompts.renamed_away]\nexpose = \"tool\"\n",
+            "[catalog]\ninclude = [\"*.md\"]\n\n[prompts.renamed_away]\nenabled = true\n",
         );
         assert!(
             Catalog::resolve(&config, OnBroken::Retain).is_err(),

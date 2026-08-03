@@ -27,7 +27,7 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use promptforge_core::parser::Prompt;
 
-use crate::config::{Config, Expose};
+use crate::config::Config;
 use crate::error::CatalogError;
 
 /// What a resolution pass does with a prompt that fails validation.
@@ -59,20 +59,18 @@ pub struct Entry {
     description: String,
     version: u32,
     path: PathBuf,
-    expose: Expose,
     prompt: Option<Prompt>,
     problem: Option<String>,
 }
 
 impl Entry {
     /// Builds a healthy entry from a parsed prompt.
-    pub(crate) fn healthy(path: PathBuf, expose: Expose, prompt: Prompt) -> Entry {
+    pub(crate) fn healthy(path: PathBuf, prompt: Prompt) -> Entry {
         Entry {
             name: prompt.frontmatter.name.clone(),
             description: prompt.frontmatter.description.clone(),
             version: prompt.frontmatter.version,
             path,
-            expose,
             prompt: Some(prompt),
             problem: None,
         }
@@ -81,24 +79,19 @@ impl Entry {
     /// Builds a broken entry under the best name the pass could work out: the
     /// frontmatter name where the file parsed, the `[prompts.NAME]` key where a
     /// named block reached it, and the file stem otherwise.
-    pub(crate) fn broken(
-        name: String,
-        path: PathBuf,
-        expose: Expose,
-        problem: impl Into<String>,
-    ) -> Entry {
+    pub(crate) fn broken(name: String, path: PathBuf, problem: impl Into<String>) -> Entry {
         Entry {
             name,
             description: String::new(),
             version: 0,
             path,
-            expose,
             prompt: None,
             problem: Some(problem.into()),
         }
     }
 
-    /// The prompt's frontmatter name, which is also its tool name.
+    /// The prompt's frontmatter name, which is how a caller names it to
+    /// `run_prompt`.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -120,18 +113,6 @@ impl Entry {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
-    }
-
-    /// How much of the harness's attention the prompt occupies.
-    #[must_use]
-    pub fn expose(&self) -> Expose {
-        self.expose
-    }
-
-    /// Whether the prompt gets its own entry in `tools/list`.
-    #[must_use]
-    pub fn is_direct(&self) -> bool {
-        self.expose == Expose::Tool
     }
 
     /// The parsed prompt, or `None` on a broken entry.

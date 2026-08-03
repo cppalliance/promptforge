@@ -1,31 +1,7 @@
 [
   {
-    "name": "echo",
-    "description": "Echo the input back\n\nA prompt's value is a finished artifact written for the user to read, so pass it through as it stands rather than restating it.",
-    "inputSchema": {
-      "properties": {
-        "args": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "greet",
-    "description": "Greet one person by name\n\nA prompt's value is a finished artifact written for the user to read, so pass it through as it stands rather than restating it.",
-    "inputSchema": {
-      "properties": {
-        "args": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
     "name": "list_prompts",
-    "description": "List every PromptForge prompt this server can run. Each entry carries the prompt's name, its description, its version, whether it also has its own tool, and any problem that currently stops it running. The listing is live, so a prompt written or edited since this conversation began is already in it. Run one with run_prompt.",
+    "description": "Names the PromptForge prompts this server can run. Each entry carries the prompt's name, its description, its version, and any problem that currently stops it running. The listing is read from the catalog as it stands, so a prompt written or edited since this conversation began is already in it. run_prompt takes a name from this listing.",
     "inputSchema": {
       "properties": {},
       "type": "object"
@@ -33,7 +9,7 @@
   },
   {
     "name": "run_prompt",
-    "description": "Run a PromptForge prompt and return what it produced. A prompt's value is a finished artifact written for the user to read, so pass it through as it stands rather than restating it. If you are unsure of a prompt's name, call list_prompts first and use a name from it rather than guessing.",
+    "description": "Runs the named PromptForge prompt and returns what it produced. This server executes prompts the caller names; the prompt argument is that name, as list_prompts reports it. A prompt's value is a finished artifact written for the user to read, so pass it through as it stands rather than restating it.",
     "inputSchema": {
       "properties": {
         "args": {
@@ -53,7 +29,7 @@
   },
   {
     "name": "need_prompt",
-    "description": "Find the PromptForge prompts closest to a capability you need, up to three of them, best first. State the capability the way a tool author would document it: an imperative phrase naming the operation and what it acts on, with no entity names, task specifics, or conversational framing. Good: \"Build a stakeholder position report for one entity.\" Bad: \"I need to know what Herb Sutter has said about ABI stability.\" It returns candidates and runs nothing; choose one and call run_prompt with the name it handed you.",
+    "description": "Resolves a described PromptForge prompt to the names of the closest prompts, up to three, best first. It is for a caller who was given a prompt by description rather than by name; it returns names and runs nothing, and run_prompt takes one of them. State the capability the way a tool author would document it: an imperative phrase naming the operation and what it acts on, with no entity names, task specifics, or conversational framing. Good: \"Build a stakeholder position report for one entity.\" Bad: \"I need to know what Herb Sutter has said about ABI stability.\"",
     "inputSchema": {
       "properties": {
         "capability": {
@@ -69,7 +45,7 @@
   },
   {
     "name": "check_run",
-    "description": "Collect a PromptForge run that outlived the call which started it. Pass the run id from a result whose status was running, and get that run's status now, with its value once it has finished. A prompt's value is a finished artifact written for the user to read, so pass it through as it stands rather than restating it.",
+    "description": "Collects a PromptForge run that outlived the call which started it. Takes the run id from a result whose status was running, and reports that run's status now, with its value once it has finished. A prompt's value is a finished artifact written for the user to read, so pass it through as it stands rather than restating it.",
     "inputSchema": {
       "properties": {
         "run_id": {
