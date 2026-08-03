@@ -1,10 +1,10 @@
 //! The four outcomes, end to end, over a catalog committed as data.
 //!
-//! The catalog under test is a JSON file beside this one, in
-//! `tests/fixtures/`, and it is compiled in rather than opened: a fixture is
-//! part of the crate, so nothing here depends on a working directory, on a
-//! path outside the crate, or on anything being fetched. It is read through
-//! the same public deserialization a caller would use.
+//! The catalog under test is a JSON file in `tests/fixtures/`, and it is
+//! compiled in rather than opened: a fixture is part of the crate, so nothing
+//! here depends on a working directory, on a path outside the crate, or on
+//! anything being fetched. It is read through the same public
+//! deserialization a caller would use.
 //!
 //! Where the unit tests hand the policy scores that were written down, these
 //! tests hand the whole engine plain-English needs and let the model produce
@@ -45,7 +45,7 @@ use promptforge_tool_picker::{Catalog, Config, Outcome, ToolDescriptor, ToolId, 
 use std::sync::OnceLock;
 
 /// The fixture catalog, as it is committed.
-const MIXED_SERVERS: &str = include_str!("fixtures/mixed-servers.json");
+const MIXED_SERVERS: &str = include_str!("../fixtures/mixed-servers.json");
 
 /// A need only `weather/get_forecast` covers.
 const BIND_NEED: &str = "get the weather forecast for a city";
