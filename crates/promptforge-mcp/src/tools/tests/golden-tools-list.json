@@ -1,7 +1,7 @@
 [
   {
     "name": "echo",
-    "description": "Echo the input back",
+    "description": "Echo the input back\n\nA prompt's value is a finished artifact written for the user to read, so pass it through as it stands rather than restating it.",
     "inputSchema": {
       "properties": {
         "args": {
@@ -13,7 +13,7 @@
   },
   {
     "name": "greet",
-    "description": "Greet one person by name",
+    "description": "Greet one person by name\n\nA prompt's value is a finished artifact written for the user to read, so pass it through as it stands rather than restating it.",
     "inputSchema": {
       "properties": {
         "args": {
@@ -33,7 +33,7 @@
   },
   {
     "name": "run_prompt",
-    "description": "Run a PromptForge prompt and return what it produced. If you are unsure of a prompt's name, call list_prompts first and use a name from it rather than guessing.",
+    "description": "Run a PromptForge prompt and return what it produced. A prompt's value is a finished artifact written for the user to read, so pass it through as it stands rather than restating it. If you are unsure of a prompt's name, call list_prompts first and use a name from it rather than guessing.",
     "inputSchema": {
       "properties": {
         "args": {
@@ -69,7 +69,7 @@
   },
   {
     "name": "check_run",
-    "description": "Collect a PromptForge run that outlived the call which started it. Pass the run id from a result whose status was running, and get that run's status now, with its value once it has finished.",
+    "description": "Collect a PromptForge run that outlived the call which started it. Pass the run id from a result whose status was running, and get that run's status now, with its value once it has finished. A prompt's value is a finished artifact written for the user to read, so pass it through as it stands rather than restating it.",
     "inputSchema": {
       "properties": {
         "run_id": {
