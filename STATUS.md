@@ -10,6 +10,7 @@ longer holds any vendor credential, only the gateway URL and shared token.
 - `promptforge-core::client::GatewayClient` - OpenAI-shaped client pointed at the gateway (URL + shared token; no vendor key).
 - `promptforge-core::execute::run` - walks top-level sections in file order, each in a fresh context; a Lua `return` finishes the run early, otherwise prose (if any) takes one round trip and control falls through to the next section. Running off the end yields `default_return`, else the last reply, else a generic completion. 5 unit tests (Lua-only, offline).
 - `promptforge-cli` - `promptforge run <file.md>`.
+- `promptforge-tool-picker` - skeleton only: crate in the workspace with lib.rs and empty `catalog`/`config`/`error` module stubs. Will become a pure, deterministic, embedding-based engine that resolves a plain-English capability need against an abstract tool catalog (no Lua, MCP, or network).
 - `promptforge-gateway` - axum service: `gateway.toml` (Secret + ${VAR} interpolation), model routing, one OpenAI passthrough upstream, bearer auth, POST /v1/chat/completions, GET /health. Config + routing unit tests + 4 end-to-end tests (fake backend + real client).
 
 Lua + args + substitution. A section's Lua block runs in a sandbox with `args`
