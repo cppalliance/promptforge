@@ -29,6 +29,7 @@ mod sessions;
 #[cfg(test)]
 mod tests;
 
+use std::borrow::Cow;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -297,19 +298,35 @@ where
     }
 }
 
+/// The same path without a Windows verbatim (`\\?\`) prefix.
+///
+/// The two sides of the comparison below are spelled by different code:
+/// `std::fs::canonicalize` returns a verbatim path on Windows, while `notify`
+/// delivers a plain absolute one, and neither is a prefix of the other. Both
+/// sides are put through this, so the prefix cannot decide the answer. No path
+/// on another platform begins with those four characters, so the strip needs no
+/// `#[cfg]` that could drift. A path that is not UTF-8 is returned untouched,
+/// which costs nothing: the plain absolute form matches it already.
+fn plain(path: &Path) -> Cow<'_, Path> {
+    match path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
+        Some(stripped) => Cow::Owned(PathBuf::from(stripped)),
+        None => Cow::Borrowed(path),
+    }
+}
+
 /// Which filesystem events start a debounce window.
 struct Interesting {
-    /// The prompts directory as configured. Anything under it counts.
-    prompts: PathBuf,
-    /// The same directory canonicalized, when that is a different path.
+    /// The prompts directory in every form an event might name it by. Anything
+    /// under any of them counts.
     ///
-    /// `notify` does not promise which form it delivers: the fsevent backend
-    /// canonicalizes its watch root, so a relative prompts directory - which is
-    /// what `[paths].prompts` defaults to - or one reached through a symlink,
-    /// which is what a temporary directory usually is, arrives in a form the
-    /// configured path is not a prefix of. Matching either form is what
-    /// `notify`'s own tests do.
-    canonical: Option<PathBuf>,
+    /// `notify` does not promise which form it delivers, so all three are held:
+    /// the configured spelling, that spelling made absolute, and the
+    /// canonicalized one. The absolute form is the one that carries a relative
+    /// `[paths].prompts` - the shipped default - since a relative path is never
+    /// a prefix of the absolute path a platform watcher delivers. The canonical
+    /// form is for a root the backend resolved itself: fsevent canonicalizes its
+    /// watch root, which is what a symlinked temporary directory arrives as.
+    roots: Vec<PathBuf>,
     /// The configuration file's name, which is the only file in its own
     /// directory that counts.
     config_name: Option<OsString>,
@@ -318,16 +335,25 @@ struct Interesting {
 impl Interesting {
     /// The filter for one watcher's two roots.
     ///
-    /// The canonical form is resolved once, here, because it is a syscall per
-    /// call otherwise and the watch root does not move under a running server -
-    /// `[paths].prompts` is one of the settings a reload refuses to apply.
+    /// The forms are resolved once, here, because canonicalizing is a syscall
+    /// per call otherwise and the watch root does not move under a running
+    /// server - `[paths].prompts` is one of the settings a reload refuses to
+    /// apply. `std::path::absolute` touches no filesystem, resolves no symlink,
+    /// and answers for a directory that does not exist yet.
     fn new(prompts: &Path, source: &Path) -> Interesting {
-        let canonical = std::fs::canonicalize(prompts)
-            .ok()
-            .filter(|canonical| canonical != prompts);
+        let mut roots = vec![plain(prompts).into_owned()];
+        let resolved = [
+            std::path::absolute(prompts).ok(),
+            std::fs::canonicalize(prompts).ok(),
+        ];
+        for form in resolved.into_iter().flatten() {
+            let form = plain(&form).into_owned();
+            if !roots.contains(&form) {
+                roots.push(form);
+            }
+        }
         Interesting {
-            prompts: prompts.to_path_buf(),
-            canonical,
+            roots,
             config_name: source.file_name().map(std::ffi::OsStr::to_owned),
         }
     }
@@ -345,11 +371,8 @@ impl Interesting {
 
     /// Whether one path is one of the two roots' contents.
     fn watched(&self, path: &Path) -> bool {
-        path.starts_with(&self.prompts)
-            || self
-                .canonical
-                .as_ref()
-                .is_some_and(|canonical| path.starts_with(canonical))
+        let path = plain(path);
+        self.roots.iter().any(|root| path.starts_with(root))
             || (self.config_name.is_some() && path.file_name() == self.config_name.as_deref())
     }
 }
