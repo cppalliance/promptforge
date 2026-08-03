@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
-use crate::config::Config;
+use crate::config::{Config, Secret};
 use crate::retrieval::Retrieval;
 use crate::watch::sessions::ListChanged;
 
@@ -217,7 +217,9 @@ pub(super) fn ignored_changes(boot: &Config, candidate: &Config) -> Vec<&'static
     if boot.server.bind != candidate.server.bind {
         ignored.push("[server].bind");
     }
-    if boot.server.token.expose() != candidate.server.token.expose() {
+    if boot.server.token.as_ref().map(Secret::expose)
+        != candidate.server.token.as_ref().map(Secret::expose)
+    {
         ignored.push("[server].token");
     }
     if boot.server.max_concurrent_runs != candidate.server.max_concurrent_runs {

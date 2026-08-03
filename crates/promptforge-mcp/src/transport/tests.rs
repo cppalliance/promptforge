@@ -13,9 +13,10 @@ use axum::http::{Request, StatusCode};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
-use super::{HEALTHZ_PATH, MCP_PATH, SSE_KEEP_ALIVE, build_router, streamable_config};
+use super::{HEALTHZ_PATH, MCP_PATH, SSE_KEEP_ALIVE, build_router, serve_http, streamable_config};
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::{Config, Secret};
+use crate::error::ServeError;
 use crate::retrieval::Retrieval;
 use crate::server::PromptForgeServer;
 use crate::watch::Sessions;
@@ -36,16 +37,7 @@ fn router() -> (TempDir, axum::Router) {
 /// the configured one. The layer takes the secret as an argument, so a token the
 /// configuration would refuse can still be put behind it here.
 fn router_with(token: Secret) -> (TempDir, axum::Router) {
-    let dir = tempfile::tempdir().expect("create a temporary prompts directory");
-    fs::write(dir.path().join("echo.md"), ECHO).expect("write the fixture prompt");
-    let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"{TOKEN}\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
-         [paths]\nprompts = '{}'\n\n\
-         [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"tool\"\n",
-        dir.path().display()
-    ))
-    .expect("the fixture configuration parses");
+    let (dir, config) = fixture(&format!("token = \"{TOKEN}\"\n"));
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
     let server = PromptForgeServer::new(
@@ -55,6 +47,22 @@ fn router_with(token: Secret) -> (TempDir, axum::Router) {
         Arc::new(Retrieval::idle()),
     );
     (dir, build_router(server, Arc::new(token)))
+}
+
+/// A one-prompt configuration whose `[server]` table carries `server_lines`,
+/// and the temporary directory its catalog reads.
+fn fixture(server_lines: &str) -> (TempDir, Config) {
+    let dir = tempfile::tempdir().expect("create a temporary prompts directory");
+    fs::write(dir.path().join("echo.md"), ECHO).expect("write the fixture prompt");
+    let config = Config::from_toml_str(&format!(
+        "[server]\n{server_lines}\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [paths]\nprompts = '{}'\n\n\
+         [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"tool\"\n",
+        dir.path().display()
+    ))
+    .expect("the fixture configuration parses");
+    (dir, config)
 }
 
 /// An `initialize` POST shaped the way the streamable-HTTP transport requires,
@@ -214,6 +222,29 @@ async fn healthz_answers_without_a_token() {
         .expect("build the liveness request");
     let response = router.oneshot(request).await.expect("the router answers");
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn serving_over_http_without_a_token_is_refused_by_name() {
+    // The token is optional in the file because stdio never reads it. This
+    // transport is the one that does, so it refuses before it binds, naming the
+    // field the operator has to add rather than serving an unguarded `/mcp`.
+    let (_dir, config) = fixture("bind = \"127.0.0.1:0\"\n");
+    assert!(config.server.token.is_none());
+    let catalog =
+        Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
+
+    let error = serve_http(
+        Arc::new(config),
+        Arc::new(CatalogHandle::new(catalog)),
+        Arc::new(Sessions::new()),
+        Arc::new(Retrieval::idle()),
+    )
+    .await
+    .expect_err("http will not serve without a shared bearer");
+
+    assert!(matches!(error, ServeError::MissingToken), "{error}");
+    assert!(error.to_string().contains("[server].token"), "{error}");
 }
 
 #[test]

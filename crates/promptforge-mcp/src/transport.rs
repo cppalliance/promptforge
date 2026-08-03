@@ -18,7 +18,10 @@
 //!
 //! stdio is the local case. It binds no port, constructs no auth layer, and
 //! therefore reads no token: a harness that spawned this process already has
-//! whatever authority the process has.
+//! whatever authority the process has. That is why `[server].token` is
+//! optional in the file and required here: the transport that checks it
+//! refuses to bind without one, and the transport that never reads it boots
+//! without one.
 
 #[cfg(test)]
 mod tests;
@@ -72,8 +75,8 @@ const SSE_KEEP_ALIVE: Duration = Duration::from_secs(15);
 /// # use promptforge_mcp::{
 /// #     Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Retrieval, Sessions,
 /// # };
-/// # fn demo(config: Config, catalog: Catalog) {
-/// let token = Arc::new(config.server.token.clone());
+/// # fn demo(config: Config, catalog: Catalog, token: promptforge_mcp::Secret) {
+/// let token = Arc::new(token);
 /// let config = Arc::new(config);
 /// let catalog = Arc::new(CatalogHandle::new(catalog));
 /// let server = PromptForgeServer::new(
@@ -114,8 +117,10 @@ fn streamable_config() -> StreamableHttpServerConfig {
 /// is stopped.
 ///
 /// # Errors
-/// Returns [`ServeError::Bind`] if the configured address cannot be bound and
-/// [`ServeError::Http`] if the accept loop stops with an error.
+/// Returns [`ServeError::MissingToken`] if `[server].token` is absent, since
+/// this transport is the one that checks it, [`ServeError::Bind`] if the
+/// configured address cannot be bound, and [`ServeError::Http`] if the accept
+/// loop stops with an error.
 pub async fn serve_http(
     config: Arc<Config>,
     catalog: Arc<CatalogHandle>,
@@ -123,7 +128,15 @@ pub async fn serve_http(
     retrieval: Arc<Retrieval>,
 ) -> Result<(), ServeError> {
     let bind = config.server.bind;
-    let token = Arc::new(config.server.token.clone());
+    // Before the socket, so a configuration with no shared bearer is refused by
+    // name rather than serving an unguarded `/mcp` to whatever can reach it.
+    let token = Arc::new(
+        config
+            .server
+            .token
+            .clone()
+            .ok_or(ServeError::MissingToken)?,
+    );
     let server = PromptForgeServer::new(Arc::clone(&config), catalog, sessions, retrieval);
     let listener = tokio::net::TcpListener::bind(bind)
         .await
@@ -139,8 +152,9 @@ pub async fn serve_http(
 ///
 /// No port is bound and no token is checked: the harness that spawned this
 /// process is the only thing that can talk to it. `[server].bind` and
-/// `[server].token` are read by nothing here, and a configuration that sets
-/// them is logged as ignored rather than silently obeyed or refused.
+/// `[server].token` are read by nothing here, so a configuration that sets
+/// either is logged as ignored rather than silently obeyed, and one that omits
+/// the token serves anyway.
 ///
 /// # Errors
 /// Returns [`ServeError::Stdio`] if the MCP handshake does not complete or the
