@@ -14,7 +14,6 @@ use serde_json::{Value, json};
 use super::fixture::{self, PROMPTS};
 use super::{Candidate, Retrieval, Shortlist};
 use crate::catalog::{Catalog, Entry};
-use crate::config::Expose;
 use crate::server::PromptForgeServer;
 use crate::watch::Sessions;
 use crate::{CatalogHandle, NEED_PROMPT};
@@ -61,7 +60,7 @@ fn descriptors_carry_the_name_the_description_and_the_args_schema() {
     assert_eq!(
         descriptor.input_schema,
         json!({"type": "object", "properties": {"args": {"type": "string"}}}),
-        "the descriptor declares what the prompt's own tool declares"
+        "the descriptor declares what a run of the prompt takes"
     );
     assert_eq!(descriptor.parameter_names(), ["args"]);
     assert_eq!(
@@ -78,7 +77,6 @@ fn a_broken_prompt_is_not_a_descriptor_and_so_is_never_recommended() {
     entries.push(Entry::broken(
         "beta".to_owned(),
         prompts.catalog.entries()[0].path().to_path_buf(),
-        Expose::List,
         "frontmatter is missing a name",
     ));
     let catalog = Catalog::new(entries);

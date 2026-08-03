@@ -53,7 +53,7 @@ const TRIO: &str = "---\nname: trio\ndescription: Three sections\nversion: 1\npr
 ## Second\n\n```lua\nvar.step = 2\n```\n\n\
 ## Third\n\n```lua\nreturn 'trio done'\n```\n";
 
-/// A server publishing [`TRIO`] as its own tool.
+/// A server over a catalog holding [`TRIO`] alone.
 fn trio_server() -> (TempDir, PromptForgeServer) {
     let dir = tempfile::tempdir().expect("create a temporary prompts directory");
     fs::write(dir.path().join("trio.md"), TRIO).expect("write the fixture prompt");
@@ -61,7 +61,7 @@ fn trio_server() -> (TempDir, PromptForgeServer) {
         "[server]\ntoken = \"t\"\n\n\
          [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
-         [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"tool\"\n",
+         [catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
     ))
     .expect("the fixture configuration parses");
@@ -93,7 +93,14 @@ async fn a_run_frames_its_start_and_then_each_section() {
         .expect("the in-process client initializes");
 
     let response = client
-        .call_tool_once(CallToolRequestParams::new("trio"))
+        .call_tool_once(
+            CallToolRequestParams::new("run_prompt").with_arguments(
+                serde_json::json!({ "prompt": "trio" })
+                    .as_object()
+                    .expect("the arguments are an object")
+                    .clone(),
+            ),
+        )
         .await
         .expect("the call reaches the prompt");
     let CallToolResponse::Complete(result) = response else {
@@ -142,7 +149,14 @@ async fn a_call_with_no_progress_token_answers_the_same() {
     // task - and the caller must not be able to tell from the answer.
     let (_dir, server) = trio_server();
     let result = server
-        .dispatch(CallToolRequestParams::new("trio"))
+        .dispatch(
+            CallToolRequestParams::new("run_prompt").with_arguments(
+                serde_json::json!({ "prompt": "trio" })
+                    .as_object()
+                    .expect("the arguments are an object")
+                    .clone(),
+            ),
+        )
         .await
         .expect("the call reaches the prompt");
 

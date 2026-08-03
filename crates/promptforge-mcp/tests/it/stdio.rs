@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
-/// A prompt that runs offline, published as its own tool.
+/// A prompt that runs offline.
 const ECHO: &str = "---\nname: echo\ndescription: Returns its argument\nversion: 1\npromptforge: 1\n---\n\n\
 ## Main\n\n```lua\nreturn args\n```\n";
 
@@ -61,7 +61,7 @@ fn fixture_with(root: &Path, prompts: &[(&str, &str)], server_lines: &str) -> Pa
             "[server]\n{server_lines}\n\
              [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
              [paths]\nprompts = '{}'\n\n\
-             [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"tool\"\n",
+             [catalog]\ninclude = [\"*.md\"]\n",
             directory.display()
         ),
     )
@@ -171,8 +171,12 @@ async fn stdio_completes_initialize_and_lists_its_tools() {
         .filter_map(|tool| tool["name"].as_str())
         .collect();
     assert!(
-        names.contains(&"echo"),
-        "the catalog's one direct prompt is published: {names:?}"
+        names.contains(&"run_prompt"),
+        "the runner is how the catalog is reached: {names:?}"
+    );
+    assert!(
+        !names.contains(&"echo"),
+        "a prompt is never published as a tool of its own: {names:?}"
     );
 
     session.child.kill().await.expect("stop the server");

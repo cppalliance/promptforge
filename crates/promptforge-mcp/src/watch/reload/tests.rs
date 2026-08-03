@@ -180,30 +180,6 @@ fn a_run_in_flight_finishes_under_the_snapshot_it_started_with() {
 }
 
 #[test]
-fn a_reload_applies_a_changed_exposure() {
-    let fixture = Fixture::new();
-    let source = config_source(fixture.root(), "");
-    fs::write(
-        fixture.root().join("prompts.toml"),
-        format!("{source}\n[prompts.alpha]\nexpose = \"tool\"\n"),
-    )
-    .expect("promote one prompt");
-
-    let reload = fixture.reload();
-
-    assert!(reload.published_changed, "a promoted prompt gains a tool");
-    assert!(
-        fixture
-            .catalog
-            .load()
-            .find("alpha")
-            .expect("the promoted entry")
-            .is_direct()
-    );
-    assert_eq!(fixture.recorder.announced(), 1);
-}
-
-#[test]
 fn a_bind_change_is_ignored_rather_than_applied() {
     let fixture = Fixture::new();
     fs::write(

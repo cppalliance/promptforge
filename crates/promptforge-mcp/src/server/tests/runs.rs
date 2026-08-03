@@ -58,9 +58,12 @@ async fn gated_server(server_lines: &str) -> (TempDir, PromptForgeServer, Arc<No
 async fn check_run_collects_a_run_that_finished_inside_its_deadline() {
     let (_dir, server) = server();
     let ran = server
-        .dispatch(call("echo", json!({ "args": "hello" })))
+        .dispatch(call(
+            "run_prompt",
+            json!({ "prompt": "echo", "args": "hello" }),
+        ))
         .await
-        .expect("a direct call is not a protocol error");
+        .expect("running a named prompt is not a protocol error");
     let run_id = structured_of(&ran)["run_id"]
         .as_str()
         .expect("a run carries an identifier")
@@ -82,7 +85,7 @@ async fn a_run_that_outlives_its_deadline_is_reported_running_and_keeps_going() 
     let (_dir, server, release) = gated_server("reply_deadline = \"50ms\"").await;
 
     let result = server
-        .dispatch(call("speak", json!({})))
+        .dispatch(call("run_prompt", json!({ "prompt": "speak" })))
         .await
         .expect("a deadline is not a protocol error");
 
@@ -150,7 +153,10 @@ async fn a_call_that_cannot_get_a_slot_is_refused_with_the_wait_it_spent() {
         .expect("the only slot starts free");
 
     let result = server
-        .dispatch(call("echo", json!({ "args": "hello" })))
+        .dispatch(call(
+            "run_prompt",
+            json!({ "prompt": "echo", "args": "hello" }),
+        ))
         .await
         .expect("a refusal is an answer, not a protocol error");
     assert_eq!(result.is_error, Some(true));

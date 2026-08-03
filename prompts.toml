@@ -29,12 +29,3 @@ token = "${PROMPTFORGE_TOKEN}"
 [catalog]
 include = ["**/*.md"]
 exclude = ["**/_*.md", "drafts/**"]
-default_expose = "list"
-
-# A prompt starts as `list` - reachable through list_prompts and run_prompt, and
-# through need_prompt when the `picker` feature is compiled in, and callable the
-# moment it is saved. Promoting it to its own tool
-# is a separate step, taken once its name and description have stopped moving,
-# because a client caches its tool list for the life of its process.
-[prompts.research_person]
-expose = "tool"

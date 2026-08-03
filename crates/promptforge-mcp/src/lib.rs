@@ -1,23 +1,22 @@
 //! PromptForge MCP server.
 //!
-//! Publishes PromptForge prompts to an agentic harness (Cursor, Claude Code) as
-//! callable MCP tools. Some prompts get their own entry in `tools/list`; the
-//! rest are reachable through built-in listing and retrieval tools. Execution
-//! happens here, against the gateway, so a prompt is always a tool and never an
-//! MCP prompt.
+//! Runs PromptForge prompts for an agentic harness (Cursor, Claude Code). A
+//! prompt is a command: it runs because a caller named it to `run_prompt`, so
+//! no prompt is published as a tool of its own and `tools/list` is the same
+//! fixed set of built-ins whatever the catalog holds. Execution happens here,
+//! against the gateway, so a prompt is never an MCP prompt.
 //!
 //! [`Config`] parses the `prompts.toml` that names the bind address, the shared
 //! token, the prompts directory, the gateway, and which prompts the harness sees;
 //! [`Catalog::resolve`] turns that configuration and the prompts directory into
 //! the set of prompts a harness may call, either refusing to start over an
 //! incomplete result or keeping the failures visible as broken entries;
-//! [`tool_definitions`] turns the resolved catalog into what `tools/list`
-//! answers with; [`PromptForgeServer`] runs a call to completion against the
-//! gateway and reports it as a [`RunResult`]; [`McpObserver`] reports that run
-//! as it goes, so a client sees a caption change rather than one silent
-//! multi-minute call; and [`RunRegistry`] admits the run, hands the caller a
-//! `run_id` when it outlasts the client's patience, and keeps the result
-//! collectable afterwards. [`build_router`] puts that handler behind a shared
+//! [`tool_definitions`] is what `tools/list` answers with; [`PromptForgeServer`]
+//! runs a call to completion against the gateway and reports it as a
+//! [`RunResult`]; [`McpObserver`] reports that run as it goes, so a client sees
+//! a caption change rather than one silent multi-minute call; and
+//! [`RunRegistry`] admits the run, hands the caller a `run_id` when it outlasts
+//! the client's patience, and keeps the result collectable afterwards. [`build_router`] puts that handler behind a shared
 //! bearer at `/mcp` with an unauthenticated `/healthz` beside it, and
 //! [`serve_http`] and [`serve_stdio`] are the two transports it is reached on.
 //! [`Watcher`] keeps the catalog current while the server runs, so writing a
