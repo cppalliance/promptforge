@@ -43,6 +43,7 @@ use crate::catalog::CatalogHandle;
 use crate::config::{Config, Secret};
 use crate::error::ServeError;
 use crate::server::PromptForgeServer;
+use crate::watch::Sessions;
 
 /// Where the MCP endpoint is nested. Everything under it is behind the bearer.
 pub const MCP_PATH: &str = "/mcp";
@@ -67,12 +68,12 @@ const SSE_KEEP_ALIVE: Duration = Duration::from_secs(15);
 /// # Examples
 /// ```
 /// # use std::sync::Arc;
-/// # use promptforge_mcp::{Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer};
+/// # use promptforge_mcp::{Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Sessions};
 /// # fn demo(config: Config, catalog: Catalog) {
 /// let token = Arc::new(config.server.token.clone());
 /// let config = Arc::new(config);
 /// let catalog = Arc::new(CatalogHandle::new(catalog));
-/// let server = PromptForgeServer::new(config, catalog);
+/// let server = PromptForgeServer::new(config, catalog, Arc::new(Sessions::new()));
 /// let router = promptforge_mcp::build_router(server, token);
 /// # let _ = router;
 /// # }
@@ -110,10 +111,11 @@ fn streamable_config() -> StreamableHttpServerConfig {
 pub async fn serve_http(
     config: Arc<Config>,
     catalog: Arc<CatalogHandle>,
+    sessions: Arc<Sessions>,
 ) -> Result<(), ServeError> {
     let bind = config.server.bind;
     let token = Arc::new(config.server.token.clone());
-    let server = PromptForgeServer::new(Arc::clone(&config), catalog);
+    let server = PromptForgeServer::new(Arc::clone(&config), catalog, sessions);
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .map_err(|source| ServeError::Bind { addr: bind, source })?;
@@ -137,12 +139,13 @@ pub async fn serve_http(
 pub async fn serve_stdio(
     config: Arc<Config>,
     catalog: Arc<CatalogHandle>,
+    sessions: Arc<Sessions>,
 ) -> Result<(), ServeError> {
     tracing::info!(
         "promptforge-mcp serving on stdio; [server].bind ({}) and [server].token are not used on this transport",
         config.server.bind
     );
-    let server = PromptForgeServer::new(config, catalog);
+    let server = PromptForgeServer::new(config, catalog, sessions);
     let running = server
         .serve(rmcp::transport::stdio())
         .await

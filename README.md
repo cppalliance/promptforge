@@ -8,7 +8,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. A run reports through it as it goes (see "Watching a run" below)
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-mcp` - binary: the MCP server that publishes prompts to an agentic harness as callable tools. It parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, answers a call by running the prompt against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
+- `crates/promptforge-mcp` - binary: the MCP server that publishes prompts to an agentic harness as callable tools. It parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, answers a call by running the prompt against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, re-reads the catalog when a prompt is saved, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. No Lua, no MCP, no network
 
 ## Build
@@ -224,12 +224,55 @@ per mistake. The one thing a glob skips in silence is a markdown file that
 declares no `promptforge:` version: a glob names a directory, and a file in it
 that is not a prompt is not the operator's mistake.
 
+### Reloading on save
+
 Once the server is running, `watch = true` re-runs that same resolution on save
 with one difference: a prompt that fails validation is kept as a broken entry
 carrying its error - still listed, and answering a call with the failure -
 instead of stopping the process. Refusing the whole catalog is right at boot,
 where nothing depends on the server yet, and wrong on save, where one typo in one
 file would freeze every other prompt.
+
+The prompts directory is watched recursively and `prompts.toml` with it. Events
+are collected for `watch_debounce` and the window restarts on each one, so a save
+that an editor performs as a write to a temporary and a rename - which is most
+Windows editors - costs one re-resolution rather than one per event. A prompt
+written since the client connected is in `list_prompts` and callable by
+`run_prompt` on the next call, with no reconnect; a deleted file leaves the
+catalog; a run already in flight holds the catalog it started with and finishes
+under that definition, whatever the save did to the file.
+
+What a reload cannot change is the shape of the running service. `[server]`,
+`[gateway]`, and `[paths].prompts` were read once - the bound socket and the
+bearer layer, the run registry's limits, the gateway each run goes through, and
+the directory being watched - so a change to any of them is logged as ignored,
+naming each setting, and takes effect on the next restart. Only the catalog
+tables reload. A candidate that cannot be resolved at all - an unparsable
+`prompts.toml`, two prompts under one name, a stale override, an empty result -
+leaves the previous catalog serving and logs why, since there is no partial
+answer to give.
+
+When the reload changed anything a client can read about a prompt - its name, its
+description, or its exposure - every connected session is sent
+`notifications/tools/list_changed`. Most clients ignore it, since a tool list is
+cached for the life of the client process, but a client that honors it is
+strictly better off. This is also why `expose = "tool"` is a promotion rather
+than a starting point: the listing tools have fixed names, so the catalog behind
+them changes freely, while a new or renamed direct tool waits for the client to
+restart whatever the server announces.
+
+`watch = false` turns the whole thing off: nothing is watched, and the catalog is
+exactly what boot resolved for the life of the process. A directory that cannot
+be watched at all is refused at boot rather than dropped silently, since losing
+live reload without being told is worse than being told to fix the path.
+
+A watch that breaks after boot - a prompts directory renamed or deleted out from
+under the server - is logged at error level and registered again on the next
+settled window. When it can be, saves resume; when it cannot, the log says that
+live reload has stopped and a restart is needed once the path is back, because a
+developer whose saves quietly stop taking effect has no other way to find out.
+The server keeps serving either way: a lost watch is not worth ending a process
+that is still answering calls.
 
 ### What the harness sees
 

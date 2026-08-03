@@ -26,6 +26,7 @@ use super::PromptForgeServer;
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::Config;
 use crate::result::NO_TURNS;
+use crate::watch::Sessions;
 
 /// A prompt that returns its input without calling a model.
 fn echo_prompt(name: &str, description: &str) -> String {
@@ -78,7 +79,11 @@ fn server_with(server_lines: &str) -> (TempDir, PromptForgeServer) {
     .expect("the fixture configuration parses");
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
-    let server = PromptForgeServer::new(Arc::new(config), Arc::new(CatalogHandle::new(catalog)));
+    let server = PromptForgeServer::new(
+        Arc::new(config),
+        Arc::new(CatalogHandle::new(catalog)),
+        Arc::new(Sessions::new()),
+    );
     (dir, server)
 }
 
@@ -99,7 +104,11 @@ fn all_direct_server() -> (TempDir, PromptForgeServer) {
     .expect("the fixture configuration parses");
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
-    let server = PromptForgeServer::new(Arc::new(config), Arc::new(CatalogHandle::new(catalog)));
+    let server = PromptForgeServer::new(
+        Arc::new(config),
+        Arc::new(CatalogHandle::new(catalog)),
+        Arc::new(Sessions::new()),
+    );
     (dir, server)
 }
 
@@ -215,7 +224,11 @@ async fn a_hyphen_resolves_to_the_underscore_it_stands_for() {
     .expect("the fixture configuration parses");
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
-    let server = PromptForgeServer::new(Arc::new(config), Arc::new(CatalogHandle::new(catalog)));
+    let server = PromptForgeServer::new(
+        Arc::new(config),
+        Arc::new(CatalogHandle::new(catalog)),
+        Arc::new(Sessions::new()),
+    );
 
     let result = server
         .dispatch(call(
@@ -435,7 +448,11 @@ fn speaking_server_with(gateway: SocketAddr, server_lines: &str) -> (TempDir, Pr
     .expect("the fixture configuration parses");
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
-    let server = PromptForgeServer::new(Arc::new(config), Arc::new(CatalogHandle::new(catalog)));
+    let server = PromptForgeServer::new(
+        Arc::new(config),
+        Arc::new(CatalogHandle::new(catalog)),
+        Arc::new(Sessions::new()),
+    );
     (dir, server)
 }
 
