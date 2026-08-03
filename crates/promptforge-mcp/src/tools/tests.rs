@@ -128,6 +128,43 @@ fn the_retrieval_tool_needs_both_a_listed_prompt_and_the_picker_feature() {
 }
 
 #[test]
+#[cfg(feature = "picker")]
+fn the_retrieval_tool_states_the_register_in_both_places_a_client_may_read() {
+    let listed = built_in_tools(Shape {
+        listed: true,
+        direct: false,
+    });
+    let need = listed
+        .iter()
+        .find(|tool| tool.name == "need_prompt")
+        .expect("a listed catalog publishes the retrieval tool");
+    let schema = serde_json::to_value(&*need.input_schema).expect("the schema serializes");
+    let parameter = schema["properties"]["capability"]["description"]
+        .as_str()
+        .expect("the parameter carries its own description")
+        .to_owned();
+
+    // A client may surface the tool's description or the parameter's, so the
+    // instruction and both examples have to be readable from either alone.
+    for text in [
+        need.description
+            .as_deref()
+            .expect("the tool carries a description"),
+        &parameter,
+    ] {
+        assert!(
+            text.contains("the way a tool author would document it"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Build a stakeholder position report for one entity."),
+            "{text}"
+        );
+        assert!(text.contains("Herb Sutter"), "{text}");
+    }
+}
+
+#[test]
 fn every_prompt_tool_takes_one_optional_string_named_args() {
     let tools = tool_definitions(&mixed());
     let schema = serde_json::to_value(&*tools[0].input_schema).expect("the schema serializes");

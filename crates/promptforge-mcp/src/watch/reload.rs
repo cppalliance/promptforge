@@ -5,7 +5,10 @@
 //! driven directly by a test and by the watcher alike. It re-reads
 //! `prompts.toml`, runs the boot pass's own resolution over the prompts
 //! directory under [`OnBroken::Retain`], swaps the result into the
-//! [`CatalogHandle`], and announces the swap when the published tool set moved.
+//! [`CatalogHandle`], rebuilds retrieval when the text it ranks on moved, and
+//! announces the swap when the published tool set moved. The rebuild rides this
+//! swap rather than a task of its own, so `need_prompt` and the runner never
+//! disagree for longer than one atomic store.
 //!
 //! Two rules make a reload safe to run under a live service. A prompt that
 //! fails validation becomes a broken entry carrying its error, so one typo
@@ -27,6 +30,7 @@ use std::sync::Arc;
 
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::Config;
+use crate::retrieval::Retrieval;
 use crate::watch::sessions::ListChanged;
 
 /// What one reload changed.
@@ -72,27 +76,37 @@ pub struct Reloader {
     catalog: Arc<CatalogHandle>,
     /// Where a changed tool set is announced.
     listener: Arc<dyn ListChanged>,
+    /// The retrieval index a reload rebuilds when the ranking text moved.
+    retrieval: Arc<Retrieval>,
 }
 
 impl Reloader {
-    /// Builds a reloader over the configuration file boot read and the catalog
-    /// it produced.
+    /// Builds a reloader over the configuration file boot read, the catalog it
+    /// produced, and the retrieval index over that catalog.
     #[must_use]
     pub fn new(
         source: &Path,
         boot: Arc<Config>,
         catalog: Arc<CatalogHandle>,
         listener: Arc<dyn ListChanged>,
+        retrieval: Arc<Retrieval>,
     ) -> Reloader {
         Reloader {
             source: source.to_path_buf(),
             boot,
             catalog,
             listener,
+            retrieval,
         }
     }
 
-    /// Re-resolves the catalog and swaps it in, reporting what changed.
+    /// Re-resolves the catalog, swaps it in, and rebuilds retrieval when the
+    /// text it ranks on moved, reporting what changed.
+    ///
+    /// This blocks: it reads and parses every prompt file, and a save that
+    /// changed a name or a description also costs one embedding forward pass per
+    /// prompt. It belongs on a blocking task, which is where the watcher calls
+    /// it.
     ///
     /// A failure is not returned: this runs under a live service, where the only
     /// useful answer to a candidate that cannot be resolved is to keep serving
@@ -141,6 +155,16 @@ impl Reloader {
         // The swap is what a later call reads; a run already in flight holds the
         // snapshot it loaded and finishes under that definition.
         self.catalog.store(candidate);
+        if ranking_changed {
+            // After the swap, never before it: retrieval hands a name to a
+            // caller that will pass it to the runner, so an index that is
+            // briefly behind the catalog is safe in a way one that is briefly
+            // ahead of it is not. The rebuild reuses the loaded model, so it
+            // costs one forward pass per prompt and no weights - and it blocks
+            // for the whole of that, which is why this method documents that it
+            // belongs on a blocking task.
+            self.retrieval.rebuild(&self.catalog.load());
+        }
         if published_changed {
             self.listener.list_changed();
         }

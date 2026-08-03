@@ -8,7 +8,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. A run reports through it as it goes (see "Watching a run" below)
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-mcp` - binary: the MCP server that publishes prompts to an agentic harness as callable tools. It parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, answers a call by running the prompt against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, re-reads the catalog when a prompt is saved, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
+- `crates/promptforge-mcp` - binary: the MCP server that publishes prompts to an agentic harness as callable tools. It parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, answers a call by running the prompt against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, re-reads the catalog when a prompt is saved, retrieves the prompts closest to a plain-English capability, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. Loading the model is the expensive part, so a caller whose catalog changes keeps one encoder and re-indexes over it: `build_with(Arc<Embedder>, Catalog, Config)` is the one indexing path and `picker.rebuild(catalog)` reaches it with this engine's own encoder and configuration. No Lua, no MCP, no network
 
 ## Build
@@ -339,9 +339,33 @@ build without the `picker` feature, or the listing tools over an all-direct
 catalog. What the server answers and what it advertises are read from the same
 statement, so they cannot disagree.
 
-`need_prompt`, where published, is not yet answered: it returns a result saying
-so, rather than a fault, since the tool was advertised and the caller did
-nothing wrong. Its behavior arrives with the picker.
+### What `need_prompt` retrieves
+
+Every runnable prompt becomes one entry in a retrieval index built at boot, over
+its name and its description - exactly what `list_prompts` reports, so what a
+caller reads is what retrieval matched on. A capability is embedded by the same
+model and the three closest prompts come back as `{name, description}`, best
+first. Nothing is filtered out for scoring poorly: the similarity floor is zero,
+because a floor exists to stop an unattended binding and this tool binds nothing
+- a model reads the candidates and decides. Three weak candidates are
+self-evidently weak to that reader, while an empty answer to a casually phrased
+request helps nobody.
+
+A broken prompt is never a candidate. It cannot run, so offering it would spend
+the caller's next call on a certain failure; `list_prompts` is where a broken
+prompt and its problem are read.
+
+The index is rebuilt on the same catalog swap a save already performs, and only
+when a name or a description moved - a body-only edit costs nothing. The rebuild
+reuses the model already in memory, so it is one embedding pass per prompt rather
+than a reload of 67MB of weights.
+
+Retrieval never stops the server. `--no-default-features` drops the `picker`
+feature and `need_prompt` with it, and a model that will not load is reported at
+error level while the process serves on: every prompt is still callable, and
+`need_prompt` answers that retrieval is unavailable and sends the caller to
+`list_prompts`. A harness whose MCP server refuses to start is worse off than one
+whose retrieval tool says it cannot help.
 
 ### A run that outlasts the call
 

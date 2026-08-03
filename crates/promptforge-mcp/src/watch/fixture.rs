@@ -13,6 +13,7 @@ use tempfile::TempDir;
 
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::Config;
+use crate::retrieval::Retrieval;
 use crate::watch::reload::{Reload, Reloader};
 use crate::watch::sessions::ListChanged;
 
@@ -77,8 +78,14 @@ pub(super) struct Fixture {
 }
 
 impl Fixture {
-    /// Two listed prompts, `alpha` and `beta`, resolved as boot would.
+    /// Two listed prompts, `alpha` and `beta`, resolved as boot would, with no
+    /// retrieval index behind them.
     pub(super) fn new() -> Fixture {
+        Fixture::with_retrieval(Arc::new(Retrieval::idle()))
+    }
+
+    /// The same fixture over a retrieval index a reload can rebuild.
+    pub(super) fn with_retrieval(retrieval: Arc<Retrieval>) -> Fixture {
         let dir = tempfile::tempdir().expect("create a temporary root");
         let root = dir.path();
         fs::create_dir_all(root.join("prompts")).expect("create the prompts directory");
@@ -94,7 +101,13 @@ impl Fixture {
         let recorder = Arc::new(Recorder::default());
         let listener: Arc<dyn ListChanged> = recorder.clone();
         let config = Arc::new(config);
-        let reloader = Reloader::new(&source, Arc::clone(&config), Arc::clone(&catalog), listener);
+        let reloader = Reloader::new(
+            &source,
+            Arc::clone(&config),
+            Arc::clone(&catalog),
+            listener,
+            retrieval,
+        );
         Fixture {
             dir,
             config,

@@ -21,7 +21,9 @@ use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
 
-use promptforge_mcp::{Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Sessions};
+use promptforge_mcp::{
+    Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Retrieval, Sessions,
+};
 use rmcp::model::{CallToolRequestParams, CallToolResponse, ProgressNotificationParam};
 use rmcp::service::NotificationContext;
 use rmcp::{ClientHandler, RoleClient, ServiceExt};
@@ -69,6 +71,7 @@ fn trio_server() -> (TempDir, PromptForgeServer) {
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Sessions::new()),
+        Arc::new(Retrieval::idle()),
     );
     (dir, server)
 }
