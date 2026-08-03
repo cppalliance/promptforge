@@ -87,6 +87,11 @@ pub struct Config {
     /// Two candidates closer together than this are a tie, not a winner.
     pub margin: f32,
     /// The cosine similarity at or above which two tools are treated as twins.
+    ///
+    /// Measured between the two tools' *own* embeddings, not between their
+    /// scores for any need: twin-ness is a property of the pair and the same
+    /// whatever is being asked of them. It is unrelated to
+    /// `similarity_floor`, which measures a need against a tool.
     pub duplicate_threshold: f32,
     /// How many candidates a shortlist carries.
     pub top_k: usize,
@@ -104,10 +109,11 @@ impl Default for Config {
     /// coverage against wrong bindings - raise it and the engine binds less
     /// often but is wrong less often when it does.
     ///
-    /// `duplicate_threshold` is `0.98`: at or above that cosine similarity two
-    /// tools were found to be twins rather than neighbours. Roughly 11% of a
-    /// broad catalog has such a twin, overwhelmingly cross-server republishes
-    /// of one underlying tool.
+    /// `duplicate_threshold` is `0.98`: at or above that cosine similarity
+    /// between two tools' own embeddings, the pair was found to be twins
+    /// rather than neighbours. Roughly 11% of a broad catalog has such a twin,
+    /// which at that similarity means a near-verbatim republication of the
+    /// same tool, overwhelmingly across servers.
     ///
     /// `top_k` is `3`: on the realistic band the correct tool was in the top 3
     /// about 90% of the time while top-1 was around 76%. That gap is why the
@@ -143,11 +149,14 @@ impl Config {
     /// # Errors
     ///
     /// Returns [`Error::ThresholdOutOfRange`] if `similarity_floor`, `margin`,
-    /// or `duplicate_threshold` is NaN or falls outside `0.0..=1.0`;
-    /// [`Error::EmptyShortlist`] if `top_k` is zero; and
-    /// [`Error::DuplicateThresholdBelowFloor`] if `duplicate_threshold` is
-    /// below `similarity_floor`, which would flag as twins pairs the floor has
-    /// already rejected.
+    /// or `duplicate_threshold` is NaN or falls outside `0.0..=1.0`, and
+    /// [`Error::EmptyShortlist`] if `top_k` is zero.
+    ///
+    /// No relation between the thresholds is checked, because none holds.
+    /// `duplicate_threshold` measures one tool against another and
+    /// `similarity_floor` measures a need against a tool, so neither bounds
+    /// the other and a `duplicate_threshold` below the floor is a perfectly
+    /// coherent configuration.
     pub fn validate(&self) -> Result<()> {
         for (field, value) in [
             ("similarity_floor", self.similarity_floor),
@@ -161,13 +170,6 @@ impl Config {
 
         if self.top_k == 0 {
             return Err(Error::EmptyShortlist);
-        }
-
-        if self.duplicate_threshold < self.similarity_floor {
-            return Err(Error::DuplicateThresholdBelowFloor {
-                similarity_floor: self.similarity_floor,
-                duplicate_threshold: self.duplicate_threshold,
-            });
         }
 
         Ok(())
@@ -266,26 +268,21 @@ mod tests {
     }
 
     #[test]
-    fn a_duplicate_threshold_below_the_floor_is_rejected() {
-        let config = Config {
-            similarity_floor: 0.9,
-            duplicate_threshold: 0.85,
-            ..Config::default()
-        };
-        assert!(matches!(
-            config.validate(),
-            Err(Error::DuplicateThresholdBelowFloor { .. })
-        ));
-    }
-
-    #[test]
-    fn a_duplicate_threshold_equal_to_the_floor_is_accepted() {
-        let config = Config {
-            similarity_floor: 0.9,
-            duplicate_threshold: 0.9,
-            ..Config::default()
-        };
-        assert!(config.validate().is_ok());
+    fn the_duplicate_threshold_is_not_ordered_against_the_floor() {
+        // The two measure different things - one tool against another, and a
+        // need against a tool - so neither bounds the other and every
+        // arrangement of them is a configuration the engine can carry out.
+        for duplicate_threshold in [0.85, 0.9, 0.95] {
+            let config = Config {
+                similarity_floor: 0.9,
+                duplicate_threshold,
+                ..Config::default()
+            };
+            assert!(
+                config.validate().is_ok(),
+                "duplicate_threshold {duplicate_threshold} against a floor of 0.9"
+            );
+        }
     }
 
     #[test]

@@ -27,11 +27,14 @@
 //! The comparison used here is a *total* order - score first, then position in
 //! the catalog - and no two rows share a position, so there is exactly one
 //! correct output for a given query and index. See [`top_k`] for the rule.
-
-// Nothing outside this module's own tests calls into it yet: the decision
-// layer that will consume a ranking is not written. The attribute comes off
-// with the first caller.
-#![allow(dead_code)]
+//!
+//! # The stored rows outlive the ranking
+//!
+//! A ranking answers "how well did each tool match this need". Some questions
+//! are about the tools themselves and not about any need - whether two tools
+//! are near-verbatim copies of each other, for one - and those are answered
+//! from the stored rows rather than from scores. [`Vectors`] is the view of
+//! the flat buffer that lets a later stage ask them.
 
 use std::cmp::Ordering;
 
@@ -56,6 +59,54 @@ pub(crate) struct Candidate {
     /// not rewrite it: a caller that receives a NaN should see the NaN rather
     /// than a plausible number standing in for it.
     pub(crate) score: f32,
+}
+
+/// The stored embedding rows, addressed by catalog position.
+///
+/// A borrowed view of the flat buffer an index keeps its vectors in: rows laid
+/// end to end, `stride` floats apart, row `i` describing the tool at catalog
+/// position `i`. It carries no vectors of its own, so passing one costs a
+/// pointer and a length and never copies a row.
+///
+/// Every row an index stores is L2-normalized, so the dot product of two rows
+/// is their cosine similarity with no magnitudes to divide out. That is what
+/// [`Vectors::similarity`] returns.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Vectors<'a> {
+    /// The rows, end to end.
+    rows: &'a [f32],
+    /// How many floats one row occupies.
+    stride: usize,
+}
+
+impl<'a> Vectors<'a> {
+    /// A view of `rows` read as records `stride` floats wide.
+    pub(crate) fn new(rows: &'a [f32], stride: usize) -> Self {
+        Self { rows, stride }
+    }
+
+    /// The row for the tool at catalog position `index`.
+    ///
+    /// `None` when the row is not wholly present - an index past the end, or a
+    /// stride of zero, which describes no row at all.
+    pub(crate) fn row(self, index: usize) -> Option<&'a [f32]> {
+        if self.stride == 0 {
+            return None;
+        }
+        let start = index.checked_mul(self.stride)?;
+        let end = start.checked_add(self.stride)?;
+        self.rows.get(start..end)
+    }
+
+    /// The cosine similarity between two stored rows.
+    ///
+    /// A property of the pair of tools alone: no query is involved, so the
+    /// answer is the same whatever need is being resolved. `None` when either
+    /// row is absent, which is how a caller holding a position the buffer does
+    /// not cover learns so rather than being handed a number.
+    pub(crate) fn similarity(self, a: usize, b: usize) -> Option<f32> {
+        Some(dot(self.row(a)?, self.row(b)?))
+    }
 }
 
 /// The best `k` rows of `vectors` for `query`, in descending score order.
@@ -95,6 +146,12 @@ pub(crate) struct Candidate {
 /// at all. Zero is unreachable through the engine's own configuration, which
 /// rejects a `top_k` of zero outright, but this function takes `k` as an
 /// argument and answers the question asked rather than assuming it cannot be.
+///
+/// The truncation is under the order described above and no other. A later
+/// stage may re-sort the candidates it receives on keys this module knows
+/// nothing about, but it receives only these `k`: a row that such a re-sort
+/// would have promoted is already discarded if it did not place in the top `k`
+/// here. Asking for a larger `k` is the only way to keep it.
 pub(crate) fn top_k(query: &[f32], vectors: &[f32], k: usize) -> Vec<Candidate> {
     if query.is_empty() || k == 0 {
         return Vec::new();
@@ -133,7 +190,11 @@ fn by_score_then_position(a: &Candidate, b: &Candidate) -> Ordering {
 }
 
 /// A score as it is ordered: anything not finite ranks below everything else.
-fn comparable(score: f32) -> f32 {
+///
+/// Shared with the decision layer, which refines this module's order with a
+/// further tie-break and must demote a non-finite score identically or the two
+/// orders would disagree about which candidate leads.
+pub(crate) fn comparable(score: f32) -> f32 {
     if score.is_finite() {
         score
     } else {
@@ -143,7 +204,7 @@ fn comparable(score: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Candidate, top_k};
+    use super::{Candidate, Vectors, top_k};
 
     /// The positions of a ranking, which is what most assertions here are about.
     fn positions(candidates: &[Candidate]) -> Vec<usize> {
@@ -262,6 +323,31 @@ mod tests {
             "the score is reported as computed"
         );
         assert!(ranked[3].score.is_infinite() && ranked[3].score.is_sign_positive());
+    }
+
+    #[test]
+    fn a_stored_row_is_read_back_at_its_catalog_position() {
+        let vectors = Vectors::new(&ROWS, 2);
+        assert_eq!(vectors.row(0), Some(&[0.0, 1.0][..]));
+        assert_eq!(vectors.row(3), Some(&[0.6, 0.8][..]));
+        assert_eq!(vectors.row(4), None);
+    }
+
+    #[test]
+    fn a_similarity_is_the_dot_product_of_two_stored_rows() {
+        let vectors = Vectors::new(&ROWS, 2);
+        assert_eq!(vectors.similarity(1, 1), Some(1.0));
+        assert_eq!(vectors.similarity(1, 2), Some(-1.0));
+        assert_eq!(vectors.similarity(0, 1), Some(0.0));
+        assert_eq!(vectors.similarity(1, 3), Some(0.6));
+    }
+
+    #[test]
+    fn a_similarity_against_a_row_that_is_not_there_is_unanswerable() {
+        let vectors = Vectors::new(&ROWS, 2);
+        assert_eq!(vectors.similarity(0, 9), None);
+        assert_eq!(vectors.similarity(9, 0), None);
+        assert_eq!(Vectors::new(&ROWS, 0).similarity(0, 0), None);
     }
 
     #[test]
