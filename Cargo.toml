@@ -39,7 +39,13 @@ tracing-subscriber = "0.3"
 # so an upgrade is a diff to read rather than a number to bump. `server` already
 # implies `schemars`; both are named so a later feature edit cannot drop the
 # schema derives by accident.
-rmcp = { version = "=3.1.0", features = ["server", "schemars", "transport-streamable-http-server"] }
+rmcp = { version = "=3.1.0", features = [
+    "server",
+    "schemars",
+    "transport-streamable-http-server",
+    "transport-io",
+] }
+tower = { version = "0.5", features = ["util"] }
 arc-swap = "1"
 glob = "0.3"
 humantime = "2"

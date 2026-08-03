@@ -20,7 +20,10 @@
 //! as it goes, so a client sees a caption change rather than one silent
 //! multi-minute call; and [`RunRegistry`] admits the run, hands the caller a
 //! `run_id` when it outlasts the client's patience, and keeps the result
-//! collectable afterwards. The transports that carry all of this come next.
+//! collectable afterwards. [`build_router`] puts that handler behind a shared
+//! bearer at `/mcp` with an unauthenticated `/healthz` beside it, and
+//! [`serve_http`] and [`serve_stdio`] are the two transports it is reached on.
+//! What comes next is the watcher that re-reads a prompt on save.
 
 mod catalog;
 mod config;
@@ -30,14 +33,16 @@ mod registry;
 mod result;
 mod server;
 mod tools;
+mod transport;
 
 pub use crate::catalog::{Catalog, CatalogHandle, Entry, OnBroken};
 pub use crate::config::{
     CatalogConfig, Config, Expose, GatewayConfig, PathsConfig, PromptConfig, Secret, ServerConfig,
 };
-pub use crate::error::{CatalogError, ConfigError, Fault};
+pub use crate::error::{CatalogError, ConfigError, Fault, ServeError};
 pub use crate::progress::{McpObserver, ProgressPump};
 pub use crate::registry::{RunRegistry, RunSlot};
 pub use crate::result::{RunResult, RunStatus};
 pub use crate::server::PromptForgeServer;
 pub use crate::tools::{CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, tool_definitions};
+pub use crate::transport::{HEALTHZ_PATH, MCP_PATH, build_router, serve_http, serve_stdio};

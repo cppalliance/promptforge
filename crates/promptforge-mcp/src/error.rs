@@ -1,6 +1,7 @@
 //! Error types for the MCP server.
 
 use std::fmt;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 /// A `prompts.toml` load failure.
@@ -23,6 +24,13 @@ pub enum ConfigError {
     #[error("parse config: {0}")]
     Parse(String),
 
+    /// `[server].token` was present but carried nothing: empty, or only
+    /// whitespace. An empty shared bearer would make a request presenting no
+    /// credential compare equal, so it is refused where it is read rather than
+    /// where it is used.
+    #[error("[server].token is required and must not be empty")]
+    EmptyToken,
+
     /// A `${VAR}` referenced an environment variable that was not set.
     #[non_exhaustive]
     #[error("unresolved environment variable {0}")]
@@ -32,6 +40,38 @@ pub enum ConfigError {
     #[non_exhaustive]
     #[error("interpolation: {0}")]
     Interpolation(String),
+}
+
+/// A transport that would not start, or that stopped abnormally.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ServeError {
+    /// The configured socket could not be bound.
+    #[non_exhaustive]
+    #[error("bind {addr}")]
+    Bind {
+        /// The address that could not be bound.
+        addr: SocketAddr,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The HTTP accept loop stopped with an error.
+    #[non_exhaustive]
+    #[error("serve http")]
+    Http {
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The stdio session did not complete its handshake, or ended abnormally.
+    /// The detail is rendered rather than carried, so no dependency's error
+    /// type reaches this crate's public surface.
+    #[non_exhaustive]
+    #[error("serve stdio: {0}")]
+    Stdio(String),
 }
 
 /// One thing wrong with a resolved catalog, named as precisely as the pass can
