@@ -1,9 +1,14 @@
-//! Handler tests.
+//! Handler tests: routing, argument shapes, and what one call answers with.
+//!
+//! Admission, the reply deadline, and collecting a run by id are in [`runs`],
+//! which shares these fixtures.
 //!
 //! Almost none of these needs a gateway: every fixture prompt's Lua block
 //! returns a value, which finishes the run before any model call is made. The
 //! exception is the turn count, which is a statement about model round trips
 //! and so needs a backend to take one against.
+
+mod runs;
 
 use std::fs;
 use std::net::SocketAddr;
@@ -17,9 +22,10 @@ use rmcp::model::{CallToolRequestParams, CallToolResult, ErrorCode, JsonObject};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-use super::{NO_TURNS, PromptForgeServer};
+use super::PromptForgeServer;
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::Config;
+use crate::result::NO_TURNS;
 
 /// A prompt that returns its input without calling a model.
 fn echo_prompt(name: &str, description: &str) -> String {
@@ -45,6 +51,11 @@ fn write(root: &Path, relative: &str, contents: &str) {
 /// A server over a prompts directory holding one direct prompt (`echo`), two
 /// listed ones (`greet`, `summarize`), and one whose Lua will not compile.
 fn server() -> (TempDir, PromptForgeServer) {
+    server_with("")
+}
+
+/// The same server, with `server_lines` added to its `[server]` table.
+fn server_with(server_lines: &str) -> (TempDir, PromptForgeServer) {
     let dir = tempfile::tempdir().expect("create a temporary prompts directory");
     let root = dir.path();
     write(root, "echo.md", &echo_prompt("echo", "Echo the input back"));
@@ -57,7 +68,7 @@ fn server() -> (TempDir, PromptForgeServer) {
     write(root, "explode.md", &broken_lua_prompt("explode"));
 
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n\n\
+        "[server]\ntoken = \"t\"\n{server_lines}\n\n\
          [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
          [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"list\"\n\n\
@@ -330,25 +341,18 @@ async fn list_prompts_reports_every_enabled_prompt() {
 }
 
 #[tokio::test]
-async fn the_built_ins_a_later_step_answers_say_so() {
+#[cfg(feature = "picker")]
+async fn the_built_in_a_later_step_answers_says_so() {
     let (_dir, server) = server();
-    let published: &[&str] = if cfg!(feature = "picker") {
-        &["check_run", "need_prompt"]
-    } else {
-        &["check_run"]
-    };
-    for name in published {
-        let request = CallToolRequestParams::new(*name);
-        let result = server
-            .dispatch(request)
-            .await
-            .expect("an unanswered built-in is a result, not a protocol error");
-        assert_eq!(result.is_error, Some(true));
-        assert!(
-            text_of(&result).contains(name),
-            "the message should name the tool"
-        );
-    }
+    let result = server
+        .dispatch(CallToolRequestParams::new("need_prompt"))
+        .await
+        .expect("an unanswered built-in is a result, not a protocol error");
+    assert_eq!(result.is_error, Some(true));
+    assert!(
+        text_of(&result).contains("need_prompt"),
+        "the message should name the tool"
+    );
 }
 
 #[tokio::test]
@@ -367,7 +371,7 @@ async fn a_built_in_this_catalog_does_not_publish_is_a_protocol_error() {
     // The collector is published whenever anything is, since a direct call can
     // outlive its deadline too.
     let collector = server
-        .dispatch(CallToolRequestParams::new("check_run"))
+        .dispatch(call("check_run", json!({ "run_id": "nonesuch" })))
         .await
         .expect("check_run is published here");
     assert_eq!(collector.is_error, Some(true));
@@ -409,6 +413,11 @@ async fn spawn_text_gateway() -> SocketAddr {
 /// A server over one direct prompt whose single section is prose, pointed at
 /// `gateway`.
 fn speaking_server(gateway: SocketAddr) -> (TempDir, PromptForgeServer) {
+    speaking_server_with(gateway, "")
+}
+
+/// The same server, with `server_lines` added to its `[server]` table.
+fn speaking_server_with(gateway: SocketAddr, server_lines: &str) -> (TempDir, PromptForgeServer) {
     let dir = tempfile::tempdir().expect("create a temporary prompts directory");
     write(
         dir.path(),
@@ -417,7 +426,7 @@ fn speaking_server(gateway: SocketAddr) -> (TempDir, PromptForgeServer) {
          ## Only\n\nSay something.\n",
     );
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n\n\
+        "[server]\ntoken = \"t\"\n{server_lines}\n\n\
          [gateway]\nurl = \"http://{gateway}/v1\"\ntoken = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
          [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"tool\"\n",

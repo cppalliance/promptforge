@@ -3,7 +3,7 @@
 //! Every call that reaches a prompt answers with a [`RunResult`], carried in
 //! the tool result's `structuredContent`. The `content` text block beside it
 //! carries the plain product: the run's returned value when it completed, the
-//! error when it failed, and - once a run can outlive its call - a line naming
+//! error when it failed, and - for a run that outlived its call - a line naming
 //! the run id to collect with.
 //!
 //! The value itself is the whole product. The core writes no output files, so
@@ -13,14 +13,21 @@
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 
+/// The turn count of a run that never started, or has not finished.
+///
+/// A prompt that will not parse, or whose tools cannot be bound, reaches no
+/// model at all, so its zero is a fact rather than a missing measurement. A run
+/// still going reports the same zero for the opposite reason: its tally is not
+/// final, and a partial count would read as a total.
+pub(crate) const NO_TURNS: u32 = 0;
+
 /// How far a run has got.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RunStatus {
     /// The run outlived the call that started it and is still going. Collect it
-    /// by id. Nothing produces this yet: the deadline race that does arrives
-    /// with the run registry.
+    /// by id with `check_run`.
     Running,
     /// The run finished and its value is in [`RunResult::value`].
     Completed,
@@ -49,7 +56,9 @@ pub struct RunResult {
     /// How many model round trips the run took, as counted by whatever observed
     /// it. A caller that observed nothing reports zero.
     pub turns: u32,
-    /// How long the run took, in milliseconds, measured around the call.
+    /// How long the run took, in milliseconds, measured from the moment it was
+    /// admitted rather than from the moment it was asked for, so a queue wait is
+    /// none of it.
     pub elapsed_ms: u64,
     /// Why the run failed, present only on a failure.
     pub error: Option<String>,
@@ -108,6 +117,30 @@ impl RunResult {
         }
     }
 
+    /// A run that outlived the call which started it and is still going in the
+    /// background.
+    ///
+    /// It reports [`NO_TURNS`], because the tally that matters is the one the
+    /// finished record carries, and `elapsed_ms` measures how long it has been
+    /// going rather than how long it took.
+    pub(crate) fn running(
+        run_id: String,
+        prompt: &str,
+        version: u32,
+        elapsed_ms: u64,
+    ) -> RunResult {
+        RunResult {
+            run_id,
+            prompt: prompt.to_owned(),
+            version,
+            status: RunStatus::Running,
+            value: None,
+            turns: NO_TURNS,
+            elapsed_ms,
+            error: None,
+        }
+    }
+
     /// The text block that goes beside this result: the value on completion,
     /// the error on failure, and a collection instruction while running.
     pub(crate) fn text(&self) -> String {
@@ -142,6 +175,20 @@ mod tests {
         assert_eq!(result.text(), "lua: boom");
         assert_eq!(result.turns, 1);
         assert!(result.value.is_none());
+    }
+
+    #[test]
+    fn a_running_run_texts_how_to_collect_it() {
+        let result = RunResult::running("r1".into(), "echo", 1, 240_000);
+        assert_eq!(result.status, RunStatus::Running);
+        let text = result.text();
+        assert!(text.contains("r1"), "the id to collect by: {text}");
+        assert!(
+            text.contains("check_run"),
+            "the tool to collect with: {text}"
+        );
+        assert!(result.value.is_none());
+        assert!(result.error.is_none());
     }
 
     #[test]
