@@ -5,7 +5,7 @@ markdown is the program, the model is the CPU.
 
 ## Workspace
 
-- `crates/promptforge-core` - library: prompt parser, gateway client, section execution
+- `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. The seam is declared but not yet wired: nothing emits an event today
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. No Lua, no MCP, no network
