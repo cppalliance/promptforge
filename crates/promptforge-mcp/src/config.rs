@@ -36,10 +36,16 @@ impl Secret {
         &self.0
     }
 
-    /// Whether the secret is empty (an intentionally credential-free endpoint).
+    /// Whether the secret is the empty string.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// Whether the secret carries nothing usable: empty, or only whitespace.
+    #[must_use]
+    pub fn is_blank(&self) -> bool {
+        self.0.trim().is_empty()
     }
 }
 
@@ -205,8 +211,9 @@ impl Config {
     /// # Errors
     /// Returns [`ConfigError::Read`] if `path` is unreadable,
     /// [`ConfigError::Interpolation`] or [`ConfigError::UnresolvedVar`] if a
-    /// `${VAR}` is malformed or unset, and [`ConfigError::Parse`] if the TOML is
-    /// invalid or carries an unknown key.
+    /// `${VAR}` is malformed or unset, [`ConfigError::Parse`] if the TOML is
+    /// invalid or carries an unknown key, and [`ConfigError::EmptyToken`] if
+    /// `[server].token` carries nothing.
     pub fn load(path: &Path) -> Result<Config, ConfigError> {
         let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
             path: path.display().to_string(),
@@ -219,8 +226,9 @@ impl Config {
     ///
     /// # Errors
     /// Returns [`ConfigError::Interpolation`] or [`ConfigError::UnresolvedVar`]
-    /// for a malformed or unset `${VAR}`, and [`ConfigError::Parse`] for
-    /// invalid TOML or an unknown key.
+    /// for a malformed or unset `${VAR}`, [`ConfigError::Parse`] for invalid
+    /// TOML or an unknown key, and [`ConfigError::EmptyToken`] for a
+    /// `[server].token` that is empty or whitespace alone.
     ///
     /// # Examples
     /// ```
@@ -239,7 +247,23 @@ impl Config {
     /// ```
     pub fn from_toml_str(raw: &str) -> Result<Config, ConfigError> {
         let interpolated = interpolate(raw)?;
-        toml::from_str(&interpolated).map_err(|e| ConfigError::Parse(e.to_string()))
+        let config: Config =
+            toml::from_str(&interpolated).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// The checks a parsed configuration must pass before anything reads it.
+    ///
+    /// The shared bearer is the whole of it: an empty token would make a request
+    /// presenting no credential compare equal to it, so the load refuses one
+    /// rather than leaving the surface open to a typo. The bearer layer refuses
+    /// an absent header on its own too, so the two defences are independent.
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.server.token.is_blank() {
+            return Err(ConfigError::EmptyToken);
+        }
+        Ok(())
     }
 }
 

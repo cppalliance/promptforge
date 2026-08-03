@@ -5,3 +5,4 @@
 //! receives, and the progress path is defined by exactly that.
 
 mod progress;
+mod stdio;

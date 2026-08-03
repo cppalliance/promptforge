@@ -29,13 +29,17 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 toml.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 # The client half of `rmcp`, so the progress tests drive the handler over a
 # real session and assert the notifications a client actually receives.
 rmcp = { workspace = true, features = ["client"] }
 tempfile.workspace = true
-tokio = { workspace = true, features = ["io-util", "test-util", "time"] }
+tokio = { workspace = true, features = ["io-util", "process", "test-util", "time"] }
+# `ServiceExt::oneshot`, so the auth matrix is asserted against the assembled
+# router rather than against a handler with the layer imagined around it.
+tower.workspace = true
 
 [features]
 default = ["picker"]

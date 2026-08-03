@@ -78,7 +78,11 @@ type Reporting = (Peer<RoleServer>, ProgressToken);
 /// catalog underneath a live server and a run in flight keeps the snapshot it
 /// started with. The registry is shared with every background run, which is what
 /// lets one that outlived its call still record what it produced.
-#[derive(Debug)]
+///
+/// Cloning is how the HTTP transport gives each session a handler: every field
+/// is shared, so a clone publishes the same catalog and, more importantly, the
+/// same registry - a run started in one session is collectable from another.
+#[derive(Debug, Clone)]
 pub struct PromptForgeServer {
     config: Arc<Config>,
     catalog: Arc<CatalogHandle>,
