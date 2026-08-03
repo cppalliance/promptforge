@@ -145,35 +145,6 @@ impl Entry {
     pub fn problem(&self) -> Option<&str> {
         self.problem.as_deref()
     }
-
-    /// The text retrieval ranks this entry on: its name and its description.
-    ///
-    /// Underscores in the name become spaces so the embedder reads it as words,
-    /// and an empty part is dropped rather than doubling the separator. This
-    /// mirrors what the tool picker embeds, so what a caller reads in
-    /// `list_prompts` is what retrieval matched on.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_mcp::{Catalog, Config, OnBroken};
-    /// # let dir = tempfile::tempdir()?;
-    /// # std::fs::write(dir.path().join("research.md"), "---\nname: research_person\ndescription: Research one person\nversion: 1\npromptforge: 1\n---\n\n## Main\n\nDo the work.\n")?;
-    /// # let config = Config::from_toml_str(&format!("[server]\ntoken = \"t\"\n\n[gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"t\"\n\n[paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n", dir.path().display()))?;
-    /// let catalog = Catalog::resolve(&config, OnBroken::Reject)?;
-    /// let entry = catalog.find("research_person").expect("the prompt just written");
-    /// assert_eq!(entry.embed_text(), "research person. Research one person");
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    #[must_use]
-    pub fn embed_text(&self) -> String {
-        let name = self.name.replace('_', " ");
-        match (name.is_empty(), self.description.is_empty()) {
-            (false, false) => format!("{name}. {}", self.description),
-            (false, true) => name,
-            (true, false) => self.description.clone(),
-            (true, true) => String::new(),
-        }
-    }
 }
 
 /// Every prompt one resolution pass produced, ordered by name.

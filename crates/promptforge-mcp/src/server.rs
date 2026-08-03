@@ -42,6 +42,7 @@ use crate::catalog::{Catalog, CatalogHandle, Entry};
 use crate::config::Config;
 use crate::registry::RunRegistry;
 use crate::result::{RunResult, RunStatus};
+use crate::retrieval::{Retrieval, Shortlist};
 use crate::tools::{
     CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, publishes_built_in, tool_definitions,
 };
@@ -52,11 +53,11 @@ use crate::watch::Sessions;
 /// runner takes a name from the listing, not a guessed one.
 const INSTRUCTIONS: &str = "This server runs PromptForge prompts. Some prompts have their own tool; the rest are reached with run_prompt. Call list_prompts to see every prompt this server can run, and pass run_prompt a name from that listing rather than guessing one.";
 
-/// The message a built-in that is published but not yet answered returns, so a
-/// caller reads why rather than a protocol fault.
-fn not_yet_answered(tool: &str) -> String {
-    format!("{tool} is published but not answered yet by this build of the server.")
-}
+/// What a caller of `need_prompt` is told when the retrieval index is not
+/// loaded: that this one tool cannot answer, and where an answer still is. The
+/// tool was advertised, so the caller did nothing wrong and a protocol fault
+/// would be blaming it for the server's own state.
+const RETRIEVAL_UNAVAILABLE: &str = "need_prompt cannot answer: this server's retrieval index is not loaded. Call list_prompts and choose a prompt from the catalog instead.";
 
 /// What a caller collecting an id nobody holds is told: that the id is unknown
 /// and how long a finished run stays collectable, so a model that polled too
@@ -90,20 +91,26 @@ pub struct PromptForgeServer {
     catalog: Arc<CatalogHandle>,
     registry: Arc<RunRegistry>,
     sessions: Arc<Sessions>,
+    retrieval: Arc<Retrieval>,
 }
 
 impl PromptForgeServer {
-    /// Builds a server over a configuration, a live catalog, and the session
-    /// list a reload announces a changed tool set to.
+    /// Builds a server over a configuration, a live catalog, the session list a
+    /// reload announces a changed tool set to, and the index `need_prompt`
+    /// answers from.
     ///
     /// The run registry is built from `[server]` here rather than passed in:
     /// its limits are that table's, and one server has exactly one. The session
-    /// list is passed in, because the watcher holds the other end of it.
+    /// list and the retrieval index are passed in, because the watcher holds the
+    /// other end of both - it announces to the one and rebuilds the other.
+    /// [`Retrieval::idle`] is the retrieval of a server that publishes no
+    /// `need_prompt` or could not load its model.
     #[must_use]
     pub fn new(
         config: Arc<Config>,
         catalog: Arc<CatalogHandle>,
         sessions: Arc<Sessions>,
+        retrieval: Arc<Retrieval>,
     ) -> PromptForgeServer {
         let registry = Arc::new(RunRegistry::new(&config.server));
         PromptForgeServer {
@@ -111,6 +118,7 @@ impl PromptForgeServer {
             catalog,
             registry,
             sessions,
+            retrieval,
         }
     }
 
@@ -186,7 +194,23 @@ impl PromptForgeServer {
                 }
             }
             NEED_PROMPT if publishes_built_in(&catalog, name) => {
-                Ok(text_error(not_yet_answered(name)))
+                let capability = required_string(arguments, "capability")?;
+                // Embedding the capability is a transformer forward pass, which
+                // has no business on a runtime worker. The index behind it is
+                // swapped atomically, so the task either ranks against the
+                // index that was current when it started or against the one
+                // that replaced it, never against a half-built one.
+                let retrieval = Arc::clone(&self.retrieval);
+                let shortlist =
+                    tokio::task::spawn_blocking(move || retrieval.shortlist(&capability))
+                        .await
+                        .map_err(|e| {
+                            ErrorData::internal_error(
+                                format!("rank prompts for the capability: {e}"),
+                                None,
+                            )
+                        })?;
+                need_prompt_result(&shortlist)
             }
             _ => match catalog.find(name) {
                 Some(entry) if entry.is_direct() => {
@@ -295,6 +319,34 @@ fn list_prompts_result(catalog: &Catalog) -> Result<CallToolResult, ErrorData> {
     let structured = json!({ "prompts": prompts });
     let text = serde_json::to_string_pretty(&structured)
         .map_err(|e| ErrorData::internal_error(format!("render the prompt listing: {e}"), None))?;
+    let mut result = CallToolResult::success(vec![ContentBlock::text(text)]);
+    result.structured_content = Some(structured);
+    Ok(result)
+}
+
+/// The candidates a capability retrieved, shaped like the listing so a caller
+/// reads one thing whichever way it found a prompt.
+///
+/// An empty shortlist is a success, not an error: "no prompt is close to this"
+/// is an answer, and the catalog is one `list_prompts` call away.
+///
+/// # Errors
+/// Returns `-32603` when the engine could not embed the capability, which is
+/// nothing the caller can correct, and when the candidates cannot be serialized.
+fn need_prompt_result(shortlist: &Shortlist) -> Result<CallToolResult, ErrorData> {
+    let candidates = match shortlist {
+        Shortlist::Candidates(candidates) => candidates,
+        Shortlist::Unavailable => return Ok(text_error(RETRIEVAL_UNAVAILABLE.to_owned())),
+        Shortlist::Failed(detail) => {
+            return Err(ErrorData::internal_error(
+                format!("rank prompts for the capability: {detail}"),
+                None,
+            ));
+        }
+    };
+    let structured = json!({ "prompts": candidates });
+    let text = serde_json::to_string_pretty(&structured)
+        .map_err(|e| ErrorData::internal_error(format!("render the candidates: {e}"), None))?;
     let mut result = CallToolResult::success(vec![ContentBlock::text(text)]);
     result.structured_content = Some(structured);
     Ok(result)

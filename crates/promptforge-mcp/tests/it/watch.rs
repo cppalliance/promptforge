@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use promptforge_mcp::{
-    Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Sessions, Watcher,
+    Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Retrieval, Sessions, Watcher,
 };
 use rmcp::service::NotificationContext;
 use rmcp::{ClientHandler, RoleClient, ServiceExt};
@@ -85,17 +85,27 @@ async fn a_saved_prompt_reaches_the_catalog_and_the_client() {
     let catalog = Catalog::resolve(&config, OnBroken::Reject).expect("boot resolves");
     let catalog = Arc::new(CatalogHandle::new(catalog));
     let sessions = Arc::new(Sessions::new());
+    // Idle, so this test costs no model load: what it is about is that a real
+    // platform event reaches a real client, and the rebuild that rides the same
+    // swap is asserted in the reload's own tests.
+    let retrieval = Arc::new(Retrieval::idle());
 
     let _watcher = Watcher::start(
         &source,
         Arc::clone(&config),
         Arc::clone(&catalog),
         Arc::clone(&sessions),
+        Arc::clone(&retrieval),
     )
     .expect("the watcher starts")
     .expect("watch defaults to on");
 
-    let server = PromptForgeServer::new(config, Arc::clone(&catalog), Arc::clone(&sessions));
+    let server = PromptForgeServer::new(
+        config,
+        Arc::clone(&catalog),
+        Arc::clone(&sessions),
+        retrieval,
+    );
     let (server_io, client_io) = tokio::io::duplex(4096);
     tokio::spawn(async move {
         let Ok(running) = server.serve(server_io).await else {

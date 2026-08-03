@@ -10,19 +10,6 @@ use super::*;
 use crate::catalog::fixture::{config_at, prompt_source, write, write_prompt};
 
 #[test]
-fn embed_text_is_the_name_and_the_description() {
-    let dir = TempDir::new().expect("temporary prompts directory");
-    let root = dir.path();
-    write_prompt(root, "p.md", "research_person", "Research one person");
-    let config = config_at(root, "[catalog]\ninclude = [\"*.md\"]\n");
-    let catalog = Catalog::resolve(&config, OnBroken::Reject).expect("the catalog resolves");
-    assert_eq!(
-        catalog.entries()[0].embed_text(),
-        "research person. Research one person"
-    );
-}
-
-#[test]
 fn hash_follows_the_description_and_is_stable_across_a_re_resolve() {
     let dir = TempDir::new().expect("temporary prompts directory");
     let root = dir.path();

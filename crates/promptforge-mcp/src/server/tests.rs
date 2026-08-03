@@ -26,6 +26,7 @@ use super::PromptForgeServer;
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::Config;
 use crate::result::NO_TURNS;
+use crate::retrieval::Retrieval;
 use crate::watch::Sessions;
 
 /// A prompt that returns its input without calling a model.
@@ -83,6 +84,7 @@ fn server_with(server_lines: &str) -> (TempDir, PromptForgeServer) {
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Sessions::new()),
+        Arc::new(Retrieval::idle()),
     );
     (dir, server)
 }
@@ -108,6 +110,7 @@ fn all_direct_server() -> (TempDir, PromptForgeServer) {
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Sessions::new()),
+        Arc::new(Retrieval::idle()),
     );
     (dir, server)
 }
@@ -228,6 +231,7 @@ async fn a_hyphen_resolves_to_the_underscore_it_stands_for() {
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Sessions::new()),
+        Arc::new(Retrieval::idle()),
     );
 
     let result = server
@@ -355,17 +359,13 @@ async fn list_prompts_reports_every_enabled_prompt() {
 
 #[tokio::test]
 #[cfg(feature = "picker")]
-async fn the_built_in_a_later_step_answers_says_so() {
+async fn a_published_built_in_called_with_no_arguments_at_all_is_the_client_s_bug() {
     let (_dir, server) = server();
-    let result = server
+    let error = server
         .dispatch(CallToolRequestParams::new("need_prompt"))
         .await
-        .expect("an unanswered built-in is a result, not a protocol error");
-    assert_eq!(result.is_error, Some(true));
-    assert!(
-        text_of(&result).contains("need_prompt"),
-        "the message should name the tool"
-    );
+        .expect_err("the schema declared a required argument");
+    assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
 }
 
 #[tokio::test]
@@ -452,6 +452,7 @@ fn speaking_server_with(gateway: SocketAddr, server_lines: &str) -> (TempDir, Pr
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Sessions::new()),
+        Arc::new(Retrieval::idle()),
     );
     (dir, server)
 }
@@ -471,6 +472,21 @@ async fn the_reported_turn_total_is_the_one_the_run_took() {
     assert_eq!(structured["status"], json!("completed"));
     assert_eq!(structured["value"], json!("spoken"));
     assert_eq!(structured["turns"], json!(1), "one prose section, one turn");
+}
+
+#[tokio::test]
+#[cfg(not(feature = "picker"))]
+async fn a_build_without_the_picker_has_no_need_prompt_at_all() {
+    let (_dir, server) = server();
+    let error = server
+        .dispatch(call("need_prompt", json!({ "capability": "anything" })))
+        .await
+        .expect_err("a tool this build never advertised does not exist");
+    assert_eq!(
+        error.code,
+        ErrorCode::METHOD_NOT_FOUND,
+        "publication is the one line dispatch reads"
+    );
 }
 
 #[tokio::test]

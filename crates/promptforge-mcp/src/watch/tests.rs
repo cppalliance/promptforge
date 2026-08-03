@@ -22,6 +22,7 @@ use super::sessions::{ListChanged, Sessions};
 use super::{Interesting, Watcher, debounce};
 use crate::catalog::{Catalog, CatalogHandle};
 use crate::config::Config;
+use crate::retrieval::Retrieval;
 
 /// The debounce window every timing test uses. Its value is immaterial on a
 /// paused clock; what matters is that the test advances past it.
@@ -231,6 +232,7 @@ async fn watch_false_starts_nothing() {
         Arc::new(config),
         catalog,
         Arc::new(Sessions::new()),
+        Arc::new(Retrieval::idle()),
     )
     .expect("starting nothing cannot fail");
     assert!(
@@ -256,6 +258,7 @@ async fn an_unwatchable_prompts_directory_is_an_error() {
         Arc::new(config),
         catalog,
         Arc::new(Sessions::new()),
+        Arc::new(Retrieval::idle()),
     );
     assert!(started.is_err());
 }

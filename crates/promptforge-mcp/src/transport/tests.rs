@@ -16,6 +16,7 @@ use tower::ServiceExt;
 use super::{HEALTHZ_PATH, MCP_PATH, SSE_KEEP_ALIVE, build_router, streamable_config};
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::{Config, Secret};
+use crate::retrieval::Retrieval;
 use crate::server::PromptForgeServer;
 use crate::watch::Sessions;
 
@@ -51,6 +52,7 @@ fn router_with(token: Secret) -> (TempDir, axum::Router) {
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Sessions::new()),
+        Arc::new(Retrieval::idle()),
     );
     (dir, build_router(server, Arc::new(token)))
 }

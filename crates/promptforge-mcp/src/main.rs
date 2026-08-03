@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use promptforge_mcp::{
-    Catalog, CatalogHandle, Config, OnBroken, Sessions, Watcher, serve_http, serve_stdio,
+    Catalog, CatalogHandle, Config, OnBroken, Retrieval, Sessions, Watcher, serve_http, serve_stdio,
 };
 
 /// What the process prints when the arguments are not the two shapes it takes.
@@ -100,6 +100,12 @@ fn run(invocation: &Invocation) -> Result<(), Box<dyn std::error::Error>> {
     // ten prompts is one whose catalog silently disagrees with its own
     // configuration, and a client sees only a missing tool.
     let catalog = Catalog::resolve(&config, OnBroken::Reject)?;
+    // Before the runtime, because loading the embedding model is seconds of
+    // blocking CPU and there is no runtime worker yet to block. It cannot fail
+    // the boot: a model that will not load costs `need_prompt` and nothing else,
+    // and a harness whose MCP server refuses to start is worse off than one
+    // whose retrieval tool reports itself unavailable.
+    let retrieval = Arc::new(Retrieval::start(&catalog));
     let config = Arc::new(config);
     let catalog = Arc::new(CatalogHandle::new(catalog));
     let sessions = Arc::new(Sessions::new());
@@ -117,11 +123,12 @@ fn run(invocation: &Invocation) -> Result<(), Box<dyn std::error::Error>> {
             Arc::clone(&config),
             Arc::clone(&catalog),
             Arc::clone(&sessions),
+            Arc::clone(&retrieval),
         )?;
         if stdio {
-            serve_stdio(config, catalog, sessions).await?;
+            serve_stdio(config, catalog, sessions, retrieval).await?;
         } else {
-            serve_http(config, catalog, sessions).await?;
+            serve_http(config, catalog, sessions, retrieval).await?;
         }
         Ok::<(), Box<dyn std::error::Error>>(())
     })?;

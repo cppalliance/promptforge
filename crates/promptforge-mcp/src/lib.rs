@@ -6,11 +6,8 @@
 //! happens here, against the gateway, so a prompt is always a tool and never an
 //! MCP prompt.
 //!
-//! What exists so far is the crate's configuration, its catalog, the tool
-//! surface those two produce, the handler that answers a call, and the registry
-//! that outlives one. [`Config`]
-//! parses the `prompts.toml` that names the bind address, the shared token, the
-//! prompts directory, the gateway, and which prompts the harness sees;
+//! [`Config`] parses the `prompts.toml` that names the bind address, the shared
+//! token, the prompts directory, the gateway, and which prompts the harness sees;
 //! [`Catalog::resolve`] turns that configuration and the prompts directory into
 //! the set of prompts a harness may call, either refusing to start over an
 //! incomplete result or keeping the failures visible as broken entries;
@@ -25,8 +22,10 @@
 //! [`serve_http`] and [`serve_stdio`] are the two transports it is reached on.
 //! [`Watcher`] keeps the catalog current while the server runs, so writing a
 //! prompt is an edit-and-call loop rather than an edit-restart-call one, and
-//! [`Sessions`] is who a changed tool list is announced to. What comes next is
-//! `need_prompt`, the retrieval tool behind the catalog.
+//! [`Sessions`] is who a changed tool list is announced to. [`Retrieval`] is
+//! what answers `need_prompt`: a plain-English capability in, up to three
+//! candidate prompts out, rebuilt on the same swap when a save changed what it
+//! ranks on.
 
 mod catalog;
 mod config;
@@ -34,6 +33,7 @@ mod error;
 mod progress;
 mod registry;
 mod result;
+mod retrieval;
 mod server;
 mod tools;
 mod transport;
@@ -47,6 +47,7 @@ pub use crate::error::{CatalogError, ConfigError, Fault, ServeError, WatchError}
 pub use crate::progress::{McpObserver, ProgressPump};
 pub use crate::registry::{RunRegistry, RunSlot};
 pub use crate::result::{RunResult, RunStatus};
+pub use crate::retrieval::{Candidate, Retrieval, Shortlist};
 pub use crate::server::PromptForgeServer;
 pub use crate::tools::{CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, tool_definitions};
 pub use crate::transport::{HEALTHZ_PATH, MCP_PATH, build_router, serve_http, serve_stdio};

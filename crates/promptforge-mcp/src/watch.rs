@@ -42,6 +42,7 @@ use tokio::task::JoinHandle;
 use crate::catalog::CatalogHandle;
 use crate::config::Config;
 use crate::error::WatchError;
+use crate::retrieval::Retrieval;
 
 pub use crate::watch::reload::{Reload, Reloader};
 pub use crate::watch::sessions::{ListChanged, Sessions};
@@ -85,6 +86,7 @@ impl Watcher {
         config: Arc<Config>,
         catalog: Arc<CatalogHandle>,
         sessions: Arc<Sessions>,
+        retrieval: Arc<Retrieval>,
     ) -> Result<Option<Watcher>, WatchError> {
         if !config.server.watch {
             tracing::info!("[server].watch is false: prompts are read once, at boot");
@@ -135,7 +137,7 @@ impl Watcher {
             humantime::format_duration(window)
         );
 
-        let reloader = Arc::new(Reloader::new(source, config, catalog, sessions));
+        let reloader = Arc::new(Reloader::new(source, config, catalog, sessions, retrieval));
         let repair = Arc::downgrade(&watcher);
         let task = tokio::spawn(async move {
             debounce(pending, window, move || {
