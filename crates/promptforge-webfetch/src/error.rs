@@ -1,10 +1,10 @@
 //! The `web_fetch` error type.
 //!
-//! [`FetchError`] is the single error type for every `web_fetch` failure mode.
-//! This step introduces it whole: the URL-policy variants, a model-facing
-//! rendering that later steps can trim of internal detail, and the conversion
-//! into [`promptforge_core::Error`] (which is what the `Tool` trait returns).
-//! Later steps add only the variants their own failure mode needs.
+//! [`FetchError`] is the single error type for every `web_fetch` failure mode:
+//! the URL and address policies, redirects, DNS, the size caps, the timeouts,
+//! and the content-type and decoding refusals. It carries a model-facing
+//! rendering that withholds internal detail, and converts into
+//! [`promptforge_core::Error`], which is what the `Tool` trait returns.
 
 use std::net::IpAddr;
 

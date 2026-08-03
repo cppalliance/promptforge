@@ -22,10 +22,13 @@
 //! a decision, so passing [`crate::observe::NullObserver`] changes nothing but
 //! the silence.
 //!
-//! Still to come: the other exit cases (a descriptor = goto/task/fanout), the
-//! tool-call loop, and durable state to carry a non-terminal section's model
-//! reply forward (today an intermediate section's model reply is not retained;
-//! the store is the durable channel).
+//! A section that declares tools runs a tool-call loop: the model's requested
+//! calls are dispatched and their results fed back until it answers with text.
+//!
+//! Still to come: the other exit cases (a descriptor = goto/task/fanout), and
+//! durable state to carry a non-terminal section's model reply forward (today
+//! an intermediate section's model reply is not retained; the store is the
+//! durable channel).
 
 use std::fmt;
 use std::time::Instant;
