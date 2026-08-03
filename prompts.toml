@@ -3,8 +3,8 @@
 # Code). Paths are relative to the process working directory, so run it from the
 # repository root:
 #
-#   cargo run -p promptforge-mcp -- serve prompts.toml            # streamable HTTP
-#   cargo run -p promptforge-mcp -- serve --stdio prompts.toml    # stdio
+#   cargo run -p promptforge-mcp-server -- serve prompts.toml            # streamable HTTP
+#   cargo run -p promptforge-mcp-server -- serve --stdio prompts.toml    # stdio
 
 [server]
 bind = "127.0.0.1:9310"

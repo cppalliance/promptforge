@@ -224,7 +224,7 @@ impl Config {
     ///
     /// # Examples
     /// ```
-    /// let config = promptforge_mcp::Config::from_toml_str(
+    /// let config = promptforge_mcp_server::Config::from_toml_str(
     ///     r#"
     /// [server]
     /// token = "shared-bearer"
@@ -235,7 +235,7 @@ impl Config {
     /// "#,
     /// )?;
     /// assert_eq!(config.server.bind.port(), 9310);
-    /// # Ok::<(), promptforge_mcp::ConfigError>(())
+    /// # Ok::<(), promptforge_mcp_server::ConfigError>(())
     /// ```
     pub fn from_toml_str(raw: &str) -> Result<Config, ConfigError> {
         let mut document: toml::Table =

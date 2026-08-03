@@ -9,7 +9,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-webfetch` - library: the `web_fetch` tool, which fetches a URL in-process and returns its main content as markdown. It needs no credential, so it runs wherever the prompt runs rather than through the gateway
 - `crates/promptforge-cli` - binary `promptforge`: the command-line tool, `promptforge run <file.md> [input]`
 - `crates/promptforge-gateway` - binary `promptforge-gateway`: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-mcp` - binary `promptforge-mcp`: the MCP server that publishes prompts to an agentic harness as callable tools. It parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, answers a call by running the prompt against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, re-reads the catalog when a prompt is saved, retrieves the prompts closest to a plain-English capability, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
+- `crates/promptforge-mcp-server` - binary `promptforge-mcp-server`: the MCP server that runs a prompt an agentic harness names to `run_prompt`. It parses its `prompts.toml`, resolves the catalog that configuration names, answers a call by running the prompt against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, re-reads the catalog when a prompt is saved, retrieves the prompts closest to a plain-English capability, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. Loading the model is the expensive part, so a caller whose catalog changes keeps one encoder and re-indexes over it: `build_with(Arc<Embedder>, Catalog, Config)` is the one indexing path and `picker.rebuild(catalog)` reaches it with this engine's own encoder and configuration. No Lua, no MCP, no network
 
 ## Build
@@ -103,8 +103,8 @@ with the same shared token as `/v1/chat/completions`).
 ## Running the MCP server
 
 ```
-cargo run -p promptforge-mcp -- serve prompts.toml            # streamable HTTP on [server].bind
-cargo run -p promptforge-mcp -- serve --stdio prompts.toml    # stdio, for a local harness
+cargo run -p promptforge-mcp-server -- serve prompts.toml            # streamable HTTP on [server].bind
+cargo run -p promptforge-mcp-server -- serve --stdio prompts.toml    # stdio, for a local harness
 ```
 
 Over HTTP the MCP endpoint is `/mcp` and every request to it must present the
@@ -170,7 +170,7 @@ read. `cargo build` leaves the binary in `target/`, which is not on `PATH`, so
 put it there first:
 
 ```
-cargo install --path crates/promptforge-mcp
+cargo install --path crates/promptforge-mcp-server
 ```
 
 Then, in the project's `.mcp.json`:
@@ -179,7 +179,7 @@ Then, in the project's `.mcp.json`:
 {
   "mcpServers": {
     "promptforge": {
-      "command": "promptforge-mcp",
+      "command": "promptforge-mcp-server",
       "args": ["serve", "--stdio", "/abs/path/to/prompts.toml"],
       "env": {
         "PROMPTFORGE_TOKEN": "dev-secret"

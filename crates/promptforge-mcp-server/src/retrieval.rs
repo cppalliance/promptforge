@@ -128,7 +128,7 @@ impl Retrieval {
     ///
     /// # Examples
     /// ```no_run
-    /// # use promptforge_mcp::{Catalog, Config, OnBroken, Retrieval};
+    /// # use promptforge_mcp_server::{Catalog, Config, OnBroken, Retrieval};
     /// # fn demo(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
     /// let catalog = Catalog::resolve(config, OnBroken::Reject)?;
     /// let retrieval = Retrieval::start(&catalog);
