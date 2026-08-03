@@ -1,0 +1,40 @@
+# PromptForge MCP server - development profile.
+# Serves the repository's own `prompts/` directory to a harness (Cursor, Claude
+# Code). Paths are relative to the process working directory, so run it from the
+# repository root:
+#
+#   cargo run -p promptforge-mcp -- serve prompts.toml            # streamable HTTP
+#   cargo run -p promptforge-mcp -- serve --stdio prompts.toml    # stdio
+
+[server]
+bind = "127.0.0.1:9310"
+# The shared bearer for the HTTP surface: every /mcp request presents it, and
+# `serve` refuses to bind without it. `serve --stdio` never reads it, so this
+# line and its variable may both be left unset for a local harness.
+token = "${PROMPTFORGE_MCP_TOKEN}"
+
+[paths]
+prompts = "prompts"
+
+# The prompts run against the same gateway the CLI uses; it holds the vendor key.
+[gateway]
+url = "http://127.0.0.1:8081/v1"
+token = "${PROMPTFORGE_TOKEN}"
+
+# Everything written under prompts/ is available. `*` stops at a separator and
+# `**` crosses one, so `**/*.md` reaches a prompt in a subdirectory too. The
+# excludes are how a draft stays out of the catalog: a leading underscore keeps
+# one file out at any depth, and `drafts/**` keeps a whole directory out. Both
+# are matched against the path relative to [paths].prompts.
+[catalog]
+include = ["**/*.md"]
+exclude = ["**/_*.md", "drafts/**"]
+default_expose = "list"
+
+# A prompt starts as `list` - reachable through list_prompts and run_prompt, and
+# through need_prompt when the `picker` feature is compiled in, and callable the
+# moment it is saved. Promoting it to its own tool
+# is a separate step, taken once its name and description have stopped moving,
+# because a client caches its tool list for the life of its process.
+[prompts.research_person]
+expose = "tool"

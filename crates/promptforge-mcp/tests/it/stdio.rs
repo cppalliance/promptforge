@@ -40,6 +40,15 @@ const PATIENCE: Duration = Duration::from_secs(20);
 /// ignore. Port 0 would be bound to something arbitrary if stdio bound anything
 /// at all; it binds nothing, so the line is inert.
 fn fixture(root: &Path, prompts: &[(&str, &str)]) -> PathBuf {
+    fixture_with(
+        root,
+        prompts,
+        "bind = \"127.0.0.1:0\"\ntoken = \"unused-on-stdio\"\n",
+    )
+}
+
+/// The same, with `server_lines` as the whole of the `[server]` table.
+fn fixture_with(root: &Path, prompts: &[(&str, &str)], server_lines: &str) -> PathBuf {
     let directory = root.join("prompts");
     fs::create_dir(&directory).expect("create the prompts directory");
     for (file, contents) in prompts {
@@ -49,7 +58,7 @@ fn fixture(root: &Path, prompts: &[(&str, &str)]) -> PathBuf {
     fs::write(
         &config,
         format!(
-            "[server]\nbind = \"127.0.0.1:0\"\ntoken = \"unused-on-stdio\"\n\n\
+            "[server]\n{server_lines}\n\
              [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
              [paths]\nprompts = '{}'\n\n\
              [catalog]\ninclude = [\"*.md\"]\ndefault_expose = \"tool\"\n",
@@ -75,11 +84,15 @@ impl Session {
     fn spawn() -> Session {
         let dir = tempfile::tempdir().expect("create a temporary directory");
         let config = fixture(dir.path(), &[("echo.md", ECHO)]);
+        Session::spawn_at(dir, &config)
+    }
 
+    /// Spawns the same command over an already-written configuration.
+    fn spawn_at(dir: tempfile::TempDir, config: &Path) -> Session {
         let mut child = Command::new(env!("CARGO_BIN_EXE_promptforge-mcp"))
             .arg("serve")
             .arg("--stdio")
-            .arg(&config)
+            .arg(config)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -160,6 +173,38 @@ async fn stdio_completes_initialize_and_lists_its_tools() {
     assert!(
         names.contains(&"echo"),
         "the catalog's one direct prompt is published: {names:?}"
+    );
+
+    session.child.kill().await.expect("stop the server");
+}
+
+#[tokio::test]
+async fn stdio_serves_a_configuration_that_carries_no_token() {
+    // `[server].token` is a property of the HTTP surface. A local install is
+    // spawned by its harness and reads no token at all, so requiring one in the
+    // file stopped that install over a credential it never uses.
+    let dir = tempfile::tempdir().expect("create a temporary directory");
+    let config = fixture_with(dir.path(), &[("echo.md", ECHO)], "");
+    let mut session = Session::spawn_at(dir, &config);
+
+    session
+        .send(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "stdio-no-token", "version": "0" },
+            },
+        }))
+        .await;
+    let initialized = session.receive().await;
+    assert_eq!(initialized["id"], json!(1));
+    assert_eq!(
+        initialized["result"]["serverInfo"]["name"],
+        json!("promptforge-mcp"),
+        "the file carries no [server].token and stdio serves anyway"
     );
 
     session.child.kill().await.expect("stop the server");

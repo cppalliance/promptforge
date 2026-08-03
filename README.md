@@ -6,9 +6,10 @@ markdown is the program, the model is the CPU.
 ## Workspace
 
 - `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. A run reports through it as it goes (see "Watching a run" below)
-- `crates/promptforge-cli` - binary: the `promptforge` command-line tool
-- `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-mcp` - binary: the MCP server that publishes prompts to an agentic harness as callable tools. It parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, answers a call by running the prompt against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, re-reads the catalog when a prompt is saved, retrieves the prompts closest to a plain-English capability, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
+- `crates/promptforge-webfetch` - library: the `web_fetch` tool, which fetches a URL in-process and returns its main content as markdown. It needs no credential, so it runs wherever the prompt runs rather than through the gateway
+- `crates/promptforge-cli` - binary `promptforge`: the command-line tool, `promptforge run <file.md> [input]`
+- `crates/promptforge-gateway` - binary `promptforge-gateway`: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
+- `crates/promptforge-mcp` - binary `promptforge-mcp`: the MCP server that publishes prompts to an agentic harness as callable tools. It parses its `prompts.toml`, resolves the catalog that configuration names, turns that catalog into the tool list a harness sees, answers a call by running the prompt against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, re-reads the catalog when a prompt is saved, retrieves the prompts closest to a plain-English capability, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. Loading the model is the expensive part, so a caller whose catalog changes keeps one encoder and re-indexes over it: `build_with(Arc<Embedder>, Catalog, Config)` is the one indexing path and `picker.rebuild(catalog)` reaches it with this engine's own encoder and configuration. No Lua, no MCP, no network
 
 ## Build
@@ -111,7 +112,8 @@ shared bearer from `[server].token`; a request that does not - no
 `Authorization` header at all, or one whose scheme is not `Bearer` - is refused
 with `401` and a `WWW-Authenticate: Bearer` header before anything is compared.
 A `[server].token` that is empty or whitespace alone is refused when the
-configuration loads, so an unset variable cannot quietly leave `/mcp` open. The
+configuration loads, and one that is absent altogether refuses the bind, naming
+the field, so no unset variable can quietly leave `/mcp` open. The
 check is per HTTP request
 rather than per MCP session, so rotating the token refuses the next call on a
 session that already initialized. `/healthz` is the one unauthenticated route,
@@ -123,11 +125,102 @@ opened and an idle proxy must not close it.
 Over stdio nothing is bound and no token is read: the harness that spawned the
 process already has whatever authority the process has. `[server].bind` is
 logged as ignored rather than silently obeyed, and `[server].token` is never
-consulted even though the file must still carry one. Logs go to stdout on HTTP
-and to stderr on stdio, where stdout is the protocol wire.
+consulted - it may be left out of the file entirely, and a `${VAR}` that names
+it does not have to be set. `[gateway].token` is required either way, because
+every transport runs prompts and every run goes through the gateway. Logs go to
+stdout on HTTP and to stderr on stdio, where stdout is the protocol wire.
 
 Either way, boot resolves the whole catalog first and refuses to serve on an
 incomplete one, printing every fault before a non-zero exit.
+
+The repository ships a working `prompts.toml` at its root, beside `gateway.toml`.
+It serves this repository's own `prompts/` directory, expects `PROMPTFORGE_TOKEN`
+in the environment (and `PROMPTFORGE_MCP_TOKEN` as well when serving over HTTP,
+which is the transport that reads it), and its paths
+are relative to the working directory the server is started from, so run it from
+the repository root.
+
+### Attaching Cursor
+
+Cursor reaches the server over streamable HTTP, so the server has to be running
+already and the request has to carry the bearer. In `~/.cursor/mcp.json` (or the
+project's `.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "promptforge": {
+      "url": "http://127.0.0.1:9310/mcp",
+      "headers": {
+        "Authorization": "Bearer dev-secret"
+      }
+    }
+  }
+}
+```
+
+The URL is `[server].bind` with `/mcp` on the end, and the bearer is the string
+`[server].token` resolves to - the same value, written out, since this file is
+read by the client and knows nothing about the server's own `${VAR}` expansion.
+
+### Attaching Claude Code
+
+Claude Code spawns the server over stdio, so nothing is bound and no bearer is
+read. `cargo build` leaves the binary in `target/`, which is not on `PATH`, so
+put it there first:
+
+```
+cargo install --path crates/promptforge-mcp
+```
+
+Then, in the project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "promptforge": {
+      "command": "promptforge-mcp",
+      "args": ["serve", "--stdio", "/abs/path/to/prompts.toml"],
+      "env": {
+        "PROMPTFORGE_TOKEN": "dev-secret"
+      }
+    }
+  }
+}
+```
+
+The `env` member is what the gateway needs: `[gateway].token` is required on
+both transports and its `${VAR}` is expanded from the spawned process's own
+environment, which the harness does not inherit from your shell. Give it the
+same value `gateway.toml` resolves to. `[server].token` needs nothing here - it
+is the HTTP surface's bearer, so it can be left out of the file entirely, and a
+`${VAR}` naming it may go unset.
+
+Give absolute paths here, in both the argument and `[paths].prompts` inside the
+file: the harness chooses the working directory the process starts in, and a
+relative prompts directory is resolved against it.
+
+### The developer loop
+
+Write a prompt as `list`, iterate on it, and promote it to `expose = "tool"` only
+once its name and description have stopped moving.
+
+That order is forced by what the two clients cache. Both freeze the tool list for
+the life of their process - in Cursor a new chat, the MCP pane's reload button,
+and `Developer: Reload Window` all carry the old snapshot over, and Claude Code
+fixes its tool index when the session starts - so a newly added or renamed direct
+tool is invisible until the client restarts, whatever the server announces. The
+listing tools have fixed names, so the catalog behind them is free to change: a
+prompt saved a second ago is in `list_prompts` and callable through `run_prompt`
+on the very next call, with no reconnect and no restart. That is the loop to
+iterate in. A promotion to `tool` costs one client restart, which is a price
+worth paying once and not once per edit.
+
+`watch = true` is what makes the edit half of the loop work: the prompts
+directory is re-read on save, so the next call runs the version on disk. Keep the
+draft out of the catalog while it is still a draft - a file whose name starts
+with `_`, at any depth, or anything under `drafts/`, both of which the shipped
+`[catalog].exclude` already drops.
 
 ## MCP server configuration
 
@@ -140,7 +233,7 @@ silently ignored.
 ```toml
 [server]
 bind = "127.0.0.1:9310"              # default
-token = "${PROMPTFORGE_MCP_TOKEN}"   # shared bearer; every /mcp request must present it
+token = "${PROMPTFORGE_MCP_TOKEN}"   # shared bearer; required to serve over HTTP, unread on stdio
 max_concurrent_runs = 4              # default; runs beyond it wait for admission
 admission_timeout = "30s"            # default; how long a call waits for a slot
 reply_deadline = "240s"              # default; past it a call returns a run id and the run continues
@@ -160,7 +253,7 @@ model = "claude-sonnet-4-6"          # optional; the core default otherwise
 # cross a separator and `**` does. Omit this table to enumerate by hand.
 [catalog]
 include = ["*.md", "governance/**/*.md"]
-exclude = ["_*.md", "drafts/**"]
+exclude = ["**/_*.md", "drafts/**"]
 default_expose = "list"              # default
 
 # Individual prompts, keyed by the prompt's frontmatter name. A block with no
@@ -189,6 +282,14 @@ Durations are plain strings (`500ms`, `30s`, `1h`). As in `gateway.toml`, any
 string value may contain `${VAR}`, expanded from the process environment at load
 time, with `$$` for a literal `$`; an unset variable fails the load, so the
 server never starts with a blank credential.
+
+`[server].token` is the one field that may be left out, and the one whose
+`${VAR}` may go unset. It belongs to the HTTP surface: `serve` refuses to bind
+without it, naming the field, while `serve --stdio` never reads it and boots
+without it. Present, it must carry something - an empty or whitespace-only token
+is refused at load, since a request presenting no credential would compare equal
+to it. `[gateway].token` is required on both transports, because every run goes
+through the gateway.
 
 `reply_deadline` must stay under the calling client's own ceiling. Cursor's
 remote calls fail at about 300 seconds and a progress notification does not
@@ -253,7 +354,8 @@ leaves the previous catalog serving and logs why, since there is no partial
 answer to give.
 
 When the reload changed anything a client can read about a prompt - its name, its
-description, or its exposure - every connected session is sent
+description, its exposure, or the problem that stops it running - every connected
+session is sent
 `notifications/tools/list_changed`. Most clients ignore it, since a tool list is
 cached for the life of the client process, but a client that honors it is
 strictly better off. This is also why `expose = "tool"` is a promotion rather
@@ -564,12 +666,13 @@ A prompt can let the model reach outside itself while a section runs. Two tools
 ship built in:
 
 - `web_fetch` - fetch a URL and get back its main content as markdown. It runs
-  locally in the CLI (no credential), extracting the article body with a
-  readability pass and falling back to a whole-page conversion for pages that
-  are not article-shaped.
+  in-process wherever the prompt runs, the CLI and the MCP server alike, because
+  it needs no credential; it extracts the article body with a readability pass
+  and falls back to a whole-page conversion for pages that are not
+  article-shaped.
 - `web_search` - search the web and get back a list of results (title, URL,
   description). It proxies through the gateway, which holds the Brave API key,
-  so the credential never reaches the CLI.
+  so the credential never reaches the process running the prompt.
 
 A prompt declares the tools it needs in its frontmatter:
 
@@ -587,9 +690,11 @@ Research the topic "{{ args }}". Search the web, read the most relevant
 pages, and write a short summary with links.
 ```
 
-`web_fetch` is always available. `web_search` needs the gateway, so
-`PROMPTFORGE_BASE_URL` and `PROMPTFORGE_TOKEN` must be set; a prompt that asks
-for it without a configured gateway fails fast with a clear error.
+`web_fetch` is always available. `web_search` needs the gateway - under the CLI
+that means `PROMPTFORGE_BASE_URL` and `PROMPTFORGE_TOKEN`, and under the MCP
+server the `[gateway]` table of `prompts.toml`. A prompt that asks for a tool the
+process cannot bind fails the run with an error naming it, rather than running
+without it.
 
 ### The tool-call loop
 
