@@ -1,146 +1,10 @@
 //! Turning a ranking into one of four answers.
 //!
-//! Ranking says how well each tool matched. This module says what that is
-//! worth: whether the best match is good enough to bind, whether the leaders
-//! are too alike to separate, and whether an unseparable pair is a fault in
-//! the catalog or a fact about it. The thresholds that decide all of this live
-//! in [`Config`], so re-tuning the judgement never touches the arithmetic that
-//! produced the scores.
-//!
-//! # The four answers
-//!
-//! [`Outcome::Absent`] is an abstention: nothing in the catalog reached the
-//! similarity floor, so the caller is told that rather than handed a
-//! nearest-miss it did not ask for. [`Outcome::Bind`] is a single tool, chosen
-//! because it cleared the floor and left the runner-up behind by at least the
-//! configured margin. The remaining two are both near-ties, and they differ in
-//! whether the caller can do anything about it.
-//!
-//! [`Outcome::Duplicate`] reports two or more tools that are copies of one
-//! another *and* are served by the same server. One server publishing two
-//! tools that no query can tell apart is a fault in that server's catalog, and
-//! the server's operator is the caller or someone the caller can reach, so
-//! this outcome exists to fail loudly rather than to pick one twin and hope.
-//! [`Outcome::Ambiguous`] reports a near-tie the margin could not separate and
-//! that was not attributed to one server's own copies - most typically the
-//! same underlying tool republished by two servers, which is the expected
-//! result of deliberately combining overlapping catalogs. Nothing is wrong, so
-//! nothing fails: the engine hands back a short list and lets a caller with
-//! fuller context choose.
-//!
-//! # A twin is a property of two tools, not of a query
-//!
-//! `duplicate_threshold` is compared against the cosine similarity between two
-//! tools' *own* stored vectors. That is a fact about the pair, the same
-//! whatever need is being resolved, and at the default `0.98` it means the two
-//! descriptions are near-verbatim republications of one another. It is
-//! deliberately not a comparison of the two candidates' query scores: two
-//! tools can both score highly against one need while describing quite
-//! different capabilities, and two verbatim copies remain copies at every
-//! score. Both stored rows are unit length, so their dot product is that
-//! cosine with no magnitudes to divide out.
-//!
-//! Nothing therefore relates `duplicate_threshold` to `similarity_floor`. The
-//! floor is a query-to-tool measure that admits candidates; the duplicate
-//! threshold is a tool-to-tool measure applied among the admitted leader's
-//! neighbours. Ordering one against the other would compare two different
-//! quantities, so [`Config::validate`] does not.
-//!
-//! # Same server versus different servers is the whole distinction
-//!
-//! A [`ToolDescriptor`] carries the server it came from and nothing that marks
-//! that server as the caller's own rather than imported. So the definition in
-//! force here is exactly the one the data supports: a group of twins drawn
-//! from a single server is a [`Outcome::Duplicate`], and any other group the
-//! margin could not separate is [`Outcome::Ambiguous`]. That is what makes the
-//! split useful. A single server's catalog is a thing somebody owns and can
-//! fix, so naming it is actionable; a collision between two servers is a
-//! property of the union the caller chose to assemble, so reporting it as an
-//! error would be reporting the caller's own intent back to them as a fault.
-//!
-//! # Precedence
-//!
-//! The checks apply in this order, and the first one that matches is the
-//! answer:
-//!
-//! 1. **Absent** - the top score is below `similarity_floor`. Nothing else is
-//!    asked, because if nothing in the catalog fits the need then whether the
-//!    two things that do not fit resemble each other is beside the point.
-//! 2. **Duplicate** - at least one other candidate shares the leader's server
-//!    and has a stored vector at or above `duplicate_threshold` similar to the
-//!    leader's. This is ahead of the margin test on purpose: the outcome
-//!    exists to fail loudly, and two tools that are copies of each other are a
-//!    fault whether or not a narrow configured margin happens to separate the
-//!    scores this particular need gave them.
-//! 3. **Bind** - the leader is separated from the runner-up by at least
-//!    `margin`, or there is no runner-up above the floor. A clear winner wins,
-//!    and a runner-up that also clears the floor does not weaken it: the floor
-//!    admits candidates, the margin is what picks between them.
-//! 4. **Ambiguous** - everything else, which is a near-tie the margin could
-//!    not separate and step 2 did not attribute to one server's own copies.
-//!    The shortlist is the answer of last resort, and it is a shortlist rather
-//!    than a failure because such ambiguity is ordinary.
-//!
-//! Steps 2 and 4 differ in which group they report, because they are asking
-//! different questions. The duplicate group is the leader together with the
-//! candidates that share its server and are twins of it, since only those are
-//! the fault being reported; it is not filtered by score, because twin-ness
-//! does not depend on one. The ambiguous group is the leading candidates that
-//! clear the floor and that `margin` failed to separate from the leader, since
-//! those are the candidates a caller still has to choose between.
-//!
-//! # Where the boundaries fall
-//!
-//! Every comparison is inclusive, which keeps a configured number readable as
-//! "this value is enough":
-//!
-//! - A score *exactly* at `similarity_floor` clears it and is considered.
-//! - A gap *exactly* equal to `margin` separates the leader from the
-//!   runner-up and binds. A `margin` of zero therefore binds on any leader
-//!   above the floor, including one that ties exactly.
-//! - Two stored vectors whose similarity is *exactly* `duplicate_threshold`
-//!   are twins.
-//!
-//! # Hints break ties, and only ties
-//!
-//! The [`ToolAnnotations`] hints reorder candidates whose scores are *exactly*
-//! equal, taking the place of the catalog position that would otherwise decide
-//! such a tie; catalog position remains the final key, so the order is still
-//! total and a decision is still a function of its inputs. Exactly-equal
-//! scores are not a contrivance: a tool republished verbatim under two servers
-//! yields identical text, identical vectors, and identical scores.
-//!
-//! The reordering reaches only the candidates it is given. A ranking arrives
-//! here already cut to length, and the cut is made under score and then
-//! catalog position alone, before any hint is read; a hint-preferred tool that
-//! tied its way to a position past the cut is therefore absent from the
-//! ranking and cannot be promoted into it - it is dropped, not demoted. Hints
-//! reorder the exact ties that survived truncation, not every exact tie in the
-//! catalog. Ranking more candidates than the shortlist will report is what
-//! widens that window.
-//!
-//! Among exactly-tied candidates, the preference is read-only first,
-//! non-destructive next, idempotent last, and the rule is that a *positive*
-//! claim promotes: a candidate whose `read_only` is `Some(true)` is preferred
-//! to one where it is anything else, then a candidate whose `destructive` is
-//! `Some(false)` to one where it is anything else, then a candidate whose
-//! `idempotent` is `Some(true)` to one where it is anything else. Candidates
-//! carrying equal hints, or no hints, are left in catalog order, so a catalog
-//! without annotations decides exactly as it would if the hints did not exist.
-//!
-//! An absent hint is deliberately treated as "no claim" rather than as a value
-//! to compare: consulting a hint only when both candidates carry it would make
-//! the comparison intransitive - a read-only tool would beat a non-read-only
-//! one while neither beat a tool that says nothing - and an intransitive
-//! comparison has no single correct sorted order, which would cost exactly the
-//! determinism the engine promises. Reading silence as the weaker claim is also
-//! the cautious reading: a tool that does not say it is read-only has not said
-//! it is.
-//!
-//! Hints never overturn a decision the scores made. They cannot promote a
-//! near-tie to a [`Outcome::Bind`], and they cannot rescue a
-//! [`Outcome::Duplicate`] - a server's twin tools are a fault to report even
-//! when one of them is the safer of the two.
+//! Ranking says how well each tool matched; this module decides what that is
+//! worth. The judgement it carries out - what each answer means, in what
+//! order the checks apply, where every boundary falls, and how a tie is
+//! broken - is documented on [`Outcome`], since that contract is what a
+//! caller reads.
 
 use crate::catalog::{ToolAnnotations, ToolDescriptor};
 use crate::config::Config;
@@ -149,7 +13,146 @@ use crate::rank::{Candidate, Vectors, comparable};
 /// What the engine concluded about a need.
 ///
 /// Exactly one variant is produced for a given catalog, need, and
-/// configuration. Which one, and why, is the [module documentation](self).
+/// configuration: whether the best match is good enough to bind, whether the
+/// leaders are too alike to separate, and whether an unseparable pair is a
+/// fault in the catalog or a fact about it. The thresholds that decide all of
+/// this live in [`Config`], so re-tuning the judgement never touches the
+/// arithmetic that produced the scores.
+///
+/// # The four answers
+///
+/// [`Outcome::Absent`] is an abstention: nothing in the catalog reached the
+/// similarity floor, so the caller is told that rather than handed a
+/// nearest-miss it did not ask for. [`Outcome::Bind`] is a single tool, chosen
+/// because it cleared the floor and left the runner-up behind by at least the
+/// configured margin. The remaining two are both near-ties, and they differ in
+/// whether the caller can do anything about it.
+///
+/// [`Outcome::Duplicate`] reports two or more tools that are copies of one
+/// another *and* are served by the same server. One server publishing two
+/// tools that no query can tell apart is a fault in that server's catalog, and
+/// the server's operator is the caller or someone the caller can reach, so
+/// this outcome exists to fail loudly rather than to pick one twin and hope.
+/// [`Outcome::Ambiguous`] reports a near-tie the margin could not separate and
+/// that was not attributed to one server's own copies - most typically the
+/// same underlying tool republished by two servers, which is the expected
+/// result of deliberately combining overlapping catalogs. Nothing is wrong, so
+/// nothing fails: the engine hands back a short list and lets a caller with
+/// fuller context choose.
+///
+/// # A twin is a property of two tools, not of a query
+///
+/// `duplicate_threshold` is compared against the cosine similarity between two
+/// tools' *own* stored vectors. That is a fact about the pair, the same
+/// whatever need is being resolved, and at the default `0.98` it means the two
+/// descriptions are near-verbatim republications of one another. It is
+/// deliberately not a comparison of the two candidates' query scores: two
+/// tools can both score highly against one need while describing quite
+/// different capabilities, and two verbatim copies remain copies at every
+/// score. Both stored rows are unit length, so their dot product is that
+/// cosine with no magnitudes to divide out.
+///
+/// Nothing therefore relates `duplicate_threshold` to `similarity_floor`. The
+/// floor is a query-to-tool measure that admits candidates; the duplicate
+/// threshold is a tool-to-tool measure applied among the admitted leader's
+/// neighbours. Ordering one against the other would compare two different
+/// quantities, so [`Config::validate`] does not.
+///
+/// # Same server versus different servers is the whole distinction
+///
+/// A [`ToolDescriptor`] carries the server it came from and nothing that marks
+/// that server as the caller's own rather than imported. So the definition in
+/// force here is exactly the one the data supports: a group of twins drawn
+/// from a single server is a [`Outcome::Duplicate`], and any other group the
+/// margin could not separate is [`Outcome::Ambiguous`]. That is what makes the
+/// split useful. A single server's catalog is a thing somebody owns and can
+/// fix, so naming it is actionable; a collision between two servers is a
+/// property of the union the caller chose to assemble, so reporting it as an
+/// error would be reporting the caller's own intent back to them as a fault.
+///
+/// # Precedence
+///
+/// The checks apply in this order, and the first one that matches is the
+/// answer:
+///
+/// 1. **Absent** - the top score is below `similarity_floor`. Nothing else is
+///    asked, because if nothing in the catalog fits the need then whether the
+///    two things that do not fit resemble each other is beside the point.
+/// 2. **Duplicate** - at least one other candidate shares the leader's server
+///    and has a stored vector at or above `duplicate_threshold` similar to the
+///    leader's. This is ahead of the margin test on purpose: the outcome
+///    exists to fail loudly, and two tools that are copies of each other are a
+///    fault whether or not a narrow configured margin happens to separate the
+///    scores this particular need gave them.
+/// 3. **Bind** - the leader is separated from the runner-up by at least
+///    `margin`, or there is no runner-up above the floor. A clear winner wins,
+///    and a runner-up that also clears the floor does not weaken it: the floor
+///    admits candidates, the margin is what picks between them.
+/// 4. **Ambiguous** - everything else, which is a near-tie the margin could
+///    not separate and step 2 did not attribute to one server's own copies.
+///    The shortlist is the answer of last resort, and it is a shortlist rather
+///    than a failure because such ambiguity is ordinary.
+///
+/// Steps 2 and 4 differ in which group they report, because they are asking
+/// different questions. The duplicate group is the leader together with the
+/// candidates that share its server and are twins of it, since only those are
+/// the fault being reported; it is not filtered by score, because twin-ness
+/// does not depend on one. The ambiguous group is the leading candidates that
+/// clear the floor and that `margin` failed to separate from the leader, since
+/// those are the candidates a caller still has to choose between.
+///
+/// # Where the boundaries fall
+///
+/// Every comparison is inclusive, which keeps a configured number readable as
+/// "this value is enough":
+///
+/// - A score *exactly* at `similarity_floor` clears it and is considered.
+/// - A gap *exactly* equal to `margin` separates the leader from the
+///   runner-up and binds. A `margin` of zero therefore binds on any leader
+///   above the floor, including one that ties exactly.
+/// - Two stored vectors whose similarity is *exactly* `duplicate_threshold`
+///   are twins.
+///
+/// # Hints break ties, and only ties
+///
+/// The [`ToolAnnotations`] hints reorder candidates whose scores are *exactly*
+/// equal, taking the place of the catalog position that would otherwise decide
+/// such a tie; catalog position remains the final key, so the order is still
+/// total and a decision is still a function of its inputs. Exactly-equal
+/// scores are not a contrivance: a tool republished verbatim under two servers
+/// yields identical text, identical vectors, and identical scores.
+///
+/// The reordering reaches only the candidates it is given. A ranking arrives
+/// already cut to length, and the cut is made under score and then catalog
+/// position alone, before any hint is read; a hint-preferred tool that tied
+/// its way to a position past the cut is therefore absent from the ranking and
+/// cannot be promoted into it - it is dropped, not demoted. Hints reorder the
+/// exact ties that survived truncation, not every exact tie in the catalog.
+/// Ranking more candidates than the shortlist will report is what widens that
+/// window.
+///
+/// Among exactly-tied candidates, the preference is read-only first,
+/// non-destructive next, idempotent last, and the rule is that a *positive*
+/// claim promotes: a candidate whose `read_only` is `Some(true)` is preferred
+/// to one where it is anything else, then a candidate whose `destructive` is
+/// `Some(false)` to one where it is anything else, then a candidate whose
+/// `idempotent` is `Some(true)` to one where it is anything else. Candidates
+/// carrying equal hints, or no hints, are left in catalog order, so a catalog
+/// without annotations decides exactly as it would if the hints did not exist.
+///
+/// An absent hint is deliberately treated as "no claim" rather than as a value
+/// to compare: consulting a hint only when both candidates carry it would make
+/// the comparison intransitive - a read-only tool would beat a non-read-only
+/// one while neither beat a tool that says nothing - and an intransitive
+/// comparison has no single correct sorted order, which would cost exactly the
+/// determinism the engine promises. Reading silence as the weaker claim is also
+/// the cautious reading: a tool that does not say it is read-only has not said
+/// it is.
+///
+/// Hints never overturn a decision the scores made. They cannot promote a
+/// near-tie to a [`Outcome::Bind`], and they cannot rescue a
+/// [`Outcome::Duplicate`] - a server's twin tools are a fault to report even
+/// when one of them is the safer of the two.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outcome {
     /// One tool matched clearly enough to be used without asking.
@@ -197,7 +200,7 @@ struct Ranked<'a> {
 /// positions index, `vectors` holds the stored row for each of those positions
 /// so the duplicate check can compare two tools to each other, and `config`
 /// supplies the thresholds. The precedence, the boundary conditions, and the
-/// tie-break are the [module documentation](self)'s contract.
+/// tie-break are [`Outcome`]'s contract.
 ///
 /// The decision is a pure function of its four arguments: it reads no clock,
 /// no environment, and no global state, and it orders candidates under a total

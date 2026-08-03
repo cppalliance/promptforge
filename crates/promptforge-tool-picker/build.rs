@@ -17,10 +17,10 @@
 //! and the download itself are unchanged.
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use anyhow::{Result, anyhow, bail};
 use half::f16;
 use hf_hub::HFClientSync;
 use safetensors::tensor::{Dtype, SafeTensors, TensorView, View, serialize};
@@ -71,8 +71,9 @@ const CONVERSION_VERSION: &str = "1";
 
 fn main() {
     if let Err(cause) = run() {
-        // Print rather than return the error: `main() -> Result` would report it
-        // through `Debug`, which escapes the newlines out of these messages.
+        // Print rather than return the error. Every failure here already
+        // carries its own multi-line remediation text, and `Display` is the
+        // form that keeps those lines intact.
         eprintln!("\npromptforge-tool-picker build script failed.\n\n{cause}\n");
         std::process::exit(1);
     }
@@ -84,8 +85,8 @@ fn main() {
 ///
 /// Fails if the Hub is unreachable with a cold cache, if a downloaded file does
 /// not match its pinned digest, or if the conversion or any write fails.
-fn run() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-changed=build.rs");
+fn run() -> Result<()> {
+    println!("cargo::rerun-if-changed=build.rs");
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
 
@@ -128,7 +129,7 @@ fn is_up_to_date(out_dir: &Path, stamp: &str) -> bool {
 ///
 /// Fails if the Hub is unreachable with a cold cache, if the file is missing,
 /// or if the bytes do not hash to `expected`.
-fn fetch(filename: &str, expected: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+fn fetch(filename: &str, expected: &str) -> Result<Vec<u8>> {
     let client = HFClientSync::new().map_err(|e| unreachable_hub(filename, &e))?;
     let path = client
         .model(REPO_OWNER, REPO_NAME)
@@ -141,7 +142,7 @@ fn fetch(filename: &str, expected: &str) -> Result<Vec<u8>, Box<dyn Error>> {
 
     let actual = hex(Sha256::digest(&bytes).as_slice());
     if actual != expected {
-        return Err(format!(
+        bail!(
             "checksum mismatch for {REPO_OWNER}/{REPO_NAME}@{REVISION}/{filename}\n  \
              expected sha256 {expected}\n  \
              actual   sha256 {actual}\n  \
@@ -149,15 +150,14 @@ fn fetch(filename: &str, expected: &str) -> Result<Vec<u8>, Box<dyn Error>> {
              The pinned revision is immutable, so this file is corrupt or tampered with. \
              Delete the cached copy and rebuild.",
             path.display()
-        )
-        .into());
+        );
     }
     Ok(bytes)
 }
 
 /// Turn a Hub failure into a message that says what to do about it.
-fn unreachable_hub(filename: &str, cause: &dyn std::fmt::Display) -> String {
-    format!(
+fn unreachable_hub(filename: &str, cause: &dyn std::fmt::Display) -> anyhow::Error {
+    anyhow!(
         "could not obtain {REPO_OWNER}/{REPO_NAME}@{REVISION}/{filename}: {cause}\n\
          This crate compiles the embedding model into the library, so the first build \
          needs network access to the Hugging Face Hub (about 130MB). Later builds reuse \
@@ -212,7 +212,7 @@ impl View for &OwnedTensor {
 ///
 /// Fails if the input is not a valid safetensors file, if an fp32 tensor's byte
 /// length is not a multiple of four, or if the result cannot be serialized.
-fn to_fp16(bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+fn to_fp16(bytes: &[u8]) -> Result<Vec<u8>> {
     let source = SafeTensors::deserialize(bytes)?;
     let converted: Vec<(String, OwnedTensor)> = source
         .tensors()
@@ -239,7 +239,7 @@ fn to_fp16(bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
 /// # Errors
 ///
 /// Fails if an fp32 tensor's byte length is not a multiple of four.
-fn convert(name: &str, view: &TensorView<'_>) -> Result<OwnedTensor, Box<dyn Error>> {
+fn convert(name: &str, view: &TensorView<'_>) -> Result<OwnedTensor> {
     let shape = view.shape().to_vec();
     if view.dtype() != Dtype::F32 {
         return Ok(OwnedTensor {
@@ -251,11 +251,10 @@ fn convert(name: &str, view: &TensorView<'_>) -> Result<OwnedTensor, Box<dyn Err
 
     let source = view.data();
     if source.len() % 4 != 0 {
-        return Err(format!(
+        bail!(
             "tensor {name} is F32 but its {} bytes are not a whole number of f32 values",
             source.len()
-        )
-        .into());
+        );
     }
     let mut data = Vec::with_capacity(source.len() / 2);
     for chunk in source.chunks_exact(4) {

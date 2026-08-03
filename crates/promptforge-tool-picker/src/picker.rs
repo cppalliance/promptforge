@@ -87,6 +87,23 @@ impl ToolPicker {
     /// [`Error::Tokenize`] or [`Error::Embed`] if a tool's text cannot be
     /// embedded, naming the first failure and abandoning the rest.
     ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use promptforge_tool_picker::{Catalog, Config, ToolDescriptor, ToolId, ToolPicker};
+    /// use serde_json::json;
+    ///
+    /// let catalog = Catalog::new(vec![ToolDescriptor::new(
+    ///     ToolId::new("files", "read_file"),
+    ///     "Read a file from disk",
+    ///     json!({"properties": {"path": {"type": "string"}}}),
+    /// )]);
+    ///
+    /// let picker = ToolPicker::build(catalog, Config::default())?;
+    /// assert_eq!(picker.len(), 1);
+    /// # Ok::<(), promptforge_tool_picker::Error>(())
+    /// ```
+    ///
     /// [`Error::ModelLoad`]: crate::Error::ModelLoad
     /// [`Error::Tokenize`]: crate::Error::Tokenize
     /// [`Error::Embed`]: crate::Error::Embed
@@ -170,7 +187,7 @@ impl ToolPicker {
     /// need is embedded by the model the tools were embedded with, ranked
     /// against the whole index, and judged against the configured thresholds;
     /// what the four outcomes mean, in what order the thresholds apply, and
-    /// where each boundary falls is [`policy`]'s contract.
+    /// where each boundary falls is [`Outcome`]'s contract.
     ///
     /// At least two candidates are ranked however short
     /// [`Config::top_k`](crate::Config::top_k) is. Every ambiguity the policy
@@ -198,6 +215,30 @@ impl ToolPicker {
     ///
     /// Returns [`Error::Tokenize`] or [`Error::Embed`] if the need cannot be
     /// embedded. Ranking and deciding cannot fail.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use promptforge_tool_picker::{
+    ///     Catalog, Config, Outcome, ToolDescriptor, ToolId, ToolPicker,
+    /// };
+    /// use serde_json::json;
+    ///
+    /// # let catalog = Catalog::new(vec![ToolDescriptor::new(
+    /// #     ToolId::new("files", "read_file"),
+    /// #     "Read a file from disk",
+    /// #     json!({"properties": {"path": {"type": "string"}}}),
+    /// # )]);
+    /// let picker = ToolPicker::build(catalog, Config::default())?;
+    ///
+    /// match picker.resolve("read a file from disk")? {
+    ///     Outcome::Bind(tool) => println!("call {}", tool.name()),
+    ///     Outcome::Duplicate(twins) => println!("{} publishes twins", twins[0].server()),
+    ///     Outcome::Ambiguous(candidates) => println!("{} tools fit", candidates.len()),
+    ///     Outcome::Absent => println!("no tool covers this need"),
+    /// }
+    /// # Ok::<(), promptforge_tool_picker::Error>(())
+    /// ```
     ///
     /// [`Error::Tokenize`]: crate::Error::Tokenize
     /// [`Error::Embed`]: crate::Error::Embed
@@ -253,6 +294,26 @@ impl ToolPicker {
     ///
     /// Returns [`Error::Tokenize`] or [`Error::Embed`] if the need cannot be
     /// embedded. Ranking cannot fail.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use promptforge_tool_picker::{Catalog, Config, ToolDescriptor, ToolId, ToolPicker};
+    /// use serde_json::json;
+    ///
+    /// # let catalog = Catalog::new(vec![ToolDescriptor::new(
+    /// #     ToolId::new("files", "read_file"),
+    /// #     "Read a file from disk",
+    /// #     json!({"properties": {"path": {"type": "string"}}}),
+    /// # )]);
+    /// let picker = ToolPicker::build(catalog, Config::default())?;
+    ///
+    /// // Never longer than `k`, and shorter when the floor removed a
+    /// // candidate or the catalog had fewer to offer.
+    /// let candidates = picker.shortlist("read a file from disk", 3)?;
+    /// assert!(candidates.len() <= 3);
+    /// # Ok::<(), promptforge_tool_picker::Error>(())
+    /// ```
     ///
     /// [`Config::similarity_floor`]: crate::Config::similarity_floor
     /// [`Config::top_k`]: crate::Config::top_k
@@ -598,6 +659,15 @@ mod tests {
     fn an_empty_index_abstains() {
         let picker = ToolPicker::build(Catalog::default(), Config::default()).unwrap();
         assert_eq!(picker.resolve("read a file").unwrap(), Outcome::Absent);
+    }
+
+    #[test]
+    fn a_picker_can_be_shared_across_threads() {
+        // The type callers put behind an `Arc`. It holds the `Embedder`, and
+        // through it two external crates' types, so a dependency upgrade could
+        // take `Send` or `Sync` away without changing a signature here.
+        const fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<ToolPicker>();
     }
 
     #[test]

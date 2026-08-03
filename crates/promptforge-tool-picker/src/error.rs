@@ -35,7 +35,7 @@ pub enum Error {
     ThresholdOutOfRange {
         /// The name of the configuration field, as it is spelled in [`Config`].
         ///
-        /// [`Config`]: crate::config::Config
+        /// [`Config`]: crate::Config
         field: &'static str,
         /// The rejected value.
         value: f32,
