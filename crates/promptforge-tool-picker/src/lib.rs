@@ -15,6 +15,47 @@
 //! Mapping a resolved descriptor onto a callable tool is the caller's job; this
 //! crate only decides which descriptor the need refers to.
 //!
+//! # Usage
+//!
+//! Build an engine over a catalog once, then ask it about as many needs as you
+//! like. [`ToolPicker::resolve`] answers with a decision;
+//! [`ToolPicker::shortlist`] hands back the candidates instead, for a caller
+//! that would rather choose for itself.
+//!
+//! ```
+//! use promptforge_tool_picker::{Catalog, Config, Outcome, ToolDescriptor, ToolId, ToolPicker};
+//! use serde_json::json;
+//!
+//! let catalog = Catalog::new(vec![
+//!     ToolDescriptor::new(
+//!         ToolId::new("files", "read_file"),
+//!         "Read a file from disk",
+//!         json!({"properties": {"path": {"type": "string"}}}),
+//!     ),
+//!     ToolDescriptor::new(
+//!         ToolId::new("net", "fetch_url"),
+//!         "Fetch a web page over HTTP",
+//!         json!({"properties": {"url": {"type": "string"}}}),
+//!     ),
+//! ]);
+//!
+//! // The costly step: the model is loaded and every tool is embedded once.
+//! let picker = ToolPicker::build(catalog, Config::default())?;
+//!
+//! match picker.resolve("read a file from disk")? {
+//!     Outcome::Bind(tool) => assert_eq!(tool.name(), "read_file"),
+//!     outcome => panic!("expected a binding, got {outcome:?}"),
+//! }
+//!
+//! // No tool here writes anything, so the engine says so rather than guessing.
+//! assert_eq!(picker.resolve("send an email to the team")?, Outcome::Absent);
+//!
+//! // A shortlist offers the same candidates, judged only against the floor.
+//! let candidates = picker.shortlist("read a file from disk", 3)?;
+//! assert_eq!(candidates[0].name(), "read_file");
+//! # Ok::<(), promptforge_tool_picker::Error>(())
+//! ```
+//!
 //! # Building this crate
 //!
 //! The model is compiled in, so the *first* build downloads it (about 130MB
