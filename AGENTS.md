@@ -2,6 +2,10 @@
 
 Multi-crate Rust workspace for the PromptForge pipeline runtime.
 
+## Do more with less
+
+This rule outranks every other rule here. Before you add a frontmatter field, a configuration key, a public type, or a new resolution path, answer one question: can this be built with what is already there? Lua already runs, sandboxed and budgeted. The run-scoped store already exists, has a file backend, and is already reachable from Lua. The catalog already resolves globs and exceptions. New machinery has to beat all of that on the merits, and "it would be tidier" is not a merit. If you add it anyway, say in the commit which existing facility you considered and why it could not carry the work.
+
 ## Rules
 
 - After completing work (compiles + tests pass), update STATUS.md before committing.
