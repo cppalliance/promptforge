@@ -14,6 +14,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - Lua VM boundary: sandbox and coroutine bridge between prompt code and host capabilities; depends on: gateway, store, shared substrate
 - shared substrate: cross-product progress, loopback discovery, protocol, and sidecar facilities; depends on: none
 - build tooling: compile-time and packaging code linked into no runtime deliverable; depends on: none
+- tool picker: deterministic catalog resolver that can shortlist or abstain but cannot execute effects; depends on: none
 
 ## Invariants
 
