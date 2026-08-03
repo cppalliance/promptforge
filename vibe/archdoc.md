@@ -15,6 +15,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - shared substrate: cross-product progress, loopback discovery, protocol, and sidecar facilities; depends on: none
 - build tooling: compile-time and packaging code linked into no runtime deliverable; depends on: none
 - tool picker: deterministic catalog resolver that can shortlist or abstain but cannot execute effects; depends on: none
+- MCP server: protocol adapter for prompt catalogs, execution, progress, and deferred collection; depends on: executor, gateway, store, tool picker, shared substrate
 
 ## Invariants
 
@@ -33,6 +34,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A13. Untrusted tool output is marked automatically; capability and context isolation remain the security boundary.
 - A14. Only prompts declaring a supported PromptForge major execute; missing or unsupported majors are refused.
 - A15. Every section entry gets a fresh model context; only Lua chooses transitions, and state crosses through the store or explicit payloads.
+- A16. Long-running runs survive client deadlines and remain collectable by opaque id until retention expires.
 
 ## Principles
 
