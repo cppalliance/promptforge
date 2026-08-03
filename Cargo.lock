@@ -2759,11 +2759,13 @@ version = "0.1.0"
 dependencies = [
  "arc-swap",
  "axum",
+ "fastrand",
  "glob",
  "humantime-serde",
  "notify",
  "promptforge-core",
  "promptforge-tool-picker",
+ "promptforge-webfetch",
  "rmcp",
  "serde",
  "serde_json",

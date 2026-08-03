@@ -133,22 +133,33 @@ impl Shape {
     }
 }
 
-/// The built-ins this catalog publishes, in `tools/list` order.
-///
-/// One entry per built-in, each pairing the definition with the rule that
+/// One built-in: how it is published, and whether this catalog publishes it.
+struct BuiltIn {
+    name: &'static str,
+    description: &'static str,
+    input_schema: Arc<JsonObject>,
+    published: bool,
+}
+
+/// Every built-in, in `tools/list` order, each paired with the rule that
 /// publishes it, so adding a built-in is adding a row.
-fn built_in_tools(shape: Shape) -> Vec<Tool> {
-    let definitions = [
-        (
-            LIST_PROMPTS,
-            LIST_PROMPTS_DESCRIPTION,
-            schema(&[], &[]),
-            shape.listed,
-        ),
-        (
-            RUN_PROMPT,
-            RUN_PROMPT_DESCRIPTION,
-            schema(
+///
+/// This is the single statement of what the server offers. Both the listing and
+/// the dispatcher read it, so a built-in absent from `tools/list` is one the
+/// handler refuses as well, and the two cannot drift into a tool that answers a
+/// call it never advertised.
+fn built_in_definitions(shape: Shape) -> [BuiltIn; 4] {
+    [
+        BuiltIn {
+            name: LIST_PROMPTS,
+            description: LIST_PROMPTS_DESCRIPTION,
+            input_schema: schema(&[], &[]),
+            published: shape.listed,
+        },
+        BuiltIn {
+            name: RUN_PROMPT,
+            description: RUN_PROMPT_DESCRIPTION,
+            input_schema: schema(
                 &[
                     (
                         "prompt",
@@ -163,36 +174,51 @@ fn built_in_tools(shape: Shape) -> Vec<Tool> {
                 ],
                 &["prompt"],
             ),
-            shape.listed,
-        ),
-        (
-            NEED_PROMPT,
-            NEED_PROMPT_DESCRIPTION,
-            schema(
+            published: shape.listed,
+        },
+        BuiltIn {
+            name: NEED_PROMPT,
+            description: NEED_PROMPT_DESCRIPTION,
+            input_schema: schema(
                 &[("capability", Some(CAPABILITY_REGISTER))],
                 &["capability"],
             ),
-            shape.listed && cfg!(feature = "picker"),
-        ),
-        (
-            CHECK_RUN,
-            CHECK_RUN_DESCRIPTION,
-            schema(
+            published: shape.listed && cfg!(feature = "picker"),
+        },
+        BuiltIn {
+            name: CHECK_RUN,
+            description: CHECK_RUN_DESCRIPTION,
+            input_schema: schema(
                 &[(
                     "run_id",
                     Some("The run id from an earlier result whose status was running."),
                 )],
                 &["run_id"],
             ),
-            shape.listed || shape.direct,
-        ),
-    ];
+            published: shape.listed || shape.direct,
+        },
+    ]
+}
 
-    definitions
+/// The built-ins this catalog publishes, in `tools/list` order.
+fn built_in_tools(shape: Shape) -> Vec<Tool> {
+    built_in_definitions(shape)
         .into_iter()
-        .filter(|&(_, _, _, published)| published)
-        .map(|(name, description, input_schema, _)| Tool::new(name, description, input_schema))
+        .filter(|built_in| built_in.published)
+        .map(|built_in| Tool::new(built_in.name, built_in.description, built_in.input_schema))
         .collect()
+}
+
+/// Whether `name` is a built-in this catalog publishes.
+///
+/// The dispatcher asks before it answers a built-in, so a name this catalog
+/// leaves out of `tools/list` - `need_prompt` in a build without the `picker`
+/// feature, or the listing tools over an all-direct catalog - is a method that
+/// does not exist rather than one the handler answers anyway.
+pub(crate) fn publishes_built_in(catalog: &Catalog, name: &str) -> bool {
+    built_in_definitions(Shape::of(catalog))
+        .iter()
+        .any(|built_in| built_in.name == name && built_in.published)
 }
 
 /// The input schema every directly exposed prompt carries: one optional string
