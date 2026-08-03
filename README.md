@@ -8,7 +8,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-core` - library: prompt parser, gateway client, section execution
 - `crates/promptforge-cli` - binary: the `promptforge` command-line tool
 - `crates/promptforge-gateway` - binary: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog (in progress: catalog, config, and error types)
+- `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog (in progress: catalog, config, and error types, embedded model assets)
 
 ## Build
 
@@ -16,6 +16,10 @@ markdown is the program, the model is the CPU.
 cargo build
 cargo test
 ```
+
+The first build downloads the tool picker's embedding model (about 130MB from
+the Hugging Face Hub, pinned to one commit and checksummed) and compiles it into
+the library. Later builds reuse the Hugging Face cache and need no network.
 
 ## Run
 

@@ -12,5 +12,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
+[build-dependencies]
+hf-hub = { workspace = true }
+safetensors = { workspace = true }
+sha2 = { workspace = true }
+half = { workspace = true }
+
 [lints]
 workspace = true
