@@ -35,7 +35,7 @@ use rmcp::model::{
     Implementation, InitializeResult, JsonObject, ListToolsResult, PaginatedRequestParams,
     ProgressToken, ServerCapabilities, ServerInfo,
 };
-use rmcp::service::{Peer, RequestContext, RoleServer};
+use rmcp::service::{NotificationContext, Peer, RequestContext, RoleServer};
 use serde_json::{Value, json};
 
 use crate::catalog::{Catalog, CatalogHandle, Entry};
@@ -45,6 +45,7 @@ use crate::result::{RunResult, RunStatus};
 use crate::tools::{
     CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, publishes_built_in, tool_definitions,
 };
+use crate::watch::Sessions;
 
 /// What the session-level instructions tell a client once, so a model that
 /// never reads a tool description still learns the one rule that matters: the
@@ -81,26 +82,35 @@ type Reporting = (Peer<RoleServer>, ProgressToken);
 ///
 /// Cloning is how the HTTP transport gives each session a handler: every field
 /// is shared, so a clone publishes the same catalog and, more importantly, the
-/// same registry - a run started in one session is collectable from another.
+/// same registry - a run started in one session is collectable from another -
+/// and registers its session in the same list the watcher announces to.
 #[derive(Debug, Clone)]
 pub struct PromptForgeServer {
     config: Arc<Config>,
     catalog: Arc<CatalogHandle>,
     registry: Arc<RunRegistry>,
+    sessions: Arc<Sessions>,
 }
 
 impl PromptForgeServer {
-    /// Builds a server over a configuration and a live catalog.
+    /// Builds a server over a configuration, a live catalog, and the session
+    /// list a reload announces a changed tool set to.
     ///
     /// The run registry is built from `[server]` here rather than passed in:
-    /// its limits are that table's, and one server has exactly one.
+    /// its limits are that table's, and one server has exactly one. The session
+    /// list is passed in, because the watcher holds the other end of it.
     #[must_use]
-    pub fn new(config: Arc<Config>, catalog: Arc<CatalogHandle>) -> PromptForgeServer {
+    pub fn new(
+        config: Arc<Config>,
+        catalog: Arc<CatalogHandle>,
+        sessions: Arc<Sessions>,
+    ) -> PromptForgeServer {
         let registry = Arc::new(RunRegistry::new(&config.server));
         PromptForgeServer {
             config,
             catalog,
             registry,
+            sessions,
         }
     }
 
@@ -220,6 +230,19 @@ impl ServerHandler for PromptForgeServer {
             env!("CARGO_PKG_VERSION"),
         ))
         .with_instructions(INSTRUCTIONS)
+    }
+
+    /// Registers the session, so a reload that changes the tool set can tell it.
+    ///
+    /// This is the one hook that names a live client. The list is kept here
+    /// rather than in the transport because stdio has no session manager to ask,
+    /// and a handler clone per session is exactly one registration per session.
+    fn on_initialized(
+        &self,
+        context: NotificationContext<RoleServer>,
+    ) -> impl Future<Output = ()> + Send + '_ {
+        self.sessions.register(context.peer);
+        std::future::ready(())
     }
 
     async fn list_tools(

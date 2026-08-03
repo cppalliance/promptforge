@@ -23,7 +23,10 @@
 //! collectable afterwards. [`build_router`] puts that handler behind a shared
 //! bearer at `/mcp` with an unauthenticated `/healthz` beside it, and
 //! [`serve_http`] and [`serve_stdio`] are the two transports it is reached on.
-//! What comes next is the watcher that re-reads a prompt on save.
+//! [`Watcher`] keeps the catalog current while the server runs, so writing a
+//! prompt is an edit-and-call loop rather than an edit-restart-call one, and
+//! [`Sessions`] is who a changed tool list is announced to. What comes next is
+//! `need_prompt`, the retrieval tool behind the catalog.
 
 mod catalog;
 mod config;
@@ -34,15 +37,17 @@ mod result;
 mod server;
 mod tools;
 mod transport;
+mod watch;
 
 pub use crate::catalog::{Catalog, CatalogHandle, Entry, OnBroken};
 pub use crate::config::{
     CatalogConfig, Config, Expose, GatewayConfig, PathsConfig, PromptConfig, Secret, ServerConfig,
 };
-pub use crate::error::{CatalogError, ConfigError, Fault, ServeError};
+pub use crate::error::{CatalogError, ConfigError, Fault, ServeError, WatchError};
 pub use crate::progress::{McpObserver, ProgressPump};
 pub use crate::registry::{RunRegistry, RunSlot};
 pub use crate::result::{RunResult, RunStatus};
 pub use crate::server::PromptForgeServer;
 pub use crate::tools::{CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, tool_definitions};
 pub use crate::transport::{HEALTHZ_PATH, MCP_PATH, build_router, serve_http, serve_stdio};
+pub use crate::watch::{ListChanged, Reload, Reloader, Sessions, Watcher};

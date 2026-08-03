@@ -74,6 +74,32 @@ pub enum ServeError {
     Stdio(String),
 }
 
+/// A filesystem watch that could not be established.
+///
+/// Only starting the watcher fails this way. Once it is running, a reload that
+/// cannot re-resolve the catalog keeps the previous one and logs why, because a
+/// typo in one file must not take the running service down with it.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum WatchError {
+    /// The platform watcher could not be created. The detail is rendered rather
+    /// than carried, so no dependency's error type reaches this crate's public
+    /// surface.
+    #[non_exhaustive]
+    #[error("create the filesystem watcher: {0}")]
+    Create(String),
+
+    /// A path could not be watched.
+    #[non_exhaustive]
+    #[error("watch {path}: {detail}")]
+    Watch {
+        /// The path that could not be watched.
+        path: String,
+        /// What the platform watcher reported.
+        detail: String,
+    },
+}
+
 /// One thing wrong with a resolved catalog, named as precisely as the pass can
 /// name it.
 ///

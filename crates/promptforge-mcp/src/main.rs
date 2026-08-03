@@ -8,7 +8,9 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use promptforge_mcp::{Catalog, CatalogHandle, Config, OnBroken, serve_http, serve_stdio};
+use promptforge_mcp::{
+    Catalog, CatalogHandle, Config, OnBroken, Sessions, Watcher, serve_http, serve_stdio,
+};
 
 /// What the process prints when the arguments are not the two shapes it takes.
 const USAGE: &str = "usage: promptforge-mcp serve [--stdio] <prompts.toml>";
@@ -92,24 +94,36 @@ impl Invocation {
 /// Loads the configuration, resolves the catalog, and serves the chosen
 /// transport until the process is stopped.
 fn run(invocation: &Invocation) -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::load(Path::new(&invocation.config))?;
+    let source = Path::new(&invocation.config);
+    let config = Config::load(source)?;
     // Boot refuses an incomplete catalog: a service that starts with nine of
     // ten prompts is one whose catalog silently disagrees with its own
     // configuration, and a client sees only a missing tool.
     let catalog = Catalog::resolve(&config, OnBroken::Reject)?;
     let config = Arc::new(config);
     let catalog = Arc::new(CatalogHandle::new(catalog));
+    let sessions = Arc::new(Sessions::new());
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
     let stdio = invocation.stdio;
     runtime.block_on(async move {
+        // Started inside the runtime, because the debounce window is a task, and
+        // held for as long as the transport serves: dropping the guard stops the
+        // watches.
+        let _watcher = Watcher::start(
+            source,
+            Arc::clone(&config),
+            Arc::clone(&catalog),
+            Arc::clone(&sessions),
+        )?;
         if stdio {
-            serve_stdio(config, catalog).await
+            serve_stdio(config, catalog, sessions).await?;
         } else {
-            serve_http(config, catalog).await
+            serve_http(config, catalog, sessions).await?;
         }
+        Ok::<(), Box<dyn std::error::Error>>(())
     })?;
     Ok(())
 }
