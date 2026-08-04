@@ -56,6 +56,20 @@ The heading and Verdict lines in this example are bracketed - `### <E-NNN>` and 
 
 `Reach` and `Seen by` are the ranking inputs for the document: how much breaks if this changes, and whether a person ever encounters it. Both are needed, because a single configuration key can have almost no reach and still be the first thing a reader must understand.
 
+## Pass 2 proposals (measurement only)
+
+Pass 2 opened the archive - the sibling design docs in `promptforge-design`, the crate's `design-core.md`, `README.md`, `STATUS.md`, `AGENTS.md`, source comments, and the full git history of `promptforge` - and searched it against every narrowed and open record. Each such record below carries a `Proposal` field after its other fields: the collapse the archive would justify, the evidence, and the evidence's provenance - a file and line, or a commit hash and its date. Three records found nothing and say so as an explicit recorded absence rather than a proposal - E-019, E-047, E-049 - kept explicit so a reader can tell an absence from a search nobody ran.
+
+No proposal is applied. No verdict moved and no proposal becomes rationale in the recovered document; because no human enters this run, a proposal only records what a person could confirm if they read the cited source. The pass-1 verdicts stand exactly as the `Verdict counts` section reports them.
+
+Proposals carry three inline cautions from the plan's section 4:
+
+- `[intention]` - the source is forward design describing something never built, so it explains an intended runtime rather than the shipped code.
+- `[self-reported]` - a commit message written by the agent that made the change; it may record the reason that read best afterward.
+- `[not-independent]` - **read this once here and it holds for every proposal below.** `crates/promptforge-core/design-core.md` and the sibling crate design docs are as-built prose a model (`claude-opus-5`) wrote from the code on 2026-08-03, one day before this ledger. Where such a document repeats a reason a source comment already gives, it is a second voice reading the same line, not independent evidence. Every proposal that rests on those documents flags the point inline, and those flags are preserved.
+
+The `#[non_exhaustive]` family - E-037, E-038, E-039, E-040 - has a single shared origin: one documented workspace house rule applied in one dated conformance commit. That origin is recorded once, at E-037; the three forced records cross-reference it rather than repeat it, and each carries a proposal note marked as bearing on a forced verdict that the note leaves unchanged.
+
 ## Records
 
 ### E-001  The gateway client is passed in, never read from the environment
@@ -89,6 +103,21 @@ Survives:   H1, H2, H4 all survive - nothing in the crate distinguishes measured
 Verdict:    OPEN
 Reach:      every run whose prompt does not set max_tool_iterations
 Seen by:    the caller, on a prompt that never converges
+Proposal:   Candidate evidence found; partial collapse only. The cap was raised from a
+            hard-coded 10 to 24: commit 6d3d903 (2026-07-29) set the original 10, and commit
+            54a947e "make the tool-call loop iteration cap configurable" (2026-07-29) raised it
+            so "genuine multi-turn tool use no longer hits ToolLoopExhausted at ten round
+            trips ... Step 1 of the multi-turn research prompt plan." [self-reported] This is a
+            floor argument (more than ten), not a value argument, so it does not separate H1/H2/H4.
+            Candidate origin for 24 itself: the designed Limits.max_turns_per_section = 24 in
+            design-mcp-server-residue.md:649 (beside max_tool_calls_per_section = 30); the shipped
+            cap counts round trips, aligning with the designed turn budget rather than 30, weak
+            support for H4. [intention] The design number is an undated first cut, so this
+            relocates the mystery rather than solving it. design-core.md:124 calls 24 "an
+            unmeasured first cut ... generous" [not-independent]. Contradiction within the archive:
+            the as-built doc frames 24 as a generous first cut (leaning H3) while git shows a
+            targeted raise from 10 for a concrete need; both are self-reported, neither derives 24.
+            Verdict OPEN unchanged.
 
 ## Ordering
 
@@ -110,6 +139,18 @@ Survives:   H1, H2, H3 all survive. H1: prose is preserved as text for a downstr
 Verdict:    OPEN
 Reach:      every prompt file and every consumer of a parsed Prompt
 Seen by:    the prompt author, who writes the file
+Proposal:   Candidate evidence found; it supports all three survivors and singles out none.
+            H1 (body is markdown because its prose is fed to the model as text): design-promptforge.md:13
+            "The markdown is the program"; :320 "The prose is authored with the model as its reader";
+            :27 "do not put a compilation step between the prompt author and the model. The raw
+            markdown is the program." [intention] (2026-07-25)
+            H2 (adopted for familiarity with a settled convention): design-core-residue.md:664
+            "Frontmatter is YAML because it is frontmatter, a settled convention with tooling." [intention]
+            H3 (markdown supplies the heading hierarchy the section model needs): design-promptforge.md:71
+            "H2 headings ... are the primary addressable sections; H3 headings ... individually
+            addressable for fan-out." [intention]
+            No collapse: the archive corroborates all three at once and refutes none. The strongest
+            single thread is H1, the design's founding "markdown is the program" move. Verdict OPEN unchanged.
 
 ### E-004  Sections run top to bottom in file order, each in a fresh context, falling through
 Element:    run_sections, crates/promptforge-core/src/execute.rs
@@ -128,6 +169,22 @@ Verdict:    NARROWED
 Reach:      every run; the control-flow spine of the executor
 Seen by:    the prompt author (section order determines execution) and the caller
 Note:       distinct from E-048 (the public entry() accessor, which the executor never calls) and from E-031 (the Section.children tree, which this walk never descends into); it starts from sections[0] directly.
+Proposal:   Candidate evidence found - the strongest in its set. Collapse toward H2 (file order is
+            the first shape built; richer control flow was intended but is unbuilt). The designed
+            control flow is explicit declared exits, not file-order fall-through: design-promptforge.md:322
+            "There is no implicit advance: a section that declares no exit is where the run ends"; :335
+            records the implicit-advance draft as rejected because "it made file order load-bearing
+            while leaving it unwritten." [intention] (2026-07-25) The residue says the code ships the
+            rejected draft: design-core-residue.md:5 lists explicit exits and boot validation as
+            "designed and unimplemented"; :7 "What exists today is a fall-through MVP"; :917 "file order
+            is the whole control-flow graph and there is nothing to walk." [intention] Building commit
+            12d6c60 "executor: fall-through across top-level sections" (2026-07-29) "Walk top-level
+            sections in file order, each in a fresh context." [self-reported] Contradiction (archive vs
+            code): the design argues against file-order fall-through and for declared exits, a walkable
+            graph, and boot validation - the code implements exactly the fall-through the design rejected.
+            This points H2 over H1. Verdict NARROWED unchanged.
+            Cross-ref: E-024's proposal ties the monotonic progress counter to this same designed-but-unbuilt
+            non-linear walk; E-031 and E-048 are the same story.
 
 ### E-005  The engine gates on the declared major: only 1 runs, an unsupported major is refused, a missing version is declined
 Element:    run() version gate, crates/promptforge-core/src/execute.rs:170-183
@@ -177,6 +234,16 @@ Survives:   H1 and H3. H2 refuted (unnecessary): two tests pin the other two run
 Verdict:    NARROWED
 Reach:      every run that falls off the end rather than returning from Lua
 Seen by:    the prompt author (default_return) and the caller (the returned string)
+Proposal:   Candidate evidence found, but it does not settle the open question. The three-rung order
+            was present from the fall-through commit and is tested: 12d6c60 (2026-07-29) "Running off
+            the end yields default_return, else the last model reply, else a generic completion," with
+            fall-through tests. [self-reported] STATUS.md:10 and design-core.md:7,84 restate the
+            precedence [not-independent]. The current source gives no reason: execute.rs:304 reads only
+            "// Ran off the end." before the default_return.or(last_reply).unwrap_or("done") chain.
+            No collapse: nothing anywhere says why an author's default_return outranks a live model
+            reply rather than the reverse, so H1 (chosen precedence) vs H3 (arbitrary-but-fixed order)
+            is as undecided after the archive as before. Recorded absence: no design doc, README/STATUS
+            line, comment, or commit argues the ordering. Verdict NARROWED unchanged.
 
 ### E-008  Three frontmatter fields are required; the rest are optional
 Element:    Frontmatter, crates/promptforge-core/src/parser.rs
@@ -193,6 +260,18 @@ Survives:   H1 and H2 both survive and are hard to separate: the always-read fie
 Verdict:    NARROWED
 Reach:      every prompt file and every reader of Frontmatter
 Seen by:    the prompt author
+Proposal:   Candidate evidence found, bearing on H1. design-promptforge.md:117-127 marks
+            name/description/version required with consumer-facing reasons: name = "the name a caller
+            passes to run_prompt"; description = "Tells a caller reading the catalog what this prompt
+            does"; version = "Bumped when the contract changes." [intention] This supports H1 (the fields
+            every consumer reads regardless of what a prompt does). Caveat: the designed frontmatter
+            differs from the built one - the design also marks params required (design-promptforge.md:123)
+            and has fields (keywords, state, outputs, progress) the code lacks, so the archive's
+            required/optional set is not the code's; it corroborates the reason for the three that
+            survived, not the exact set. [intention] design-core.md:67 restates "Three are required ...
+            and four default" [not-independent]. No decisive collapse: the archive strengthens H1 but
+            says nothing bearing on H2 (required tracks whether a field has a sensible default), so both
+            survive. Verdict NARROWED unchanged.
 
 ### E-009  The Lua sandbox loads only string, table, and math, and strips code-loading and reflection
 Element:    run_chunk, Lua::new_with(StdLib::STRING | StdLib::TABLE | StdLib::MATH, ...) and harden(), crates/promptforge-core/src/lua.rs
@@ -226,6 +305,21 @@ Survives:   H1 and H2, and they are over-determined rather than competing. H3 is
 Verdict:    NARROWED
 Reach:      the entire tool subsystem - every executor signature and every tool builder (bind.rs, cli/tools.rs, runner.rs:64)
 Seen by:    anyone implementing a tool or registering one by name
+Proposal:   Candidate evidence found, bearing on H1, plus a contradiction on the wider tool design.
+            H1 (tools live in crates core does not depend on): design-core-residue.md:158 "One extension
+            is one linked crate contributing named functions"; :323 "no extension crate depends on mlua
+            at all." [intention] Confirmed independently by commit f858e05 "webfetch: extract web_fetch
+            into its own crate" (2026-07-29) "The new crate depends on promptforge-core for the Tool
+            trait." [self-reported] Trait creation c7ec498 "core: Tool trait for executor tool dispatch"
+            (2026-07-29) is title-only, no origin rationale. Contradiction (archive vs code): the designed
+            tool system is a closed canonical vocabulary - ToolName parses only from a fixed table,
+            resolved through ToolMap, built by register_capability with serde_json::Value in and out
+            (design-core-residue.md:48-68,240-380; design.md:165) - the opposite of the shipped open
+            dyn Tool with a String result; :280 "the Tool trait ... is what exists in place of all of
+            this ... a String result rather than a Value"; :380 "None of the eighteen names is bound."
+            [intention] No collapse: pass 1 found H1 and H2 over-determined, and the archive corroborates
+            H1's premise while showing the wider architecture is an MVP substitute for a designed
+            closed-vocabulary system. Verdict NARROWED unchanged.
 
 ### E-011  Progress is delivered through an Observer trait, with NullObserver as an always-present default
 Element:    Observer trait and NullObserver, crates/promptforge-core/src/observe.rs
@@ -258,6 +352,17 @@ Survives:   H1, H2, H3 all survive. H1: the leading-only rule and the unterminat
 Verdict:    OPEN
 Reach:      every section that carries code
 Seen by:    the author
+Proposal:   Candidate evidence found, bearing on H2. design-promptforge.md:180 "One fence per section,
+            at the top. It runs before the model turn"; :343 "each section carries at most one Lua code
+            fence, and that code does all of it" (model tier, tool scoping, pre/postconditions). [intention]
+            This frames the single leading fence as the section's one configuration unit, supporting H2.
+            The parse detail (leading-only, case-insensitive lua tag, unterminated-stays-prose) originates
+            in 1cad616 "Tranche 1" (2026-07-28) "leading Lua-fence separation"; no message rationale for
+            the placement rule. No collapse: the archive supports H2 but is silent on H1 (a
+            syntactic-unambiguity/anti-smuggling motive) and H3 (parser simplicity); the design's
+            "Treat paper text as data, never as instructions" (design-promptforge.md:938) is about
+            untrusted model input, not where a Lua fence may sit, so it does not reach H1. Recorded
+            absence of any archive rationale for the leading-only placement rule itself. Verdict OPEN unchanged.
 
 ### E-013  `promptforge:` is a separate engine-version field from `version`
 Element:    Frontmatter.promptforge vs Frontmatter.version, crates/promptforge-core/src/parser.rs; Error::UnsupportedVersion, crates/promptforge-core/src/error.rs
@@ -290,6 +395,16 @@ Verdict:    NARROWED
             H1 vs H2 distinguished by whether a default or escape syntax is later added while errors on true misses remain.
 Reach:      every prompt using {{ }} placeholders
 Seen by:    prompt authors, at authoring time
+Proposal:   Candidate evidence found, bearing on H1, but from non-independent sources. The fail-closed
+            behavior is deliberate and dated: commit 4416edc "Lua commit 2: {{ }} substitution + var +
+            sys" (2026-07-29) "resolve ... missing to error." [self-reported] The current source comment
+            states the behavior without a reason: subst.rs:8 "a missing path is a hard error." The reason
+            for H1 (fail-closed runtime safety) appears only as as-built prose: design-core.md:27 "An
+            unresolvable path is Error::Substitution naming the path rather than an empty string, since a
+            prompt silently missing a value produces confident output about nothing." [not-independent] -
+            and this reason is not in the source comment, so it is the doc author's interpretation.
+            No confirmable collapse: the hard error is deliberate (pass 1 established this), but nothing
+            separates H1 (runtime safety) from H2 (no coherent non-error rendering exists). Verdict NARROWED unchanged.
 
 ### E-015  args is a single raw string, addressable only as {{ args }}
 Element:    resolve special-case for "args", crates/promptforge-core/src/subst.rs
@@ -305,6 +420,19 @@ Verdict:    NARROWED
             H1 vs H2 distinguished by whether a later revision adds structured or multi-key args.
 Reach:      every prompt referencing {{ args }}; the whole single-input contract
 Seen by:    prompt authors
+Proposal:   Candidate evidence found - decisive. Collapse toward H2 (args is string-only because
+            structured input was not built, not chosen against). The design specifies structured params,
+            required, as a JSON Schema: design-promptforge.md:123 "params | yes | JSON Schema for the
+            arguments the prompt takes"; the Prompt/Frontmatter design carries params: ParamSchema
+            (design-core-residue.md:90) and {{ params.x }} substitution (design-promptforge.md:176).
+            [intention] (2026-07-25) The residue records the gap: design-core-residue.md:17
+            "args is one raw string rather than a schema-validated object." [intention] The raw string
+            has been present since the first Lua commit: 2b4ea9d "Lua commit 1 (echo)" (2026-07-29) "the
+            single raw args string exposed." [self-reported] Contradiction: design-core.md:25 frames the
+            raw string as a deliberate choice ("The alternative, a JSON Schema in frontmatter ... its
+            absence is felt") [not-independent], whereas the design corpus shows schema-validated params
+            were the intended shape and raw-string args is what got built first. The human-confirmable
+            weight is on H2. Verdict NARROWED unchanged (no proposal applied).
 
 ### E-016  Prose substitution is a single non-recursive pass; resolved text is never re-scanned
 Element:    substitute, crates/promptforge-core/src/subst.rs
@@ -319,6 +447,19 @@ Survives:   H1, H2, H3 all survive. The code fixes single-pass behaviour, but no
 Verdict:    OPEN
 Reach:      every prompt whose prose contains {{ }} placeholders
 Seen by:    prompt authors
+Proposal:   Candidate evidence found, and it names a reason none of pass 1's three hypotheses did.
+            The single-pass/no-recursion/no-arithmetic behavior is deliberate, and the stated reason is
+            "compute in Lua": source comment subst.rs:6-8 "Resolution is a single pass with no recursion
+            ... Substitution does no arithmetic - compute in Lua and reference the result." Commit 4416edc
+            (2026-07-29) "single pass, no formulas (compute in Lua, reference the result)." [self-reported]
+            design-core.md:27 "There is no recursion and no arithmetic, because a template language inside
+            a prompt is a second programming language competing with the Lua block directly above it"
+            repeats the comment's "compute in Lua" reason [not-independent]. Partial, sideways collapse:
+            the archive refutes H3 (recursion "simply not built" - the exclusion is deliberate and stated),
+            but the reason it gives (avoid a redundant second template/computation language) matches
+            neither H1 (injection/termination safety) nor H2 (simplicity/speed) cleanly - it is a distinct
+            fourth motive. H1 (safety) is neither confirmed nor refuted by anything in the archive.
+            Verdict OPEN unchanged.
 
 ### E-017  A tool's output is trusted unless it opts out, via a defaulted trait method
 Element:    Tool::untrusted_output, crates/promptforge-core/src/tools.rs:43
@@ -335,6 +476,17 @@ Survives:   H1 and H2. The test at tools.rs:62 names the trusted default as inte
 Verdict:    NARROWED
 Reach:      every tool result the executor appends during a run (execute.rs:436)
 Seen by:    tool implementers, who inherit or override it; the model, whose input is guard-wrapped or not
+Proposal:   Candidate evidence found - settles H2's factual claim. untrusted_output was a later addition
+            to an already-existing Tool trait, added with a defaulted body returning false: the trait was
+            created in c7ec498 "core: Tool trait for executor tool dispatch" (2026-07-29 07:49);
+            untrusted_output was added later the same day in a96d4b3 "core: guard-wrap untrusted tool
+            output against prompt injection" (2026-07-29 16:42): "Add Tool::untrusted_output() (default
+            false); web_fetch overrides it true ... Trusted tool results are unchanged." [self-reported]
+            Pass 1 said H1 vs H2 "is exactly what a commit history would show and the source cannot"; the
+            history shows H2 factually true - the method postdates the trait and every prior implementer
+            inherited false. Collapse toward H2 as fact, without excluding H1: the same commit also
+            expresses H1's reading (default false so the common trusted tool needs no ceremony and the
+            exceptional web_fetch opts in), so the two remain compatible rather than exclusive. Verdict NARROWED unchanged.
 
 ### E-018  Untrusted tool output is fenced in a nonce-delimited guard block with a defanged interior
 Element:    wrap_untrusted / UNTRUSTED_RULE / Tool::untrusted_output, crates/promptforge-core/src/execute.rs:52-79
@@ -367,6 +519,16 @@ Survives:   H1 and H2. H3 is refuted by the dedicated test at client.rs:349, whi
 Verdict:    NARROWED
 Reach:      every tool call the model requests during a run
 Seen by:    tool implementers, who receive a Value that may be a string on malformed input; rarely the end caller
+Proposal:   RECORDED ABSENCE - the archive was searched and nothing bears on the open question; the two
+            survivors are not distinguished. The source comment states the behaviour and not its reason:
+            client.rs:105-107 "holds that string parsed into a Value (falling back to a string Value if it
+            is not valid JSON)", and client.rs:249-250 the same. design-core.md:132 repeats only the
+            behaviour and adds no reason [not-independent]. The introducing commit a98e2b5 "core: client
+            sends tool schemas and parses tool_calls" (2026-07-29) carries no body, so no self-reported
+            reason exists. The residue and design.md describe a ToolFn taking a typed argument struct
+            deserialized by register_capability, a different design that says nothing about a raw-string
+            fallback in the built thin client. Nothing bears on whether the fallback is "keep the run
+            alive" (H1) or "interpretation is the tool's job" (H2). Both remain. Verdict NARROWED unchanged.
 
 ### E-020  complete returns a two-variant CompletionResult, never a stream
 Element:    CompletionResult + GatewayClient::complete, crates/promptforge-core/src/client.rs:122,189
@@ -383,6 +545,18 @@ Survives:   H1 and H2. H3's "two methods" branch is refuted: one round trip retu
 Verdict:    NARROWED
 Reach:      every consumer of complete() - the executor loop and the gateway integration test (gateway tests/it/main.rs:92)
 Seen by:    the caller, who matches the result
+Proposal:   Candidate evidence found, but only on the "never a stream" clause, not on the enum-shape
+            choice the two survivors are about. The "no stream" fact is a deferral, not a design
+            rejection: 301dd03 "Gateway v0" (2026-07-29) lists under "Deferred (walking skeleton):
+            admission control, pinning, model packs, hot reload, Anthropic shim, streaming, service
+            installers." [self-reported] (credible here because it is a deferral list, not a rationale),
+            so a reader should not read the absence of streaming as a closed decision. On the surviving
+            question (why an enum over an Option, protocol-pair H1 vs loop-exhaustiveness H2), the archive
+            is silent: client.rs:1-10 module doc and design-core.md:130-132 both describe "either one text
+            reply out or the tool calls the model asked for" - the OpenAI shape - consistent with H1 but
+            not excluding H2, and the design-core line reads the module comment [not-independent]. A human
+            could confirm streaming was deferred rather than designed out, but not which of H1/H2 drove the
+            enum shape. Verdict NARROWED unchanged.
 
 ### E-021  from_env requires only PROMPTFORGE_TOKEN and defaults the base URL and model
 Element:    GatewayClient::from_env, crates/promptforge-core/src/client.rs:163
@@ -398,6 +572,18 @@ Survives:   H1 and H2. H3 is refuted: the one required variable is exactly the o
 Verdict:    NARROWED
 Reach:      every environment-configured caller of the client (from_env; execute.rs:278 uses it as the None fallback)
 Seen by:    the person setting environment variables, who gets MissingEnv when the token is absent
+Proposal:   Candidate evidence found, weak; it does not separate the two survivors. client.rs:155-169
+            states the split and its facts: "Base URL: PROMPTFORGE_BASE_URL, else the local gateway.
+            Model: PROMPTFORGE_MODEL, else a sane default. Token: PROMPTFORGE_TOKEN, the gateway's shared
+            bearer. Required." - it confirms the boundary the record read from code and gives no reason
+            for it. client.rs:16-17 labels DEFAULT_BASE_URL "the local development gateway", a lean toward
+            H2 (a developer running the local gateway), only a lean. design-core.md:134 and the residue
+            (line 19) restate the three variables; neither gives the split's reason and design-core reads
+            the same comment [not-independent]. A human could confirm the boundary is deliberate (the token
+            has a named Error::MissingEnv, the other two have concrete defaults) but could not settle
+            whether defaultability (H1) or one-variable local setup (H2) drove it. Verdict NARROWED unchanged.
+            Cross-ref: client.rs:18-24 gives the reason DEFAULT_MODEL is public (cross-crate reuse), which
+            bears on E-022 (FORCED), not on this record.
 
 ### E-022  DEFAULT_MODEL is public API
 Element:    pub const DEFAULT_MODEL, crates/promptforge-core/src/client.rs:25
@@ -446,6 +632,24 @@ Survives:   H1 and H2. H3 refuted (impossible): there is no remaining/percent fi
 Verdict:    NARROWED
 Reach:      every run reporting section progress
 Seen by:    the end user watching a progress display
+Proposal:   Candidate evidence found, and it settles the intent decisively toward H1 while confirming
+            H2 describes the built code - a place the archive contradicts what the core actually
+            guarantees. The source comment states the contract as deliberate: observe.rs:99-102 "How many
+            sections have been entered, including this one ... Never decreases across a run; a repeated
+            section repeats a value rather than going backwards." The "repeated section repeats a value"
+            clause anticipates a non-linear walk (a section entered twice) that the built executor cannot
+            produce, so the comment is written for a design (H1), not for today's index+1 (H2). Introduced
+            by 387621e "add an observer seam to the core" (2026-08-02). Forward design makes H1 explicit:
+            design-core-residue.md:430 SectionStarted.completed "Distinct sections completed so far.
+            Monotonic, never decreasing."; design.md observer section, monotonic "so a revisit does not
+            advance it", against goto/return_result that can revisit or skip. (2026-07-25) [intention] -
+            an intention for a jumping executor that does not exist. Contradiction: the core emits
+            completed = index + 1 (execute.rs:238) and the sibling promptforge-mcp-server/src/progress.rs
+            re-clamps to non-decreasing. The monotonic guarantee was designed to live in the core for a
+            non-linear walk; the built core satisfies it only because the walk is linear, and a consumer
+            re-clamps as if the core were not trusted. H1 is the recorded intent, H2 the honest description
+            of the shipped code. Verdict NARROWED unchanged.
+            Cross-ref: ties to E-004 and E-031 - the same designed-but-unbuilt non-linear walk.
 
 ### E-025  A Message serializes only the fields its role uses
 Element:    Message serde attributes, crates/promptforge-core/src/client.rs:32-46
@@ -461,6 +665,16 @@ Survives:   H1, H2, and H3. The "functional contract" that would refute H3 rests
 Verdict:    OPEN
 Reach:      every request complete() builds - the wire shape of every message sent
 Seen by:    the backend or gateway on the wire, and callers constructing messages
+Proposal:   Candidate evidence found, weak; it leans H1 but refutes nothing. client.rs:27-31 comment:
+            "A plain user message serializes to just {role, content}; the optional tool_call_id and
+            tool_calls fields are emitted only when set, which keeps the wire shape of ordinary messages
+            unchanged." "Keeps the wire shape unchanged" is a statement of intent aligned with H1 (the
+            ordinary chat-completions shape), but it does not claim the backend rejects a null-bearing
+            message, so it cannot promote H1 over H3 (tidiness) - the same words fit both. design-core.md:132
+            mentions the wire types without the skip rationale and does not even repeat this comment, so it
+            adds nothing. No commit body addresses it (a98e2b5 is empty). A human could read the comment as
+            author preference for the unchanged shape (H1-leaning) but could not confirm the backend
+            requires it, so the three-way openness stands. Verdict OPEN unchanged.
 
 ### E-026  The run's environment inputs are bundled into a RunOptions struct, apart from its intrinsic arguments
 Element:    RunOptions, crates/promptforge-core/src/execute.rs:103-112, and run()'s signature
@@ -477,6 +691,22 @@ Survives:   H1 and H3. H2 refuted (impossible): the fields have unlike ownership
 Verdict:    NARROWED
 Reach:      every caller of execute::run (currently the CLI and the MCP server)
 Seen by:    the caller, at the call site
+Proposal:   Candidate evidence found; it supports H1 over H3, but the strongest statement is as-built
+            prose and the forward design describes a different struct. design-core.md:17 (key choice 1):
+            "Growing this later is additive - a field on RunOptions, or a builder over it - which is why
+            the positional list was acceptable in the first place." This is the growth-and-arity reason
+            (H1); it is model-written as-built prose, and no source comment states it (the RunOptions field
+            docs at execute.rs:104-111 explain only the client env-fallback, i.e. E-001), so design-core.md
+            is here an inference from the code, not a repeat of a comment - credible but not first-party.
+            Forward design argues the same for a larger, different struct: design-core-residue.md:554 "A
+            single RunConfig struct rather than eight positional arguments, because the argument list is
+            long, heterogeneous, and will grow." RunConfig (eight fields) is not RunOptions (two), so this
+            explains the intention behind bundling env inputs generally, not this specific two-field struct.
+            (2026-07-25) [intention] Commit 477f551 (2026-08-02) introduces RunOptions and explains only
+            the client-is-optional reason (E-001), not the bundle-vs-positional choice. A human could
+            confirm the bundle was chosen for additive growth (H1); the archive resurrects no evidence
+            that two positional params were weighed and rejected, so H3 goes unaddressed, neither confirmed
+            nor killed. Verdict NARROWED unchanged, leaning H1.
 
 ### E-027  A scoped tool name absent from the run's pool fails the run, never a silent drop
 Element:    scoped_tools, crates/promptforge-core/src/execute.rs:321-332
@@ -508,6 +738,21 @@ Verdict:    NARROWED
             H1 vs H2 distinguished by whether a later revision ever gates the store by tool scoping.
 Reach:      every Lua block (the store table is present in all of them)
 Seen by:    prompt authors
+Proposal:   Candidate evidence found, and it settles the intent decisively toward H1. The source comment
+            names the always-on-ness as deliberate category placement, not an omission: lua.rs:14-15 "The
+            store table is a deterministic host capability (like var), always present and independent of
+            tool scoping." and lua.rs:60 "always present (a host capability, not a scoped tool)." This
+            directly refutes H2's "not yet scoped" reading - the author names the non-scoping as the
+            design, not as unfinished work. Introduced by 6d3caa7 "core: thread run-scoped store through
+            run + Lua store API" (2026-07-31). Forward design gives the general rule the comment
+            instantiates: design-core-residue.md:136-140 (ToolMap::scoped doc) "This scopes the model
+            surface only. Lua host objects are bound once per run and are not filtered, because scoping
+            exists to keep the model's choice small." (2026-07-25) [intention] Caution: the residue's store
+            names a different subsystem (a query-interface run-state store) than the code's store (a virtual
+            filesystem) - the residue flags this at line 14 - but the host-object-vs-model-surface scoping
+            principle is general. design-core.md:108 "store is a host capability rather than a scoped tool"
+            repeats the lua.rs comment [not-independent]. A human reading lua.rs:14-15 and the scoping rule
+            would confirm H1 and set aside H2 as refuted by the author's own words. Verdict NARROWED unchanged.
 
 ### E-029  Only scalar Lua return values become a section result; tables raise
 Element:    value_to_string, crates/promptforge-core/src/lua.rs
@@ -523,6 +768,17 @@ Verdict:    NARROWED
             H1 vs H2 distinguished by whether a later revision accepts a table return.
 Reach:      every section whose Lua block returns a value (the finish case of the exit rule)
 Seen by:    prompt authors
+Proposal:   Candidate evidence found, and it settles the intent decisively toward H2 (table returns are
+            deferred, not renounced). The source comment says "deferred" in as many words: lua.rs:292-293
+            "Render a returned Lua scalar as the section's result string. Tables and other non-scalar
+            returns are deferred to a later commit." This is the author stating H2 outright. The
+            introducing commit agrees: 2b4ea9d "Lua commit 1 (echo)" (2026-07-29) "a chunk that returns a
+            plain value ends the run with that value", within a staged commit series ("commit 2", "later
+            commit"), so "deferred" is a real roadmap word, not a post-hoc gloss. [self-reported]
+            design-core.md:110 "Only a scalar is accepted ... returning a table is Error::Lua" describes
+            the behaviour without the "deferred" reason, so it neither helps nor independently corroborates.
+            A human reading lua.rs:292-293 would confirm H2 (deferred) and demote H1 to the value the code
+            happens to enforce today. Verdict NARROWED unchanged.
 
 ### E-030  A Lua block records tool names for later resolution; it validates nothing
 Element:    install_tools_table / tools.add / LuaOutcome::scoped_tools, crates/promptforge-core/src/lua.rs
@@ -555,6 +811,23 @@ Verdict:    NARROWED
 Reach:      every consumer that walks a prompt's sections
 Seen by:    the author, who writes nested headings
 Note:       distinct element from E-004 (the executor's linear walk); this record is the tree data structure, and its evidence is exactly that the walk never reads it.
+Proposal:   Candidate evidence found, and it is the clearest contradiction in its group: the tree was
+            designed to carry runtime meaning the code never wired up. Forward design makes children
+            executable and individually addressable: design-core-residue.md:107-109 (Section.children doc)
+            "H3 sections beneath an H2. Individually addressable, which is what makes a battery of forty
+            tests ordinary readable markdown that still fans out." and design.md host names,
+            sections.children("## Battery") "returns the H3 children as addressable sections", with
+            Task/fanout dispatching them. (2026-07-25) [intention] - design intent in H1's spirit (and
+            beyond, toward the refuted H2 "required by execution"). The code contradicts the intent:
+            parser.rs:57-58 and build_sections (parser.rs:300-320) build the tree, but run_sections walks
+            only prompt.sections and never descends, and sections.children/Task/fanout do not exist.
+            design-core.md:69 records the built state: "Child sections are parsed and never executed."
+            Source comments (parser.rs:2-8,44-45,57-58) describe the recursion only and give no reason, so
+            the reason lives entirely in the forward design. A human reading the residue would confirm H1
+            was the designed reason and reading the code would find it unrealized - the tree today is H3
+            (inert hierarchy) because the machinery that would make it H1 was never built. Intention, not
+            code. Verdict NARROWED unchanged.
+            Cross-ref: ties to E-004 and E-024 - the same designed-but-unbuilt non-linear walk.
 
 ### E-032  File reads return numbered lines, not raw content
 Element:    number_lines / FileStore::read contract, crates/promptforge-core/src/store.rs
@@ -571,6 +844,21 @@ Verdict:    NARROWED
             H1 vs H2 distinguished by whether the model's file tools present this format to the model (evidence would live in tools.rs, outside this group).
 Reach:      every store.read call site (Lua store table, and later the model's file tools)
 Seen by:    whoever reads a stored file - a model or a person
+Proposal:   Candidate evidence found; it leans H1 as intent, but the model consumer it names is unbuilt,
+            so a reader should not take the intent for the code. store.rs:7-9 module doc: "Reads return
+            numbered lines for navigation and error messages, and edits are anchor-based ... the shape
+            that works for a model." The "model" is named for the edit shape; for the numbered read the
+            comment says "navigation and error messages", genuinely between H1 (stable references) and H2
+            (human-readable errors). Introduced by 4079d48 "core: run-scoped virtual file store"
+            (2026-07-31). design-core.md:33,116 pairs read and edit under one reason ("the eventual editor
+            of these files is a model"), pushing the numbered read toward H1; but this is as-built prose
+            reading the same module doc, and it claims a model editor the code does not support -
+            design-core.md:118 and the residue both state there are no model-facing file tools
+            [not-independent]. A human could confirm the format was intended for an eventual model reader
+            (H1 as design intent) but find that consumer unbuilt, so within the crate as it stands H2
+            (navigation/error display, seen by a person) is what the format serves. The distinguishing
+            evidence the ledger anticipated (whether the model's file tools present this format) is still
+            absent because those tools are unbuilt. Verdict NARROWED unchanged.
 
 ### E-033  Edits are anchor-based and refuse unless the anchor is unique
 Element:    FileStore::str_replace / MemVfs::str_replace, crates/promptforge-core/src/store.rs
@@ -587,6 +875,19 @@ Verdict:    NARROWED
             H1 vs H2 distinguished by the caller: a model consumer favours H1, a re-applied-edit workflow favours H2.
 Reach:      every str_replace call site (Lua store table and later the model's edit tool)
 Seen by:    whoever edits a stored file
+Proposal:   Candidate evidence found; it supports H1 and leaves H2 unaddressed. store.rs:7-9 module doc:
+            "edits are anchor-based ([FileStore::str_replace]) rather than offset-based, the shape that
+            works for a model." This names the model as the reason the edit primitive is a substring anchor
+            rather than a byte/line offset - exactly H1 (an offset-blind caller). Introduced by 4079d48
+            (2026-07-31). The uniqueness refusal has its own stated reason: store.rs:46-47 AnchorAmbiguous
+            "ambiguous and is refused rather than applied to an arbitrary match", store.rs:36-37
+            AnchorNotFound; commit 4079d48 calls it "str_replace anchor-unique-or-error." This corroborates
+            the deliberateness the record read from the match-counting code (killing H3 simplicity) but
+            does not bear on H1 vs H2. design-core.md:33 "an offset-based edit against a numbered read is
+            the pairing that goes wrong silently ... because the eventual editor of these files is a model"
+            repeats the module comment [not-independent], again the unbuilt model editor. A human would
+            confirm H1 from store.rs:7-9; H2 (anchors survive prior edits) is nowhere addressed in the
+            archive, so it is neither confirmed nor killed. Verdict NARROWED unchanged, leaning H1.
 
 ### E-034  glob supports * within a path segment and ** across slashes
 Element:    glob_match / FileStore::glob semantics, crates/promptforge-core/src/store.rs
@@ -602,6 +903,16 @@ Verdict:    NARROWED
             H1 vs H2 not distinguished within the crate; both produce identical behaviour.
 Reach:      every store.glob call site (Lua store table and later the model's file tools)
 Seen by:    whoever lists stored files
+Proposal:   Candidate evidence found, weak. The same two-wildcard convention (* stops at a separator, **
+            crosses it) is applied independently in the MCP server's catalog resolution, described in
+            README.md:249-250 ("* does not cross a separator and **") and STATUS.md:14 ("* stopping at a
+            separator"). A rule that recurs in a second, unrelated subsystem is a house convention rather
+            than a one-off, mild support for H1 (authors already know the rule). Provenance of the store
+            matcher itself: commit 4079d48 "core: run-scoped virtual file store" (2026-07-31) introduced
+            glob in the FileStore trait list but records no rationale for the wildcard semantics.
+            design-core.md:116 restates the behavior and gives no reason [not-independent]. The archive
+            never states why the segment-aware rule was chosen, so it does not distinguish H1 from H2 -
+            both produce identical behavior, exactly as pass 1 found. Verdict NARROWED unchanged.
 
 ### E-035  One crate-wide `Error` enum spans parsing, transport, and execution
 Element:    Error, crates/promptforge-core/src/error.rs
@@ -617,6 +928,25 @@ Survives:   H1 and H2 survive and overlap: one enum both eases the cross-module 
 Verdict:    NARROWED
 Reach:      every fallible call in the crate
 Seen by:    the caller, who matches on the error
+Proposal:   Candidate evidence found. The workspace house style argues against the shipped choice:
+            rust-how-to.md:273 "Prefer one error type per unit of fallibility to one crate-wide enum, so a
+            caller never sees variants a function cannot produce." The crate keeps one crate-wide enum
+            anyway. The conformance sweep chose to keep it: commit 520bba7 "chore: conform workspace to
+            rust-how-to.md" (2026-07-31) body "core Error stays enum-level: webfetch matches its variants
+            cross-crate." A stated, dated reason for retaining the single enum through a sweep that was
+            otherwise applying the house rules, closest to H2 (a single matchable surface for a cross-crate
+            caller). [self-reported] design-core.md:45 gives a different reason ("no split between a parse
+            error, a validation error, and a run error because there is no validation step to own the
+            middle one") - it bears on neither H1 nor H2 directly, explaining the absence of a three-way
+            phase split [not-independent]. The residue shows the designed shape was three phase enums:
+            design-core-residue.md:932-934 defines ParseError, ValidateError, RunError, and :945 "Three
+            enums, one per phase, is not what exists: there is one Error." Forward-design intention (a
+            ValidateError for a validation phase never built). [intention] Collapse a human could confirm:
+            lean toward H2 on the dated commit reason. Contradiction: the shipped single enum runs against
+            both the house rule (rust-how-to.md:273) and the residue's three-phase design. Verdict NARROWED unchanged.
+            Cross-ref: the reason Error carries #[non_exhaustive] at the enum level but not per-variant -
+            520bba7 "webfetch matches its variants cross-crate" - is recorded with the non_exhaustive
+            family origin at E-037.
 
 ### E-036  The transport error hides its concrete source type behind `Box<dyn Error>`
 Element:    Error::Http, crates/promptforge-core/src/error.rs
@@ -647,6 +977,28 @@ Survives:   H1 and H2 both survive and are not separable here: the attribute sit
 Verdict:    NARROWED
 Reach:      every downstream crate that matches or constructs these types
 Seen by:    the caller, at compile time
+Proposal:   Candidate evidence found, strong. This is the single decision behind the whole
+            #[non_exhaustive] family (E-037 and the forced E-038, E-039, E-040): a documented,
+            workspace-wide house rule adopted wholesale, and this record holds the shared origin the
+            family cross-references. The house rule: rust-how-to.md:272 "Put #[non_exhaustive] on every
+            public error enum, and separately on every variant that carries data." rust-how-to.md:361
+            "Apply #[non_exhaustive] to a public enum, struct, or variant when you introduce it, so adding
+            to it later stays a minor change." The rule's stated purpose is forward-compat and its scope is
+            "on introduction" (uniform), so the rule itself makes H1 (its rationale) and H2 (its uniform
+            application) two faces of one convention rather than rivals - which is what pass 1 found by
+            structure alone. The mechanical adoption: commit 520bba7 "chore: conform workspace to
+            rust-how-to.md" (2026-07-31) body "#[non_exhaustive] on gateway error variants and public
+            data-bag structs ... no behavior change" - a conformance sweep is H2 made explicit, with the
+            house rule as its H1 justification. Earliest adoption predates the sweep and is already framed
+            as rulebook conformance: commit 1cad616 "Tranche 1" (2026-07-28) "#[non_exhaustive] error type
+            that does not leak reqwest::Error ... Follows the Rust rulebook." STATUS.md:56 records it
+            settled: "Public error types are #[non_exhaustive] and leak no dependency's error type."
+            Reading a human could confirm: H1 and H2 are not separable because the house rule fuses them;
+            the archive supplies the missing provenance (a written convention adopted in a dated
+            conformance commit) rather than a way to pick one. Verdict NARROWED unchanged.
+            Cross-ref: Error carries #[non_exhaustive] at the enum level but not per-variant, and 520bba7
+            says why ("webfetch matches its variants cross-crate") - the same fact bears on E-035. The
+            forced family E-038, E-039, E-040 shares this origin and points back here.
 
 ### E-038  The public wire types carry #[non_exhaustive]; the service types do not
 Element:    #[non_exhaustive] on Message, ToolSchema, ToolCall, CompletionResult, crates/promptforge-core/src/client.rs:33,93,109,121
@@ -662,6 +1014,13 @@ Survives:   H1 alone. H3 is refuted by the selective application: the attribute 
 Verdict:    FORCED
 Reach:      every downstream site that constructs or matches Message, ToolSchema, ToolCall, or CompletionResult across the crate boundary
 Seen by:    downstream implementers, who must use constructors and wildcard match arms
+Proposal:   (Bears on a forced verdict; the verdict is unchanged.) This record is part of the
+            #[non_exhaustive] family whose single shared origin is recorded once at E-037: one documented
+            workspace house rule (rust-how-to.md:272,361, forward-compat, applied on introduction),
+            adopted in the dated conformance commit 520bba7 (2026-07-31), earliest adoption 1cad616
+            "Tranche 1" (2026-07-28), settled in STATUS.md:56. This supplies the provenance for the
+            forward-compat reason pass 1 forced from code; it does not change the FORCED verdict.
+            Cross-ref: shared origin at E-037.
 
 ### E-039  Event is marked non_exhaustive so it can grow without breaking external consumers
 Element:    Event enum, crates/promptforge-core/src/observe.rs:82-84
@@ -677,6 +1036,15 @@ Survives:   H1. H3 refuted (impossible): every variant and its fields are pub, s
 Verdict:    FORCED
 Reach:      every external consumer of Event (the MCP server today)
 Seen by:    the consumer, who must write a catch-all arm
+Proposal:   (Bears on a forced verdict; the verdict is unchanged.) This record is part of the
+            #[non_exhaustive] family whose common origin is the documented workspace house rule
+            recorded once at E-037 (rust-how-to.md:272,361, forward-compat, applied on introduction),
+            settled in STATUS.md:56. The rule is the shared origin, not the 520bba7 (2026-07-31 05:28)
+            conformance sweep: Event did not exist at 520bba7 and received #[non_exhaustive] at its own
+            introducing commit 387621e "add an observer seam to the core" (2026-08-02), an instance of
+            the same rule "applied on introduction." This supplies the provenance for the forward-compat
+            reason pass 1 forced from code; it does not change the FORCED verdict.
+            Cross-ref: shared origin at E-037.
 
 ### E-040  StoreError and its variants are #[non_exhaustive]
 Element:    StoreError enum, crates/promptforge-core/src/store.rs
@@ -691,6 +1059,16 @@ Survives:   H1. H2 unnecessary: the variants already expose named public fields 
 Verdict:    FORCED
 Reach:      every caller that matches a StoreError; every FileStore implementor
 Seen by:    a caller handling store failures
+Proposal:   (Bears on a forced verdict; the verdict is unchanged.) This record is part of the
+            #[non_exhaustive] family whose common origin is the documented workspace house rule
+            recorded once at E-037 (rust-how-to.md:272,361, forward-compat, applied on introduction),
+            settled in STATUS.md:56. The rule is the shared origin, not the 520bba7 (2026-07-31 05:28)
+            conformance sweep: StoreError did not exist at 520bba7 and received #[non_exhaustive] (enum
+            and data-carrying variants) at its own introducing commit 4079d48 "core: run-scoped virtual
+            file store" (2026-07-31 05:37), nine minutes after the sweep, an instance of the same rule
+            "applied on introduction." This supplies the provenance for the forward-compat reason pass 1
+            forced from code; it does not change the FORCED verdict.
+            Cross-ref: shared origin at E-037.
 
 ### E-041  Events serialize externally tagged, pinned as a wire contract
 Element:    Event serde derive, crates/promptforge-core/src/observe.rs:82
@@ -721,6 +1099,21 @@ Survives:   H1 and H2. H3 is refuted as unnecessary: the same never-hold-the-ven
 Verdict:    NARROWED
 Reach:      the web_search tool and the credential boundary; changing it would move the vendor key into the client process
 Seen by:    the operator configuring the gateway, not the end caller
+Proposal:   Candidate evidence found; the archive foregrounds H1 heavily and also supports H2. H1
+            (credential isolation) is stated repeatedly: README.md:658-659 "It proxies through the
+            gateway, which holds the Brave API key, so the credential never reaches the process running
+            the prompt." STATUS.md:58 makes it cross-cutting: "The gateway is the only process with an
+            edge to a backend; it holds vendor keys." design-core.md:128 "so the search provider's key
+            never reaches this process" [not-independent]. H2 (vendor/schema decoupling) is supported by
+            STATUS.md:59 "Wire structs are not shared between core and gateway (JSON is the contract)."
+            Code provenance: commit c1c7011 "core: web_search tool proxying through the gateway"
+            (2026-07-29) is title-only, no reason. The residue confirms this is a departure from the
+            original boundary: design-core-residue.md:20 "It holds no vendor key - it posts to the
+            gateway," :38 the designed boundary was "No schema, no table, no paper, no search provider" -
+            a search tool in core at all reverses the intended boundary, which is intention, not a reason
+            for the proxy shape. [intention] Collapse a human could confirm: lean toward H1 (credential
+            isolation) on the repeated cross-cutting principle; H2 still holds on "wire structs are not
+            shared." Verdict NARROWED unchanged.
 
 ### E-043  WebSearch::call returns the gateway's JSON body verbatim as a String
 Element:    WebSearch::call return, crates/promptforge-core/src/tools/web_search.rs:114
@@ -737,6 +1130,15 @@ Survives:   H1 and H2. The trait's String return (tools.rs:32) and a text-consum
 Verdict:    NARROWED
 Reach:      the web_search result surface - the model's entire view of search results
 Seen by:    the model; the caller only as the returned String
+Proposal:   Candidate evidence found, bearing on H2. STATUS.md:59, a settled decision: "Wire structs are
+            not shared between core and gateway (JSON is the contract)." This is precisely H2's mechanism -
+            core deliberately holds no typed view of the gateway's search-result shape, so passing the
+            body through unparsed keeps that separation; it matches the pass-1 finding that core imports
+            none of the gateway's typed WebSearchResponse. design-core.md:128 restates the behavior
+            ("returns the body verbatim") without a reason [not-independent]. Commit c1c7011 (2026-07-29)
+            records no rationale in its empty body. The archive never says whether verbatim was chosen to
+            avoid wasted work for a text consumer (H1) or to stay schema-free (H2); "JSON is the contract"
+            leans H2 but does not exclude H1. Verdict NARROWED unchanged.
 
 ### E-044  Detection is a lenient free function returning Option, separate from parsing
 Element:    promptforge_version, crates/promptforge-core/src/parser.rs, re-exported at lib.rs:28
@@ -754,6 +1156,16 @@ Survives:   H1, H2, H3 all survive and are genuinely different (a normal negativ
 Verdict:    OPEN
 Reach:      every catalog discovery pass and every CLI invocation, before parse
 Seen by:    the server or CLI caller
+Proposal:   Candidate evidence found; it leans H1 but does not settle the three. The commit that added
+            detection states H1 in as many words: commit ead3997 "core: detect promptforge prompts via
+            frontmatter version" (2026-07-31) body "a lenient promptforge_version(source) that reports the
+            engine major ... (absent/malformed -> None, never errors) ... promptforge runs only its own
+            prompts, and plain prompts are the caller's concern." "Plain prompts are the caller's concern"
+            is H1 (a negative result is normal). [self-reported] design-core.md:23 (key choice 4) touches
+            all three: "a caller can ask 'is this one of mine' of an arbitrary file on disk" (H1), "the
+            cheap question a file walker asks" (H2), and the malformed-reads-as-None behavior (H3) - it
+            enumerates the concerns rather than adjudicating them [not-independent]. The commit foregrounds
+            H1; nothing in the archive kills H2 or H3, so OPEN stands. Verdict OPEN unchanged.
 
 ### E-045  The Store handle is Arc<Mutex<Box<dyn FileStore + Send + Sync>>>
 Element:    Store struct, crates/promptforge-core/src/store.rs
@@ -786,6 +1198,23 @@ Survives:   H1, H2, H4 all survive - nothing in the crate distinguishes measured
 Verdict:    OPEN
 Reach:      every section that runs a Lua block
 Seen by:    a prompt author whose block loops without terminating
+Proposal:   Candidate evidence found, strong, pointing at H3. design-core.md states H3 flatly: line 37
+            (key choice 11) "Neither number is measured: both are first cuts chosen to be generous enough
+            that no plausible prompt reaches them." line 96 "Both figures are unmeasured first cuts, set
+            generously so that only a runaway block reaches them." Independence check: the source comment
+            at lua.rs:36 is purely descriptive ("~1e7 instructions") and says nothing about being measured
+            or generous, so design-core.md is not merely repeating a comment - but it is still a model's
+            as-built inference, not a primary record of the decision [not-independent]. The residue gives
+            the same reason as design intention: design-core-residue.md:872 "Every number here is a first
+            cut chosen to be obviously generous rather than tuned," :868 works the headroom ("ten million
+            is three orders of magnitude of headroom"). Forward design, describing a different mechanism
+            than shipped (an interrupt every 100,000 instructions capped at 10,000,000, versus the built
+            hook every 10,000 firing up to 1,000 times) - same order of magnitude. [intention] Code
+            provenance: commit 2b4ea9d "Lua commit 1" (2026-07-29) "an instruction-count hook to abort a
+            runaway block" with no number rationale. Collapse a human could confirm: toward H3 (unmeasured,
+            generous first cut), refuting H1/H2/H4, on two independent archive statements. Caution: both
+            are model/agent-authored accounts and neither is a measurement record; the value's true origin
+            is exactly the contingency section 8 says pass 1 cannot recover. Verdict OPEN unchanged.
 
 ### E-047  Error bodies are truncated to 2000 characters
 Element:    MAX_ERROR_BODY and the inline .take(2000), crates/promptforge-core/src/tools/web_search.rs:13 and client.rs:228
@@ -801,6 +1230,13 @@ Survives:   H1, H2, H3, H4 all survive. The value appears twice and governs how 
 Verdict:    OPEN
 Reach:      the error bodies surfaced by client.complete and WebSearch.call on a non-success status
 Seen by:    whoever reads an Error::Backend body - the caller or the logs - only on failure
+Proposal:   RECORDED ABSENCE - the archive was searched and nothing bears on where 2000 came from. No
+            design document, README, STATUS, or AGENTS mentions the 2000-character cap or MAX_ERROR_BODY
+            at all. The two sites arose in different commits, which explains the naming inconsistency pass
+            1 noted (a named constant in one place, an inline literal in the other) but supplies no reason
+            for the value: the client.rs inline .take(2000) traces to 1cad616 (2026-07-28, Tranche 1) and
+            web_search.rs MAX_ERROR_BODY to c1c7011 (2026-07-29). Neither commit body discusses the number.
+            Verdict OPEN unchanged with no candidate.
 
 ### E-048  The entry section is the first top-level section, chosen by position not name
 Element:    Prompt::entry, crates/promptforge-core/src/parser.rs
@@ -818,6 +1254,31 @@ Verdict:    NARROWED
 Reach:      the public entry() accessor only; no production caller today (the executor does not use it, so it does not in fact fix where execution starts - that is E-004). Its blast radius is any external consumer that calls entry() plus the one parser test.
 Seen by:    a consumer of the public API who calls entry()
 Note:       the group-2 record claimed Reach "every run, since it fixes where execution starts"; the call-site check refutes that. The Evidence was updated to match: the group's "execute.rs:233 iterates sections in order" line was replaced by the call-site finding that entry() has no production caller and run_sections starts at sections[0] directly, and Reach/Seen by were corrected to follow. Verdict and hypotheses stand. Distinct element from E-004 (the executor walk), which independently starts at sections[0]. This record ranks above E-049 and E-050 despite nil production reach because the ledger orders by reach and visibility together: entry() is public API a consumer can call, whereas E-049 and E-050 are seen by nobody, and the ranking's tail slot (E-050, the one met by no one unless it fails) is the least-visible record, not the lowest-reach one - so visibility, not reach, sets the order among these last three.
+Proposal:   Candidate evidence found, strong. This is an unbuilt seam, and the history and residue explain
+            the caller it was built for. Git history explains the orphaned accessor directly: entry() had
+            a real caller in Tranche 1 - commit 1cad616 (2026-07-28) "parse prompt file and execute entry
+            section", whose execute.rs reads let section = prompt.entry(); (module doc: "Tranche 1 runs
+            exactly one round trip: take the entry section's prose"). One day later commit 12d6c60
+            "executor: fall-through across top-level sections" (2026-07-29) rewrote execution to "Walk
+            top-level sections in file order," which starts at sections[0] directly and never calls
+            entry(). So the accessor is a live seam from a single-entry executor, orphaned by the
+            fall-through rewrite - exactly the pass-1 finding that no production site calls it.
+            [self-reported] The residue describes the intended caller, and it is name-based, not
+            positional: design-core-residue.md:115 "## Main is the entry point. Sections do not run in
+            file order: Main reads accumulated state ... and reaches the next step with goto or Task." :5
+            lists the designed Executor and its control-flow machinery as unbuilt. [intention] design-core.md:65
+            restates the shipped behavior ("entry() returns the first top-level section, whatever it is
+            called") without noting it has no caller [not-independent]. Contradiction (archive vs code):
+            the residue's entry is name-based (## Main) with sections not running in file order; the code
+            makes entry positional and runs sections in file order. Pass 1's H2 ("a reserved name was
+            considered and rejected to avoid collisions") is refuted in the code, but the archive shows
+            name-based entry was not rejected over collisions - it was the whole design intention, and the
+            shipped code diverged to positional, so the archive relocates H2 from "considered and rejected"
+            to "designed and not built" (intention, not a reason present in the code). H1 and H3 both still
+            hold for the shipped code; the archive adds provenance rather than distinguishing them.
+            Verdict NARROWED unchanged.
+            Cross-ref: the same designed-but-unbuilt non-linear walk as E-004, which independently runs
+            sections in file order from sections[0].
 
 ### E-049  Store::lock recovers a poisoned mutex instead of propagating
 Element:    Store::lock -> unwrap_or_else(PoisonError::into_inner), crates/promptforge-core/src/store.rs
@@ -833,6 +1294,16 @@ Verdict:    NARROWED
             H1 vs H2 distinguished by whether poison is ever surfaced as an error elsewhere.
 Reach:      every store op (all route through lock)
 Seen by:    nobody directly; a run continues silently after a poisoning panic
+Proposal:   RECORDED ABSENCE - the archive was searched and nothing distinguishes H1 from H2. No design
+            document, README, STATUS, or AGENTS discusses mutex-poison handling or into_inner. The choice
+            traces to commit 4079d48 "core: run-scoped virtual file store" (2026-07-31), whose body
+            describes the trait surface but says nothing about poison recovery. Seam context (bears on the
+            store, not on this specific choice): the same commit notes the store was built ahead of its
+            caller - "Not yet wired into execution (rung 2 step 1 of 4)" - and design-core.md:114 frames
+            FileStore as "the backend contract a filesystem or network backend would implement" [not-independent];
+            that intended fallible backend is the unbuilt caller behind E-040's StoreError and the
+            fallible-but-infallible signatures, which is intention and does not speak to how a poisoned
+            lock is handled. Verdict NARROWED unchanged with no candidate on its own question.
 
 ### E-050  The guard nonce is non-cryptographic randomness
 Element:    make_nonce, crates/promptforge-core/src/execute.rs:85-87
@@ -849,6 +1320,20 @@ Survives:   H1, H2, H3 all survive. The threat is a fetched page forging a close
 Verdict:    OPEN
 Reach:      every untrusted tool result in a section's loop
 Seen by:    no one directly; a security property nobody encounters unless it fails
+Proposal:   Candidate evidence found, weak; it bears on H1's premise but does not settle the three. The
+            commit that added the guard states the threat model and asserts unforgeability: commit a96d4b3
+            "core: guard-wrap untrusted tool output against prompt injection" (2026-07-29) body "an XML tag
+            whose name carries a per-section random nonce ... with any forged occurrence of that tag
+            escaped so a page cannot break out. XML with the nonce in the tag name because the routed model
+            is trained to respect XML delimiting and the close tag stays unforgeable." This confirms H1's
+            premise (the requirement is that fetched content cannot forge the close tag within one run)
+            and asserts the design meets it. Caution: this is the change author's own after-the-fact claim
+            of unforgeability, not an entropy analysis or a comparison against a cryptographic RNG.
+            [self-reported] design-core.md:35 (key choice 10) restates the nonce-in-tag-name and
+            unguessability point [not-independent]. The archive never weighs 64 non-cryptographic bits as
+            sufficient (H1), an oversight (H2), or merely convenient (H3); the threat model it records
+            supports H1's framing but leaves the sufficiency question exactly where pass 1 left it.
+            Verdict OPEN unchanged.
 
 ## Verdict counts
 
