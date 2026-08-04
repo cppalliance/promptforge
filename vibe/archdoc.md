@@ -41,15 +41,12 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - Before adding configuration, public API, or resolution machinery, prefer sandboxed Lua, the run-scoped store, or the catalog when one already carries the work.
 - Keep model-facing prose in Markdown and programmable logic in Lua.
 - Treat each binary as a product boundary and reserve build features for real toolchain or native-build constraints.
+- Promote rationale only when evidence excludes alternatives or a human confirms it; keep archive proposals provisional.
 
 ## Thresholds
 
 - god_atfd: 5
 - god_wmc: 47
-- cluster_params: 3
-- cluster_sites: 2
-- large_diff_files: 6
-- large_diff_lines: 400
 
 ## Decided against
 
