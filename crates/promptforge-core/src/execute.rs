@@ -21,28 +21,30 @@
 //! a decision, so passing [`crate::observe::NullObserver`] changes nothing but
 //! the silence.
 //!
-//! Bound tool declarations replay into each section VM, but this lifecycle step
-//! does not advertise or dispatch tools. Alias scope and dispatch are wired by
-//! a later layer.
+//! Bound tool declarations replay into each section VM. Prompt-wide aliases
+//! and H2 additions form the effective model-visible scope, which is checked
+//! for semantic near-duplicates before concrete tools are advertised under
+//! their local aliases and dispatched by stable identity.
 //!
 //! Still to come: the other exit cases (a descriptor = goto/task/fanout), and
 //! durable state to carry a non-terminal section's model reply forward (today
 //! an intermediate section's model reply is not retained; the store is the
 //! durable channel).
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde_json::json;
 
 use crate::bind::BoundPrompt;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
-use crate::lua::{SectionVm, ToolBindings};
+use crate::lua::{SectionVm, ToolScope};
 use crate::observe::{Observer, detail};
 use crate::parser::Prompt;
 use crate::store::Store;
 use crate::subst;
-use crate::tools::Tool;
-use crate::{Error, Result};
+use crate::tools::{Tool, ToolId, ToolRegistry};
+use crate::{Error, NearDuplicateDiagnostic, Result};
 
 /// The default maximum number of model round trips a single section's
 /// tool-call loop will take before giving up, applied when a prompt's
@@ -122,14 +124,14 @@ pub struct RunOptions<'a> {
 #[derive(Debug, Clone, Copy)]
 pub struct RunPrompt<'a> {
     prompt: &'a Prompt,
-    bindings: Option<&'a ToolBindings>,
+    bound: Option<&'a BoundPrompt>,
 }
 
 impl<'a> From<&'a BoundPrompt> for RunPrompt<'a> {
     fn from(bound: &'a BoundPrompt) -> Self {
         Self {
             prompt: bound.prompt(),
-            bindings: Some(bound.bindings()),
+            bound: Some(bound),
         }
     }
 }
@@ -138,7 +140,7 @@ impl<'a> From<&'a Prompt> for RunPrompt<'a> {
     fn from(prompt: &'a Prompt) -> Self {
         Self {
             prompt,
-            bindings: None,
+            bound: None,
         }
     }
 }
@@ -162,8 +164,9 @@ impl fmt::Debug for RunOptions<'_> {
 /// replay in each section VM. Parsed [`Prompt`] values remain accepted so
 /// existing hosts keep compiling until they adopt the separate binding phase.
 ///
-/// `tools` preserves the outer call contract but is not advertised or
-/// dispatched by this lifecycle-only execution step.
+/// `tools` is the complete callable pool for this run. A bound section exposes
+/// only aliases in its effective `tools.always` plus `tools.add` scope, and
+/// dispatches a returned alias through its frozen [`crate::tools::ToolId`].
 ///
 /// `store` is the run's virtual-file handle. Create it once (typically with
 /// [`Store::memory`]) and pass it in; the same handle is given to every
@@ -186,13 +189,15 @@ impl fmt::Debug for RunOptions<'_> {
 /// [`crate::Error::MissingEnv`] if the gateway client cannot be built when a
 /// model call is needed, [`crate::Error::UnknownScopedTool`] if a section
 /// scopes a tool name absent from `tools`, [`crate::Error::UnknownTool`] if the
-/// model calls a tool that was not provided, [`crate::Error::ToolLoopExhausted`]
-/// if a section's tool-call loop does not converge within its iteration cap, or
-/// any transport/backend error from a model call.
+/// model calls an alias absent from its effective scope,
+/// [`crate::Error::NearDuplicateTools`] if two effective tools meet the picker's
+/// duplicate threshold, [`crate::Error::ToolLoopExhausted`] if a section's
+/// tool-call loop does not converge within its iteration cap, or any
+/// transport/backend error from a model call.
 pub async fn run<'a>(
     prompt: impl Into<RunPrompt<'a>>,
     args: &str,
-    _tools: &[&dyn Tool],
+    tools: &[&dyn Tool],
     store: &Store,
     opts: RunOptions<'_>,
 ) -> Result<String> {
@@ -213,6 +218,7 @@ pub async fn run<'a>(
     }
 
     let RunOptions { observer, client } = opts;
+    let registry = ToolRegistry::new(tools.iter().copied());
     let prompt_section = prompt.title.as_str();
     observer.observe(prompt_section, detail::RUN_STARTED);
 
@@ -221,8 +227,9 @@ pub async fn run<'a>(
     let mut turns: u32 = 0;
     let result = run_sections(
         prompt,
-        run_prompt.bindings,
+        run_prompt.bound,
         args,
+        &registry,
         store,
         observer,
         client,
@@ -251,13 +258,15 @@ pub async fn run<'a>(
 /// # Errors
 /// Returns the same errors as [`run`], which documents them.
 #[expect(
+    clippy::too_many_arguments,
     clippy::too_many_lines,
-    reason = "the lifecycle stays linear so every early failure can tear down its owned section VM before returning"
+    reason = "the lifecycle keeps its borrowed run inputs explicit and linear so every early failure can tear down its owned section VM before returning"
 )]
 async fn run_sections(
     prompt: &Prompt,
-    bindings: Option<&ToolBindings>,
+    bound: Option<&BoundPrompt>,
     args: &str,
+    registry: &ToolRegistry<'_>,
     store: &Store,
     observer: &dyn Observer,
     mut client: Option<GatewayClient>,
@@ -280,9 +289,9 @@ async fn run_sections(
         // grows, which is what the progress contract requires.
         observer.observe(&section.name, detail::SECTION_STARTED);
 
-        let mut vm = match (prompt.shared.as_ref(), bindings) {
-            (Some(shared), Some(bindings)) => {
-                SectionVm::new_with_bindings(shared, bindings, observer, &section.name)?
+        let mut vm = match (prompt.shared.as_ref(), bound) {
+            (Some(shared), Some(bound)) => {
+                SectionVm::new_with_bindings(shared, bound.bindings(), observer, &section.name)?
             }
             (shared, _) => SectionVm::new(shared, observer, &section.name)?,
         };
@@ -309,14 +318,18 @@ async fn run_sections(
         }
 
         // Bound VMs close declaration recording before reply binding or epilog
-        // execution. The effective scope is intentionally unused in this step.
-        if bindings.is_some()
-            && prompt.shared.is_some()
-            && let Err(error) = vm.close_tool_scope(observer, &section.name)
-        {
-            vm.teardown(observer, &section.name);
-            return Err(error);
-        }
+        // execution. Unbound compatibility runs remain tool-free.
+        let scope = if bound.is_some() && prompt.shared.is_some() {
+            match vm.close_tool_scope(observer, &section.name) {
+                Ok(scope) => Some(scope),
+                Err(error) => {
+                    vm.teardown(observer, &section.name);
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
 
         let var = match vm.var() {
             Ok(var) => var,
@@ -333,6 +346,18 @@ async fn run_sections(
             }
         };
         if !prose.trim().is_empty() {
+            let (schemas, dispatch) = match (bound, scope.as_ref()) {
+                (Some(bound), Some(scope)) => {
+                    match prepare_effective_scope(bound, scope, registry, observer, &section.name) {
+                        Ok(prepared) => prepared,
+                        Err(error) => {
+                            vm.teardown(observer, &section.name);
+                            return Err(error);
+                        }
+                    }
+                }
+                _ => (Vec::new(), BTreeMap::new()),
+            };
             if client.is_none() {
                 match GatewayClient::from_env() {
                     Ok(new_client) => client = Some(new_client),
@@ -345,8 +370,9 @@ async fn run_sections(
             if let Some(client) = &client {
                 let text = match run_tool_loop(
                     client,
-                    &[],
-                    &[],
+                    &schemas,
+                    &dispatch,
+                    registry,
                     prose,
                     max_tool_iterations,
                     SectionProgress {
@@ -398,6 +424,88 @@ async fn run_sections(
         .unwrap_or_else(|| "done".to_string()))
 }
 
+fn prepare_effective_scope(
+    bound: &BoundPrompt,
+    scope: &ToolScope,
+    registry: &ToolRegistry<'_>,
+    observer: &dyn Observer,
+    section: &str,
+) -> Result<(Vec<ToolSchema>, BTreeMap<String, ToolId>)> {
+    observer.observe(section, detail::TOOL_SCOPE_VALIDATION_STARTED);
+    let result = validate_effective_scope_inner(bound, scope)
+        .and_then(|()| prepare_scoped_tools(scope, registry));
+    observer.observe(
+        section,
+        if result.is_ok() {
+            detail::TOOL_SCOPE_VALIDATION_SUCCEEDED
+        } else {
+            detail::TOOL_SCOPE_VALIDATION_FAILED
+        },
+    );
+    result
+}
+
+fn validate_effective_scope_inner(bound: &BoundPrompt, scope: &ToolScope) -> Result<()> {
+    let effective = scope
+        .bindings()
+        .iter()
+        .map(crate::lua::ToolBinding::id)
+        .collect::<BTreeSet<_>>();
+    for pair in bound.near_duplicates() {
+        let first_id = ToolId::new(pair.first.id.server(), pair.first.id.name());
+        let second_id = ToolId::new(pair.second.id.server(), pair.second.id.name());
+        if !effective.contains(&first_id) || !effective.contains(&second_id) {
+            continue;
+        }
+        let first_alias = bound.id_to_alias().get(&first_id).cloned().ok_or_else(|| {
+            Error::ToolScopeAnalysis {
+                detail: "selected identity has no frozen alias".to_owned(),
+            }
+        })?;
+        let second_alias = bound
+            .id_to_alias()
+            .get(&second_id)
+            .cloned()
+            .ok_or_else(|| Error::ToolScopeAnalysis {
+                detail: "selected identity has no frozen alias".to_owned(),
+            })?;
+        return Err(Error::NearDuplicateTools {
+            diagnostic: Box::new(NearDuplicateDiagnostic {
+                first_alias,
+                first_id,
+                first_description: pair.first.description.clone(),
+                first_annotations: pair.first.annotations,
+                second_alias,
+                second_id,
+                second_description: pair.second.description.clone(),
+                second_annotations: pair.second.annotations,
+                similarity: pair.similarity,
+            }),
+        });
+    }
+    Ok(())
+}
+
+fn prepare_scoped_tools(
+    scope: &ToolScope,
+    registry: &ToolRegistry<'_>,
+) -> Result<(Vec<ToolSchema>, BTreeMap<String, ToolId>)> {
+    let mut schemas = Vec::with_capacity(scope.bindings().len());
+    let mut dispatch = BTreeMap::new();
+    for binding in scope.bindings() {
+        let tool = registry
+            .get(binding.id())
+            .ok_or_else(|| Error::UnknownScopedTool(binding.alias().to_owned()))?;
+        schemas.push(ToolSchema {
+            name: binding.alias().to_owned(),
+            description: tool.description().to_owned(),
+            parameters: tool.parameters_schema(),
+        });
+        dispatch.insert(binding.alias().to_owned(), binding.id().clone());
+    }
+    Ok((schemas, dispatch))
+}
+
 /// What one section's tool loop needs to report itself: where observations go, which
 /// section they belong to, and the run-wide turn counter it advances.
 ///
@@ -423,13 +531,15 @@ struct SectionProgress<'a> {
 /// is re-sent. The loop is capped at `max_tool_iterations` round trips.
 ///
 /// # Errors
-/// Returns [`Error::UnknownTool`] if the model calls a tool not in `tools`,
+/// Returns [`Error::UnknownTool`] if the model calls an alias absent from
+/// `dispatch`,
 /// [`Error::ToolLoopExhausted`] if the cap is hit without a text reply, or any
 /// transport/backend error from a model call or a tool's own failure.
 async fn run_tool_loop(
     client: &GatewayClient,
     schemas: &[ToolSchema],
-    tools: &[&dyn Tool],
+    dispatch: &BTreeMap<String, ToolId>,
+    registry: &ToolRegistry<'_>,
     prose: String,
     max_tool_iterations: usize,
     progress: SectionProgress<'_>,
@@ -485,10 +595,14 @@ async fn run_tool_loop(
 
                 // Dispatch each requested tool and append its result.
                 for call in &calls {
-                    let tool = tools
-                        .iter()
-                        .find(|t| t.wire_name() == call.name)
-                        .ok_or_else(|| Error::UnknownTool(call.name.clone()))?;
+                    let Some(id) = dispatch.get(&call.name) else {
+                        observer.observe(section, detail::TOOL_CALL_FAILED);
+                        return Err(Error::UnknownTool(call.name.clone()));
+                    };
+                    let Some(tool) = registry.get(id) else {
+                        observer.observe(section, detail::TOOL_CALL_FAILED);
+                        return Err(Error::UnknownScopedTool(call.name.clone()));
+                    };
                     let result = tool.call(call.arguments.clone()).await;
                     observer.observe(
                         section,

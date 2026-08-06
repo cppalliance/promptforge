@@ -1,5 +1,29 @@
 //! The crate's error type and result alias.
 
+/// Diagnostics for two semantic near-duplicates exposed in one model turn.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct NearDuplicateDiagnostic {
+    /// The first prompt-local alias in picker catalog pair order.
+    pub first_alias: String,
+    /// The first stable identity.
+    pub first_id: crate::tools::ToolId,
+    /// The first concrete picker description.
+    pub first_description: String,
+    /// The first concrete picker behavioural hints.
+    pub first_annotations: promptforge_tool_picker::ToolAnnotations,
+    /// The second prompt-local alias in picker catalog pair order.
+    pub second_alias: String,
+    /// The second stable identity.
+    pub second_id: crate::tools::ToolId,
+    /// The second concrete picker description.
+    pub second_description: String,
+    /// The second concrete picker behavioural hints.
+    pub second_annotations: promptforge_tool_picker::ToolAnnotations,
+    /// The cosine similarity reported by the picker.
+    pub similarity: f32,
+}
+
 /// The crate's error type, spanning parsing, HTTP, and execution failures.
 ///
 /// Marked `#[non_exhaustive]` so future variants are not a breaking change. The
@@ -127,6 +151,29 @@ pub enum Error {
         alias: String,
         /// The selected stable identity absent from the registry.
         id: crate::tools::ToolId,
+    },
+
+    /// The picker could not analyze the selected tool identities.
+    #[error("could not analyze the selected tool scope: {detail}")]
+    #[non_exhaustive]
+    ToolScopeAnalysis {
+        /// The picker failure without exposing its concrete error type.
+        detail: String,
+    },
+
+    /// Two tools in one model-visible scope are semantic near-duplicates.
+    #[error(
+        "tool aliases {first_alias:?} ({first_id:?}) and {second_alias:?} ({second_id:?}) are near-duplicates with similarity {similarity}",
+        first_alias = diagnostic.first_alias,
+        first_id = diagnostic.first_id,
+        second_alias = diagnostic.second_alias,
+        second_id = diagnostic.second_id,
+        similarity = diagnostic.similarity,
+    )]
+    #[non_exhaustive]
+    NearDuplicateTools {
+        /// The complete pair diagnostic, boxed to keep every crate error small.
+        diagnostic: Box<NearDuplicateDiagnostic>,
     },
 
     /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
