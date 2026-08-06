@@ -36,6 +36,34 @@ pub mod detail {
     pub const LUA_COMPILATION_SUCCEEDED: &str = "Lua compilation succeeded";
     /// Lua source compilation returned an error.
     pub const LUA_COMPILATION_FAILED: &str = "Lua compilation failed";
+    /// A section VM began loading and executing its shared program.
+    pub const LUA_SHARED_LOAD_STARTED: &str = "Lua shared load started";
+    /// A section VM loaded and executed its shared program successfully.
+    pub const LUA_SHARED_LOAD_SUCCEEDED: &str = "Lua shared load succeeded";
+    /// A section VM failed to load or execute its shared program.
+    pub const LUA_SHARED_LOAD_FAILED: &str = "Lua shared load failed";
+    /// A section VM began executing its preamble.
+    pub const LUA_PREAMBLE_STARTED: &str = "Lua preamble started";
+    /// A section VM executed its preamble successfully.
+    pub const LUA_PREAMBLE_SUCCEEDED: &str = "Lua preamble succeeded";
+    /// A section VM failed to execute its preamble.
+    pub const LUA_PREAMBLE_FAILED: &str = "Lua preamble failed";
+    /// A section VM began binding a model reply.
+    pub const LUA_REPLY_BINDING_STARTED: &str = "Lua reply binding started";
+    /// A section VM bound a model reply successfully.
+    pub const LUA_REPLY_BINDING_SUCCEEDED: &str = "Lua reply binding succeeded";
+    /// A section VM failed to bind a model reply.
+    pub const LUA_REPLY_BINDING_FAILED: &str = "Lua reply binding failed";
+    /// A section VM began executing its epilog.
+    pub const LUA_EPILOG_STARTED: &str = "Lua epilog started";
+    /// A section VM executed its epilog successfully.
+    pub const LUA_EPILOG_SUCCEEDED: &str = "Lua epilog succeeded";
+    /// A section VM failed to execute its epilog.
+    pub const LUA_EPILOG_FAILED: &str = "Lua epilog failed";
+    /// A section VM began teardown.
+    pub const LUA_TEARDOWN_STARTED: &str = "Lua teardown started";
+    /// A section VM completed teardown.
+    pub const LUA_TEARDOWN_SUCCEEDED: &str = "Lua teardown succeeded";
     /// A harness-mediated store write succeeded.
     pub const STORE_WRITE_SUCCEEDED: &str = "Store write succeeded";
     /// A harness-mediated store write failed.
