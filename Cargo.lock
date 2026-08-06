@@ -2712,8 +2712,8 @@ dependencies = [
 name = "promptforge-cli"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "promptforge-core",
+ "promptforge-tool-picker",
  "promptforge-webfetch",
  "tokio",
 ]

@@ -8,13 +8,16 @@
 
 use std::process::ExitCode;
 
+use promptforge_core::bind::bind_prompt;
 use promptforge_core::execute::RunOptions;
-use promptforge_core::observe::NullObserver;
+use promptforge_core::observe::{NullObserver, Observer};
 use promptforge_core::store::Store;
-use promptforge_core::tools::Tool;
 use promptforge_core::{execute, parser::Prompt};
+use promptforge_tool_picker::{Config as PickerConfig, ToolPicker};
 
 mod tools;
+
+const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8081/v1";
 
 /// Entry point. Dispatches subcommands and maps errors to a non-zero exit.
 #[tokio::main]
@@ -28,7 +31,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             };
             let input = args.next().unwrap_or_default();
-            run(&path, &input).await
+            run(&path, &input, &NullObserver).await
         }
         Some(other) => {
             eprintln!("unknown command: {other}\nusage: promptforge run <file.md> [input]");
@@ -43,7 +46,7 @@ async fn main() -> ExitCode {
 
 /// Parse the file, execute its sections with `input` as `args`, and print the
 /// result.
-async fn run(path: &str, input: &str) -> ExitCode {
+async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -59,7 +62,7 @@ async fn run(path: &str, input: &str) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let prompt = match Prompt::parse(&source, &NullObserver) {
+    let prompt = match Prompt::parse(&source, observer) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {e}");
@@ -67,16 +70,25 @@ async fn run(path: &str, input: &str) -> ExitCode {
         }
     };
 
-    let base_url = std::env::var("PROMPTFORGE_BASE_URL").ok();
+    let base_url =
+        std::env::var("PROMPTFORGE_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_owned());
     let token = std::env::var("PROMPTFORGE_TOKEN").ok();
-    let boxed = match tools::select_tools(&[], base_url.as_deref(), token.as_deref()) {
-        Ok(t) => t,
+    let available = tools::available_tools(&base_url, token.as_deref());
+    let picker = match ToolPicker::build(available.catalog().clone(), PickerConfig::default()) {
+        Ok(picker) => picker,
         Err(e) => {
             eprintln!("error: {e}");
             return ExitCode::FAILURE;
         }
     };
-    let tools: Vec<&dyn Tool> = boxed.iter().map(AsRef::as_ref).collect();
+    let registry = available.registry();
+    let bound = match bind_prompt(prompt, &picker, &registry, observer) {
+        Ok(bound) => bound,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     // One run-scoped store, created once and shared by every section. The CLI
     // uses the in-memory sandbox backend by default.
@@ -86,11 +98,11 @@ async fn run(path: &str, input: &str) -> ExitCode {
     // progress; its gateway client comes from the environment, which is what
     // `client: None` selects.
     let options = RunOptions {
-        observer: &NullObserver,
+        observer,
         client: None,
     };
 
-    match execute::run(&prompt, input, &tools, &store, options).await {
+    match execute::run(&bound, input, registry.tools(), &store, options).await {
         Ok(result) => {
             println!("{result}");
             ExitCode::SUCCESS
