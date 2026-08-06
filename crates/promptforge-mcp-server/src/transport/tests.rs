@@ -18,7 +18,7 @@ use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::{Config, Secret};
 use crate::error::ServeError;
 use crate::retrieval::Retrieval;
-use crate::server::PromptForgeServer;
+use crate::server::{PreparedTools, PromptForgeServer};
 
 /// The shared bearer every fixture router is built with.
 const TOKEN: &str = "shared-bearer";
@@ -39,10 +39,12 @@ fn router_with(token: Secret) -> (TempDir, axum::Router) {
     let (dir, config) = fixture(&format!("token = \"{TOKEN}\"\n"));
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
+    let tools = Arc::new(PreparedTools::new(&config.gateway).expect("prepare fixture live tools"));
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Retrieval::idle()),
+        tools,
     );
     (dir, build_router(server, Arc::new(token)))
 }
@@ -231,11 +233,13 @@ async fn serving_over_http_without_a_token_is_refused_by_name() {
     assert!(config.server.token.is_none());
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
+    let tools = Arc::new(PreparedTools::new(&config.gateway).expect("prepare fixture live tools"));
 
     let error = serve_http(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Retrieval::idle()),
+        tools,
     )
     .await
     .expect_err("http will not serve without a shared bearer");

@@ -10,7 +10,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use promptforge_mcp_server::{
-    Catalog, CatalogHandle, Config, OnBroken, Retrieval, Watcher, serve_http, serve_stdio,
+    Catalog, CatalogHandle, Config, OnBroken, PreparedTools, Retrieval, Watcher, serve_http,
+    serve_stdio,
 };
 
 /// What the process prints when the arguments are not the two shapes it takes.
@@ -101,11 +102,13 @@ fn run(invocation: &Invocation) -> Result<(), Box<dyn std::error::Error>> {
     // ten prompts is one whose catalog silently disagrees with its own
     // configuration, and a client sees only a missing tool.
     let catalog = Catalog::resolve(&config, OnBroken::Reject)?;
-    // Before the runtime, because loading the embedding model is seconds of
-    // blocking CPU and there is no runtime worker yet to block. It cannot fail
-    // the boot: a model that will not load costs `need_prompt` and nothing else,
-    // and a harness whose MCP server refuses to start is worse off than one
-    // whose retrieval tool reports itself unavailable.
+    // Tool capability binding is synchronous and model-backed. Prepare its
+    // complete live registry and picker once before the async executor exists,
+    // then share the immutable result across every run.
+    let tools = Arc::new(PreparedTools::new(&config.gateway)?);
+    // Prepare the optional prompt-retrieval index before the runtime for the
+    // same blocking-CPU reason. Unlike the required execution picker above, a
+    // failed retrieval index costs `need_prompt` and nothing else.
     let retrieval = Arc::new(Retrieval::start(&catalog));
     let config = Arc::new(config);
     let catalog = Arc::new(CatalogHandle::new(catalog));
@@ -125,9 +128,9 @@ fn run(invocation: &Invocation) -> Result<(), Box<dyn std::error::Error>> {
             Arc::clone(&retrieval),
         )?;
         if stdio {
-            serve_stdio(config, catalog, retrieval).await?;
+            serve_stdio(config, catalog, retrieval, tools).await?;
         } else {
-            serve_http(config, catalog, retrieval).await?;
+            serve_http(config, catalog, retrieval, tools).await?;
         }
         Ok::<(), Box<dyn std::error::Error>>(())
     })?;

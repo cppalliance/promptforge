@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use super::fixture::{self, PROMPTS};
 use super::{Candidate, Retrieval, Shortlist};
 use crate::catalog::{Catalog, Entry};
-use crate::server::PromptForgeServer;
+use crate::server::{PreparedTools, PromptForgeServer};
 use crate::{CatalogHandle, NEED_PROMPT};
 
 /// The candidate names a capability retrieves, best first.
@@ -41,6 +41,7 @@ fn server(retrieval: Retrieval) -> PromptForgeServer {
         Arc::clone(&prompts.config),
         Arc::new(CatalogHandle::new(prompts.catalog.clone())),
         Arc::new(retrieval),
+        Arc::new(PreparedTools::new(&prompts.config.gateway).expect("prepare fixture live tools")),
     )
 }
 

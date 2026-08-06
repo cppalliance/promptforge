@@ -1,42 +1,88 @@
-//! Binding a prompt's declared tool names, and the gateway its run talks to.
+//! The MCP host's prepared semantic picker and complete live tool registry.
 //!
-//! A prompt names the canonical tools it needs in its frontmatter; the runner
-//! turns that list into live instances before handing them to the executor.
-//! `web_fetch` runs in this process, `web_search` proxies through the gateway,
-//! and an unrecognized name fails the run rather than being dropped.
-//!
-//! This mirrors the same twenty lines in the CLI deliberately. The two callers
-//! differ in where the gateway comes from - the CLI reads the environment and
-//! may have no gateway at all, while a configured server always has one, so
-//! `web_search` here can never be refused for want of credentials. A third
-//! copy would be the point at which a shared crate earns its keep; a second one
-//! is not.
+//! Both artifacts are derived from the same concrete instances once, before
+//! the async runtime starts. The server then shares this immutable environment
+//! across every run. A picker identity therefore cannot exist without a
+//! callable registry entry carrying the same stable identity.
 
 use promptforge_core::client::{DEFAULT_MODEL, GatewayClient};
-use promptforge_core::tools::{Tool, WebSearch};
+use promptforge_core::tools::{Tool, ToolRegistry, WebSearch};
+use promptforge_tool_picker::{
+    Catalog, Config as PickerConfig, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
+};
 use promptforge_webfetch::WebFetch;
 
 use crate::config::GatewayConfig;
 
-/// Builds the tool instances a prompt requested, in the order it named them.
-///
-/// # Errors
-/// Returns a caller-facing message naming the tool when the prompt requests one
-/// this server does not implement.
-pub(super) fn select_tools(
-    requested: &[String],
-    gateway: &GatewayConfig,
-) -> Result<Vec<Box<dyn Tool>>, String> {
-    let mut tools: Vec<Box<dyn Tool>> = Vec::with_capacity(requested.len());
-    for name in requested {
-        let tool: Box<dyn Tool> = match name.as_str() {
-            "web_fetch" => Box::new(WebFetch::new()),
-            "web_search" => Box::new(WebSearch::new(&gateway.url, gateway.token.expose())),
-            other => return Err(format!("the prompt requests an unknown tool: {other}")),
-        };
-        tools.push(tool);
+/// The immutable picker and live tools shared by every server run.
+pub struct PreparedTools {
+    live: Vec<Box<dyn Tool>>,
+    picker: ToolPicker,
+}
+
+impl std::fmt::Debug for PreparedTools {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedTools")
+            .field(
+                "ids",
+                &self.live.iter().map(|tool| tool.id()).collect::<Vec<_>>(),
+            )
+            .field("picker", &self.picker)
+            .finish()
     }
-    Ok(tools)
+}
+
+impl PreparedTools {
+    /// Builds the complete MCP live registry and its matching prepared picker.
+    ///
+    /// # Errors
+    /// Returns the picker error when its model cannot load or the live catalog
+    /// cannot be indexed.
+    pub fn new(gateway: &GatewayConfig) -> Result<Self, promptforge_tool_picker::Error> {
+        let live = live_tools(gateway);
+        let catalog = catalog(&live);
+        let picker = ToolPicker::build(catalog, PickerConfig::default())?;
+        Ok(Self { live, picker })
+    }
+
+    /// Rebuilds the environment for another test gateway while reusing this
+    /// environment's already-loaded embedding model.
+    ///
+    /// # Errors
+    /// Returns the picker error when the new live catalog cannot be indexed.
+    #[cfg(test)]
+    pub(crate) fn rebuild(
+        &self,
+        gateway: &GatewayConfig,
+    ) -> Result<Self, promptforge_tool_picker::Error> {
+        let live = live_tools(gateway);
+        let picker = self.picker.rebuild(catalog(&live))?;
+        Ok(Self { live, picker })
+    }
+
+    /// Returns a registry borrowing every concrete live tool.
+    #[must_use]
+    pub(crate) fn registry(&self) -> ToolRegistry<'_> {
+        ToolRegistry::new(self.live.iter().map(AsRef::as_ref))
+    }
+
+    /// Returns the process-lifetime prepared semantic picker.
+    #[must_use]
+    pub(crate) fn picker(&self) -> &ToolPicker {
+        &self.picker
+    }
+}
+
+fn live_tools(gateway: &GatewayConfig) -> Vec<Box<dyn Tool>> {
+    vec![
+        Box::new(WebFetch::new()),
+        Box::new(WebSearch::new(&gateway.url, gateway.token.expose())),
+    ]
+}
+
+fn catalog(live: &[Box<dyn Tool>]) -> Catalog {
+    Catalog::new(live.iter().map(|tool| descriptor(tool.as_ref())).collect())
 }
 
 /// The client a run's model calls go through, built from the configuration
@@ -48,9 +94,23 @@ pub(super) fn gateway_client(gateway: &GatewayConfig) -> GatewayClient {
     GatewayClient::new(&gateway.url, gateway.token.expose(), model)
 }
 
+/// Derives one abstract descriptor from its callable live instance.
+fn descriptor(tool: &dyn Tool) -> ToolDescriptor {
+    let id = tool.id();
+    ToolDescriptor::new(
+        PickerToolId::new(id.server(), id.name()),
+        tool.description(),
+        tool.parameters_schema(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{gateway_client, select_tools};
+    use promptforge_core::bind::bind_prompt;
+    use promptforge_core::observe::NullObserver;
+    use promptforge_core::parser::Prompt;
+
+    use super::{PreparedTools, gateway_client};
     use crate::config::Config;
 
     fn gateway(model: &str) -> Config {
@@ -61,33 +121,44 @@ mod tests {
     }
 
     #[test]
-    fn no_declared_tools_binds_nothing() {
+    fn complete_live_registry_contains_both_canonical_tools() {
         let config = gateway("");
-        let tools = select_tools(&[], &config.gateway).expect("an empty list binds");
-        assert!(tools.is_empty());
+        let tools = PreparedTools::new(&config.gateway).expect("prepare fixture tools");
+        let registry_ids = tools
+            .registry()
+            .tools()
+            .iter()
+            .map(|tool| {
+                let id = tool.id();
+                (id.server().to_owned(), id.name().to_owned())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            registry_ids,
+            [
+                ("promptforge".to_owned(), "web_fetch".to_owned()),
+                ("promptforge".to_owned(), "web_search".to_owned()),
+            ]
+        );
     }
 
     #[test]
-    fn both_canonical_tools_bind() {
+    fn a_capability_binds_to_the_matching_live_tool() {
         let config = gateway("");
-        let tools = select_tools(
-            &["web_fetch".to_owned(), "web_search".to_owned()],
-            &config.gateway,
+        let tools = PreparedTools::new(&config.gateway).expect("prepare fixture tools");
+        let prompt = Prompt::parse(
+            "---\nname: fixture\ndescription: Binding fixture\nversion: 1\npromptforge: 1\n---\n# Fixture\n\n```lua prompt\ntools.need(\"fetch\", \"Fetch a web page and return its main content as markdown.\")\n```\n\n## Run\n\n```lua\nreturn \"done\"\n```\n",
+            &NullObserver,
         )
-        .expect("both canonical names bind");
-        let names: Vec<&str> = tools.iter().map(|tool| tool.wire_name()).collect();
-        assert_eq!(names, ["web_fetch", "web_search"]);
-    }
+        .expect("parse fixture prompt");
+        let registry = tools.registry();
 
-    #[test]
-    fn an_unknown_tool_is_refused_by_name() {
-        let config = gateway("");
-        let Err(message) = select_tools(&["nope".to_owned()], &config.gateway) else {
-            panic!("an unknown tool should not bind")
-        };
-        assert!(
-            message.contains("nope"),
-            "message should name it: {message}"
+        let bound = bind_prompt(prompt, tools.picker(), &registry, &NullObserver)
+            .expect("bind available capability");
+
+        assert_eq!(
+            bound.alias_to_id()["fetch"],
+            promptforge_core::tools::ToolId::new("promptforge", "web_fetch")
         );
     }
 

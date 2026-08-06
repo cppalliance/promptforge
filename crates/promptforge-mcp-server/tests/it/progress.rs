@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use promptforge_mcp_server::{
-    Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Retrieval,
+    Catalog, CatalogHandle, Config, OnBroken, PreparedTools, PromptForgeServer, Retrieval,
 };
 use rmcp::model::{CallToolRequestParams, CallToolResponse, ProgressNotificationParam};
 use rmcp::service::NotificationContext;
@@ -68,10 +68,12 @@ fn trio_server() -> (TempDir, PromptForgeServer) {
     .expect("the fixture configuration parses");
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
+    let tools = Arc::new(PreparedTools::new(&config.gateway).expect("prepare fixture live tools"));
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Retrieval::idle()),
+        tools,
     );
     (dir, server)
 }
