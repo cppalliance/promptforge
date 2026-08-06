@@ -1,7 +1,26 @@
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
 use promptforge_core::Error;
-use promptforge_core::lua::LuaProgram;
-use promptforge_core::observe::NullObserver;
+use promptforge_core::execute::{RunOptions, run};
+use promptforge_core::lua::{LuaProgram, ToolResolver, bind_tool_declarations};
+use promptforge_core::observe::{NullObserver, Observer};
 use promptforge_core::parser::Prompt;
+use promptforge_core::store::Store;
+use promptforge_core::tools::ToolId;
+
+type Record = (String, String, String);
+
+const LOG_EXECUTION: &str = "fixture-log-checkpoints";
+const PREAMBLE_EXECUTION: &str = "fixture-preamble-return";
+const STORE_EXECUTION: &str = "fixture-store-fallthrough";
+const SHIPPED_PARSE: &str = "fixture-shipped-prompts";
+
+const LOG_CHECKPOINTS: &str = include_str!("../prompts/execution/log-checkpoints.md");
+const PREAMBLE_RETURN: &str = include_str!("../prompts/execution/preamble-return.md");
+const STORE_FALLTHROUGH: &str = include_str!("../prompts/execution/store-fallthrough.md");
 
 struct ValidFixture {
     name: &'static str,
@@ -60,6 +79,79 @@ const INVALID_FIXTURES: &[InvalidFixture] = &[
         message_fragment: "section `Transform` epilog",
     },
 ];
+
+/// A synchronized observer shared by concurrent fixture runs.
+#[derive(Default)]
+struct Recorder(Mutex<Vec<Record>>);
+
+impl Observer for Recorder {
+    fn observe(&self, execution: &str, section: &str, detail: &str) {
+        self.0
+            .lock()
+            .expect("the fixture recorder mutex must remain usable")
+            .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+    }
+}
+
+impl Recorder {
+    fn records(&self) -> Vec<Record> {
+        self.0
+            .lock()
+            .expect("the fixture recorder mutex must remain usable")
+            .clone()
+    }
+}
+
+#[derive(Debug)]
+struct NoTools;
+
+impl ToolResolver for NoTools {
+    fn resolve(&self, capability: &str) -> promptforge_core::Result<ToolId> {
+        panic!("tool-free fixture unexpectedly requested capability {capability:?}")
+    }
+}
+
+fn parse_execution_fixture(
+    source: &str,
+    name: &str,
+    execution: &str,
+    observer: &dyn Observer,
+) -> Prompt {
+    let prompt = Prompt::parse(source, execution, observer)
+        .unwrap_or_else(|error| panic!("fixture {name} failed to parse: {error}"));
+    if let Some(shared) = &prompt.shared {
+        let bindings = bind_tool_declarations(shared, &NoTools, execution, observer, &prompt.title)
+            .unwrap_or_else(|error| {
+                panic!("fixture {name} failed deterministic declaration binding: {error}")
+            });
+        assert!(
+            bindings.bindings().is_empty(),
+            "fixture {name} must remain tool-free"
+        );
+    }
+    prompt
+}
+
+fn checkpoints(records: &[Record], execution: &str) -> Vec<Record> {
+    records
+        .iter()
+        .filter(|(record_execution, _, detail)| {
+            record_execution == execution && detail.starts_with("Lua: ")
+        })
+        .cloned()
+        .collect()
+}
+
+fn collect_markdown(directory: &Path, files: &mut Vec<std::path::PathBuf>) {
+    for entry in fs::read_dir(directory).expect("read repository prompt directory") {
+        let path = entry.expect("read repository prompt entry").path();
+        if path.is_dir() {
+            collect_markdown(&path, files);
+        } else if path.extension().is_some_and(|extension| extension == "md") {
+            files.push(path);
+        }
+    }
+}
 
 #[test]
 fn valid_prompt_files_parse_through_the_public_api() {
@@ -190,4 +282,280 @@ fn verify_preamble_prose_epilog(prompt: &Prompt) {
     assert_eq!(fallback.prose, "This section has prose only.");
     assert!(fallback.preamble.is_none());
     assert!(fallback.epilog.is_none());
+}
+
+#[tokio::test]
+async fn log_fixture_reports_exact_author_checkpoints() {
+    let recorder = Recorder::default();
+    let prompt = parse_execution_fixture(
+        LOG_CHECKPOINTS,
+        "execution/log-checkpoints.md",
+        LOG_EXECUTION,
+        &recorder,
+    );
+    let store = Store::memory();
+    let result = run(
+        &prompt,
+        "",
+        &[],
+        &store,
+        RunOptions {
+            execution: LOG_EXECUTION,
+            observer: &recorder,
+            client: None,
+        },
+    )
+    .await
+    .expect("the log checkpoint fixture must execute offline");
+
+    assert_eq!(result, "logged");
+    assert_eq!(
+        store
+            .read("state.txt")
+            .expect("the prepare section writes state"),
+        "1| prepared"
+    );
+    assert_eq!(
+        checkpoints(&recorder.records(), LOG_EXECUTION),
+        [
+            (
+                LOG_EXECUTION.to_owned(),
+                "Log Checkpoints".to_owned(),
+                "Lua: shared loaded".to_owned(),
+            ),
+            (
+                LOG_EXECUTION.to_owned(),
+                "Prepare".to_owned(),
+                "Lua: shared loaded".to_owned(),
+            ),
+            (
+                LOG_EXECUTION.to_owned(),
+                "Prepare".to_owned(),
+                "Lua: prepare started".to_owned(),
+            ),
+            (
+                LOG_EXECUTION.to_owned(),
+                "Prepare".to_owned(),
+                "Lua: prepare finished".to_owned(),
+            ),
+            (
+                LOG_EXECUTION.to_owned(),
+                "Finish".to_owned(),
+                "Lua: shared loaded".to_owned(),
+            ),
+            (
+                LOG_EXECUTION.to_owned(),
+                "Finish".to_owned(),
+                "Lua: finish started".to_owned(),
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn preamble_return_fixture_skips_model_and_epilog() {
+    let recorder = Recorder::default();
+    let prompt = parse_execution_fixture(
+        PREAMBLE_RETURN,
+        "execution/preamble-return.md",
+        PREAMBLE_EXECUTION,
+        &recorder,
+    );
+    let store = Store::memory();
+    let result = run(
+        &prompt,
+        "early result",
+        &[],
+        &store,
+        RunOptions {
+            execution: PREAMBLE_EXECUTION,
+            observer: &recorder,
+            client: None,
+        },
+    )
+    .await
+    .expect("the preamble return fixture must execute without a model");
+
+    assert_eq!(result, "early result");
+    assert!(
+        store.read("unreachable.txt").is_err(),
+        "the epilog after a scalar preamble return must not run"
+    );
+    assert_eq!(
+        checkpoints(&recorder.records(), PREAMBLE_EXECUTION),
+        [(
+            PREAMBLE_EXECUTION.to_owned(),
+            "Stop Early".to_owned(),
+            "Lua: returning early".to_owned(),
+        )]
+    );
+}
+
+#[tokio::test]
+async fn store_fixture_persists_state_across_fall_through() {
+    let recorder = Recorder::default();
+    let prompt = parse_execution_fixture(
+        STORE_FALLTHROUGH,
+        "execution/store-fallthrough.md",
+        STORE_EXECUTION,
+        &recorder,
+    );
+    let store = Store::memory();
+    let result = run(
+        &prompt,
+        "carried value",
+        &[],
+        &store,
+        RunOptions {
+            execution: STORE_EXECUTION,
+            observer: &recorder,
+            client: None,
+        },
+    )
+    .await
+    .expect("the store fall-through fixture must execute offline");
+
+    assert_eq!(result, "1| carried value");
+    assert_eq!(
+        store
+            .read("handoff.txt")
+            .expect("the handoff remains stored"),
+        "1| carried value"
+    );
+    assert_eq!(
+        checkpoints(&recorder.records(), STORE_EXECUTION),
+        [
+            (
+                STORE_EXECUTION.to_owned(),
+                "Write".to_owned(),
+                "Lua: writing state".to_owned(),
+            ),
+            (
+                STORE_EXECUTION.to_owned(),
+                "Read".to_owned(),
+                "Lua: reading state".to_owned(),
+            ),
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_runs_keep_execution_ids_separate() {
+    const FIRST: &str = "fixture-concurrent-first";
+    const SECOND: &str = "fixture-concurrent-second";
+
+    let recorder = Arc::new(Recorder::default());
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let first_prompt = Arc::new(parse_execution_fixture(
+        PREAMBLE_RETURN,
+        "execution/preamble-return.md",
+        FIRST,
+        recorder.as_ref(),
+    ));
+    let second_prompt = Arc::new(parse_execution_fixture(
+        PREAMBLE_RETURN,
+        "execution/preamble-return.md",
+        SECOND,
+        recorder.as_ref(),
+    ));
+
+    let first_recorder = Arc::clone(&recorder);
+    let first_barrier = Arc::clone(&barrier);
+    let first = tokio::spawn(async move {
+        first_barrier.wait().await;
+        run(
+            first_prompt.as_ref(),
+            "first result",
+            &[],
+            &Store::memory(),
+            RunOptions {
+                execution: FIRST,
+                observer: first_recorder.as_ref(),
+                client: None,
+            },
+        )
+        .await
+    });
+
+    let second_recorder = Arc::clone(&recorder);
+    let second = tokio::spawn(async move {
+        barrier.wait().await;
+        run(
+            second_prompt.as_ref(),
+            "second result",
+            &[],
+            &Store::memory(),
+            RunOptions {
+                execution: SECOND,
+                observer: second_recorder.as_ref(),
+                client: None,
+            },
+        )
+        .await
+    });
+
+    assert_eq!(
+        first
+            .await
+            .expect("the first fixture task must join")
+            .expect("the first fixture run must succeed"),
+        "first result"
+    );
+    assert_eq!(
+        second
+            .await
+            .expect("the second fixture task must join")
+            .expect("the second fixture run must succeed"),
+        "second result"
+    );
+
+    let records = recorder.records();
+    assert_eq!(
+        records
+            .iter()
+            .map(|(execution, _, _)| execution.as_str())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([FIRST, SECOND]),
+        "the shared recorder must retain only the two caller-provided ids"
+    );
+    for execution in [FIRST, SECOND] {
+        assert_eq!(
+            checkpoints(&records, execution),
+            [(
+                execution.to_owned(),
+                "Stop Early".to_owned(),
+                "Lua: returning early".to_owned(),
+            )],
+            "each concurrent run must retain its own checkpoint"
+        );
+        assert!(
+            records
+                .iter()
+                .filter(|(record_execution, _, _)| record_execution == execution)
+                .any(|(_, section, detail)| {
+                    section == "Preamble Return" && detail == "Run succeeded"
+                }),
+            "{execution} must retain its own terminal run record"
+        );
+    }
+}
+
+#[test]
+fn every_shipped_prompt_parses_offline() {
+    let prompts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts");
+    let mut files = Vec::new();
+    collect_markdown(&prompts, &mut files);
+    files.sort();
+    assert_eq!(files.len(), 4, "every shipped markdown prompt is covered");
+
+    for path in files {
+        let source = fs::read_to_string(&path).expect("read shipped prompt");
+        assert!(
+            !source.contains("web_search") && !source.contains("web_fetch"),
+            "{} must declare semantic capabilities, not concrete tools",
+            path.display()
+        );
+        Prompt::parse(&source, SHIPPED_PARSE, &NullObserver)
+            .unwrap_or_else(|error| panic!("{} must parse: {error}", path.display()));
+    }
 }
