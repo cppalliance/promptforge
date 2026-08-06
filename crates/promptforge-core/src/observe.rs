@@ -64,6 +64,24 @@ pub mod detail {
     pub const LUA_TEARDOWN_STARTED: &str = "Lua teardown started";
     /// A section VM completed teardown.
     pub const LUA_TEARDOWN_SUCCEEDED: &str = "Lua teardown succeeded";
+    /// Prompt-level tool declarations began binding.
+    pub const TOOL_BINDING_STARTED: &str = "Tool binding started";
+    /// Prompt-level tool declarations bound successfully.
+    pub const TOOL_BINDING_SUCCEEDED: &str = "Tool binding succeeded";
+    /// Prompt-level tool declaration binding failed.
+    pub const TOOL_BINDING_FAILED: &str = "Tool binding failed";
+    /// A section VM began replaying prompt-level tool declarations.
+    pub const TOOL_REPLAY_STARTED: &str = "Tool replay started";
+    /// A section VM replayed prompt-level tool declarations exactly.
+    pub const TOOL_REPLAY_SUCCEEDED: &str = "Tool replay succeeded";
+    /// A section VM's prompt-level tool declaration replay differed.
+    pub const TOOL_REPLAY_FAILED: &str = "Tool replay failed";
+    /// A section began closing its effective tool scope.
+    pub const TOOL_SCOPE_CLOSING: &str = "Tool scope closing";
+    /// A section's effective tool scope was closed successfully.
+    pub const TOOL_SCOPE_CLOSED: &str = "Tool scope closed";
+    /// A section's effective tool scope could not be closed.
+    pub const TOOL_SCOPE_FAILED: &str = "Tool scope failed";
     /// A harness-mediated store write succeeded.
     pub const STORE_WRITE_SUCCEEDED: &str = "Store write succeeded";
     /// A harness-mediated store write failed.
