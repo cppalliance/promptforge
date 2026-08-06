@@ -630,13 +630,6 @@ Prose for the second section.\n";
     }
 
     #[test]
-    fn missing_h1_errors() {
-        let src = "---\nname: x\ndescription: d\n---\n\nPreface.\n\n## S\n\np\n";
-        let error = Prompt::parse(src, "test", &NullObserver).expect_err("H1 must be required");
-        assert!(error.to_string().contains("requires an H1"));
-    }
-
-    #[test]
     fn empty_h1_title_errors() {
         let src = "---\nname: x\ndescription: d\n---\n\n#\n\n## S\n\np\n";
         let error =
@@ -661,14 +654,6 @@ Prose for the second section.\n";
         let shared = prompt.shared.expect("shared program must be present");
         assert_eq!(shared.source(), "function answer() return 42 end");
         assert_eq!(prompt.description_text, "Description.");
-    }
-
-    #[test]
-    fn shared_library_after_description_is_misplaced() {
-        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\nDescription first.\n\n```lua prompt\nreturn 1\n```\n\n## S\n\np\n";
-        let error =
-            Prompt::parse(src, "test", &NullObserver).expect_err("shared Lua must lead H1 content");
-        assert!(error.to_string().contains("immediately follow the H1"));
     }
 
     #[test]

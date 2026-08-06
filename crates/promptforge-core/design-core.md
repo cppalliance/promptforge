@@ -38,6 +38,8 @@ Prompts depend on semantic aliases, never deployment tool names. H1 `tools.need`
 
 15. **Reranking and generated progress labels remain outside core.** The picker spike measured `bge-reranker-v2-m3` at 0.856 on the clean hackathon set but 0.735 on TOOLRET, below plain bge-small at 0.804, while adding a roughly 568M-parameter model. That domain-dependent result does not justify a mandatory reranker; author-register measurements on a deployment's own catalog must first show reliable benefit. The original `(execution, section, detail)` record remains the authoritative trace. A future label model may derive optional UI text off the critical path, but it may neither replace that record nor influence execution, and it must independently justify quality, latency, and privacy cost.
 
+16. **Complete prompt fixtures live at the public crate boundary.** The unpublished `promptforge-core-tests` workspace binary owns readable, author-shaped valid and invalid Markdown documents. Each file is named and registered explicitly with `include_str!`; table-driven offline unit tests parse through the public `Prompt::parse` API and assert complete structure or the public error variant plus a stable message fragment. Narrow fence near-misses, malformed fields, instruction budgets, and other isolated grammar mechanics remain inline with the parser. This keeps whole-document stories visible without introducing directory discovery, generated loaders, build scripts, network access, model access, or a second parser contract.
+
 ## The public lifecycle separates syntax, deployment binding, and execution
 
 `Prompt::parse(source, execution, observer)` validates Markdown structure, compiles executable Lua regions, reports under the caller's execution id, and returns a `Prompt`. Its frontmatter carries `name`, `description`, optional `promptforge` engine major, optional `default_return`, and optional `max_tool_iterations`. It carries no tool list. The parsed value contains the required title, optional shared program, H1 description text, and top-level section tree.
@@ -90,4 +92,4 @@ Persistent bytecode, compatibility parsing for the removed grammar, cross-sectio
 
 `design-core-orig.md` is byte-for-byte historical and is not part of the current contract.
 
-*2026-08-06 12:20 - GPT-5.6 Sol*
+*2026-08-06 13:10 - GPT-5.6 Sol*
