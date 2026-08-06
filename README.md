@@ -539,14 +539,22 @@ Human-readable description (not executed).
 
 ## Section
 
+```lua
+var.subject = args
+```
+
 Prose the model reads.
+
+```lua
+return reply
+```
 ```
 
 - `---` delimited YAML frontmatter (`name`, `description`, `version`, `promptforge` required; `default_return` and `max_tool_iterations` optional).
 - `promptforge:` is the **engine version** that marks the file as a promptforge prompt (supported major: `1`). It is distinct from `version:`, which is the author's own revision of the prompt. A file without a `promptforge:` version is not a promptforge prompt and the CLI declines to run it; an unsupported major is refused, never silently degraded.
 - Exactly one `# Title` is required. Markdown before it is ignored.
 - The H1 may immediately open with one exact, unindented triple-backtick `lua prompt` fence after any number of blank lines. Its exact triple-backtick closing line ends the shared library, and the remaining H1 text is the human-readable description. A reserved `lua prompt` fence after description prose, a second one, or an inexact closing marker is an error. Indented markers, longer backtick runs, different capitalization, and extra info tokens are ordinary Markdown.
-- `## Section` headings are executable units; they run top to bottom (fall-through). Each may begin with a single ` ```lua ` block followed by prose.
+- `## Section` headings are executable units; they run top to bottom (fall-through). Each section parses as an optional exact leading `lua` preamble fence, prose, and an optional exact trailing `lua` epilog fence. Reserved fences use exact unindented lowercase ` ```lua ` opening lines and exact unindented ` ``` ` closing lines. Blank lines may surround them. A lone reserved fence is the preamble. Lua fences between prose, longer or indented fences, different capitalization, extra info tokens, and marker-looking lines inside a longer fence remain model-facing prose.
 
 ## Prompt language
 
@@ -559,28 +567,26 @@ promptforge run <file.md> [input]
 
 `input` is exposed to the prompt as `args`.
 
-### The Lua block
+### Section Lua phases
 
-A section may open with one ` ```lua ` fence. It runs before the model, in a
-sandbox (no filesystem, network, or `os`). It can read `args` and `sys`, write
-the `var` table, and end the run early by returning a value:
+A section may open with an exact ` ```lua ` preamble fence and close with an exact ` ```lua ` epilog fence. Both are compiled during parsing with errors located at the section heading and phase. Compilation reports contain only fixed strings, never Lua source or diagnostic payloads.
+
+The current executor retains its one-phase compatibility behavior: it runs the compiled preamble's retained source before the model in a sandbox (no filesystem, network, or `os`) and does not run the epilog yet. The preamble can read `args` and `sys`, write the `var` table, and end the run early by returning a value:
 
 ```lua
 return args              -- finishes the run with this value; no model call
 ```
 
-If the block returns nothing (or there is no block), the section's prose is sent
-to the model.
+If the preamble returns nothing (or there is no preamble), the section's prose is sent to the model. Parsing and retaining the epilog does not yet bind `reply` or change executor lifecycle.
 
-Core also exposes the next lifecycle's `SectionVm` building block. The parser compiles and retains the optional H1 `lua prompt` program, but the current executor does not run it yet. `SectionVm` can run an optional compiled shared program before delayed host injection, then keep one hardened environment and one instruction budget across explicit `run_preamble`, `bind_reply`, `run_epilog`, and `teardown` operations. `bind_tool_declarations` runs shared code once against a deterministic `ToolResolver`, where `tools.need(alias, description)` records exact case-sensitive aliases and `tools.always(alias)` selects prompt-wide scope. `SectionVm::new_with_bindings` replays those declarations exactly without resolving again; after injection, H2 code may record declared aliases with `tools.add(alias)`, and `close_tool_scope` freezes prompt-wide aliases followed by section additions before any reply binding or epilog. Identity uniqueness and live-registry agreement remain later binding checks. Each lifecycle operation reports fixed payload-free start and outcome details. H2 epilog grammar, the concrete picker adapter, alias-based model dispatch, and complete lifecycle wiring are later steps.
+Core also exposes the next lifecycle's `SectionVm` building block. The parser compiles and retains the optional H1 `lua prompt` program and each H2 preamble and epilog, but the current executor does not run the H1 program or H2 epilog yet. `SectionVm` can run an optional compiled shared program before delayed host injection, then keep one hardened environment and one instruction budget across explicit `run_preamble`, `bind_reply`, `run_epilog`, and `teardown` operations. `bind_tool_declarations` runs shared code once against a deterministic `ToolResolver`, where `tools.need(alias, description)` records exact case-sensitive aliases and `tools.always(alias)` selects prompt-wide scope. `SectionVm::new_with_bindings` replays those declarations exactly without resolving again; after injection, H2 code may record declared aliases with `tools.add(alias)`, and `close_tool_scope` freezes prompt-wide aliases followed by section additions before any reply binding or epilog. Identity uniqueness and live-registry agreement remain later binding checks. Each lifecycle operation reports fixed payload-free start and outcome details. The concrete picker adapter, alias-based model dispatch, and complete lifecycle wiring remain later steps.
 
 ### Substitution
 
-Before the model sees the prose, `{{ path }}` placeholders are resolved from
-three namespaces:
+Before the model sees the prose, `{{ path }}` placeholders are resolved from three namespaces. Substitution applies only to prose - never to preamble or epilog Lua source:
 
 - `{{ args }}` - the raw input string.
-- `{{ var.x }}` - values the Lua block wrote (`var.x = ...`).
+- `{{ var.x }}` - values the Lua preamble wrote (`var.x = ...`).
 - `{{ sys.when }}` / `{{ sys.now }}` / `{{ sys.id }}` - runtime metadata: the run's
   launch timestamp, a build-time timestamp, and the context id.
 

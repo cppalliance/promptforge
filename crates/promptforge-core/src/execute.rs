@@ -1,18 +1,18 @@
 //! Section execution and fall-through.
 //!
 //! The run walks the top-level sections in file order, each in a fresh context.
-//! For each section: run its Lua block; if the chunk returns a plain value that
-//! value is the run's result and the run ends immediately (this doubles as the
-//! return fence - sections after it are not reached by fall-through). Otherwise
-//! the section's prose is `{{ }}`-substituted (over `args`, the `var` the block
-//! wrote, and the runtime `sys`) and, if non-empty, sent to the gateway for one
-//! round trip; then control falls through to the next section.
+//! For each section, the current compatibility path runs the preamble's retained
+//! source; if it returns a plain value, that value is the run's result and the
+//! run ends immediately. Otherwise the section's prose is `{{ }}`-substituted
+//! over `args`, the `var` the preamble wrote, and the runtime `sys` and, if
+//! non-empty, sent to the gateway for one round trip. Parsed epilogs are not
+//! executed until the complete section lifecycle is wired.
 //!
 //! Running off the last section ends the run: the result is `default_return`
 //! from the frontmatter, else the last model reply, else a generic completion.
 //!
 //! One run-scoped [`Store`] is created once by the caller and threaded through
-//! every section (both its Lua block and, later, the model's file tools), so
+//! every section (both its Lua preamble and, later, the model's file tools), so
 //! bulk state persists across the context-clearing transitions even though a
 //! section's conversation never does.
 //!
@@ -127,8 +127,8 @@ impl fmt::Debug for RunOptions<'_> {
 /// `args` is the single raw input string, exposed to Lua and to `{{ args }}`.
 ///
 /// `tools` is the run's full pool of available tools. Tool scoping is opt-in
-/// per section: a section advertises only the tools its Lua block named with
-/// `tools.add(...)`, and a section with no Lua block (or one that never calls
+/// per section: a section advertises only the tools its Lua preamble named with
+/// `tools.add(...)`, and a section with no preamble (or one that never calls
 /// `tools.add`) advertises none. Only a section's scoped subset is shown to and
 /// dispatchable by the model for that section. When the model asks to call one,
 /// the executor dispatches it, appends the result to the conversation, and
@@ -138,7 +138,7 @@ impl fmt::Debug for RunOptions<'_> {
 ///
 /// `store` is the run's virtual-file handle. Create it once (typically with
 /// [`Store::memory`]) and pass it in; the same handle is given to every
-/// section's Lua block, so files persist across sections even though each
+/// section's Lua preamble, so files persist across sections even though each
 /// section's context is cleared on entry. It is a shared handle, so passing
 /// `&store` (not a fresh store per section) is what makes the state durable.
 ///
@@ -152,7 +152,7 @@ impl fmt::Debug for RunOptions<'_> {
 /// Returns [`crate::Error::UnsupportedVersion`] if the prompt declares a
 /// `promptforge:` major this build does not support,
 /// [`crate::Error::Parse`] if the file has no `promptforge:` version (it is not
-/// a promptforge prompt), [`crate::Error::Lua`] if a Lua block fails,
+/// a promptforge prompt), [`crate::Error::Lua`] if a Lua preamble fails,
 /// [`crate::Error::Substitution`] if a `{{ }}` path cannot be resolved,
 /// [`crate::Error::MissingEnv`] if the gateway client cannot be built when a
 /// model call is needed, [`crate::Error::UnknownScopedTool`] if a section
@@ -237,11 +237,12 @@ async fn run_sections(
         // grows, which is what the progress contract requires.
         observer.observe(&section.name, detail::SECTION_STARTED);
 
-        // Run the section's Lua block. A returned value ends the whole run.
-        // The block's `tools.add(...)` names (empty without a Lua block) scope
+        // Run the section's preamble through the existing compatibility path.
+        // Its `tools.add(...)` names (empty without a preamble) scope
         // which tools this section may advertise and dispatch.
-        let (var, scoped_names) = if let Some(source) = &section.lua {
-            let outcome = lua::run_chunk(source, args, &sys, store, observer, &section.name)?;
+        let (var, scoped_names) = if let Some(program) = &section.preamble {
+            let outcome =
+                lua::run_chunk(program.source(), args, &sys, store, observer, &section.name)?;
             if let Some(value) = outcome.returned {
                 // The return fence: this section did finish, and the run ends
                 // with it, so the boundary is reported before returning.

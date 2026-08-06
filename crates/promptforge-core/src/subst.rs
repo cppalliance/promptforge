@@ -1,12 +1,13 @@
 //! `{{ }}` prose substitution.
 //!
-//! After a section's Lua block runs, the harness resolves `{{ path }}`
-//! placeholders in the prose before the model sees it. Three namespaces are
-//! available: `args` (the single raw input string), `var` (values the Lua block
-//! wrote), and `sys` (runtime-provided metadata). Resolution is a single pass
-//! with no recursion: scalars render as strings, tables/arrays as JSON, and a
-//! missing path is a hard error. Substitution does no arithmetic - compute in
-//! Lua and reference the result.
+//! After a section's Lua preamble runs, the harness resolves `{{ path }}`
+//! placeholders in the prose before the model sees it. Lua source in the
+//! preamble and epilog is never substituted. Three namespaces are available:
+//! `args` (the single raw input string), `var` (values the preamble wrote), and
+//! `sys` (runtime-provided metadata). Resolution is a single pass with no
+//! recursion: scalars render as strings, tables/arrays as JSON, and a missing
+//! path is a hard error. Substitution does no arithmetic - compute in Lua and
+//! reference the result.
 
 use serde_json::Value;
 
@@ -14,8 +15,9 @@ use crate::{Error, Result};
 
 /// Resolve every `{{ path }}` in `prose` against `args`, `var`, and `sys`.
 ///
-/// `var` and `sys` are JSON objects (`var` read back from the Lua block, `sys`
-/// built by the runtime).
+/// `var` and `sys` are JSON objects (`var` read back from the Lua preamble,
+/// `sys` built by the runtime). This function receives prose only and does not
+/// transform either compiled Lua phase.
 ///
 /// # Errors
 /// Returns [`Error::Substitution`] for an unclosed `{{`, an unknown namespace, a
