@@ -1,12 +1,10 @@
-//! Section execution and fall-through.
+//! Section lifecycle execution and fall-through.
 //!
-//! The run walks the top-level sections in file order, each in a fresh context.
-//! For each section, the current compatibility path runs the preamble's retained
-//! source; if it returns a plain value, that value is the run's result and the
-//! run ends immediately. Otherwise the section's prose is `{{ }}`-substituted
-//! over `args`, the `var` the preamble wrote, and the runtime `sys` and, if
-//! non-empty, sent to the gateway for one round trip. Parsed epilogs are not
-//! executed until the complete section lifecycle is wired.
+//! The run walks top-level sections in file order, creating one isolated
+//! [`crate::lua::SectionVm`] for each. Shared Lua loads before host injection,
+//! then the preamble, model reply binding, and epilog use that same VM. A
+//! scalar preamble return skips the model and epilog; a scalar epilog return
+//! ends the run after the model.
 //!
 //! Running off the last section ends the run: the result is `default_return`
 //! from the frontmatter, else the last model reply, else a generic completion.
@@ -23,8 +21,9 @@
 //! a decision, so passing [`crate::observe::NullObserver`] changes nothing but
 //! the silence.
 //!
-//! A section that declares tools runs a tool-call loop: the model's requested
-//! calls are dispatched and their results fed back until it answers with text.
+//! Bound tool declarations replay into each section VM, but this lifecycle step
+//! does not advertise or dispatch tools. Alias scope and dispatch are wired by
+//! a later layer.
 //!
 //! Still to come: the other exit cases (a descriptor = goto/task/fanout), and
 //! durable state to carry a non-terminal section's model reply forward (today
@@ -35,8 +34,9 @@ use std::fmt;
 
 use serde_json::json;
 
+use crate::bind::BoundPrompt;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
-use crate::lua;
+use crate::lua::{SectionVm, ToolBindings};
 use crate::observe::{Observer, detail};
 use crate::parser::Prompt;
 use crate::store::Store;
@@ -48,6 +48,9 @@ use crate::{Error, Result};
 /// tool-call loop will take before giving up, applied when a prompt's
 /// frontmatter does not declare its own `max_tool_iterations`.
 const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
+
+/// The prompt language major this executor implements.
+const SUPPORTED_MAJOR: u32 = 1;
 
 /// The rule sentence prefixed to every untrusted tool result, telling the model
 /// the enclosed text is data to analyze and not instructions to follow.
@@ -111,6 +114,35 @@ pub struct RunOptions<'a> {
     pub client: Option<GatewayClient>,
 }
 
+/// A prompt accepted by [`run`].
+///
+/// A [`BoundPrompt`] supplies frozen H1 declaration replay data. A parsed
+/// [`Prompt`] remains accepted as a compatibility input for hosts that have not
+/// yet adopted the separate binding phase; it has no frozen declarations.
+#[derive(Debug, Clone, Copy)]
+pub struct RunPrompt<'a> {
+    prompt: &'a Prompt,
+    bindings: Option<&'a ToolBindings>,
+}
+
+impl<'a> From<&'a BoundPrompt> for RunPrompt<'a> {
+    fn from(bound: &'a BoundPrompt) -> Self {
+        Self {
+            prompt: bound.prompt(),
+            bindings: Some(bound.bindings()),
+        }
+    }
+}
+
+impl<'a> From<&'a Prompt> for RunPrompt<'a> {
+    fn from(prompt: &'a Prompt) -> Self {
+        Self {
+            prompt,
+            bindings: None,
+        }
+    }
+}
+
 impl fmt::Debug for RunOptions<'_> {
     /// Formats the options without the observer, which is a trait object and
     /// carries no `Debug`; its presence is reported instead.
@@ -126,15 +158,12 @@ impl fmt::Debug for RunOptions<'_> {
 ///
 /// `args` is the single raw input string, exposed to Lua and to `{{ args }}`.
 ///
-/// `tools` is the run's full pool of available tools. Tool scoping is opt-in
-/// per section: a section advertises only the tools its Lua preamble named with
-/// `tools.add(...)`, and a section with no preamble (or one that never calls
-/// `tools.add`) advertises none. Only a section's scoped subset is shown to and
-/// dispatchable by the model for that section. When the model asks to call one,
-/// the executor dispatches it, appends the result to the conversation, and
-/// re-sends, looping until the model returns a final text reply. The cap on
-/// those round trips is the prompt's `max_tool_iterations` when set, otherwise
-/// a raised runtime default. Pass an empty slice to disable tools entirely.
+/// `prompt` normally receives a [`BoundPrompt`], whose frozen H1 declarations
+/// replay in each section VM. Parsed [`Prompt`] values remain accepted so
+/// existing hosts keep compiling until they adopt the separate binding phase.
+///
+/// `tools` preserves the outer call contract but is not advertised or
+/// dispatched by this lifecycle-only execution step.
 ///
 /// `store` is the run's virtual-file handle. Create it once (typically with
 /// [`Store::memory`]) and pass it in; the same handle is given to every
@@ -160,18 +189,19 @@ impl fmt::Debug for RunOptions<'_> {
 /// model calls a tool that was not provided, [`crate::Error::ToolLoopExhausted`]
 /// if a section's tool-call loop does not converge within its iteration cap, or
 /// any transport/backend error from a model call.
-pub async fn run(
-    prompt: &Prompt,
+pub async fn run<'a>(
+    prompt: impl Into<RunPrompt<'a>>,
     args: &str,
-    tools: &[&dyn Tool],
+    _tools: &[&dyn Tool],
     store: &Store,
     opts: RunOptions<'_>,
 ) -> Result<String> {
+    let run_prompt = prompt.into();
+    let prompt = run_prompt.prompt;
     // Gate on the declared engine major before doing any work: promptforge runs
     // only its own prompts, and refuses an unsupported major rather than
     // silently degrading. A file with no `promptforge:` version is not a
     // promptforge prompt at all, which is the caller's concern, not ours.
-    const SUPPORTED_MAJOR: u32 = 1;
     match prompt.frontmatter.promptforge {
         Some(SUPPORTED_MAJOR) => {}
         Some(other) => return Err(Error::UnsupportedVersion(other)),
@@ -189,7 +219,16 @@ pub async fn run(
     // The turn count is threaded through the whole run so `RunFinished` can
     // report the total even when a section fails part way through it.
     let mut turns: u32 = 0;
-    let result = run_sections(prompt, args, tools, store, observer, client, &mut turns).await;
+    let result = run_sections(
+        prompt,
+        run_prompt.bindings,
+        args,
+        store,
+        observer,
+        client,
+        &mut turns,
+    )
+    .await;
 
     observer.observe(
         prompt_section,
@@ -211,10 +250,14 @@ pub async fn run(
 ///
 /// # Errors
 /// Returns the same errors as [`run`], which documents them.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the lifecycle stays linear so every early failure can tear down its owned section VM before returning"
+)]
 async fn run_sections(
     prompt: &Prompt,
+    bindings: Option<&ToolBindings>,
     args: &str,
-    tools: &[&dyn Tool],
     store: &Store,
     observer: &dyn Observer,
     mut client: Option<GatewayClient>,
@@ -237,47 +280,73 @@ async fn run_sections(
         // grows, which is what the progress contract requires.
         observer.observe(&section.name, detail::SECTION_STARTED);
 
-        // Run the section's preamble through the existing compatibility path.
-        // Its `tools.add(...)` names (empty without a preamble) scope
-        // which tools this section may advertise and dispatch.
-        let (var, scoped_names) = if let Some(program) = &section.preamble {
-            let outcome =
-                lua::run_chunk(program.source(), args, &sys, store, observer, &section.name)?;
-            if let Some(value) = outcome.returned {
-                // The return fence: this section did finish, and the run ends
-                // with it, so the boundary is reported before returning.
-                observer.observe(&section.name, detail::SECTION_FINISHED);
-                return Ok(value);
+        let mut vm = match (prompt.shared.as_ref(), bindings) {
+            (Some(shared), Some(bindings)) => {
+                SectionVm::new_with_bindings(shared, bindings, observer, &section.name)?
             }
-            (outcome.var, outcome.scoped_tools)
-        } else {
-            (json!({}), Vec::new())
+            (shared, _) => SectionVm::new(shared, observer, &section.name)?,
         };
+        if let Err(error) = vm.inject_host(args, &sys, store) {
+            vm.teardown(observer, &section.name);
+            return Err(error);
+        }
 
-        // Resolve the scoped names against the run's tool pool. A name absent
-        // from the pool is a hard error, never a silent drop. The model can
-        // only be shown, and only dispatch, this filtered subset.
-        let section_tools = scoped_tools(tools, &scoped_names)?;
-        let schemas: Vec<ToolSchema> = section_tools
-            .iter()
-            .map(|t| ToolSchema {
-                name: t.wire_name().to_string(),
-                description: t.description().to_string(),
-                parameters: t.parameters_schema(),
-            })
-            .collect();
+        let preamble_return = if let Some(program) = &section.preamble {
+            match vm.run_preamble(program, observer, &section.name) {
+                Ok(returned) => returned,
+                Err(error) => {
+                    vm.teardown(observer, &section.name);
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(value) = preamble_return {
+            vm.teardown(observer, &section.name);
+            observer.observe(&section.name, detail::SECTION_FINISHED);
+            return Ok(value);
+        }
 
-        // Substitute the prose; if there is any, take one model round trip.
-        let prose = subst::substitute(&section.prose, args, &var, &sys)?;
+        // Bound VMs close declaration recording before reply binding or epilog
+        // execution. The effective scope is intentionally unused in this step.
+        if bindings.is_some()
+            && prompt.shared.is_some()
+            && let Err(error) = vm.close_tool_scope(observer, &section.name)
+        {
+            vm.teardown(observer, &section.name);
+            return Err(error);
+        }
+
+        let var = match vm.var() {
+            Ok(var) => var,
+            Err(error) => {
+                vm.teardown(observer, &section.name);
+                return Err(error);
+            }
+        };
+        let prose = match subst::substitute(&section.prose, args, &var, &sys) {
+            Ok(prose) => prose,
+            Err(error) => {
+                vm.teardown(observer, &section.name);
+                return Err(error);
+            }
+        };
         if !prose.trim().is_empty() {
             if client.is_none() {
-                client = Some(GatewayClient::from_env()?);
+                match GatewayClient::from_env() {
+                    Ok(new_client) => client = Some(new_client),
+                    Err(error) => {
+                        vm.teardown(observer, &section.name);
+                        return Err(error);
+                    }
+                }
             }
             if let Some(client) = &client {
-                let text = run_tool_loop(
+                let text = match run_tool_loop(
                     client,
-                    &schemas,
-                    &section_tools,
+                    &[],
+                    &[],
                     prose,
                     max_tool_iterations,
                     SectionProgress {
@@ -286,13 +355,38 @@ async fn run_sections(
                         turns,
                     },
                 )
-                .await?;
+                .await
+                {
+                    Ok(text) => text,
+                    Err(error) => {
+                        vm.teardown(observer, &section.name);
+                        return Err(error);
+                    }
+                };
+                if let Err(error) = vm.bind_reply(&text, observer, &section.name) {
+                    vm.teardown(observer, &section.name);
+                    return Err(error);
+                }
                 last_reply = Some(text);
             }
         }
 
+        let epilog_return = if let Some(program) = &section.epilog {
+            match vm.run_epilog(program, observer, &section.name) {
+                Ok(returned) => returned,
+                Err(error) => {
+                    vm.teardown(observer, &section.name);
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
+        vm.teardown(observer, &section.name);
         observer.observe(&section.name, detail::SECTION_FINISHED);
-        // Fall through to the next section (context clears - nothing is carried).
+        if let Some(value) = epilog_return {
+            return Ok(value);
+        }
     }
 
     // Ran off the end.
@@ -302,27 +396,6 @@ async fn run_sections(
         .clone()
         .or(last_reply)
         .unwrap_or_else(|| "done".to_string()))
-}
-
-/// Resolve a section's scoped tool names against the run's tool pool, in
-/// first-named order, returning the matching subset the section may advertise
-/// and dispatch.
-///
-/// # Errors
-/// Returns [`Error::UnknownScopedTool`] if a scoped name has no matching tool
-/// in `tools`, so a typo or an undeclared tool fails loudly rather than being
-/// silently dropped.
-fn scoped_tools<'a>(tools: &[&'a dyn Tool], names: &[String]) -> Result<Vec<&'a dyn Tool>> {
-    let mut selected: Vec<&'a dyn Tool> = Vec::with_capacity(names.len());
-    for name in names {
-        let tool = tools
-            .iter()
-            .copied()
-            .find(|t| t.wire_name() == name)
-            .ok_or_else(|| Error::UnknownScopedTool(name.clone()))?;
-        selected.push(tool);
-    }
-    Ok(selected)
 }
 
 /// What one section's tool loop needs to report itself: where observations go, which

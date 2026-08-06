@@ -8,7 +8,7 @@ This is the authoritative design for `promptforge-core`. It distinguishes behavi
 
 ### Crate boundary
 
-`promptforge-core` is a library. A caller parses Markdown into `Prompt`, supplies input, a concrete tool pool, a run-scoped `Store`, and `RunOptions`, then awaits `execute::run`. There is no executor object and no state outliving the call.
+`promptforge-core` is a library. A caller parses Markdown into `Prompt`, binds it into `BoundPrompt`, supplies input, a run-scoped `Store`, and `RunOptions`, then awaits `execute::run`. Parsed prompts remain accepted temporarily so hosts can migrate to the separate binding phase without a flag day. There is no executor object and no state outliving the call.
 
 The crate currently exposes `client`, `execute`, `lua`, `observe`, `parser`, `store`, `subst`, and `tools`. The crate root re-exports `Error`, `Result`, and `promptforge_version`.
 
@@ -16,7 +16,7 @@ The crate currently exposes `client`, `execute`, `lua`, `observe`, `parser`, `st
 
 A prompt currently consists of YAML frontmatter without concrete tools, exactly one required H1 title, an optional compiled shared library, and one or more H2 sections. Ordinary Markdown before the H1 is ignored. The shared library is reserved by an exact unindented `lua prompt` Markdown fence immediately after the H1, allowing blank lines but no prose before it. Reserved-looking marker lines inside a longer Markdown fence remain prose. Each section parses into an optional compiled Lua preamble, prose, and an optional compiled Lua epilog. Top-level sections execute in file order. Child sections parse but do not execute.
 
-Each section currently gets a fresh Lua VM. Its Lua can read `args` and `sys`, write `var`, scope concrete tools with `tools.add`, and use the run-scoped virtual store. A scalar top-level return ends the run. Otherwise substituted non-empty prose enters the model tool loop. Falling off the final section returns `default_return`, the last model reply, or `"done"` in that order.
+Each section gets a fresh persistent `SectionVm`. The bound H1 shared program loads first, host values are injected, and the optional preamble, model reply binding, and optional epilog all use the same environment. A scalar preamble return skips model and epilog and ends the run. Otherwise substituted non-empty prose enters a tool-free model turn, its text is bound as `reply`, and a scalar epilog return ends the run. Empty prose skips the model and leaves `reply` nil while still running the epilog. Teardown destroys the VM before the section finishes. Falling off the final section returns `default_return`, the last model reply, or `"done"` in that order.
 
 The `Store` remains the sole intentional mutable channel across section boundaries. Direct `Store` calls are ordinary library operations and are unobserved. Store calls made through the Lua execution harness are observed without exposing paths or contents.
 
@@ -26,7 +26,7 @@ Every callable `Tool` exposes a stable `ToolId` consisting of a server and a nam
 
 `Tool` also exposes its exact model-facing description and parameter schema. `ToolRegistry` preserves supplied order and repeated identities, and resolves live instances by `ToolId`. The registry remains a faithful collection, while prompt binding validates the complete registry atomically and rejects any repeated live identity.
 
-The existing executor still scopes, advertises, and dispatches tools by `wire_name` until alias binding ships. The wire name is therefore a temporary transport detail, not an identity key for new APIs.
+The executor does not yet advertise or dispatch tools. The existing concrete tool loop remains an internal compatibility facility while alias-based advertisement and `ToolId` dispatch are reserved for the next execution step.
 
 ### Picker near-duplicate analysis
 
@@ -84,7 +84,7 @@ Every compiled program run after injection uses the same Lua environment. A host
 
 One instruction hook and counter belong to the VM, so shared-library, preamble, and epilog execution consume one section-wide budget rather than resetting it at phase boundaries. Store functions are installed inside an `mlua` scope for each synchronous Lua phase: they borrow the caller's observer long enough to report each operation immediately, but neither observer nor scoped callback remains in the VM while the host awaits a model. The `mlua` `send` feature and send-safe tool recorder let the owned VM move with an async run without putting a mutex around Lua or holding a guard across an await.
 
-The existing `run_chunk` compatibility path now uses `SectionVm` for one phase and retains expression evaluation compatibility. Parser grammar and the model executor do not yet construct the full shared/preamble/reply/epilog lifecycle.
+The existing `run_chunk` compatibility path still uses `SectionVm` for one phase and retains expression evaluation compatibility. The model executor now constructs the shared/preamble/reply/epilog lifecycle directly.
 
 ### Lua declaration and scope modes
 
@@ -94,7 +94,7 @@ The resulting `ToolBindings` is immutable and ordered. `SectionVm::new_with_bind
 
 After host injection, the section's `tools` table is in H2 recording mode. Only `tools.add(alias...)` is accepted, and every alias must have a frozen binding. Additions are first-seen ordered and idempotent; aliases already in `tools.always` are not repeated. `close_tool_scope` returns an immutable effective scope with prompt-wide aliases first and H2 additions second, then permanently closes recording so an epilog cannot widen the model-visible scope.
 
-Binding, registry validation, replay, and scope closure report fixed start/outcome details containing no aliases, descriptions, identities, source, or other payloads. The parser stores the compiled H1 shared program but the executor does not invoke these modes yet. Alias-based model advertisement and dispatch and complete lifecycle wiring remain later steps.
+Binding, registry validation, replay, and scope closure report fixed start/outcome details containing no aliases, descriptions, identities, source, or other payloads. Execution replays frozen declarations and closes the recorder before reply binding or epilog execution, but intentionally discards the effective scope. Alias-based model advertisement and dispatch remain later steps.
 
 ### Validated capability binding
 
@@ -122,11 +122,9 @@ The shipped Lua modes implement declaration binding, exact replay, H2 recording,
 
 The model will see selected concrete descriptions and schemas under prompt-local aliases. Calls will dispatch through `ToolId`. Before a model turn, the picker will reject near-duplicate tools in that section's effective scope.
 
-### Complete section lifecycle
+### Host binding integration
 
-Execution will wire the shipped `SectionVm` seam through shared bytecode, the H2 preamble, effective-scope validation, the model turn, `reply` binding, and the epilog. A scalar preamble return will skip model and epilog. A scalar epilog return will finish after the model. The VM will then be destroyed.
-
-Hosts will parse, bind, and execute in separate phases while passing the same observer reference through each phase. Async hosts will move synchronous binding to `spawn_blocking`. No mutex guard will cross an await.
+Hosts will parse, bind, and execute in separate phases while passing the same observer reference through each phase. Async hosts will move synchronous binding to `spawn_blocking`. Parsed-prompt execution compatibility can then be removed. No mutex guard will cross an await.
 
 ### Explicit non-goals
 

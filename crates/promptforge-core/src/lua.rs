@@ -474,7 +474,9 @@ fn validate_alias(alias: &str) -> Result<()> {
 /// `SectionVm` deliberately does not expose its underlying [`Lua`]. This keeps
 /// hardening, host injection, instruction accounting, and report delivery on
 /// the one owned path. Each section must receive a new instance; dropping it
-/// destroys all Lua memory belonging to that section.
+/// destroys all Lua memory belonging to that section. Once Lua allocation
+/// succeeds, construction, shared-load, and declaration-replay failures cross
+/// the same explicit observed teardown boundary as later lifecycle failures.
 ///
 /// # Examples
 /// ```
@@ -531,9 +533,6 @@ impl SectionVm {
             LuaOptions::default(),
         )
         .map_err(|error| Error::Lua(error.to_string()))?;
-        harden(&lua)?;
-        install_instruction_budget(&lua);
-
         let vm = Self {
             lua,
             scoped_tools: Arc::new(Mutex::new(Vec::new())),
@@ -542,13 +541,17 @@ impl SectionVm {
             store: None,
             host_injected: false,
         };
+        if let Err(error) = harden(&vm.lua) {
+            return vm.construction_failed(error, observer, section);
+        }
+        install_instruction_budget(&vm.lua);
         if let Some(program) = shared {
             observer.observe(section, detail::LUA_SHARED_LOAD_STARTED);
             match vm.run_loaded(program) {
                 Ok(_) => observer.observe(section, detail::LUA_SHARED_LOAD_SUCCEEDED),
                 Err(error) => {
                     observer.observe(section, detail::LUA_SHARED_LOAD_FAILED);
-                    return Err(error);
+                    return vm.construction_failed(error, observer, section);
                 }
             }
         }
@@ -600,23 +603,26 @@ impl SectionVm {
             LuaOptions::default(),
         )
         .map_err(|error| Error::Lua(error.to_string()))?;
-        harden(&lua)?;
-        install_instruction_budget(&lua);
         let runtime = Arc::new(Mutex::new(ToolRuntime {
             phase: ToolPhase::Replay,
             declaration_index: 0,
             added: Vec::new(),
         }));
-        install_replay_tools(&lua, bindings, &runtime)?;
-
         let vm = Self {
             lua,
             scoped_tools: Arc::new(Mutex::new(Vec::new())),
             bound_tools: Some(bindings.clone()),
-            tool_runtime: Some(runtime),
+            tool_runtime: Some(Arc::clone(&runtime)),
             store: None,
             host_injected: false,
         };
+        if let Err(error) = harden(&vm.lua) {
+            return vm.construction_failed(error, observer, section);
+        }
+        install_instruction_budget(&vm.lua);
+        if let Err(error) = install_replay_tools(&vm.lua, bindings, &runtime) {
+            return vm.construction_failed(error, observer, section);
+        }
         observer.observe(section, detail::LUA_SHARED_LOAD_STARTED);
         observer.observe(section, detail::TOOL_REPLAY_STARTED);
         let result = vm.run_loaded(shared).and_then(|returned| {
@@ -644,7 +650,10 @@ impl SectionVm {
                 detail::LUA_SHARED_LOAD_FAILED
             },
         );
-        result.map(|()| vm)
+        match result {
+            Ok(()) => Ok(vm),
+            Err(error) => vm.construction_failed(error, observer, section),
+        }
     }
 
     /// Installs the section's host values after the shared program has run.
@@ -1060,6 +1069,16 @@ impl SectionVm {
         observer.observe(section, detail::LUA_TEARDOWN_STARTED);
         drop(self);
         observer.observe(section, detail::LUA_TEARDOWN_SUCCEEDED);
+    }
+
+    fn construction_failed(
+        self,
+        error: Error,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<Self> {
+        self.teardown(observer, section);
+        Err(error)
     }
 
     fn run_loaded(&self, program: &LuaProgram) -> Result<Option<String>> {
@@ -2360,9 +2379,35 @@ mod tests {
             [
                 detail::LUA_SHARED_LOAD_STARTED,
                 detail::LUA_SHARED_LOAD_FAILED,
+                detail::LUA_TEARDOWN_STARTED,
+                detail::LUA_TEARDOWN_SUCCEEDED,
             ]
             .into_iter()
             .map(|detail| ("Shared".to_owned(), detail.to_owned()))
+            .collect::<Vec<_>>()
+        );
+
+        let (_, bindings) = fixture_bindings("tools.need('search', 'private capability')");
+        let recorder = Recorder::default();
+        SectionVm::new_with_bindings(
+            &program("tools.need('search', 'changed capability')"),
+            &bindings,
+            &recorder,
+            "Replay",
+        )
+        .expect_err("changed declarations must fail replay");
+        assert_eq!(
+            recorder.observations(),
+            [
+                detail::LUA_SHARED_LOAD_STARTED,
+                detail::TOOL_REPLAY_STARTED,
+                detail::TOOL_REPLAY_FAILED,
+                detail::LUA_SHARED_LOAD_FAILED,
+                detail::LUA_TEARDOWN_STARTED,
+                detail::LUA_TEARDOWN_SUCCEEDED,
+            ]
+            .into_iter()
+            .map(|detail| ("Replay".to_owned(), detail.to_owned()))
             .collect::<Vec<_>>()
         );
 
