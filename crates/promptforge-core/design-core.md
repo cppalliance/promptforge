@@ -66,7 +66,17 @@ The version gate runs before observation begins. A refused source emits no repor
 
 `LuaProgram` retains its original source and compiles it once into process-local Lua 5.4 bytecode without executing it. Loading creates a function in a caller-supplied VM but does not call it, so one program can seed multiple independent VMs while each VM supplies its own globals. The bytecode is private, is never persisted, and is not treated as a portable serialization format.
 
-Compilation takes an explicit prompt-region location. Malformed source returns `Error::LuaCompile` carrying that location, the retained source, and the Lua compiler diagnostic. Fixed compilation start, success, and failure reports expose none of the source or location payload. Existing parsing and execution still pass source strings directly until their owning grammar and VM steps ship.
+Compilation takes an explicit prompt-region location. Malformed source returns `Error::LuaCompile` carrying that location, the retained source, and the Lua compiler diagnostic. Fixed compilation start, success, and failure reports expose none of the source or location payload. Existing parsing and model execution still pass source strings through the one-phase compatibility path until their owning grammar and executor steps ship.
+
+### Persistent section VM seam
+
+`SectionVm` owns one hardened, isolated, sendable Lua 5.4 VM for a section lifecycle. Its optional shared program runs before host values exist. `inject_host` then installs `args`, `sys`, a new `var`, the run-scoped `store`, a send-safe ordered `tools.add` recorder, and an initially nil `reply`. Host globals are installed with raw table writes so a shared-library global metatable cannot intercept delayed injection. Distinct `run_preamble`, `bind_reply`, `run_epilog`, and consuming `teardown` operations make every lifecycle phase explicit rather than asking a generic runner's caller to identify the phase out of band.
+
+Every compiled program run after injection uses the same Lua environment. A host binds the model result with `bind_reply`, then runs an epilog in that environment. Top-level nil means no return; string, integer, number, and boolean returns become result strings; other return types fail. `var` and scoped tool names can be read without exposing the underlying VM. Shared loading, preamble execution, reply binding, epilog execution, and teardown each report fixed payload-free start and outcome details in operation order.
+
+One instruction hook and counter belong to the VM, so shared-library, preamble, and epilog execution consume one section-wide budget rather than resetting it at phase boundaries. Store functions are installed inside an `mlua` scope for each synchronous Lua phase: they borrow the caller's observer long enough to report each operation immediately, but neither observer nor scoped callback remains in the VM while the host awaits a model. The `mlua` `send` feature and send-safe tool recorder let the owned VM move with an async run without putting a mutex around Lua or holding a guard across an await.
+
+The existing `run_chunk` compatibility path now uses `SectionVm` for one phase and retains expression evaluation compatibility. Parser grammar and the model executor do not yet construct the full shared/preamble/reply/epilog lifecycle.
 
 ## Planned, not shipped
 
@@ -75,10 +85,6 @@ Everything in this section is settled design for later steps and remains unimple
 ### Capability binding and picker validation
 
 Prompt-local capability aliases will bind one-to-one to the shipped live `ToolId` values through `promptforge-tool-picker`. Binding will reject absent, duplicate, ambiguous, colliding, and registry-mismatched identities. Before a model turn, core will apply the shipped picker near-duplicate analysis to the effective scope.
-
-### Persistent section VMs
-
-`SectionVm` will own one isolated VM per section and preserve one environment across shared-library load, preamble, model await, `reply` binding, and epilog. Lua memory will never cross sections.
 
 ### Required H1 and three-phase grammar
 
@@ -92,7 +98,7 @@ The model will see selected concrete descriptions and schemas under prompt-local
 
 ### Complete section lifecycle
 
-Execution will run shared bytecode, the H2 preamble, effective-scope validation, the model turn, `reply` binding, and the epilog in one section VM. A scalar preamble return will skip model and epilog. A scalar epilog return will finish after the model. The VM will then be destroyed.
+Execution will wire the shipped `SectionVm` seam through shared bytecode, the H2 preamble, effective-scope validation, the model turn, `reply` binding, and the epilog. A scalar preamble return will skip model and epilog. A scalar epilog return will finish after the model. The VM will then be destroyed.
 
 Hosts will parse, bind, and execute in separate phases while passing the same observer reference through each phase. Async hosts will move synchronous binding to `spawn_blocking`. No mutex guard will cross an await.
 

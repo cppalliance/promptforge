@@ -18,9 +18,8 @@
 //! transition. A failed store op raises a Lua error, which surfaces from
 //! [`run_chunk`] as [`Error::Lua`].
 
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mlua::{
@@ -142,6 +141,455 @@ impl LuaProgram {
     }
 }
 
+/// One hardened, isolated Lua VM for a section's complete lifecycle.
+///
+/// The VM owns one Lua environment from construction until drop. An optional
+/// shared program runs before host values are installed, then preamble and
+/// epilog programs loaded with [`run_preamble`](Self::run_preamble) and
+/// [`run_epilog`](Self::run_epilog) see that same environment.
+/// [`bind_reply`](Self::bind_reply) inserts the model reply into it between
+/// those phases. A single instruction counter covers every program run by this
+/// VM, so splitting work across lifecycle phases cannot reset the budget.
+///
+/// `SectionVm` deliberately does not expose its underlying [`Lua`]. This keeps
+/// hardening, host injection, instruction accounting, and report delivery on
+/// the one owned path. Each section must receive a new instance; dropping it
+/// destroys all Lua memory belonging to that section.
+///
+/// # Examples
+/// ```
+/// use promptforge_core::lua::SectionVm;
+/// use promptforge_core::observe::NullObserver;
+///
+/// let vm = SectionVm::new(None, &NullObserver, "Example")?;
+/// vm.teardown(&NullObserver, "Example");
+/// # Ok::<(), promptforge_core::Error>(())
+/// ```
+#[derive(Debug)]
+pub struct SectionVm {
+    lua: Lua,
+    scoped_tools: Arc<Mutex<Vec<String>>>,
+    store: Option<Store>,
+    host_injected: bool,
+}
+
+impl SectionVm {
+    /// Creates a hardened section VM and optionally executes a shared program.
+    ///
+    /// The shared program runs before `args`, `sys`, `var`, `tools`, `store`,
+    /// and `reply` are installed. This delayed injection prevents shared code
+    /// from retaining a host value before section execution begins.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the VM cannot be built or hardened, or if the
+    /// shared program fails or returns a non-scalar value.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::lua::{LuaProgram, SectionVm};
+    /// use promptforge_core::observe::NullObserver;
+    ///
+    /// let shared = LuaProgram::compile(
+    ///     "function decorate(s) return '<' .. s .. '>' end",
+    ///     "shared",
+    ///     &NullObserver,
+    ///     "Example",
+    /// )?;
+    /// let vm = SectionVm::new(Some(&shared), &NullObserver, "Example")?;
+    /// vm.teardown(&NullObserver, "Example");
+    /// # Ok::<(), promptforge_core::Error>(())
+    /// ```
+    pub fn new(
+        shared: Option<&LuaProgram>,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<Self> {
+        let lua = Lua::new_with(
+            StdLib::STRING | StdLib::TABLE | StdLib::MATH,
+            LuaOptions::default(),
+        )
+        .map_err(|error| Error::Lua(error.to_string()))?;
+        harden(&lua)?;
+        install_instruction_budget(&lua);
+
+        let vm = Self {
+            lua,
+            scoped_tools: Arc::new(Mutex::new(Vec::new())),
+            store: None,
+            host_injected: false,
+        };
+        if let Some(program) = shared {
+            observer.observe(section, detail::LUA_SHARED_LOAD_STARTED);
+            match vm.run_loaded(program) {
+                Ok(_) => observer.observe(section, detail::LUA_SHARED_LOAD_SUCCEEDED),
+                Err(error) => {
+                    observer.observe(section, detail::LUA_SHARED_LOAD_FAILED);
+                    return Err(error);
+                }
+            }
+        }
+        Ok(vm)
+    }
+
+    /// Installs the section's host values after the shared program has run.
+    ///
+    /// This operation may be called exactly once. The store callbacks own a
+    /// clone of the run-scoped store. Store functions are installed with
+    /// phase-local borrowed observation context by
+    /// [`run_preamble`](Self::run_preamble) and [`run_epilog`](Self::run_epilog),
+    /// so no observer reference is retained while the VM waits for a model reply.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if host values cannot be bridged or if host
+    /// values were already injected.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::lua::SectionVm;
+    /// use promptforge_core::observe::NullObserver;
+    /// use promptforge_core::store::Store;
+    ///
+    /// let mut vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &Store::memory())?;
+    /// vm.teardown(&NullObserver, "Example");
+    /// # Ok::<(), promptforge_core::Error>(())
+    /// ```
+    pub fn inject_host(&mut self, args: &str, sys: &Json, store: &Store) -> Result<()> {
+        if self.host_injected {
+            return Err(Error::Lua(
+                "section VM host values were already injected".to_owned(),
+            ));
+        }
+
+        let globals = self.lua.globals();
+        globals
+            .raw_set("args", args)
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        let sys_value = self
+            .lua
+            .to_value(sys)
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        globals
+            .raw_set("sys", sys_value)
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        let var = self
+            .lua
+            .create_table()
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        globals
+            .raw_set("var", var)
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        install_tools_table(&self.lua, &globals, &self.scoped_tools)?;
+        globals
+            .raw_set("reply", Value::Nil)
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        self.store = Some(store.clone());
+        self.host_injected = true;
+        Ok(())
+    }
+
+    /// Executes a compiled preamble in this VM's persistent environment.
+    ///
+    /// Store-operation reports recorded by host callbacks are delivered in
+    /// operation order before this method returns, including when execution
+    /// fails. A nil or absent top-level return produces `None`; strings,
+    /// integers, numbers, and booleans produce their scalar string form.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if host values have not been injected, execution
+    /// fails, the shared instruction budget is exhausted, or the program
+    /// returns a non-scalar value.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::lua::{LuaProgram, SectionVm};
+    /// use promptforge_core::observe::NullObserver;
+    /// use promptforge_core::store::Store;
+    ///
+    /// let preamble = LuaProgram::compile(
+    ///     "var.answer = 42",
+    ///     "preamble",
+    ///     &NullObserver,
+    ///     "Example",
+    /// )?;
+    /// let mut vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
+    /// assert_eq!(vm.run_preamble(&preamble, &NullObserver, "Example")?, None);
+    /// vm.teardown(&NullObserver, "Example");
+    /// # Ok::<(), promptforge_core::Error>(())
+    /// ```
+    pub fn run_preamble(
+        &self,
+        program: &LuaProgram,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<Option<String>> {
+        observer.observe(section, detail::LUA_PREAMBLE_STARTED);
+        if !self.host_injected {
+            let error = Error::Lua("section VM host values have not been injected".to_owned());
+            observer.observe(section, detail::LUA_PREAMBLE_FAILED);
+            return Err(error);
+        }
+        let result = self.run_loaded_with_host(program, observer, section);
+        observer.observe(
+            section,
+            if result.is_ok() {
+                detail::LUA_PREAMBLE_SUCCEEDED
+            } else {
+                detail::LUA_PREAMBLE_FAILED
+            },
+        );
+        result
+    }
+
+    /// Binds the model reply for a later epilog in the same environment.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if host values have not been injected or the
+    /// reply cannot be installed.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::lua::SectionVm;
+    /// use promptforge_core::observe::NullObserver;
+    /// use promptforge_core::store::Store;
+    ///
+    /// let mut vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
+    /// vm.bind_reply("model answer", &NullObserver, "Example")?;
+    /// vm.teardown(&NullObserver, "Example");
+    /// # Ok::<(), promptforge_core::Error>(())
+    /// ```
+    pub fn bind_reply(&self, reply: &str, observer: &dyn Observer, section: &str) -> Result<()> {
+        observer.observe(section, detail::LUA_REPLY_BINDING_STARTED);
+        if !self.host_injected {
+            let error = Error::Lua("section VM host values have not been injected".to_owned());
+            observer.observe(section, detail::LUA_REPLY_BINDING_FAILED);
+            return Err(error);
+        }
+        let result = self
+            .lua
+            .globals()
+            .raw_set("reply", reply)
+            .map_err(|error| Error::Lua(error.to_string()));
+        observer.observe(
+            section,
+            if result.is_ok() {
+                detail::LUA_REPLY_BINDING_SUCCEEDED
+            } else {
+                detail::LUA_REPLY_BINDING_FAILED
+            },
+        );
+        result
+    }
+
+    /// Executes a compiled epilog in this VM's persistent environment.
+    ///
+    /// Store-operation reports are delivered in operation order between the
+    /// epilog's start and outcome reports.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if host values have not been injected, execution
+    /// fails, the shared instruction budget is exhausted, or the program
+    /// returns a non-scalar value.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::lua::{LuaProgram, SectionVm};
+    /// use promptforge_core::observe::NullObserver;
+    /// use promptforge_core::store::Store;
+    ///
+    /// let epilog = LuaProgram::compile(
+    ///     "return reply",
+    ///     "epilog",
+    ///     &NullObserver,
+    ///     "Example",
+    /// )?;
+    /// let mut vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
+    /// vm.bind_reply("done", &NullObserver, "Example")?;
+    /// assert_eq!(
+    ///     vm.run_epilog(&epilog, &NullObserver, "Example")?.as_deref(),
+    ///     Some("done"),
+    /// );
+    /// vm.teardown(&NullObserver, "Example");
+    /// # Ok::<(), promptforge_core::Error>(())
+    /// ```
+    pub fn run_epilog(
+        &self,
+        program: &LuaProgram,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<Option<String>> {
+        observer.observe(section, detail::LUA_EPILOG_STARTED);
+        if !self.host_injected {
+            let error = Error::Lua("section VM host values have not been injected".to_owned());
+            observer.observe(section, detail::LUA_EPILOG_FAILED);
+            return Err(error);
+        }
+        let result = self.run_loaded_with_host(program, observer, section);
+        observer.observe(
+            section,
+            if result.is_ok() {
+                detail::LUA_EPILOG_SUCCEEDED
+            } else {
+                detail::LUA_EPILOG_FAILED
+            },
+        );
+        result
+    }
+
+    /// Returns the current `var` table as JSON.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if host values have not been injected or `var`
+    /// cannot be represented as JSON.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::lua::SectionVm;
+    /// use promptforge_core::observe::NullObserver;
+    /// use promptforge_core::store::Store;
+    ///
+    /// let mut vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
+    /// assert_eq!(vm.var()?, serde_json::json!({}));
+    /// vm.teardown(&NullObserver, "Example");
+    /// # Ok::<(), promptforge_core::Error>(())
+    /// ```
+    pub fn var(&self) -> Result<Json> {
+        if !self.host_injected {
+            return Err(Error::Lua(
+                "section VM host values have not been injected".to_owned(),
+            ));
+        }
+        let value: Value = self
+            .lua
+            .globals()
+            .get("var")
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        self.lua
+            .from_value(value)
+            .map_err(|error| Error::Lua(error.to_string()))
+    }
+
+    /// Returns tool names recorded by `tools.add`, in first-seen order.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the internal recorder mutex was poisoned.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::lua::{LuaProgram, SectionVm};
+    /// use promptforge_core::observe::NullObserver;
+    /// use promptforge_core::store::Store;
+    ///
+    /// let preamble = LuaProgram::compile(
+    ///     "tools.add('search')",
+    ///     "preamble",
+    ///     &NullObserver,
+    ///     "Example",
+    /// )?;
+    /// let mut vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
+    /// vm.run_preamble(&preamble, &NullObserver, "Example")?;
+    /// assert_eq!(vm.scoped_tools()?, vec!["search"]);
+    /// vm.teardown(&NullObserver, "Example");
+    /// # Ok::<(), promptforge_core::Error>(())
+    /// ```
+    pub fn scoped_tools(&self) -> Result<Vec<String>> {
+        self.scoped_tools
+            .lock()
+            .map(|names| names.clone())
+            .map_err(|_| Error::Lua("section VM tool recorder was poisoned".to_owned()))
+    }
+
+    /// Destroys this section VM at an explicit observed lifecycle boundary.
+    ///
+    /// The observer is borrowed only for this synchronous call and is not
+    /// retained by the VM.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::lua::SectionVm;
+    /// use promptforge_core::observe::NullObserver;
+    ///
+    /// let vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// vm.teardown(&NullObserver, "Example");
+    /// # Ok::<(), promptforge_core::Error>(())
+    /// ```
+    pub fn teardown(self, observer: &dyn Observer, section: &str) {
+        observer.observe(section, detail::LUA_TEARDOWN_STARTED);
+        drop(self);
+        observer.observe(section, detail::LUA_TEARDOWN_SUCCEEDED);
+    }
+
+    fn run_loaded(&self, program: &LuaProgram) -> Result<Option<String>> {
+        let returned: MultiValue = program
+            .load(&self.lua)?
+            .call(())
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        scalar_return(returned)
+    }
+
+    fn run_loaded_with_host(
+        &self,
+        program: &LuaProgram,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<Option<String>> {
+        let store = self.store.as_ref().ok_or_else(|| {
+            Error::Lua("section VM host values have not been injected".to_owned())
+        })?;
+        let returned: MultiValue = self
+            .lua
+            .scope(|scope| {
+                install_store_table(
+                    &self.lua,
+                    scope,
+                    &self.lua.globals(),
+                    store,
+                    observer,
+                    section,
+                )
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+                program
+                    .load(&self.lua)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?
+                    .call(())
+            })
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        scalar_return(returned)
+    }
+
+    fn run_source(
+        &self,
+        source: &str,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<Option<String>> {
+        let store = self.store.as_ref().ok_or_else(|| {
+            Error::Lua("section VM host values have not been injected".to_owned())
+        })?;
+        let returned: MultiValue = self
+            .lua
+            .scope(|scope| {
+                install_store_table(
+                    &self.lua,
+                    scope,
+                    &self.lua.globals(),
+                    store,
+                    observer,
+                    section,
+                )
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+                self.lua.load(source).eval()
+            })
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        scalar_return(returned)
+    }
+}
+
 /// The result of running a section's Lua block.
 #[derive(Debug, Clone)]
 pub struct LuaOutcome {
@@ -179,48 +627,11 @@ pub fn run_chunk(
     observer: &dyn Observer,
     section: &str,
 ) -> Result<LuaOutcome> {
-    let lua = Lua::new_with(
-        StdLib::STRING | StdLib::TABLE | StdLib::MATH,
-        LuaOptions::default(),
-    )
-    .map_err(|e| Error::Lua(e.to_string()))?;
-
-    harden(&lua)?;
-
-    let globals = lua.globals();
-    globals
-        .set("args", args)
-        .map_err(|e| Error::Lua(e.to_string()))?;
-    let sys_value = lua.to_value(sys).map_err(|e| Error::Lua(e.to_string()))?;
-    globals
-        .set("sys", sys_value)
-        .map_err(|e| Error::Lua(e.to_string()))?;
-    let var_table = lua.create_table().map_err(|e| Error::Lua(e.to_string()))?;
-    globals
-        .set("var", var_table)
-        .map_err(|e| Error::Lua(e.to_string()))?;
-
-    let scoped = install_tools_table(&lua, &globals)?;
-
-    install_instruction_budget(&lua);
-
-    let evaluated: mlua::Result<MultiValue> = lua.scope(|scope| {
-        install_store_table(&lua, scope, &globals, store, observer, section)
-            .map_err(|error| mlua::Error::external(error.to_string()))?;
-        lua.load(source).eval()
-    });
-    let returned = evaluated.map_err(|e| Error::Lua(e.to_string()))?;
-    let returned = match returned.into_iter().next() {
-        None | Some(Value::Nil) => None,
-        Some(value) => Some(value_to_string(&value)?),
-    };
-
-    let var_value: Value = globals.get("var").map_err(|e| Error::Lua(e.to_string()))?;
-    let var: Json = lua
-        .from_value(var_value)
-        .map_err(|e| Error::Lua(e.to_string()))?;
-
-    let scoped_tools = scoped.borrow().clone();
+    let mut vm = SectionVm::new(None, observer, section)?;
+    vm.inject_host(args, sys, store)?;
+    let returned = vm.run_source(source, observer, section)?;
+    let var = vm.var()?;
+    let scoped_tools = vm.scoped_tools()?;
 
     Ok(LuaOutcome {
         returned,
@@ -235,18 +646,20 @@ pub fn run_chunk(
 /// chunk runs. `add` only records names; it validates nothing and never
 /// touches the model.
 ///
-/// The VM is single-threaded and non-async, so an `Rc<RefCell<..>>` moved into
-/// the function is sufficient shared state.
-///
 /// # Errors
 /// Returns [`Error::Lua`] if the `tools` table or its `add` function cannot be
 /// created or installed into the sandbox globals.
-fn install_tools_table(lua: &Lua, globals: &mlua::Table) -> Result<Rc<RefCell<Vec<String>>>> {
-    let scoped: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
-    let recorder = Rc::clone(&scoped);
+fn install_tools_table(
+    lua: &Lua,
+    globals: &mlua::Table,
+    scoped: &Arc<Mutex<Vec<String>>>,
+) -> Result<()> {
+    let recorder = Arc::clone(scoped);
     let add = lua
         .create_function(move |_, names: Variadic<String>| {
-            let mut acc = recorder.borrow_mut();
+            let mut acc = recorder
+                .lock()
+                .map_err(|_| mlua::Error::external("tool recorder was poisoned"))?;
             for name in names {
                 if !acc.iter().any(|existing| existing == &name) {
                     acc.push(name);
@@ -260,9 +673,9 @@ fn install_tools_table(lua: &Lua, globals: &mlua::Table) -> Result<Rc<RefCell<Ve
         .set("add", add)
         .map_err(|e| Error::Lua(e.to_string()))?;
     globals
-        .set("tools", tools)
+        .raw_set("tools", tools)
         .map_err(|e| Error::Lua(e.to_string()))?;
-    Ok(scoped)
+    Ok(())
 }
 
 /// Expose an always-on `store` table whose six methods (`write`, `append`,
@@ -423,7 +836,7 @@ fn install_store_table<'scope, 'env: 'scope>(
         .map_err(|e| Error::Lua(e.to_string()))?;
 
     globals
-        .set("store", table)
+        .raw_set("store", table)
         .map_err(|e| Error::Lua(e.to_string()))?;
     Ok(())
 }
@@ -481,6 +894,13 @@ fn value_to_string(value: &Value) -> Result<String> {
             "cannot return a {} as a result",
             other.type_name()
         ))),
+    }
+}
+
+fn scalar_return(returned: MultiValue) -> Result<Option<String>> {
+    match returned.into_iter().next() {
+        None | Some(Value::Nil) => Ok(None),
+        Some(value) => value_to_string(&value).map(Some),
     }
 }
 
@@ -594,6 +1014,334 @@ mod tests {
         )
     }
 
+    fn program(source: &str) -> LuaProgram {
+        LuaProgram::compile(source, "test program", &NullObserver, "Test")
+            .expect("test Lua must compile")
+    }
+
+    #[test]
+    fn section_vm_is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<SectionVm>();
+    }
+
+    #[test]
+    fn section_vm_preserves_one_environment_across_all_phases() {
+        let shared = program(
+            "shared_saw_args = args\n\
+             function decorate(value) return '<' .. value .. '>' end",
+        );
+        let preamble = program(
+            "var.from_shared = decorate(args)\n\
+             tools.add('search')\n\
+             store.write('phase.txt', var.from_shared)",
+        );
+        let epilog = program(
+            "tools.add('fetch', 'search')\n\
+             return shared_saw_args == nil and decorate(reply) or 'host leaked early'",
+        );
+        let store = Store::memory();
+        let mut vm =
+            SectionVm::new(Some(&shared), &NullObserver, "Test").expect("shared program must run");
+        vm.inject_host("input", &json!({ "id": 7 }), &store)
+            .expect("host values must inject");
+
+        assert_eq!(
+            vm.run_preamble(&preamble, &NullObserver, "Test")
+                .expect("preamble must run"),
+            None
+        );
+        assert_eq!(
+            vm.var()
+                .expect("var must serialize")
+                .get("from_shared")
+                .and_then(Json::as_str),
+            Some("<input>")
+        );
+        assert_eq!(
+            store.read("phase.txt").expect("shared store must read"),
+            "1| <input>"
+        );
+
+        vm.bind_reply("model answer", &NullObserver, "Test")
+            .expect("reply must bind into the same environment");
+        assert_eq!(
+            vm.run_epilog(&epilog, &NullObserver, "Test")
+                .expect("epilog must run")
+                .as_deref(),
+            Some("<model answer>")
+        );
+        assert_eq!(
+            vm.scoped_tools().expect("tool recorder must be readable"),
+            vec!["search", "fetch"]
+        );
+    }
+
+    #[test]
+    fn section_vm_requires_delayed_single_host_injection() {
+        let no_op = program("return args");
+        let store = Store::memory();
+        let mut vm = SectionVm::new(None, &NullObserver, "Test").expect("VM must build");
+
+        let error = vm
+            .run_preamble(&no_op, &NullObserver, "Test")
+            .expect_err("programs cannot run before host injection");
+        assert!(error.to_string().contains("not been injected"));
+
+        vm.inject_host("first", &json!({}), &store)
+            .expect("first injection must succeed");
+        let error = vm
+            .inject_host("second", &json!({}), &store)
+            .expect_err("host values cannot be replaced");
+        assert!(error.to_string().contains("already injected"));
+    }
+
+    #[test]
+    fn section_vm_host_injection_bypasses_shared_global_metatables() {
+        let shared = program(
+            "captured = {}\n\
+             setmetatable(_G, { __newindex = function(_, key, value) captured[key] = value end })",
+        );
+        let inspect = program(
+            "return tostring(captured.args) .. ',' .. tostring(captured.store) .. ',' .. args",
+        );
+        let mut vm =
+            SectionVm::new(Some(&shared), &NullObserver, "Test").expect("shared program must run");
+        vm.inject_host("private input", &json!({}), &Store::memory())
+            .expect("raw host injection must bypass the shared metatable");
+
+        assert_eq!(
+            vm.run_preamble(&inspect, &NullObserver, "Test")
+                .expect("inspection must run")
+                .as_deref(),
+            Some("nil,nil,private input")
+        );
+    }
+
+    #[test]
+    fn section_vm_reports_store_operations_in_each_phase() {
+        let write = program("store.write('state.txt', args)");
+        let read = program("return store.read('state.txt')");
+        let recorder = Recorder::default();
+        let mut vm = SectionVm::new(None, &NullObserver, "Gather").expect("VM must build");
+        vm.inject_host("private input", &json!({}), &Store::memory())
+            .expect("host values must inject");
+
+        vm.run_preamble(&write, &recorder, "Gather")
+            .expect("preamble write must run");
+        vm.bind_reply("private reply", &recorder, "Gather")
+            .expect("reply must bind");
+        vm.run_epilog(&read, &recorder, "Gather")
+            .expect("epilog read must run");
+        vm.teardown(&recorder, "Gather");
+
+        assert_eq!(
+            recorder.observations(),
+            vec![
+                ("Gather".to_owned(), detail::LUA_PREAMBLE_STARTED.to_owned(),),
+                (
+                    "Gather".to_owned(),
+                    detail::STORE_WRITE_SUCCEEDED.to_owned(),
+                ),
+                (
+                    "Gather".to_owned(),
+                    detail::LUA_PREAMBLE_SUCCEEDED.to_owned(),
+                ),
+                (
+                    "Gather".to_owned(),
+                    detail::LUA_REPLY_BINDING_STARTED.to_owned(),
+                ),
+                (
+                    "Gather".to_owned(),
+                    detail::LUA_REPLY_BINDING_SUCCEEDED.to_owned(),
+                ),
+                ("Gather".to_owned(), detail::LUA_EPILOG_STARTED.to_owned(),),
+                ("Gather".to_owned(), detail::STORE_READ_SUCCEEDED.to_owned(),),
+                ("Gather".to_owned(), detail::LUA_EPILOG_SUCCEEDED.to_owned(),),
+                ("Gather".to_owned(), detail::LUA_TEARDOWN_STARTED.to_owned(),),
+                (
+                    "Gather".to_owned(),
+                    detail::LUA_TEARDOWN_SUCCEEDED.to_owned(),
+                ),
+            ]
+        );
+        let trace = format!("{:?}", recorder.observations());
+        assert!(!trace.contains("private input"));
+        assert!(!trace.contains("private reply"));
+        assert!(!trace.contains("state.txt"));
+    }
+
+    #[test]
+    fn section_vm_accepts_only_scalar_top_level_returns() {
+        let store = Store::memory();
+        for (source, expected) in [
+            ("return 'text'", Some("text")),
+            ("return 42", Some("42")),
+            ("return 1.5", Some("1.5")),
+            ("return true", Some("true")),
+            ("return nil", None),
+        ] {
+            let mut vm = SectionVm::new(None, &NullObserver, "Test").expect("VM must build");
+            vm.inject_host("", &json!({}), &store)
+                .expect("host values must inject");
+            assert_eq!(
+                vm.run_preamble(&program(source), &NullObserver, "Test")
+                    .expect("scalar return must work")
+                    .as_deref(),
+                expected
+            );
+        }
+
+        let mut vm = SectionVm::new(None, &NullObserver, "Test").expect("VM must build");
+        vm.inject_host("", &json!({}), &store)
+            .expect("host values must inject");
+        let error = vm
+            .run_preamble(&program("return {}"), &NullObserver, "Test")
+            .expect_err("table returns must be refused");
+        assert!(error.to_string().contains("cannot return a table"));
+    }
+
+    #[test]
+    fn section_vms_isolate_mutated_shared_globals() {
+        let shared = program("counter = 0");
+        let increment = program("counter = counter + 1; return counter");
+        let store = Store::memory();
+        let mut first =
+            SectionVm::new(Some(&shared), &NullObserver, "First").expect("first VM must build");
+        let mut second =
+            SectionVm::new(Some(&shared), &NullObserver, "Second").expect("second VM must build");
+        first
+            .inject_host("", &json!({}), &store)
+            .expect("first host must inject");
+        second
+            .inject_host("", &json!({}), &store)
+            .expect("second host must inject");
+
+        assert_eq!(
+            first
+                .run_preamble(&increment, &NullObserver, "First")
+                .expect("first increment must run")
+                .as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            first
+                .run_epilog(&increment, &NullObserver, "First")
+                .expect("second first-VM increment must run")
+                .as_deref(),
+            Some("2")
+        );
+        assert_eq!(
+            second
+                .run_preamble(&increment, &NullObserver, "Second")
+                .expect("second VM increment must run")
+                .as_deref(),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn shared_program_consumes_the_later_phase_instruction_budget() {
+        let work = program("for i = 1, 3000000 do local value = i end");
+        let mut vm = SectionVm::new(Some(&work), &NullObserver, "Test")
+            .expect("shared work must fit the budget");
+        vm.inject_host("", &json!({}), &Store::memory())
+            .expect("host values must inject");
+
+        let error = vm
+            .run_preamble(&work, &NullObserver, "Test")
+            .expect_err("the preamble must exhaust the budget left by shared execution");
+        assert!(error.to_string().contains("instruction budget exceeded"));
+    }
+
+    #[test]
+    fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
+        let shared = program("private_global = 'shared secret'");
+        let preamble = program("var.value = args");
+        let epilog = program("return reply");
+        let recorder = Recorder::default();
+        let mut vm =
+            SectionVm::new(Some(&shared), &recorder, "Gather").expect("shared program must run");
+        vm.inject_host("private input", &json!({}), &Store::memory())
+            .expect("host values must inject");
+        vm.run_preamble(&preamble, &recorder, "Gather")
+            .expect("preamble must run");
+        vm.bind_reply("private reply", &recorder, "Gather")
+            .expect("reply must bind");
+        vm.run_epilog(&epilog, &recorder, "Gather")
+            .expect("epilog must run");
+        vm.teardown(&recorder, "Gather");
+
+        let observations = recorder.observations();
+        assert_eq!(
+            observations,
+            [
+                detail::LUA_SHARED_LOAD_STARTED,
+                detail::LUA_SHARED_LOAD_SUCCEEDED,
+                detail::LUA_PREAMBLE_STARTED,
+                detail::LUA_PREAMBLE_SUCCEEDED,
+                detail::LUA_REPLY_BINDING_STARTED,
+                detail::LUA_REPLY_BINDING_SUCCEEDED,
+                detail::LUA_EPILOG_STARTED,
+                detail::LUA_EPILOG_SUCCEEDED,
+                detail::LUA_TEARDOWN_STARTED,
+                detail::LUA_TEARDOWN_SUCCEEDED,
+            ]
+            .into_iter()
+            .map(|detail| ("Gather".to_owned(), detail.to_owned()))
+            .collect::<Vec<_>>()
+        );
+        let trace = format!("{observations:?}");
+        assert!(!trace.contains("shared secret"));
+        assert!(!trace.contains("private input"));
+        assert!(!trace.contains("private reply"));
+    }
+
+    #[test]
+    fn section_lifecycle_failures_report_their_phase() {
+        let recorder = Recorder::default();
+        let failing_shared = program("error('private shared failure')");
+        SectionVm::new(Some(&failing_shared), &recorder, "Shared")
+            .expect_err("shared execution must fail");
+        assert_eq!(
+            recorder.observations(),
+            [
+                detail::LUA_SHARED_LOAD_STARTED,
+                detail::LUA_SHARED_LOAD_FAILED,
+            ]
+            .into_iter()
+            .map(|detail| ("Shared".to_owned(), detail.to_owned()))
+            .collect::<Vec<_>>()
+        );
+
+        for (section, expected, operation) in [
+            ("Preamble", detail::LUA_PREAMBLE_FAILED, 0_u8),
+            ("Reply", detail::LUA_REPLY_BINDING_FAILED, 1_u8),
+            ("Epilog", detail::LUA_EPILOG_FAILED, 2_u8),
+        ] {
+            let recorder = Recorder::default();
+            let vm = SectionVm::new(None, &NullObserver, section).expect("VM must build");
+            let error = match operation {
+                0 => vm
+                    .run_preamble(&program("return nil"), &recorder, section)
+                    .expect_err("preamble before injection must fail"),
+                1 => vm
+                    .bind_reply("private reply", &recorder, section)
+                    .expect_err("reply before injection must fail"),
+                _ => vm
+                    .run_epilog(&program("return nil"), &recorder, section)
+                    .expect_err("epilog before injection must fail"),
+            };
+            assert!(error.to_string().contains("not been injected"));
+            let observations = recorder.observations();
+            assert_eq!(
+                observations.last().map(|(_, detail)| detail.as_str()),
+                Some(expected)
+            );
+            assert!(!format!("{observations:?}").contains("private reply"));
+        }
+    }
+
     #[test]
     fn lua_program_retains_source_and_round_trips_bytecode() {
         let source = "return greeting .. ' world'";
@@ -689,6 +1437,11 @@ mod tests {
             run("return args", "hello").unwrap().returned.as_deref(),
             Some("hello")
         );
+    }
+
+    #[test]
+    fn expression_only_compatibility_chunk_returns_its_value() {
+        assert_eq!(run("42", "").unwrap().returned.as_deref(), Some("42"));
     }
 
     #[test]
