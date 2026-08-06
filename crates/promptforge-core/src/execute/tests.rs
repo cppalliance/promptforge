@@ -25,6 +25,11 @@ fn parse(md: &str) -> Prompt {
     Prompt::parse(&source, &NullObserver).unwrap()
 }
 
+/// Build the tool-free bound form consumed by the complete lifecycle path.
+fn bound(md: &str) -> BoundPrompt {
+    BoundPrompt::without_tools(parse(md))
+}
+
 /// Options that report nowhere and build no client - what a Lua-only,
 /// offline test wants.
 fn silent() -> RunOptions<'static> {
@@ -38,7 +43,7 @@ fn silent() -> RunOptions<'static> {
 /// in-memory store created for the run - the ergonomic path for the
 /// Lua-only tests that do not care about the store's contents.
 async fn run_offline(md: &str) -> Result<String> {
-    run(&parse(md), "", &[], &Store::memory(), silent()).await
+    run(&bound(md), "", &[], &Store::memory(), silent()).await
 }
 
 /// An [`Observer`] that keeps every observation it is handed, in order, so a test
@@ -70,7 +75,7 @@ impl Recorder {
 async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String)>) {
     let recorder = Recorder::default();
     let result = run(
-        &parse(md),
+        &bound(md),
         "",
         &[],
         &Store::memory(),
@@ -217,7 +222,7 @@ async fn store_persists_across_sections() {
 ## Writer\n\n```lua\nstore.write('note.txt', 'carried across')\n```\n\n\
 ## Reader\n\n```lua\nvar.seen = store.read('note.txt')\nreturn var.seen\n```\n";
     let store = Store::memory();
-    let out = run(&parse(md), "", &[], &store, silent()).await.unwrap();
+    let out = run(&bound(md), "", &[], &store, silent()).await.unwrap();
     assert_eq!(
         out, "1| carried across",
         "the second section must read what the first wrote"
@@ -269,41 +274,6 @@ impl Tool for EchoTool {
     async fn call(&self, args: Value) -> Result<String> {
         let value = args.get("value").and_then(Value::as_str).unwrap_or("");
         Ok(format!("echoed: {value}"))
-    }
-}
-
-/// A second trivial tool, so scoping tests can distinguish which tools a
-/// section selects from a pool of more than one.
-struct NoopTool;
-
-#[async_trait::async_trait]
-impl Tool for NoopTool {
-    fn id(&self) -> ToolId {
-        ToolId::new("tests", "noop")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn wire_name(&self) -> &str {
-        "noop"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn description(&self) -> &str {
-        "Do nothing."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({ "type": "object", "properties": {} })
-    }
-
-    async fn call(&self, _args: Value) -> Result<String> {
-        Ok(String::new())
     }
 }
 
@@ -386,36 +356,6 @@ impl Tool for FailingTool {
             status: 500,
             body: "the tool's own backend failed".to_string(),
         })
-    }
-}
-
-#[test]
-fn section_scoped_to_one_tool_selects_only_that_one() {
-    let echo = EchoTool;
-    let noop = NoopTool;
-    let pool: &[&dyn Tool] = &[&echo, &noop];
-    let selected = scoped_tools(pool, &["echo".to_string()]).unwrap();
-    let names: Vec<&str> = selected.iter().map(|t| t.wire_name()).collect();
-    assert_eq!(names, vec!["echo"]);
-}
-
-#[test]
-fn section_with_no_scope_selects_no_tools() {
-    let echo = EchoTool;
-    let noop = NoopTool;
-    let pool: &[&dyn Tool] = &[&echo, &noop];
-    let selected = scoped_tools(pool, &[]).unwrap();
-    assert!(selected.is_empty());
-}
-
-#[test]
-fn scoped_name_absent_from_pool_is_an_error() {
-    let echo = EchoTool;
-    let pool: &[&dyn Tool] = &[&echo];
-    match scoped_tools(pool, &["web_search".to_string()]) {
-        Err(Error::UnknownScopedTool(name)) => assert_eq!(name, "web_search"),
-        Err(other) => panic!("expected UnknownScopedTool, got {other:?}"),
-        Ok(_) => panic!("a scoped name absent from the pool must error"),
     }
 }
 
@@ -935,8 +875,40 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("First".to_string(), detail::SECTION_STARTED.to_string()),
+            (
+                "First".to_string(),
+                detail::LUA_PREAMBLE_STARTED.to_string()
+            ),
+            (
+                "First".to_string(),
+                detail::LUA_PREAMBLE_SUCCEEDED.to_string(),
+            ),
+            (
+                "First".to_string(),
+                detail::LUA_TEARDOWN_STARTED.to_string()
+            ),
+            (
+                "First".to_string(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
+            ),
             ("First".to_string(), detail::SECTION_FINISHED.to_string()),
             ("Second".to_string(), detail::SECTION_STARTED.to_string()),
+            (
+                "Second".to_string(),
+                detail::LUA_PREAMBLE_STARTED.to_string(),
+            ),
+            (
+                "Second".to_string(),
+                detail::LUA_PREAMBLE_SUCCEEDED.to_string(),
+            ),
+            (
+                "Second".to_string(),
+                detail::LUA_TEARDOWN_STARTED.to_string(),
+            ),
+            (
+                "Second".to_string(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
+            ),
             ("Second".to_string(), detail::SECTION_FINISHED.to_string()),
             ("Test prompt".to_string(), detail::RUN_SUCCEEDED.to_string()),
         ]
@@ -945,7 +917,7 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
 
 #[tokio::test]
 async fn recording_and_null_observers_produce_the_same_result_and_store_state() {
-    let prompt = parse(STORE_SECTIONS);
+    let prompt = bound(STORE_SECTIONS);
     let recorded_store = Store::memory();
     let sink = Recorder::default();
     let observed_result = run(
@@ -974,9 +946,9 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         "observer choice must not change stored contents"
     );
 
-    let failing = parse(
+    let failing = bound(
         "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
-         ## Only\n\n```lua\ntools.add('missing')\n```\n",
+         ## Only\n\n```lua\nerror('expected failure')\n```\n",
     );
     let sink = Recorder::default();
     let observed_error = run(
@@ -990,10 +962,10 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         },
     )
     .await
-    .expect_err("the scoped tool is absent");
+    .expect_err("the preamble fails");
     let null_error = run(&failing, "", &[], &Store::memory(), silent())
         .await
-        .expect_err("the scoped tool is absent");
+        .expect_err("the preamble fails");
     assert_eq!(
         observed_error.to_string(),
         null_error.to_string(),
@@ -1017,18 +989,25 @@ async fn a_run_refused_by_the_version_gate_reports_nothing() {
 
 #[tokio::test]
 async fn a_failing_run_still_reports_run_finished() {
-    // The section scopes a tool the run's (empty) pool does not have, so
-    // the walk errors part way through and the final observation must say so.
+    // The preamble fails, so the walk tears down its VM and the final
+    // observation must report the run failure.
     let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
-## Only\n\n```lua\ntools.add('nope')\n```\n";
+## Only\n\n```lua\nerror('expected failure')\n```\n";
     let (result, observations) = run_recorded(md).await;
-    assert!(matches!(result, Err(Error::UnknownScopedTool(_))));
+    assert!(matches!(result, Err(Error::Lua(_))));
 
     assert_eq!(
         observations,
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
+            ("Only".to_string(), detail::LUA_PREAMBLE_STARTED.to_string()),
+            ("Only".to_string(), detail::LUA_PREAMBLE_FAILED.to_string()),
+            ("Only".to_string(), detail::LUA_TEARDOWN_STARTED.to_string()),
+            (
+                "Only".to_string(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
+            ),
             ("Test prompt".to_string(), detail::RUN_FAILED.to_string()),
         ],
         "a section that errors reports no SectionFinished"
@@ -1111,7 +1090,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
 ## Only\n\nSay something.\n";
     let recorder = Recorder::default();
     let out = run(
-        &parse(md),
+        &bound(md),
         "",
         &[],
         &Store::memory(),
@@ -1134,6 +1113,19 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
             ("Only".to_string(), detail::MODEL_TURN_COMPLETED.to_string(),),
+            (
+                "Only".to_string(),
+                detail::LUA_REPLY_BINDING_STARTED.to_string(),
+            ),
+            (
+                "Only".to_string(),
+                detail::LUA_REPLY_BINDING_SUCCEEDED.to_string(),
+            ),
+            ("Only".to_string(), detail::LUA_TEARDOWN_STARTED.to_string()),
+            (
+                "Only".to_string(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
+            ),
             ("Only".to_string(), detail::SECTION_FINISHED.to_string()),
             ("Test prompt".to_string(), detail::RUN_SUCCEEDED.to_string()),
         ]
@@ -1141,13 +1133,13 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
 }
 
 #[tokio::test]
-async fn parsed_epilog_remains_inert_in_the_compatibility_executor() {
+async fn epilog_runs_after_reply_and_can_return() {
     let addr = spawn_text_gateway().await;
     let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
 ## Only\n\nSay something.\n\n```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'epilog result'\n```\n";
-    let prompt = parse(md);
-    assert!(prompt.entry().preamble.is_none());
-    assert!(prompt.entry().epilog.is_some());
+    let prompt = bound(md);
+    assert!(prompt.prompt().entry().preamble.is_none());
+    assert!(prompt.prompt().entry().epilog.is_some());
 
     let recorder = Recorder::default();
     let store = Store::memory();
@@ -1168,20 +1160,209 @@ async fn parsed_epilog_remains_inert_in_the_compatibility_executor() {
     .await
     .unwrap();
 
-    assert_eq!(out, "hello from the mock");
-    assert!(
-        store.read("epilog-ran.txt").is_err(),
-        "the parsed epilog must not mutate the store"
-    );
+    assert_eq!(out, "epilog result");
+    assert_eq!(store.read("epilog-ran.txt").unwrap(), "1| yes");
     assert_eq!(
         recorder.events(),
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
             ("Only".to_string(), detail::MODEL_TURN_COMPLETED.to_string()),
+            (
+                "Only".to_string(),
+                detail::LUA_REPLY_BINDING_STARTED.to_string(),
+            ),
+            (
+                "Only".to_string(),
+                detail::LUA_REPLY_BINDING_SUCCEEDED.to_string(),
+            ),
+            ("Only".to_string(), detail::LUA_EPILOG_STARTED.to_string()),
+            (
+                "Only".to_string(),
+                detail::STORE_WRITE_SUCCEEDED.to_string(),
+            ),
+            ("Only".to_string(), detail::LUA_EPILOG_SUCCEEDED.to_string(),),
+            ("Only".to_string(), detail::LUA_TEARDOWN_STARTED.to_string()),
+            (
+                "Only".to_string(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
+            ),
             ("Only".to_string(), detail::SECTION_FINISHED.to_string()),
             ("Test prompt".to_string(), detail::RUN_SUCCEEDED.to_string()),
-        ],
-        "an inert epilog must add no lifecycle observations"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn preamble_return_skips_model_and_epilog() {
+    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+## Only\n\n```lua\nreturn 'early'\n```\n\n\
+This prose must not reach a model.\n\n\
+```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'late'\n```\n";
+    let store = Store::memory();
+    let out = run(&bound(md), "", &[], &store, silent()).await.unwrap();
+
+    assert_eq!(out, "early");
+    assert!(store.read("epilog-ran.txt").is_err());
+}
+
+#[tokio::test]
+async fn shared_helper_survives_preamble_model_and_epilog() {
+    let addr = spawn_text_gateway().await;
+    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+```lua prompt\nfunction decorate(value) return '<' .. value .. '>' end\n```\n\n\
+## Only\n\n```lua\nvar.question = decorate(args)\n```\n\n\
+Ask using {{ var.question }}.\n\n\
+```lua\nreturn decorate(reply)\n```\n";
+    let recorder = Recorder::default();
+    let out = run(
+        &bound(md),
+        "input",
+        &[],
+        &Store::memory(),
+        RunOptions {
+            observer: &recorder,
+            client: Some(GatewayClient::new(
+                &format!("http://{addr}/v1"),
+                "test",
+                "test-model",
+            )),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(out, "<hello from the mock>");
+    assert_eq!(
+        recorder.events(),
+        [
+            ("Test prompt".to_owned(), detail::RUN_STARTED.to_owned()),
+            ("Only".to_owned(), detail::SECTION_STARTED.to_owned()),
+            (
+                "Only".to_owned(),
+                detail::LUA_SHARED_LOAD_STARTED.to_owned(),
+            ),
+            ("Only".to_owned(), detail::TOOL_REPLAY_STARTED.to_owned()),
+            ("Only".to_owned(), detail::TOOL_REPLAY_SUCCEEDED.to_owned(),),
+            (
+                "Only".to_owned(),
+                detail::LUA_SHARED_LOAD_SUCCEEDED.to_owned(),
+            ),
+            ("Only".to_owned(), detail::LUA_PREAMBLE_STARTED.to_owned()),
+            ("Only".to_owned(), detail::LUA_PREAMBLE_SUCCEEDED.to_owned(),),
+            ("Only".to_owned(), detail::TOOL_SCOPE_CLOSING.to_owned()),
+            ("Only".to_owned(), detail::TOOL_SCOPE_CLOSED.to_owned()),
+            ("Only".to_owned(), detail::MODEL_TURN_COMPLETED.to_owned(),),
+            (
+                "Only".to_owned(),
+                detail::LUA_REPLY_BINDING_STARTED.to_owned(),
+            ),
+            (
+                "Only".to_owned(),
+                detail::LUA_REPLY_BINDING_SUCCEEDED.to_owned(),
+            ),
+            ("Only".to_owned(), detail::LUA_EPILOG_STARTED.to_owned()),
+            ("Only".to_owned(), detail::LUA_EPILOG_SUCCEEDED.to_owned(),),
+            ("Only".to_owned(), detail::LUA_TEARDOWN_STARTED.to_owned()),
+            ("Only".to_owned(), detail::LUA_TEARDOWN_SUCCEEDED.to_owned(),),
+            ("Only".to_owned(), detail::SECTION_FINISHED.to_owned()),
+            ("Test prompt".to_owned(), detail::RUN_SUCCEEDED.to_owned()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
+    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+## Only\n\n```lua\nvar.phase = 'preamble'\n```\n\n\
+```lua\nif reply ~= nil then error('empty prose must not bind a reply') end\nreturn var.phase .. '-epilog'\n```\n";
+
+    assert_eq!(
+        run(&bound(md), "", &[], &Store::memory(), silent())
+            .await
+            .unwrap(),
+        "preamble-epilog"
+    );
+}
+
+#[tokio::test]
+async fn default_return_precedes_the_last_model_reply() {
+    let addr = spawn_text_gateway().await;
+    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\ndefault_return: fallback\n---\n\n\
+# Test prompt\n\n\
+## Only\n\nAsk the model.\n";
+    let out = run(
+        &bound(md),
+        "",
+        &[],
+        &Store::memory(),
+        RunOptions {
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(
+                &format!("http://{addr}/v1"),
+                "test",
+                "test-model",
+            )),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(out, "fallback");
+}
+
+#[tokio::test]
+async fn lifecycle_model_call_advertises_no_tools() {
+    async fn completions(
+        State(bodies): State<Arc<Mutex<Vec<Value>>>>,
+        Json(body): Json<Value>,
+    ) -> Json<Value> {
+        bodies.lock().unwrap().push(body);
+        Json(json!({
+            "choices": [{
+                "message": { "role": "assistant", "content": "plain reply" }
+            }]
+        }))
+    }
+
+    let bodies = Arc::new(Mutex::new(Vec::new()));
+    let router = Router::new()
+        .route("/v1/chat/completions", post(completions))
+        .with_state(Arc::clone(&bodies));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let echo = EchoTool;
+    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+# Test prompt\n\n## Only\n\nAsk without tools.\n";
+    let out = run(
+        &bound(md),
+        "",
+        &[&echo],
+        &Store::memory(),
+        RunOptions {
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(
+                &format!("http://{addr}/v1"),
+                "test",
+                "test-model",
+            )),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(out, "plain reply");
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 1);
+    assert!(
+        bodies[0].get("tools").is_none(),
+        "the lifecycle-only model call must not advertise tools"
     );
 }
