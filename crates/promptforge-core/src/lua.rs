@@ -24,10 +24,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mlua::{
-    HookTriggers, Lua, LuaOptions, LuaSerdeExt, MultiValue, StdLib, Value, Variadic, VmState,
+    HookTriggers, Lua, LuaOptions, LuaSerdeExt, MultiValue, Scope, StdLib, Value, Variadic, VmState,
 };
 use serde_json::Value as Json;
 
+use crate::observe::{Observer, detail};
 use crate::store::Store;
 use crate::{Error, Result};
 
@@ -52,7 +53,8 @@ pub struct LuaOutcome {
 
 /// Run a section's Lua chunk with `args` and `sys` exposed, a writable `var`
 /// table available, and a `store` table backed by `store`, returning the
-/// chunk's return value and the final `var`.
+/// chunk's return value and the final `var`. Harness-mediated store operations
+/// report safe outcomes to `observer` under `section`.
 ///
 /// `store` is the run-scoped virtual-file handle; every section in a run is
 /// given the same handle, so files a section writes persist for later sections
@@ -64,7 +66,14 @@ pub struct LuaOutcome {
 /// cannot be bridged, the chunk fails to run (including hitting the instruction
 /// budget or a failing `store` op, which raises a Lua error), or it returns a
 /// value that cannot be rendered as a result string.
-pub fn run_chunk(source: &str, args: &str, sys: &Json, store: &Store) -> Result<LuaOutcome> {
+pub fn run_chunk(
+    source: &str,
+    args: &str,
+    sys: &Json,
+    store: &Store,
+    observer: &dyn Observer,
+    section: &str,
+) -> Result<LuaOutcome> {
     let lua = Lua::new_with(
         StdLib::STRING | StdLib::TABLE | StdLib::MATH,
         LuaOptions::default(),
@@ -87,14 +96,15 @@ pub fn run_chunk(source: &str, args: &str, sys: &Json, store: &Store) -> Result<
         .map_err(|e| Error::Lua(e.to_string()))?;
 
     let scoped = install_tools_table(&lua, &globals)?;
-    install_store_table(&lua, &globals, store)?;
 
     install_instruction_budget(&lua);
 
-    let returned: MultiValue = lua
-        .load(source)
-        .eval()
-        .map_err(|e| Error::Lua(e.to_string()))?;
+    let evaluated: mlua::Result<MultiValue> = lua.scope(|scope| {
+        install_store_table(&lua, scope, &globals, store, observer, section)
+            .map_err(|error| mlua::Error::external(error.to_string()))?;
+        lua.load(source).eval()
+    });
+    let returned = evaluated.map_err(|e| Error::Lua(e.to_string()))?;
     let returned = match returned.into_iter().next() {
         None | Some(Value::Nil) => None,
         Some(value) => Some(value_to_string(&value)?),
@@ -152,8 +162,8 @@ fn install_tools_table(lua: &Lua, globals: &mlua::Table) -> Result<Rc<RefCell<Ve
 
 /// Expose an always-on `store` table whose six methods (`write`, `append`,
 /// `read`, `str_replace`, `delete`, `glob`) are backed by the run-scoped
-/// [`Store`] handle, cloned into each host function's closure so every section
-/// shares one set of virtual files.
+/// [`Store`] handle. The functions borrow the observer within an [`mlua::Scope`]
+/// so each operation reports immediately after its result is known.
 ///
 /// The table is a deterministic host capability, present regardless of tool
 /// scoping. The mutating ops (`write`/`append`/`str_replace`/`delete`) return
@@ -163,22 +173,49 @@ fn install_tools_table(lua: &Lua, globals: &mlua::Table) -> Result<Rc<RefCell<Ve
 /// surfaces from [`run_chunk`] as [`Error::Lua`].
 ///
 /// The `Store` handle locks a mutex internally per call and is synchronous, so
-/// nothing is held across an await and a `RefCell` is neither used nor needed.
+/// nothing is held across an await.
 ///
 /// [`StoreError`]: crate::store::StoreError
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the `store` table or any of its functions cannot
 /// be created or installed into the sandbox globals.
-fn install_store_table(lua: &Lua, globals: &mlua::Table, store: &Store) -> Result<()> {
+fn observe_store_result(
+    observer: &dyn Observer,
+    section: &str,
+    succeeded: bool,
+    success: &'static str,
+    failure: &'static str,
+) {
+    observer.observe(section, if succeeded { success } else { failure });
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "one table installs all six store operations beside their matching observation outcomes"
+)]
+fn install_store_table<'scope, 'env: 'scope>(
+    lua: &Lua,
+    scope: &'scope Scope<'scope, 'env>,
+    globals: &mlua::Table,
+    store: &Store,
+    observer: &'env dyn Observer,
+    section: &'env str,
+) -> Result<()> {
     let table = lua.create_table().map_err(|e| Error::Lua(e.to_string()))?;
 
     let handle = store.clone();
-    let write = lua
+    let write = scope
         .create_function(move |_, (path, contents): (String, String)| {
-            handle
-                .write(&path, &contents)
-                .map_err(mlua::Error::external)?;
+            let result = handle.write(&path, &contents);
+            observe_store_result(
+                observer,
+                section,
+                result.is_ok(),
+                detail::STORE_WRITE_SUCCEEDED,
+                detail::STORE_WRITE_FAILED,
+            );
+            result.map_err(mlua::Error::external)?;
             Ok(())
         })
         .map_err(|e| Error::Lua(e.to_string()))?;
@@ -187,11 +224,17 @@ fn install_store_table(lua: &Lua, globals: &mlua::Table, store: &Store) -> Resul
         .map_err(|e| Error::Lua(e.to_string()))?;
 
     let handle = store.clone();
-    let append = lua
+    let append = scope
         .create_function(move |_, (path, contents): (String, String)| {
-            handle
-                .append(&path, &contents)
-                .map_err(mlua::Error::external)?;
+            let result = handle.append(&path, &contents);
+            observe_store_result(
+                observer,
+                section,
+                result.is_ok(),
+                detail::STORE_APPEND_SUCCEEDED,
+                detail::STORE_APPEND_FAILED,
+            );
+            result.map_err(mlua::Error::external)?;
             Ok(())
         })
         .map_err(|e| Error::Lua(e.to_string()))?;
@@ -200,19 +243,35 @@ fn install_store_table(lua: &Lua, globals: &mlua::Table, store: &Store) -> Resul
         .map_err(|e| Error::Lua(e.to_string()))?;
 
     let handle = store.clone();
-    let read = lua
-        .create_function(move |_, path: String| handle.read(&path).map_err(mlua::Error::external))
+    let read = scope
+        .create_function(move |_, path: String| {
+            let result = handle.read(&path);
+            observe_store_result(
+                observer,
+                section,
+                result.is_ok(),
+                detail::STORE_READ_SUCCEEDED,
+                detail::STORE_READ_FAILED,
+            );
+            result.map_err(mlua::Error::external)
+        })
         .map_err(|e| Error::Lua(e.to_string()))?;
     table
         .set("read", read)
         .map_err(|e| Error::Lua(e.to_string()))?;
 
     let handle = store.clone();
-    let str_replace = lua
+    let str_replace = scope
         .create_function(move |_, (path, old, new): (String, String, String)| {
-            handle
-                .str_replace(&path, &old, &new)
-                .map_err(mlua::Error::external)?;
+            let result = handle.str_replace(&path, &old, &new);
+            observe_store_result(
+                observer,
+                section,
+                result.is_ok(),
+                detail::STORE_REPLACE_SUCCEEDED,
+                detail::STORE_REPLACE_FAILED,
+            );
+            result.map_err(mlua::Error::external)?;
             Ok(())
         })
         .map_err(|e| Error::Lua(e.to_string()))?;
@@ -221,9 +280,17 @@ fn install_store_table(lua: &Lua, globals: &mlua::Table, store: &Store) -> Resul
         .map_err(|e| Error::Lua(e.to_string()))?;
 
     let handle = store.clone();
-    let delete = lua
+    let delete = scope
         .create_function(move |_, path: String| {
-            handle.delete(&path).map_err(mlua::Error::external)?;
+            let result = handle.delete(&path);
+            observe_store_result(
+                observer,
+                section,
+                result.is_ok(),
+                detail::STORE_DELETE_SUCCEEDED,
+                detail::STORE_DELETE_FAILED,
+            );
+            result.map_err(mlua::Error::external)?;
             Ok(())
         })
         .map_err(|e| Error::Lua(e.to_string()))?;
@@ -232,9 +299,17 @@ fn install_store_table(lua: &Lua, globals: &mlua::Table, store: &Store) -> Resul
         .map_err(|e| Error::Lua(e.to_string()))?;
 
     let handle = store.clone();
-    let glob = lua
+    let glob = scope
         .create_function(move |lua, pattern: String| {
-            let paths = handle.glob(&pattern).map_err(mlua::Error::external)?;
+            let result = handle.glob(&pattern);
+            observe_store_result(
+                observer,
+                section,
+                result.is_ok(),
+                detail::STORE_GLOB_SUCCEEDED,
+                detail::STORE_GLOB_FAILED,
+            );
+            let paths = result.map_err(mlua::Error::external)?;
             lua.create_sequence_from(paths)
         })
         .map_err(|e| Error::Lua(e.to_string()))?;
@@ -306,8 +381,89 @@ fn value_to_string(value: &Value) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
+    use crate::observe::NullObserver;
+    use crate::store::{FileStore, StoreError};
     use serde_json::json;
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<(String, String)>>);
+
+    impl Observer for Recorder {
+        fn observe(&self, section: &str, detail: &str) {
+            self.0
+                .lock()
+                .expect("the recorder mutex must not be poisoned")
+                .push((section.to_owned(), detail.to_owned()));
+        }
+    }
+
+    impl Recorder {
+        fn observations(&self) -> Vec<(String, String)> {
+            self.0
+                .lock()
+                .expect("the recorder mutex must not be poisoned")
+                .clone()
+        }
+    }
+
+    #[derive(Debug)]
+    struct FailingStore;
+
+    impl FailingStore {
+        fn error(path: &str) -> StoreError {
+            StoreError::NotFound {
+                path: path.to_owned(),
+            }
+        }
+    }
+
+    impl FileStore for FailingStore {
+        fn write(&mut self, path: &str, _contents: &str) -> std::result::Result<(), StoreError> {
+            Err(Self::error(path))
+        }
+
+        fn append(&mut self, path: &str, _contents: &str) -> std::result::Result<(), StoreError> {
+            Err(Self::error(path))
+        }
+
+        fn read(&self, path: &str) -> std::result::Result<String, StoreError> {
+            Err(Self::error(path))
+        }
+
+        fn str_replace(
+            &mut self,
+            path: &str,
+            _old: &str,
+            _new: &str,
+        ) -> std::result::Result<(), StoreError> {
+            Err(Self::error(path))
+        }
+
+        fn delete(&mut self, path: &str) -> std::result::Result<(), StoreError> {
+            Err(Self::error(path))
+        }
+
+        fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, StoreError> {
+            Err(Self::error(pattern))
+        }
+    }
+
+    struct BoundaryRecorder {
+        store: Store,
+        snapshots: Mutex<Vec<Vec<String>>>,
+    }
+
+    impl Observer for BoundaryRecorder {
+        fn observe(&self, _section: &str, _detail: &str) {
+            self.snapshots
+                .lock()
+                .expect("the snapshot mutex must not be poisoned")
+                .push(self.store.glob("**").expect("the memory store can glob"));
+        }
+    }
 
     fn run(source: &str, args: &str) -> Result<LuaOutcome> {
         run_chunk(
@@ -315,13 +471,22 @@ mod tests {
             args,
             &json!({ "id": 1, "when": "t" }),
             &Store::memory(),
+            &NullObserver,
+            "Test",
         )
     }
 
     /// Run a chunk against a caller-supplied store, so a test can inspect the
     /// store after the chunk has run.
     fn run_with(source: &str, store: &Store) -> Result<LuaOutcome> {
-        run_chunk(source, "", &json!({ "id": 1, "when": "t" }), store)
+        run_chunk(
+            source,
+            "",
+            &json!({ "id": 1, "when": "t" }),
+            store,
+            &NullObserver,
+            "Test",
+        )
     }
 
     #[test]
@@ -489,6 +654,170 @@ mod tests {
             store.read("shared.txt").expect("read"),
             "1| from lua",
             "a Lua write must land in the shared store"
+        );
+    }
+
+    #[test]
+    fn store_reports_are_ordered_exact_and_payload_free_on_failure() {
+        let recorder = Recorder::default();
+        let store = Store::memory();
+        let source = "store.write('secret/path.txt', 'private contents')\n\
+                      store.read('secret/path.txt')\n\
+                      store.str_replace('secret/path.txt', 'missing secret', 'replacement')";
+        let error = run_chunk(
+            source,
+            "private input",
+            &json!({ "id": 1, "when": "t" }),
+            &store,
+            &recorder,
+            "Gather",
+        )
+        .expect_err("the missing anchor must fail");
+        assert!(matches!(error, Error::Lua(_)));
+
+        let observations = recorder.observations();
+        assert_eq!(
+            observations,
+            vec![
+                (
+                    "Gather".to_string(),
+                    detail::STORE_WRITE_SUCCEEDED.to_string(),
+                ),
+                (
+                    "Gather".to_string(),
+                    detail::STORE_READ_SUCCEEDED.to_string(),
+                ),
+                (
+                    "Gather".to_string(),
+                    detail::STORE_REPLACE_FAILED.to_string(),
+                ),
+            ]
+        );
+        let trace = format!("{observations:?}");
+        for payload in [
+            "secret/path.txt",
+            "private contents",
+            "missing secret",
+            "replacement",
+            "private input",
+        ] {
+            assert!(
+                !trace.contains(payload),
+                "observation leaked payload {payload:?}: {trace}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_store_operation_reports_its_exact_success_and_failure() {
+        struct Case {
+            source: &'static str,
+            success: &'static str,
+            failure: &'static str,
+            prepare: fn(&Store),
+        }
+
+        fn empty(_store: &Store) {}
+
+        fn existing(store: &Store) {
+            store
+                .write("a.txt", "old")
+                .expect("the memory store can prepare a file");
+        }
+
+        let cases = [
+            Case {
+                source: "store.write('a.txt', 'new')",
+                success: detail::STORE_WRITE_SUCCEEDED,
+                failure: detail::STORE_WRITE_FAILED,
+                prepare: empty,
+            },
+            Case {
+                source: "store.append('a.txt', 'new')",
+                success: detail::STORE_APPEND_SUCCEEDED,
+                failure: detail::STORE_APPEND_FAILED,
+                prepare: empty,
+            },
+            Case {
+                source: "store.read('a.txt')",
+                success: detail::STORE_READ_SUCCEEDED,
+                failure: detail::STORE_READ_FAILED,
+                prepare: existing,
+            },
+            Case {
+                source: "store.str_replace('a.txt', 'old', 'new')",
+                success: detail::STORE_REPLACE_SUCCEEDED,
+                failure: detail::STORE_REPLACE_FAILED,
+                prepare: existing,
+            },
+            Case {
+                source: "store.delete('a.txt')",
+                success: detail::STORE_DELETE_SUCCEEDED,
+                failure: detail::STORE_DELETE_FAILED,
+                prepare: existing,
+            },
+            Case {
+                source: "local matches = store.glob('*.txt')",
+                success: detail::STORE_GLOB_SUCCEEDED,
+                failure: detail::STORE_GLOB_FAILED,
+                prepare: existing,
+            },
+        ];
+
+        for case in cases {
+            let store = Store::memory();
+            (case.prepare)(&store);
+            let recorder = Recorder::default();
+            run_chunk(case.source, "", &json!({}), &store, &recorder, "Store")
+                .expect("the memory store operation succeeds");
+            assert_eq!(
+                recorder.observations(),
+                vec![("Store".to_owned(), case.success.to_owned())],
+                "wrong success observation for {}",
+                case.source
+            );
+
+            let store = Store::new(Box::new(FailingStore));
+            let recorder = Recorder::default();
+            let error = run_chunk(case.source, "", &json!({}), &store, &recorder, "Store")
+                .expect_err("the failing backend rejects every operation");
+            assert!(matches!(error, Error::Lua(_)));
+            assert_eq!(
+                recorder.observations(),
+                vec![("Store".to_owned(), case.failure.to_owned())],
+                "wrong failure observation for {}",
+                case.source
+            );
+        }
+    }
+
+    #[test]
+    fn store_observations_happen_before_later_lua_side_effects() {
+        let store = Store::memory();
+        let recorder = BoundaryRecorder {
+            store: store.clone(),
+            snapshots: Mutex::new(Vec::new()),
+        };
+
+        run_chunk(
+            "store.write('first.txt', '')\nstore.write('second.txt', '')",
+            "",
+            &json!({}),
+            &store,
+            &recorder,
+            "Store",
+        )
+        .expect("both writes succeed");
+
+        assert_eq!(
+            *recorder
+                .snapshots
+                .lock()
+                .expect("the snapshot mutex must not be poisoned"),
+            vec![
+                vec!["first.txt".to_owned()],
+                vec!["first.txt".to_owned(), "second.txt".to_owned()],
+            ]
         );
     }
 }

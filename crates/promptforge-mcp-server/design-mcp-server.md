@@ -32,7 +32,7 @@ To operate it: run `promptforge-mcp-server serve prompts.toml` for streamable HT
 
 11. **Arguments are one string, named `args`.** The runtime takes a single raw argument string, so `run_prompt` takes the prompt's name and one optional string and no JSON Schema enters frontmatter. This costs client-side autocompletion and typed validation, and choice 1 makes it permanent rather than merely current: with one tool serving every prompt there is no per-prompt schema to attach one to.
 
-12. **Progress is first-class, and the runtime grew a public event stream to carry it.** Without it every run is one silent multi-minute call. `promptforge-core` gained an `Observer` trait and an `Event` enum, and the server forwards them as `notifications/progress`, which a client renders as a caption changing in place. The cost is a breaking change to `execute::run` and a standing obligation to keep the event stream stable enough for the notification path to mean something. Progress buys visibility only, never time: choice 5, not this one, is what keeps a long run alive.
+12. **Progress is first-class, and the runtime exposes one report-only observer seam to carry it.** Without it every run is one silent multi-minute call. `promptforge-core` calls `Observer::observe(section, detail)` with borrowed payload-free strings, and the server recognizes a small exact detail vocabulary for `notifications/progress`, which a client renders as a caption changing in place. Unknown details are tolerated and reports never steer execution. Progress buys visibility only, never time: choice 5, not this one, is what keeps a long run alive.
 
 13. **`need_prompt` hands back three candidates and never runs one.** A plain-English capability is ranked against the catalog and up to three prompts come back, best first, for the calling model to choose among with the whole conversation in front of it. It then calls `run_prompt` with a name it was handed rather than one it guessed, which closes the gap choice 10 can only mitigate. It does not contradict choice 1, because the intent still came from a person naming what they want: the caller who was told to run "the prompt that builds a stakeholder report" without being told it is called `staker`. A retriever that bound instead of suggesting would spend minutes of gateway time on the wrong artifact, and the caller could not tell that it had.
 
@@ -122,16 +122,15 @@ Three reported numbers mean something specific. `elapsed_ms` measures the run an
 
 A backgrounded run always reaches a terminal record, whatever happens to it: a supervisor owns the join handle past the reply deadline, so a run that panics or is aborted is recorded as `failed` saying it did not finish. That matters beyond the reading, because eviction only reaches a record that finished, so a run left `running` would be both uncollectable and permanent, which is a leak for the life of the process rather than a missing answer.
 
-## Progress reports sections completed, and never a total
+## Progress reports sections entered, and never a total
 
-| Event | Frame |
+| Exact detail | Frame |
 |---|---|
-| run started | `progress` 0, `message` the prompt's name |
-| section started | `progress` the sections entered so far, from 1, `message` the section's heading |
-| section finished, model turn, tool call | none; the latter two are logged |
-| run finished | none; it latches the turn total the result reports |
+| `Run started` | `progress` 0, `message` the H1 title |
+| `Section started` | `progress` the sections entered so far, from 1, `message` the H2 heading |
+| every other recognized or unknown detail | none; logged or ignored |
 
-`total` is always absent because a jump or an early return means the number of sections a run will visit is unknown when it starts, so a denominator would be a guess wearing a measurement's clothes. The client shows a changing caption rather than a filling bar. `progress` is latched with a maximum so it never decreases, which the protocol requires. A section's end sends nothing because the frame would be identical to the one already on the wire, and a client renders the caption in place, so a duplicate is invisible to the reader and pure cost on the stream.
+`total` is always absent because an early return means the number of sections a run will visit is unknown when it starts, so a denominator would be a guess wearing a measurement's clothes. The client shows a changing caption rather than a filling bar. `progress` increments only for exact `Section started` details and therefore never decreases. A section's end sends nothing because the frame would be identical to the one already on the wire, and a client renders the caption in place, so a duplicate is invisible to the reader and pure cost on the stream.
 
 A frame rides the SSE stream the `tools/call` POST opened, which is why the HTTP transport is streamable and sessioned rather than stateless JSON: a stateless transport has no channel to carry a notification and would reduce every run to one long opaque call. The stream is pinged every 15 seconds when it is otherwise idle, because a run that thinks for longer than the first proxy's idle timeout between sections must not look dead to it.
 
@@ -177,21 +176,13 @@ The index is rebuilt on the same catalog swap a save already performs, and only 
 
 The rebuild happens *after* the catalog is stored, and the order matters because the two failure modes are not symmetric. Retrieval hands a name to a caller that will pass it to the runner, so an index briefly behind the catalog offers a name the runner refuses with the correctable listing choice 10 already carries, while one briefly ahead offers a name that does not exist yet for the same reason and buys nothing. A rebuild that fails keeps the previous index and logs why, since a stale shortlist is a name `run_prompt` corrects and no shortlist at all is a tool that stopped working over one bad save.
 
-## The runtime's event stream is a public interface, and the costliest thing here to reverse
+## The runtime's report-only observer is a public interface
 
 Forwarding progress required `promptforge-core` to grow one:
 
 ```rust
-pub trait Observer: Send + Sync { fn on_event(&self, ev: &Event); }
-
-#[non_exhaustive]
-pub enum Event {
-    RunStarted { prompt: String, sections: usize },
-    SectionStarted { completed: u32, name: String },
-    SectionFinished { name: String },
-    ModelTurn { section: String, turn: u32 },
-    ToolCalled { section: String, tool: String, ok: bool },
-    RunFinished { turns: u32, elapsed_ms: u64, ok: bool },
+pub trait Observer: Send + Sync {
+    fn observe(&self, section: &str, detail: &str);
 }
 
 pub struct RunOptions<'a> {
@@ -203,9 +194,9 @@ pub struct RunOptions<'a> {
 pub async fn run(prompt: &Prompt, args: &str, tools: &[&dyn Tool], store: &Store, opts: RunOptions<'_>) -> Result<String>;
 ```
 
-`completed` starts at 1 for the first section and never decreases. `on_event` is synchronous and must never block, await, or panic, which is the contract that lets the executor call it inline on the run's own path. `RunStarted::sections` is the count of top-level sections the prompt declares, which bounds rather than predicts what a run will visit, and this server does not forward it: a bound rendered as a denominator is the guess the progress path refuses.
+`observe` is synchronous and must never block, await, or panic, which is the contract that lets the executor call it inline on the run's own path. The pair is the complete trace record and excludes raw prompt prose, model input or output, tool arguments or results, store paths or contents, credentials, and fetched content.
 
-This is the change most expensive to walk back. It is a breaking change to the runtime's central entry point, every call site passes `RunOptions`, and the enum is the shape a notification path now depends on: `Event` is `#[non_exhaustive]` so variants can be added, but renaming or repurposing one breaks consumers silently in the sense that matters, by changing what a caption means. Events are a report and never a decision, so dropping one cannot change a result, and that is what makes the queue behind the forwarding path allowed to lose frames.
+The server recognizes only exact constants from `promptforge_core::observe::detail`. `Run started` creates frame zero, `Section started` increments the progress counter, and `Model turn completed` increments the result's turn counter. Unknown details are logged at debug level and otherwise ignored. Reports are never decisions, so dropping one cannot change a result, and that is what makes the queue behind the forwarding path allowed to lose frames.
 
 ## The `rmcp` pin is exact and the run registry forgets a restart, both deliberately
 

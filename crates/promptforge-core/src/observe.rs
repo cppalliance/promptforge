@@ -1,255 +1,130 @@
-//! Progress reporting for a run in flight.
+//! Report-only observation for a run in flight.
 //!
-//! A run is otherwise silent until it returns, which for a multi-section prompt
-//! is minutes. [`Observer`] is the seam a caller hooks to watch one: the
-//! executor hands it an [`Event`] at each point a reader would want to see,
-//! and the caller forwards, records, or discards it. [`NullObserver`] is the
-//! discarding implementation, and is what a caller that wants no progress
-//! passes.
-//!
-//! The events are the contract, not the executor's internals: they name what
-//! happened in the prompt's own vocabulary (sections, turns, tools), so a
-//! consumer renders them without knowing how a section is run.
-//!
-//! Each [`Event`] serializes externally tagged, meaning one JSON object whose
-//! single key is the variant name and whose value holds the fields:
-//!
-//! ```json
-//! {"SectionStarted": {"completed": 1, "name": "Gather"}}
-//! ```
-//!
-//! [`crate::execute::run`] emits through this seam: it takes a
-//! [`crate::execute::RunOptions`] carrying the observer, and reports the run's
-//! start and end, each section boundary, each model turn, and each tool call.
+//! [`Observer`] receives borrowed `(section, detail)` strings at operational
+//! boundaries. The strings are the complete trace record: they contain no raw
+//! prompt prose, model input or output, tool arguments or results, store paths
+//! or contents, credentials, or fetched content. Reports are synchronous and
+//! never consulted for a decision. [`NullObserver`] provides silence without a
+//! second execution path.
 
-/// A sink for [`Event`]s produced by a run.
+/// Stable detail strings emitted by the currently shipped runtime.
 ///
-/// The executor calls [`on_event`] from whatever task is driving the run,
-/// so an implementation must be `Send + Sync`. It must also be cheap:
-/// `on_event` is synchronous and sits on the run's own path, so an
-/// implementation that forwards elsewhere hands the event to a channel and
-/// returns rather than blocking, awaiting, or performing I/O.
+/// Consumers may recognize individual constants for cosmetic presentation, but
+/// must tolerate unknown details and must never use a report to steer execution.
+pub mod detail {
+    /// A run passed its version gate and began.
+    pub const RUN_STARTED: &str = "Run started";
+    /// A run returned a value.
+    pub const RUN_SUCCEEDED: &str = "Run succeeded";
+    /// A run returned an error.
+    pub const RUN_FAILED: &str = "Run failed";
+    /// A top-level section began.
+    pub const SECTION_STARTED: &str = "Section started";
+    /// A top-level section completed successfully.
+    pub const SECTION_FINISHED: &str = "Section finished";
+    /// A model round trip completed successfully.
+    pub const MODEL_TURN_COMPLETED: &str = "Model turn completed";
+    /// A model round trip returned an error.
+    pub const MODEL_TURN_FAILED: &str = "Model turn failed";
+    /// A tool dispatch completed successfully.
+    pub const TOOL_CALL_SUCCEEDED: &str = "Tool call succeeded";
+    /// A tool dispatch returned an error.
+    pub const TOOL_CALL_FAILED: &str = "Tool call failed";
+    /// A harness-mediated store write succeeded.
+    pub const STORE_WRITE_SUCCEEDED: &str = "Store write succeeded";
+    /// A harness-mediated store write failed.
+    pub const STORE_WRITE_FAILED: &str = "Store write failed";
+    /// A harness-mediated store append succeeded.
+    pub const STORE_APPEND_SUCCEEDED: &str = "Store append succeeded";
+    /// A harness-mediated store append failed.
+    pub const STORE_APPEND_FAILED: &str = "Store append failed";
+    /// A harness-mediated store read succeeded.
+    pub const STORE_READ_SUCCEEDED: &str = "Store read succeeded";
+    /// A harness-mediated store read failed.
+    pub const STORE_READ_FAILED: &str = "Store read failed";
+    /// A harness-mediated store replacement succeeded.
+    pub const STORE_REPLACE_SUCCEEDED: &str = "Store replace succeeded";
+    /// A harness-mediated store replacement failed.
+    pub const STORE_REPLACE_FAILED: &str = "Store replace failed";
+    /// A harness-mediated store deletion succeeded.
+    pub const STORE_DELETE_SUCCEEDED: &str = "Store delete succeeded";
+    /// A harness-mediated store deletion failed.
+    pub const STORE_DELETE_FAILED: &str = "Store delete failed";
+    /// A harness-mediated store glob succeeded.
+    pub const STORE_GLOB_SUCCEEDED: &str = "Store glob succeeded";
+    /// A harness-mediated store glob failed.
+    pub const STORE_GLOB_FAILED: &str = "Store glob failed";
+}
+
+/// A report-only sink for operational observations.
 ///
-/// An event is a report, never a decision. Dropping one, or all of them, must
-/// leave the run's result unchanged - which is what lets [`NullObserver`] be
-/// the default.
+/// The runtime calls [`observe`](Self::observe) synchronously from the task
+/// driving a run, so implementations must be `Send + Sync`, non-blocking, and
+/// non-panicking. A forwarding implementation should copy the borrowed strings
+/// into a queue and return rather than awaiting or performing I/O.
 ///
-/// [`on_event`]: Observer::on_event
+/// An observation is never read back by the runtime. Recording every report or
+/// discarding all of them must leave outputs, errors, ordering, and side effects
+/// unchanged.
 ///
 /// # Examples
 /// ```
 /// use std::sync::atomic::{AtomicUsize, Ordering};
 ///
-/// use promptforge_core::observe::{Event, Observer};
+/// use promptforge_core::observe::Observer;
 ///
 /// #[derive(Default)]
 /// struct Counter(AtomicUsize);
 ///
 /// impl Observer for Counter {
-///     fn on_event(&self, _ev: &Event) {
+///     fn observe(&self, _section: &str, _detail: &str) {
 ///         self.0.fetch_add(1, Ordering::Relaxed);
 ///     }
 /// }
 ///
 /// let counter = Counter::default();
-/// counter.on_event(&Event::SectionFinished { name: "Gather".to_string() });
+/// counter.observe("Gather", "Section finished");
 /// assert_eq!(counter.0.load(Ordering::Relaxed), 1);
 /// ```
 pub trait Observer: Send + Sync {
-    /// Reports that `ev` just happened.
+    /// Reports one deterministic operational statement for `section`.
     ///
-    /// Called synchronously on the run's own path. An implementation must not
-    /// block, await, or panic; see the trait documentation.
-    fn on_event(&self, ev: &Event);
+    /// The report must not contain payloads or secrets and must not affect any
+    /// execution decision. Implementations must return promptly and must not
+    /// panic.
+    fn observe(&self, section: &str, detail: &str);
 }
 
-/// Something worth reporting that happened during a run.
-///
-/// Marked `#[non_exhaustive]` because the executor will grow points worth
-/// reporting; a consumer therefore matches with a catch-all arm.
-///
-/// # Examples
-/// ```
-/// use promptforge_core::observe::Event;
-///
-/// let ev = Event::RunStarted { prompt: "greet".to_string(), sections: 2 };
-/// assert_eq!(
-///     serde_json::to_value(&ev)?,
-///     serde_json::json!({"RunStarted": {"prompt": "greet", "sections": 2}}),
-/// );
-/// # Ok::<(), serde_json::Error>(())
-/// ```
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-#[non_exhaustive]
-pub enum Event {
-    /// The run began.
-    RunStarted {
-        /// The prompt's frontmatter name.
-        prompt: String,
-        /// How many top-level sections the prompt declares.
-        ///
-        /// This is what the prompt contains, not what the run will visit: an
-        /// early return or a jump means fewer, so it bounds rather than
-        /// predicts.
-        sections: usize,
-    },
-
-    /// A section began.
-    SectionStarted {
-        /// How many sections have been entered, including this one, so it is
-        /// 1 for the first. Never decreases across a run; a repeated section
-        /// repeats a value rather than going backwards.
-        completed: u32,
-        /// The section's heading text.
-        name: String,
-    },
-
-    /// A section finished.
-    SectionFinished {
-        /// The section's heading text.
-        name: String,
-    },
-
-    /// The model produced a reply within a section.
-    ModelTurn {
-        /// The heading text of the section the turn belongs to.
-        section: String,
-        /// Which turn this is within the section, counting from 1.
-        turn: u32,
-    },
-
-    /// A tool the model asked for has been dispatched and has answered.
-    ToolCalled {
-        /// The heading text of the section the call belongs to.
-        section: String,
-        /// The tool's wire name.
-        tool: String,
-        /// Whether the call answered rather than failing.
-        ok: bool,
-    },
-
-    /// The run ended, whether by returning a value or by failing.
-    RunFinished {
-        /// How many model turns the whole run took.
-        turns: u32,
-        /// Wall-clock duration of the run in milliseconds.
-        elapsed_ms: u64,
-        /// Whether the run produced a value rather than an error.
-        ok: bool,
-    },
-}
-
-/// An [`Observer`] that discards every event.
+/// An [`Observer`] that discards every observation.
 ///
 /// This is what a caller wanting no progress passes, so the executor never
 /// needs an `Option<&dyn Observer>` and never branches on one.
 ///
 /// # Examples
 /// ```
-/// use promptforge_core::observe::{Event, NullObserver, Observer};
+/// use promptforge_core::observe::{NullObserver, Observer};
 ///
 /// let observer = NullObserver;
-/// observer.on_event(&Event::RunFinished { turns: 3, elapsed_ms: 120, ok: true });
+/// observer.observe("Example prompt", "Run succeeded");
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NullObserver;
 
 impl Observer for NullObserver {
-    fn on_event(&self, _ev: &Event) {}
+    fn observe(&self, _section: &str, _detail: &str) {}
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// How many variants [`Event`] has; [`variant_index`] is what keeps this
-    /// honest.
-    const VARIANT_COUNT: usize = 6;
-
-    /// Returns a distinct index for each [`Event`] variant.
-    ///
-    /// The match has one arm per variant and no catch-all. `#[non_exhaustive]`
-    /// only binds other crates, so this match is still exhaustiveness-checked
-    /// here: a variant added to [`Event`] stops this file compiling until it
-    /// is given an index, and `every_variant_is_represented` then fails until
-    /// [`every_variant`] builds one.
-    fn variant_index(ev: &Event) -> usize {
-        match ev {
-            Event::RunStarted { .. } => 0,
-            Event::SectionStarted { .. } => 1,
-            Event::SectionFinished { .. } => 2,
-            Event::ModelTurn { .. } => 3,
-            Event::ToolCalled { .. } => 4,
-            Event::RunFinished { .. } => 5,
-        }
-    }
-
-    /// One of each variant, so a test that must cover the enum cannot quietly
-    /// miss one added later.
-    fn every_variant() -> Vec<Event> {
-        vec![
-            Event::RunStarted {
-                prompt: "greet".to_string(),
-                sections: 2,
-            },
-            Event::SectionStarted {
-                completed: 1,
-                name: "Gather".to_string(),
-            },
-            Event::SectionFinished {
-                name: "Gather".to_string(),
-            },
-            Event::ModelTurn {
-                section: "Gather".to_string(),
-                turn: 2,
-            },
-            Event::ToolCalled {
-                section: "Gather".to_string(),
-                tool: "web_search".to_string(),
-                ok: true,
-            },
-            Event::RunFinished {
-                turns: 3,
-                elapsed_ms: 1250,
-                ok: false,
-            },
-        ]
-    }
-
     #[test]
-    fn every_variant_is_represented() {
-        let mut seen = [false; VARIANT_COUNT];
-        for ev in every_variant() {
-            seen[variant_index(&ev)] = true;
-        }
-        assert!(
-            seen.iter().all(|found| *found),
-            "every_variant omits a variant: {seen:?}"
-        );
-    }
-
-    #[test]
-    fn variants_serialize_to_expected_shape() {
-        let expected = serde_json::json!([
-            {"RunStarted": {"prompt": "greet", "sections": 2}},
-            {"SectionStarted": {"completed": 1, "name": "Gather"}},
-            {"SectionFinished": {"name": "Gather"}},
-            {"ModelTurn": {"section": "Gather", "turn": 2}},
-            {"ToolCalled": {"section": "Gather", "tool": "web_search", "ok": true}},
-            {"RunFinished": {"turns": 3, "elapsed_ms": 1250, "ok": false}},
-        ]);
-        assert_eq!(
-            serde_json::to_value(every_variant()).expect("serialize"),
-            expected
-        );
-    }
-
-    #[test]
-    fn null_observer_accepts_every_variant() {
+    fn null_observer_accepts_reports() {
         let observer = NullObserver;
-        for ev in every_variant() {
-            observer.on_event(&ev);
-        }
+        observer.observe("Prompt", "Run started");
+        observer.observe("Gather", "Section started");
+        observer.observe("Gather", "Section finished");
+        observer.observe("Prompt", "Run succeeded");
     }
 
     #[test]
@@ -258,19 +133,6 @@ mod tests {
         assert_send_sync::<dyn Observer>();
 
         let observer: &dyn Observer = &NullObserver;
-        observer.on_event(&Event::SectionFinished {
-            name: "Gather".to_string(),
-        });
-    }
-
-    #[test]
-    fn events_are_cloneable_for_forwarding() {
-        // A forwarding observer owns what it queues, so `Event` must clone.
-        let ev = Event::SectionStarted {
-            completed: 4,
-            name: "Report".to_string(),
-        };
-        let queued = ev.clone();
-        assert_eq!(ev, queued);
+        observer.observe("Gather", "Section finished");
     }
 }
