@@ -6,7 +6,7 @@
 //! server. The gateway's JSON results are returned verbatim as a string, ready
 //! to hand back to the model.
 
-use crate::tools::Tool;
+use crate::tools::{Tool, ToolId};
 use crate::{Error, Result};
 
 /// The largest error body kept for diagnostics, in characters.
@@ -44,11 +44,15 @@ impl WebSearch {
 
 #[async_trait::async_trait]
 impl Tool for WebSearch {
+    fn id(&self) -> ToolId {
+        ToolId::new("promptforge", "web_search")
+    }
+
     #[expect(
         clippy::unnecessary_literal_bound,
         reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
-    fn name(&self) -> &str {
+    fn wire_name(&self) -> &str {
         "web_search"
     }
 
@@ -118,7 +122,7 @@ impl Tool for WebSearch {
 #[cfg(test)]
 mod tests {
     use super::WebSearch;
-    use crate::tools::Tool;
+    use crate::tools::{Tool, ToolId};
 
     use std::net::SocketAddr;
 
@@ -127,6 +131,35 @@ mod tests {
     use axum::http::HeaderMap;
     use axum::routing::post;
     use serde_json::Value;
+
+    #[test]
+    fn descriptor_is_stable_and_faithful() {
+        let tool = WebSearch::new("http://localhost", "test");
+
+        assert_eq!(tool.id(), ToolId::new("promptforge", "web_search"));
+        assert_eq!(tool.wire_name(), "web_search");
+        assert_eq!(
+            tool.description(),
+            "Search the web and return a list of results (title, url, description)."
+        );
+        assert_eq!(
+            tool.parameters_schema(),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query."
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "Max number of results."
+                    }
+                },
+                "required": ["query"]
+            })
+        );
+    }
 
     /// Spawn the mock gateway on an ephemeral port and return its address.
     async fn spawn_mock() -> SocketAddr {
