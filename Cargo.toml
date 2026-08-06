@@ -73,6 +73,8 @@ candle-transformers = "0.11"
 # drops the progress bar and the C++ trainer; `onig` is the regex engine the
 # runtime pre-tokenizers need, and is what candle-core selects too.
 tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+tar = { version = "0.4.46", default-features = false }
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
