@@ -106,6 +106,9 @@ fn descriptor(tool: &dyn Tool) -> ToolDescriptor {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::Path;
+
     use promptforge_core::bind::bind_prompt;
     use promptforge_core::observe::NullObserver;
     use promptforge_core::parser::Prompt;
@@ -118,6 +121,17 @@ mod tests {
             "[server]\ntoken = \"t\"\n\n[gateway]\nurl = \"http://127.0.0.1:8081/v1/\"\ntoken = \"gw\"\n{model}"
         ))
         .expect("the fixture configuration parses")
+    }
+
+    fn collect_markdown(directory: &Path, files: &mut Vec<std::path::PathBuf>) {
+        for entry in fs::read_dir(directory).expect("read repository prompt directory") {
+            let path = entry.expect("read repository prompt entry").path();
+            if path.is_dir() {
+                collect_markdown(&path, files);
+            } else if path.extension().is_some_and(|extension| extension == "md") {
+                files.push(path);
+            }
+        }
     }
 
     #[test]
@@ -160,6 +174,55 @@ mod tests {
             bound.alias_to_id()["fetch"],
             promptforge_core::tools::ToolId::new("promptforge", "web_fetch")
         );
+    }
+
+    #[test]
+    fn every_repository_prompt_parses_and_binds() {
+        let config = gateway("");
+        let tools = PreparedTools::new(&config.gateway).expect("prepare repository tools");
+        let registry = tools.registry();
+        let prompts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts");
+        let mut files = Vec::new();
+        collect_markdown(&prompts, &mut files);
+        files.sort();
+        assert_eq!(files.len(), 4, "every shipped markdown prompt is covered");
+
+        for path in files {
+            let source = fs::read_to_string(&path).expect("read repository prompt");
+            assert!(
+                !source.contains("web_search") && !source.contains("web_fetch"),
+                "{} must not depend on concrete tool names",
+                path.display()
+            );
+            let prompt = Prompt::parse(&source, &NullObserver).unwrap_or_else(|error| {
+                panic!("{} must parse: {error}", path.display());
+            });
+            let name = prompt.frontmatter.name.clone();
+            let bound = bind_prompt(prompt, tools.picker(), &registry, &NullObserver)
+                .unwrap_or_else(|error| panic!("{} must bind: {error}", path.display()));
+
+            if name == "research_person" {
+                assert_eq!(
+                    bound.alias_to_id().get("search"),
+                    Some(&promptforge_core::tools::ToolId::new(
+                        "promptforge",
+                        "web_search"
+                    ))
+                );
+                assert_eq!(
+                    bound.alias_to_id().get("fetch"),
+                    Some(&promptforge_core::tools::ToolId::new(
+                        "promptforge",
+                        "web_fetch"
+                    ))
+                );
+            } else {
+                assert!(
+                    bound.alias_to_id().is_empty(),
+                    "{name} declares no capabilities"
+                );
+            }
+        }
     }
 
     #[test]
