@@ -78,13 +78,23 @@ One instruction hook and counter belong to the VM, so shared-library, preamble, 
 
 The existing `run_chunk` compatibility path now uses `SectionVm` for one phase and retains expression evaluation compatibility. Parser grammar and the model executor do not yet construct the full shared/preamble/reply/epilog lifecycle.
 
+### Lua declaration and scope modes
+
+Core exposes a deterministic `ToolResolver` seam instead of depending on a concrete picker. `bind_tool_declarations` executes one compiled H1 shared program in binding mode. `tools.need(alias, description)` resolves each capability once to a stable `ToolId`; `tools.always(alias)` marks a previously declared alias as prompt-wide; `tools.add` is refused. Aliases are accepted exactly when they match `[A-Za-z][A-Za-z0-9_-]{0,63}`. There is no normalization. Duplicate aliases and invalid or duplicate `tools.always` declarations fail binding. Identity collision and live-registry agreement checks remain owned by the later binding-uniqueness step.
+
+The resulting `ToolBindings` is immutable and ordered. `SectionVm::new_with_bindings` executes the shared program in every fresh section VM under replay mode, checks every `tools.need` and `tools.always` call against the frozen declaration sequence, and never invokes the resolver. Changed values, changed order, omitted calls, and extra calls are replay mismatches. Phase checks belong to the host callbacks, so a shared function captured during replay cannot invoke declaration operations from an H2.
+
+After host injection, the section's `tools` table is in H2 recording mode. Only `tools.add(alias...)` is accepted, and every alias must have a frozen binding. Additions are first-seen ordered and idempotent; aliases already in `tools.always` are not repeated. `close_tool_scope` returns an immutable effective scope with prompt-wide aliases first and H2 additions second, then permanently closes recording so an epilog cannot widen the model-visible scope.
+
+Binding, replay, and scope closure report fixed start/outcome details containing no aliases, descriptions, identities, source, or other payloads. The existing parser and executor do not invoke these modes yet. Their H1 grammar, concrete picker adapter, alias-based model advertisement and dispatch, and complete lifecycle wiring remain later steps.
+
 ## Planned, not shipped
 
 Everything in this section is settled design for later steps and remains unimplemented.
 
 ### Capability binding and picker validation
 
-Prompt-local capability aliases will bind one-to-one to the shipped live `ToolId` values through `promptforge-tool-picker`. Binding will reject absent, duplicate, ambiguous, colliding, and registry-mismatched identities. Before a model turn, core will apply the shipped picker near-duplicate analysis to the effective scope.
+The shipped deterministic resolver seam and Lua modes preserve each resolved `ToolId` without yet enforcing identity uniqueness or live-registry agreement. A later adapter will translate `promptforge-tool-picker` outcomes into that seam, including absent, duplicate, and ambiguous outcomes, and the later binding-uniqueness step will validate identities atomically. Before a model turn, core will apply the shipped picker near-duplicate analysis to the effective scope.
 
 ### Required H1 and three-phase grammar
 
@@ -92,7 +102,7 @@ The grammar will require one H1, allow one immediately following `lua prompt` sh
 
 ### Semantic capability phases
 
-H1 code will declare `tools.need(alias, description)` and optional prompt-wide `tools.always(alias)`. H2 preambles will scope declared aliases with `tools.add(alias)`. Needs will bind once before execution and replay from immutable cached bindings without additional embeddings.
+The shipped Lua modes implement declaration binding, exact replay, H2 recording, and scope closure. The parser and executor will later route H1 and H2 source regions into those modes and adapt the concrete picker to the deterministic resolver seam.
 
 The model will see selected concrete descriptions and schemas under prompt-local aliases. Calls will dispatch through `ToolId`. Before a model turn, the picker will reject near-duplicate tools in that section's effective scope.
 
@@ -119,4 +129,4 @@ Fan-out execution, branching, retries, child execution, persistent bytecode, com
 9. Lua bytecode remains process-local and private; retained source and explicit locations carry compilation diagnostics.
 10. Later lifecycle behavior remains planned until its owning step lands with tests and documentation.
 
-*2026-08-05 23:45 - GPT-5.6 Sol*
+*2026-08-06 01:00 - GPT-5.6 Sol*
