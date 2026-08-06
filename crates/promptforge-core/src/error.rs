@@ -33,7 +33,7 @@ pub enum Error {
     #[error("malformed response: {0}")]
     MalformedResponse(String),
 
-    /// A section's Lua block failed to build, run, or return a usable value.
+    /// A section's Lua phase failed to build, run, or return a usable value.
     #[error("lua error: {0}")]
     Lua(String),
 
@@ -60,7 +60,7 @@ pub enum Error {
     #[error("model called unknown tool {0}")]
     UnknownTool(String),
 
-    /// A section's Lua block scoped a tool by a name absent from the run's
+    /// A section's Lua preamble scoped a tool by a name absent from the run's
     /// supplied tool pool, so no matching tool could be advertised or dispatched.
     #[error("section scoped unknown tool {0}")]
     UnknownScopedTool(String),
