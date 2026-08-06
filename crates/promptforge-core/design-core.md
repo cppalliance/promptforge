@@ -28,6 +28,12 @@ Every callable `Tool` exposes a stable `ToolId` consisting of a server and a nam
 
 The existing executor still scopes, advertises, and dispatches tools by `wire_name` until alias binding ships. The wire name is therefore a temporary transport detail, not an identity key for new APIs.
 
+### Picker near-duplicate analysis
+
+`promptforge-tool-picker` exposes `ToolPicker::near_duplicates(ids)` for validating a selected set of stable tool identities without embedding any new text. It compares every selected catalog pair using the vectors already stored by the picker and reports pairs whose cosine similarity is at or above the picker's configured `duplicate_threshold`.
+
+The analysis is independent of capability needs, query scores, and server boundaries. Every requested identity must be present in the picker: all are validated before pair comparison, and an absent identity returns an error carrying that `ToolId` instead of an incomplete result. Repeated requested identities are idempotent set membership, so they do not repeat work or produce self-pairs, and results follow catalog pair order regardless of request order. Each `NearDuplicate` carries both descriptors and the measured score so later core binding can produce complete diagnostics without reaching into picker internals.
+
 ### Report-only observer seam
 
 The shipped observer contract has one operation:
@@ -62,7 +68,7 @@ Everything in this section is settled design for later steps. None of it is impl
 
 ### Capability binding and picker validation
 
-Prompt-local capability aliases will bind one-to-one to the shipped live `ToolId` values through `promptforge-tool-picker`. Binding will reject absent, duplicate, ambiguous, colliding, and registry-mismatched identities. The picker will also expose near-duplicate analysis over already stored vectors.
+Prompt-local capability aliases will bind one-to-one to the shipped live `ToolId` values through `promptforge-tool-picker`. Binding will reject absent, duplicate, ambiguous, colliding, and registry-mismatched identities. Before a model turn, core will apply the shipped picker near-duplicate analysis to the effective scope.
 
 ### Compiled Lua and persistent section VMs
 
@@ -100,4 +106,4 @@ Fan-out execution, branching, retries, child execution, persistent bytecode, com
 8. Expected failures return errors.
 9. Later lifecycle behavior remains planned until its owning step lands with tests and documentation.
 
-*2026-08-05 23:24 - GPT-5.6 Sol*
+*2026-08-05 23:45 - GPT-5.6 Sol*

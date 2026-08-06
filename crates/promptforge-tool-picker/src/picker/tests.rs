@@ -2,12 +2,13 @@
 
 use std::sync::Arc;
 
-use super::ToolPicker;
+use super::{NearDuplicate, ToolPicker, near_duplicates};
 use crate::catalog::{Catalog, ToolDescriptor, ToolId};
 use crate::config::Config;
 use crate::embed::{EMBEDDING_DIMENSIONS, Embedder};
 use crate::error::Error;
 use crate::policy::Outcome;
+use crate::rank::Vectors;
 use serde_json::json;
 
 /// Two tools: enough to prove rows are kept apart, cheap enough to embed.
@@ -27,6 +28,110 @@ fn tiny_catalog() -> Catalog {
             json!({"properties": {"url": {"type": "string"}}}),
         ),
     ])
+}
+
+/// A descriptor with the given identity for synthetic pair analysis.
+fn pair_tool(server: &str, name: &str) -> ToolDescriptor {
+    ToolDescriptor::new(ToolId::new(server, name), "does a thing", json!({}))
+}
+
+/// Returns selected pairs over hand-written two-dimensional unit vectors.
+fn synthetic_pairs(
+    tools: &[ToolDescriptor],
+    vectors: &[f32],
+    threshold: f32,
+    ids: &[ToolId],
+) -> crate::error::Result<Vec<NearDuplicate>> {
+    near_duplicates(tools, Vectors::new(vectors, 2), threshold, ids)
+}
+
+#[test]
+fn an_absent_id_rejects_the_whole_selected_set() {
+    let tools = vec![pair_tool("files", "read"), pair_tool("files", "write")];
+    let missing = ToolId::new("missing", "tool");
+    let selected = vec![tools[0].id.clone(), tools[1].id.clone(), missing.clone()];
+
+    let error = synthetic_pairs(&tools, &[1.0, 0.0, 1.0, 0.0], 0.9, &selected)
+        .expect_err("an absent identity must not yield a partial pair analysis");
+    assert!(
+        matches!(error, Error::ToolNotInCatalog { ref id } if *id == missing),
+        "got {error:?}"
+    );
+}
+
+#[test]
+fn repeated_ids_are_idempotent_set_membership() {
+    let tools = vec![pair_tool("files", "read"), pair_tool("files", "write")];
+    let selected = vec![
+        tools[0].id.clone(),
+        tools[1].id.clone(),
+        tools[0].id.clone(),
+        tools[1].id.clone(),
+    ];
+
+    let pairs = synthetic_pairs(&tools, &[1.0, 0.0, 1.0, 0.0], 0.9, &selected).unwrap();
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(pairs[0].first, tools[0]);
+    assert_eq!(pairs[0].second, tools[1]);
+}
+
+#[test]
+fn pair_similarity_must_reach_the_duplicate_threshold() {
+    let tools = vec![pair_tool("files", "read"), pair_tool("blobs", "read")];
+    let ids = [tools[0].id.clone(), tools[1].id.clone()];
+    let threshold = 0.75_f32;
+    let at_threshold = [1.0, 0.0, threshold, (1.0 - threshold * threshold).sqrt()];
+
+    assert_eq!(
+        synthetic_pairs(&tools, &at_threshold, threshold, &ids).unwrap(),
+        vec![NearDuplicate {
+            first: tools[0].clone(),
+            second: tools[1].clone(),
+            similarity: threshold,
+        }]
+    );
+
+    let below = f32::from_bits(threshold.to_bits() - 1);
+    let below_threshold = [1.0, 0.0, below, (1.0 - below * below).sqrt()];
+    assert!(
+        synthetic_pairs(&tools, &below_threshold, threshold, &ids)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn pairs_cross_server_boundaries_and_follow_catalog_order() {
+    let tools = vec![
+        pair_tool("first", "read"),
+        pair_tool("second", "read"),
+        pair_tool("third", "read"),
+    ];
+    let vectors = [1.0, 0.0, 1.0, 0.0, 1.0, 0.0];
+    let selected = vec![
+        tools[2].id.clone(),
+        tools[0].id.clone(),
+        tools[1].id.clone(),
+        tools[2].id.clone(),
+    ];
+
+    let pairs = synthetic_pairs(&tools, &vectors, 1.0, &selected).unwrap();
+    assert_eq!(
+        pairs
+            .iter()
+            .map(|pair| (&pair.first.id, &pair.second.id))
+            .collect::<Vec<_>>(),
+        vec![
+            (&tools[0].id, &tools[1].id),
+            (&tools[0].id, &tools[2].id),
+            (&tools[1].id, &tools[2].id),
+        ]
+    );
+    assert!(
+        pairs
+            .iter()
+            .all(|pair| pair.first.server() != pair.second.server())
+    );
 }
 
 #[test]
@@ -215,6 +320,64 @@ fn a_tool_republished_across_servers_yields_a_shortlist() {
         picker.resolve(&need).unwrap(),
         Outcome::Ambiguous(catalog.tools().to_vec())
     );
+}
+
+#[test]
+fn public_near_duplicate_analysis_reuses_the_indexed_vectors() {
+    let catalog = republished("files", "blobs");
+    let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
+    let ids = vec![
+        catalog.tools()[1].id.clone(),
+        catalog.tools()[0].id.clone(),
+        catalog.tools()[1].id.clone(),
+    ];
+
+    let pairs = picker.near_duplicates(&ids).unwrap();
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(pairs[0].first, catalog.tools()[0]);
+    assert_eq!(pairs[0].second, catalog.tools()[1]);
+    assert!(pairs[0].similarity >= picker.config().duplicate_threshold);
+}
+
+#[test]
+fn public_near_duplicate_analysis_uses_its_configured_threshold_inclusively() {
+    let catalog = tiny_catalog();
+    let embedder = Arc::new(Embedder::new().unwrap());
+    let probe =
+        ToolPicker::build_with(Arc::clone(&embedder), catalog.clone(), Config::default()).unwrap();
+    let ids = [catalog.tools()[0].id.clone(), catalog.tools()[1].id.clone()];
+    let score = probe
+        .vector(0)
+        .unwrap()
+        .iter()
+        .zip(probe.vector(1).unwrap())
+        .map(|(first, second)| first * second)
+        .sum::<f32>();
+    let above_score = f32::from_bits(score.to_bits() + 1);
+
+    let excluded = ToolPicker::build_with(
+        Arc::clone(&embedder),
+        catalog.clone(),
+        Config {
+            duplicate_threshold: above_score,
+            ..Config::default()
+        },
+    )
+    .unwrap();
+    assert!(excluded.near_duplicates(&ids).unwrap().is_empty());
+
+    let at_boundary = ToolPicker::build_with(
+        embedder,
+        catalog,
+        Config {
+            duplicate_threshold: score,
+            ..Config::default()
+        },
+    )
+    .unwrap();
+    let pairs = at_boundary.near_duplicates(&ids).unwrap();
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(pairs[0].similarity.to_bits(), score.to_bits());
 }
 
 #[test]

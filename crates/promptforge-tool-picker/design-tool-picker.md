@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-This crate answers one question for a caller: given a set of tools described only in prose, which one does this sentence mean? It answers with a decision, not a score - a single bound tool, a fault report naming one server's own copy-pasted twins, a shortlist of candidates it could not separate, or an abstention. Abstention is an answer and not an error, and that distinction is the load-bearing part of the contract: a caller must be able to tell "no tool fits" from "the engine could not run".
+This crate answers one primary question for a caller: given a set of tools described only in prose, which one does this sentence mean? It answers with a decision, not a score - a single bound tool, a fault report naming one server's own copy-pasted twins, a shortlist of candidates it could not separate, or an abstention. Abstention is an answer and not an error, and that distinction is the load-bearing part of the contract: a caller must be able to tell "no tool fits" from "the engine could not run". It also answers one pairwise question over an already selected set: which selected tools are near-duplicates under the same stored vectors and configured threshold?
 
 The engine is self-contained by construction. The catalog of tool descriptors is the sole input, the embedding model is compiled into the library, and nothing is read from disk or the network at run time. It carries no scripting language, no tool-calling protocol, and no client: mapping a chosen descriptor onto something callable is the caller's job. The same catalog, need, and configuration always produce the same answer, on the same machine and across processes, because every ordering in the pipeline is a total order and every text is embedded on its own rather than in a batch.
 
@@ -43,6 +43,7 @@ impl ToolPicker {
     pub fn embedder(&self) -> &Arc<Embedder>;
     pub fn resolve(&self, need: &str) -> Result<Outcome>;
     pub fn shortlist(&self, need: &str, k: usize) -> Result<Vec<ToolDescriptor>>;
+    pub fn near_duplicates(&self, ids: &[ToolId]) -> Result<Vec<NearDuplicate>>;
     pub fn tools(&self) -> &[ToolDescriptor];
 }
 ```
@@ -64,6 +65,8 @@ impl ToolPicker {
 14. **Determinism is a published guarantee, and it is bought by total orders and unbatched embedding.** Every ranking sorts by score descending, then - for scores that tie exactly, which happens whenever a tool is republished verbatim - by behavioural hints, then by catalog position, which is the one key guaranteed unique because a catalog is deliberately not deduplicated. A non-finite score is ordered below every real one so the order stays total even for a value the crate cannot currently produce. Embedding runs one text at a time rather than in a padded batch, so a vector never depends on its neighbours to within floating-point noise. Indexing is a once-per-build cost, and reproducibility is worth more there than batch throughput.
 
 15. **Behavioural hints break exactly-tied scores and nothing else, and silence is not a claim.** Where MCP-style `readOnlyHint`, `destructiveHint`, and `idempotentHint` are present, a positive claim promotes: read-only first, then non-destructive, then idempotent. An absent hint is read as "no claim" rather than as a value to compare, because consulting a hint only when both candidates carry it would make the comparison intransitive and cost exactly the determinism above - and reading silence as the weaker claim is the cautious reading anyway. Hints never overturn a decision the scores made: they cannot promote a near-tie into a binding, cannot rescue a `Duplicate`, and cannot recall a candidate that fell outside the ranked window.
+
+16. **Near-duplicate analysis is pairwise over selected identities and performs no embedding.** `near_duplicates(ids)` reuses the vectors stored when the picker was built and compares every selected catalog pair against `duplicate_threshold`, inclusively. It does not apply same-server policy because callers use it to protect one effective tool scope, where overlapping capabilities compete regardless of provenance. Every requested identity must exist in the picker: the complete request is validated before comparison, and an absent identity returns `ToolNotInCatalog` carrying that `ToolId` rather than silently producing a partial safety result. Repeated requested identities are idempotent set membership, so they do not duplicate a pair or compare one entry with itself, and output follows catalog pair order rather than request order. Each `NearDuplicate` carries the two descriptors and their cosine similarity, giving a later validator identities, descriptions, hints, and the exact score without exposing vector internals.
 
 ## What the caller writes: the catalog as JSON
 
@@ -105,4 +108,4 @@ Loading the model twice in one process is measurably slower than once, since the
 - A persistent vector cache. None exists: an index is a process-lifetime thing, and a cache keyed on catalog content would have to be invalidated by the same content hash it is keyed on, which costs more correctness risk than embedding a realistic catalog costs time.
 - Tuning `margin` against a real catalog, which is the one default carrying no measurement behind it.
 
-*2026-08-02 - claude-opus-5, revised 2026-08-03 for the shared-encoder constructors*
+*2026-08-02 - claude-opus-5, revised 2026-08-05 by GPT-5.6 Sol for selected-set near-duplicate analysis*

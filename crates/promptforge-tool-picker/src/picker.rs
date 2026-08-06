@@ -47,15 +47,29 @@
 
 use std::sync::Arc;
 
-use crate::catalog::{Catalog, ToolDescriptor};
+use crate::catalog::{Catalog, ToolDescriptor, ToolId};
 use crate::config::Config;
 use crate::embed::{EMBEDDING_DIMENSIONS, Embedder};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::policy::{self, Outcome};
 use crate::rank::{self, Candidate, Vectors};
 
 #[cfg(test)]
 mod tests;
+
+/// A selected pair whose stored tool vectors meet the duplicate threshold.
+///
+/// The pair is reported in catalog order. Its similarity is the cosine between
+/// the tools' stored vectors, independent of any capability need or query.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NearDuplicate {
+    /// The earlier tool in catalog order.
+    pub first: ToolDescriptor,
+    /// The later tool in catalog order.
+    pub second: ToolDescriptor,
+    /// The cosine similarity between the tools' stored vectors.
+    pub similarity: f32,
+}
 
 /// A catalog embedded and held in memory, ready to answer needs.
 ///
@@ -439,6 +453,45 @@ impl ToolPicker {
         Ok(policy::shortlist(&ranked, self.tools(), &self.config))
     }
 
+    /// Reports near-duplicate pairs among the selected tool identities.
+    ///
+    /// Each selected catalog entry is compared with every later selected entry
+    /// using the vectors already stored by this picker. A pair is returned when
+    /// its cosine similarity is greater than or equal to
+    /// [`Config::duplicate_threshold`]. Server boundaries do not affect this
+    /// analysis.
+    ///
+    /// Every requested identity must be present in the picker. All identities
+    /// are validated before any pair is compared, so an absent identity returns
+    /// an error rather than an incomplete analysis. Repeating an identity in
+    /// `ids` is idempotent set membership: it does not repeat entries or compare
+    /// a tool with itself. Results are ordered by the first tool's catalog
+    /// position and then the second's, independently of the order of `ids`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ToolNotInCatalog`] naming the first requested identity
+    /// that is absent from this picker's catalog.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use promptforge_tool_picker::{Catalog, Config, ToolId, ToolPicker};
+    ///
+    /// let picker = ToolPicker::build(Catalog::default(), Config::default())?;
+    /// let pairs = picker.near_duplicates(&[])?;
+    /// assert!(pairs.is_empty());
+    /// # Ok::<(), promptforge_tool_picker::Error>(())
+    /// ```
+    pub fn near_duplicates(&self, ids: &[ToolId]) -> Result<Vec<NearDuplicate>> {
+        near_duplicates(
+            self.tools(),
+            Vectors::new(&self.vectors, EMBEDDING_DIMENSIONS),
+            self.config.duplicate_threshold,
+            ids,
+        )
+    }
+
     /// The stored vector for the tool at `index` in [`ToolPicker::tools`].
     ///
     /// The slice is [`EMBEDDING_DIMENSIONS`] long and unit length, so its dot
@@ -450,6 +503,43 @@ impl ToolPicker {
         let end = start.checked_add(EMBEDDING_DIMENSIONS)?;
         self.vectors.get(start..end)
     }
+}
+
+/// Finds selected pairs meeting `threshold`, preserving catalog pair order.
+fn near_duplicates(
+    tools: &[ToolDescriptor],
+    vectors: Vectors<'_>,
+    threshold: f32,
+    ids: &[ToolId],
+) -> Result<Vec<NearDuplicate>> {
+    for id in ids {
+        if !tools.iter().any(|tool| tool.id == *id) {
+            return Err(Error::ToolNotInCatalog { id: id.clone() });
+        }
+    }
+
+    let mut pairs = Vec::new();
+    for (first_index, first) in tools.iter().enumerate() {
+        if !ids.contains(&first.id) {
+            continue;
+        }
+        for (second_index, second) in tools.iter().enumerate().skip(first_index + 1) {
+            if !ids.contains(&second.id) {
+                continue;
+            }
+            let Some(similarity) = vectors.similarity(first_index, second_index) else {
+                continue;
+            };
+            if similarity >= threshold {
+                pairs.push(NearDuplicate {
+                    first: first.clone(),
+                    second: second.clone(),
+                    similarity,
+                });
+            }
+        }
+    }
+    Ok(pairs)
 }
 
 impl std::fmt::Debug for ToolPicker {
