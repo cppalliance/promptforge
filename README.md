@@ -5,7 +5,7 @@ markdown is the program, the model is the CPU.
 
 ## Workspace
 
-- `crates/promptforge-core` - library: prompt parser, gateway client, section execution, source-retaining `LuaProgram` compilation to process-local Lua 5.4 bytecode, stable live-tool identity (`ToolId`, `ToolRegistry`, and transport-only wire names), and `observe`, the report-only progress seam (`Observer`, `NullObserver`) that a caller hooks to watch a long run. A run reports borrowed `(section, detail)` strings through it as it goes (see "Watching a run" below)
+- `crates/promptforge-core` - library: prompt parser, gateway client, section execution, source-retaining `LuaProgram` compilation to process-local Lua 5.4 bytecode, a sendable persistent `SectionVm` lifecycle seam, stable live-tool identity (`ToolId`, `ToolRegistry`, and transport-only wire names), and `observe`, the report-only progress seam (`Observer`, `NullObserver`) that a caller hooks to watch a long run. A run reports borrowed `(section, detail)` strings through it as it goes (see "Watching a run" below)
 - `crates/promptforge-webfetch` - library: the `web_fetch` tool, which fetches a URL in-process and returns its main content as markdown. It needs no credential, so it runs wherever the prompt runs rather than through the gateway
 - `crates/promptforge-cli` - binary `promptforge`: the command-line tool, `promptforge run <file.md> [input]`
 - `crates/promptforge-gateway` - binary `promptforge-gateway`: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
@@ -564,6 +564,8 @@ return args              -- finishes the run with this value; no model call
 
 If the block returns nothing (or there is no block), the section's prose is sent
 to the model.
+
+Core also exposes the next lifecycle's `SectionVm` building block. It runs an optional compiled shared program before delayed host injection, then keeps one hardened environment and one instruction budget across explicit `run_preamble`, `bind_reply`, `run_epilog`, and `teardown` operations. Each lifecycle operation reports fixed payload-free start and outcome details without retaining its borrowed observer between calls. The current parser and executor still use the one-block language above; shared-library and epilog syntax, capability phases, and model-loop wiring are not part of this step.
 
 ### Substitution
 
