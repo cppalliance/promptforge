@@ -35,6 +35,17 @@ pub struct BoundPrompt {
 }
 
 impl BoundPrompt {
+    #[cfg(test)]
+    pub(crate) fn without_tools(prompt: Prompt) -> Self {
+        Self {
+            prompt,
+            bindings: ToolBindings::default(),
+            diagnostics: BTreeMap::new(),
+            alias_to_id: BTreeMap::new(),
+            id_to_alias: BTreeMap::new(),
+        }
+    }
+
     /// Returns the parsed prompt whose H1 declarations were bound.
     #[must_use]
     pub fn prompt(&self) -> &Prompt {
