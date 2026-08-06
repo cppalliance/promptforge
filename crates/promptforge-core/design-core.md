@@ -122,11 +122,11 @@ Everything in this section is settled design for later steps and remains unimple
 
 The shipped Lua modes implement declaration binding, exact replay, H2 recording, and scope closure. `bind_prompt` now routes the H1 source through concrete picker binding, while the executor will later consume `BoundPrompt` and route H1 replay and H2 source regions through their lifecycle modes.
 
-Host adapters still need to construct matching picker catalogs and live registries before they can use this shipped core path.
+The CLI now constructs its complete available live registry first and derives a matching picker catalog from those same concrete instances. It binds synchronously and executes the resulting `BoundPrompt`. The MCP host adapter still needs to adopt this path.
 
 ### Host binding integration
 
-Hosts will parse, bind, and execute in separate phases while passing the same observer reference through each phase. Async hosts will move synchronous binding to `spawn_blocking`. Parsed-prompt execution compatibility can then be removed. No mutex guard will cross an await.
+The CLI parses, binds, and executes in separate phases while passing the same observer reference through each phase. Its top-level caller installs `NullObserver` by default, and synchronous binding occurs directly before the async executor is entered. The async MCP host will move synchronous binding to `spawn_blocking`. Parsed-prompt execution compatibility can be removed after that host migrates. No mutex guard will cross an await.
 
 ### Explicit non-goals
 
@@ -143,6 +143,6 @@ Fan-out execution, branching, retries, child execution, persistent bytecode, com
 7. Registry lookup compares stable `ToolId` values and does not silently make wire names into identity.
 8. Expected failures return errors.
 9. Lua bytecode remains process-local and private; retained source and explicit locations carry compilation diagnostics.
-10. Later lifecycle behavior remains planned until its owning step lands with tests and documentation.
+10. Host integration remains planned until its owning host lands with tests and documentation.
 
-*2026-08-06 02:35 - GPT-5.6 Sol*
+*2026-08-06 03:00 - GPT-5.6 Sol*

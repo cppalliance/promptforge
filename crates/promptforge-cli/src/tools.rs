@@ -1,95 +1,207 @@
-//! Resolve prompt-declared tool names into concrete tool instances.
+//! Build the CLI's live tool registry and matching semantic-picker catalog.
 //!
-//! A prompt lists the canonical tool names it needs in its frontmatter. The CLI
-//! turns that list into live [`Tool`] instances before handing them to the
-//! executor. `web_fetch` runs locally and is always available; `web_search`
-//! proxies through the gateway and therefore needs the gateway base URL and
-//! bearer token.
+//! `web_fetch` runs locally and is always available. `web_search` proxies
+//! through the gateway, so it is omitted when no bearer credential is
+//! installed. The abstract picker descriptors are derived from the same live
+//! instances placed in the registry, keeping identity, description, and schema
+//! agreement structural rather than conventional.
 
-use promptforge_core::tools::{Tool, WebSearch};
+use promptforge_core::tools::{Tool, ToolRegistry, WebSearch};
+use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId};
 use promptforge_webfetch::WebFetch;
 
-/// Build the tool instances a prompt requested, resolving each canonical name
-/// to its implementation.
+/// The complete set of concrete tools available to one CLI run.
 ///
-/// `web_fetch` is always available (it runs locally). `web_search` requires the
-/// gateway base URL and token, since it proxies through the gateway.
-///
-/// # Errors
-/// Returns an error naming the tool if the prompt requests an unknown tool, or
-/// requests `web_search` when the gateway credentials are not available.
-pub(crate) fn select_tools(
-    requested: &[String],
-    base_url: Option<&str>,
-    token: Option<&str>,
-) -> anyhow::Result<Vec<Box<dyn Tool>>> {
-    let mut tools: Vec<Box<dyn Tool>> = Vec::with_capacity(requested.len());
-    for name in requested {
-        let tool: Box<dyn Tool> = match name.as_str() {
-            "web_fetch" => Box::new(WebFetch::new()),
-            "web_search" => match (base_url, token) {
-                (Some(base_url), Some(token)) => Box::new(WebSearch::new(base_url, token)),
-                _ => {
-                    anyhow::bail!(
-                        "prompt requests web_search but no gateway is configured (set \
-                         PROMPTFORGE_BASE_URL and PROMPTFORGE_TOKEN)"
-                    );
-                }
-            },
-            other => anyhow::bail!("unknown tool: {other}"),
-        };
-        tools.push(tool);
+/// The picker catalog is built directly from `live`, so no descriptor can be
+/// offered without a callable tool carrying the same stable identity.
+pub(crate) struct AvailableTools {
+    live: Vec<Box<dyn Tool>>,
+    catalog: Catalog,
+}
+
+impl std::fmt::Debug for AvailableTools {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AvailableTools")
+            .field(
+                "ids",
+                &self.live.iter().map(|tool| tool.id()).collect::<Vec<_>>(),
+            )
+            .field("catalog", &self.catalog)
+            .finish()
     }
-    Ok(tools)
+}
+
+impl AvailableTools {
+    /// Returns a registry borrowing every available concrete tool.
+    pub(crate) fn registry(&self) -> ToolRegistry<'_> {
+        ToolRegistry::new(self.live.iter().map(AsRef::as_ref))
+    }
+
+    /// Returns the matching abstract picker catalog.
+    pub(crate) fn catalog(&self) -> &Catalog {
+        &self.catalog
+    }
+}
+
+/// Builds every concrete tool currently available to the CLI.
+///
+/// `web_fetch` is unconditional. `web_search` is included only when `token` is
+/// present, because that bearer is the credential needed to invoke the gateway.
+pub(crate) fn available_tools(base_url: &str, token: Option<&str>) -> AvailableTools {
+    let mut live: Vec<Box<dyn Tool>> = vec![Box::new(WebFetch::new())];
+    if let Some(token) = token {
+        live.push(Box::new(WebSearch::new(base_url, token)));
+    }
+
+    let catalog = Catalog::new(live.iter().map(|tool| descriptor(tool.as_ref())).collect());
+    AvailableTools { live, catalog }
+}
+
+fn descriptor(tool: &dyn Tool) -> ToolDescriptor {
+    let id = tool.id();
+    ToolDescriptor::new(
+        PickerToolId::new(id.server(), id.name()),
+        tool.description(),
+        tool.parameters_schema(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::select_tools;
+    use promptforge_core::Error;
+    use promptforge_core::bind::bind_prompt;
+    use promptforge_core::observe::NullObserver;
+    use promptforge_core::parser::Prompt;
+    use promptforge_tool_picker::{Config, ToolPicker};
+
+    use super::available_tools;
+
+    const BASE_URL: &str = "http://127.0.0.1:8081/v1";
 
     #[test]
-    fn empty_request_yields_no_tools() {
-        let tools = select_tools(&[], None, None).expect("empty request should succeed");
-        assert!(tools.is_empty());
-    }
+    fn available_capability_binds_to_live_tool() {
+        let available = available_tools(BASE_URL, None);
+        let picker = ToolPicker::build(available.catalog().clone(), Config::default())
+            .expect("fixture picker should build");
+        let registry = available.registry();
+        let prompt = parse_prompt(
+            r#"
+tools.need("fetch", "Fetch a web page and return its main content as markdown.")
+"#,
+        );
 
-    #[test]
-    fn web_fetch_is_always_available() {
-        let tools = select_tools(&["web_fetch".into()], None, None)
-            .expect("web_fetch should not require a gateway");
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].wire_name(), "web_fetch");
-    }
+        let bound = bind_prompt(prompt, &picker, &registry, &NullObserver)
+            .expect("available fetch capability should bind");
 
-    #[test]
-    fn web_search_without_gateway_errors() {
-        let Err(err) = select_tools(&["web_search".into()], None, None) else {
-            panic!("web_search should require a gateway")
-        };
-        let err = err.to_string();
-        assert!(
-            err.contains("gateway"),
-            "error should mention the gateway, got: {err}"
+        assert_eq!(
+            bound.alias_to_id().get("fetch"),
+            Some(&promptforge_core::tools::ToolId::new(
+                "promptforge",
+                "web_fetch"
+            ))
         );
     }
 
     #[test]
-    fn web_search_with_gateway_resolves() {
-        let tools = select_tools(&["web_search".into()], Some("http://x/v1"), Some("t"))
-            .expect("web_search should resolve with credentials");
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].wire_name(), "web_search");
+    fn token_includes_web_search_and_need_can_bind() {
+        let available = available_tools(BASE_URL, Some("test-token"));
+        let registry = available.registry();
+        assert!(
+            registry
+                .tools()
+                .iter()
+                .any(|tool| tool.id().name() == "web_search")
+        );
+        assert!(
+            available
+                .catalog()
+                .tools()
+                .iter()
+                .any(|tool| tool.name() == "web_search")
+        );
+        let picker = ToolPicker::build(available.catalog().clone(), Config::default())
+            .expect("fixture picker should build");
+        let prompt = parse_prompt(
+            r#"
+tools.need("search", "Search the web and return a list of results (title, url, description).")
+"#,
+        );
+
+        let bound = bind_prompt(prompt, &picker, &registry, &NullObserver)
+            .expect("available search capability should bind");
+
+        assert_eq!(
+            bound.alias_to_id().get("search"),
+            Some(&promptforge_core::tools::ToolId::new(
+                "promptforge",
+                "web_search"
+            ))
+        );
     }
 
     #[test]
-    fn unknown_tool_errors() {
-        let Err(err) = select_tools(&["nope".into()], None, None) else {
-            panic!("unknown tool should error")
-        };
-        let err = err.to_string();
+    fn no_token_excludes_web_search_and_need_is_absent() {
+        let available = available_tools(BASE_URL, None);
+        let registry = available.registry();
         assert!(
-            err.contains("unknown"),
-            "error should mention unknown tool, got: {err}"
+            registry
+                .tools()
+                .iter()
+                .all(|tool| tool.id().name() != "web_search")
         );
+        assert!(
+            available
+                .catalog()
+                .tools()
+                .iter()
+                .all(|tool| tool.name() != "web_search")
+        );
+        let picker = ToolPicker::build(available.catalog().clone(), Config::default())
+            .expect("fixture picker should build");
+        let prompt = parse_prompt(
+            r#"
+tools.need("search", "Search the web and return a list of results (title, url, description).")
+"#,
+        );
+
+        let error = bind_prompt(prompt, &picker, &registry, &NullObserver)
+            .expect_err("unavailable search capability must not bind");
+
+        assert!(matches!(error, Error::Absent { .. }));
+    }
+
+    #[test]
+    fn live_registry_and_picker_catalog_have_identical_ids() {
+        for token in [None, Some("test-token")] {
+            let available = available_tools(BASE_URL, token);
+            let registry = available.registry();
+            let live_ids = registry
+                .tools()
+                .iter()
+                .map(|tool| {
+                    let id = tool.id();
+                    (id.server().to_owned(), id.name().to_owned())
+                })
+                .collect::<Vec<_>>();
+            let picker_ids = available
+                .catalog()
+                .tools()
+                .iter()
+                .map(|tool| (tool.server().to_owned(), tool.name().to_owned()))
+                .collect::<Vec<_>>();
+
+            assert_eq!(live_ids, picker_ids);
+        }
+    }
+
+    fn parse_prompt(declarations: &str) -> Prompt {
+        Prompt::parse(
+            &format!(
+                "---\nname: fixture\ndescription: CLI registry fixture\nversion: 1\npromptforge: 1\n---\n# Fixture\n\n```lua prompt\n{declarations}```\n\n## Run\n\n```lua\nreturn \"done\"\n```\n"
+            ),
+            &NullObserver,
+        )
+        .expect("fixture prompt should parse")
     }
 }
