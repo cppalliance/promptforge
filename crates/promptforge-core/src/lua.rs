@@ -257,6 +257,7 @@ struct BindingState {
     bindings: Vec<ToolBinding>,
     always: Vec<String>,
     declarations: Vec<ToolDeclaration>,
+    resolver_error: Option<Error>,
 }
 
 /// Executes an H1 shared program in binding mode and freezes its declarations.
@@ -267,9 +268,9 @@ struct BindingState {
 /// identifiers matching `[A-Za-z][A-Za-z0-9_-]{0,63}`.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] for invalid aliases, duplicate declarations,
-/// out-of-order or duplicate `tools.always` calls, resolver failures, Lua
-/// failures, or a non-nil top-level return.
+/// Returns any error from [`ToolResolver::resolve`] unchanged. Returns
+/// [`Error::Lua`] for invalid aliases, duplicate declarations, out-of-order or
+/// duplicate `tools.always` calls, Lua failures, or a non-nil top-level return.
 ///
 /// # Examples
 /// ```
@@ -326,96 +327,113 @@ fn bind_tool_declarations_inner(
     install_instruction_budget(&lua);
     let state = Arc::new(Mutex::new(BindingState::default()));
 
-    let returned: MultiValue = lua
-        .scope(|scope| {
-            let tools = lua.create_table()?;
+    let returned = lua.scope(|scope| {
+        let tools = lua.create_table()?;
 
-            let needs = Arc::clone(&state);
-            let need = scope.create_function(
-                move |_, (alias, description): (String, String)| -> mlua::Result<()> {
-                    validate_alias(&alias)
-                        .map_err(|error| mlua::Error::external(error.to_string()))?;
-                    let mut declarations = needs
-                        .lock()
-                        .map_err(|_| mlua::Error::external("tool binding recorder was poisoned"))?;
-                    if declarations
-                        .bindings
-                        .iter()
-                        .any(|binding| binding.alias == alias)
-                    {
-                        return Err(mlua::Error::external(format!(
-                            "tool alias {alias:?} was declared more than once"
-                        )));
-                    }
-                    let id = resolver
-                        .resolve(&description)
-                        .map_err(|error| mlua::Error::external(error.to_string()))?;
-                    declarations.bindings.push(ToolBinding {
-                        alias: alias.clone(),
-                        description: description.clone(),
-                        id,
-                    });
-                    declarations
-                        .declarations
-                        .push(ToolDeclaration::Need { alias, description });
-                    Ok(())
-                },
-            )?;
-            tools.set("need", need)?;
-
-            let prompt_wide = Arc::clone(&state);
-            let always = scope.create_function(move |_, alias: String| -> mlua::Result<()> {
+        let needs = Arc::clone(&state);
+        let need = scope.create_function(
+            move |_, (alias, description): (String, String)| -> mlua::Result<()> {
                 validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
-                let mut declarations = prompt_wide
+                let mut declarations = needs
                     .lock()
                     .map_err(|_| mlua::Error::external("tool binding recorder was poisoned"))?;
-                if !declarations
+                if declarations
                     .bindings
                     .iter()
                     .any(|binding| binding.alias == alias)
                 {
                     return Err(mlua::Error::external(format!(
-                        "tools.always alias {alias:?} was not declared by tools.need"
+                        "tool alias {alias:?} was declared more than once"
                     )));
                 }
-                if declarations
-                    .always
-                    .iter()
-                    .any(|existing| existing == &alias)
-                {
-                    return Err(mlua::Error::external(format!(
-                        "tools.always alias {alias:?} was recorded more than once"
-                    )));
-                }
-                declarations.always.push(alias.clone());
+                let id = match resolver.resolve(&description) {
+                    Ok(id) => id,
+                    Err(error) => {
+                        if declarations.resolver_error.is_none() {
+                            declarations.resolver_error = Some(error);
+                        }
+                        return Err(mlua::Error::external("tool capability resolution failed"));
+                    }
+                };
+                declarations.bindings.push(ToolBinding {
+                    alias: alias.clone(),
+                    description: description.clone(),
+                    id,
+                });
                 declarations
                     .declarations
-                    .push(ToolDeclaration::Always(alias));
+                    .push(ToolDeclaration::Need { alias, description });
                 Ok(())
-            })?;
-            tools.set("always", always)?;
-            let add = scope.create_function(|_, _: Variadic<String>| -> mlua::Result<()> {
-                Err(mlua::Error::external(
-                    "tools.add is only available during H2 recording",
-                ))
-            })?;
-            tools.set("add", add)?;
-            lua.globals().raw_set("tools", tools)?;
-            program
-                .load(&lua)
-                .map_err(|error| mlua::Error::external(error.to_string()))?
-                .call(())
-        })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+            },
+        )?;
+        tools.set("need", need)?;
+
+        let prompt_wide = Arc::clone(&state);
+        let always = scope.create_function(move |_, alias: String| -> mlua::Result<()> {
+            validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
+            let mut declarations = prompt_wide
+                .lock()
+                .map_err(|_| mlua::Error::external("tool binding recorder was poisoned"))?;
+            if !declarations
+                .bindings
+                .iter()
+                .any(|binding| binding.alias == alias)
+            {
+                return Err(mlua::Error::external(format!(
+                    "tools.always alias {alias:?} was not declared by tools.need"
+                )));
+            }
+            if declarations
+                .always
+                .iter()
+                .any(|existing| existing == &alias)
+            {
+                return Err(mlua::Error::external(format!(
+                    "tools.always alias {alias:?} was recorded more than once"
+                )));
+            }
+            declarations.always.push(alias.clone());
+            declarations
+                .declarations
+                .push(ToolDeclaration::Always(alias));
+            Ok(())
+        })?;
+        tools.set("always", always)?;
+        let add = scope.create_function(|_, _: Variadic<String>| -> mlua::Result<()> {
+            Err(mlua::Error::external(
+                "tools.add is only available during H2 recording",
+            ))
+        })?;
+        tools.set("add", add)?;
+        lua.globals().raw_set("tools", tools)?;
+        program
+            .load(&lua)
+            .map_err(|error| mlua::Error::external(error.to_string()))?
+            .call(())
+    });
+    let returned = match returned {
+        Ok(returned) => returned,
+        Err(lua_error) => {
+            let resolver_error = state
+                .lock()
+                .map_err(|_| Error::Lua("tool binding recorder was poisoned".to_owned()))?
+                .resolver_error
+                .take();
+            return Err(resolver_error.unwrap_or_else(|| Error::Lua(lua_error.to_string())));
+        }
+    };
+    let state = Arc::try_unwrap(state)
+        .map_err(|_| Error::Lua("tool binding recorder remained shared".to_owned()))?
+        .into_inner()
+        .map_err(|_| Error::Lua("tool binding recorder was poisoned".to_owned()))?;
+    if let Some(error) = state.resolver_error {
+        return Err(error);
+    }
     if scalar_return(returned)?.is_some() {
         return Err(Error::Lua(
             "H1 tool declaration program must not return a value".to_owned(),
         ));
     }
-    let state = Arc::try_unwrap(state)
-        .map_err(|_| Error::Lua("tool binding recorder remained shared".to_owned()))?
-        .into_inner()
-        .map_err(|_| Error::Lua("tool binding recorder was poisoned".to_owned()))?;
     Ok(ToolBindings {
         bindings: state.bindings,
         always: state.always,

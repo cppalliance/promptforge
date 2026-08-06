@@ -2,9 +2,10 @@
 
 /// The crate's error type, spanning parsing, HTTP, and execution failures.
 ///
-/// Marked `#[non_exhaustive]` so future variants are not a breaking change, and
-/// the transport variant hides its concrete source type so no dependency's
-/// error leaks through this crate's public API.
+/// Marked `#[non_exhaustive]` so future variants are not a breaking change. The
+/// data-carrying tool-binding variants are likewise non-exhaustive so fields can
+/// be added compatibly, and the transport variant hides its concrete source
+/// type so no dependency's error leaks through this crate's public API.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -46,6 +47,44 @@ pub enum Error {
         lua_source: String,
         /// The Lua 5.4 compiler diagnostic.
         message: String,
+    },
+
+    /// The concrete picker failed while resolving a capability declaration.
+    #[error("could not bind tool capability {capability:?}: {detail}")]
+    #[non_exhaustive]
+    Bind {
+        /// The exact capability description passed to `tools.need`.
+        capability: String,
+        /// The picker failure without exposing its concrete error type.
+        detail: String,
+    },
+
+    /// No picker catalog entry matched a declared capability.
+    #[error("no tool matches capability {capability:?}")]
+    #[non_exhaustive]
+    Absent {
+        /// The exact capability description passed to `tools.need`.
+        capability: String,
+    },
+
+    /// One server published duplicate matches for a declared capability.
+    #[error("duplicate tools match capability {capability:?}: {candidates:?}")]
+    #[non_exhaustive]
+    Duplicate {
+        /// The exact capability description passed to `tools.need`.
+        capability: String,
+        /// The stable identities reported by the picker, in picker order.
+        candidates: Vec<crate::tools::ToolId>,
+    },
+
+    /// The picker could not choose uniquely among capability matches.
+    #[error("ambiguous tools match capability {capability:?}: {candidates:?}")]
+    #[non_exhaustive]
+    Ambiguous {
+        /// The exact capability description passed to `tools.need`.
+        capability: String,
+        /// The stable identities reported by the picker, in picker order.
+        candidates: Vec<crate::tools::ToolId>,
     },
 
     /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
