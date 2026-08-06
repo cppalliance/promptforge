@@ -257,7 +257,7 @@ struct BindingState {
     bindings: Vec<ToolBinding>,
     always: Vec<String>,
     declarations: Vec<ToolDeclaration>,
-    resolver_error: Option<Error>,
+    callback_error: Option<Error>,
 }
 
 /// Executes an H1 shared program in binding mode and freezes its declarations.
@@ -268,9 +268,10 @@ struct BindingState {
 /// identifiers matching `[A-Za-z][A-Za-z0-9_-]{0,63}`.
 ///
 /// # Errors
-/// Returns any error from [`ToolResolver::resolve`] unchanged. Returns
-/// [`Error::Lua`] for invalid aliases, duplicate declarations, out-of-order or
-/// duplicate `tools.always` calls, Lua failures, or a non-nil top-level return.
+/// Returns any error from [`ToolResolver::resolve`] unchanged and
+/// [`Error::DuplicateAlias`] for a repeated `tools.need` alias. Returns
+/// [`Error::Lua`] for invalid aliases, out-of-order or duplicate
+/// `tools.always` calls, Lua failures, or a non-nil top-level return.
 ///
 /// # Examples
 /// ```
@@ -342,15 +343,18 @@ fn bind_tool_declarations_inner(
                     .iter()
                     .any(|binding| binding.alias == alias)
                 {
-                    return Err(mlua::Error::external(format!(
-                        "tool alias {alias:?} was declared more than once"
-                    )));
+                    if declarations.callback_error.is_none() {
+                        declarations.callback_error = Some(Error::DuplicateAlias {
+                            alias: alias.clone(),
+                        });
+                    }
+                    return Err(mlua::Error::external("duplicate tool alias"));
                 }
                 let id = match resolver.resolve(&description) {
                     Ok(id) => id,
                     Err(error) => {
-                        if declarations.resolver_error.is_none() {
-                            declarations.resolver_error = Some(error);
+                        if declarations.callback_error.is_none() {
+                            declarations.callback_error = Some(error);
                         }
                         return Err(mlua::Error::external("tool capability resolution failed"));
                     }
@@ -414,19 +418,19 @@ fn bind_tool_declarations_inner(
     let returned = match returned {
         Ok(returned) => returned,
         Err(lua_error) => {
-            let resolver_error = state
+            let callback_error = state
                 .lock()
                 .map_err(|_| Error::Lua("tool binding recorder was poisoned".to_owned()))?
-                .resolver_error
+                .callback_error
                 .take();
-            return Err(resolver_error.unwrap_or_else(|| Error::Lua(lua_error.to_string())));
+            return Err(callback_error.unwrap_or_else(|| Error::Lua(lua_error.to_string())));
         }
     };
     let state = Arc::try_unwrap(state)
         .map_err(|_| Error::Lua("tool binding recorder remained shared".to_owned()))?
         .into_inner()
         .map_err(|_| Error::Lua("tool binding recorder was poisoned".to_owned()))?;
-    if let Some(error) = state.resolver_error {
+    if let Some(error) = state.callback_error {
         return Err(error);
     }
     if scalar_return(returned)?.is_some() {
@@ -1812,7 +1816,26 @@ mod tests {
             "Prompt",
         )
         .expect_err("duplicate aliases must fail");
-        assert!(error.to_string().contains("more than once"));
+        assert!(matches!(
+            error,
+            Error::DuplicateAlias { alias } if alias == "search"
+        ));
+    }
+
+    #[test]
+    fn duplicate_alias_error_cannot_be_suppressed_with_lua_pcall() {
+        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
+        let error = bind_tool_declarations(
+            &program("tools.need('search', 'one'); pcall(tools.need, 'search', 'two')"),
+            &resolver,
+            &NullObserver,
+            "Prompt",
+        )
+        .expect_err("a caught duplicate callback must still fail binding");
+        assert!(matches!(
+            error,
+            Error::DuplicateAlias { alias } if alias == "search"
+        ));
     }
 
     #[test]

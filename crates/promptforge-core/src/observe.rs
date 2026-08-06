@@ -76,6 +76,12 @@ pub mod detail {
     pub const TOOL_BINDING_SUCCEEDED: &str = "Tool binding succeeded";
     /// Prompt-level tool declaration binding failed.
     pub const TOOL_BINDING_FAILED: &str = "Tool binding failed";
+    /// Live-registry and one-to-one binding validation began.
+    pub const TOOL_REGISTRY_VALIDATION_STARTED: &str = "Tool registry validation started";
+    /// Live-registry and one-to-one binding validation succeeded.
+    pub const TOOL_REGISTRY_VALIDATION_SUCCEEDED: &str = "Tool registry validation succeeded";
+    /// Live-registry or one-to-one binding validation failed.
+    pub const TOOL_REGISTRY_VALIDATION_FAILED: &str = "Tool registry validation failed";
     /// A section VM began replaying prompt-level tool declarations.
     pub const TOOL_REPLAY_STARTED: &str = "Tool replay started";
     /// A section VM replayed prompt-level tool declarations exactly.
