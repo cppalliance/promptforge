@@ -12,8 +12,17 @@ name = "promptforge-core-tests"
 path = "src/main.rs"
 
 [dependencies]
+flate2.workspace = true
 promptforge-core.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
+sha2.workspace = true
+tar.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
