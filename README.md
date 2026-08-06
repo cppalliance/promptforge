@@ -5,7 +5,7 @@ markdown is the program, the model is the CPU.
 
 ## Workspace
 
-- `crates/promptforge-core` - library: prompt parser, gateway client, section execution, source-retaining `LuaProgram` compilation to process-local Lua 5.4 bytecode, synchronous four-outcome picker binding with atomic one-to-one alias and stable-identity maps validated against the complete live registry, a sendable persistent `SectionVm` lifecycle seam, deterministic Lua tool declaration binding and exact per-section replay with immutable H2 scope closure, stable live-tool identity (`ToolId`, `ToolRegistry`, and transport-only wire names), and `observe`, the report-only progress seam (`Observer`, `NullObserver`) that a caller hooks to watch a long run. A run reports borrowed `(section, detail)` strings through it as it goes (see "Watching a run" below)
+- `crates/promptforge-core` - library: prompt parser, gateway client, section execution, source-retaining `LuaProgram` compilation to process-local Lua 5.4 bytecode, synchronous four-outcome picker binding with atomic one-to-one alias and stable-identity maps validated against the complete live registry, a sendable persistent `SectionVm` lifecycle seam, deterministic Lua tool declaration binding and exact per-section replay with immutable H2 scope closure, stable live-tool identity (`ToolId`, `ToolRegistry`, and transport-only wire names), and `observe`, the report-only progress seam (`Observer`, `NullObserver`) that a caller hooks to watch a long run. A run reports borrowed `(execution, section, detail)` strings through it as it goes (see "Watching a run" below)
 - `crates/promptforge-webfetch` - library: the `web_fetch` tool, which fetches a URL in-process and returns its main content as markdown. It needs no credential, so it runs wherever the prompt runs rather than through the gateway
 - `crates/promptforge-cli` - binary `promptforge`: the command-line tool, `promptforge run <file.md> [input]`. It builds a matching live registry and semantic-picker catalog for the tools available at launch, binds H1 needs synchronously, and executes the resulting `BoundPrompt`
 - `crates/promptforge-gateway` - binary `promptforge-gateway`: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
@@ -132,7 +132,7 @@ it does not have to be set. `[gateway].token` is required either way, because
 every transport runs prompts and every run goes through the gateway. Logs go to
 stdout on HTTP and to stderr on stdio, where stdout is the protocol wire.
 
-Either way, boot resolves the whole catalog first and refuses to serve on an incomplete one, printing every fault before a non-zero exit. It then builds the complete live registry (`web_fetch` and `web_search`) and a picker catalog derived from those same concrete instances before starting Tokio. Every `run_prompt` binds H1 `tools.need` declarations in `spawn_blocking`, then executes the immutable `BoundPrompt` with the same observer used during binding. Binding reports that are not progress boundaries are tolerated as unknown details and logged at debug level.
+Either way, boot resolves the whole catalog first and refuses to serve on an incomplete one, printing every fault before a non-zero exit. It then builds the complete live registry (`web_fetch` and `web_search`) and a picker catalog derived from those same concrete instances before starting Tokio. Every `run_prompt` reuses its existing run id as the observer execution id, reparses the validated catalog source snapshot under that id, binds H1 `tools.need` declarations in `spawn_blocking`, then executes the immutable `BoundPrompt` with the same observer and id. Binding reports that are not progress boundaries are tolerated as unknown details and logged at debug level.
 
 The repository ships a working `prompts.toml` at its root, beside `gateway.toml`.
 It serves this repository's own `prompts/` directory, expects `PROMPTFORGE_TOKEN`
@@ -640,13 +640,15 @@ use promptforge_core::execute::{self, RunOptions};
 use promptforge_core::observe::NullObserver;
 
 let opts = RunOptions {
+    execution: "example-run", // one caller-owned id for parse, bind, and run
     observer: &NullObserver,   // or your own Observer
     client: None,              // None builds the gateway client from the environment
 };
 let result = execute::run(&prompt, input, &tools, &store, opts).await?;
 ```
 
-- `observer` receives borrowed `(section, detail)` strings when the run starts and ends, at each section boundary, after each model turn and tool call, and after each Lua-harness store operation. `observe` is synchronous and sits on the run's own path, so an implementation that forwards elsewhere copies the pair into a queue and returns rather than blocking. Observations are reports, never decisions: dropping them cannot change the result, which is why `NullObserver` is what the CLI passes.
+- `execution` is a caller-owned stable identifier. Pass the same value to `Prompt::parse`, `bind_prompt`, and `RunOptions`; the CLI generates one per invocation and MCP reuses its existing run id.
+- `observer` receives borrowed `(execution, section, detail)` strings when parsing and binding occur, when the run starts and ends, at each section boundary, after each model turn and tool call, and after each Lua-harness store operation. `observe` is synchronous and sits on the caller's path, so an implementation that forwards elsewhere copies the triple into a queue and returns rather than blocking. Observations are reports, never decisions: dropping them cannot change the result, which is why `NullObserver` is what the CLI passes. Observer implementations own synchronization; a recorder shared by concurrent executions can use `Mutex<Vec<_>>`, and no core-global observer lock is held across an await.
 - Details are stable exact strings from `promptforge_core::observe::detail`. They contain no prompt prose, model input or output, tool arguments or results, store paths or contents, credentials, or fetched content.
 - The MCP adapter recognizes `Run started` and `Section started` for cosmetic numeric progress. It counts recognized section starts from 1 and tolerates unknown details. There is deliberately no total: an early return means the number of sections a run will visit is not known when it starts, so a denominator would be a guess.
 - `client` is the gateway client the run's model calls go through. `None` builds
@@ -673,7 +675,7 @@ Concrete tool names no longer belong in YAML frontmatter or prompt code. The par
 
 Binding intentionally has no reranker. The tool-picker spike found that `bge-reranker-v2-m3` improved the clean hackathon set to 0.856 but scored 0.735 on TOOLRET, below plain bge-small at 0.804, while adding a roughly 568M-parameter model. That domain-dependent regression does not justify another mandatory stage. A reranker remains a non-goal until author-register measurements on the deployment's own catalog show a reliable gain.
 
-Progress labels are also outside binding and execution. The deterministic `(section, detail)` observation pair is the authoritative trace and is never rewritten by a model. A future label model may derive optional UI text off the critical path, but it must preserve the original pair, avoid feeding labels back into decisions, and justify its measured quality, latency, and privacy cost independently.
+Progress labels are also outside binding and execution. The deterministic `(execution, section, detail)` observation record is the authoritative trace and is never rewritten by a model. A future label model may derive optional UI text off the critical path, but it must preserve the original record, avoid feeding labels back into decisions, and justify its measured quality, latency, and privacy cost independently.
 
 ### The tool-call loop
 

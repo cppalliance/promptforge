@@ -91,7 +91,7 @@ tools.need("fetch", "Fetch a web page and return its main content as markdown.")
 "#,
         );
 
-        let bound = bind_prompt(prompt, &picker, &registry, &NullObserver)
+        let bound = bind_prompt(prompt, &picker, &registry, "test-run", &NullObserver)
             .expect("available fetch capability should bind");
 
         assert_eq!(
@@ -128,7 +128,7 @@ tools.need("search", "Search the web and return a list of results (title, url, d
 "#,
         );
 
-        let bound = bind_prompt(prompt, &picker, &registry, &NullObserver)
+        let bound = bind_prompt(prompt, &picker, &registry, "test-run", &NullObserver)
             .expect("available search capability should bind");
 
         assert_eq!(
@@ -165,7 +165,7 @@ tools.need("search", "Search the web and return a list of results (title, url, d
 "#,
         );
 
-        let error = bind_prompt(prompt, &picker, &registry, &NullObserver)
+        let error = bind_prompt(prompt, &picker, &registry, "test-run", &NullObserver)
             .expect_err("unavailable search capability must not bind");
 
         assert!(matches!(error, Error::Absent { .. }));
@@ -200,6 +200,7 @@ tools.need("search", "Search the web and return a list of results (title, url, d
             &format!(
                 "---\nname: fixture\ndescription: CLI registry fixture\nversion: 1\npromptforge: 1\n---\n# Fixture\n\n```lua prompt\n{declarations}```\n\n## Run\n\n```lua\nreturn \"done\"\n```\n"
             ),
+            "test-run",
             &NullObserver,
         )
         .expect("fixture prompt should parse")

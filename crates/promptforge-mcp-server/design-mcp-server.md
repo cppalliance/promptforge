@@ -32,7 +32,7 @@ To operate it: run `promptforge-mcp-server serve prompts.toml` for streamable HT
 
 11. **Arguments are one string, named `args`.** The runtime takes a single raw argument string, so `run_prompt` takes the prompt's name and one optional string and no JSON Schema enters frontmatter. This costs client-side autocompletion and typed validation, and choice 1 makes it permanent rather than merely current: with one tool serving every prompt there is no per-prompt schema to attach one to.
 
-12. **Progress is first-class, and the runtime exposes one report-only observer seam to carry it.** Without it every run is one silent multi-minute call. `promptforge-core` calls `Observer::observe(section, detail)` with borrowed payload-free strings, and the server recognizes a small exact detail vocabulary for `notifications/progress`, which a client renders as a caption changing in place. Unknown details are tolerated and reports never steer execution. Progress buys visibility only, never time: choice 5, not this one, is what keeps a long run alive.
+12. **Progress is first-class, and the runtime exposes one report-only observer seam to carry it.** Without it every run is one silent multi-minute call. `promptforge-core` calls `Observer::observe(execution, section, detail)` with borrowed payload-free section and detail strings, and the server recognizes a small exact detail vocabulary for `notifications/progress`, which a client renders as a caption changing in place. The server reuses its existing run id as `execution` across per-run parsing, binding, and execution. Unknown details are tolerated and reports never steer execution. Progress buys visibility only, never time: choice 5, not this one, is what keeps a long run alive.
 
 13. **`need_prompt` hands back three candidates and never runs one.** A plain-English capability is ranked against the catalog and up to three prompts come back, best first, for the calling model to choose among with the whole conversation in front of it. It then calls `run_prompt` with a name it was handed rather than one it guessed, which closes the gap choice 10 can only mitigate. It does not contradict choice 1, because the intent still came from a person naming what they want: the caller who was told to run "the prompt that builds a stakeholder report" without being told it is called `staker`. A retriever that bound instead of suggesting would spend minutes of gateway time on the wrong artifact, and the caller could not tell that it had.
 
@@ -186,10 +186,11 @@ Forwarding progress required `promptforge-core` to grow one:
 
 ```rust
 pub trait Observer: Send + Sync {
-    fn observe(&self, section: &str, detail: &str);
+    fn observe(&self, execution: &str, section: &str, detail: &str);
 }
 
 pub struct RunOptions<'a> {
+    pub execution: &'a str,
     pub observer: &'a dyn Observer,
     /// `None` builds the gateway client from the environment, which is the CLI's path.
     pub client: Option<GatewayClient>,
@@ -198,9 +199,9 @@ pub struct RunOptions<'a> {
 pub async fn run(prompt: &BoundPrompt, args: &str, tools: &[&dyn Tool], store: &Store, opts: RunOptions<'_>) -> Result<String>;
 ```
 
-`observe` is synchronous and must never block, await, or panic, which is the contract that lets the executor call it inline on the run's own path. The pair is the complete trace record and excludes raw prompt prose, model input or output, tool arguments or results, store paths or contents, credentials, and fetched content.
+`observe` is synchronous and must never block, await, or panic, which is the contract that lets the executor call it inline on the run's own path. The triple is the complete trace record and excludes raw prompt prose, model input or output, tool arguments or results, store paths or contents, credentials, and fetched content. Concrete observers own synchronization; core holds no global recorder lock and no lock across an await.
 
-The server recognizes only exact constants from `promptforge_core::observe::detail`. `Run started` creates frame zero, `Section started` increments the progress counter, and `Model turn completed` increments the result's turn counter. Binding and registry-validation details currently fall through the same unknown-detail path as any future core detail: they are logged at debug level, emit no frame, change no counter, and cannot affect execution. Reports are never decisions, so dropping one cannot change a result, and that is what makes the queue behind the forwarding path allowed to lose frames.
+The server creates its run id before work begins, reparses the validated catalog source snapshot with that id, and passes the same id through binding and `RunOptions`. It recognizes only exact constants from `promptforge_core::observe::detail`. `Run started` creates frame zero, `Section started` increments the progress counter, and `Model turn completed` increments the result's turn counter. Binding and registry-validation details currently fall through the same unknown-detail path as any future core detail: they are logged at debug level with the execution id, emit no frame, change no counter, and cannot affect execution. Reports are never decisions, so dropping one cannot change a result, and that is what makes the queue behind the forwarding path allowed to lose frames.
 
 ## The `rmcp` pin is exact and the run registry forgets a restart, both deliberately
 
@@ -215,4 +216,4 @@ The run registry is in memory, and a restart forgets every run, finished or not.
 - Whether frontmatter should carry `keywords`, which would sharpen both the listing and retrieval.
 - Whether the run registry should survive a restart.
 
-*2026-08-06 03:00 - GPT-5.6 Sol*
+*2026-08-06 12:20 - GPT-5.6 Sol*

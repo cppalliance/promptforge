@@ -25,8 +25,10 @@ use tempfile::TempDir;
 use super::{PreparedTools, PromptForgeServer};
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::Config;
+use crate::progress::McpObserver;
 use crate::result::NO_TURNS;
 use crate::retrieval::Retrieval;
+use promptforge_core::observe::detail;
 
 fn prepared(config: &Config) -> Arc<PreparedTools> {
     static SEED: OnceLock<PreparedTools> = OnceLock::new();
@@ -159,6 +161,55 @@ async fn the_runner_runs_the_named_prompt_and_reports_the_value_twice() {
             .is_some_and(|id| id.len() == 32),
         "a run carries an identifier: {structured}"
     );
+}
+
+#[tokio::test]
+async fn the_runner_reuses_its_returned_run_id_for_parse_bind_and_execution() {
+    let (_dir, server) = server();
+    let catalog = server.catalog.load();
+    let entry = catalog
+        .find("echo")
+        .expect("the runner lifecycle fixture must exist");
+    let observer = Arc::new(McpObserver::silent());
+
+    let result = super::runner::run_recorded(
+        server.config.as_ref(),
+        &server.registry,
+        Arc::clone(&server.tools),
+        entry,
+        "hello",
+        Arc::clone(&observer),
+    )
+    .await
+    .expect("the recorded runner lifecycle must not be a protocol error");
+
+    let structured = structured_of(&result);
+    let run_id = structured["run_id"]
+        .as_str()
+        .expect("the runner must return its run id");
+    let records = observer.records();
+    assert!(!records.is_empty());
+    assert!(
+        records.iter().all(|(execution, _, _)| execution == run_id),
+        "parse, bind, and execution must reuse the returned run id: {records:#?}"
+    );
+    let details = records
+        .iter()
+        .map(|(_, _, detail)| detail.as_str())
+        .collect::<Vec<_>>();
+    for expected in [
+        detail::PARSE_STARTED,
+        detail::PARSE_SUCCEEDED,
+        detail::TOOL_BINDING_STARTED,
+        detail::TOOL_BINDING_SUCCEEDED,
+        detail::RUN_STARTED,
+        detail::RUN_SUCCEEDED,
+    ] {
+        assert!(
+            details.contains(&expected),
+            "the MCP runner lifecycle must include {expected:?}: {records:#?}"
+        );
+    }
 }
 
 #[tokio::test]

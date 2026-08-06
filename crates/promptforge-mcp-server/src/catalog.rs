@@ -59,18 +59,20 @@ pub struct Entry {
     description: String,
     version: u32,
     path: PathBuf,
+    source: Option<String>,
     prompt: Option<Prompt>,
     problem: Option<String>,
 }
 
 impl Entry {
     /// Builds a healthy entry from a parsed prompt.
-    pub(crate) fn healthy(path: PathBuf, prompt: Prompt) -> Entry {
+    pub(crate) fn healthy(path: PathBuf, source: String, prompt: Prompt) -> Entry {
         Entry {
             name: prompt.frontmatter.name.clone(),
             description: prompt.frontmatter.description.clone(),
             version: prompt.frontmatter.version,
             path,
+            source: Some(source),
             prompt: Some(prompt),
             problem: None,
         }
@@ -85,6 +87,7 @@ impl Entry {
             description: String::new(),
             version: 0,
             path,
+            source: None,
             prompt: None,
             problem: Some(problem.into()),
         }
@@ -113,6 +116,12 @@ impl Entry {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The validated source snapshot, or `None` on a broken entry.
+    #[must_use]
+    pub fn source(&self) -> Option<&str> {
+        self.source.as_deref()
     }
 
     /// The parsed prompt, or `None` on a broken entry.
