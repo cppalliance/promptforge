@@ -94,7 +94,17 @@ The resulting `ToolBindings` is immutable and ordered. `SectionVm::new_with_bind
 
 After host injection, the section's `tools` table is in H2 recording mode. Only `tools.add(alias...)` is accepted, and every alias must have a frozen binding. Additions are first-seen ordered and idempotent; aliases already in `tools.always` are not repeated. `close_tool_scope` returns an immutable effective scope with prompt-wide aliases first and H2 additions second, then permanently closes recording so an epilog cannot widen the model-visible scope.
 
-Binding, replay, and scope closure report fixed start/outcome details containing no aliases, descriptions, identities, source, or other payloads. The parser stores the compiled H1 shared program but the executor does not invoke these modes yet. The concrete picker adapter, alias-based model advertisement and dispatch, and complete lifecycle wiring remain later steps.
+Binding, replay, and scope closure report fixed start/outcome details containing no aliases, descriptions, identities, source, or other payloads. The parser stores the compiled H1 shared program but the executor does not invoke these modes yet. Alias-based model advertisement and dispatch, collision validation, and complete lifecycle wiring remain later steps.
+
+### Four-outcome capability binding
+
+Core now depends directly on `promptforge-tool-picker` for the synchronous prompt binding phase. `bind::bind_prompt` takes ownership of a parsed `Prompt`, executes its optional H1 shared program once through the existing Lua declaration mode, and returns an immutable `BoundPrompt` containing the prompt, frozen `ToolBindings`, and selected catalog diagnostics. A prompt with no H1 shared program produces empty frozen bindings through the same observed binding boundary.
+
+The concrete resolver caches picker decisions by the exact capability description bytes for the duration of that one pass. Repeating an identical description under another alias replays the decision without embedding the need again. No trimming, folding, or normalization merges different descriptions. A successful `Outcome::Bind` becomes a stable core `ToolId`; the selected `ToolDescriptor` is retained in a read-only diagnostics map keyed by that identity. This step does not reject two aliases selecting one identity, compare picker descriptors with live tools, or otherwise perform the collision hardening owned by the next step.
+
+Picker operation failures return `Error::Bind` with the exact capability and a string diagnostic. `Outcome::Absent`, `Outcome::Duplicate`, and `Outcome::Ambiguous` return their distinct core error variants, with duplicate and ambiguous candidate identities preserved in picker order. Resolver errors survive the Lua callback boundary as structured core errors, even if H1 Lua attempts to catch the callback failure with `pcall`.
+
+The pass reports only the existing fixed `Tool binding started`, `Tool binding succeeded`, and `Tool binding failed` details under the H1 title. Reports contain no aliases, capabilities, identities, candidates, catalog prose, or picker diagnostics. Binding is synchronous and does not construct an executor, consult a live registry, or invoke a tool.
 
 ## Planned, not shipped
 
@@ -102,11 +112,11 @@ Everything in this section is settled design for later steps and remains unimple
 
 ### Capability binding and picker validation
 
-The shipped deterministic resolver seam and Lua modes preserve each resolved `ToolId` without yet enforcing identity uniqueness or live-registry agreement. A later adapter will translate `promptforge-tool-picker` outcomes into that seam, including absent, duplicate, and ambiguous outcomes, and the later binding-uniqueness step will validate identities atomically. Before a model turn, core will apply the shipped picker near-duplicate analysis to the effective scope.
+The shipped concrete picker binding preserves each resolved `ToolId` and its catalog diagnostic without enforcing identity uniqueness or live-registry agreement. The later binding-uniqueness step will validate those identities atomically. Before a model turn, core will apply the shipped picker near-duplicate analysis to the effective scope.
 
 ### Semantic capability phases
 
-The shipped Lua modes implement declaration binding, exact replay, H2 recording, and scope closure. The parser and executor will later route H1 and H2 source regions into those modes and adapt the concrete picker to the deterministic resolver seam.
+The shipped Lua modes implement declaration binding, exact replay, H2 recording, and scope closure. `bind_prompt` now routes the H1 source through concrete picker binding, while the executor will later consume `BoundPrompt` and route H1 replay and H2 source regions through their lifecycle modes.
 
 The model will see selected concrete descriptions and schemas under prompt-local aliases. Calls will dispatch through `ToolId`. Before a model turn, the picker will reject near-duplicate tools in that section's effective scope.
 
@@ -133,4 +143,4 @@ Fan-out execution, branching, retries, child execution, persistent bytecode, com
 9. Lua bytecode remains process-local and private; retained source and explicit locations carry compilation diagnostics.
 10. Later lifecycle behavior remains planned until its owning step lands with tests and documentation.
 
-*2026-08-06 01:00 - GPT-5.6 Sol*
+*2026-08-06 01:34 - GPT-5.6 Sol*
