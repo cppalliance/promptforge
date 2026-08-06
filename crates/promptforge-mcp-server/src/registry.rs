@@ -77,8 +77,6 @@ struct Finished {
 struct Record {
     /// The prompt's name, so a running run can be reported without the catalog.
     prompt: String,
-    /// The prompt's frontmatter contract version.
-    version: u32,
     /// When the run started.
     started: Instant,
     /// The outcome, absent while the run is still going.
@@ -90,12 +88,7 @@ impl Record {
     fn snapshot(&self, run_id: &str) -> RunResult {
         match &self.finished {
             Some(finished) => finished.result.clone(),
-            None => RunResult::running(
-                run_id.to_owned(),
-                &self.prompt,
-                self.version,
-                elapsed_ms(self.started),
-            ),
+            None => RunResult::running(run_id.to_owned(), &self.prompt, elapsed_ms(self.started)),
         }
     }
 }
@@ -163,10 +156,9 @@ impl RunRegistry {
 
     /// Records a run as started. Called before the task that runs it is spawned,
     /// so a `check_run` racing the deadline finds it.
-    pub(crate) fn started(&self, run_id: &str, prompt: &str, version: u32) {
+    pub(crate) fn started(&self, run_id: &str, prompt: &str) {
         let record = Record {
             prompt: prompt.to_owned(),
-            version,
             started: Instant::now(),
             finished: None,
         };
@@ -208,7 +200,6 @@ impl RunRegistry {
         self: &Arc<Self>,
         run_id: &str,
         prompt: &str,
-        version: u32,
         mut task: JoinHandle<RunResult>,
     ) -> RunResult {
         match tokio::time::timeout(self.reply_deadline, &mut task).await {
@@ -216,7 +207,7 @@ impl RunRegistry {
             Ok(Err(join)) => {
                 // A task that panicked or was aborted wrote no record of its
                 // own, so the failure is recorded here and reported once.
-                let result = self.unfinished(run_id, prompt, version, &join);
+                let result = self.unfinished(run_id, prompt, &join);
                 self.finished(run_id, result.clone());
                 result
             }
@@ -226,12 +217,12 @@ impl RunRegistry {
                     prompt = %prompt,
                     "the run outlived its call and is collectable by run id"
                 );
-                self.supervise(run_id.to_owned(), prompt.to_owned(), version, task);
+                self.supervise(run_id.to_owned(), prompt.to_owned(), task);
                 // The record was written before the task was spawned and a
                 // running one is never evicted, so the fallback is the
                 // compiler's path and not the program's.
                 self.check(run_id)
-                    .unwrap_or_else(|| RunResult::running(run_id.to_owned(), prompt, version, 0))
+                    .unwrap_or_else(|| RunResult::running(run_id.to_owned(), prompt, 0))
             }
         }
     }
@@ -248,13 +239,7 @@ impl RunRegistry {
     /// A normal outcome is logged by the runner that constructs it. An abnormal
     /// join is logged here because this task is the only place that can build
     /// and observe its terminal result.
-    fn supervise(
-        self: &Arc<Self>,
-        run_id: String,
-        prompt: String,
-        version: u32,
-        task: JoinHandle<RunResult>,
-    ) {
+    fn supervise(self: &Arc<Self>, run_id: String, prompt: String, task: JoinHandle<RunResult>) {
         let registry = Arc::clone(self);
         // Detached deliberately: the handle is the last thing that could observe
         // this run, and there is no later caller to hand it to.
@@ -262,7 +247,7 @@ impl RunRegistry {
             match task.await {
                 Ok(_result) => {}
                 Err(join) => {
-                    let result = registry.unfinished(&run_id, &prompt, version, &join);
+                    let result = registry.unfinished(&run_id, &prompt, &join);
                     registry.finished(&run_id, result.clone());
                     tracing::info!(
                         run_id = %run_id,
@@ -281,7 +266,7 @@ impl RunRegistry {
     ///
     /// `elapsed_ms` is taken from the record's own start, so a run that died is
     /// timed the same way a run that finished is.
-    fn unfinished(&self, run_id: &str, prompt: &str, version: u32, join: &JoinError) -> RunResult {
+    fn unfinished(&self, run_id: &str, prompt: &str, join: &JoinError) -> RunResult {
         let elapsed = self
             .records()
             .get(run_id)
@@ -289,7 +274,6 @@ impl RunRegistry {
         RunResult::failed(
             run_id.to_owned(),
             prompt,
-            version,
             format!("the run did not finish: {join}"),
             NO_TURNS,
             elapsed,

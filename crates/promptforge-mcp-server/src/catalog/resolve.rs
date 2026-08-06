@@ -301,7 +301,7 @@ mod tests {
         write(
             root,
             "other.md",
-            "---\nname: other\ndescription: d\nversion: 1\n---\n\n## S\n\np\n",
+            "---\nname: other\ndescription: d\n---\n\n## S\n\np\n",
         );
 
         let config = config_at(root, "[catalog]\ninclude = [\"*.md\"]\n");
@@ -460,7 +460,7 @@ mod tests {
         write(
             root,
             "nosections.md",
-            "---\nname: empty\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n# Only a title\n",
+            "---\nname: empty\ndescription: d\npromptforge: 1\n---\n\n# Only a title\n",
         );
 
         let config = config_at(root, "[catalog]\ninclude = [\"*.md\"]\n");

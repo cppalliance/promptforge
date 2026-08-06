@@ -19,7 +19,7 @@ pub(super) fn write(root: &Path, relative: &str, contents: &str) {
 /// A minimal prompt that runs offline: one section whose Lua returns at once.
 pub(super) fn prompt_source(name: &str, description: &str) -> String {
     format!(
-        "---\nname: {name}\ndescription: {description}\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: {name}\ndescription: {description}\npromptforge: 1\n---\n\n\
          # Title\n\n## Main\n\n```lua\nreturn args\n```\n"
     )
 }

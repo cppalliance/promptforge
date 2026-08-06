@@ -47,8 +47,6 @@ pub struct RunResult {
     pub run_id: String,
     /// The prompt's frontmatter name.
     pub prompt: String,
-    /// The prompt's frontmatter contract version, zero for a broken prompt.
-    pub version: u32,
     /// How far the run has got.
     pub status: RunStatus,
     /// What the run returned, present only once it completed.
@@ -75,7 +73,6 @@ impl RunResult {
     pub(crate) fn completed(
         run_id: String,
         prompt: &str,
-        version: u32,
         value: String,
         turns: u32,
         elapsed_ms: u64,
@@ -83,7 +80,6 @@ impl RunResult {
         RunResult {
             run_id,
             prompt: prompt.to_owned(),
-            version,
             status: RunStatus::Completed,
             value: Some(value),
             turns,
@@ -100,7 +96,6 @@ impl RunResult {
     pub(crate) fn failed(
         run_id: String,
         prompt: &str,
-        version: u32,
         error: String,
         turns: u32,
         elapsed_ms: u64,
@@ -108,7 +103,6 @@ impl RunResult {
         RunResult {
             run_id,
             prompt: prompt.to_owned(),
-            version,
             status: RunStatus::Failed,
             value: None,
             turns,
@@ -123,16 +117,10 @@ impl RunResult {
     /// It reports [`NO_TURNS`], because the tally that matters is the one the
     /// finished record carries, and `elapsed_ms` measures how long it has been
     /// going rather than how long it took.
-    pub(crate) fn running(
-        run_id: String,
-        prompt: &str,
-        version: u32,
-        elapsed_ms: u64,
-    ) -> RunResult {
+    pub(crate) fn running(run_id: String, prompt: &str, elapsed_ms: u64) -> RunResult {
         RunResult {
             run_id,
             prompt: prompt.to_owned(),
-            version,
             status: RunStatus::Running,
             value: None,
             turns: NO_TURNS,
@@ -161,7 +149,7 @@ mod tests {
 
     #[test]
     fn a_completed_run_texts_its_value() {
-        let result = RunResult::completed("r1".into(), "echo", 1, "hello".into(), 2, 4);
+        let result = RunResult::completed("r1".into(), "echo", "hello".into(), 2, 4);
         assert_eq!(result.status, RunStatus::Completed);
         assert_eq!(result.text(), "hello");
         assert_eq!(result.turns, 2);
@@ -170,7 +158,7 @@ mod tests {
 
     #[test]
     fn a_failed_run_texts_its_error() {
-        let result = RunResult::failed("r1".into(), "echo", 1, "lua: boom".into(), 1, 4);
+        let result = RunResult::failed("r1".into(), "echo", "lua: boom".into(), 1, 4);
         assert_eq!(result.status, RunStatus::Failed);
         assert_eq!(result.text(), "lua: boom");
         assert_eq!(result.turns, 1);
@@ -179,7 +167,7 @@ mod tests {
 
     #[test]
     fn a_running_run_texts_how_to_collect_it() {
-        let result = RunResult::running("r1".into(), "echo", 1, 240_000);
+        let result = RunResult::running("r1".into(), "echo", 240_000);
         assert_eq!(result.status, RunStatus::Running);
         let text = result.text();
         assert!(text.contains("r1"), "the id to collect by: {text}");

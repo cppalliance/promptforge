@@ -57,7 +57,6 @@ pub enum OnBroken {
 pub struct Entry {
     name: String,
     description: String,
-    version: u32,
     path: PathBuf,
     source: Option<String>,
     prompt: Option<Prompt>,
@@ -70,7 +69,6 @@ impl Entry {
         Entry {
             name: prompt.frontmatter.name.clone(),
             description: prompt.frontmatter.description.clone(),
-            version: prompt.frontmatter.version,
             path,
             source: Some(source),
             prompt: Some(prompt),
@@ -85,7 +83,6 @@ impl Entry {
         Entry {
             name,
             description: String::new(),
-            version: 0,
             path,
             source: None,
             prompt: None,
@@ -104,12 +101,6 @@ impl Entry {
     #[must_use]
     pub fn description(&self) -> &str {
         &self.description
-    }
-
-    /// The prompt's frontmatter contract version, zero on a broken entry.
-    #[must_use]
-    pub fn version(&self) -> u32 {
-        self.version
     }
 
     /// The file the entry was resolved from.

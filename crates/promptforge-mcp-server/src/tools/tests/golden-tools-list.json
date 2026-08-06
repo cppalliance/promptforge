@@ -1,7 +1,7 @@
 [
   {
     "name": "list_prompts",
-    "description": "Names the PromptForge prompts this server can run. Each entry carries the prompt's name, its description, its version, and any problem that currently stops it running. The listing is read from the catalog as it stands, so a prompt written or edited since this conversation began is already in it. run_prompt takes a name from this listing.",
+    "description": "Names the PromptForge prompts this server can run. Each entry carries the prompt's name, its description, and any problem that currently stops it running. The listing is read from the catalog as it stands, so a prompt written or edited since this conversation began is already in it. run_prompt takes a name from this listing.",
     "inputSchema": {
       "properties": {},
       "type": "object"

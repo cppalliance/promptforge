@@ -182,7 +182,7 @@ fn wrap_untrusted_escapes_a_forged_closing_tag() {
 
 #[tokio::test]
 async fn falls_through_to_next_section() {
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nreturn \"second\"\n```\n";
     let out = run_offline(md).await.unwrap();
@@ -191,7 +191,7 @@ async fn falls_through_to_next_section() {
 
 #[tokio::test]
 async fn explicit_return_stops_fall_through() {
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## First\n\n```lua\nreturn \"first\"\n```\n\n\
 ## Second\n\n```lua\nreturn \"unreached\"\n```\n";
     let out = run_offline(md).await.unwrap();
@@ -200,7 +200,7 @@ async fn explicit_return_stops_fall_through() {
 
 #[tokio::test]
 async fn runs_off_end_to_default_return() {
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\ndefault_return: \"fell off\"\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\ndefault_return: \"fell off\"\n---\n\n\
 ## Only\n\n```lua\nlocal x = 1\n```\n";
     let out = run_offline(md).await.unwrap();
     assert_eq!(out, "fell off");
@@ -208,7 +208,7 @@ async fn runs_off_end_to_default_return() {
 
 #[tokio::test]
 async fn generic_result_when_nothing_produced() {
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nlocal x = 1\n```\n";
     let out = run_offline(md).await.unwrap();
     assert_eq!(out, "done");
@@ -217,7 +217,7 @@ async fn generic_result_when_nothing_produced() {
 #[tokio::test]
 async fn sys_id_increments_per_section() {
     // First section files nothing and falls through; second returns its id.
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nreturn tostring(sys.id)\n```\n";
     let out = run_offline(md).await.unwrap();
@@ -229,7 +229,7 @@ async fn sys_id_increments_per_section() {
 #[tokio::test]
 async fn supported_major_one_proceeds() {
     // A `promptforge: 1` prompt clears the gate and runs to completion.
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let out = run_offline(md).await.unwrap();
     assert_eq!(out, "ran");
@@ -238,7 +238,7 @@ async fn supported_major_one_proceeds() {
 #[tokio::test]
 async fn unsupported_major_is_refused() {
     // A future major is refused, never silently degraded to major 1.
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 2\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 2\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let err = run_offline(md)
         .await
@@ -250,7 +250,7 @@ async fn unsupported_major_is_refused() {
 async fn missing_version_is_not_a_promptforge_prompt() {
     // No `promptforge:` key: not our prompt, so `run` declines with a Parse
     // error rather than executing it.
-    let md = "---\nname: t\ndescription: d\nversion: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let err = run_offline(md)
         .await
@@ -272,7 +272,7 @@ async fn store_persists_across_sections() {
     // first section's Lua writes a file; the second, in a fresh context,
     // reads it back - proving the store outlives the context-clearing
     // transition. The read lands in `var`, so it round-trips the value.
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Writer\n\n```lua\nstore.write('note.txt', 'carried across')\n```\n\n\
 ## Reader\n\n```lua\nvar.seen = store.read('note.txt')\nreturn var.seen\n```\n";
     let store = Store::memory();
@@ -676,7 +676,8 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
 fn run_resolves_cap_from_frontmatter_else_default() {
     // Mirrors the resolution in `run`: a declared budget wins, an absent
     // one falls back to the raised default.
-    let declared = "---\nname: t\ndescription: d\nversion: 1\nmax_tool_iterations: 5\n---\n\n# T\n\n## S\n\np\n";
+    let declared =
+        "---\nname: t\ndescription: d\nmax_tool_iterations: 5\n---\n\n# T\n\n## S\n\np\n";
     let p = Prompt::parse(declared, EXECUTION, &NullObserver).unwrap();
     assert_eq!(
         p.frontmatter
@@ -685,7 +686,7 @@ fn run_resolves_cap_from_frontmatter_else_default() {
         5
     );
 
-    let absent = "---\nname: t\ndescription: d\nversion: 1\n---\n\n# T\n\n## S\n\np\n";
+    let absent = "---\nname: t\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
     let p = Prompt::parse(absent, EXECUTION, &NullObserver).unwrap();
     assert_eq!(
         p.frontmatter
@@ -996,12 +997,12 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
 
 /// The two-section fixture the fall-through test uses: the first section
 /// falls through, the second returns from Lua.
-const TWO_SECTIONS: &str = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+const TWO_SECTIONS: &str = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nreturn \"second\"\n```\n";
 
-const STORE_SECTIONS: &str = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+const STORE_SECTIONS: &str = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ## First\n\n```lua\nstore.write('state.txt', 'first')\n```\n\n\
 ## Second\n\n```lua\nstore.append('state.txt', '\\nsecond')\nreturn \"second\"\n```\n";
@@ -1089,7 +1090,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
     );
 
     let failing = bound(
-        "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
          ## Only\n\n```lua\nerror('expected failure')\n```\n",
     );
     let sink = Recorder::default();
@@ -1120,7 +1121,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
 async fn a_run_refused_by_the_version_gate_reports_nothing() {
     // The gate is not a run that failed; it is a run that never started, so
     // there is no RunStarted to pair a RunFinished with.
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 2\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 2\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let (result, records) = run_recorded(md).await;
     assert!(result.is_err());
@@ -1134,7 +1135,7 @@ async fn a_run_refused_by_the_version_gate_reports_nothing() {
 async fn a_failing_run_still_reports_run_finished() {
     // The preamble fails, so the walk tears down its VM and the final
     // observation must report the run failure.
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nerror('expected failure')\n```\n";
     let (result, records) = run_recorded(md).await;
     assert!(matches!(result, Err(Error::Lua(_))));
@@ -1169,7 +1170,7 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
     let capability =
         serde_json::to_string(&descriptor.enriched_text()).expect("serialize fixture capability");
     let source = format!(
-        "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 1\n---\n\n\
          # Lifecycle\n\n```lua prompt\n\
          tools.need('echo', {capability})\n\
          tools.always('echo')\n```\n\n\
@@ -1317,7 +1318,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
     // nothing here reads `PROMPTFORGE_*`, and the run still reaches a
     // gateway and reports its model turn.
     let addr = spawn_text_gateway().await;
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\nSay something.\n";
     let recorder = Recorder::default();
     let out = run(
@@ -1367,7 +1368,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
 #[tokio::test]
 async fn epilog_runs_after_reply_and_can_return() {
     let addr = spawn_text_gateway().await;
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\nSay something.\n\n```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'epilog result'\n```\n";
     let prompt = bound(md);
     assert!(prompt.prompt().entry().preamble.is_none());
@@ -1428,7 +1429,7 @@ async fn epilog_runs_after_reply_and_can_return() {
 
 #[tokio::test]
 async fn preamble_return_skips_model_and_epilog() {
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\n```lua\nreturn 'early'\n```\n\n\
 This prose must not reach a model.\n\n\
@@ -1443,7 +1444,7 @@ This prose must not reach a model.\n\n\
 #[tokio::test]
 async fn shared_helper_survives_preamble_model_and_epilog() {
     let addr = spawn_text_gateway().await;
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ```lua prompt\nfunction decorate(value) return '<' .. value .. '>' end\n```\n\n\
 ## Only\n\n```lua\nvar.question = decorate(args)\n```\n\n\
@@ -1517,7 +1518,7 @@ Ask using {{ var.question }}.\n\n\
 
 #[tokio::test]
 async fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\n```lua\nvar.phase = 'preamble'\n```\n\n\
 ```lua\nif reply ~= nil then error('empty prose must not bind a reply') end\nreturn var.phase .. '-epilog'\n```\n";
@@ -1533,7 +1534,7 @@ async fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
 #[tokio::test]
 async fn default_return_precedes_the_last_model_reply() {
     let addr = spawn_text_gateway().await;
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\ndefault_return: fallback\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\ndefault_return: fallback\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\nAsk the model.\n";
     let out = run(
@@ -1652,7 +1653,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
     });
 
     let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Concrete description.");
-    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua prompt\ntools.need('local_alias', 'capability')\n```\n\n\
 ## Only\n\nAsk without tools.\n";
     let prompt = bound_with_tools(
@@ -1692,7 +1693,7 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
     let (addr, bodies, _) = spawn_aliased_tool_gateway("local_alias").await;
     let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Concrete description.");
     let prompt = bound_with_tools(
-        "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua prompt\n\
 tools.need('local_alias', 'capability')\n\
 tools.always('local_alias')\n```\n\n\
@@ -1741,7 +1742,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     let (addr, bodies, _) = spawn_aliased_tool_gateway("section_tool").await;
     let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Section concrete.");
     let prompt = bound_with_tools(
-        "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua prompt\n\
 tools.need('section_tool', 'capability')\n```\n\n\
 ## Only\n\n```lua\ntools.add('section_tool')\n```\n\nUse the tool.\n",
@@ -1802,7 +1803,7 @@ async fn near_duplicate_tools_are_valid_when_isolated_in_separate_sections() {
     let first_descriptor = picker_descriptor("first", "Similar operation one.");
     let second_descriptor = picker_descriptor("second", "Similar operation two.");
     let prompt = bound_with_tools(
-        "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua prompt\n\
 tools.need('first_local', 'first')\n\
 tools.need('second_local', 'second')\n```\n\n\
@@ -1846,7 +1847,7 @@ async fn near_duplicate_effective_scope_fails_before_the_model_without_payload_r
     let first_descriptor = picker_descriptor("first", "Private similar description one.");
     let second_descriptor = picker_descriptor("second", "Private similar description two.");
     let prompt = bound_with_tools(
-        "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua prompt\n\
 tools.need('first_local', 'first')\n\
 tools.need('second_local', 'second')\n```\n\n\

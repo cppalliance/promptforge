@@ -35,7 +35,7 @@ pub(crate) fn retrieval(catalog: &Catalog) -> Retrieval {
 /// A prompt whose Lua returns at once, so it needs no gateway.
 pub(crate) fn prompt(name: &str, description: &str) -> String {
     format!(
-        "---\nname: {name}\ndescription: {description}\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: {name}\ndescription: {description}\npromptforge: 1\n---\n\n\
          # Test prompt\n\n## Main\n\n```lua\nreturn '{name}'\n```\n"
     )
 }
