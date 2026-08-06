@@ -50,6 +50,8 @@
 //! caption rather than a filling bar. `progress` is latched with a maximum, so
 //! it never decreases, which the protocol requires.
 
+#[cfg(test)]
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
@@ -106,7 +108,7 @@ struct Frame {
 /// use promptforge_mcp_server::McpObserver;
 ///
 /// let observer = McpObserver::silent();
-/// observer.observe("Gather", detail::MODEL_TURN_COMPLETED);
+/// observer.observe("example-run", "Gather", detail::MODEL_TURN_COMPLETED);
 /// assert_eq!(observer.turns(), 1);
 /// ```
 #[derive(Debug)]
@@ -120,6 +122,9 @@ pub struct McpObserver {
     turns: AtomicU32,
     /// Frames the queue had no room for.
     dropped: AtomicU32,
+    /// Complete records retained only for runner lifecycle regressions.
+    #[cfg(test)]
+    records: Mutex<Vec<(String, String, String)>>,
 }
 
 impl McpObserver {
@@ -164,6 +169,15 @@ impl McpObserver {
         self.dropped.load(Ordering::Relaxed)
     }
 
+    /// Complete correlated observations retained by the test observer.
+    #[cfg(test)]
+    pub(crate) fn records(&self) -> Vec<(String, String, String)> {
+        self.records
+            .lock()
+            .expect("the MCP test recorder mutex must not be poisoned")
+            .clone()
+    }
+
     /// An observer over `frames`, or over nothing.
     fn over(frames: Option<Sender<Frame>>) -> McpObserver {
         McpObserver {
@@ -171,6 +185,8 @@ impl McpObserver {
             completed: AtomicU32::new(0),
             turns: AtomicU32::new(0),
             dropped: AtomicU32::new(0),
+            #[cfg(test)]
+            records: Mutex::new(Vec::new()),
         }
     }
 
@@ -210,39 +226,44 @@ impl McpObserver {
 }
 
 impl Observer for McpObserver {
-    fn observe(&self, section: &str, report: &str) {
+    fn observe(&self, execution: &str, section: &str, report: &str) {
+        #[cfg(test)]
+        self.records
+            .lock()
+            .expect("the MCP test recorder mutex must not be poisoned")
+            .push((execution.to_owned(), section.to_owned(), report.to_owned()));
         match report {
             detail::RUN_STARTED => {
-                tracing::info!(%section, "run started");
+                tracing::info!(%execution, %section, "run started");
                 self.queue(0, section);
             }
             detail::SECTION_STARTED => {
                 self.queue(self.advance(), section);
             }
             detail::SECTION_FINISHED => {
-                tracing::debug!(%section, "section finished");
+                tracing::debug!(%execution, %section, "section finished");
             }
             detail::MODEL_TURN_COMPLETED => {
                 let turn = self.turns.fetch_add(1, Ordering::Relaxed) + 1;
-                tracing::debug!(%section, turn, "model turn completed");
+                tracing::debug!(%execution, %section, turn, "model turn completed");
             }
             detail::MODEL_TURN_FAILED => {
-                tracing::warn!(%section, "model turn failed");
+                tracing::warn!(%execution, %section, "model turn failed");
             }
             detail::TOOL_CALL_SUCCEEDED => {
-                tracing::debug!(%section, "tool call succeeded");
+                tracing::debug!(%execution, %section, "tool call succeeded");
             }
             detail::TOOL_CALL_FAILED => {
-                tracing::warn!(%section, "tool call failed");
+                tracing::warn!(%execution, %section, "tool call failed");
             }
             detail::RUN_SUCCEEDED => {
-                tracing::debug!(%section, "run success observed");
+                tracing::debug!(%execution, %section, "run success observed");
             }
             detail::RUN_FAILED => {
-                tracing::debug!(%section, "run failure observed");
+                tracing::debug!(%execution, %section, "run failure observed");
             }
             unknown => {
-                tracing::debug!(%section, detail = %unknown, "unrecognized observation");
+                tracing::debug!(%execution, %section, detail = %unknown, "unrecognized observation");
             }
         }
     }
@@ -364,7 +385,7 @@ mod tests {
     fn a_run_frames_its_start_and_each_section_and_nothing_else() {
         let (observer, mut frames) = McpObserver::queued();
         for (section, report) in three_section_run() {
-            observer.observe(section, report);
+            observer.observe("test-run", section, report);
         }
         assert_eq!(
             drain(&mut frames),
@@ -383,7 +404,7 @@ mod tests {
     fn progress_counts_recognized_section_starts() {
         let (observer, mut frames) = McpObserver::queued();
         for section in ["one", "two", "three"] {
-            observer.observe(section, detail::SECTION_STARTED);
+            observer.observe("test-run", section, detail::SECTION_STARTED);
         }
         let progress: Vec<u32> = drain(&mut frames).iter().map(|f| f.progress).collect();
         assert_eq!(progress, vec![1, 2, 3]);
@@ -395,11 +416,13 @@ mod tests {
         // stopped accepting: the queue fills, and the run must not notice.
         let sections = super::CAPACITY + 16;
         let source = long_prompt(sections);
-        let prompt = Prompt::parse(&source, &NullObserver).expect("the fixture prompt parses");
+        let prompt =
+            Prompt::parse(&source, "test-run", &NullObserver).expect("the fixture prompt parses");
         let (observer, _frames) = McpObserver::queued();
 
         let store = Store::memory();
         let options = RunOptions {
+            execution: "test-run",
             observer: &observer,
             client: None,
         };
@@ -437,9 +460,9 @@ mod tests {
         let observer = McpObserver::silent();
         tracing::subscriber::with_default(subscriber, || {
             for (section, report) in three_section_run() {
-                observer.observe(section, report);
+                observer.observe("test-run", section, report);
             }
-            observer.observe("First", detail::TOOL_CALL_FAILED);
+            observer.observe("test-run", "First", detail::TOOL_CALL_FAILED);
         });
         assert_eq!(
             levels.operator_visible(),
@@ -452,7 +475,7 @@ mod tests {
     fn a_silent_observer_counts_turns_without_a_queue() {
         let observer = McpObserver::silent();
         for (section, report) in three_section_run() {
-            observer.observe(section, report);
+            observer.observe("test-run", section, report);
         }
         assert_eq!(observer.turns(), 1);
         assert_eq!(observer.dropped(), 0, "there is nothing to drop into");
@@ -470,7 +493,7 @@ mod tests {
             detail::TOOL_REGISTRY_VALIDATION_FAILED,
             "A future detail",
         ] {
-            observer.observe("First", report);
+            observer.observe("test-run", "First", report);
         }
 
         assert!(drain(&mut frames).is_empty());

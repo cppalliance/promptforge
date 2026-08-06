@@ -8,7 +8,7 @@
 //! returns the run's result. [`observe`] is the seam through which a run
 //! reports its progress, for a caller that wants to watch a long run in
 //! flight; [`execute::run`] takes an [`execute::RunOptions`] carrying the
-//! [`observe::Observer`] the borrowed report pairs go to, and
+//! [`observe::Observer`] the borrowed correlated report records go to, and
 //! [`observe::NullObserver`] is what a caller wanting silence passes.
 //!
 //! A source is a promptforge prompt only when its frontmatter declares a

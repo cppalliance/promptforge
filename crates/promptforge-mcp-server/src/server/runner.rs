@@ -31,6 +31,7 @@ use std::time::Duration;
 use promptforge_core::bind::{BoundPrompt, bind_prompt};
 use promptforge_core::client::GatewayClient;
 use promptforge_core::execute::{self, RunOptions};
+use promptforge_core::parser::Prompt;
 use promptforge_core::store::Store;
 use rmcp::model::{CallToolResult, ErrorData};
 use tokio::time::Instant;
@@ -71,6 +72,13 @@ struct Launch {
     slot: RunSlot,
 }
 
+/// One run's observer, correlation id, and optional progress pump.
+struct Observation {
+    run_id: String,
+    observer: Arc<McpObserver>,
+    pump: Option<ProgressPump>,
+}
+
 /// Runs one entry and answers the call that asked for it.
 ///
 /// # Errors
@@ -87,7 +95,7 @@ pub(super) async fn run(
 ) -> Result<CallToolResult, ErrorData> {
     let run_id = new_run_id();
 
-    let Some(prompt) = entry.prompt() else {
+    let Some(source) = entry.source() else {
         let problem = entry
             .problem()
             .unwrap_or("the prompt is unavailable")
@@ -110,18 +118,59 @@ pub(super) async fn run(
         None => (Arc::new(McpObserver::silent()), None),
     };
 
+    run_observed(
+        config,
+        registry,
+        tools,
+        entry,
+        args,
+        source,
+        Observation {
+            run_id,
+            observer,
+            pump,
+        },
+    )
+    .await
+}
+
+/// Runs one validated source snapshot under an already-created observation
+/// context. Keeping this boundary explicit lets the runner regression retain
+/// the observer while exercising the same parse-bind-run path as production.
+async fn run_observed(
+    config: &Config,
+    registry: &Arc<RunRegistry>,
+    tools: Arc<PreparedTools>,
+    entry: &Entry,
+    args: &str,
+    source: &str,
+    observation: Observation,
+) -> Result<CallToolResult, ErrorData> {
+    let Observation {
+        run_id,
+        observer,
+        pump,
+    } = observation;
+    let prompt = match Prompt::parse(source, &run_id, observer.as_ref()) {
+        Ok(prompt) => prompt,
+        Err(error) => {
+            return binding_failed(run_id, entry, error.to_string(), observer, pump).await;
+        }
+    };
+
     // Binding embeds each distinct capability synchronously. Keep that CPU work
     // off the async executor, while using the exact observer execution will
     // receive so the whole parse-bind-run lifecycle has one reporting seam.
-    let prompt = prompt.clone();
     let binding_tools = Arc::clone(&tools);
     let binding_observer = Arc::clone(&observer);
+    let binding_execution = run_id.clone();
     let binding = tokio::task::spawn_blocking(move || {
         let live = binding_tools.registry();
         bind_prompt(
             prompt,
             binding_tools.picker(),
             &live,
+            &binding_execution,
             binding_observer.as_ref(),
         )
     })
@@ -179,6 +228,37 @@ pub(super) async fn run(
     run_result(&result)
 }
 
+/// Drives the production runner lifecycle while retaining its observer for a
+/// correlation regression.
+#[cfg(test)]
+pub(super) async fn run_recorded(
+    config: &Config,
+    registry: &Arc<RunRegistry>,
+    tools: Arc<PreparedTools>,
+    entry: &Entry,
+    args: &str,
+    observer: Arc<McpObserver>,
+) -> Result<CallToolResult, ErrorData> {
+    let run_id = new_run_id();
+    let source = entry
+        .source()
+        .expect("the recorded runner fixture must be a healthy entry");
+    run_observed(
+        config,
+        registry,
+        tools,
+        entry,
+        args,
+        source,
+        Observation {
+            run_id,
+            observer,
+            pump: None,
+        },
+    )
+    .await
+}
+
 /// Runs one prompt to a [`RunResult`] and records it.
 ///
 /// This is the body of the spawned task, so nothing here borrows from the call
@@ -200,6 +280,7 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
     let live = tools.registry();
     let store = Store::memory();
     let options = RunOptions {
+        execution: &run_id,
         observer: observer.as_ref(),
         client: Some(client),
     };

@@ -167,7 +167,7 @@ impl LuaProgram {
     ///
     /// `location` identifies the source region in diagnostics. Compilation
     /// reports contain only fixed strings and never include `source` or
-    /// `location`.
+    /// `location`; each carries `execution` unchanged.
     ///
     /// # Errors
     /// Returns [`Error::LuaCompile`] when `source` is not syntactically valid,
@@ -183,6 +183,7 @@ impl LuaProgram {
     /// let program = LuaProgram::compile(
     ///     "return 40 + 2",
     ///     "example preamble",
+    ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
     /// )?;
@@ -195,10 +196,11 @@ impl LuaProgram {
     pub fn compile(
         source: &str,
         location: &str,
+        execution: &str,
         observer: &dyn Observer,
         section: &str,
     ) -> Result<Self> {
-        observer.observe(section, detail::LUA_COMPILATION_STARTED);
+        observer.observe(execution, section, detail::LUA_COMPILATION_STARTED);
 
         let lua = match Lua::new_with(
             StdLib::STRING | StdLib::TABLE | StdLib::MATH,
@@ -206,7 +208,7 @@ impl LuaProgram {
         ) {
             Ok(lua) => lua,
             Err(error) => {
-                observer.observe(section, detail::LUA_COMPILATION_FAILED);
+                observer.observe(execution, section, detail::LUA_COMPILATION_FAILED);
                 return Err(Error::Lua(error.to_string()));
             }
         };
@@ -214,7 +216,7 @@ impl LuaProgram {
         let function = match lua.load(source).set_name(location).into_function() {
             Ok(function) => function,
             Err(error) => {
-                observer.observe(section, detail::LUA_COMPILATION_FAILED);
+                observer.observe(execution, section, detail::LUA_COMPILATION_FAILED);
                 return Err(Error::LuaCompile {
                     location: location.to_owned(),
                     lua_source: source.to_owned(),
@@ -224,7 +226,7 @@ impl LuaProgram {
         };
         let bytecode = function.dump(true);
 
-        observer.observe(section, detail::LUA_COMPILATION_SUCCEEDED);
+        observer.observe(execution, section, detail::LUA_COMPILATION_SUCCEEDED);
         Ok(Self {
             source: source.to_owned(),
             bytecode,
@@ -265,7 +267,8 @@ struct BindingState {
 /// In binding mode `tools.need(alias, description)` resolves each capability
 /// exactly once and `tools.always(alias)` marks a previously declared alias as
 /// prompt-wide. `tools.add` is unavailable. Aliases are case-sensitive ASCII
-/// identifiers matching `[A-Za-z][A-Za-z0-9_-]{0,63}`.
+/// identifiers matching `[A-Za-z][A-Za-z0-9_-]{0,63}`. Reports carry
+/// `execution` unchanged.
 ///
 /// # Errors
 /// Returns any error from [`ToolResolver::resolve`] unchanged and
@@ -282,12 +285,13 @@ struct BindingState {
 /// let shared = LuaProgram::compile(
 ///     "tools.need('Web-Search', 'search the web'); tools.always('Web-Search')",
 ///     "shared",
+///     "example-run",
 ///     &NullObserver,
 ///     "Example",
 /// )?;
 /// let resolver = |_: &str| Ok(ToolId::new("example", "search"));
 /// let bindings =
-///     bind_tool_declarations(&shared, &resolver, &NullObserver, "Example")?;
+///     bind_tool_declarations(&shared, &resolver, "example-run", &NullObserver, "Example")?;
 /// assert_eq!(bindings.bindings()[0].alias(), "Web-Search");
 /// assert_eq!(bindings.always(), ["Web-Search"]);
 /// # Ok::<(), promptforge_core::Error>(())
@@ -295,12 +299,14 @@ struct BindingState {
 pub fn bind_tool_declarations(
     program: &LuaProgram,
     resolver: &dyn ToolResolver,
+    execution: &str,
     observer: &dyn Observer,
     section: &str,
 ) -> Result<ToolBindings> {
-    observer.observe(section, detail::TOOL_BINDING_STARTED);
+    observer.observe(execution, section, detail::TOOL_BINDING_STARTED);
     let result = bind_tool_declarations_inner(program, resolver);
     observer.observe(
+        execution,
         section,
         if result.is_ok() {
             detail::TOOL_BINDING_SUCCEEDED
@@ -483,12 +489,13 @@ fn validate_alias(alias: &str) -> Result<()> {
 /// use promptforge_core::lua::SectionVm;
 /// use promptforge_core::observe::NullObserver;
 ///
-/// let vm = SectionVm::new(None, &NullObserver, "Example")?;
+/// let vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
 /// vm.teardown(&NullObserver, "Example");
 /// # Ok::<(), promptforge_core::Error>(())
 /// ```
 #[derive(Debug)]
 pub struct SectionVm {
+    execution: String,
     lua: Lua,
     scoped_tools: Arc<Mutex<Vec<String>>>,
     bound_tools: Option<ToolBindings>,
@@ -502,7 +509,8 @@ impl SectionVm {
     ///
     /// The shared program runs before `args`, `sys`, `var`, `tools`, `store`,
     /// and `reply` are installed. This delayed injection prevents shared code
-    /// from retaining a host value before section execution begins.
+    /// from retaining a host value before section execution begins. The VM
+    /// retains `execution` for every later lifecycle report.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened, or if the
@@ -516,15 +524,17 @@ impl SectionVm {
     /// let shared = LuaProgram::compile(
     ///     "function decorate(s) return '<' .. s .. '>' end",
     ///     "shared",
+    ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
     /// )?;
-    /// let vm = SectionVm::new(Some(&shared), &NullObserver, "Example")?;
+    /// let vm = SectionVm::new(Some(&shared), "example-run", &NullObserver, "Example")?;
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     pub fn new(
         shared: Option<&LuaProgram>,
+        execution: &str,
         observer: &dyn Observer,
         section: &str,
     ) -> Result<Self> {
@@ -534,6 +544,7 @@ impl SectionVm {
         )
         .map_err(|error| Error::Lua(error.to_string()))?;
         let vm = Self {
+            execution: execution.to_owned(),
             lua,
             scoped_tools: Arc::new(Mutex::new(Vec::new())),
             bound_tools: None,
@@ -546,11 +557,11 @@ impl SectionVm {
         }
         install_instruction_budget(&vm.lua);
         if let Some(program) = shared {
-            observer.observe(section, detail::LUA_SHARED_LOAD_STARTED);
+            observer.observe(execution, section, detail::LUA_SHARED_LOAD_STARTED);
             match vm.run_loaded(program) {
-                Ok(_) => observer.observe(section, detail::LUA_SHARED_LOAD_SUCCEEDED),
+                Ok(_) => observer.observe(execution, section, detail::LUA_SHARED_LOAD_SUCCEEDED),
                 Err(error) => {
-                    observer.observe(section, detail::LUA_SHARED_LOAD_FAILED);
+                    observer.observe(execution, section, detail::LUA_SHARED_LOAD_FAILED);
                     return vm.construction_failed(error, observer, section);
                 }
             }
@@ -564,7 +575,8 @@ impl SectionVm {
     /// section's isolated environment. During that run, `tools.need` and
     /// `tools.always` must reproduce the binding pass call-for-call. No resolver
     /// is consulted. A changed alias, description, order, omitted call, or extra
-    /// call is a replay mismatch.
+    /// call is a replay mismatch. The VM retains `execution` for every later
+    /// lifecycle report.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built, shared execution fails,
@@ -581,20 +593,24 @@ impl SectionVm {
     /// let shared = LuaProgram::compile(
     ///     "tools.need('search', 'search the web')",
     ///     "shared",
+    ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
     /// )?;
     /// let resolver = |_: &str| Ok(ToolId::new("example", "search"));
     /// let bindings =
-    ///     bind_tool_declarations(&shared, &resolver, &NullObserver, "Example")?;
+    ///     bind_tool_declarations(&shared, &resolver, "example-run", &NullObserver, "Example")?;
     /// let vm =
-    ///     SectionVm::new_with_bindings(&shared, &bindings, &NullObserver, "Example")?;
+    ///     SectionVm::new_with_bindings(
+    ///         &shared, &bindings, "example-run", &NullObserver, "Example"
+    ///     )?;
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     pub fn new_with_bindings(
         shared: &LuaProgram,
         bindings: &ToolBindings,
+        execution: &str,
         observer: &dyn Observer,
         section: &str,
     ) -> Result<Self> {
@@ -609,6 +625,7 @@ impl SectionVm {
             added: Vec::new(),
         }));
         let vm = Self {
+            execution: execution.to_owned(),
             lua,
             scoped_tools: Arc::new(Mutex::new(Vec::new())),
             bound_tools: Some(bindings.clone()),
@@ -623,8 +640,8 @@ impl SectionVm {
         if let Err(error) = install_replay_tools(&vm.lua, bindings, &runtime) {
             return vm.construction_failed(error, observer, section);
         }
-        observer.observe(section, detail::LUA_SHARED_LOAD_STARTED);
-        observer.observe(section, detail::TOOL_REPLAY_STARTED);
+        observer.observe(execution, section, detail::LUA_SHARED_LOAD_STARTED);
+        observer.observe(execution, section, detail::TOOL_REPLAY_STARTED);
         let result = vm.run_loaded(shared).and_then(|returned| {
             if returned.is_some() {
                 Err(Error::Lua(
@@ -635,6 +652,7 @@ impl SectionVm {
             }
         });
         observer.observe(
+            execution,
             section,
             if result.is_ok() {
                 detail::TOOL_REPLAY_SUCCEEDED
@@ -643,6 +661,7 @@ impl SectionVm {
             },
         );
         observer.observe(
+            execution,
             section,
             if result.is_ok() {
                 detail::LUA_SHARED_LOAD_SUCCEEDED
@@ -674,7 +693,7 @@ impl SectionVm {
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::Store;
     ///
-    /// let mut vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
     /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &Store::memory())?;
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
@@ -738,10 +757,11 @@ impl SectionVm {
     /// let preamble = LuaProgram::compile(
     ///     "var.answer = 42",
     ///     "preamble",
+    ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
     /// )?;
-    /// let mut vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
     /// assert_eq!(vm.run_preamble(&preamble, &NullObserver, "Example")?, None);
     /// vm.teardown(&NullObserver, "Example");
@@ -753,14 +773,15 @@ impl SectionVm {
         observer: &dyn Observer,
         section: &str,
     ) -> Result<Option<String>> {
-        observer.observe(section, detail::LUA_PREAMBLE_STARTED);
+        observer.observe(&self.execution, section, detail::LUA_PREAMBLE_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(section, detail::LUA_PREAMBLE_FAILED);
+            observer.observe(&self.execution, section, detail::LUA_PREAMBLE_FAILED);
             return Err(error);
         }
         let result = self.run_loaded_with_host(program, observer, section);
         observer.observe(
+            &self.execution,
             section,
             if result.is_ok() {
                 detail::LUA_PREAMBLE_SUCCEEDED
@@ -783,21 +804,21 @@ impl SectionVm {
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::Store;
     ///
-    /// let mut vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
     /// vm.bind_reply("model answer", &NullObserver, "Example")?;
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     pub fn bind_reply(&self, reply: &str, observer: &dyn Observer, section: &str) -> Result<()> {
-        observer.observe(section, detail::LUA_REPLY_BINDING_STARTED);
+        observer.observe(&self.execution, section, detail::LUA_REPLY_BINDING_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(section, detail::LUA_REPLY_BINDING_FAILED);
+            observer.observe(&self.execution, section, detail::LUA_REPLY_BINDING_FAILED);
             return Err(error);
         }
         if let Err(error) = self.require_closed_tool_scope("bind a model reply") {
-            observer.observe(section, detail::LUA_REPLY_BINDING_FAILED);
+            observer.observe(&self.execution, section, detail::LUA_REPLY_BINDING_FAILED);
             return Err(error);
         }
         let result = self
@@ -806,6 +827,7 @@ impl SectionVm {
             .raw_set("reply", reply)
             .map_err(|error| Error::Lua(error.to_string()));
         observer.observe(
+            &self.execution,
             section,
             if result.is_ok() {
                 detail::LUA_REPLY_BINDING_SUCCEEDED
@@ -835,10 +857,11 @@ impl SectionVm {
     /// let epilog = LuaProgram::compile(
     ///     "return reply",
     ///     "epilog",
+    ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
     /// )?;
-    /// let mut vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
     /// vm.bind_reply("done", &NullObserver, "Example")?;
     /// assert_eq!(
@@ -854,18 +877,19 @@ impl SectionVm {
         observer: &dyn Observer,
         section: &str,
     ) -> Result<Option<String>> {
-        observer.observe(section, detail::LUA_EPILOG_STARTED);
+        observer.observe(&self.execution, section, detail::LUA_EPILOG_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(section, detail::LUA_EPILOG_FAILED);
+            observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
             return Err(error);
         }
         if let Err(error) = self.require_closed_tool_scope("run an epilog") {
-            observer.observe(section, detail::LUA_EPILOG_FAILED);
+            observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
             return Err(error);
         }
         let result = self.run_loaded_with_host(program, observer, section);
         observer.observe(
+            &self.execution,
             section,
             if result.is_ok() {
                 detail::LUA_EPILOG_SUCCEEDED
@@ -888,7 +912,7 @@ impl SectionVm {
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::Store;
     ///
-    /// let mut vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
     /// assert_eq!(vm.var()?, serde_json::json!({}));
     /// vm.teardown(&NullObserver, "Example");
@@ -924,10 +948,11 @@ impl SectionVm {
     /// let preamble = LuaProgram::compile(
     ///     "tools.add('search')",
     ///     "preamble",
+    ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
     /// )?;
-    /// let mut vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
     /// vm.run_preamble(&preamble, &NullObserver, "Example")?;
     /// assert_eq!(vm.scoped_tools()?, vec!["search"]);
@@ -963,18 +988,22 @@ impl SectionVm {
     /// let shared = LuaProgram::compile(
     ///     "tools.need('search', 'search the web')",
     ///     "shared",
+    ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
     /// )?;
     /// let resolver = |_: &str| Ok(ToolId::new("example", "search"));
     /// let bindings =
-    ///     bind_tool_declarations(&shared, &resolver, &NullObserver, "Example")?;
+    ///     bind_tool_declarations(&shared, &resolver, "example-run", &NullObserver, "Example")?;
     /// let mut vm =
-    ///     SectionVm::new_with_bindings(&shared, &bindings, &NullObserver, "Example")?;
+    ///     SectionVm::new_with_bindings(
+    ///         &shared, &bindings, "example-run", &NullObserver, "Example"
+    ///     )?;
     /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
     /// let preamble = LuaProgram::compile(
     ///     "tools.add('search')",
     ///     "preamble",
+    ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
     /// )?;
@@ -985,9 +1014,10 @@ impl SectionVm {
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     pub fn close_tool_scope(&self, observer: &dyn Observer, section: &str) -> Result<ToolScope> {
-        observer.observe(section, detail::TOOL_SCOPE_CLOSING);
+        observer.observe(&self.execution, section, detail::TOOL_SCOPE_CLOSING);
         let result = self.close_tool_scope_inner();
         observer.observe(
+            &self.execution,
             section,
             if result.is_ok() {
                 detail::TOOL_SCOPE_CLOSED
@@ -1061,14 +1091,15 @@ impl SectionVm {
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     ///
-    /// let vm = SectionVm::new(None, &NullObserver, "Example")?;
+    /// let vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     pub fn teardown(self, observer: &dyn Observer, section: &str) {
-        observer.observe(section, detail::LUA_TEARDOWN_STARTED);
+        let execution = self.execution.clone();
+        observer.observe(&self.execution, section, detail::LUA_TEARDOWN_STARTED);
         drop(self);
-        observer.observe(section, detail::LUA_TEARDOWN_SUCCEEDED);
+        observer.observe(&execution, section, detail::LUA_TEARDOWN_SUCCEEDED);
     }
 
     fn construction_failed(
@@ -1106,6 +1137,7 @@ impl SectionVm {
                     scope,
                     &self.lua.globals(),
                     store,
+                    &self.execution,
                     observer,
                     section,
                 )
@@ -1136,6 +1168,7 @@ impl SectionVm {
                     scope,
                     &self.lua.globals(),
                     store,
+                    &self.execution,
                     observer,
                     section,
                 )
@@ -1164,7 +1197,7 @@ pub struct LuaOutcome {
 /// Run a section's Lua chunk with `args` and `sys` exposed, a writable `var`
 /// table available, and a `store` table backed by `store`, returning the
 /// chunk's return value and the final `var`. Harness-mediated store operations
-/// report safe outcomes to `observer` under `section`.
+/// report safe outcomes to `observer` under `execution` and `section`.
 ///
 /// `store` is the run-scoped virtual-file handle; every section in a run is
 /// given the same handle, so files a section writes persist for later sections
@@ -1181,10 +1214,11 @@ pub fn run_chunk(
     args: &str,
     sys: &Json,
     store: &Store,
+    execution: &str,
     observer: &dyn Observer,
     section: &str,
 ) -> Result<LuaOutcome> {
-    let mut vm = SectionVm::new(None, observer, section)?;
+    let mut vm = SectionVm::new(None, execution, observer, section)?;
     vm.inject_host(args, sys, store)?;
     let returned = vm.run_source(source, observer, section)?;
     let var = vm.var()?;
@@ -1440,13 +1474,18 @@ fn install_tools_table(
 /// Returns [`Error::Lua`] if the `store` table or any of its functions cannot
 /// be created or installed into the sandbox globals.
 fn observe_store_result(
+    execution: &str,
     observer: &dyn Observer,
     section: &str,
     succeeded: bool,
     success: &'static str,
     failure: &'static str,
 ) {
-    observer.observe(section, if succeeded { success } else { failure });
+    observer.observe(
+        execution,
+        section,
+        if succeeded { success } else { failure },
+    );
 }
 
 #[expect(
@@ -1458,6 +1497,7 @@ fn install_store_table<'scope, 'env: 'scope>(
     scope: &'scope Scope<'scope, 'env>,
     globals: &mlua::Table,
     store: &Store,
+    execution: &'env str,
     observer: &'env dyn Observer,
     section: &'env str,
 ) -> Result<()> {
@@ -1468,6 +1508,7 @@ fn install_store_table<'scope, 'env: 'scope>(
         .create_function(move |_, (path, contents): (String, String)| {
             let result = handle.write(&path, &contents);
             observe_store_result(
+                execution,
                 observer,
                 section,
                 result.is_ok(),
@@ -1487,6 +1528,7 @@ fn install_store_table<'scope, 'env: 'scope>(
         .create_function(move |_, (path, contents): (String, String)| {
             let result = handle.append(&path, &contents);
             observe_store_result(
+                execution,
                 observer,
                 section,
                 result.is_ok(),
@@ -1506,6 +1548,7 @@ fn install_store_table<'scope, 'env: 'scope>(
         .create_function(move |_, path: String| {
             let result = handle.read(&path);
             observe_store_result(
+                execution,
                 observer,
                 section,
                 result.is_ok(),
@@ -1524,6 +1567,7 @@ fn install_store_table<'scope, 'env: 'scope>(
         .create_function(move |_, (path, old, new): (String, String, String)| {
             let result = handle.str_replace(&path, &old, &new);
             observe_store_result(
+                execution,
                 observer,
                 section,
                 result.is_ok(),
@@ -1543,6 +1587,7 @@ fn install_store_table<'scope, 'env: 'scope>(
         .create_function(move |_, path: String| {
             let result = handle.delete(&path);
             observe_store_result(
+                execution,
                 observer,
                 section,
                 result.is_ok(),
@@ -1562,6 +1607,7 @@ fn install_store_table<'scope, 'env: 'scope>(
         .create_function(move |lua, pattern: String| {
             let result = handle.glob(&pattern);
             observe_store_result(
+                execution,
                 observer,
                 section,
                 result.is_ok(),
@@ -1654,24 +1700,35 @@ mod tests {
     use crate::store::{FileStore, StoreError};
     use serde_json::json;
 
+    const EXECUTION: &str = "lua-test";
+
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<(String, String)>>);
+    struct Recorder(Mutex<Vec<(String, String, String)>>);
 
     impl Observer for Recorder {
-        fn observe(&self, section: &str, detail: &str) {
+        fn observe(&self, execution: &str, section: &str, detail: &str) {
             self.0
                 .lock()
                 .expect("the recorder mutex must not be poisoned")
-                .push((section.to_owned(), detail.to_owned()));
+                .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
         }
     }
 
     impl Recorder {
-        fn observations(&self) -> Vec<(String, String)> {
+        fn records(&self) -> Vec<(String, String, String)> {
             self.0
                 .lock()
                 .expect("the recorder mutex must not be poisoned")
                 .clone()
+        }
+
+        fn observations(&self) -> Vec<(String, String)> {
+            self.0
+                .lock()
+                .expect("the recorder mutex must not be poisoned")
+                .iter()
+                .map(|(_, section, detail)| (section.clone(), detail.clone()))
+                .collect()
         }
     }
 
@@ -1723,7 +1780,7 @@ mod tests {
     }
 
     impl Observer for BoundaryRecorder {
-        fn observe(&self, _section: &str, _detail: &str) {
+        fn observe(&self, _execution: &str, _section: &str, _detail: &str) {
             self.snapshots
                 .lock()
                 .expect("the snapshot mutex must not be poisoned")
@@ -1737,6 +1794,7 @@ mod tests {
             args,
             &json!({ "id": 1, "when": "t" }),
             &Store::memory(),
+            EXECUTION,
             &NullObserver,
             "Test",
         )
@@ -1750,13 +1808,14 @@ mod tests {
             "",
             &json!({ "id": 1, "when": "t" }),
             store,
+            EXECUTION,
             &NullObserver,
             "Test",
         )
     }
 
     fn program(source: &str) -> LuaProgram {
-        LuaProgram::compile(source, "test program", &NullObserver, "Test")
+        LuaProgram::compile(source, "test program", EXECUTION, &NullObserver, "Test")
             .expect("test Lua must compile")
     }
 
@@ -1772,8 +1831,9 @@ mod tests {
                 },
             ))
         };
-        let bindings = bind_tool_declarations(&shared, &resolver, &NullObserver, "Prompt")
-            .expect("fixture declarations must bind");
+        let bindings =
+            bind_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+                .expect("fixture declarations must bind");
         (shared, bindings)
     }
 
@@ -1810,8 +1870,9 @@ mod tests {
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-a",
         ] {
             let declaration = program(&format!("tools.need({alias:?}, 'capability')"));
-            let error = bind_tool_declarations(&declaration, &resolver, &NullObserver, "Prompt")
-                .expect_err("invalid aliases must be rejected");
+            let error =
+                bind_tool_declarations(&declaration, &resolver, EXECUTION, &NullObserver, "Prompt")
+                    .expect_err("invalid aliases must be rejected");
             assert!(
                 error.to_string().contains("invalid tool alias"),
                 "wrong error for {alias:?}: {error}"
@@ -1820,7 +1881,7 @@ mod tests {
 
         for valid in ["Upper", "has-dash", &format!("A{}", "2".repeat(63))] {
             let declaration = program(&format!("tools.need({valid:?}, 'capability')"));
-            bind_tool_declarations(&declaration, &resolver, &NullObserver, "Prompt")
+            bind_tool_declarations(&declaration, &resolver, EXECUTION, &NullObserver, "Prompt")
                 .expect("planned alias forms must be valid");
         }
     }
@@ -1831,6 +1892,7 @@ mod tests {
         let error = bind_tool_declarations(
             &program("tools.need('search', 'one'); tools.need('search', 'two')"),
             &resolver,
+            EXECUTION,
             &NullObserver,
             "Prompt",
         )
@@ -1847,6 +1909,7 @@ mod tests {
         let error = bind_tool_declarations(
             &program("tools.need('search', 'one'); pcall(tools.need, 'search', 'two')"),
             &resolver,
+            EXECUTION,
             &NullObserver,
             "Prompt",
         )
@@ -1864,9 +1927,14 @@ mod tests {
             "tools.always('missing')",
             "tools.need('search', 'one'); tools.always('search'); tools.always('search')",
         ] {
-            let error =
-                bind_tool_declarations(&program(source), &resolver, &NullObserver, "Prompt")
-                    .expect_err("invalid always declarations must fail");
+            let error = bind_tool_declarations(
+                &program(source),
+                &resolver,
+                EXECUTION,
+                &NullObserver,
+                "Prompt",
+            )
+            .expect_err("invalid always declarations must fail");
             assert!(
                 error.to_string().contains("not declared")
                     || error.to_string().contains("more than once")
@@ -1884,9 +1952,14 @@ mod tests {
             "tools.need('search', 'search the web')",
             "tools.need('search', 'search the web'); tools.always('search'); tools.always('search')",
         ] {
-            let error =
-                SectionVm::new_with_bindings(&program(source), &bindings, &NullObserver, "Section")
-                    .expect_err("changed declarations must fail replay");
+            let error = SectionVm::new_with_bindings(
+                &program(source),
+                &bindings,
+                EXECUTION,
+                &NullObserver,
+                "Section",
+            )
+            .expect_err("changed declarations must fail replay");
             assert!(error.to_string().contains("replay"));
         }
     }
@@ -1899,8 +1972,9 @@ mod tests {
              tools.always('search')",
         );
         let preamble = program("tools.add('fetch', 'search', 'fetch')");
-        let mut vm = SectionVm::new_with_bindings(&shared, &bindings, &NullObserver, "Section")
-            .expect("declarations must replay");
+        let mut vm =
+            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("declarations must replay");
         vm.inject_host("", &json!({}), &Store::memory())
             .expect("host must inject");
         vm.run_preamble(&preamble, &NullObserver, "Section")
@@ -1939,8 +2013,9 @@ mod tests {
              if ok then error('invalid add unexpectedly succeeded') end; \
              tools.add('fetch')",
         );
-        let mut vm = SectionVm::new_with_bindings(&shared, &bindings, &NullObserver, "Section")
-            .expect("declarations must replay");
+        let mut vm =
+            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("declarations must replay");
         vm.inject_host("", &json!({}), &Store::memory())
             .expect("host must inject");
         vm.run_preamble(&preamble, &NullObserver, "Section")
@@ -1963,8 +2038,9 @@ mod tests {
     #[test]
     fn bound_reply_and_epilog_require_closed_scope() {
         let (shared, bindings) = fixture_bindings("tools.need('search', 'search the web')");
-        let mut vm = SectionVm::new_with_bindings(&shared, &bindings, &NullObserver, "Section")
-            .expect("declarations must replay");
+        let mut vm =
+            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("declarations must replay");
         vm.inject_host("", &json!({}), &Store::memory())
             .expect("host must inject");
 
@@ -1994,8 +2070,9 @@ mod tests {
         let source = "saved_need = tools.need\n\
                       tools.need('search', 'search the web')";
         let (shared, bindings) = fixture_bindings(source);
-        let mut vm = SectionVm::new_with_bindings(&shared, &bindings, &NullObserver, "Section")
-            .expect("declarations must replay");
+        let mut vm =
+            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("declarations must replay");
         vm.inject_host("", &json!({}), &Store::memory())
             .expect("host must inject");
 
@@ -2021,8 +2098,9 @@ mod tests {
     #[test]
     fn unknown_h2_alias_fails_before_scope_closure() {
         let (shared, bindings) = fixture_bindings("tools.need('search', 'search the web')");
-        let mut vm = SectionVm::new_with_bindings(&shared, &bindings, &NullObserver, "Section")
-            .expect("declarations must replay");
+        let mut vm =
+            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("declarations must replay");
         vm.inject_host("", &json!({}), &Store::memory())
             .expect("host must inject");
         let error = vm
@@ -2036,16 +2114,23 @@ mod tests {
         let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
         let shared = program("tools.need('private_alias', 'private capability')");
         let recorder = Recorder::default();
-        let bindings = bind_tool_declarations(&shared, &resolver, &recorder, "Prompt")
+        let bindings = bind_tool_declarations(&shared, &resolver, EXECUTION, &recorder, "Prompt")
             .expect("binding must succeed");
-        let mut vm = SectionVm::new_with_bindings(&shared, &bindings, &recorder, "Section")
-            .expect("replay must succeed");
+        let mut vm =
+            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &recorder, "Section")
+                .expect("replay must succeed");
         vm.inject_host("", &json!({}), &Store::memory())
             .expect("host must inject");
         vm.close_tool_scope(&recorder, "Section")
             .expect("empty H2 scope must close");
 
         let observations = recorder.observations();
+        assert!(
+            recorder
+                .records()
+                .iter()
+                .all(|(execution, _, _)| execution == EXECUTION)
+        );
         assert_eq!(
             observations
                 .iter()
@@ -2070,8 +2155,8 @@ mod tests {
     #[test]
     fn scope_closure_failure_reports_exact_payload_free_sequence() {
         let recorder = Recorder::default();
-        let vm =
-            SectionVm::new(None, &recorder, "private section").expect("unbound VM must construct");
+        let vm = SectionVm::new(None, EXECUTION, &recorder, "private section")
+            .expect("unbound VM must construct");
         vm.close_tool_scope(&recorder, "private section")
             .expect_err("unbound scope closure must fail");
 
@@ -2112,8 +2197,8 @@ mod tests {
              return shared_saw_args == nil and decorate(reply) or 'host leaked early'",
         );
         let store = Store::memory();
-        let mut vm =
-            SectionVm::new(Some(&shared), &NullObserver, "Test").expect("shared program must run");
+        let mut vm = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "Test")
+            .expect("shared program must run");
         vm.inject_host("input", &json!({ "id": 7 }), &store)
             .expect("host values must inject");
 
@@ -2152,7 +2237,7 @@ mod tests {
     fn section_vm_requires_delayed_single_host_injection() {
         let no_op = program("return args");
         let store = Store::memory();
-        let mut vm = SectionVm::new(None, &NullObserver, "Test").expect("VM must build");
+        let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
 
         let error = vm
             .run_preamble(&no_op, &NullObserver, "Test")
@@ -2176,8 +2261,8 @@ mod tests {
         let inspect = program(
             "return tostring(captured.args) .. ',' .. tostring(captured.store) .. ',' .. args",
         );
-        let mut vm =
-            SectionVm::new(Some(&shared), &NullObserver, "Test").expect("shared program must run");
+        let mut vm = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "Test")
+            .expect("shared program must run");
         vm.inject_host("private input", &json!({}), &Store::memory())
             .expect("raw host injection must bypass the shared metatable");
 
@@ -2194,7 +2279,8 @@ mod tests {
         let write = program("store.write('state.txt', args)");
         let read = program("return store.read('state.txt')");
         let recorder = Recorder::default();
-        let mut vm = SectionVm::new(None, &NullObserver, "Gather").expect("VM must build");
+        let mut vm =
+            SectionVm::new(None, EXECUTION, &NullObserver, "Gather").expect("VM must build");
         vm.inject_host("private input", &json!({}), &Store::memory())
             .expect("host values must inject");
 
@@ -2252,7 +2338,8 @@ mod tests {
             ("return true", Some("true")),
             ("return nil", None),
         ] {
-            let mut vm = SectionVm::new(None, &NullObserver, "Test").expect("VM must build");
+            let mut vm =
+                SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
             vm.inject_host("", &json!({}), &store)
                 .expect("host values must inject");
             assert_eq!(
@@ -2263,7 +2350,7 @@ mod tests {
             );
         }
 
-        let mut vm = SectionVm::new(None, &NullObserver, "Test").expect("VM must build");
+        let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
         vm.inject_host("", &json!({}), &store)
             .expect("host values must inject");
         let error = vm
@@ -2277,10 +2364,10 @@ mod tests {
         let shared = program("counter = 0");
         let increment = program("counter = counter + 1; return counter");
         let store = Store::memory();
-        let mut first =
-            SectionVm::new(Some(&shared), &NullObserver, "First").expect("first VM must build");
-        let mut second =
-            SectionVm::new(Some(&shared), &NullObserver, "Second").expect("second VM must build");
+        let mut first = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "First")
+            .expect("first VM must build");
+        let mut second = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "Second")
+            .expect("second VM must build");
         first
             .inject_host("", &json!({}), &store)
             .expect("first host must inject");
@@ -2314,7 +2401,7 @@ mod tests {
     #[test]
     fn shared_program_consumes_the_later_phase_instruction_budget() {
         let work = program("for i = 1, 3000000 do local value = i end");
-        let mut vm = SectionVm::new(Some(&work), &NullObserver, "Test")
+        let mut vm = SectionVm::new(Some(&work), EXECUTION, &NullObserver, "Test")
             .expect("shared work must fit the budget");
         vm.inject_host("", &json!({}), &Store::memory())
             .expect("host values must inject");
@@ -2331,8 +2418,8 @@ mod tests {
         let preamble = program("var.value = args");
         let epilog = program("return reply");
         let recorder = Recorder::default();
-        let mut vm =
-            SectionVm::new(Some(&shared), &recorder, "Gather").expect("shared program must run");
+        let mut vm = SectionVm::new(Some(&shared), EXECUTION, &recorder, "Gather")
+            .expect("shared program must run");
         vm.inject_host("private input", &json!({}), &Store::memory())
             .expect("host values must inject");
         vm.run_preamble(&preamble, &recorder, "Gather")
@@ -2372,7 +2459,7 @@ mod tests {
     fn section_lifecycle_failures_report_their_phase() {
         let recorder = Recorder::default();
         let failing_shared = program("error('private shared failure')");
-        SectionVm::new(Some(&failing_shared), &recorder, "Shared")
+        SectionVm::new(Some(&failing_shared), EXECUTION, &recorder, "Shared")
             .expect_err("shared execution must fail");
         assert_eq!(
             recorder.observations(),
@@ -2392,6 +2479,7 @@ mod tests {
         SectionVm::new_with_bindings(
             &program("tools.need('search', 'changed capability')"),
             &bindings,
+            EXECUTION,
             &recorder,
             "Replay",
         )
@@ -2417,7 +2505,8 @@ mod tests {
             ("Epilog", detail::LUA_EPILOG_FAILED, 2_u8),
         ] {
             let recorder = Recorder::default();
-            let vm = SectionVm::new(None, &NullObserver, section).expect("VM must build");
+            let vm =
+                SectionVm::new(None, EXECUTION, &NullObserver, section).expect("VM must build");
             let error = match operation {
                 0 => vm
                     .run_preamble(&program("return nil"), &recorder, section)
@@ -2442,9 +2531,14 @@ mod tests {
     #[test]
     fn lua_program_retains_source_and_round_trips_bytecode() {
         let source = "return greeting .. ' world'";
-        let program =
-            LuaProgram::compile(source, "section Gather preamble", &NullObserver, "Gather")
-                .expect("valid Lua must compile");
+        let program = LuaProgram::compile(
+            source,
+            "section Gather preamble",
+            EXECUTION,
+            &NullObserver,
+            "Gather",
+        )
+        .expect("valid Lua must compile");
         assert_eq!(program.source(), source);
 
         for greeting in ["hello", "goodbye"] {
@@ -2462,7 +2556,7 @@ mod tests {
     fn malformed_lua_reports_location_and_retains_source_diagnostic() {
         let source = "local secret =\nreturn secret";
         let location = "section Gather preamble";
-        let error = LuaProgram::compile(source, location, &NullObserver, "Gather")
+        let error = LuaProgram::compile(source, location, EXECUTION, &NullObserver, "Gather")
             .expect_err("malformed Lua must not compile");
 
         match &error {
@@ -2491,7 +2585,8 @@ mod tests {
         let recorder = Recorder::default();
         let source = "return 'private source payload'";
         let location = "private/location";
-        LuaProgram::compile(source, location, &recorder, "Gather").expect("valid Lua must compile");
+        LuaProgram::compile(source, location, EXECUTION, &recorder, "Gather")
+            .expect("valid Lua must compile");
         assert_eq!(
             recorder.observations(),
             vec![
@@ -2507,7 +2602,7 @@ mod tests {
         );
 
         let recorder = Recorder::default();
-        LuaProgram::compile("local private =", location, &recorder, "Gather")
+        LuaProgram::compile("local private =", location, EXECUTION, &recorder, "Gather")
             .expect_err("malformed Lua must fail");
         let observations = recorder.observations();
         assert_eq!(
@@ -2713,6 +2808,7 @@ mod tests {
             "private input",
             &json!({ "id": 1, "when": "t" }),
             &store,
+            EXECUTION,
             &recorder,
             "Gather",
         )
@@ -2812,8 +2908,16 @@ mod tests {
             let store = Store::memory();
             (case.prepare)(&store);
             let recorder = Recorder::default();
-            run_chunk(case.source, "", &json!({}), &store, &recorder, "Store")
-                .expect("the memory store operation succeeds");
+            run_chunk(
+                case.source,
+                "",
+                &json!({}),
+                &store,
+                EXECUTION,
+                &recorder,
+                "Store",
+            )
+            .expect("the memory store operation succeeds");
             assert_eq!(
                 recorder.observations(),
                 vec![("Store".to_owned(), case.success.to_owned())],
@@ -2823,8 +2927,16 @@ mod tests {
 
             let store = Store::new(Box::new(FailingStore));
             let recorder = Recorder::default();
-            let error = run_chunk(case.source, "", &json!({}), &store, &recorder, "Store")
-                .expect_err("the failing backend rejects every operation");
+            let error = run_chunk(
+                case.source,
+                "",
+                &json!({}),
+                &store,
+                EXECUTION,
+                &recorder,
+                "Store",
+            )
+            .expect_err("the failing backend rejects every operation");
             assert!(matches!(error, Error::Lua(_)));
             assert_eq!(
                 recorder.observations(),
@@ -2848,6 +2960,7 @@ mod tests {
             "",
             &json!({}),
             &store,
+            EXECUTION,
             &recorder,
             "Store",
         )

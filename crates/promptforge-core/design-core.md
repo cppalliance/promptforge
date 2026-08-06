@@ -2,13 +2,13 @@
 
 ## Executive summary
 
-`promptforge-core` is the library that turns one PromptForge Markdown source into a validated run result. A host parses the source into `Prompt`, binds its semantic capability declarations into an immutable `BoundPrompt`, supplies one raw input string, a complete live tool registry, a run-scoped virtual file store, and an observer, then awaits `execute::run`. The language requires one H1, permits one immediately leading shared `lua prompt` program, and executes top-level H2 sections in file order. Each section owns one isolated Lua 5.4 VM from shared load through preamble, model work, `reply` binding, and epilog, then destroys it. No Lua memory crosses sections; `Store` is the sole intentional mutable channel.
+`promptforge-core` is the library that turns one PromptForge Markdown source into a validated run result. A host creates one execution id, parses the source into `Prompt`, binds its semantic capability declarations into an immutable `BoundPrompt`, supplies one raw input string, a complete live tool registry, a run-scoped virtual file store, and an observer, then awaits `execute::run` under that same id. The language requires one H1, permits one immediately leading shared `lua prompt` program, and executes top-level H2 sections in file order. Each section owns one isolated Lua 5.4 VM from shared load through preamble, model work, `reply` binding, and epilog, then destroys it. No Lua memory crosses sections; `Store` is the sole intentional mutable channel.
 
-Prompts depend on semantic aliases, never deployment tool names. H1 `tools.need` declarations bind once through the prepared picker to stable `ToolId` values, `tools.always` explicitly selects genuinely universal aliases, and H2 `tools.add` explicitly selects section-local aliases. Binding is one-to-one, immutable, and complete before execution. The observer reports deterministic borrowed `(section, detail)` strings and cannot steer behavior. Expected parse, binding, Lua, substitution, model, tool, and store failures return errors. The authoritative result is one string, selected by scalar Lua return, frontmatter fallback, last model reply, or `"done"`.
+Prompts depend on semantic aliases, never deployment tool names. H1 `tools.need` declarations bind once through the prepared picker to stable `ToolId` values, `tools.always` explicitly selects genuinely universal aliases, and H2 `tools.add` explicitly selects section-local aliases. Binding is one-to-one, immutable, and complete before execution. The observer reports deterministic borrowed `(execution, section, detail)` strings and cannot steer behavior. Expected parse, binding, Lua, substitution, model, tool, and store failures return errors. The authoritative result is one string, selected by scalar Lua return, frontmatter fallback, last model reply, or `"done"`.
 
 ## Key design choices
 
-1. **A run is a free function over caller-owned resources.** The public path is parse, bind, then `execute::run`; there is no executor object or process-global run state. The caller owns the prompt, live tools, store, observer, and optional gateway client, which keeps deployment policy outside the core and makes concurrent runs independent.
+1. **A run is a free function over caller-owned resources.** The public path is parse, bind, then `execute::run`; there is no executor object or process-global run state. The caller owns the execution id, prompt, live tools, store, observer, and optional gateway client, which keeps deployment policy outside the core and makes concurrent runs independent.
 
 2. **One required H1 is the semantic prompt boundary.** Frontmatter is followed by exactly one non-empty H1, with ordinary Markdown before it ignored. The H1 supplies the stable run title and the only location for shared declarations, so parsing refuses a missing or duplicate H1 instead of inferring intent from an H2 or preserving an unreleased grammar.
 
@@ -32,19 +32,19 @@ Prompts depend on semantic aliases, never deployment tool names. H1 `tools.need`
 
 12. **Effective-scope overlap fails before a model sees tools.** Binding reuses picker vectors to precompute selected near-duplicate pairs, and execution checks only the `always` plus `add` aliases competing in the current non-empty turn. Similar tools may exist in different sections, but a pair at or above the configured duplicate threshold fails with both identities and the measured score because asking the model to distinguish semantically duplicate choices is less reliable than fixing the prompt scope.
 
-13. **The observer reports facts through one non-blocking seam.** Every observed API takes an always-present `&dyn Observer`; silence is `NullObserver`. Parse, compilation, binding, registry validation, Lua phases, scope, model, tool, run, section, and harness-mediated store boundaries emit deterministic payload-free strings. Reports never feed back into execution, so observer choice cannot change output, errors, order, or side effects.
+13. **The observer reports facts through one non-blocking seam.** Every observed API takes an always-present `&dyn Observer`; silence is `NullObserver`. The caller supplies one execution id before parsing and passes it unchanged through binding and `RunOptions`; `SectionVm` retains it for synchronous Lua and store reports, and model and tool loops borrow it from run state. Parse, compilation, binding, registry validation, Lua phases, scope, model, tool, run, section, and harness-mediated store boundaries emit deterministic payload-free section and detail strings under that id. Observer implementations own synchronization, so a shared recorder uses its own mutex and core never holds a global observer lock or a recorder guard across an await. Reports never feed back into execution, so observer choice cannot change output, errors, order, or side effects.
 
 14. **Untrusted and executable content stay visibly separated.** Lua runs in a restricted VM with code-loading and reflection surfaces removed and one section-wide instruction budget. Tool results marked untrusted are nonce-framed before entering model history. These boundaries make prompt code explicit and fetched text data, while expected hostile or malformed input returns an error instead of widening authority.
 
-15. **Reranking and generated progress labels remain outside core.** The picker spike measured `bge-reranker-v2-m3` at 0.856 on the clean hackathon set but 0.735 on TOOLRET, below plain bge-small at 0.804, while adding a roughly 568M-parameter model. That domain-dependent result does not justify a mandatory reranker; author-register measurements on a deployment's own catalog must first show reliable benefit. The original `(section, detail)` pair remains the authoritative trace. A future label model may derive optional UI text off the critical path, but it may neither replace that pair nor influence execution, and it must independently justify quality, latency, and privacy cost.
+15. **Reranking and generated progress labels remain outside core.** The picker spike measured `bge-reranker-v2-m3` at 0.856 on the clean hackathon set but 0.735 on TOOLRET, below plain bge-small at 0.804, while adding a roughly 568M-parameter model. That domain-dependent result does not justify a mandatory reranker; author-register measurements on a deployment's own catalog must first show reliable benefit. The original `(execution, section, detail)` record remains the authoritative trace. A future label model may derive optional UI text off the critical path, but it may neither replace that record nor influence execution, and it must independently justify quality, latency, and privacy cost.
 
 ## The public lifecycle separates syntax, deployment binding, and execution
 
-`Prompt::parse(source, observer)` validates Markdown structure, compiles executable Lua regions, and returns a `Prompt`. Its frontmatter carries `name`, `description`, author `version`, optional `promptforge` engine major, optional `default_return`, and optional `max_tool_iterations`. It carries no tool list. The parsed value contains the required title, optional shared program, H1 description text, and top-level section tree.
+`Prompt::parse(source, execution, observer)` validates Markdown structure, compiles executable Lua regions, reports under the caller's execution id, and returns a `Prompt`. Its frontmatter carries `name`, `description`, author `version`, optional `promptforge` engine major, optional `default_return`, and optional `max_tool_iterations`. It carries no tool list. The parsed value contains the required title, optional shared program, H1 description text, and top-level section tree.
 
-`bind::bind_prompt(prompt, picker, registry, observer)` consumes a parsed prompt and returns `BoundPrompt`. The pass executes shared Lua once in declaration mode, resolves exact capability-description bytes at most once during that pass, retains selected descriptors for diagnostics, validates both identity directions, and asks the picker for near-duplicate analysis without embedding new text. `Absent`, `Duplicate`, and `Ambiguous` are distinct binding outcomes. Binding performs no model or tool call.
+`bind::bind_prompt(prompt, picker, registry, execution, observer)` consumes a parsed prompt and returns `BoundPrompt`. The pass executes shared Lua once in declaration mode, resolves exact capability-description bytes at most once during that pass, retains selected descriptors for diagnostics, validates both identity directions, and asks the picker for near-duplicate analysis without embedding new text. `Absent`, `Duplicate`, and `Ambiguous` are distinct binding outcomes. Binding performs no model or tool call and reports under the same id parsing used.
 
-`execute::run(bound, args, tools, store, RunOptions)` gates the `promptforge` major, walks top-level H2 sections in source order, and returns one string. Parsed `Prompt` input remains accepted as a temporary compatibility path for tool-free callers, but semantic declarations require `BoundPrompt`. `RunOptions` always carries an observer and optionally carries a configured gateway client. The async future remains sendable, and no store, recorder, or observer mutex guard crosses a model await.
+`execute::run(bound, args, tools, store, RunOptions)` gates the `promptforge` major, walks top-level H2 sections in source order, and returns one string. Parsed `Prompt` input remains accepted as a temporary compatibility path for tool-free callers, but semantic declarations require `BoundPrompt`. `RunOptions` always carries the caller's execution id and observer and optionally carries a configured gateway client. The async future remains sendable, and no store, recorder, or observer mutex guard crosses a model await.
 
 ## Exact grammar keeps Markdown examples inert
 
@@ -68,13 +68,13 @@ The complete observer interface is:
 
 ```rust
 pub trait Observer: Send + Sync {
-    fn observe(&self, section: &str, detail: &str);
+    fn observe(&self, execution: &str, section: &str, detail: &str);
 }
 ```
 
 Before the H1 is known, parser reports use `Prompt`; prompt-wide reports use the H1 title; section reports use the H2 heading. Details come from the fixed `observe::detail` vocabulary. They contain no raw prompt prose, input, model request or reply, tool arguments or results, store path or content, credential, fetched text, capability sentence, alias, or picker candidate.
 
-The MCP host may recognize exact details for cosmetic progress and turn counting, tolerate unknown details, and log them. That recognition is downstream presentation logic. No model rewrites trace records, and a generated label cannot become evidence about what executed.
+The CLI creates one execution id before parsing. The MCP host reuses its existing run id, reparses the validated catalog source snapshot under that id, and passes it through binding and execution. MCP may recognize exact details for cosmetic progress and turn counting, tolerate unknown details, and log them together with the execution id. That recognition is downstream presentation logic. No model rewrites trace records, and a generated label cannot become evidence about what executed.
 
 ## Host registries keep abstract selection and concrete dispatch in agreement
 
@@ -90,4 +90,4 @@ Persistent bytecode, compatibility parsing for the removed grammar, cross-sectio
 
 `design-core-orig.md` is byte-for-byte historical and is not part of the current contract.
 
-*2026-08-06 03:45 - GPT-5.6 Sol*
+*2026-08-06 12:20 - GPT-5.6 Sol*

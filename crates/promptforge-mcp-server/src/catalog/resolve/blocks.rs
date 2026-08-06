@@ -37,8 +37,11 @@ pub(super) fn apply(
                 let path = root.join(file);
                 // A block names one file deliberately, so whatever is there has
                 // to parse: the silent skip is a property of globbing alone.
-                let entry = match read(&path).and_then(|source| parse(&source)) {
-                    Ok(prompt) => admit(path.clone(), prompt, Some(key)),
+                let entry = match read(&path) {
+                    Ok(source) => match parse(&source) {
+                        Ok(prompt) => admit(path.clone(), source, prompt, Some(key)),
+                        Err(detail) => Entry::broken(key.clone(), path.clone(), detail),
+                    },
                     Err(detail) => Entry::broken(key.clone(), path.clone(), detail),
                 };
                 match entries.iter().position(|held| held.path() == path) {

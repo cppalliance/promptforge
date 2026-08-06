@@ -12,6 +12,7 @@ name = "promptforge"
 path = "src/main.rs"
 
 [dependencies]
+fastrand.workspace = true
 promptforge-core.workspace = true
 promptforge-webfetch.workspace = true
 promptforge-tool-picker.workspace = true

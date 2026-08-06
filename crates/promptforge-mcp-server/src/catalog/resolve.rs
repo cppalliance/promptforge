@@ -53,7 +53,7 @@ pub(crate) fn resolve(config: &Config, on_broken: OnBroken) -> Result<Catalog, C
             continue;
         }
         entries.push(match parse(&source) {
-            Ok(prompt) => admit(path, prompt, None),
+            Ok(prompt) => admit(path, source, prompt, None),
             Err(detail) => Entry::broken(stem_name(&path), path, detail),
         });
     }
@@ -159,12 +159,12 @@ fn read(path: &Path) -> Result<String, String> {
 
 /// Parses one candidate file, reporting the failure as a validation detail.
 fn parse(source: &str) -> Result<Prompt, String> {
-    Prompt::parse(source, &NullObserver).map_err(|e| format!("does not parse: {e}"))
+    Prompt::parse(source, "catalog", &NullObserver).map_err(|e| format!("does not parse: {e}"))
 }
 
 /// Turns a parsed prompt into an entry, checking the frontmatter name and, for
 /// a named block, that the name is the one the block was keyed on.
-fn admit(path: PathBuf, prompt: Prompt, block_key: Option<&str>) -> Entry {
+fn admit(path: PathBuf, source: String, prompt: Prompt, block_key: Option<&str>) -> Entry {
     let name = prompt.frontmatter.name.clone();
     if !is_valid_tool_name(&name) {
         let detail = format!(
@@ -189,7 +189,7 @@ fn admit(path: PathBuf, prompt: Prompt, block_key: Option<&str>) -> Entry {
         let detail = format!("frontmatter name {name:?} does not match its [prompts.{key}] block");
         return Entry::broken(key.to_string(), path, detail);
     }
-    Entry::healthy(path, prompt)
+    Entry::healthy(path, source, prompt)
 }
 
 /// One fault per name two or more healthy prompts declare, each naming every
