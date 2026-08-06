@@ -2,11 +2,13 @@
 //!
 //! [`bind_prompt`] executes the parsed H1 shared program once in Lua tool
 //! declaration mode. Exact capability strings are resolved through the concrete
-//! picker at most once during that pass. The resulting [`BoundPrompt`] owns the
-//! parsed prompt, frozen declaration replay data, and the selected picker
-//! descriptors needed by later validation, but exposes no mutation path.
+//! picker at most once during that pass. Binding then validates one-to-one
+//! alias and identity mappings against the complete live registry. The
+//! resulting [`BoundPrompt`] owns the parsed prompt, frozen declaration replay
+//! data, atomic forward and reverse maps, and selected picker diagnostics, but
+//! exposes no mutation path.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use promptforge_tool_picker::{Outcome, ToolDescriptor, ToolId as PickerToolId, ToolPicker};
@@ -14,19 +16,22 @@ use promptforge_tool_picker::{Outcome, ToolDescriptor, ToolId as PickerToolId, T
 use crate::lua::{ToolBindings, ToolResolver, bind_tool_declarations};
 use crate::observe::{Observer, detail};
 use crate::parser::Prompt;
-use crate::tools::ToolId;
+use crate::tools::{ToolId, ToolRegistry};
 use crate::{Error, Result};
 
 /// A parsed prompt with one frozen H1 capability-binding result.
 ///
 /// The original prompt, exact Lua declaration replay sequence, and selected
-/// picker descriptors are owned together. All fields are private and every
-/// accessor is shared, so a caller cannot change what later section VMs replay.
+/// picker descriptors and validated forward and reverse maps are owned
+/// together. All fields are private and every accessor is shared, so a caller
+/// cannot change what later section VMs replay or dispatch.
 #[derive(Debug, Clone)]
 pub struct BoundPrompt {
     prompt: Prompt,
     bindings: ToolBindings,
     diagnostics: BTreeMap<ToolId, ToolDescriptor>,
+    alias_to_id: BTreeMap<String, ToolId>,
+    id_to_alias: BTreeMap<ToolId, String>,
 }
 
 impl BoundPrompt {
@@ -43,22 +48,32 @@ impl BoundPrompt {
     }
 
     /// Returns selected picker descriptors keyed by stable core identity.
-    ///
-    /// This map retains exact catalog diagnostics for later validation without
-    /// requiring another picker lookup. Step 9 does not compare these entries
-    /// with a live registry or reject identity collisions.
     #[must_use]
     pub fn diagnostics(&self) -> &BTreeMap<ToolId, ToolDescriptor> {
         &self.diagnostics
     }
+
+    /// Returns the complete prompt-local alias to stable identity map.
+    #[must_use]
+    pub fn alias_to_id(&self) -> &BTreeMap<String, ToolId> {
+        &self.alias_to_id
+    }
+
+    /// Returns the complete stable identity to prompt-local alias map.
+    #[must_use]
+    pub fn id_to_alias(&self) -> &BTreeMap<ToolId, String> {
+        &self.id_to_alias
+    }
 }
 
-/// Binds every H1 `tools.need` declaration through `picker` synchronously.
+/// Binds every H1 `tools.need` declaration and validates the live registry.
 ///
 /// The optional shared program is executed exactly once in the existing Lua
 /// declaration mode. Repeated byte-identical capability descriptions replay a
 /// cached picker decision, while descriptions differing by any byte are
-/// resolved independently. No executor, host registry, or live tool is used.
+/// resolved independently. The complete `registry` is then checked for repeated
+/// stable identities before atomic forward and reverse binding maps are built.
+/// Every selected identity must be present in that registry.
 ///
 /// Binding observations are the fixed payload-free details from
 /// [`crate::observe::detail`]. They contain no alias, capability, candidate,
@@ -68,16 +83,25 @@ impl BoundPrompt {
 /// Returns [`Error::Bind`] if the picker itself fails, [`Error::Absent`] when
 /// nothing fits, [`Error::Duplicate`] for one server's duplicate matches,
 /// [`Error::Ambiguous`] for a non-unique shortlist, or the existing Lua binding
-/// errors for invalid declaration programs.
+/// errors for invalid declaration programs. Returns
+/// [`Error::DuplicateLiveToolId`], [`Error::DuplicateAlias`],
+/// [`Error::ToolIdSelectedTwice`], or [`Error::PickedToolNotLive`] when an
+/// identity boundary is not one-to-one and complete.
 pub fn bind_prompt(
     prompt: Prompt,
     picker: &ToolPicker,
+    registry: &ToolRegistry<'_>,
     observer: &dyn Observer,
 ) -> Result<BoundPrompt> {
-    bind_with_source(prompt, picker, observer)
+    bind_with_source(prompt, picker, registry, observer)
 }
 
-fn bind_with_source<S>(prompt: Prompt, source: &S, observer: &dyn Observer) -> Result<BoundPrompt>
+fn bind_with_source<S>(
+    prompt: Prompt,
+    source: &S,
+    registry: &ToolRegistry<'_>,
+    observer: &dyn Observer,
+) -> Result<BoundPrompt>
 where
     S: DecisionSource + ?Sized,
 {
@@ -90,12 +114,70 @@ where
         ToolBindings::default()
     };
     let diagnostics = resolver.into_diagnostics()?;
+    let (alias_to_id, id_to_alias) =
+        validate_registry_and_bindings(&bindings, registry, observer, &prompt.title)?;
 
     Ok(BoundPrompt {
         prompt,
         bindings,
         diagnostics,
+        alias_to_id,
+        id_to_alias,
     })
+}
+
+fn validate_registry_and_bindings(
+    bindings: &ToolBindings,
+    registry: &ToolRegistry<'_>,
+    observer: &dyn Observer,
+    section: &str,
+) -> Result<(BTreeMap<String, ToolId>, BTreeMap<ToolId, String>)> {
+    observer.observe(section, detail::TOOL_REGISTRY_VALIDATION_STARTED);
+    let result = validate_registry_and_bindings_inner(bindings, registry);
+    observer.observe(
+        section,
+        if result.is_ok() {
+            detail::TOOL_REGISTRY_VALIDATION_SUCCEEDED
+        } else {
+            detail::TOOL_REGISTRY_VALIDATION_FAILED
+        },
+    );
+    result
+}
+
+fn validate_registry_and_bindings_inner(
+    bindings: &ToolBindings,
+    registry: &ToolRegistry<'_>,
+) -> Result<(BTreeMap<String, ToolId>, BTreeMap<ToolId, String>)> {
+    let mut live_ids = BTreeSet::new();
+    for tool in registry.tools() {
+        let id = tool.id();
+        if !live_ids.insert(id.clone()) {
+            return Err(Error::DuplicateLiveToolId { id });
+        }
+    }
+
+    let mut alias_to_id = BTreeMap::new();
+    let mut id_to_alias = BTreeMap::new();
+    for binding in bindings.bindings() {
+        let alias = binding.alias().to_owned();
+        let id = binding.id().clone();
+        if alias_to_id.insert(alias.clone(), id.clone()).is_some() {
+            return Err(Error::DuplicateAlias { alias });
+        }
+        if let Some(first_alias) = id_to_alias.insert(id.clone(), alias.clone()) {
+            return Err(Error::ToolIdSelectedTwice {
+                id,
+                first_alias,
+                second_alias: alias,
+            });
+        }
+        if !live_ids.contains(&id) {
+            return Err(Error::PickedToolNotLive { alias, id });
+        }
+    }
+
+    Ok((alias_to_id, id_to_alias))
 }
 
 #[derive(Debug, Clone)]
@@ -217,13 +299,14 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use super::*;
     use crate::lua::LuaProgram;
     use crate::observe::NullObserver;
     use crate::observe::Observer;
     use crate::parser::Frontmatter;
+    use crate::tools::Tool;
 
     #[derive(Debug)]
     struct FixtureSource {
@@ -247,6 +330,7 @@ mod tests {
                 "bind" | "private selected capability" => {
                     CachedDecision::Bind(Self::tool("server", "bound"))
                 }
+                "other" => CachedDecision::Bind(Self::tool("server", "other")),
                 "absent" | "private missing capability" => CachedDecision::Absent,
                 "duplicate" => CachedDecision::Duplicate(vec![
                     Self::tool("server", "one"),
@@ -258,6 +342,50 @@ mod tests {
                 ]),
                 _ => CachedDecision::Failed("fixture picker failure".to_owned()),
             }
+        }
+    }
+
+    #[derive(Debug)]
+    struct FixtureLiveTool {
+        id: ToolId,
+    }
+
+    impl FixtureLiveTool {
+        fn new(server: &str, name: &str) -> Self {
+            Self {
+                id: ToolId::new(server, name),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Tool for FixtureLiveTool {
+        fn id(&self) -> ToolId {
+            self.id.clone()
+        }
+
+        #[expect(
+            clippy::unnecessary_literal_bound,
+            reason = "the Tool trait fixes this return type to &str"
+        )]
+        fn wire_name(&self) -> &str {
+            "fixture"
+        }
+
+        #[expect(
+            clippy::unnecessary_literal_bound,
+            reason = "the Tool trait fixes this return type to &str"
+        )]
+        fn description(&self) -> &str {
+            "fixture"
+        }
+
+        fn parameters_schema(&self) -> Value {
+            json!({"type": "object"})
+        }
+
+        async fn call(&self, _args: Value) -> Result<String> {
+            Ok(String::new())
         }
     }
 
@@ -483,15 +611,37 @@ mod tests {
         let source = FixtureSource {
             calls: AtomicUsize::new(0),
         };
+        let live = FixtureLiveTool::new("server", "bound");
+        let other = FixtureLiveTool::new("server", "other");
+        let registry = ToolRegistry::new([&live as &dyn Tool, &other as &dyn Tool]);
         let bound = bind_with_source(
-            prompt(Some(program("tools.need('alias', 'bind')"))),
+            prompt(Some(program(
+                "tools.need('alias', 'bind')\ntools.need('other_alias', 'other')",
+            ))),
             &source,
+            &registry,
             &NullObserver,
         )
         .unwrap();
         assert_eq!(bound.prompt().title, "Private title");
         assert_eq!(bound.bindings().bindings()[0].alias(), "alias");
-        assert_eq!(bound.diagnostics().len(), 1);
+        assert_eq!(bound.diagnostics().len(), 2);
+        assert_eq!(
+            bound.alias_to_id().get("alias"),
+            Some(&ToolId::new("server", "bound"))
+        );
+        assert_eq!(
+            bound.alias_to_id().get("other_alias"),
+            Some(&ToolId::new("server", "other"))
+        );
+        assert_eq!(
+            bound.id_to_alias().get(&ToolId::new("server", "bound")),
+            Some(&"alias".to_owned())
+        );
+        assert_eq!(
+            bound.id_to_alias().get(&ToolId::new("server", "other")),
+            Some(&"other_alias".to_owned())
+        );
     }
 
     #[test]
@@ -503,32 +653,50 @@ mod tests {
             let source = FixtureSource {
                 calls: AtomicUsize::new(0),
             };
+            let live = FixtureLiveTool::new("server", "bound");
+            let registry = ToolRegistry::new([&live as &dyn Tool]);
             let recorder = Recorder::default();
             let result = bind_with_source(
                 prompt(Some(program(&format!(
                     "tools.need('private_alias', {capability:?})"
                 )))),
                 &source,
+                &registry,
                 &recorder,
             );
             assert_eq!(result.is_ok(), outcome == "succeeded");
-            assert_eq!(
-                recorder.observations(),
-                [
+            let expected = if outcome == "succeeded" {
+                vec![
                     (
                         "Private title".to_owned(),
                         detail::TOOL_BINDING_STARTED.to_owned(),
                     ),
                     (
                         "Private title".to_owned(),
-                        if outcome == "succeeded" {
-                            detail::TOOL_BINDING_SUCCEEDED.to_owned()
-                        } else {
-                            detail::TOOL_BINDING_FAILED.to_owned()
-                        },
+                        detail::TOOL_BINDING_SUCCEEDED.to_owned(),
+                    ),
+                    (
+                        "Private title".to_owned(),
+                        detail::TOOL_REGISTRY_VALIDATION_STARTED.to_owned(),
+                    ),
+                    (
+                        "Private title".to_owned(),
+                        detail::TOOL_REGISTRY_VALIDATION_SUCCEEDED.to_owned(),
                     ),
                 ]
-            );
+            } else {
+                vec![
+                    (
+                        "Private title".to_owned(),
+                        detail::TOOL_BINDING_STARTED.to_owned(),
+                    ),
+                    (
+                        "Private title".to_owned(),
+                        detail::TOOL_BINDING_FAILED.to_owned(),
+                    ),
+                ]
+            };
+            assert_eq!(recorder.observations(), expected);
             let trace = format!("{:?}", recorder.observations());
             assert!(!trace.contains("private_alias"));
             assert!(!trace.contains(capability));
@@ -542,7 +710,8 @@ mod tests {
             calls: AtomicUsize::new(0),
         };
         let recorder = Recorder::default();
-        let bound = bind_with_source(prompt(None), &source, &recorder).unwrap();
+        let registry = ToolRegistry::new(std::iter::empty());
+        let bound = bind_with_source(prompt(None), &source, &registry, &recorder).unwrap();
 
         assert!(bound.bindings().bindings().is_empty());
         assert!(bound.diagnostics().is_empty());
@@ -558,7 +727,137 @@ mod tests {
                     "Private title".to_owned(),
                     detail::TOOL_BINDING_SUCCEEDED.to_owned(),
                 ),
+                (
+                    "Private title".to_owned(),
+                    detail::TOOL_REGISTRY_VALIDATION_STARTED.to_owned(),
+                ),
+                (
+                    "Private title".to_owned(),
+                    detail::TOOL_REGISTRY_VALIDATION_SUCCEEDED.to_owned(),
+                ),
             ]
         );
+    }
+
+    #[test]
+    fn duplicate_live_ids_fail_before_a_bound_prompt_exists() {
+        let source = FixtureSource {
+            calls: AtomicUsize::new(0),
+        };
+        let first = FixtureLiveTool::new("server", "bound");
+        let repeated = FixtureLiveTool::new("server", "bound");
+        let registry = ToolRegistry::new([&first as &dyn Tool, &repeated as &dyn Tool]);
+
+        let error = bind_with_source(
+            prompt(Some(program("tools.need('alias', 'bind')"))),
+            &source,
+            &registry,
+            &NullObserver,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            Error::DuplicateLiveToolId { id } if id == ToolId::new("server", "bound")
+        ));
+    }
+
+    #[test]
+    fn two_aliases_selecting_one_live_id_fail_atomically() {
+        let source = FixtureSource {
+            calls: AtomicUsize::new(0),
+        };
+        let live = FixtureLiveTool::new("server", "bound");
+        let registry = ToolRegistry::new([&live as &dyn Tool]);
+
+        let error = bind_with_source(
+            prompt(Some(program(
+                "tools.need('first', 'bind')\ntools.need('second', 'bind')",
+            ))),
+            &source,
+            &registry,
+            &NullObserver,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            Error::ToolIdSelectedTwice {
+                id,
+                first_alias,
+                second_alias,
+            } if id == ToolId::new("server", "bound")
+                && first_alias == "first"
+                && second_alias == "second"
+        ));
+    }
+
+    #[test]
+    fn picker_selected_id_absent_from_live_registry_fails_atomically() {
+        let source = FixtureSource {
+            calls: AtomicUsize::new(0),
+        };
+        let unrelated = FixtureLiveTool::new("server", "other");
+        let registry = ToolRegistry::new([&unrelated as &dyn Tool]);
+
+        let error = bind_with_source(
+            prompt(Some(program("tools.need('alias', 'bind')"))),
+            &source,
+            &registry,
+            &NullObserver,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            Error::PickedToolNotLive { alias, id }
+                if alias == "alias" && id == ToolId::new("server", "bound")
+        ));
+    }
+
+    #[test]
+    fn registry_validation_failure_reports_are_ordered_and_payload_free() {
+        let source = FixtureSource {
+            calls: AtomicUsize::new(0),
+        };
+        let recorder = Recorder::default();
+        let registry = ToolRegistry::new(std::iter::empty());
+
+        let result = bind_with_source(
+            prompt(Some(program(
+                "tools.need('private_alias', 'private selected capability')",
+            ))),
+            &source,
+            &registry,
+            &recorder,
+        );
+
+        assert!(matches!(result, Err(Error::PickedToolNotLive { .. })));
+        assert_eq!(
+            recorder.observations(),
+            [
+                (
+                    "Private title".to_owned(),
+                    detail::TOOL_BINDING_STARTED.to_owned(),
+                ),
+                (
+                    "Private title".to_owned(),
+                    detail::TOOL_BINDING_SUCCEEDED.to_owned(),
+                ),
+                (
+                    "Private title".to_owned(),
+                    detail::TOOL_REGISTRY_VALIDATION_STARTED.to_owned(),
+                ),
+                (
+                    "Private title".to_owned(),
+                    detail::TOOL_REGISTRY_VALIDATION_FAILED.to_owned(),
+                ),
+            ]
+        );
+        let trace = format!("{:?}", recorder.observations());
+        assert!(!trace.contains("private_alias"));
+        assert!(!trace.contains("private selected capability"));
+        assert!(!trace.contains("server"));
+        assert!(!trace.contains("bound"));
     }
 }

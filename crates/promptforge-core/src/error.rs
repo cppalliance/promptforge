@@ -87,6 +87,48 @@ pub enum Error {
         candidates: Vec<crate::tools::ToolId>,
     },
 
+    /// One prompt-local alias was declared more than once.
+    #[error("tool alias {alias:?} was declared more than once")]
+    #[non_exhaustive]
+    DuplicateAlias {
+        /// The exact case-sensitive alias declared by the prompt.
+        alias: String,
+    },
+
+    /// The live registry contains more than one entry with one stable identity.
+    #[error("live tool registry contains duplicate identity {id:?}")]
+    #[non_exhaustive]
+    DuplicateLiveToolId {
+        /// The repeated stable identity.
+        id: crate::tools::ToolId,
+    },
+
+    /// Two prompt-local aliases selected the same stable tool identity.
+    #[error(
+        "tool identity {id:?} was selected by both aliases {first_alias:?} and {second_alias:?}"
+    )]
+    #[non_exhaustive]
+    ToolIdSelectedTwice {
+        /// The stable identity selected more than once.
+        id: crate::tools::ToolId,
+        /// The first alias in declaration order.
+        first_alias: String,
+        /// The later conflicting alias.
+        second_alias: String,
+    },
+
+    /// A picker-selected stable identity is not callable in the live registry.
+    #[error(
+        "alias {alias:?} selected tool identity {id:?}, which is absent from the live registry"
+    )]
+    #[non_exhaustive]
+    PickedToolNotLive {
+        /// The prompt-local alias whose selection cannot be fulfilled.
+        alias: String,
+        /// The selected stable identity absent from the registry.
+        id: crate::tools::ToolId,
+    },
+
     /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
     #[error("substitution error: {0}")]
     Substitution(String),

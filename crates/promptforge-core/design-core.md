@@ -24,7 +24,7 @@ The `Store` remains the sole intentional mutable channel across section boundari
 
 Every callable `Tool` exposes a stable `ToolId` consisting of a server and a name in that server's namespace. The built-in live identities are `("promptforge", "web_search")` and `("promptforge", "web_fetch")`. Identity is structural and remains independent of the concrete wire name used by the current model transport.
 
-`Tool` also exposes its exact model-facing description and parameter schema. `ToolRegistry` preserves supplied order and repeated identities, and resolves live instances by `ToolId`. It intentionally does not reject repeated IDs: atomic collision validation belongs to the later binding-uniqueness step.
+`Tool` also exposes its exact model-facing description and parameter schema. `ToolRegistry` preserves supplied order and repeated identities, and resolves live instances by `ToolId`. The registry remains a faithful collection, while prompt binding validates the complete registry atomically and rejects any repeated live identity.
 
 The existing executor still scopes, advertises, and dispatches tools by `wire_name` until alias binding ships. The wire name is therefore a temporary transport detail, not an identity key for new APIs.
 
@@ -88,31 +88,33 @@ The existing `run_chunk` compatibility path now uses `SectionVm` for one phase a
 
 ### Lua declaration and scope modes
 
-Core exposes a deterministic `ToolResolver` seam instead of depending on a concrete picker. `bind_tool_declarations` executes one compiled H1 shared program in binding mode. `tools.need(alias, description)` resolves each capability once to a stable `ToolId`; `tools.always(alias)` marks a previously declared alias as prompt-wide; `tools.add` is refused. Aliases are accepted exactly when they match `[A-Za-z][A-Za-z0-9_-]{0,63}`. There is no normalization. Duplicate aliases and invalid or duplicate `tools.always` declarations fail binding. Identity collision and live-registry agreement checks remain owned by the later binding-uniqueness step.
+Core exposes a deterministic `ToolResolver` seam instead of depending on a concrete picker. `bind_tool_declarations` executes one compiled H1 shared program in binding mode. `tools.need(alias, description)` resolves each capability once to a stable `ToolId`; `tools.always(alias)` marks a previously declared alias as prompt-wide; `tools.add` is refused. Aliases are accepted exactly when they match `[A-Za-z][A-Za-z0-9_-]{0,63}`. There is no normalization. Duplicate aliases return a structured binding error that cannot be suppressed with Lua `pcall`; invalid or duplicate `tools.always` declarations also fail binding.
 
 The resulting `ToolBindings` is immutable and ordered. `SectionVm::new_with_bindings` executes the shared program in every fresh section VM under replay mode, checks every `tools.need` and `tools.always` call against the frozen declaration sequence, and never invokes the resolver. Changed values, changed order, omitted calls, and extra calls are replay mismatches. Phase checks belong to the host callbacks, so a shared function captured during replay cannot invoke declaration operations from an H2.
 
 After host injection, the section's `tools` table is in H2 recording mode. Only `tools.add(alias...)` is accepted, and every alias must have a frozen binding. Additions are first-seen ordered and idempotent; aliases already in `tools.always` are not repeated. `close_tool_scope` returns an immutable effective scope with prompt-wide aliases first and H2 additions second, then permanently closes recording so an epilog cannot widen the model-visible scope.
 
-Binding, replay, and scope closure report fixed start/outcome details containing no aliases, descriptions, identities, source, or other payloads. The parser stores the compiled H1 shared program but the executor does not invoke these modes yet. Alias-based model advertisement and dispatch, collision validation, and complete lifecycle wiring remain later steps.
+Binding, registry validation, replay, and scope closure report fixed start/outcome details containing no aliases, descriptions, identities, source, or other payloads. The parser stores the compiled H1 shared program but the executor does not invoke these modes yet. Alias-based model advertisement and dispatch and complete lifecycle wiring remain later steps.
 
-### Four-outcome capability binding
+### Validated capability binding
 
-Core now depends directly on `promptforge-tool-picker` for the synchronous prompt binding phase. `bind::bind_prompt` takes ownership of a parsed `Prompt`, executes its optional H1 shared program once through the existing Lua declaration mode, and returns an immutable `BoundPrompt` containing the prompt, frozen `ToolBindings`, and selected catalog diagnostics. A prompt with no H1 shared program produces empty frozen bindings through the same observed binding boundary.
+Core depends directly on `promptforge-tool-picker` for the synchronous prompt binding phase. `bind::bind_prompt` takes ownership of a parsed `Prompt`, a prepared picker, the complete live `ToolRegistry`, and an observer. It executes the optional H1 shared program once through the existing Lua declaration mode, then validates every identity boundary before returning an immutable `BoundPrompt`. A prompt with no H1 shared program produces empty frozen bindings and maps through the same observed binding and registry-validation boundaries.
 
-The concrete resolver caches picker decisions by the exact capability description bytes for the duration of that one pass. Repeating an identical description under another alias replays the decision without embedding the need again. No trimming, folding, or normalization merges different descriptions. A successful `Outcome::Bind` becomes a stable core `ToolId`; the selected `ToolDescriptor` is retained in a read-only diagnostics map keyed by that identity. This step does not reject two aliases selecting one identity, compare picker descriptors with live tools, or otherwise perform the collision hardening owned by the next step.
+The concrete resolver caches picker decisions by the exact capability description bytes for the duration of that one pass. Repeating an identical description under another alias replays the decision without embedding the need again. No trimming, folding, or normalization merges different descriptions. A successful `Outcome::Bind` becomes a stable core `ToolId`; the selected `ToolDescriptor` is retained in a read-only diagnostics map keyed by that identity.
 
 Picker operation failures return `Error::Bind` with the exact capability and a string diagnostic. `Outcome::Absent`, `Outcome::Duplicate`, and `Outcome::Ambiguous` return their distinct core error variants, with duplicate and ambiguous candidate identities preserved in picker order. Resolver errors survive the Lua callback boundary as structured core errors, even if H1 Lua attempts to catch the callback failure with `pcall`.
 
-The pass reports only the existing fixed `Tool binding started`, `Tool binding succeeded`, and `Tool binding failed` details under the H1 title. Reports contain no aliases, capabilities, identities, candidates, catalog prose, or picker diagnostics. Binding is synchronous and does not construct an executor, consult a live registry, or invoke a tool.
+Validation first scans the complete live registry and rejects a repeated stable identity. It then builds alias-to-ID and ID-to-alias maps in local temporary values, rejecting a repeated alias, two aliases selecting one ID, or any selected ID absent from the live registry. Only a wholly valid pair of maps is moved into `BoundPrompt`, so callers can never observe a partial result. The frozen declaration sequence, diagnostics, and both maps have shared accessors but no mutation path.
+
+The pass reports fixed binding and registry-validation start and outcome details under the H1 title. Reports contain no aliases, capabilities, identities, candidates, catalog prose, live-registry data, or picker diagnostics. Binding is synchronous and does not construct an executor or invoke a tool.
 
 ## Planned, not shipped
 
 Everything in this section is settled design for later steps and remains unimplemented.
 
-### Capability binding and picker validation
+### Picker scope validation
 
-The shipped concrete picker binding preserves each resolved `ToolId` and its catalog diagnostic without enforcing identity uniqueness or live-registry agreement. The later binding-uniqueness step will validate those identities atomically. Before a model turn, core will apply the shipped picker near-duplicate analysis to the effective scope.
+Before a model turn, core will apply the shipped picker near-duplicate analysis to the effective scope.
 
 ### Semantic capability phases
 
