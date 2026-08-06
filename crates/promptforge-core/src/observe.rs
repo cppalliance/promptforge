@@ -1,16 +1,20 @@
 //! Report-only observation for a run in flight.
 //!
 //! [`Observer`] receives borrowed `(execution, section, detail)` strings at
-//! operational boundaries. The strings are the complete trace record: they contain no raw
-//! prompt prose, model input or output, tool arguments or results, store paths
-//! or contents, credentials, or fetched content. Reports are synchronous and
-//! never consulted for a decision. [`NullObserver`] provides silence without a
-//! second execution path.
+//! operational boundaries. The strings are the complete trace record. Fixed
+//! runtime details contain no raw prompt prose, model input or output, tool
+//! arguments or results, store paths or contents, credentials, or fetched
+//! content. The sole author-controlled exception is a validated `Lua:
+//! <message>` checkpoint from the phase-local Lua `log(message)` callback.
+//! Reports are synchronous and never consulted for a decision.
+//! [`NullObserver`] provides silence without a second execution path.
 
 /// Stable detail strings emitted by the currently shipped runtime.
 ///
 /// Consumers may recognize individual constants for cosmetic presentation, but
 /// must tolerate unknown details and must never use a report to steer execution.
+/// Accepted Lua checkpoints are dynamic `Lua: <message>` details and therefore
+/// have no constant in this module.
 pub mod detail {
     /// Prompt parsing began.
     pub const PARSE_STARTED: &str = "Parse started";
@@ -161,7 +165,10 @@ pub mod detail {
 pub trait Observer: Send + Sync {
     /// Reports one deterministic statement for `execution` and `section`.
     ///
-    /// The report must not contain payloads or secrets and must not affect any
+    /// Fixed runtime reports contain no payloads or secrets. The only
+    /// author-controlled detail is a constrained `Lua: <message>` checkpoint;
+    /// prompt authors must never put arguments, replies, tool data,
+    /// credentials, paths, or store contents in it. Reports must not affect any
     /// execution decision. Implementations must return promptly and must not
     /// panic.
     fn observe(&self, execution: &str, section: &str, detail: &str);
