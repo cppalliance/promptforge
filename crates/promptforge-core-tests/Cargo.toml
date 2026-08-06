@@ -12,13 +12,18 @@ name = "promptforge-core-tests"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+fastrand.workspace = true
 flate2.workspace = true
 promptforge-core.workspace = true
+promptforge-tool-picker.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
+serde_json.workspace = true
 sha2.workspace = true
 tar.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["signal"] }
 zip.workspace = true
 
 [dev-dependencies]
