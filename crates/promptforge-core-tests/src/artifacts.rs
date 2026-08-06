@@ -211,11 +211,16 @@ impl Provisioner {
         let _lock = self.lock_artifact(&install)?;
         validate_cache_path(&self.cache, &install)?;
         if Self::install_is_valid(&install, asset.sha256)? {
+            println!("cache hit: llama-server installation {}", asset.platform);
             return find_executable(&install, asset.executable_name, asset.archive_name);
         }
         self.ensure_blob(archive_asset, &archive)?;
         validate_cache_path(&self.cache, &archive)?;
 
+        println!(
+            "installing cached llama-server archive for {}",
+            asset.platform
+        );
         remove_cache_entry(&self.cache, &install)?;
         let staging = part_path(&install);
         remove_cache_entry(&self.cache, &staging)?;
@@ -288,6 +293,7 @@ impl Provisioner {
 
         if destination.is_file() {
             if file_digest(destination)? == asset.sha256 {
+                println!("cache hit: {}", asset.name);
                 return Ok(());
             }
             remove_cache_entry(&self.cache, destination)?;
@@ -302,6 +308,7 @@ impl Provisioner {
         };
         ensure_cache_directory(&self.cache, parent)?;
         validate_cache_path(&self.cache, &staging)?;
+        println!("downloading pinned artifact: {}", asset.name);
         let actual = match self.download(asset.url, &staging) {
             Ok(actual) => actual,
             Err(error) => {
