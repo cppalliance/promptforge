@@ -203,10 +203,23 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
             elapsed,
         ),
     };
+    log_terminal_result(&result);
     registry.finished(&run_id, result.clone());
     // Explicit, because returning the slot is the point of having held it.
     drop(slot);
     result
+}
+
+/// Logs one payload-free terminal record after every field is final.
+fn log_terminal_result(result: &RunResult) {
+    tracing::info!(
+        run_id = %result.run_id,
+        prompt = %result.prompt,
+        status = ?result.status,
+        turns = result.turns,
+        elapsed_ms = result.elapsed_ms,
+        "run reached its terminal state"
+    );
 }
 
 /// What a call refused admission is told: the wait it spent, so the calling
@@ -228,7 +241,12 @@ fn new_run_id() -> String {
 mod tests {
     use std::time::Duration;
 
-    use super::{new_run_id, refused};
+    use tracing::Level;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    use super::{log_terminal_result, new_run_id, refused};
+    use crate::levels::Levels;
+    use crate::result::RunResult;
 
     #[test]
     fn a_run_id_is_thirty_two_hex_digits() {
@@ -242,5 +260,33 @@ mod tests {
     fn a_refusal_names_the_wait_it_spent() {
         let message = refused(Duration::from_secs(30));
         assert!(message.contains("30s"), "{message}");
+    }
+
+    #[test]
+    fn terminal_log_carries_the_completed_result_measurements() {
+        let levels = Levels::default();
+        let subscriber = tracing_subscriber::registry().with(levels.clone());
+        let result = RunResult::completed("r1".into(), "echo", 1, "secret".into(), 3, 42);
+
+        tracing::subscriber::with_default(subscriber, || log_terminal_result(&result));
+
+        assert_eq!(levels.operator_visible(), vec![Level::INFO]);
+        for field in [
+            "run reached its terminal state",
+            "run_id=r1",
+            "prompt=echo",
+            "status=Completed",
+            "turns=3",
+            "elapsed_ms=42",
+        ] {
+            assert!(
+                levels.said(Level::INFO, field),
+                "terminal log omitted {field}"
+            );
+        }
+        assert!(
+            !levels.said(Level::INFO, "secret"),
+            "terminal logging must exclude the run payload"
+        );
     }
 }

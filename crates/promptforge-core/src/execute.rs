@@ -16,9 +16,10 @@
 //! bulk state persists across the context-clearing transitions even though a
 //! section's conversation never does.
 //!
-//! A run reports itself as it goes: [`RunOptions::observer`] receives an
-//! [`Event`] when the run starts and ends, at each section boundary, at each
-//! model turn, and after each tool call. Reporting is a side channel and never
+//! A run reports itself as it goes: [`RunOptions::observer`] receives a
+//! borrowed `(section, detail)` pair when the run starts and ends, at each
+//! section boundary, model turn, tool call, and harness-mediated store
+//! operation. Reporting is a side channel and never
 //! a decision, so passing [`crate::observe::NullObserver`] changes nothing but
 //! the silence.
 //!
@@ -31,13 +32,12 @@
 //! durable channel).
 
 use std::fmt;
-use std::time::Instant;
 
 use serde_json::json;
 
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::lua;
-use crate::observe::{Event, Observer};
+use crate::observe::{Observer, detail};
 use crate::parser::Prompt;
 use crate::store::Store;
 use crate::subst;
@@ -144,9 +144,9 @@ impl fmt::Debug for RunOptions<'_> {
 ///
 /// `opts` carries the run's [`Observer`] and, optionally, the
 /// [`GatewayClient`] to use. A run that clears the version gate reports
-/// [`Event::RunStarted`] before its first section and [`Event::RunFinished`]
-/// however it ends, including on an error; a run refused by the gate reports
-/// nothing, because it never started.
+/// [`detail::RUN_STARTED`] before its first section and either
+/// [`detail::RUN_SUCCEEDED`] or [`detail::RUN_FAILED`] however it ends. A run
+/// refused by the gate reports nothing because it never started.
 ///
 /// # Errors
 /// Returns [`crate::Error::UnsupportedVersion`] if the prompt declares a
@@ -183,22 +183,24 @@ pub async fn run(
     }
 
     let RunOptions { observer, client } = opts;
-    let started = Instant::now();
-    observer.on_event(&Event::RunStarted {
-        prompt: prompt.frontmatter.name.clone(),
-        sections: prompt.sections.len(),
-    });
+    // H1 becomes required in a later grammar step. Until then, the fixed
+    // pre-title label keeps observation safe for legacy prompts without one.
+    let prompt_section = prompt.title.as_deref().unwrap_or("Prompt");
+    observer.observe(prompt_section, detail::RUN_STARTED);
 
     // The turn count is threaded through the whole run so `RunFinished` can
     // report the total even when a section fails part way through it.
     let mut turns: u32 = 0;
     let result = run_sections(prompt, args, tools, store, observer, client, &mut turns).await;
 
-    observer.on_event(&Event::RunFinished {
-        turns,
-        elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-        ok: result.is_ok(),
-    });
+    observer.observe(
+        prompt_section,
+        if result.is_ok() {
+            detail::RUN_SUCCEEDED
+        } else {
+            detail::RUN_FAILED
+        },
+    );
     result
 }
 
@@ -207,7 +209,7 @@ pub async fn run(
 ///
 /// Split out of [`run`] so that every way the walk can end - a Lua return, an
 /// error, running off the last section - passes through one place that emits
-/// [`Event::RunFinished`].
+/// the run's final observation.
 ///
 /// # Errors
 /// Returns the same errors as [`run`], which documents them.
@@ -235,22 +237,17 @@ async fn run_sections(
 
         // `completed` counts sections entered, so the first is 1. It only ever
         // grows, which is what the progress contract requires.
-        observer.on_event(&Event::SectionStarted {
-            completed: u32::try_from(index + 1).unwrap_or(u32::MAX),
-            name: section.name.clone(),
-        });
+        observer.observe(&section.name, detail::SECTION_STARTED);
 
         // Run the section's Lua block. A returned value ends the whole run.
         // The block's `tools.add(...)` names (empty without a Lua block) scope
         // which tools this section may advertise and dispatch.
         let (var, scoped_names) = if let Some(source) = &section.lua {
-            let outcome = lua::run_chunk(source, args, &sys, store)?;
+            let outcome = lua::run_chunk(source, args, &sys, store, observer, &section.name)?;
             if let Some(value) = outcome.returned {
                 // The return fence: this section did finish, and the run ends
                 // with it, so the boundary is reported before returning.
-                observer.on_event(&Event::SectionFinished {
-                    name: section.name.clone(),
-                });
+                observer.observe(&section.name, detail::SECTION_FINISHED);
                 return Ok(value);
             }
             (outcome.var, outcome.scoped_tools)
@@ -295,9 +292,7 @@ async fn run_sections(
             }
         }
 
-        observer.on_event(&Event::SectionFinished {
-            name: section.name.clone(),
-        });
+        observer.observe(&section.name, detail::SECTION_FINISHED);
         // Fall through to the next section (context clears - nothing is carried).
     }
 
@@ -331,7 +326,7 @@ fn scoped_tools<'a>(tools: &[&'a dyn Tool], names: &[String]) -> Result<Vec<&'a 
     Ok(selected)
 }
 
-/// What one section's tool loop needs to report itself: where events go, which
+/// What one section's tool loop needs to report itself: where observations go, which
 /// section they belong to, and the run-wide turn counter it advances.
 ///
 /// Bundled rather than passed as three parameters so the loop's signature stays
@@ -340,7 +335,7 @@ fn scoped_tools<'a>(tools: &[&'a dyn Tool], names: &[String]) -> Result<Vec<&'a 
 struct SectionProgress<'a> {
     /// Where the loop reports its turns and tool calls.
     observer: &'a dyn Observer,
-    /// The heading text every event from this loop carries.
+    /// The heading text every observation from this loop carries.
     section: &'a str,
     /// The run's model-turn total, advanced once per round trip.
     turns: &'a mut u32,
@@ -372,7 +367,6 @@ async fn run_tool_loop(
         section,
         turns,
     } = progress;
-    let mut section_turn: u32 = 0;
     let mut conversation = vec![Message::user(prose)];
     let tool_arg = if schemas.is_empty() {
         None
@@ -385,16 +379,16 @@ async fn run_tool_loop(
     let nonce = make_nonce();
 
     for _ in 0..max_tool_iterations {
-        let completion = client.complete(&conversation, tool_arg).await?;
+        let completion = client.complete(&conversation, tool_arg).await;
+        if completion.is_err() {
+            observer.observe(section, detail::MODEL_TURN_FAILED);
+        }
+        let completion = completion?;
 
         // A round trip that produced a reply is a turn, whether the reply is
         // the section's final text or a batch of tool calls.
-        section_turn = section_turn.saturating_add(1);
         *turns = turns.saturating_add(1);
-        observer.on_event(&Event::ModelTurn {
-            section: section.to_string(),
-            turn: section_turn,
-        });
+        observer.observe(section, detail::MODEL_TURN_COMPLETED);
 
         match completion {
             CompletionResult::Text(text) => return Ok(text),
@@ -424,11 +418,14 @@ async fn run_tool_loop(
                         .find(|t| t.name() == call.name)
                         .ok_or_else(|| Error::UnknownTool(call.name.clone()))?;
                     let result = tool.call(call.arguments.clone()).await;
-                    observer.on_event(&Event::ToolCalled {
-                        section: section.to_string(),
-                        tool: call.name.clone(),
-                        ok: result.is_ok(),
-                    });
+                    observer.observe(
+                        section,
+                        if result.is_ok() {
+                            detail::TOOL_CALL_SUCCEEDED
+                        } else {
+                            detail::TOOL_CALL_FAILED
+                        },
+                    );
                     let result = result?;
                     // An untrusted tool's result is wrapped in a guard block
                     // before it enters the history; a trusted tool's is pushed
