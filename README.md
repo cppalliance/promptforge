@@ -295,10 +295,11 @@ relative to `[paths].prompts`, and `exclude` is matched against that same
 relative path, so `drafts/**` means the `drafts` directory and not any path that
 happens to contain the word.
 
-A prompt's identity is its frontmatter `name`, which is the name a caller passes
-to `run_prompt` verbatim rather than transformed, so it must match
-`^[a-z][a-z0-9_]{0,47}$`; transforming would let two different frontmatter names
-collide. The four built-in names - `list_prompts`, `run_prompt`, `need_prompt`,
+A prompt's stored identity is its frontmatter `name`, which must match
+`^[a-z][a-z0-9_]{0,47}$` and is never transformed in the catalog. For forgiving
+caller lookup, `run_prompt` case-folds a requested name and treats `-` as `_`;
+legal stored identities cannot collide under that normalization. The four
+built-in names - `list_prompts`, `run_prompt`, `need_prompt`,
 and `check_run` - are reserved: "run `check_run`" is ambiguous to a person and to
 a model alike, so the boot refuses such a prompt, naming the collision.
 
@@ -526,6 +527,8 @@ promptforge: 1
 # Title
 
 ```lua prompt
+tools.need("fetch", "Fetch a web page and return its main content as markdown.")
+
 function normalize(value)
     return string.lower(value)
 end
@@ -537,6 +540,7 @@ Human-readable description (not executed).
 
 ```lua
 var.subject = args
+tools.add("fetch")
 ```
 
 Prose the model reads.
@@ -551,6 +555,7 @@ return reply
 - Exactly one `# Title` is required. Markdown before it is ignored.
 - The H1 may immediately open with one exact, unindented triple-backtick `lua prompt` fence after any number of blank lines. Its exact triple-backtick closing line ends the shared library, and the remaining H1 text is the human-readable description. A reserved `lua prompt` fence after description prose, a second one, or an inexact closing marker is an error. Indented markers, longer backtick runs, different capitalization, and extra info tokens are ordinary Markdown.
 - `## Section` headings are executable units; they run top to bottom (fall-through). Each section parses as an optional exact leading `lua` preamble fence, prose, and an optional exact trailing `lua` epilog fence. Reserved fences use exact unindented lowercase ` ```lua ` opening lines and exact unindented ` ``` ` closing lines. Blank lines may surround them. A lone reserved fence is the preamble. Lua fences between prose, longer or indented fences, different capitalization, extra info tokens, and marker-looking lines inside a longer fence remain model-facing prose.
+- Shared Lua declares semantic capabilities under prompt-local aliases with `tools.need(alias, description)`. A section exposes an alias deliberately with `tools.add(alias)`; `tools.always(alias)` belongs in shared Lua only when every model-facing section genuinely needs that capability. Declaration alone exposes nothing.
 
 ## Prompt language
 
@@ -592,8 +597,9 @@ Substitution does no arithmetic - compute in Lua and reference the result
 
 ### Fall-through and the result
 
-Top-level `##` sections run in file order, each in a fresh context (nothing is
-carried between them). A section ends by either:
+Top-level `##` sections run in file order, each with fresh Lua state and a fresh
+model conversation. The run-scoped `Store` is the sole mutable channel carried
+between sections. A section ends by either:
 
 - **returning a value from Lua** (`return ...`) - this finishes the whole run
   with that value, so sections after it are not reached by fall-through; or
@@ -664,6 +670,10 @@ ship built in:
   so the credential never reaches the process running the prompt.
 
 Concrete tool names no longer belong in YAML frontmatter or prompt code. The parser accepts a compiled H1 shared library, and `bind::bind_prompt` executes that source once to resolve `tools.need(alias, description)` through a `ToolPicker`, record `tools.always(alias)`, and validate the result against a complete live `ToolRegistry`. Its immutable `BoundPrompt` carries matching forward and reverse maps plus picker overlap analysis. `execute::run` combines explicit prompt-wide and H2 scopes, advertises concrete descriptions and schemas under local aliases, and dispatches aliases by stable identity. Declared tools are never injected automatically. The CLI and MCP server both use this complete path; the MCP server builds the complete live registry and matching picker catalog at boot, binds each run on Tokio's blocking pool, and executes the resulting `BoundPrompt`.
+
+Binding intentionally has no reranker. The tool-picker spike found that `bge-reranker-v2-m3` improved the clean hackathon set to 0.856 but scored 0.735 on TOOLRET, below plain bge-small at 0.804, while adding a roughly 568M-parameter model. That domain-dependent regression does not justify another mandatory stage. A reranker remains a non-goal until author-register measurements on the deployment's own catalog show a reliable gain.
+
+Progress labels are also outside binding and execution. The deterministic `(section, detail)` observation pair is the authoritative trace and is never rewritten by a model. A future label model may derive optional UI text off the critical path, but it must preserve the original pair, avoid feeding labels back into decisions, and justify its measured quality, latency, and privacy cost independently.
 
 ### The tool-call loop
 

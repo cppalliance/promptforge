@@ -21,9 +21,9 @@ use crate::{Error, Result};
 #[derive(Debug, Clone, serde::Deserialize)]
 #[non_exhaustive]
 pub struct Frontmatter {
-    /// The prompt's identifier (becomes the MCP tool name).
+    /// The prompt's identifier, supplied explicitly by a caller.
     pub name: String,
-    /// One-line description; steers a calling model's tool selection.
+    /// One-line description shown in prompt listings and name retrieval.
     pub description: String,
     /// Contract version, bumped when the interface changes.
     pub version: u32,
