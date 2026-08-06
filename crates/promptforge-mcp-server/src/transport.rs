@@ -74,13 +74,15 @@ const SSE_KEEP_ALIVE: Duration = Duration::from_secs(15);
 /// # use promptforge_mcp_server::{
 /// #     Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Retrieval,
 /// # };
-/// # fn demo(config: Config, catalog: Catalog, token: promptforge_mcp_server::Secret) {
+/// # fn demo(config: Config, catalog: Catalog, token: promptforge_mcp_server::Secret) -> Result<(), Box<dyn std::error::Error>> {
 /// let token = Arc::new(token);
 /// let config = Arc::new(config);
 /// let catalog = Arc::new(CatalogHandle::new(catalog));
-/// let server = PromptForgeServer::new(config, catalog, Arc::new(Retrieval::idle()));
+/// let tools = Arc::new(promptforge_mcp_server::PreparedTools::new(&config.gateway)?);
+/// let server = PromptForgeServer::new(config, catalog, Arc::new(Retrieval::idle()), tools);
 /// let router = promptforge_mcp_server::build_router(server, token);
 /// # let _ = router;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// # }
 /// ```
 pub fn build_router(server: PromptForgeServer, token: Arc<Secret>) -> Router {
@@ -119,6 +121,7 @@ pub async fn serve_http(
     config: Arc<Config>,
     catalog: Arc<CatalogHandle>,
     retrieval: Arc<Retrieval>,
+    tools: Arc<crate::PreparedTools>,
 ) -> Result<(), ServeError> {
     let bind = config.server.bind;
     // Before the socket, so a configuration with no shared bearer is refused by
@@ -130,7 +133,7 @@ pub async fn serve_http(
             .clone()
             .ok_or(ServeError::MissingToken)?,
     );
-    let server = PromptForgeServer::new(Arc::clone(&config), catalog, retrieval);
+    let server = PromptForgeServer::new(Arc::clone(&config), catalog, retrieval, tools);
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .map_err(|source| ServeError::Bind { addr: bind, source })?;
@@ -156,12 +159,13 @@ pub async fn serve_stdio(
     config: Arc<Config>,
     catalog: Arc<CatalogHandle>,
     retrieval: Arc<Retrieval>,
+    tools: Arc<crate::PreparedTools>,
 ) -> Result<(), ServeError> {
     tracing::info!(
         "promptforge-mcp-server serving on stdio; [server].bind ({}) and [server].token are not used on this transport",
         config.server.bind
     );
-    let server = PromptForgeServer::new(config, catalog, retrieval);
+    let server = PromptForgeServer::new(config, catalog, retrieval, tools);
     let running = server
         .serve(rmcp::transport::stdio())
         .await

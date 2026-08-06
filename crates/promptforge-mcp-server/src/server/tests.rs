@@ -13,7 +13,7 @@ mod runs;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use axum::Json;
 use axum::Router;
@@ -22,11 +22,21 @@ use rmcp::model::{CallToolRequestParams, CallToolResult, ErrorCode, JsonObject};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-use super::PromptForgeServer;
+use super::{PreparedTools, PromptForgeServer};
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::Config;
 use crate::result::NO_TURNS;
 use crate::retrieval::Retrieval;
+
+fn prepared(config: &Config) -> Arc<PreparedTools> {
+    static SEED: OnceLock<PreparedTools> = OnceLock::new();
+    let seed = SEED
+        .get_or_init(|| PreparedTools::new(&config.gateway).expect("prepare fixture tool model"));
+    Arc::new(
+        seed.rebuild(&config.gateway)
+            .expect("index fixture live tools"),
+    )
+}
 
 /// A prompt that returns its input without calling a model.
 fn echo_prompt(name: &str, description: &str) -> String {
@@ -41,6 +51,14 @@ fn failing_lua_prompt(name: &str) -> String {
     format!(
         "---\nname: {name}\ndescription: Fails on entry\nversion: 1\npromptforge: 1\n---\n\n\
          # Test prompt\n\n## Main\n\n```lua\nreturn {{}}\n```\n"
+    )
+}
+
+fn capability_prompt(name: &str, capability: &str) -> String {
+    format!(
+        "---\nname: {name}\ndescription: Capability binding fixture\nversion: 1\npromptforge: 1\n---\n\n\
+         # Capability prompt\n\n```lua prompt\ntools.need(\"fetch\", \"{capability}\")\n```\n\n\
+         ## Main\n\n```lua\ntools.add(\"fetch\")\n```\n\n```lua\nreturn \"bound\"\n```\n"
     )
 }
 
@@ -78,10 +96,12 @@ fn server_with(server_lines: &str) -> (TempDir, PromptForgeServer) {
     .expect("the fixture configuration parses");
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
+    let tools = prepared(&config);
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Retrieval::idle()),
+        tools,
     );
     (dir, server)
 }
@@ -139,6 +159,97 @@ async fn the_runner_runs_the_named_prompt_and_reports_the_value_twice() {
             .is_some_and(|id| id.len() == 32),
         "a run carries an identifier: {structured}"
     );
+}
+
+#[tokio::test]
+async fn the_runner_binds_and_executes_a_bound_prompt_against_the_shared_registry() {
+    let dir = tempfile::tempdir().expect("create a temporary prompts directory");
+    write(
+        dir.path(),
+        "bound.md",
+        &capability_prompt(
+            "bound",
+            "Fetch a web page and return its main content as markdown.",
+        ),
+    );
+    let config = Config::from_toml_str(&format!(
+        "[server]\ntoken = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
+        dir.path().display()
+    ))
+    .expect("the fixture configuration parses");
+    let catalog =
+        Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
+    let tools = prepared(&config);
+    let server = PromptForgeServer::new(
+        Arc::new(config),
+        Arc::new(CatalogHandle::new(catalog)),
+        Arc::new(Retrieval::idle()),
+        tools,
+    );
+
+    let result = server
+        .dispatch(call("run_prompt", json!({ "prompt": "bound" })))
+        .await
+        .expect("binding and running are not protocol errors");
+
+    assert_eq!(result.is_error, Some(false));
+    assert_eq!(text_of(&result), "bound");
+    assert_eq!(structured_of(&result)["status"], json!("completed"));
+}
+
+#[tokio::test]
+async fn an_unbindable_capability_fails_before_admission_and_execution() {
+    let dir = tempfile::tempdir().expect("create a temporary prompts directory");
+    write(
+        dir.path(),
+        "absent.md",
+        &capability_prompt(
+            "absent",
+            "Control a deep-space telescope's cryogenic mirror actuators.",
+        ),
+    );
+    let config = Config::from_toml_str(&format!(
+        "[server]\ntoken = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
+        dir.path().display()
+    ))
+    .expect("the fixture configuration parses");
+    let catalog =
+        Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
+    let tools = prepared(&config);
+    let server = PromptForgeServer::new(
+        Arc::new(config),
+        Arc::new(CatalogHandle::new(catalog)),
+        Arc::new(Retrieval::idle()),
+        tools,
+    );
+    let mut slots = Vec::new();
+    for _ in 0..4 {
+        slots.push(
+            server
+                .registry
+                .admit()
+                .await
+                .expect("all fixture run slots start free"),
+        );
+    }
+
+    let result = server
+        .dispatch(call("run_prompt", json!({ "prompt": "absent" })))
+        .await
+        .expect("an absent capability is a run failure, not a protocol error");
+
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(structured_of(&result)["status"], json!("failed"));
+    assert!(
+        text_of(&result).contains("no tool matches capability"),
+        "{}",
+        text_of(&result)
+    );
+    drop(slots);
 }
 
 #[tokio::test]
@@ -201,10 +312,12 @@ async fn a_hyphen_resolves_to_the_underscore_it_stands_for() {
     .expect("the fixture configuration parses");
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
+    let tools = prepared(&config);
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Retrieval::idle()),
+        tools,
     );
 
     let result = server
@@ -353,10 +466,12 @@ async fn list_prompts_carries_the_problem_that_stops_a_prompt_running() {
     ))
     .expect("the fixture configuration parses");
     let catalog = Catalog::resolve(&config, OnBroken::Retain).expect("a reload keeps going");
+    let tools = prepared(&config);
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Retrieval::idle()),
+        tools,
     );
 
     let result = server
@@ -453,10 +568,12 @@ fn speaking_server_with(gateway: SocketAddr, server_lines: &str) -> (TempDir, Pr
     .expect("the fixture configuration parses");
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
+    let tools = prepared(&config);
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
         Arc::new(Retrieval::idle()),
+        tools,
     );
     (dir, server)
 }
