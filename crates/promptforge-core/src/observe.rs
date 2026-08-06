@@ -30,6 +30,12 @@ pub mod detail {
     pub const TOOL_CALL_SUCCEEDED: &str = "Tool call succeeded";
     /// A tool dispatch returned an error.
     pub const TOOL_CALL_FAILED: &str = "Tool call failed";
+    /// Lua source compilation began.
+    pub const LUA_COMPILATION_STARTED: &str = "Lua compilation started";
+    /// Lua source compilation completed successfully.
+    pub const LUA_COMPILATION_SUCCEEDED: &str = "Lua compilation succeeded";
+    /// Lua source compilation returned an error.
+    pub const LUA_COMPILATION_FAILED: &str = "Lua compilation failed";
     /// A harness-mediated store write succeeded.
     pub const STORE_WRITE_SUCCEEDED: &str = "Store write succeeded";
     /// A harness-mediated store write failed.

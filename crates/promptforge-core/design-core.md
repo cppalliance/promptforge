@@ -62,17 +62,23 @@ The Lua VM loads only the selected safe standard libraries, removes code-loading
 
 The version gate runs before observation begins. A refused source emits no reports. Once a run begins, success and failure both produce a final run observation.
 
+### Parse-time Lua programs
+
+`LuaProgram` retains its original source and compiles it once into process-local Lua 5.4 bytecode without executing it. Loading creates a function in a caller-supplied VM but does not call it, so one program can seed multiple independent VMs while each VM supplies its own globals. The bytecode is private, is never persisted, and is not treated as a portable serialization format.
+
+Compilation takes an explicit prompt-region location. Malformed source returns `Error::LuaCompile` carrying that location, the retained source, and the Lua compiler diagnostic. Fixed compilation start, success, and failure reports expose none of the source or location payload. Existing parsing and execution still pass source strings directly until their owning grammar and VM steps ship.
+
 ## Planned, not shipped
 
-Everything in this section is settled design for later steps. None of it is implemented by the report-only observer change.
+Everything in this section is settled design for later steps and remains unimplemented.
 
 ### Capability binding and picker validation
 
 Prompt-local capability aliases will bind one-to-one to the shipped live `ToolId` values through `promptforge-tool-picker`. Binding will reject absent, duplicate, ambiguous, colliding, and registry-mismatched identities. Before a model turn, core will apply the shipped picker near-duplicate analysis to the effective scope.
 
-### Compiled Lua and persistent section VMs
+### Persistent section VMs
 
-`LuaProgram` will retain source and process-local Lua 5.4 bytecode compiled once at parse time. `SectionVm` will own one isolated VM per section and preserve one environment across shared-library load, preamble, model await, `reply` binding, and epilog. Bytecode will never be persisted and Lua memory will never cross sections.
+`SectionVm` will own one isolated VM per section and preserve one environment across shared-library load, preamble, model await, `reply` binding, and epilog. Lua memory will never cross sections.
 
 ### Required H1 and three-phase grammar
 
@@ -104,6 +110,7 @@ Fan-out execution, branching, retries, child execution, persistent bytecode, com
 6. A live tool's identity is independent of its current transport wire name.
 7. Registry lookup compares stable `ToolId` values and does not silently make wire names into identity.
 8. Expected failures return errors.
-9. Later lifecycle behavior remains planned until its owning step lands with tests and documentation.
+9. Lua bytecode remains process-local and private; retained source and explicit locations carry compilation diagnostics.
+10. Later lifecycle behavior remains planned until its owning step lands with tests and documentation.
 
 *2026-08-05 23:45 - GPT-5.6 Sol*

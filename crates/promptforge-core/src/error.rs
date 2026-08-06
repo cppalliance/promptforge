@@ -37,6 +37,17 @@ pub enum Error {
     #[error("lua error: {0}")]
     Lua(String),
 
+    /// Lua source was not syntactically valid at its prompt location.
+    #[error("lua compilation error at {location}: {message}")]
+    LuaCompile {
+        /// The prompt region supplied by the parser, such as a section preamble.
+        location: String,
+        /// The retained source that failed to compile.
+        lua_source: String,
+        /// The Lua 5.4 compiler diagnostic.
+        message: String,
+    },
+
     /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
     #[error("substitution error: {0}")]
     Substitution(String),
