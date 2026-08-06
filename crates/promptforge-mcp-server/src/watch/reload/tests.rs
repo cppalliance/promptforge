@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use super::{Reload, ignored_changes};
 use crate::config::Config;
 use crate::retrieval::Retrieval;
-use crate::server::PromptForgeServer;
+use crate::server::{PreparedTools, PromptForgeServer};
 use crate::watch::fixture::{Fixture, config_source};
 
 /// One `tools/call` request over an object of arguments.
@@ -294,6 +294,7 @@ async fn a_call_after_a_reload_runs_the_new_body_and_a_broken_prompt_answers_wit
         Arc::clone(&fixture.config),
         Arc::clone(&fixture.catalog),
         Arc::new(Retrieval::idle()),
+        Arc::new(PreparedTools::new(&fixture.config.gateway).expect("prepare fixture live tools")),
     );
 
     let before = server
@@ -338,6 +339,7 @@ async fn a_prompt_added_mid_session_is_callable_on_the_same_handler() {
         Arc::clone(&fixture.config),
         Arc::clone(&fixture.catalog),
         Arc::new(Retrieval::idle()),
+        Arc::new(PreparedTools::new(&fixture.config.gateway).expect("prepare fixture live tools")),
     );
 
     let missing = server

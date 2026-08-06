@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use promptforge_mcp_server::{
-    Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, Retrieval, Watcher,
+    Catalog, CatalogHandle, Config, OnBroken, PreparedTools, PromptForgeServer, Retrieval, Watcher,
 };
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, CallToolResponse};
@@ -86,7 +86,8 @@ async fn a_saved_prompt_is_callable_on_the_session_that_was_already_open() {
     .expect("the watcher starts")
     .expect("watch defaults to on");
 
-    let server = PromptForgeServer::new(config, Arc::clone(&catalog), retrieval);
+    let tools = Arc::new(PreparedTools::new(&config.gateway).expect("prepare fixture live tools"));
+    let server = PromptForgeServer::new(config, Arc::clone(&catalog), retrieval, tools);
     let (server_io, client_io) = tokio::io::duplex(4096);
     tokio::spawn(async move {
         let Ok(running) = server.serve(server_io).await else {

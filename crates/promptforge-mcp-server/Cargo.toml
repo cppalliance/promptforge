@@ -18,7 +18,7 @@ humantime.workspace = true
 humantime-serde.workspace = true
 notify.workspace = true
 promptforge-core.workspace = true
-promptforge-tool-picker = { workspace = true, optional = true }
+promptforge-tool-picker.workspace = true
 promptforge-webfetch.workspace = true
 rmcp.workspace = true
 serde.workspace = true
@@ -43,9 +43,9 @@ tower.workspace = true
 
 [features]
 default = ["picker"]
-# Spelled with `dep:` so the implicit optional-dependency feature does not leak
-# into the public feature set.
-picker = ["dep:promptforge-tool-picker"]
+# Controls prompt retrieval only. The dependency itself remains required for
+# execution-time capability binding.
+picker = []
 
 [lints]
 workspace = true

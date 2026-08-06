@@ -50,7 +50,7 @@ pub use crate::progress::{McpObserver, ProgressPump};
 pub use crate::registry::{RunRegistry, RunSlot};
 pub use crate::result::{RunResult, RunStatus};
 pub use crate::retrieval::{Candidate, Retrieval, Shortlist};
-pub use crate::server::PromptForgeServer;
+pub use crate::server::{PreparedTools, PromptForgeServer};
 pub use crate::tools::{CHECK_RUN, LIST_PROMPTS, NEED_PROMPT, RUN_PROMPT, tool_definitions};
 pub use crate::transport::{HEALTHZ_PATH, MCP_PATH, build_router, serve_http, serve_stdio};
 pub use crate::watch::{Reload, Reloader, Watcher};

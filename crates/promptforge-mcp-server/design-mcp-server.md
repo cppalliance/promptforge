@@ -97,9 +97,13 @@ Only `[server]` and `[gateway]` are required; every other table and key has a de
 
 Two details of the interpolation are load-bearing. `${VAR}` is expanded over the *parsed* document rather than the raw text, which is what attributes an unset variable to the field that carried it; that is the only way `[server].token` alone can survive one while every other field still fails the load. And an unset variable anywhere else fails the load, so the server never starts with a blank credential.
 
-## A prompt temporarily reaches no execution tools
+## One prepared picker and complete live registry serve every run
 
-Prompt frontmatter no longer names concrete tools. The runner currently calls its concrete binding module with an empty request and passes the resulting empty tool pool to the executor. The gateway configuration still constructs the model client, but it does not currently populate that pool. Semantic H1 capability binding and MCP live-registry integration are planned; the server does not yet run that binding or assemble the selected live tools.
+Before the Tokio runtime starts, the host constructs both concrete tools it can execute: local `web_fetch` and gateway-backed `web_search`. It derives the picker's abstract catalog directly from those instances, including each stable identity, description, and parameter schema, then loads and indexes that catalog once. The immutable prepared picker and owned live registry are shared by every server session and run, so no selectable identity can exist without its callable counterpart.
+
+Each `run_prompt` call clones the parsed prompt snapshot and binds its H1 capability declarations with `spawn_blocking`. Embedding a need is synchronous CPU work and must not occupy an async executor worker. Binding happens before admission because a prompt that cannot bind will never consume a run slot. The same `McpObserver` instance spans binding and execution, so report ordering remains one lifecycle even though the blocking phase runs on another thread.
+
+Successful binding produces a `BoundPrompt`, which the run task owns alongside the shared tool environment. Execution receives that bound value and the complete live registry, not a prompt-selected vector of tools: frozen aliases resolve to stable `ToolId` values, then registry lookup finds the callable instance. Binding errors are ordinary failed run results with zero execution time. The registry and picker remain fixed across catalog reloads because saving prompt text changes neither the configured gateway nor the host's available tool set.
 
 ## The result carries the value, not a path
 
@@ -168,9 +172,9 @@ Two failure modes of the watch itself are handled deliberately rather than incid
 
 Every runnable prompt becomes one index entry over its name and its description, which is exactly what `list_prompts` reports, so what a caller reads is what retrieval matched on. A broken prompt is never a candidate: it cannot run, so offering it would spend the caller's next call on a certain failure, and it carries no description to rank on either. The similarity floor is set to zero, against the ranking engine's own tuned default, because a floor exists to stop an unattended binding and nothing here binds unattended; three weak candidates are self-evidently weak to the model reading them, while an empty answer to a casually phrased request helps nobody.
 
-The ranking engine is an optional dependency that is on by default. It compiles roughly 67MB of weights into the binary and its first build anywhere needs Hugging Face access, so `--no-default-features` exists for an offline or size-sensitive build and drops `need_prompt` alone. Default on, because a server whose retrieval tool depends on remembering a flag is a server whose retrieval tool does not get used. If offline builds become routine, flip the default.
+Prompt retrieval is optional and on by default, but the ranking engine is no longer an optional dependency: execution-time H1 capability binding uses the same engine. `--no-default-features` therefore drops `need_prompt` alone and does not remove the roughly 67MB of compiled weights. Default on, because a server whose retrieval tool depends on remembering a flag is a server whose retrieval tool does not get used.
 
-With the feature compiled in, the model is loaded once at boot - before the Tokio runtime exists, since parsing the weights is seconds of blocking CPU and there is no worker yet to block - and a load that fails cannot fail the boot. Loading is the slow part and the one part that can fail on its own, while everything else about the server (every prompt, the listing, the runner, the collector) works without it, so a model that will not load is reported at error level and the process serves on.
+The execution picker is loaded before the Tokio runtime exists, since parsing the weights is seconds of blocking CPU and there is no worker yet to block. Its failure does fail boot because no prompt capability can be bound correctly without it. With retrieval compiled in, its separate prompt index is also prepared before Tokio; failure of that optional index is reported at error level while the process serves, because every prompt remains callable through the already-prepared execution picker.
 
 The index is rebuilt on the same catalog swap a save already performs, and only when a content hash over every entry's name and description moved, so a body-only edit costs nothing. The rebuild reuses the model already in memory, which is what makes it one embedding pass per prompt rather than a reload of the weights: building from scratch on every save would be seconds of CPU on a directory that changes whenever a developer types `:w`. The two alternatives both cost something visible. Reloading the model in a background task leaves a window where `need_prompt` recommends a prompt that was just renamed, and rebuilding lazily makes the first call after any save wait for the weights.
 
@@ -191,12 +195,12 @@ pub struct RunOptions<'a> {
     pub client: Option<GatewayClient>,
 }
 
-pub async fn run(prompt: &Prompt, args: &str, tools: &[&dyn Tool], store: &Store, opts: RunOptions<'_>) -> Result<String>;
+pub async fn run(prompt: &BoundPrompt, args: &str, tools: &[&dyn Tool], store: &Store, opts: RunOptions<'_>) -> Result<String>;
 ```
 
 `observe` is synchronous and must never block, await, or panic, which is the contract that lets the executor call it inline on the run's own path. The pair is the complete trace record and excludes raw prompt prose, model input or output, tool arguments or results, store paths or contents, credentials, and fetched content.
 
-The server recognizes only exact constants from `promptforge_core::observe::detail`. `Run started` creates frame zero, `Section started` increments the progress counter, and `Model turn completed` increments the result's turn counter. Unknown details are logged at debug level and otherwise ignored. Reports are never decisions, so dropping one cannot change a result, and that is what makes the queue behind the forwarding path allowed to lose frames.
+The server recognizes only exact constants from `promptforge_core::observe::detail`. `Run started` creates frame zero, `Section started` increments the progress counter, and `Model turn completed` increments the result's turn counter. Binding and registry-validation details currently fall through the same unknown-detail path as any future core detail: they are logged at debug level, emit no frame, change no counter, and cannot affect execution. Reports are never decisions, so dropping one cannot change a result, and that is what makes the queue behind the forwarding path allowed to lose frames.
 
 ## The `rmcp` pin is exact and the run registry forgets a restart, both deliberately
 
@@ -211,4 +215,4 @@ The run registry is in memory, and a restart forgets every run, finished or not.
 - Whether frontmatter should carry `keywords`, which would sharpen both the listing and retrieval.
 - Whether the run registry should survive a restart.
 
-*2026-08-03 - claude-opus-5*
+*2026-08-06 03:00 - GPT-5.6 Sol*

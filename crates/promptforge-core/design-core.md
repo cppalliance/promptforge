@@ -114,21 +114,17 @@ Binding asks the picker for near-duplicate pairs across the immutable selected i
 
 After validation, the executor builds model schemas in effective-scope order, with prompt-wide aliases first and first-seen H2 additions second. Names are local aliases while descriptions and parameter schemas come from the callable live instances. Calls resolve alias to frozen `ToolId`, then `ToolId` to the live registry entry. Missing aliases and missing live targets are expected errors. Tool arguments and results retain the existing guard and conversation behavior, but reports expose only fixed scope, model, and tool outcomes.
 
+### Integrated binding, execution, and hosts
+
+The shipped Lua modes implement declaration binding, exact replay, H2 recording, and scope closure. `bind_prompt` routes the H1 source through concrete picker binding, and the executor consumes `BoundPrompt`, replays H1 declarations, and routes H2 source regions through their lifecycle modes.
+
+Both shipped hosts construct their complete available live registry first and derive a matching picker catalog from those same concrete instances. The CLI binds synchronously before entering execution. The MCP server prepares and shares its picker and complete registry at boot, binds each prompt on Tokio's blocking pool, and executes the resulting `BoundPrompt`. Both pass the same observer reference through binding and execution. The CLI installs `NullObserver` by default, while the MCP host passes one `McpObserver` through blocking binding and async execution without holding a mutex guard across an await.
+
 ## Planned, not shipped
 
-Everything in this section is settled design for later steps and remains unimplemented.
+Parsed-prompt execution compatibility remains temporarily and can be removed in a later cleanup step after downstream library callers have migrated to explicit binding.
 
-### Semantic capability phases
-
-The shipped Lua modes implement declaration binding, exact replay, H2 recording, and scope closure. `bind_prompt` now routes the H1 source through concrete picker binding, while the executor will later consume `BoundPrompt` and route H1 replay and H2 source regions through their lifecycle modes.
-
-The CLI now constructs its complete available live registry first and derives a matching picker catalog from those same concrete instances. It binds synchronously and executes the resulting `BoundPrompt`. The MCP host adapter still needs to adopt this path.
-
-### Host binding integration
-
-The CLI parses, binds, and executes in separate phases while passing the same observer reference through each phase. Its top-level caller installs `NullObserver` by default, and synchronous binding occurs directly before the async executor is entered. The async MCP host will move synchronous binding to `spawn_blocking`. Parsed-prompt execution compatibility can be removed after that host migrates. No mutex guard will cross an await.
-
-### Explicit non-goals
+## Explicit non-goals
 
 Fan-out execution, branching, retries, child execution, persistent bytecode, compatibility parsing, reranking, model-generated progress labels, and cross-section Lua memory are not part of this lifecycle refactor.
 
@@ -143,6 +139,6 @@ Fan-out execution, branching, retries, child execution, persistent bytecode, com
 7. Registry lookup compares stable `ToolId` values and does not silently make wire names into identity.
 8. Expected failures return errors.
 9. Lua bytecode remains process-local and private; retained source and explicit locations carry compilation diagnostics.
-10. Host integration remains planned until its owning host lands with tests and documentation.
+10. Every host derives picker descriptors from the same concrete instances it places in the complete live registry.
 
 *2026-08-06 03:00 - GPT-5.6 Sol*

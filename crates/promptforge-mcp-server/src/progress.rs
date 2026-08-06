@@ -459,9 +459,19 @@ mod tests {
     }
 
     #[test]
-    fn unknown_details_are_tolerated_without_frames_or_counters() {
+    fn binding_and_unknown_details_are_tolerated_without_frames_or_counters() {
         let (observer, mut frames) = McpObserver::queued();
-        observer.observe("First", "A future detail");
+        for report in [
+            detail::TOOL_BINDING_STARTED,
+            detail::TOOL_BINDING_SUCCEEDED,
+            detail::TOOL_BINDING_FAILED,
+            detail::TOOL_REGISTRY_VALIDATION_STARTED,
+            detail::TOOL_REGISTRY_VALIDATION_SUCCEEDED,
+            detail::TOOL_REGISTRY_VALIDATION_FAILED,
+            "A future detail",
+        ] {
+            observer.observe("First", report);
+        }
 
         assert!(drain(&mut frames).is_empty());
         assert_eq!(observer.turns(), 0);

@@ -47,6 +47,8 @@ use crate::tools::{
     tool_definitions,
 };
 
+pub use bind::PreparedTools;
+
 /// What the session-level instructions tell a client once, so a model that
 /// never reads a tool description still learns the two rules that matter: this
 /// server executes a prompt the caller names, and what comes back is the
@@ -97,6 +99,7 @@ pub struct PromptForgeServer {
     catalog: Arc<CatalogHandle>,
     registry: Arc<RunRegistry>,
     retrieval: Arc<Retrieval>,
+    tools: Arc<PreparedTools>,
 }
 
 impl PromptForgeServer {
@@ -113,6 +116,7 @@ impl PromptForgeServer {
         config: Arc<Config>,
         catalog: Arc<CatalogHandle>,
         retrieval: Arc<Retrieval>,
+        tools: Arc<PreparedTools>,
     ) -> PromptForgeServer {
         let registry = Arc::new(RunRegistry::new(&config.server));
         PromptForgeServer {
@@ -120,6 +124,7 @@ impl PromptForgeServer {
             catalog,
             registry,
             retrieval,
+            tools,
         }
     }
 
@@ -232,7 +237,15 @@ impl PromptForgeServer {
         args: &str,
         reporting: Option<Reporting>,
     ) -> Result<CallToolResult, ErrorData> {
-        runner::run(&self.config, &self.registry, entry, args, reporting).await
+        runner::run(
+            &self.config,
+            &self.registry,
+            Arc::clone(&self.tools),
+            entry,
+            args,
+            reporting,
+        )
+        .await
     }
 }
 

@@ -28,21 +28,20 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use promptforge_core::bind::{BoundPrompt, bind_prompt};
 use promptforge_core::client::GatewayClient;
 use promptforge_core::execute::{self, RunOptions};
-use promptforge_core::parser::Prompt;
 use promptforge_core::store::Store;
-use promptforge_core::tools::Tool;
 use rmcp::model::{CallToolResult, ErrorData};
 use tokio::time::Instant;
 
 use crate::catalog::Entry;
 use crate::config::Config;
-use crate::progress::McpObserver;
+use crate::progress::{McpObserver, ProgressPump};
 use crate::registry::{RunRegistry, RunSlot, elapsed_ms};
 use crate::result::{NO_TURNS, RunResult};
 
-use super::{Reporting, bind, run_result, text_error};
+use super::{PreparedTools, Reporting, bind, run_result, text_error};
 
 /// Everything one background run owns for as long as it lasts.
 ///
@@ -53,17 +52,17 @@ struct Launch {
     /// The run's identifier, which is also how it is collected.
     run_id: String,
     /// The prompt to run, cloned from the catalog snapshot.
-    prompt: Prompt,
+    prompt: BoundPrompt,
     /// The prompt's name, as the result reports it.
     name: String,
     /// The prompt's frontmatter contract version.
     version: u32,
     /// The run's whole input.
     args: String,
-    /// The tools the prompt asked for.
-    tools: Vec<Box<dyn Tool>>,
+    /// The complete immutable live registry and prepared picker.
+    tools: Arc<PreparedTools>,
     /// Where the run reports itself, and what counts its turns.
-    observer: McpObserver,
+    observer: Arc<McpObserver>,
     /// The gateway the run's model calls go through.
     client: GatewayClient,
     /// When the run started, for `elapsed_ms`.
@@ -81,6 +80,7 @@ struct Launch {
 pub(super) async fn run(
     config: &Config,
     registry: &Arc<RunRegistry>,
+    tools: Arc<PreparedTools>,
     entry: &Entry,
     args: &str,
     reporting: Option<Reporting>,
@@ -102,42 +102,63 @@ pub(super) async fn run(
         ));
     };
 
-    let tools = match bind::select_tools(&[], &config.gateway) {
-        Ok(tools) => tools,
-        Err(message) => {
-            return run_result(&RunResult::failed(
+    let (observer, pump) = match reporting {
+        Some((peer, token)) => {
+            let (observer, pump) = McpObserver::reporting(peer, token);
+            (Arc::new(observer), Some(pump))
+        }
+        None => (Arc::new(McpObserver::silent()), None),
+    };
+
+    // Binding embeds each distinct capability synchronously. Keep that CPU work
+    // off the async executor, while using the exact observer execution will
+    // receive so the whole parse-bind-run lifecycle has one reporting seam.
+    let prompt = prompt.clone();
+    let binding_tools = Arc::clone(&tools);
+    let binding_observer = Arc::clone(&observer);
+    let binding = tokio::task::spawn_blocking(move || {
+        let live = binding_tools.registry();
+        bind_prompt(
+            prompt,
+            binding_tools.picker(),
+            &live,
+            binding_observer.as_ref(),
+        )
+    })
+    .await;
+    let bound = match binding {
+        Ok(Ok(bound)) => bound,
+        Ok(Err(error)) => {
+            return binding_failed(run_id, entry, error.to_string(), observer, pump).await;
+        }
+        Err(error) => {
+            return binding_failed(
                 run_id,
-                entry.name(),
-                entry.version(),
-                message,
-                NO_TURNS,
-                0,
-            ));
+                entry,
+                format!("prompt binding did not finish: {error}"),
+                observer,
+                pump,
+            )
+            .await;
         }
     };
 
     let Some(slot) = registry.admit().await else {
+        drop(observer);
+        finish_pump(pump).await;
         return Ok(text_error(refused(registry.admission_timeout())));
     };
 
-    // The clock starts here, past admission, so a run's reported duration is the
-    // run's own and carries none of the queue wait ahead of it.
+    // The clock starts here, past binding and admission, so a run's reported
+    // duration is execution time and carries neither wait.
     let started = Instant::now();
-
-    let (observer, pump) = match reporting {
-        Some((peer, token)) => {
-            let (observer, pump) = McpObserver::reporting(peer, token);
-            (observer, Some(pump))
-        }
-        None => (McpObserver::silent(), None),
-    };
 
     registry.started(&run_id, entry.name(), entry.version());
     let task = tokio::spawn(execute_run(
         Arc::clone(registry),
         Launch {
             run_id: run_id.clone(),
-            prompt: prompt.clone(),
+            prompt: bound,
             name: entry.name().to_owned(),
             version: entry.version(),
             args: args.to_owned(),
@@ -176,13 +197,13 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
         slot,
     } = launch;
 
-    let borrowed: Vec<&dyn Tool> = tools.iter().map(AsRef::as_ref).collect();
+    let live = tools.registry();
     let store = Store::memory();
     let options = RunOptions {
-        observer: &observer,
+        observer: observer.as_ref(),
         client: Some(client),
     };
-    let outcome = execute::run(&prompt, &args, &borrowed, &store, options).await;
+    let outcome = execute::run(&prompt, &args, live.tools(), &store, options).await;
 
     let turns = observer.turns();
     // Timed here rather than after the flush, so the run's duration is the run's
@@ -208,6 +229,34 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
     // Explicit, because returning the slot is the point of having held it.
     drop(slot);
     result
+}
+
+/// Converts a binding or blocking-task failure into a caller-facing failed run.
+async fn binding_failed(
+    run_id: String,
+    entry: &Entry,
+    message: String,
+    observer: Arc<McpObserver>,
+    pump: Option<ProgressPump>,
+) -> Result<CallToolResult, ErrorData> {
+    let turns = observer.turns();
+    drop(observer);
+    finish_pump(pump).await;
+    run_result(&RunResult::failed(
+        run_id,
+        entry.name(),
+        entry.version(),
+        message,
+        turns,
+        0,
+    ))
+}
+
+/// Closes a run's optional progress path after its observer has been dropped.
+async fn finish_pump(pump: Option<ProgressPump>) {
+    if let Some(pump) = pump {
+        pump.finish().await;
+    }
 }
 
 /// Logs one payload-free terminal record after every field is final.

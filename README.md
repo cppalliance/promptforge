@@ -9,7 +9,7 @@ markdown is the program, the model is the CPU.
 - `crates/promptforge-webfetch` - library: the `web_fetch` tool, which fetches a URL in-process and returns its main content as markdown. It needs no credential, so it runs wherever the prompt runs rather than through the gateway
 - `crates/promptforge-cli` - binary `promptforge`: the command-line tool, `promptforge run <file.md> [input]`. It builds a matching live registry and semantic-picker catalog for the tools available at launch, binds H1 needs synchronously, and executes the resulting `BoundPrompt`
 - `crates/promptforge-gateway` - binary `promptforge-gateway`: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-mcp-server` - binary `promptforge-mcp-server`: the MCP server that runs a prompt an agentic harness names to `run_prompt`. It parses its `prompts.toml`, resolves the catalog that configuration names, answers a call by running the prompt against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, re-reads the catalog when a prompt is saved, retrieves the prompts closest to a plain-English capability, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
+- `crates/promptforge-mcp-server` - binary `promptforge-mcp-server`: the MCP server that runs a prompt an agentic harness names to `run_prompt`. It prepares one semantic picker and matching complete live registry at boot, binds each prompt's H1 capabilities on Tokio's blocking pool, executes the resulting `BoundPrompt` against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, re-reads the catalog when a prompt is saved, retrieves the prompts closest to a plain-English capability, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. Loading the model is the expensive part, so a caller whose catalog changes keeps one encoder and re-indexes over it: `build_with(Arc<Embedder>, Catalog, Config)` is the one indexing path and `picker.rebuild(catalog)` reaches it with this engine's own encoder and configuration. No Lua, no MCP, no network
 
 ## Build
@@ -132,8 +132,7 @@ it does not have to be set. `[gateway].token` is required either way, because
 every transport runs prompts and every run goes through the gateway. Logs go to
 stdout on HTTP and to stderr on stdio, where stdout is the protocol wire.
 
-Either way, boot resolves the whole catalog first and refuses to serve on an
-incomplete one, printing every fault before a non-zero exit.
+Either way, boot resolves the whole catalog first and refuses to serve on an incomplete one, printing every fault before a non-zero exit. It then builds the complete live registry (`web_fetch` and `web_search`) and a picker catalog derived from those same concrete instances before starting Tokio. Every `run_prompt` binds H1 `tools.need` declarations in `spawn_blocking`, then executes the immutable `BoundPrompt` with the same observer used during binding. Binding reports that are not progress boundaries are tolerated as unknown details and logged at debug level.
 
 The repository ships a working `prompts.toml` at its root, beside `gateway.toml`.
 It serves this repository's own `prompts/` directory, expects `PROMPTFORGE_TOKEN`
@@ -448,12 +447,7 @@ when a name or a description moved - a body-only edit costs nothing. The rebuild
 reuses the model already in memory, so it is one embedding pass per prompt rather
 than a reload of 67MB of weights.
 
-Retrieval never stops the server. `--no-default-features` drops the `picker`
-feature and `need_prompt` with it, and a model that will not load is reported at
-error level while the process serves on: every prompt is still callable, and
-`need_prompt` answers that retrieval is unavailable and sends the caller to
-`list_prompts`. A harness whose MCP server refuses to start is worse off than one
-whose retrieval tool says it cannot help.
+Retrieval never stops the server. `--no-default-features` drops the `picker` feature and `need_prompt` with it, but keeps the embedding weights required for execution-time capability binding. Failure to prepare the execution picker stops boot because prompts could not bind correctly without it. Failure to prepare the optional retrieval index is reported at error level while the process serves on: every prompt is still callable, and `need_prompt` answers that retrieval is unavailable and sends the caller to `list_prompts`.
 
 ### A run that outlasts the call
 
@@ -669,7 +663,7 @@ ship built in:
   description). It proxies through the gateway, which holds the Brave API key,
   so the credential never reaches the process running the prompt.
 
-Concrete tool names no longer belong in YAML frontmatter or prompt code. The parser accepts a compiled H1 shared library, and `bind::bind_prompt` executes that source once to resolve `tools.need(alias, description)` through a `ToolPicker`, record `tools.always(alias)`, and validate the result against a complete live `ToolRegistry`. Its immutable `BoundPrompt` carries matching forward and reverse maps plus picker overlap analysis. `execute::run` combines explicit prompt-wide and H2 scopes, advertises concrete descriptions and schemas under local aliases, and dispatches aliases by stable identity. Declared tools are never injected automatically. The CLI uses this complete path; MCP registry construction remains a later integration step.
+Concrete tool names no longer belong in YAML frontmatter or prompt code. The parser accepts a compiled H1 shared library, and `bind::bind_prompt` executes that source once to resolve `tools.need(alias, description)` through a `ToolPicker`, record `tools.always(alias)`, and validate the result against a complete live `ToolRegistry`. Its immutable `BoundPrompt` carries matching forward and reverse maps plus picker overlap analysis. `execute::run` combines explicit prompt-wide and H2 scopes, advertises concrete descriptions and schemas under local aliases, and dispatches aliases by stable identity. Declared tools are never injected automatically. The CLI and MCP server both use this complete path; the MCP server builds the complete live registry and matching picker catalog at boot, binds each run on Tokio's blocking pool, and executes the resulting `BoundPrompt`.
 
 ### The tool-call loop
 
