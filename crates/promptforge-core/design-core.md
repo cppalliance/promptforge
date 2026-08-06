@@ -14,7 +14,7 @@ The crate currently exposes `client`, `execute`, `lua`, `observe`, `parser`, `st
 
 ### Current prompt and execution lifecycle
 
-A prompt currently consists of YAML frontmatter, an optional H1 title, and one or more H2 sections. Each section may have one leading Lua fence and prose. Top-level sections execute in file order. Child sections parse but do not execute.
+A prompt currently consists of YAML frontmatter without concrete tools, exactly one required H1 title, an optional compiled shared library, and one or more H2 sections. Ordinary Markdown before the H1 is ignored. The shared library is reserved by an exact unindented `lua prompt` Markdown fence immediately after the H1, allowing blank lines but no prose before it. Reserved-looking marker lines inside a longer Markdown fence remain prose. Each section retains the existing optional leading Lua fence and prose grammar. Top-level sections execute in file order. Child sections parse but do not execute.
 
 Each section currently gets a fresh Lua VM. Its Lua can read `args` and `sys`, write `var`, scope concrete tools with `tools.add`, and use the run-scoped virtual store. A scalar top-level return ends the run. Otherwise substituted non-empty prose enters the model tool loop. Falling off the final section returns `default_return`, the last model reply, or `"done"` in that order.
 
@@ -46,7 +46,7 @@ pub trait Observer: Send + Sync {
 
 Every observing API receives an always-present `&dyn Observer`. `NullObserver` is the silent implementation. There is no optional observer path, structured event enum, event serialization, clone requirement, or observer wire format.
 
-`section` identifies the current H2 section. Run-wide activity uses the H1 title after parsing. Until the planned required-H1 grammar ships, a prompt without an H1 uses the fixed label `Prompt`.
+`section` identifies the current H2 section. Run-wide activity uses the required H1 title after parsing. Parse boundaries use the fixed label `Prompt` before and after structural parsing, while shared-library compilation uses the H1 title.
 
 `detail` is a stable operational statement from `observe::detail`. The shipped vocabulary reports run start and outcome, section start and finish, model turn outcome, tool call outcome, and every Lua-harness store operation outcome.
 
@@ -66,7 +66,7 @@ The version gate runs before observation begins. A refused source emits no repor
 
 `LuaProgram` retains its original source and compiles it once into process-local Lua 5.4 bytecode without executing it. Loading creates a function in a caller-supplied VM but does not call it, so one program can seed multiple independent VMs while each VM supplies its own globals. The bytecode is private, is never persisted, and is not treated as a portable serialization format.
 
-Compilation takes an explicit prompt-region location. Malformed source returns `Error::LuaCompile` carrying that location, the retained source, and the Lua compiler diagnostic. Fixed compilation start, success, and failure reports expose none of the source or location payload. Existing parsing and model execution still pass source strings through the one-phase compatibility path until their owning grammar and executor steps ship.
+Compilation takes an explicit prompt-region location. Malformed source returns `Error::LuaCompile` carrying that location, the retained source, and the Lua compiler diagnostic. Fixed compilation start, success, and failure reports expose none of the source or location payload. Parsing now compiles the optional H1 shared library once. Existing section parsing and model execution still pass H2 source strings through the one-phase compatibility path until their owning grammar and executor steps ship.
 
 ### Persistent section VM seam
 
@@ -86,7 +86,7 @@ The resulting `ToolBindings` is immutable and ordered. `SectionVm::new_with_bind
 
 After host injection, the section's `tools` table is in H2 recording mode. Only `tools.add(alias...)` is accepted, and every alias must have a frozen binding. Additions are first-seen ordered and idempotent; aliases already in `tools.always` are not repeated. `close_tool_scope` returns an immutable effective scope with prompt-wide aliases first and H2 additions second, then permanently closes recording so an epilog cannot widen the model-visible scope.
 
-Binding, replay, and scope closure report fixed start/outcome details containing no aliases, descriptions, identities, source, or other payloads. The existing parser and executor do not invoke these modes yet. Their H1 grammar, concrete picker adapter, alias-based model advertisement and dispatch, and complete lifecycle wiring remain later steps.
+Binding, replay, and scope closure report fixed start/outcome details containing no aliases, descriptions, identities, source, or other payloads. The parser stores the compiled H1 shared program but the executor does not invoke these modes yet. The concrete picker adapter, alias-based model advertisement and dispatch, and complete lifecycle wiring remain later steps.
 
 ## Planned, not shipped
 
@@ -96,9 +96,9 @@ Everything in this section is settled design for later steps and remains unimple
 
 The shipped deterministic resolver seam and Lua modes preserve each resolved `ToolId` without yet enforcing identity uniqueness or live-registry agreement. A later adapter will translate `promptforge-tool-picker` outcomes into that seam, including absent, duplicate, and ambiguous outcomes, and the later binding-uniqueness step will validate identities atomically. Before a model turn, core will apply the shipped picker near-duplicate analysis to the effective scope.
 
-### Required H1 and three-phase grammar
+### Three-phase section grammar
 
-The grammar will require one H1, allow one immediately following `lua prompt` shared-library fence, and split each H2 into an optional leading Lua preamble, prose, and optional trailing Lua epilog. Exact fence forms will reserve executable regions while other fences remain prose. YAML frontmatter will no longer carry concrete tools.
+The remaining grammar work will split each H2 into an optional leading Lua preamble, prose, and optional trailing Lua epilog. Exact fence forms will reserve executable regions while other fences remain prose.
 
 ### Semantic capability phases
 

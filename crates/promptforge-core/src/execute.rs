@@ -183,9 +183,7 @@ pub async fn run(
     }
 
     let RunOptions { observer, client } = opts;
-    // H1 becomes required in a later grammar step. Until then, the fixed
-    // pre-title label keeps observation safe for legacy prompts without one.
-    let prompt_section = prompt.title.as_deref().unwrap_or("Prompt");
+    let prompt_section = prompt.title.as_str();
     observer.observe(prompt_section, detail::RUN_STARTED);
 
     // The turn count is threaded through the whole run so `RunFinished` can

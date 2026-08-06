@@ -97,9 +97,9 @@ Only `[server]` and `[gateway]` are required; every other table and key has a de
 
 Two details of the interpolation are load-bearing. `${VAR}` is expanded over the *parsed* document rather than the raw text, which is what attributes an unset variable to the field that carried it; that is the only way `[server].token` alone can survive one while every other field still fails the load. And an unset variable anywhere else fails the load, so the server never starts with a blank credential.
 
-## A prompt reaches two tools, and `prompts.toml` holds no credential of its own
+## A prompt temporarily reaches no execution tools
 
-A prompt's frontmatter names the tools it needs, and the runner binds that list before handing it to the executor. `web_fetch` runs in this process; `web_search` proxies to the gateway on the gateway's own token, so the search credential stays with the process that already holds the LLM credentials and this file carries no non-LLM secret to protect. A name outside the two fails the run naming the tool, rather than being dropped: a run that quietly proceeded without the search it declared would return an artifact that looks finished and was assembled from nothing.
+Prompt frontmatter no longer names concrete tools. The runner currently calls its concrete binding module with an empty request and passes the resulting empty tool pool to the executor. The gateway configuration still constructs the model client, but it does not currently populate that pool. Semantic H1 capability binding and MCP live-registry integration are planned; the server does not yet run that binding or assemble the selected live tools.
 
 ## The result carries the value, not a path
 

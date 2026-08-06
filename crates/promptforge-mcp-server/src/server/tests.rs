@@ -32,7 +32,7 @@ use crate::retrieval::Retrieval;
 fn echo_prompt(name: &str, description: &str) -> String {
     format!(
         "---\nname: {name}\ndescription: {description}\nversion: 3\npromptforge: 1\n---\n\n\
-         ## Main\n\n```lua\nreturn args\n```\n"
+         # Test prompt\n\n## Main\n\n```lua\nreturn args\n```\n"
     )
 }
 
@@ -40,7 +40,7 @@ fn echo_prompt(name: &str, description: &str) -> String {
 fn broken_lua_prompt(name: &str) -> String {
     format!(
         "---\nname: {name}\ndescription: Fails on entry\nversion: 1\npromptforge: 1\n---\n\n\
-         ## Main\n\n```lua\nreturn (\n```\n"
+         # Test prompt\n\n## Main\n\n```lua\nreturn (\n```\n"
     )
 }
 
@@ -441,7 +441,7 @@ fn speaking_server_with(gateway: SocketAddr, server_lines: &str) -> (TempDir, Pr
         dir.path(),
         "speak.md",
         "---\nname: speak\ndescription: Say something\nversion: 1\npromptforge: 1\n---\n\n\
-         ## Only\n\nSay something.\n",
+         # Test prompt\n\n## Only\n\nSay something.\n",
     );
     let config = Config::from_toml_str(&format!(
         "[server]\ntoken = \"t\"\n{server_lines}\n\n\

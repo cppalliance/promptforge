@@ -17,7 +17,12 @@ use crate::tools::{Tool, ToolId};
 
 /// Lua-only prompts never build the gateway client, so these run offline.
 fn parse(md: &str) -> Prompt {
-    Prompt::parse(md).unwrap()
+    let source = if md.lines().any(|line| line.starts_with("# ")) {
+        md.to_string()
+    } else {
+        md.replacen("---\n\n", "---\n\n# Test prompt\n\n", 1)
+    };
+    Prompt::parse(&source, &NullObserver).unwrap()
 }
 
 /// Options that report nowhere and build no client - what a Lua-only,
@@ -610,9 +615,8 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
 fn run_resolves_cap_from_frontmatter_else_default() {
     // Mirrors the resolution in `run`: a declared budget wins, an absent
     // one falls back to the raised default.
-    let declared =
-        "---\nname: t\ndescription: d\nversion: 1\nmax_tool_iterations: 5\n---\n\n## S\n\np\n";
-    let p = Prompt::parse(declared).unwrap();
+    let declared = "---\nname: t\ndescription: d\nversion: 1\nmax_tool_iterations: 5\n---\n\n# T\n\n## S\n\np\n";
+    let p = Prompt::parse(declared, &NullObserver).unwrap();
     assert_eq!(
         p.frontmatter
             .max_tool_iterations
@@ -620,8 +624,8 @@ fn run_resolves_cap_from_frontmatter_else_default() {
         5
     );
 
-    let absent = "---\nname: t\ndescription: d\nversion: 1\n---\n\n## S\n\np\n";
-    let p = Prompt::parse(absent).unwrap();
+    let absent = "---\nname: t\ndescription: d\nversion: 1\n---\n\n# T\n\n## S\n\np\n";
+    let p = Prompt::parse(absent, &NullObserver).unwrap();
     assert_eq!(
         p.frontmatter
             .max_tool_iterations
@@ -1023,9 +1027,9 @@ async fn a_failing_run_still_reports_run_finished() {
     assert_eq!(
         observations,
         vec![
-            ("Prompt".to_string(), detail::RUN_STARTED.to_string()),
+            ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
-            ("Prompt".to_string(), detail::RUN_FAILED.to_string()),
+            ("Test prompt".to_string(), detail::RUN_FAILED.to_string()),
         ],
         "a section that errors reports no SectionFinished"
     );
@@ -1127,11 +1131,11 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
     assert_eq!(
         recorder.events(),
         vec![
-            ("Prompt".to_string(), detail::RUN_STARTED.to_string()),
+            ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
             ("Only".to_string(), detail::MODEL_TURN_COMPLETED.to_string(),),
             ("Only".to_string(), detail::SECTION_FINISHED.to_string()),
-            ("Prompt".to_string(), detail::RUN_SUCCEEDED.to_string()),
+            ("Test prompt".to_string(), detail::RUN_SUCCEEDED.to_string()),
         ]
     );
 }
