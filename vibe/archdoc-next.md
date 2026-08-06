@@ -15,3 +15,5 @@
 - [2026-08-04-1-recover-core-design-rationale] irrecoverable contingency: Exact thresholds, external observations, and deleted alternatives cannot be reconstructed reliably from current code.
 - [2026-08-05-1-section-lua-lifecycle] exact declaration replay: Freeze capability bindings once and replay declarations without resolving again.
 - [2026-08-05-1-section-lua-lifecycle] observer side channel: Observation must remain non-blocking, payload-free, and irrelevant to execution decisions.
+- [2026-08-06-1-prompt-fixtures-logging] bounded author logging: Author logs are the sole payload-bearing observation exception and stay bounded and single-line.
+- [2026-08-06-1-prompt-fixtures-logging] test strata: Ordinary tests are deterministic and offline; live-model checks run only through explicit commands.
