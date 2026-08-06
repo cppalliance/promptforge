@@ -262,7 +262,7 @@ async fn run_sections(
         let schemas: Vec<ToolSchema> = section_tools
             .iter()
             .map(|t| ToolSchema {
-                name: t.name().to_string(),
+                name: t.wire_name().to_string(),
                 description: t.description().to_string(),
                 parameters: t.parameters_schema(),
             })
@@ -319,7 +319,7 @@ fn scoped_tools<'a>(tools: &[&'a dyn Tool], names: &[String]) -> Result<Vec<&'a 
         let tool = tools
             .iter()
             .copied()
-            .find(|t| t.name() == name)
+            .find(|t| t.wire_name() == name)
             .ok_or_else(|| Error::UnknownScopedTool(name.clone()))?;
         selected.push(tool);
     }
@@ -415,7 +415,7 @@ async fn run_tool_loop(
                 for call in &calls {
                     let tool = tools
                         .iter()
-                        .find(|t| t.name() == call.name)
+                        .find(|t| t.wire_name() == call.name)
                         .ok_or_else(|| Error::UnknownTool(call.name.clone()))?;
                     let result = tool.call(call.arguments.clone()).await;
                     observer.observe(

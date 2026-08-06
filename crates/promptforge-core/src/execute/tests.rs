@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use super::*;
 use crate::observe::{NullObserver, detail};
-use crate::tools::Tool;
+use crate::tools::{Tool, ToolId};
 
 /// Lua-only prompts never build the gateway client, so these run offline.
 fn parse(md: &str) -> Prompt {
@@ -233,11 +233,15 @@ struct EchoTool;
 
 #[async_trait::async_trait]
 impl Tool for EchoTool {
+    fn id(&self) -> ToolId {
+        ToolId::new("tests", "echo")
+    }
+
     #[expect(
         clippy::unnecessary_literal_bound,
         reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
-    fn name(&self) -> &str {
+    fn wire_name(&self) -> &str {
         "echo"
     }
 
@@ -269,11 +273,15 @@ struct NoopTool;
 
 #[async_trait::async_trait]
 impl Tool for NoopTool {
+    fn id(&self) -> ToolId {
+        ToolId::new("tests", "noop")
+    }
+
     #[expect(
         clippy::unnecessary_literal_bound,
         reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
-    fn name(&self) -> &str {
+    fn wire_name(&self) -> &str {
         "noop"
     }
 
@@ -300,11 +308,15 @@ struct UntrustedEchoTool;
 
 #[async_trait::async_trait]
 impl Tool for UntrustedEchoTool {
+    fn id(&self) -> ToolId {
+        ToolId::new("tests", "untrusted_echo")
+    }
+
     #[expect(
         clippy::unnecessary_literal_bound,
         reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
-    fn name(&self) -> &str {
+    fn wire_name(&self) -> &str {
         "echo"
     }
 
@@ -340,11 +352,15 @@ struct FailingTool;
 
 #[async_trait::async_trait]
 impl Tool for FailingTool {
+    fn id(&self) -> ToolId {
+        ToolId::new("tests", "failing")
+    }
+
     #[expect(
         clippy::unnecessary_literal_bound,
         reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
-    fn name(&self) -> &str {
+    fn wire_name(&self) -> &str {
         "echo"
     }
 
@@ -374,7 +390,7 @@ fn section_scoped_to_one_tool_selects_only_that_one() {
     let noop = NoopTool;
     let pool: &[&dyn Tool] = &[&echo, &noop];
     let selected = scoped_tools(pool, &["echo".to_string()]).unwrap();
-    let names: Vec<&str> = selected.iter().map(|t| t.name()).collect();
+    let names: Vec<&str> = selected.iter().map(|t| t.wire_name()).collect();
     assert_eq!(names, vec!["echo"]);
 }
 
@@ -463,7 +479,7 @@ fn schemas_for(tools: &[&dyn Tool]) -> Vec<ToolSchema> {
     tools
         .iter()
         .map(|t| ToolSchema {
-            name: t.name().to_string(),
+            name: t.wire_name().to_string(),
             description: t.description().to_string(),
             parameters: t.parameters_schema(),
         })

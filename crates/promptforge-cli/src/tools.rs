@@ -58,7 +58,7 @@ mod tests {
         let tools = select_tools(&["web_fetch".into()], None, None)
             .expect("web_fetch should not require a gateway");
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name(), "web_fetch");
+        assert_eq!(tools[0].wire_name(), "web_fetch");
     }
 
     #[test]
@@ -78,7 +78,7 @@ mod tests {
         let tools = select_tools(&["web_search".into()], Some("http://x/v1"), Some("t"))
             .expect("web_search should resolve with credentials");
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name(), "web_search");
+        assert_eq!(tools[0].wire_name(), "web_search");
     }
 
     #[test]

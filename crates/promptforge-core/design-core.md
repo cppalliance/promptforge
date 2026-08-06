@@ -20,6 +20,14 @@ Each section currently gets a fresh Lua VM. Its Lua can read `args` and `sys`, w
 
 The `Store` remains the sole intentional mutable channel across section boundaries. Direct `Store` calls are ordinary library operations and are unobserved. Store calls made through the Lua execution harness are observed without exposing paths or contents.
 
+### Stable live-tool identity
+
+Every callable `Tool` exposes a stable `ToolId` consisting of a server and a name in that server's namespace. The built-in live identities are `("promptforge", "web_search")` and `("promptforge", "web_fetch")`. Identity is structural and remains independent of the concrete wire name used by the current model transport.
+
+`Tool` also exposes its exact model-facing description and parameter schema. `ToolRegistry` preserves supplied order and repeated identities, and resolves live instances by `ToolId`. It intentionally does not reject repeated IDs: atomic collision validation belongs to the later binding-uniqueness step.
+
+The existing executor still scopes, advertises, and dispatches tools by `wire_name` until alias binding ships. The wire name is therefore a temporary transport detail, not an identity key for new APIs.
+
 ### Report-only observer seam
 
 The shipped observer contract has one operation:
@@ -52,9 +60,9 @@ The version gate runs before observation begins. A refused source emits no repor
 
 Everything in this section is settled design for later steps. None of it is implemented by the report-only observer change.
 
-### Stable tool identity and picker validation
+### Capability binding and picker validation
 
-Live tools will expose stable `ToolId`, description, and schema. Prompt-local capability aliases will bind one-to-one to live IDs through `promptforge-tool-picker`. Binding will reject absent, duplicate, ambiguous, colliding, and registry-mismatched identities. The picker will also expose near-duplicate analysis over already stored vectors.
+Prompt-local capability aliases will bind one-to-one to the shipped live `ToolId` values through `promptforge-tool-picker`. Binding will reject absent, duplicate, ambiguous, colliding, and registry-mismatched identities. The picker will also expose near-duplicate analysis over already stored vectors.
 
 ### Compiled Lua and persistent section VMs
 
@@ -87,7 +95,9 @@ Fan-out execution, branching, retries, child execution, persistent bytecode, com
 3. `NullObserver` changes only visibility.
 4. `Store` is the sole intentional cross-section mutable channel.
 5. A section exposes only explicitly scoped tools.
-6. Expected failures return errors.
-7. Later lifecycle behavior remains planned until its owning step lands with tests and documentation.
+6. A live tool's identity is independent of its current transport wire name.
+7. Registry lookup compares stable `ToolId` values and does not silently make wire names into identity.
+8. Expected failures return errors.
+9. Later lifecycle behavior remains planned until its owning step lands with tests and documentation.
 
-*2026-08-05 22:49 - GPT-5.6 Sol*
+*2026-08-05 23:24 - GPT-5.6 Sol*
