@@ -6,6 +6,11 @@
 //! table are exposed; a writable `var` table is provided for the block to
 //! populate; an always-on `store` table gives the block the run's virtual
 //! files; and an instruction-count hook aborts a runaway block.
+//! Direct `print` and `warn` are unavailable. During each executable Lua phase,
+//! a borrowed `log(message)` callback accepts one bounded, single-line UTF-8
+//! string and reports it through the run's [`Observer`] as `Lua: <message>`.
+//! The callback expires at the end of that phase and is never retained across
+//! a model await.
 //!
 //! The chunk's top-level return value becomes the section's result (the finish
 //! case of the exit rule). The `var` table is read back afterward as JSON for
@@ -37,6 +42,10 @@ use crate::{Error, Result};
 const HOOK_INTERVAL: u32 = 10_000;
 /// Maximum number of hook firings before a block is aborted (~1e7 instructions).
 const HOOK_BUDGET: u64 = 1_000;
+/// Observer-detail prefix for the one intentionally author-controlled report.
+const LUA_LOG_PREFIX: &str = "Lua: ";
+/// Maximum number of Unicode scalar values accepted by `log`.
+const LUA_LOG_CHARACTER_LIMIT: usize = 256;
 
 /// Resolves one plain-English capability description to one stable live tool.
 ///
@@ -268,7 +277,8 @@ struct BindingState {
 /// exactly once and `tools.always(alias)` marks a previously declared alias as
 /// prompt-wide. `tools.add` is unavailable. Aliases are case-sensitive ASCII
 /// identifiers matching `[A-Za-z][A-Za-z0-9_-]{0,63}`. Reports carry
-/// `execution` unchanged.
+/// `execution` unchanged. A phase-local `log(message)` reports constrained
+/// author checkpoints under `section`; direct `print` is unavailable.
 ///
 /// # Errors
 /// Returns any error from [`ToolResolver::resolve`] unchanged and
@@ -304,7 +314,7 @@ pub fn bind_tool_declarations(
     section: &str,
 ) -> Result<ToolBindings> {
     observer.observe(execution, section, detail::TOOL_BINDING_STARTED);
-    let result = bind_tool_declarations_inner(program, resolver);
+    let result = bind_tool_declarations_inner(program, resolver, execution, observer, section);
     observer.observe(
         execution,
         section,
@@ -324,6 +334,9 @@ pub fn bind_tool_declarations(
 fn bind_tool_declarations_inner(
     program: &LuaProgram,
     resolver: &dyn ToolResolver,
+    execution: &str,
+    observer: &dyn Observer,
+    section: &str,
 ) -> Result<ToolBindings> {
     let lua = Lua::new_with(
         StdLib::STRING | StdLib::TABLE | StdLib::MATH,
@@ -335,6 +348,8 @@ fn bind_tool_declarations_inner(
     let state = Arc::new(Mutex::new(BindingState::default()));
 
     let returned = lua.scope(|scope| {
+        install_log(&lua, scope, execution, observer, section)
+            .map_err(|error| mlua::Error::external(error.to_string()))?;
         let tools = lua.create_table()?;
 
         let needs = Arc::clone(&state);
@@ -416,10 +431,11 @@ fn bind_tool_declarations_inner(
         })?;
         tools.set("add", add)?;
         lua.globals().raw_set("tools", tools)?;
-        program
+        let result = program
             .load(&lua)
             .map_err(|error| mlua::Error::external(error.to_string()))?
-            .call(())
+            .call(());
+        finish_log_phase(&lua, result)
     });
     let returned = match returned {
         Ok(returned) => returned,
@@ -510,7 +526,9 @@ impl SectionVm {
     /// The shared program runs before `args`, `sys`, `var`, `tools`, `store`,
     /// and `reply` are installed. This delayed injection prevents shared code
     /// from retaining a host value before section execution begins. The VM
-    /// retains `execution` for every later lifecycle report.
+    /// retains `execution` for every later lifecycle report. Shared execution
+    /// receives a phase-local `log(message)` callback; direct `print` is
+    /// unavailable.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened, or if the
@@ -558,7 +576,7 @@ impl SectionVm {
         install_instruction_budget(&vm.lua);
         if let Some(program) = shared {
             observer.observe(execution, section, detail::LUA_SHARED_LOAD_STARTED);
-            match vm.run_loaded(program) {
+            match vm.run_loaded_with_log(program, observer, section) {
                 Ok(_) => observer.observe(execution, section, detail::LUA_SHARED_LOAD_SUCCEEDED),
                 Err(error) => {
                     observer.observe(execution, section, detail::LUA_SHARED_LOAD_FAILED);
@@ -576,7 +594,8 @@ impl SectionVm {
     /// `tools.always` must reproduce the binding pass call-for-call. No resolver
     /// is consulted. A changed alias, description, order, omitted call, or extra
     /// call is a replay mismatch. The VM retains `execution` for every later
-    /// lifecycle report.
+    /// lifecycle report. Replay receives a phase-local `log(message)` callback
+    /// that reports under this H2 `section`.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built, shared execution fails,
@@ -642,15 +661,17 @@ impl SectionVm {
         }
         observer.observe(execution, section, detail::LUA_SHARED_LOAD_STARTED);
         observer.observe(execution, section, detail::TOOL_REPLAY_STARTED);
-        let result = vm.run_loaded(shared).and_then(|returned| {
-            if returned.is_some() {
-                Err(Error::Lua(
-                    "H1 tool declaration program must not return a value".to_owned(),
-                ))
-            } else {
-                finish_replay(&vm)
-            }
-        });
+        let result = vm
+            .run_loaded_with_log(shared, observer, section)
+            .and_then(|returned| {
+                if returned.is_some() {
+                    Err(Error::Lua(
+                        "H1 tool declaration program must not return a value".to_owned(),
+                    ))
+                } else {
+                    finish_replay(&vm)
+                }
+            });
         observer.observe(
             execution,
             section,
@@ -742,6 +763,8 @@ impl SectionVm {
     /// operation order before this method returns, including when execution
     /// fails. A nil or absent top-level return produces `None`; strings,
     /// integers, numbers, and booleans produce their scalar string form.
+    /// `log(message)` is available only for this call and reports under
+    /// `execution` and `section`.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected, execution
@@ -841,7 +864,8 @@ impl SectionVm {
     /// Executes a compiled epilog in this VM's persistent environment.
     ///
     /// Store-operation reports are delivered in operation order between the
-    /// epilog's start and outcome reports.
+    /// epilog's start and outcome reports. `log(message)` is available only for
+    /// this call and reports under `execution` and `section`.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected, a bound
@@ -1112,10 +1136,23 @@ impl SectionVm {
         Err(error)
     }
 
-    fn run_loaded(&self, program: &LuaProgram) -> Result<Option<String>> {
-        let returned: MultiValue = program
-            .load(&self.lua)?
-            .call(())
+    fn run_loaded_with_log(
+        &self,
+        program: &LuaProgram,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<Option<String>> {
+        let returned: MultiValue = self
+            .lua
+            .scope(|scope| {
+                install_log(&self.lua, scope, &self.execution, observer, section)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+                let result = program
+                    .load(&self.lua)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?
+                    .call(());
+                finish_log_phase(&self.lua, result)
+            })
             .map_err(|error| Error::Lua(error.to_string()))?;
         scalar_return(returned)
     }
@@ -1132,6 +1169,8 @@ impl SectionVm {
         let returned: MultiValue = self
             .lua
             .scope(|scope| {
+                install_log(&self.lua, scope, &self.execution, observer, section)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
                 install_store_table(
                     &self.lua,
                     scope,
@@ -1142,10 +1181,11 @@ impl SectionVm {
                     section,
                 )
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
-                program
+                let result = program
                     .load(&self.lua)
                     .map_err(|error| mlua::Error::external(error.to_string()))?
-                    .call(())
+                    .call(());
+                finish_log_phase(&self.lua, result)
             })
             .map_err(|error| Error::Lua(error.to_string()))?;
         scalar_return(returned)
@@ -1163,6 +1203,8 @@ impl SectionVm {
         let returned: MultiValue = self
             .lua
             .scope(|scope| {
+                install_log(&self.lua, scope, &self.execution, observer, section)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
                 install_store_table(
                     &self.lua,
                     scope,
@@ -1173,7 +1215,8 @@ impl SectionVm {
                     section,
                 )
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
-                self.lua.load(source).eval()
+                let result = self.lua.load(source).eval();
+                finish_log_phase(&self.lua, result)
             })
             .map_err(|error| Error::Lua(error.to_string()))?;
         scalar_return(returned)
@@ -1198,6 +1241,8 @@ pub struct LuaOutcome {
 /// table available, and a `store` table backed by `store`, returning the
 /// chunk's return value and the final `var`. Harness-mediated store operations
 /// report safe outcomes to `observer` under `execution` and `section`.
+/// `log(message)` reports constrained author checkpoints through the same
+/// observer for this call only; direct `print` is unavailable.
 ///
 /// `store` is the run-scoped virtual-file handle; every section in a run is
 /// given the same handle, so files a section writes persist for later sections
@@ -1453,6 +1498,65 @@ fn install_tools_table(
     Ok(())
 }
 
+/// Installs the phase-local author diagnostic callback.
+///
+/// The callback borrows its observer through [`Scope`], so neither the callback
+/// nor any Lua reference copied from it can retain that observer after the
+/// current H1 or H2 phase returns.
+fn install_log<'scope, 'env: 'scope>(
+    lua: &Lua,
+    scope: &'scope Scope<'scope, 'env>,
+    execution: &'env str,
+    observer: &'env dyn Observer,
+    section: &'env str,
+) -> Result<()> {
+    let log = scope
+        .create_function(move |_, arguments: MultiValue| {
+            if arguments.len() != 1 {
+                return Err(mlua::Error::external("log expects exactly one argument"));
+            }
+            let Some(Value::String(message)) = arguments.into_iter().next() else {
+                return Err(mlua::Error::external("log message must be a UTF-8 string"));
+            };
+            let message = message
+                .to_str()
+                .map_err(|_| mlua::Error::external("log message must be a UTF-8 string"))?;
+            if message.chars().count() > LUA_LOG_CHARACTER_LIMIT {
+                return Err(mlua::Error::external(
+                    "log message must be at most 256 characters",
+                ));
+            }
+            if message.chars().any(is_log_line_break_or_control) {
+                return Err(mlua::Error::external(
+                    "log message must not contain newline or control characters",
+                ));
+            }
+            let detail = format!("{LUA_LOG_PREFIX}{message}");
+            observer.observe(execution, section, &detail);
+            Ok(())
+        })
+        .map_err(|error| Error::Lua(error.to_string()))?;
+    lua.globals()
+        .raw_set("log", log)
+        .map_err(|error| Error::Lua(error.to_string()))
+}
+
+fn is_log_line_break_or_control(character: char) -> bool {
+    character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')
+}
+
+/// Clears the phase's global callback before its scoped Rust closure expires.
+///
+/// Lua code may have copied the function elsewhere, but [`Scope`] invalidates
+/// every such reference when the phase returns.
+fn finish_log_phase<T>(lua: &Lua, result: mlua::Result<T>) -> mlua::Result<T> {
+    let cleanup = lua.globals().raw_set("log", Value::Nil);
+    match (result, cleanup) {
+        (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+        (Ok(value), Ok(())) => Ok(value),
+    }
+}
+
 /// Expose an always-on `store` table whose six methods (`write`, `append`,
 /// `read`, `str_replace`, `delete`, `glob`) are backed by the run-scoped
 /// [`Store`] handle. The functions borrow the observer within an [`mlua::Scope`]
@@ -1628,8 +1732,9 @@ fn install_store_table<'scope, 'env: 'scope>(
     Ok(())
 }
 
-/// Remove code-loading and reflection globals the base library provides. The
-/// `io`, `os`, `package`, `coroutine`, and `debug` libraries are never loaded.
+/// Remove code-loading, direct output, and reflection globals the base library
+/// provides. The `io`, `os`, `package`, `coroutine`, and `debug` libraries are
+/// never loaded.
 fn harden(lua: &Lua) -> Result<()> {
     let globals = lua.globals();
     for name in [
@@ -1645,6 +1750,8 @@ fn harden(lua: &Lua) -> Result<()> {
         "rawset",
         "rawequal",
         "rawlen",
+        "print",
+        "warn",
     ] {
         globals
             .set(name, Value::Nil)
@@ -1693,7 +1800,7 @@ fn scalar_return(returned: MultiValue) -> Result<Option<String>> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::observe::NullObserver;
@@ -1835,6 +1942,471 @@ mod tests {
             bind_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
                 .expect("fixture declarations must bind");
         (shared, bindings)
+    }
+
+    #[test]
+    fn direct_output_is_absent_in_every_executable_lua_vm() {
+        let unbound_shared =
+            program("assert(print == nil); assert(warn == nil); log('unbound shared')");
+        let unbound = SectionVm::new(Some(&unbound_shared), EXECUTION, &NullObserver, "Section")
+            .expect("unbound shared VM must not expose direct output");
+        unbound.teardown(&NullObserver, "Section");
+
+        let shared = program(
+            "assert(print == nil)\n\
+             assert(warn == nil)\n\
+             tools.need('search', 'search the web')",
+        );
+        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
+        let bindings =
+            bind_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+                .expect("binding VM must not expose direct output");
+        let mut vm =
+            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("replay VM must not expose direct output");
+        vm.inject_host("", &json!({}), &Store::memory())
+            .expect("host must inject");
+        vm.run_preamble(
+            &program("assert(print == nil); assert(warn == nil)"),
+            &NullObserver,
+            "Section",
+        )
+        .expect("preamble must not expose direct output");
+        vm.close_tool_scope(&NullObserver, "Section")
+            .expect("scope must close");
+        vm.run_epilog(
+            &program("assert(print == nil); assert(warn == nil)"),
+            &NullObserver,
+            "Section",
+        )
+        .expect("epilog must not expose direct output");
+        vm.teardown(&NullObserver, "Section");
+
+        assert_eq!(
+            run("return tostring(print) .. ':' .. tostring(warn)", "")
+                .expect("compatibility VM must run")
+                .returned
+                .as_deref(),
+            Some("nil:nil")
+        );
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the regression spells out every H1 and H2 checkpoint to prove exact phase ordering"
+    )]
+    fn logs_are_correlated_and_ordered_across_h1_and_h2_phases() {
+        let shared = program(
+            "log('shared checkpoint')\n\
+             tools.need('search', 'search the web')",
+        );
+        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
+        let recorder = Recorder::default();
+        let bindings = bind_tool_declarations(&shared, &resolver, EXECUTION, &recorder, "Prompt")
+            .expect("binding log must succeed");
+        let mut vm =
+            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &recorder, "Gather")
+                .expect("replay log must succeed");
+        vm.inject_host("", &json!({}), &Store::memory())
+            .expect("host must inject");
+        vm.run_preamble(&program("log('preamble checkpoint')"), &recorder, "Gather")
+            .expect("preamble log must succeed");
+        vm.close_tool_scope(&recorder, "Gather")
+            .expect("scope must close");
+        vm.run_epilog(&program("log('epilog checkpoint')"), &recorder, "Gather")
+            .expect("epilog log must succeed");
+        vm.teardown(&recorder, "Gather");
+
+        assert_eq!(
+            recorder.records(),
+            [
+                (
+                    EXECUTION.to_owned(),
+                    "Prompt".to_owned(),
+                    detail::TOOL_BINDING_STARTED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Prompt".to_owned(),
+                    "Lua: shared checkpoint".to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Prompt".to_owned(),
+                    detail::TOOL_BINDING_SUCCEEDED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    detail::LUA_SHARED_LOAD_STARTED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    detail::TOOL_REPLAY_STARTED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    "Lua: shared checkpoint".to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    detail::TOOL_REPLAY_SUCCEEDED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    detail::LUA_SHARED_LOAD_SUCCEEDED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    detail::LUA_PREAMBLE_STARTED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    "Lua: preamble checkpoint".to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    detail::LUA_PREAMBLE_SUCCEEDED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    detail::TOOL_SCOPE_CLOSING.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    detail::TOOL_SCOPE_CLOSED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    detail::LUA_EPILOG_STARTED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    "Lua: epilog checkpoint".to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    detail::LUA_EPILOG_SUCCEEDED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    detail::LUA_TEARDOWN_STARTED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Gather".to_owned(),
+                    detail::LUA_TEARDOWN_SUCCEEDED.to_owned(),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn compatibility_chunk_logs_interleave_with_host_operations() {
+        let recorder = Recorder::default();
+        run_chunk(
+            "log('before write')\n\
+             store.write('state.txt', 'value')\n\
+             log('after write')",
+            "",
+            &json!({}),
+            &Store::memory(),
+            "compatibility-run",
+            &recorder,
+            "Compatibility",
+        )
+        .expect("compatibility logging must succeed");
+
+        assert_eq!(
+            recorder.records(),
+            [
+                (
+                    "compatibility-run".to_owned(),
+                    "Compatibility".to_owned(),
+                    "Lua: before write".to_owned(),
+                ),
+                (
+                    "compatibility-run".to_owned(),
+                    "Compatibility".to_owned(),
+                    detail::STORE_WRITE_SUCCEEDED.to_owned(),
+                ),
+                (
+                    "compatibility-run".to_owned(),
+                    "Compatibility".to_owned(),
+                    "Lua: after write".to_owned(),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn log_accepts_exactly_one_bounded_control_free_utf8_string() {
+        let invalid = [
+            ("log()", "log expects exactly one argument"),
+            ("log('one', 'two')", "log expects exactly one argument"),
+            ("log(42)", "log message must be a UTF-8 string"),
+            (
+                "log(string.char(255))",
+                "log message must be a UTF-8 string",
+            ),
+            (
+                "log('first\\nsecond')",
+                "log message must not contain newline or control characters",
+            ),
+            (
+                "log('first\\tsecond')",
+                "log message must not contain newline or control characters",
+            ),
+            (
+                "log('first\u{2028}second')",
+                "log message must not contain newline or control characters",
+            ),
+        ];
+        for (source, expected) in invalid {
+            let recorder = Recorder::default();
+            let error = run_chunk(
+                source,
+                "",
+                &json!({}),
+                &Store::memory(),
+                EXECUTION,
+                &recorder,
+                "Validation",
+            )
+            .expect_err("invalid log input must fail");
+            assert!(
+                error.to_string().contains(expected),
+                "wrong validation error for {source:?}: {error}"
+            );
+            assert!(
+                recorder.records().is_empty(),
+                "invalid log input must emit no report"
+            );
+        }
+
+        let too_long = "é".repeat(LUA_LOG_CHARACTER_LIMIT + 1);
+        let source = format!(
+            "log({})",
+            serde_json::to_string(&too_long).expect("test string must serialize")
+        );
+        let error = run(&source, "").expect_err("257 characters must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("log message must be at most 256 characters")
+        );
+
+        let maximum = "é".repeat(LUA_LOG_CHARACTER_LIMIT);
+        let source = format!(
+            "log({})",
+            serde_json::to_string(&maximum).expect("test string must serialize")
+        );
+        let recorder = Recorder::default();
+        run_chunk(
+            &source,
+            "",
+            &json!({}),
+            &Store::memory(),
+            EXECUTION,
+            &recorder,
+            "Validation",
+        )
+        .expect("256 Unicode characters must succeed");
+        assert_eq!(
+            recorder.records(),
+            [(
+                EXECUTION.to_owned(),
+                "Validation".to_owned(),
+                format!("Lua: {maximum}"),
+            )]
+        );
+    }
+
+    #[test]
+    fn logging_does_not_change_results_or_store_effects_with_null_observer() {
+        let source = "log('checkpoint')\n\
+                      var.answer = args\n\
+                      store.write('answer.txt', args)\n\
+                      return var.answer";
+        let recorded_store = Store::memory();
+        let recorder = Recorder::default();
+        let observed_outcome = run_chunk(
+            source,
+            "same",
+            &json!({}),
+            &recorded_store,
+            EXECUTION,
+            &recorder,
+            "Equivalence",
+        )
+        .expect("recorded execution must succeed");
+        let null_store = Store::memory();
+        let silent = run_chunk(
+            source,
+            "same",
+            &json!({}),
+            &null_store,
+            EXECUTION,
+            &NullObserver,
+            "Equivalence",
+        )
+        .expect("silent execution must succeed");
+
+        assert_eq!(observed_outcome.returned, silent.returned);
+        assert_eq!(observed_outcome.var, silent.var);
+        assert_eq!(observed_outcome.scoped_tools, silent.scoped_tools);
+        assert_eq!(
+            recorded_store
+                .read("answer.txt")
+                .expect("recorded write must persist"),
+            null_store
+                .read("answer.txt")
+                .expect("silent write must persist")
+        );
+    }
+
+    #[test]
+    fn retained_log_functions_expire_with_their_phase_observer() {
+        struct DropRecorder {
+            dropped: Arc<std::sync::atomic::AtomicBool>,
+            records: Arc<Mutex<Vec<(String, String, String)>>>,
+        }
+
+        impl Observer for DropRecorder {
+            fn observe(&self, execution: &str, section: &str, detail: &str) {
+                self.records
+                    .lock()
+                    .expect("the recorder mutex must not be poisoned")
+                    .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+            }
+        }
+
+        impl Drop for DropRecorder {
+            fn drop(&mut self) {
+                self.dropped
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let first_records = Arc::new(Mutex::new(Vec::new()));
+        let first = DropRecorder {
+            dropped: Arc::clone(&dropped),
+            records: Arc::clone(&first_records),
+        };
+        let mut vm =
+            SectionVm::new(None, EXECUTION, &NullObserver, "Section").expect("VM must construct");
+        vm.inject_host("", &json!({}), &Store::memory())
+            .expect("host must inject");
+        vm.run_preamble(
+            &program("saved_log = log; log('first phase')"),
+            &first,
+            "Section",
+        )
+        .expect("first phase log must succeed");
+        drop(first);
+        assert!(
+            dropped.load(std::sync::atomic::Ordering::SeqCst),
+            "the phase must not retain its observer"
+        );
+
+        let second = Recorder::default();
+        vm.run_epilog(
+            &program(
+                "local ok = pcall(saved_log, 'stale callback')\n\
+                 if ok then error('retained log callback remained live') end\n\
+                 log('second phase')",
+            ),
+            &second,
+            "Section",
+        )
+        .expect("a fresh epilog callback must replace the expired callback");
+        vm.teardown(&second, "Section");
+
+        assert_eq!(
+            *first_records
+                .lock()
+                .expect("the recorder mutex must not be poisoned"),
+            [
+                (
+                    EXECUTION.to_owned(),
+                    "Section".to_owned(),
+                    detail::LUA_PREAMBLE_STARTED.to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Section".to_owned(),
+                    "Lua: first phase".to_owned(),
+                ),
+                (
+                    EXECUTION.to_owned(),
+                    "Section".to_owned(),
+                    detail::LUA_PREAMBLE_SUCCEEDED.to_owned(),
+                ),
+            ]
+        );
+        assert!(
+            second
+                .records()
+                .iter()
+                .any(|(_, _, detail)| detail == "Lua: second phase")
+        );
+        assert!(
+            second
+                .records()
+                .iter()
+                .all(|(_, _, detail)| detail != "Lua: stale callback")
+        );
+    }
+
+    #[test]
+    fn concurrent_logs_keep_execution_ids_and_local_order() {
+        let recorder = Arc::new(Recorder::default());
+        let mut workers = Vec::new();
+        for execution in ["execution-a", "execution-b"] {
+            let recorder = Arc::clone(&recorder);
+            workers.push(std::thread::spawn(move || {
+                run_chunk(
+                    "log('first'); log('second')",
+                    "",
+                    &json!({}),
+                    &Store::memory(),
+                    execution,
+                    recorder.as_ref(),
+                    "Concurrent",
+                )
+                .expect("concurrent log run must succeed");
+            }));
+        }
+        for worker in workers {
+            worker.join().expect("logging worker must finish");
+        }
+
+        let records = recorder.records();
+        for execution in ["execution-a", "execution-b"] {
+            assert_eq!(
+                records
+                    .iter()
+                    .filter(|(actual, _, _)| actual == execution)
+                    .map(|(_, section, detail)| (section.as_str(), detail.as_str()))
+                    .collect::<Vec<_>>(),
+                [("Concurrent", "Lua: first"), ("Concurrent", "Lua: second"),]
+            );
+        }
     }
 
     #[test]
