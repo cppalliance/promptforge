@@ -1,0 +1,18 @@
+[package]
+name = "promptforge-core-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "PromptForge author-shaped prompt fixtures and explicit model-test harness"
+
+[[bin]]
+name = "promptforge-core-tests"
+path = "src/main.rs"
+
+[dependencies]
+promptforge-core.workspace = true
+
+[lints]
+workspace = true
