@@ -94,6 +94,12 @@ pub mod detail {
     pub const TOOL_SCOPE_CLOSED: &str = "Tool scope closed";
     /// A section's effective tool scope could not be closed.
     pub const TOOL_SCOPE_FAILED: &str = "Tool scope failed";
+    /// Semantic validation of a model-visible tool scope began.
+    pub const TOOL_SCOPE_VALIDATION_STARTED: &str = "Tool scope validation started";
+    /// A model-visible tool scope passed semantic validation.
+    pub const TOOL_SCOPE_VALIDATION_SUCCEEDED: &str = "Tool scope validation succeeded";
+    /// A model-visible tool scope failed semantic validation.
+    pub const TOOL_SCOPE_VALIDATION_FAILED: &str = "Tool scope validation failed";
     /// A harness-mediated store write succeeded.
     pub const STORE_WRITE_SUCCEEDED: &str = "Store write succeeded";
     /// A harness-mediated store write failed.

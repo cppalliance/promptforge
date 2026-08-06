@@ -16,7 +16,7 @@ The crate currently exposes `client`, `execute`, `lua`, `observe`, `parser`, `st
 
 A prompt currently consists of YAML frontmatter without concrete tools, exactly one required H1 title, an optional compiled shared library, and one or more H2 sections. Ordinary Markdown before the H1 is ignored. The shared library is reserved by an exact unindented `lua prompt` Markdown fence immediately after the H1, allowing blank lines but no prose before it. Reserved-looking marker lines inside a longer Markdown fence remain prose. Each section parses into an optional compiled Lua preamble, prose, and an optional compiled Lua epilog. Top-level sections execute in file order. Child sections parse but do not execute.
 
-Each section gets a fresh persistent `SectionVm`. The bound H1 shared program loads first, host values are injected, and the optional preamble, model reply binding, and optional epilog all use the same environment. A scalar preamble return skips model and epilog and ends the run. Otherwise substituted non-empty prose enters a tool-free model turn, its text is bound as `reply`, and a scalar epilog return ends the run. Empty prose skips the model and leaves `reply` nil while still running the epilog. Teardown destroys the VM before the section finishes. Falling off the final section returns `default_return`, the last model reply, or `"done"` in that order.
+Each section gets a fresh persistent `SectionVm`. The bound H1 shared program loads first, host values are injected, and the optional preamble, model reply binding, and optional epilog all use the same environment. A scalar preamble return skips model and epilog and ends the run. Otherwise the executor closes the effective alias scope, substitutes prose, validates a non-empty turn's selected identities, and enters the model tool loop. Final text is bound as `reply`, and a scalar epilog return ends the run. Empty prose skips scope validation and the model, leaves `reply` nil, and still runs the epilog. Teardown destroys the VM before the section finishes. Falling off the final section returns `default_return`, the last model reply, or `"done"` in that order.
 
 The `Store` remains the sole intentional mutable channel across section boundaries. Direct `Store` calls are ordinary library operations and are unobserved. Store calls made through the Lua execution harness are observed without exposing paths or contents.
 
@@ -26,7 +26,7 @@ Every callable `Tool` exposes a stable `ToolId` consisting of a server and a nam
 
 `Tool` also exposes its exact model-facing description and parameter schema. `ToolRegistry` preserves supplied order and repeated identities, and resolves live instances by `ToolId`. The registry remains a faithful collection, while prompt binding validates the complete registry atomically and rejects any repeated live identity.
 
-The executor does not yet advertise or dispatch tools. The existing concrete tool loop remains an internal compatibility facility while alias-based advertisement and `ToolId` dispatch are reserved for the next execution step.
+The executor advertises only the effective prompt-local aliases for one section. Each schema uses the callable live tool's concrete description and parameter schema under that alias. A returned alias resolves through the frozen alias-to-`ToolId` map and then through the run's live registry, so transport wire names never become prompt dependencies.
 
 ### Picker near-duplicate analysis
 
@@ -66,7 +66,7 @@ The version gate runs before observation begins. A refused source emits no repor
 
 `LuaProgram` retains its original source and compiles it once into process-local Lua 5.4 bytecode without executing it. Loading creates a function in a caller-supplied VM but does not call it, so one program can seed multiple independent VMs while each VM supplies its own globals. The bytecode is private, is never persisted, and is not treated as a portable serialization format.
 
-Compilation takes an explicit prompt-region location. Malformed source returns `Error::LuaCompile` carrying that location, the retained source, and the Lua compiler diagnostic. Fixed compilation start, success, and failure reports expose none of the source or location payload. Parsing compiles the optional H1 shared library and every reserved H2 preamble and epilog once. Existing model execution still passes the preamble's retained source through the one-phase compatibility path and does not run the epilog.
+Compilation takes an explicit prompt-region location. Malformed source returns `Error::LuaCompile` carrying that location, the retained source, and the Lua compiler diagnostic. Fixed compilation start, success, and failure reports expose none of the source or location payload. Parsing compiles the optional H1 shared library and every reserved H2 preamble and epilog once. Bound execution loads those compiled programs directly across the section lifecycle, while the separate `run_chunk` compatibility API remains available for one-phase callers.
 
 ### Three-phase section grammar
 
@@ -94,7 +94,7 @@ The resulting `ToolBindings` is immutable and ordered. `SectionVm::new_with_bind
 
 After host injection, the section's `tools` table is in H2 recording mode. Only `tools.add(alias...)` is accepted, and every alias must have a frozen binding. Additions are first-seen ordered and idempotent; aliases already in `tools.always` are not repeated. `close_tool_scope` returns an immutable effective scope with prompt-wide aliases first and H2 additions second, then permanently closes recording so an epilog cannot widen the model-visible scope.
 
-Binding, registry validation, replay, and scope closure report fixed start/outcome details containing no aliases, descriptions, identities, source, or other payloads. Execution replays frozen declarations and closes the recorder before reply binding or epilog execution, but intentionally discards the effective scope. Alias-based model advertisement and dispatch remain later steps.
+Binding, registry validation, replay, scope closure, and effective-scope validation report fixed start/outcome details containing no aliases, descriptions, identities, source, or other payloads. Execution replays frozen declarations, closes the recorder before any model turn, and consumes the resulting effective scope for validation, advertisement, and dispatch. Declaring a need alone exposes nothing.
 
 ### Validated capability binding
 
@@ -108,19 +108,21 @@ Validation first scans the complete live registry and rejects a repeated stable 
 
 The pass reports fixed binding and registry-validation start and outcome details under the H1 title. Reports contain no aliases, capabilities, identities, candidates, catalog prose, live-registry data, or picker diagnostics. Binding is synchronous and does not construct an executor or invoke a tool.
 
+### Aliased tool scope and dispatch
+
+Binding asks the picker for near-duplicate pairs across the immutable selected identity set and retains that analysis in `BoundPrompt`. The analysis validates every selected identity against the picker catalog once. Before each non-empty model turn, execution filters those pairs to the effective `tools.always` plus H2 `tools.add` set. A pair at or above the configured duplicate threshold fails before the model call with both aliases, stable identities, concrete picker descriptions, behavioural hints, and score. Similar tools in separate sections remain valid because they never compete in one turn.
+
+After validation, the executor builds model schemas in effective-scope order, with prompt-wide aliases first and first-seen H2 additions second. Names are local aliases while descriptions and parameter schemas come from the callable live instances. Calls resolve alias to frozen `ToolId`, then `ToolId` to the live registry entry. Missing aliases and missing live targets are expected errors. Tool arguments and results retain the existing guard and conversation behavior, but reports expose only fixed scope, model, and tool outcomes.
+
 ## Planned, not shipped
 
 Everything in this section is settled design for later steps and remains unimplemented.
-
-### Picker scope validation
-
-Before a model turn, core will apply the shipped picker near-duplicate analysis to the effective scope.
 
 ### Semantic capability phases
 
 The shipped Lua modes implement declaration binding, exact replay, H2 recording, and scope closure. `bind_prompt` now routes the H1 source through concrete picker binding, while the executor will later consume `BoundPrompt` and route H1 replay and H2 source regions through their lifecycle modes.
 
-The model will see selected concrete descriptions and schemas under prompt-local aliases. Calls will dispatch through `ToolId`. Before a model turn, the picker will reject near-duplicate tools in that section's effective scope.
+Host adapters still need to construct matching picker catalogs and live registries before they can use this shipped core path.
 
 ### Host binding integration
 
@@ -143,4 +145,4 @@ Fan-out execution, branching, retries, child execution, persistent bytecode, com
 9. Lua bytecode remains process-local and private; retained source and explicit locations carry compilation diagnostics.
 10. Later lifecycle behavior remains planned until its owning step lands with tests and documentation.
 
-*2026-08-06 01:34 - GPT-5.6 Sol*
+*2026-08-06 02:35 - GPT-5.6 Sol*
