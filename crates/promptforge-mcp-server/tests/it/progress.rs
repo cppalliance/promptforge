@@ -48,7 +48,7 @@ impl ClientHandler for RecordingClient {
 
 /// A prompt of three sections, the first two falling through and the last
 /// returning, so the whole run happens offline.
-const TRIO: &str = "---\nname: trio\ndescription: Three sections\nversion: 1\npromptforge: 1\n---\n\n\
+const TRIO: &str = "---\nname: trio\ndescription: Three sections\npromptforge: 1\n---\n\n\
 # Trio\n\n\
 ## First\n\n```lua\nvar.step = 1\n```\n\n\
 ## Second\n\n```lua\nvar.step = 2\n```\n\n\

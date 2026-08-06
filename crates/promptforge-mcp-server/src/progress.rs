@@ -349,7 +349,7 @@ mod tests {
     /// the whole run happens offline and emits one frame per section.
     fn long_prompt(sections: usize) -> String {
         let mut source = String::from(
-            "---\nname: long\ndescription: Many sections\nversion: 1\npromptforge: 1\n---\n\n# Test prompt\n",
+            "---\nname: long\ndescription: Many sections\npromptforge: 1\n---\n\n# Test prompt\n",
         );
         for section in 1..sections {
             let _written = write!(

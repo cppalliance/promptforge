@@ -21,7 +21,7 @@ const BUILT_INS: [&str; 4] = ["list_prompts", "run_prompt", "need_prompt", "chec
 /// A parsed prompt that runs offline: one section whose Lua returns at once.
 fn prompt(name: &str, description: &str) -> (String, Prompt) {
     let source = format!(
-        "---\nname: {name}\ndescription: {description}\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: {name}\ndescription: {description}\npromptforge: 1\n---\n\n\
          # Title\n\n## Main\n\n```lua\nreturn args\n```\n"
     );
     let prompt =

@@ -35,7 +35,7 @@ const PATIENCE: Duration = Duration::from_secs(10);
 /// A prompt whose Lua returns at once, so no gateway is needed.
 fn prompt(name: &str, description: &str, value: &str) -> String {
     format!(
-        "---\nname: {name}\ndescription: {description}\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: {name}\ndescription: {description}\npromptforge: 1\n---\n\n\
          # Test prompt\n\n## Main\n\n```lua\nreturn '{value}'\n```\n"
     )
 }

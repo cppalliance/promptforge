@@ -56,8 +56,6 @@ struct Launch {
     prompt: BoundPrompt,
     /// The prompt's name, as the result reports it.
     name: String,
-    /// The prompt's frontmatter contract version.
-    version: u32,
     /// The run's whole input.
     args: String,
     /// The complete immutable live registry and prepared picker.
@@ -103,7 +101,6 @@ pub(super) async fn run(
         return run_result(&RunResult::failed(
             run_id,
             entry.name(),
-            entry.version(),
             problem,
             NO_TURNS,
             0,
@@ -202,14 +199,13 @@ async fn run_observed(
     // duration is execution time and carries neither wait.
     let started = Instant::now();
 
-    registry.started(&run_id, entry.name(), entry.version());
+    registry.started(&run_id, entry.name());
     let task = tokio::spawn(execute_run(
         Arc::clone(registry),
         Launch {
             run_id: run_id.clone(),
             prompt: bound,
             name: entry.name().to_owned(),
-            version: entry.version(),
             args: args.to_owned(),
             tools,
             observer,
@@ -219,9 +215,7 @@ async fn run_observed(
         },
     ));
 
-    let result = registry
-        .settle(&run_id, entry.name(), entry.version(), task)
-        .await;
+    let result = registry.settle(&run_id, entry.name(), task).await;
     if let Some(pump) = pump {
         pump.finish().await;
     }
@@ -268,7 +262,6 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
         run_id,
         prompt,
         name,
-        version,
         args,
         tools,
         observer,
@@ -295,15 +288,8 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
     drop(observer);
 
     let result = match outcome {
-        Ok(value) => RunResult::completed(run_id.clone(), &name, version, value, turns, elapsed),
-        Err(error) => RunResult::failed(
-            run_id.clone(),
-            &name,
-            version,
-            error.to_string(),
-            turns,
-            elapsed,
-        ),
+        Ok(value) => RunResult::completed(run_id.clone(), &name, value, turns, elapsed),
+        Err(error) => RunResult::failed(run_id.clone(), &name, error.to_string(), turns, elapsed),
     };
     log_terminal_result(&result);
     registry.finished(&run_id, result.clone());
@@ -323,14 +309,7 @@ async fn binding_failed(
     let turns = observer.turns();
     drop(observer);
     finish_pump(pump).await;
-    run_result(&RunResult::failed(
-        run_id,
-        entry.name(),
-        entry.version(),
-        message,
-        turns,
-        0,
-    ))
+    run_result(&RunResult::failed(run_id, entry.name(), message, turns, 0))
 }
 
 /// Closes a run's optional progress path after its observer has been dropped.
@@ -396,7 +375,7 @@ mod tests {
     fn terminal_log_carries_the_completed_result_measurements() {
         let levels = Levels::default();
         let subscriber = tracing_subscriber::registry().with(levels.clone());
-        let result = RunResult::completed("r1".into(), "echo", 1, "secret".into(), 3, 42);
+        let result = RunResult::completed("r1".into(), "echo", "secret".into(), 3, 42);
 
         tracing::subscriber::with_default(subscriber, || log_terminal_result(&result));
 

@@ -301,7 +301,6 @@ fn list_prompts_result(catalog: &Catalog) -> Result<CallToolResult, ErrorData> {
             json!({
                 "name": entry.name(),
                 "description": entry.description(),
-                "version": entry.version(),
                 "problem": entry.problem(),
             })
         })

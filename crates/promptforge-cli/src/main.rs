@@ -144,7 +144,7 @@ mod tests {
         ));
         std::fs::write(
             &path,
-            "---\nname: lifecycle\ndescription: CLI lifecycle fixture\nversion: 1\npromptforge: 1\n---\n\n\
+            "---\nname: lifecycle\ndescription: CLI lifecycle fixture\npromptforge: 1\n---\n\n\
              # Lifecycle\n\n## Run\n\n```lua\nreturn 'done'\n```\n",
         )
         .expect("write the CLI lifecycle fixture");

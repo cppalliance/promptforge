@@ -18,7 +18,7 @@ use crate::watch::reload::{Reload, Reloader};
 /// A prompt whose Lua returns at once, so it needs no gateway.
 pub(super) fn prompt(name: &str, description: &str, value: &str) -> String {
     format!(
-        "---\nname: {name}\ndescription: {description}\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: {name}\ndescription: {description}\npromptforge: 1\n---\n\n\
          # Test prompt\n\n## Main\n\n```lua\nreturn '{value}'\n```\n"
     )
 }

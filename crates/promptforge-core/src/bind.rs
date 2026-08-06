@@ -537,7 +537,6 @@ mod tests {
             frontmatter: Frontmatter {
                 name: "fixture".to_owned(),
                 description: "fixture".to_owned(),
-                version: 1,
                 promptforge: Some(1),
                 default_return: None,
                 max_tool_iterations: None,
