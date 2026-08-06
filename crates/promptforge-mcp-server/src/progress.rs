@@ -4,9 +4,10 @@
 //! One `tools/call` can take minutes, and `notifications/progress` is the only
 //! thing a client can render while it waits. The two halves of that job have
 //! incompatible shapes: the core reports a run through [`Observer`], whose
-//! `on_event` is synchronous and sits on the run's own path, while sending a
+//! `observe` is synchronous and sits on the run's own path, while sending a
 //! notification is an `.await` on the peer. [`McpObserver`] is the join between
-//! them. `on_event` turns an event into a frame and hands it to a bounded
+//! them. `observe` recognizes a pinned detail vocabulary, turns the two
+//! cosmetic progress details into frames, and hands them to a bounded
 //! channel with `try_send`, and [`ProgressPump`] awaits the peer on a task of
 //! its own. Nothing on the run's path blocks, and the only shared state is a
 //! set of atomics, so no guard exists to be held across an await point.
@@ -19,30 +20,29 @@
 //! then abandons them, since a caption nobody reads is not worth a reply
 //! nobody receives.
 //!
-//! What each event produces:
+//! What each recognized observation produces:
 //!
-//! | Event | Frame |
+//! | Detail | Frame |
 //! |---|---|
-//! | `RunStarted` | frame 0, captioned with the prompt's name |
-//! | `SectionStarted` | the latched `completed`, captioned with the section |
-//! | `SectionFinished`, `ModelTurn`, `ToolCalled` | none; logged only |
-//! | `RunFinished` | none; it latches the run's turn total |
+//! | `Run started` | frame 0, captioned with the H1 title |
+//! | `Section started` | the incremented section count, captioned with the H2 |
+//! | all other recognized and unknown details | none; logged only |
 //!
-//! `SectionFinished` sends nothing because the frame it would send is the one
+//! `Section finished` sends nothing because the frame it would send is the one
 //! already on the wire: same latched `progress`, same section name. A client
 //! renders the caption in place, so a second identical frame is invisible to
 //! the reader and pure cost on the stream.
 //!
-//! What each event logs, which is a separate question from what it sends: the
-//! two run boundaries are `info`, so an operator at the default level sees that
-//! a run happened, what it was, how long it took, and how many model turns it
-//! needed - a run that quietly takes too long is this service's characteristic
-//! failure, and those two lines are what make it visible. Everything inside a
-//! run is `debug`, because a section can make dozens of tool calls and burying
-//! the boundaries under them defeats the purpose. The one exception is a tool
-//! call that failed, which is `warn`: a search that came back empty is a thing
-//! an operator wants without turning on debug, and it is rare enough not to
-//! flood.
+//! What each observation logs, which is a separate question from what it sends:
+//! the start boundary is `info`. The runner logs the terminal [`RunResult`]
+//! separately at `info`, once status, elapsed time, and the final turn count
+//! exist. Everything inside a run is `debug`, because a section can make dozens
+//! of tool calls and burying the boundaries under them defeats the purpose. The
+//! one exception is a tool call that failed, which is `warn`: a search that
+//! came back empty is a thing an operator wants without turning on debug, and
+//! it is rare enough not to flood.
+//!
+//! [`RunResult`]: crate::RunResult
 //!
 //! `total` is never sent. A `goto` or an early return means the number of
 //! sections a run will visit is unknown when it starts, so a denominator would
@@ -53,7 +53,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use promptforge_core::observe::{Event, Observer};
+use promptforge_core::observe::{Observer, detail};
 use rmcp::RoleServer;
 use rmcp::model::{ProgressNotificationParam, ProgressToken};
 use rmcp::service::Peer;
@@ -102,20 +102,19 @@ struct Frame {
 ///
 /// # Examples
 /// ```
-/// use promptforge_core::observe::{Event, Observer};
+/// use promptforge_core::observe::{Observer, detail};
 /// use promptforge_mcp_server::McpObserver;
 ///
 /// let observer = McpObserver::silent();
-/// observer.on_event(&Event::RunFinished { turns: 3, elapsed_ms: 40, ok: true });
-/// assert_eq!(observer.turns(), 3);
+/// observer.observe("Gather", detail::MODEL_TURN_COMPLETED);
+/// assert_eq!(observer.turns(), 1);
 /// ```
 #[derive(Debug)]
 pub struct McpObserver {
     /// The queue the pump drains, absent when the call carried no
     /// `progressToken` and there is therefore nothing to report to.
     frames: Option<Sender<Frame>>,
-    /// The highest `completed` any section reported, which is what makes
-    /// `progress` monotonic.
+    /// How many section-start observations the run reported.
     completed: AtomicU32,
     /// The run's model round trips, as the run itself reported them.
     turns: AtomicU32,
@@ -150,10 +149,10 @@ impl McpObserver {
         (observer, ProgressPump { task })
     }
 
-    /// How many model round trips the run reported taking.
+    /// How many completed model round trips have been observed so far.
     ///
-    /// Zero until the run ends, and zero after it for a run that reached no
-    /// model at all.
+    /// Zero before the first completed turn, and zero throughout a run that
+    /// reaches no model at all.
     #[must_use]
     pub fn turns(&self) -> u32 {
         self.turns.load(Ordering::Relaxed)
@@ -185,12 +184,9 @@ impl McpObserver {
         (McpObserver::over(Some(sender)), receiver)
     }
 
-    /// Raises the latch to `completed` and returns its new value, so a section
-    /// reported out of order repeats a number rather than going backwards.
-    fn latch(&self, completed: u32) -> u32 {
-        self.completed
-            .fetch_max(completed, Ordering::Relaxed)
-            .max(completed)
+    /// Increments and returns the number of sections entered.
+    fn advance(&self) -> u32 {
+        self.completed.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     /// Queues one frame, or counts it as dropped.
@@ -214,42 +210,40 @@ impl McpObserver {
 }
 
 impl Observer for McpObserver {
-    fn on_event(&self, ev: &Event) {
-        match ev {
-            Event::RunStarted { prompt, sections } => {
-                tracing::info!(%prompt, sections, "run started");
-                self.queue(0, prompt);
+    fn observe(&self, section: &str, report: &str) {
+        match report {
+            detail::RUN_STARTED => {
+                tracing::info!(%section, "run started");
+                self.queue(0, section);
             }
-            Event::SectionStarted { completed, name } => {
-                let progress = self.latch(*completed);
-                self.queue(progress, name);
+            detail::SECTION_STARTED => {
+                self.queue(self.advance(), section);
             }
-            Event::SectionFinished { name } => {
-                tracing::debug!(section = %name, "section finished");
+            detail::SECTION_FINISHED => {
+                tracing::debug!(%section, "section finished");
             }
-            Event::ModelTurn { section, turn } => {
-                tracing::debug!(section = %section, turn, "model turn");
+            detail::MODEL_TURN_COMPLETED => {
+                let turn = self.turns.fetch_add(1, Ordering::Relaxed) + 1;
+                tracing::debug!(%section, turn, "model turn completed");
             }
-            Event::ToolCalled { section, tool, ok } => {
-                if *ok {
-                    tracing::debug!(section = %section, tool = %tool, ok, "tool called");
-                } else {
-                    tracing::warn!(section = %section, tool = %tool, ok, "tool call failed");
-                }
+            detail::MODEL_TURN_FAILED => {
+                tracing::warn!(%section, "model turn failed");
             }
-            Event::RunFinished {
-                turns,
-                elapsed_ms,
-                ok,
-            } => {
-                self.turns.store(*turns, Ordering::Relaxed);
-                tracing::info!(turns, elapsed_ms, ok, "run finished");
+            detail::TOOL_CALL_SUCCEEDED => {
+                tracing::debug!(%section, "tool call succeeded");
             }
-            // `Event` is `#[non_exhaustive]`, so a variant added upstream
-            // reaches here rather than breaking the build. An unreported event
-            // is the right default: a frame's meaning is this crate's to
-            // decide, not the core's to impose.
-            other => tracing::debug!(?other, "unreported run event"),
+            detail::TOOL_CALL_FAILED => {
+                tracing::warn!(%section, "tool call failed");
+            }
+            detail::RUN_SUCCEEDED => {
+                tracing::debug!(%section, "run success observed");
+            }
+            detail::RUN_FAILED => {
+                tracing::debug!(%section, "run failure observed");
+            }
+            unknown => {
+                tracing::debug!(%section, detail = %unknown, "unrecognized observation");
+            }
         }
     }
 }
@@ -307,7 +301,7 @@ mod tests {
     use super::{Frame, McpObserver, ProgressPump, Receiver};
     use crate::levels::Levels;
     use promptforge_core::execute::{self, RunOptions};
-    use promptforge_core::observe::{Event, Observer};
+    use promptforge_core::observe::{Observer, detail};
     use promptforge_core::parser::Prompt;
     use promptforge_core::store::Store;
     use tracing::Level;
@@ -349,62 +343,33 @@ mod tests {
         source
     }
 
-    /// The events a three-section run emits, one section of which takes a model
-    /// turn and a tool call.
-    fn three_section_run() -> Vec<Event> {
+    /// The observations a three-section run emits, one section of which takes a
+    /// model turn and a tool call.
+    fn three_section_run() -> Vec<(&'static str, &'static str)> {
         vec![
-            Event::RunStarted {
-                prompt: "trio".to_string(),
-                sections: 3,
-            },
-            Event::SectionStarted {
-                completed: 1,
-                name: "First".to_string(),
-            },
-            Event::ModelTurn {
-                section: "First".to_string(),
-                turn: 1,
-            },
-            Event::ToolCalled {
-                section: "First".to_string(),
-                tool: "WebSearch".to_string(),
-                ok: true,
-            },
-            Event::SectionFinished {
-                name: "First".to_string(),
-            },
-            Event::SectionStarted {
-                completed: 2,
-                name: "Second".to_string(),
-            },
-            Event::SectionFinished {
-                name: "Second".to_string(),
-            },
-            Event::SectionStarted {
-                completed: 3,
-                name: "Third".to_string(),
-            },
-            Event::SectionFinished {
-                name: "Third".to_string(),
-            },
-            Event::RunFinished {
-                turns: 1,
-                elapsed_ms: 40,
-                ok: true,
-            },
+            ("Trio", detail::RUN_STARTED),
+            ("First", detail::SECTION_STARTED),
+            ("First", detail::MODEL_TURN_COMPLETED),
+            ("First", detail::TOOL_CALL_SUCCEEDED),
+            ("First", detail::SECTION_FINISHED),
+            ("Second", detail::SECTION_STARTED),
+            ("Second", detail::SECTION_FINISHED),
+            ("Third", detail::SECTION_STARTED),
+            ("Third", detail::SECTION_FINISHED),
+            ("Trio", detail::RUN_SUCCEEDED),
         ]
     }
 
     #[test]
     fn a_run_frames_its_start_and_each_section_and_nothing_else() {
         let (observer, mut frames) = McpObserver::queued();
-        for ev in three_section_run() {
-            observer.on_event(&ev);
+        for (section, report) in three_section_run() {
+            observer.observe(section, report);
         }
         assert_eq!(
             drain(&mut frames),
             vec![
-                frame(0, "trio"),
+                frame(0, "Trio"),
                 frame(1, "First"),
                 frame(2, "Second"),
                 frame(3, "Third"),
@@ -415,16 +380,13 @@ mod tests {
     }
 
     #[test]
-    fn progress_never_decreases() {
+    fn progress_counts_recognized_section_starts() {
         let (observer, mut frames) = McpObserver::queued();
-        for completed in [1, 3, 2] {
-            observer.on_event(&Event::SectionStarted {
-                completed,
-                name: format!("s{completed}"),
-            });
+        for section in ["one", "two", "three"] {
+            observer.observe(section, detail::SECTION_STARTED);
         }
         let progress: Vec<u32> = drain(&mut frames).iter().map(|f| f.progress).collect();
-        assert_eq!(progress, vec![1, 3, 3], "a repeat repeats its number");
+        assert_eq!(progress, vec![1, 2, 3]);
     }
 
     #[tokio::test]
@@ -469,34 +431,40 @@ mod tests {
     }
 
     #[test]
-    fn only_the_run_boundaries_and_a_failed_tool_call_reach_the_default_level() {
+    fn only_the_run_start_and_a_failed_tool_call_reach_the_default_level() {
         let levels = Levels::default();
         let subscriber = tracing_subscriber::registry().with(levels.clone());
         let observer = McpObserver::silent();
         tracing::subscriber::with_default(subscriber, || {
-            for ev in three_section_run() {
-                observer.on_event(&ev);
+            for (section, report) in three_section_run() {
+                observer.observe(section, report);
             }
-            observer.on_event(&Event::ToolCalled {
-                section: "First".to_string(),
-                tool: "WebSearch".to_string(),
-                ok: false,
-            });
+            observer.observe("First", detail::TOOL_CALL_FAILED);
         });
         assert_eq!(
             levels.operator_visible(),
-            vec![Level::INFO, Level::INFO, Level::WARN],
-            "the two run boundaries, then the failed tool call"
+            vec![Level::INFO, Level::WARN],
+            "the run start, then the failed tool call"
         );
     }
 
     #[test]
     fn a_silent_observer_counts_turns_without_a_queue() {
         let observer = McpObserver::silent();
-        for ev in three_section_run() {
-            observer.on_event(&ev);
+        for (section, report) in three_section_run() {
+            observer.observe(section, report);
         }
         assert_eq!(observer.turns(), 1);
         assert_eq!(observer.dropped(), 0, "there is nothing to drop into");
+    }
+
+    #[test]
+    fn unknown_details_are_tolerated_without_frames_or_counters() {
+        let (observer, mut frames) = McpObserver::queued();
+        observer.observe("First", "A future detail");
+
+        assert!(drain(&mut frames).is_empty());
+        assert_eq!(observer.turns(), 0);
+        assert_eq!(observer.dropped(), 0);
     }
 }

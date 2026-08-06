@@ -49,6 +49,7 @@ impl ClientHandler for RecordingClient {
 /// A prompt of three sections, the first two falling through and the last
 /// returning, so the whole run happens offline.
 const TRIO: &str = "---\nname: trio\ndescription: Three sections\nversion: 1\npromptforge: 1\n---\n\n\
+# Trio\n\n\
 ## First\n\n```lua\nvar.step = 1\n```\n\n\
 ## Second\n\n```lua\nvar.step = 2\n```\n\n\
 ## Third\n\n```lua\nreturn 'trio done'\n```\n";
@@ -127,7 +128,7 @@ async fn a_run_frames_its_start_and_then_each_section() {
     assert_eq!(
         seen,
         vec![
-            (0.0, Some("trio")),
+            (0.0, Some("Trio")),
             (1.0, Some("First")),
             (2.0, Some("Second")),
             (3.0, Some("Third")),

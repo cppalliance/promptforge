@@ -140,7 +140,7 @@ async fn a_backgrounded_run_that_panics_becomes_a_collectable_failure() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_backgrounded_run_logs_the_id_it_handed_back_and_the_outcome_that_followed() {
+async fn a_backgrounded_run_logs_the_id_without_duplicating_the_runner_terminal_log() {
     let (levels, _recording) = recording();
     let registry = registry("reply_deadline = \"50ms\"");
     registry.started("r1", "slow", 1);
@@ -160,17 +160,14 @@ async fn a_backgrounded_run_logs_the_id_it_handed_back_and_the_outcome_that_foll
 
     assert_eq!(
         levels.operator_visible(),
-        vec![Level::INFO, Level::INFO],
-        "the run leaving its call and the run ending, and nothing else: {levels:?}"
+        vec![Level::INFO],
+        "only the run leaving its call is logged by the registry: {levels:?}"
     );
     assert!(
         levels.said(Level::INFO, "outlived its call"),
         "the id the caller was handed: {levels:?}"
     );
-    assert!(
-        levels.said(Level::INFO, "terminal state"),
-        "the outcome nobody else observed: {levels:?}"
-    );
+    assert!(!levels.said(Level::INFO, "terminal state"), "{levels:?}");
 }
 
 #[tokio::test(start_paused = true)]

@@ -5,7 +5,7 @@ markdown is the program, the model is the CPU.
 
 ## Workspace
 
-- `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the progress-reporting seam (`Observer`, `Event`, `NullObserver`) that a caller hooks to watch a long run. A run reports through it as it goes (see "Watching a run" below)
+- `crates/promptforge-core` - library: prompt parser, gateway client, section execution, and `observe`, the report-only progress seam (`Observer`, `NullObserver`) that a caller hooks to watch a long run. A run reports borrowed `(section, detail)` strings through it as it goes (see "Watching a run" below)
 - `crates/promptforge-webfetch` - library: the `web_fetch` tool, which fetches a URL in-process and returns its main content as markdown. It needs no credential, so it runs wherever the prompt runs rather than through the gateway
 - `crates/promptforge-cli` - binary `promptforge`: the command-line tool, `promptforge run <file.md> [input]`
 - `crates/promptforge-gateway` - binary `promptforge-gateway`: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
@@ -497,7 +497,7 @@ caption a client updates in place. The frames are:
 
 | When | `progress` | `message` |
 |---|---|---|
-| the run starts | 0 | the prompt's name |
+| the run starts | 0 | the prompt's H1 title, or `Prompt` until H1 becomes required |
 | each section starts | sections entered so far, from 1 | the section's heading |
 
 Nothing else is sent. A section's end would repeat the frame already on the
@@ -515,8 +515,7 @@ this.
 
 A call carrying no `progressToken` is answered identically, with no channel and
 no forwarding task behind it. Either way the run's reported `turns` is the count
-the executor itself reported, since the observer that receives progress is also
-what hears the run's final tally.
+of exact `Model turn completed` observations received by the same observer.
 
 ## Prompt file anatomy
 
@@ -628,16 +627,9 @@ let opts = RunOptions {
 let result = execute::run(&prompt, input, &tools, &store, opts).await?;
 ```
 
-- `observer` receives an `Event` when the run starts and ends, at each section
-  boundary, at each model turn, and after each tool call. `on_event` is
-  synchronous and sits on the run's own path, so an implementation that
-  forwards elsewhere queues the event and returns rather than blocking. Events
-  are a report, never a decision: dropping them cannot change the result, which
-  is why `NullObserver` (the discarding one) is what the CLI passes.
-- `Event::SectionStarted` carries `completed`, the number of sections entered so
-  far counting from 1. It never decreases. There is deliberately no total: an
-  early return means the number of sections a run will visit is not known when
-  it starts, so a denominator would be a guess.
+- `observer` receives borrowed `(section, detail)` strings when the run starts and ends, at each section boundary, after each model turn and tool call, and after each Lua-harness store operation. `observe` is synchronous and sits on the run's own path, so an implementation that forwards elsewhere copies the pair into a queue and returns rather than blocking. Observations are reports, never decisions: dropping them cannot change the result, which is why `NullObserver` is what the CLI passes.
+- Details are stable exact strings from `promptforge_core::observe::detail`. They contain no prompt prose, model input or output, tool arguments or results, store paths or contents, credentials, or fetched content.
+- The MCP adapter recognizes `Run started` and `Section started` for cosmetic numeric progress. It counts recognized section starts from 1 and tolerates unknown details. There is deliberately no total: an early return means the number of sections a run will visit is not known when it starts, so a denominator would be a guess.
 - `client` is the gateway client the run's model calls go through. `None` builds
   one from `PROMPTFORGE_BASE_URL` / `PROMPTFORGE_TOKEN` / `PROMPTFORGE_MODEL` on
   the first call that needs it, which is what the CLI uses. A caller configured

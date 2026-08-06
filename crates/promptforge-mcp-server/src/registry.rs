@@ -245,9 +245,9 @@ impl RunRegistry {
     /// for the life of the process - never answerable by `check_run`, and never
     /// evicted, since eviction only reaches a record that finished.
     ///
-    /// Either way the outcome is logged here, because this task is the last
-    /// thing that observes such a run: the call that asked for it was answered
-    /// while it was still going.
+    /// A normal outcome is logged by the runner that constructs it. An abnormal
+    /// join is logged here because this task is the only place that can build
+    /// and observe its terminal result.
     fn supervise(
         self: &Arc<Self>,
         run_id: String,
@@ -259,21 +259,21 @@ impl RunRegistry {
         // Detached deliberately: the handle is the last thing that could observe
         // this run, and there is no later caller to hand it to.
         let _supervisor = tokio::spawn(async move {
-            let result = match task.await {
-                Ok(result) => result,
+            match task.await {
+                Ok(_result) => {}
                 Err(join) => {
                     let result = registry.unfinished(&run_id, &prompt, version, &join);
                     registry.finished(&run_id, result.clone());
-                    result
+                    tracing::info!(
+                        run_id = %run_id,
+                        prompt = %prompt,
+                        status = ?result.status,
+                        turns = result.turns,
+                        elapsed_ms = result.elapsed_ms,
+                        "a backgrounded run reached its terminal state"
+                    );
                 }
-            };
-            tracing::info!(
-                run_id = %run_id,
-                prompt = %prompt,
-                status = ?result.status,
-                elapsed_ms = result.elapsed_ms,
-                "a backgrounded run reached its terminal state"
-            );
+            }
         });
     }
 

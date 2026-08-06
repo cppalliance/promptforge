@@ -7,11 +7,12 @@ use std::sync::{Arc, Mutex};
 use axum::Json;
 use axum::Router;
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::routing::post;
 use serde_json::Value;
 
 use super::*;
-use crate::observe::NullObserver;
+use crate::observe::{NullObserver, detail};
 use crate::tools::Tool;
 
 /// Lua-only prompts never build the gateway client, so these run offline.
@@ -35,23 +36,23 @@ async fn run_offline(md: &str) -> Result<String> {
     run(&parse(md), "", &[], &Store::memory(), silent()).await
 }
 
-/// An [`Observer`] that keeps every event it is handed, in order, so a test
+/// An [`Observer`] that keeps every observation it is handed, in order, so a test
 /// can assert on the whole sequence rather than on a count.
 #[derive(Default)]
-struct Recorder(Mutex<Vec<Event>>);
+struct Recorder(Mutex<Vec<(String, String)>>);
 
 impl Observer for Recorder {
-    fn on_event(&self, ev: &Event) {
+    fn observe(&self, section: &str, detail: &str) {
         self.0
             .lock()
             .expect("the recorder mutex must not be poisoned")
-            .push(ev.clone());
+            .push((section.to_owned(), detail.to_owned()));
     }
 }
 
 impl Recorder {
-    /// The events recorded so far, in order.
-    fn events(&self) -> Vec<Event> {
+    /// The observations recorded so far, in order.
+    fn events(&self) -> Vec<(String, String)> {
         self.0
             .lock()
             .expect("the recorder mutex must not be poisoned")
@@ -61,7 +62,7 @@ impl Recorder {
 
 /// Run `md` offline under a fresh recorder and return the result together
 /// with everything the recorder saw.
-async fn run_recorded(md: &str) -> (Result<String>, Vec<Event>) {
+async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String)>) {
     let recorder = Recorder::default();
     let result = run(
         &parse(md),
@@ -677,18 +678,63 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     assert_eq!(
         recorder.events(),
         vec![
-            Event::ModelTurn {
-                section: "Gather".to_string(),
-                turn: 1,
-            },
-            Event::ToolCalled {
-                section: "Gather".to_string(),
-                tool: "echo".to_string(),
-                ok: false,
-            },
+            (
+                "Gather".to_string(),
+                detail::MODEL_TURN_COMPLETED.to_string(),
+            ),
+            ("Gather".to_string(), detail::TOOL_CALL_FAILED.to_string(),),
         ],
         "the failed dispatch must be reported before the error propagates"
     );
+}
+
+#[tokio::test]
+async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
+    async fn fail() -> (StatusCode, &'static str) {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "private backend response",
+        )
+    }
+
+    let router = Router::new().route("/v1/chat/completions", post(fail));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "secret token", "test-model");
+    let recorder = Recorder::default();
+    let mut turns = 0;
+    let error = run_tool_loop(
+        &client,
+        &[],
+        &[],
+        "private model input".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        SectionProgress {
+            observer: &recorder,
+            section: "Gather",
+            turns: &mut turns,
+        },
+    )
+    .await
+    .expect_err("the backend failure must propagate");
+
+    assert!(matches!(error, Error::Backend { status: 500, .. }));
+    assert_eq!(
+        recorder.events(),
+        vec![("Gather".to_string(), detail::MODEL_TURN_FAILED.to_string(),)]
+    );
+    let trace = format!("{:?}", recorder.events());
+    for payload in [
+        "private backend response",
+        "private model input",
+        "secret token",
+    ] {
+        assert!(!trace.contains(payload), "observation leaked {payload:?}");
+    }
 }
 
 // --- Guard-wrapping of untrusted tool results in the loop ---
@@ -850,71 +896,89 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
 /// The two-section fixture the fall-through test uses: the first section
 /// falls through, the second returns from Lua.
 const TWO_SECTIONS: &str = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
 ## First\n\n```lua\nlocal x = 1\n```\n\n\
 ## Second\n\n```lua\nreturn \"second\"\n```\n";
 
-/// Split a recorded sequence into everything before the final event and
-/// that event, which is the one carrying an unpredictable duration.
-fn split_last(events: Vec<Event>) -> (Vec<Event>, Event) {
-    let mut events = events;
-    let last = events.pop().expect("a run must report at least one event");
-    (events, last)
-}
+const STORE_SECTIONS: &str = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+## First\n\n```lua\nstore.write('state.txt', 'first')\n```\n\n\
+## Second\n\n```lua\nstore.append('state.txt', '\\nsecond')\nreturn \"second\"\n```\n";
 
 #[tokio::test]
-async fn a_two_section_run_reports_the_exact_event_sequence() {
-    let (result, events) = run_recorded(TWO_SECTIONS).await;
+async fn a_two_section_run_reports_the_exact_observation_sequence() {
+    let (result, observations) = run_recorded(TWO_SECTIONS).await;
     assert_eq!(result.unwrap(), "second");
 
-    let (head, last) = split_last(events);
     assert_eq!(
-        head,
+        observations,
         vec![
-            Event::RunStarted {
-                prompt: "t".to_string(),
-                sections: 2,
-            },
-            Event::SectionStarted {
-                completed: 1,
-                name: "First".to_string(),
-            },
-            Event::SectionFinished {
-                name: "First".to_string(),
-            },
-            Event::SectionStarted {
-                completed: 2,
-                name: "Second".to_string(),
-            },
-            Event::SectionFinished {
-                name: "Second".to_string(),
-            },
+            ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
+            ("First".to_string(), detail::SECTION_STARTED.to_string()),
+            ("First".to_string(), detail::SECTION_FINISHED.to_string()),
+            ("Second".to_string(), detail::SECTION_STARTED.to_string()),
+            ("Second".to_string(), detail::SECTION_FINISHED.to_string()),
+            ("Test prompt".to_string(), detail::RUN_SUCCEEDED.to_string()),
         ]
     );
-    // `elapsed_ms` is a measurement, so the final event is matched on the
-    // fields that are contractual.
-    match last {
-        Event::RunFinished { turns, ok, .. } => {
-            assert_eq!(turns, 0, "a Lua-only run takes no model turn");
-            assert!(ok, "the run produced a value");
-        }
-        other => panic!("the last event must be RunFinished, got {other:?}"),
-    }
 }
 
 #[tokio::test]
-async fn completed_never_decreases_across_a_run() {
-    let (_result, events) = run_recorded(TWO_SECTIONS).await;
-    let mut previous = 0;
-    for ev in &events {
-        if let Event::SectionStarted { completed, .. } = ev {
-            assert!(
-                *completed >= previous,
-                "completed went backwards: {previous} then {completed}"
-            );
-            previous = *completed;
-        }
-    }
-    assert_eq!(previous, 2, "both sections must have been reported");
+async fn recording_and_null_observers_produce_the_same_result_and_store_state() {
+    let prompt = parse(STORE_SECTIONS);
+    let recorded_store = Store::memory();
+    let sink = Recorder::default();
+    let observed_result = run(
+        &prompt,
+        "",
+        &[],
+        &recorded_store,
+        RunOptions {
+            observer: &sink,
+            client: None,
+        },
+    )
+    .await;
+    let null_store = Store::memory();
+    let null_result = run(&prompt, "", &[], &null_store, silent()).await;
+
+    assert_eq!(observed_result.unwrap(), null_result.unwrap());
+    assert_eq!(
+        recorded_store.glob("**").unwrap(),
+        null_store.glob("**").unwrap(),
+        "observer choice must not change store side effects"
+    );
+    assert_eq!(
+        recorded_store.read("state.txt").unwrap(),
+        null_store.read("state.txt").unwrap(),
+        "observer choice must not change stored contents"
+    );
+
+    let failing = parse(
+        "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+         ## Only\n\n```lua\ntools.add('missing')\n```\n",
+    );
+    let sink = Recorder::default();
+    let observed_error = run(
+        &failing,
+        "",
+        &[],
+        &Store::memory(),
+        RunOptions {
+            observer: &sink,
+            client: None,
+        },
+    )
+    .await
+    .expect_err("the scoped tool is absent");
+    let null_error = run(&failing, "", &[], &Store::memory(), silent())
+        .await
+        .expect_err("the scoped tool is absent");
+    assert_eq!(
+        observed_error.to_string(),
+        null_error.to_string(),
+        "observer choice must not change errors"
+    );
 }
 
 #[tokio::test]
@@ -923,42 +987,32 @@ async fn a_run_refused_by_the_version_gate_reports_nothing() {
     // there is no RunStarted to pair a RunFinished with.
     let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 2\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
-    let (result, events) = run_recorded(md).await;
+    let (result, observations) = run_recorded(md).await;
     assert!(result.is_err());
     assert!(
-        events.is_empty(),
-        "the gate must report nothing: {events:?}"
+        observations.is_empty(),
+        "the gate must report nothing: {observations:?}"
     );
 }
 
 #[tokio::test]
 async fn a_failing_run_still_reports_run_finished() {
     // The section scopes a tool the run's (empty) pool does not have, so
-    // the walk errors part way through and the final event must say so.
+    // the walk errors part way through and the final observation must say so.
     let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\ntools.add('nope')\n```\n";
-    let (result, events) = run_recorded(md).await;
+    let (result, observations) = run_recorded(md).await;
     assert!(matches!(result, Err(Error::UnknownScopedTool(_))));
 
-    let (head, last) = split_last(events);
     assert_eq!(
-        head,
+        observations,
         vec![
-            Event::RunStarted {
-                prompt: "t".to_string(),
-                sections: 1,
-            },
-            Event::SectionStarted {
-                completed: 1,
-                name: "Only".to_string(),
-            },
+            ("Prompt".to_string(), detail::RUN_STARTED.to_string()),
+            ("Only".to_string(), detail::SECTION_STARTED.to_string()),
+            ("Prompt".to_string(), detail::RUN_FAILED.to_string()),
         ],
         "a section that errors reports no SectionFinished"
     );
-    match last {
-        Event::RunFinished { ok, .. } => assert!(!ok, "the run failed"),
-        other => panic!("the last event must be RunFinished, got {other:?}"),
-    }
 }
 
 #[tokio::test]
@@ -991,19 +1045,18 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     assert_eq!(
         recorder.events(),
         vec![
-            Event::ModelTurn {
-                section: "Gather".to_string(),
-                turn: 1,
-            },
-            Event::ToolCalled {
-                section: "Gather".to_string(),
-                tool: "echo".to_string(),
-                ok: true,
-            },
-            Event::ModelTurn {
-                section: "Gather".to_string(),
-                turn: 2,
-            },
+            (
+                "Gather".to_string(),
+                detail::MODEL_TURN_COMPLETED.to_string(),
+            ),
+            (
+                "Gather".to_string(),
+                detail::TOOL_CALL_SUCCEEDED.to_string(),
+            ),
+            (
+                "Gather".to_string(),
+                detail::MODEL_TURN_COMPLETED.to_string(),
+            ),
         ]
     );
 }
@@ -1055,32 +1108,14 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
     .unwrap();
     assert_eq!(out, "hello from the mock");
 
-    let (head, last) = split_last(recorder.events());
     assert_eq!(
-        head,
+        recorder.events(),
         vec![
-            Event::RunStarted {
-                prompt: "t".to_string(),
-                sections: 1,
-            },
-            Event::SectionStarted {
-                completed: 1,
-                name: "Only".to_string(),
-            },
-            Event::ModelTurn {
-                section: "Only".to_string(),
-                turn: 1,
-            },
-            Event::SectionFinished {
-                name: "Only".to_string(),
-            },
+            ("Prompt".to_string(), detail::RUN_STARTED.to_string()),
+            ("Only".to_string(), detail::SECTION_STARTED.to_string()),
+            ("Only".to_string(), detail::MODEL_TURN_COMPLETED.to_string(),),
+            ("Only".to_string(), detail::SECTION_FINISHED.to_string()),
+            ("Prompt".to_string(), detail::RUN_SUCCEEDED.to_string()),
         ]
     );
-    match last {
-        Event::RunFinished { turns, ok, .. } => {
-            assert_eq!(turns, 1, "the prose section took one model turn");
-            assert!(ok);
-        }
-        other => panic!("the last event must be RunFinished, got {other:?}"),
-    }
 }

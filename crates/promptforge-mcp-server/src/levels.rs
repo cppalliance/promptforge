@@ -1,5 +1,4 @@
-//! A test-only subscriber layer that records what the log said and at what
-//! level.
+//! A test-only subscriber layer that records each log's fields and level.
 //!
 //! Two things in this crate are a level rather than a message: a run boundary is
 //! `info` because an operator watching the default level must see that a run
@@ -15,7 +14,7 @@ use tracing::field::{Field, Visit};
 use tracing::{Level, Subscriber};
 use tracing_subscriber::layer::{Context, Layer};
 
-/// The level and message of every event a subscriber saw, in order.
+/// The level and rendered fields of every event a subscriber saw, in order.
 #[derive(Clone, Default)]
 pub(crate) struct Levels(Arc<Mutex<Vec<(Level, String)>>>);
 
@@ -31,7 +30,7 @@ impl Levels {
             .collect()
     }
 
-    /// Whether some event at `level` carried `needle` in its message.
+    /// Whether some event at `level` carried `needle` in its rendered fields.
     pub(crate) fn said(&self, level: Level, needle: &str) -> bool {
         self.lines()
             .iter()
@@ -55,29 +54,24 @@ impl fmt::Debug for Levels {
 
 impl<S: Subscriber> Layer<S> for Levels {
     fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
-        let mut message = Message(String::new());
-        event.record(&mut message);
+        let mut fields = Fields(Vec::new());
+        event.record(&mut fields);
         self.0
             .lock()
             .expect("no test panics while holding the recorded lines")
-            .push((*event.metadata().level(), message.0));
+            .push((*event.metadata().level(), fields.0.join(" ")));
     }
 }
 
-/// The `message` field of one event, which is the static text the macro was
-/// written with.
-struct Message(String);
+/// The rendered fields of one event.
+struct Fields(Vec<String>);
 
-impl Visit for Message {
+impl Visit for Fields {
     fn record_str(&mut self, field: &Field, value: &str) {
-        if field.name() == "message" {
-            self.0 = value.to_owned();
-        }
+        self.0.push(format!("{}={value}", field.name()));
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        if field.name() == "message" {
-            self.0 = format!("{value:?}");
-        }
+        self.0.push(format!("{}={value:?}", field.name()));
     }
 }
