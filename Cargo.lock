@@ -2743,6 +2743,7 @@ name = "promptforge-core-tests"
 version = "0.1.0"
 dependencies = [
  "promptforge-core",
+ "tokio",
 ]
 
 [[package]]
