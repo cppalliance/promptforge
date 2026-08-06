@@ -36,7 +36,7 @@ pub(crate) fn retrieval(catalog: &Catalog) -> Retrieval {
 pub(crate) fn prompt(name: &str, description: &str) -> String {
     format!(
         "---\nname: {name}\ndescription: {description}\nversion: 1\npromptforge: 1\n---\n\n\
-         ## Main\n\n```lua\nreturn '{name}'\n```\n"
+         # Test prompt\n\n## Main\n\n```lua\nreturn '{name}'\n```\n"
     )
 }
 

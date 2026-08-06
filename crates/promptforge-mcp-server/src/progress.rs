@@ -301,7 +301,7 @@ mod tests {
     use super::{Frame, McpObserver, ProgressPump, Receiver};
     use crate::levels::Levels;
     use promptforge_core::execute::{self, RunOptions};
-    use promptforge_core::observe::{Observer, detail};
+    use promptforge_core::observe::{NullObserver, Observer, detail};
     use promptforge_core::parser::Prompt;
     use promptforge_core::store::Store;
     use tracing::Level;
@@ -328,7 +328,7 @@ mod tests {
     /// the whole run happens offline and emits one frame per section.
     fn long_prompt(sections: usize) -> String {
         let mut source = String::from(
-            "---\nname: long\ndescription: Many sections\nversion: 1\npromptforge: 1\n---\n",
+            "---\nname: long\ndescription: Many sections\nversion: 1\npromptforge: 1\n---\n\n# Test prompt\n",
         );
         for section in 1..sections {
             let _written = write!(
@@ -395,7 +395,7 @@ mod tests {
         // stopped accepting: the queue fills, and the run must not notice.
         let sections = super::CAPACITY + 16;
         let source = long_prompt(sections);
-        let prompt = Prompt::parse(&source).expect("the fixture prompt parses");
+        let prompt = Prompt::parse(&source, &NullObserver).expect("the fixture prompt parses");
         let (observer, _frames) = McpObserver::queued();
 
         let store = Store::memory();

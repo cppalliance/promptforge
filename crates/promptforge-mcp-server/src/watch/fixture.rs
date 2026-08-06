@@ -19,14 +19,14 @@ use crate::watch::reload::{Reload, Reloader};
 pub(super) fn prompt(name: &str, description: &str, value: &str) -> String {
     format!(
         "---\nname: {name}\ndescription: {description}\nversion: 1\npromptforge: 1\n---\n\n\
-         ## Main\n\n```lua\nreturn '{value}'\n```\n"
+         # Test prompt\n\n## Main\n\n```lua\nreturn '{value}'\n```\n"
     )
 }
 
 /// A prompt file that declares a `promptforge:` version - so it is a prompt -
 /// but whose frontmatter is missing a required field, so it cannot be validated.
 pub(super) fn unparsable() -> &'static str {
-    "---\npromptforge: 1\n---\n\n## Main\n\nprose\n"
+    "---\npromptforge: 1\n---\n\n# Test prompt\n\n## Main\n\nprose\n"
 }
 
 /// A `prompts.toml` body over `prompts/`, with `extra` appended verbatim.

@@ -12,6 +12,12 @@
 /// Consumers may recognize individual constants for cosmetic presentation, but
 /// must tolerate unknown details and must never use a report to steer execution.
 pub mod detail {
+    /// Prompt parsing began.
+    pub const PARSE_STARTED: &str = "Parse started";
+    /// Prompt parsing and parse-time compilation completed successfully.
+    pub const PARSE_SUCCEEDED: &str = "Parse succeeded";
+    /// Prompt parsing or parse-time compilation returned an error.
+    pub const PARSE_FAILED: &str = "Parse failed";
     /// A run passed its version gate and began.
     pub const RUN_STARTED: &str = "Run started";
     /// A run returned a value.

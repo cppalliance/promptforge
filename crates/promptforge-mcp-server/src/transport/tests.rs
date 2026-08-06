@@ -25,7 +25,7 @@ const TOKEN: &str = "shared-bearer";
 
 /// A prompt that runs offline: one section whose Lua returns at once.
 const ECHO: &str = "---\nname: echo\ndescription: Returns its argument\nversion: 1\npromptforge: 1\n---\n\n\
-## Main\n\n```lua\nreturn args\n```\n";
+# Test prompt\n\n## Main\n\n```lua\nreturn args\n```\n";
 
 /// A router over a one-prompt catalog, and the directory that catalog reads.
 fn router() -> (TempDir, axum::Router) {
