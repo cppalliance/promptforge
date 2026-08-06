@@ -3,7 +3,7 @@
 //! Admission, the reply deadline, and collecting a run by id are in [`runs`],
 //! which shares these fixtures.
 //!
-//! Almost none of these needs a gateway: every fixture prompt's Lua block
+//! Almost none of these needs a gateway: every fixture prompt's Lua preamble
 //! returns a value, which finishes the run before any model call is made. The
 //! exception is the turn count, which is a statement about model round trips
 //! and so needs a backend to take one against.
@@ -36,11 +36,11 @@ fn echo_prompt(name: &str, description: &str) -> String {
     )
 }
 
-/// A prompt whose Lua block does not compile, so the run starts and fails.
-fn broken_lua_prompt(name: &str) -> String {
+/// A prompt whose valid Lua returns an unsupported value at execution.
+fn failing_lua_prompt(name: &str) -> String {
     format!(
         "---\nname: {name}\ndescription: Fails on entry\nversion: 1\npromptforge: 1\n---\n\n\
-         # Test prompt\n\n## Main\n\n```lua\nreturn (\n```\n"
+         # Test prompt\n\n## Main\n\n```lua\nreturn {{}}\n```\n"
     )
 }
 
@@ -50,7 +50,7 @@ fn write(root: &Path, relative: &str, contents: &str) {
 }
 
 /// A server over a prompts directory holding three prompts that run offline
-/// (`echo`, `greet`, `summarize`) and one whose Lua will not compile.
+/// (`echo`, `greet`, `summarize`) and one whose Lua fails during execution.
 fn server() -> (TempDir, PromptForgeServer) {
     server_with("")
 }
@@ -66,7 +66,7 @@ fn server_with(server_lines: &str) -> (TempDir, PromptForgeServer) {
         "summarize.md",
         &echo_prompt("summarize", "Summarize a document"),
     );
-    write(root, "explode.md", &broken_lua_prompt("explode"));
+    write(root, "explode.md", &failing_lua_prompt("explode"));
 
     let config = Config::from_toml_str(&format!(
         "[server]\ntoken = \"t\"\n{server_lines}\n\n\

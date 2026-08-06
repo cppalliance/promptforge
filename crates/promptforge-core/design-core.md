@@ -14,7 +14,7 @@ The crate currently exposes `client`, `execute`, `lua`, `observe`, `parser`, `st
 
 ### Current prompt and execution lifecycle
 
-A prompt currently consists of YAML frontmatter without concrete tools, exactly one required H1 title, an optional compiled shared library, and one or more H2 sections. Ordinary Markdown before the H1 is ignored. The shared library is reserved by an exact unindented `lua prompt` Markdown fence immediately after the H1, allowing blank lines but no prose before it. Reserved-looking marker lines inside a longer Markdown fence remain prose. Each section retains the existing optional leading Lua fence and prose grammar. Top-level sections execute in file order. Child sections parse but do not execute.
+A prompt currently consists of YAML frontmatter without concrete tools, exactly one required H1 title, an optional compiled shared library, and one or more H2 sections. Ordinary Markdown before the H1 is ignored. The shared library is reserved by an exact unindented `lua prompt` Markdown fence immediately after the H1, allowing blank lines but no prose before it. Reserved-looking marker lines inside a longer Markdown fence remain prose. Each section parses into an optional compiled Lua preamble, prose, and an optional compiled Lua epilog. Top-level sections execute in file order. Child sections parse but do not execute.
 
 Each section currently gets a fresh Lua VM. Its Lua can read `args` and `sys`, write `var`, scope concrete tools with `tools.add`, and use the run-scoped virtual store. A scalar top-level return ends the run. Otherwise substituted non-empty prose enters the model tool loop. Falling off the final section returns `default_return`, the last model reply, or `"done"` in that order.
 
@@ -66,7 +66,15 @@ The version gate runs before observation begins. A refused source emits no repor
 
 `LuaProgram` retains its original source and compiles it once into process-local Lua 5.4 bytecode without executing it. Loading creates a function in a caller-supplied VM but does not call it, so one program can seed multiple independent VMs while each VM supplies its own globals. The bytecode is private, is never persisted, and is not treated as a portable serialization format.
 
-Compilation takes an explicit prompt-region location. Malformed source returns `Error::LuaCompile` carrying that location, the retained source, and the Lua compiler diagnostic. Fixed compilation start, success, and failure reports expose none of the source or location payload. Parsing now compiles the optional H1 shared library once. Existing section parsing and model execution still pass H2 source strings through the one-phase compatibility path until their owning grammar and executor steps ship.
+Compilation takes an explicit prompt-region location. Malformed source returns `Error::LuaCompile` carrying that location, the retained source, and the Lua compiler diagnostic. Fixed compilation start, success, and failure reports expose none of the source or location payload. Parsing compiles the optional H1 shared library and every reserved H2 preamble and epilog once. Existing model execution still passes the preamble's retained source through the one-phase compatibility path and does not run the epilog.
+
+### Three-phase section grammar
+
+Each H2 through H6 section is split into an optional leading Lua preamble, prose, and an optional trailing Lua epilog. Reserved executable regions require exact unindented ` ```lua ` opening lines and exact unindented ` ``` ` closing lines. Blank lines may precede the preamble and follow the epilog. A lone reserved fence is the preamble, preserving the existing one-fence meaning; two fences may surround empty prose.
+
+Only positional boundary fences are reserved. Exact Lua fences between prose remain prose without compilation. Indented markers, longer backtick runs, different capitalization, extra info tokens, other languages, and marker-looking lines inside longer Markdown fences also remain prose. A reserved boundary fence with no exact close is a location-bearing parse error rather than prose.
+
+`Section` stores `preamble` and `epilog` as compiled `LuaProgram` values around its prose. Compilation locations identify the section heading and phase. Compilation observations use only the fixed payload-free details, while diagnostics retain source and location in the returned error. Substitution remains a prose-only operation and never rewrites Lua source.
 
 ### Persistent section VM seam
 
@@ -95,10 +103,6 @@ Everything in this section is settled design for later steps and remains unimple
 ### Capability binding and picker validation
 
 The shipped deterministic resolver seam and Lua modes preserve each resolved `ToolId` without yet enforcing identity uniqueness or live-registry agreement. A later adapter will translate `promptforge-tool-picker` outcomes into that seam, including absent, duplicate, and ambiguous outcomes, and the later binding-uniqueness step will validate identities atomically. Before a model turn, core will apply the shipped picker near-duplicate analysis to the effective scope.
-
-### Three-phase section grammar
-
-The remaining grammar work will split each H2 into an optional leading Lua preamble, prose, and optional trailing Lua epilog. Exact fence forms will reserve executable regions while other fences remain prose.
 
 ### Semantic capability phases
 

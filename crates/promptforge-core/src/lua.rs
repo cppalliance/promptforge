@@ -156,7 +156,7 @@ struct ToolRuntime {
 ///
 /// Compilation does not execute the source. Loading a program with [`load`](Self::load)
 /// creates a function in the supplied VM but likewise does not call it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LuaProgram {
     source: String,
     bytecode: Vec<u8>,

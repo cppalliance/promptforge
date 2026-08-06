@@ -1139,3 +1139,49 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         ]
     );
 }
+
+#[tokio::test]
+async fn parsed_epilog_remains_inert_in_the_compatibility_executor() {
+    let addr = spawn_text_gateway().await;
+    let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+## Only\n\nSay something.\n\n```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'epilog result'\n```\n";
+    let prompt = parse(md);
+    assert!(prompt.entry().preamble.is_none());
+    assert!(prompt.entry().epilog.is_some());
+
+    let recorder = Recorder::default();
+    let store = Store::memory();
+    let out = run(
+        &prompt,
+        "",
+        &[],
+        &store,
+        RunOptions {
+            observer: &recorder,
+            client: Some(GatewayClient::new(
+                &format!("http://{addr}/v1"),
+                "test",
+                "test-model",
+            )),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(out, "hello from the mock");
+    assert!(
+        store.read("epilog-ran.txt").is_err(),
+        "the parsed epilog must not mutate the store"
+    );
+    assert_eq!(
+        recorder.events(),
+        vec![
+            ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
+            ("Only".to_string(), detail::SECTION_STARTED.to_string()),
+            ("Only".to_string(), detail::MODEL_TURN_COMPLETED.to_string()),
+            ("Only".to_string(), detail::SECTION_FINISHED.to_string()),
+            ("Test prompt".to_string(), detail::RUN_SUCCEEDED.to_string()),
+        ],
+        "an inert epilog must add no lifecycle observations"
+    );
+}
