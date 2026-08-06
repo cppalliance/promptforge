@@ -75,7 +75,7 @@ mod tests {
             &config.gateway,
         )
         .expect("both canonical names bind");
-        let names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
+        let names: Vec<&str> = tools.iter().map(|tool| tool.wire_name()).collect();
         assert_eq!(names, ["web_fetch", "web_search"]);
     }
 

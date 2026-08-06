@@ -14,7 +14,7 @@ use std::sync::Arc;
 use readabilityrs::{Readability, ReadabilityOptions};
 use reqwest::header::CONTENT_TYPE;
 
-use promptforge_core::tools::Tool;
+use promptforge_core::tools::{Tool, ToolId};
 use promptforge_core::{Error, Result};
 
 pub mod address;
@@ -304,11 +304,15 @@ fn extract_html(html: &str, base_url: Option<&str>, raw: bool) -> (String, Extra
 
 #[async_trait::async_trait]
 impl Tool for WebFetch {
+    fn id(&self) -> ToolId {
+        ToolId::new("promptforge", "web_fetch")
+    }
+
     #[expect(
         clippy::unnecessary_literal_bound,
         reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
-    fn name(&self) -> &str {
+    fn wire_name(&self) -> &str {
         "web_fetch"
     }
 
@@ -620,7 +624,7 @@ mod tests {
     use super::{WebFetch, extract_html};
     use crate::config::FetchConfig;
     use promptforge_core::Error;
-    use promptforge_core::tools::Tool;
+    use promptforge_core::tools::{Tool, ToolId};
 
     /// An article page long enough for readability extraction to fire.
     const ARTICLE_HTML: &str = r"
@@ -648,6 +652,40 @@ mod tests {
           </article>
         </body></html>
     ";
+
+    #[test]
+    fn descriptor_is_stable_and_faithful() {
+        let tool = WebFetch::new();
+
+        assert_eq!(tool.id(), ToolId::new("promptforge", "web_fetch"));
+        assert_eq!(tool.wire_name(), "web_fetch");
+        assert_eq!(
+            tool.description(),
+            "Fetch a web page and return its main content as markdown."
+        );
+        assert_eq!(
+            tool.parameters_schema(),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to fetch."
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Maximum number of characters of text to return for this call, overriding the configured default. Longer text is truncated on a character boundary and the result is flagged as truncated."
+                    },
+                    "raw": {
+                        "type": "boolean",
+                        "description": "Skip article extraction and render the whole HTML document. Use for a page that is mostly a table or list, where extraction would discard the content. Ignored for non-HTML responses. Defaults to false."
+                    }
+                },
+                "required": ["url"]
+            })
+        );
+    }
 
     /// Shared state for the loopback server: its own port and a target hit count.
     #[derive(Clone)]
