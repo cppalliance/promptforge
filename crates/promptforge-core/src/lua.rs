@@ -24,7 +24,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mlua::{
-    HookTriggers, Lua, LuaOptions, LuaSerdeExt, MultiValue, Scope, StdLib, Value, Variadic, VmState,
+    Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, MultiValue, Scope, StdLib, Value,
+    Variadic, VmState,
 };
 use serde_json::Value as Json;
 
@@ -36,6 +37,110 @@ use crate::{Error, Result};
 const HOOK_INTERVAL: u32 = 10_000;
 /// Maximum number of hook firings before a block is aborted (~1e7 instructions).
 const HOOK_BUDGET: u64 = 1_000;
+
+/// Compiled Lua 5.4 source that can be loaded into multiple process-local VMs.
+///
+/// A program retains its original source for diagnostics and stores bytecode
+/// produced once by Lua 5.4. The bytecode is an in-memory implementation detail:
+/// it is not a stable or portable serialization format and must not be persisted.
+///
+/// Compilation does not execute the source. Loading a program with [`load`](Self::load)
+/// creates a function in the supplied VM but likewise does not call it.
+#[derive(Debug, Clone)]
+pub struct LuaProgram {
+    source: String,
+    bytecode: Vec<u8>,
+}
+
+impl LuaProgram {
+    /// Compiles `source` as Lua 5.4 bytecode without executing it.
+    ///
+    /// `location` identifies the source region in diagnostics. Compilation
+    /// reports contain only fixed strings and never include `source` or
+    /// `location`.
+    ///
+    /// # Errors
+    /// Returns [`Error::LuaCompile`] when `source` is not syntactically valid,
+    /// retaining the source, location, and Lua diagnostic. Returns
+    /// [`Error::Lua`] if the temporary compiler VM cannot be created.
+    ///
+    /// # Examples
+    /// ```
+    /// use mlua::Lua;
+    /// use promptforge_core::lua::LuaProgram;
+    /// use promptforge_core::observe::NullObserver;
+    ///
+    /// let program = LuaProgram::compile(
+    ///     "return 40 + 2",
+    ///     "example preamble",
+    ///     &NullObserver,
+    ///     "Example",
+    /// )?;
+    /// let lua = Lua::new();
+    /// let chunk = program.load(&lua)?;
+    /// let answer: i64 = chunk.call(())?;
+    /// assert_eq!(answer, 42);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn compile(
+        source: &str,
+        location: &str,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<Self> {
+        observer.observe(section, detail::LUA_COMPILATION_STARTED);
+
+        let lua = match Lua::new_with(
+            StdLib::STRING | StdLib::TABLE | StdLib::MATH,
+            LuaOptions::default(),
+        ) {
+            Ok(lua) => lua,
+            Err(error) => {
+                observer.observe(section, detail::LUA_COMPILATION_FAILED);
+                return Err(Error::Lua(error.to_string()));
+            }
+        };
+
+        let function = match lua.load(source).set_name(location).into_function() {
+            Ok(function) => function,
+            Err(error) => {
+                observer.observe(section, detail::LUA_COMPILATION_FAILED);
+                return Err(Error::LuaCompile {
+                    location: location.to_owned(),
+                    lua_source: source.to_owned(),
+                    message: error.to_string(),
+                });
+            }
+        };
+        let bytecode = function.dump(true);
+
+        observer.observe(section, detail::LUA_COMPILATION_SUCCEEDED);
+        Ok(Self {
+            source: source.to_owned(),
+            bytecode,
+        })
+    }
+
+    /// Returns the original Lua source retained for diagnostics.
+    #[must_use]
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    /// Loads the compiled function into `lua` without executing it.
+    ///
+    /// The bytecode is loaded only into a VM in the same process and is never
+    /// exposed as a persistence format.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the VM rejects the internally compiled
+    /// bytecode.
+    pub fn load(&self, lua: &Lua) -> Result<Function> {
+        lua.load(self.bytecode.as_slice())
+            .into_function()
+            .map_err(|error| Error::Lua(error.to_string()))
+    }
+}
 
 /// The result of running a section's Lua block.
 #[derive(Debug, Clone)]
@@ -487,6 +592,95 @@ mod tests {
             &NullObserver,
             "Test",
         )
+    }
+
+    #[test]
+    fn lua_program_retains_source_and_round_trips_bytecode() {
+        let source = "return greeting .. ' world'";
+        let program =
+            LuaProgram::compile(source, "section Gather preamble", &NullObserver, "Gather")
+                .expect("valid Lua must compile");
+        assert_eq!(program.source(), source);
+
+        for greeting in ["hello", "goodbye"] {
+            let lua = Lua::new();
+            lua.globals()
+                .set("greeting", greeting)
+                .expect("the test global must install");
+            let function = program.load(&lua).expect("bytecode must load");
+            let returned: String = function.call(()).expect("bytecode must execute");
+            assert_eq!(returned, format!("{greeting} world"));
+        }
+    }
+
+    #[test]
+    fn malformed_lua_reports_location_and_retains_source_diagnostic() {
+        let source = "local secret =\nreturn secret";
+        let location = "section Gather preamble";
+        let error = LuaProgram::compile(source, location, &NullObserver, "Gather")
+            .expect_err("malformed Lua must not compile");
+
+        match &error {
+            Error::LuaCompile {
+                location: actual_location,
+                lua_source: actual_source,
+                message,
+            } => {
+                assert_eq!(actual_location, location);
+                assert_eq!(actual_source, source);
+                assert!(
+                    message.contains(location),
+                    "the Lua diagnostic must identify its source region: {message}"
+                );
+            }
+            other => panic!("expected Error::LuaCompile, got {other:?}"),
+        }
+        assert!(
+            error.to_string().contains(location),
+            "the displayed error must identify its source region"
+        );
+    }
+
+    #[test]
+    fn lua_compilation_reports_are_ordered_exact_and_payload_free() {
+        let recorder = Recorder::default();
+        let source = "return 'private source payload'";
+        let location = "private/location";
+        LuaProgram::compile(source, location, &recorder, "Gather").expect("valid Lua must compile");
+        assert_eq!(
+            recorder.observations(),
+            vec![
+                (
+                    "Gather".to_owned(),
+                    detail::LUA_COMPILATION_STARTED.to_owned(),
+                ),
+                (
+                    "Gather".to_owned(),
+                    detail::LUA_COMPILATION_SUCCEEDED.to_owned(),
+                ),
+            ]
+        );
+
+        let recorder = Recorder::default();
+        LuaProgram::compile("local private =", location, &recorder, "Gather")
+            .expect_err("malformed Lua must fail");
+        let observations = recorder.observations();
+        assert_eq!(
+            observations,
+            vec![
+                (
+                    "Gather".to_owned(),
+                    detail::LUA_COMPILATION_STARTED.to_owned(),
+                ),
+                (
+                    "Gather".to_owned(),
+                    detail::LUA_COMPILATION_FAILED.to_owned(),
+                ),
+            ]
+        );
+        let trace = format!("{observations:?}");
+        assert!(!trace.contains("private"));
+        assert!(!trace.contains(location));
     }
 
     #[test]
