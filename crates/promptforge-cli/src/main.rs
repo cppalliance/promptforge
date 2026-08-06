@@ -59,7 +59,7 @@ async fn run(path: &str, input: &str) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let prompt = match Prompt::parse(&source) {
+    let prompt = match Prompt::parse(&source, &NullObserver) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {e}");
@@ -69,11 +69,7 @@ async fn run(path: &str, input: &str) -> ExitCode {
 
     let base_url = std::env::var("PROMPTFORGE_BASE_URL").ok();
     let token = std::env::var("PROMPTFORGE_TOKEN").ok();
-    let boxed = match tools::select_tools(
-        &prompt.frontmatter.tools,
-        base_url.as_deref(),
-        token.as_deref(),
-    ) {
+    let boxed = match tools::select_tools(&[], base_url.as_deref(), token.as_deref()) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("error: {e}");

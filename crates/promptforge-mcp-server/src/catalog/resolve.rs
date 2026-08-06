@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use glob::{MatchOptions, Pattern};
+use promptforge_core::observe::NullObserver;
 use promptforge_core::parser::Prompt;
 use promptforge_core::promptforge_version;
 
@@ -158,7 +159,7 @@ fn read(path: &Path) -> Result<String, String> {
 
 /// Parses one candidate file, reporting the failure as a validation detail.
 fn parse(source: &str) -> Result<Prompt, String> {
-    Prompt::parse(source).map_err(|e| format!("does not parse: {e}"))
+    Prompt::parse(source, &NullObserver).map_err(|e| format!("does not parse: {e}"))
 }
 
 /// Turns a parsed prompt into an entry, checking the frontmatter name and, for

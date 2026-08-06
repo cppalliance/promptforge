@@ -61,7 +61,7 @@ pub enum Error {
     UnknownTool(String),
 
     /// A section's Lua block scoped a tool by a name absent from the run's
-    /// frontmatter tools, so no matching tool could be advertised or dispatched.
+    /// supplied tool pool, so no matching tool could be advertised or dispatched.
     #[error("section scoped unknown tool {0}")]
     UnknownScopedTool(String),
 

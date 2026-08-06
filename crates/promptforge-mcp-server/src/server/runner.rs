@@ -102,7 +102,7 @@ pub(super) async fn run(
         ));
     };
 
-    let tools = match bind::select_tools(&prompt.frontmatter.tools, &config.gateway) {
+    let tools = match bind::select_tools(&[], &config.gateway) {
         Ok(tools) => tools,
         Err(message) => {
             return run_result(&RunResult::failed(

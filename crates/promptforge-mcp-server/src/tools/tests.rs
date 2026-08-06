@@ -9,6 +9,7 @@
 
 use std::path::PathBuf;
 
+use promptforge_core::observe::NullObserver;
 use promptforge_core::parser::Prompt;
 
 use super::{prompt_value, publishes_built_in, tool_definitions};
@@ -23,7 +24,7 @@ fn prompt(name: &str, description: &str) -> Prompt {
         "---\nname: {name}\ndescription: {description}\nversion: 1\npromptforge: 1\n---\n\n\
          # Title\n\n## Main\n\n```lua\nreturn args\n```\n"
     );
-    Prompt::parse(&source).expect("the fixture prompt parses")
+    Prompt::parse(&source, &NullObserver).expect("the fixture prompt parses")
 }
 
 fn entry(name: &str, description: &str) -> Entry {

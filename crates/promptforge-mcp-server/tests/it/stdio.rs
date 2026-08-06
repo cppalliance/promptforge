@@ -21,11 +21,11 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 /// A prompt that runs offline.
 const ECHO: &str = "---\nname: echo\ndescription: Returns its argument\nversion: 1\npromptforge: 1\n---\n\n\
-## Main\n\n```lua\nreturn args\n```\n";
+# Test prompt\n\n## Main\n\n```lua\nreturn args\n```\n";
 
 /// A prompt whose frontmatter name is not a legal tool name.
 const SHOUTY: &str = "---\nname: Shouty\ndescription: An illegal tool name\nversion: 1\npromptforge: 1\n---\n\n\
-## Main\n\n```lua\nreturn args\n```\n";
+# Test prompt\n\n## Main\n\n```lua\nreturn args\n```\n";
 
 /// A prompt that declares itself one and then carries no section.
 const NO_SECTIONS: &str = "---\nname: hollow\ndescription: No sections at all\nversion: 1\npromptforge: 1\n---\n\n# Only a title\n";

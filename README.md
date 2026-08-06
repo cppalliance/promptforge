@@ -497,7 +497,7 @@ caption a client updates in place. The frames are:
 
 | When | `progress` | `message` |
 |---|---|---|
-| the run starts | 0 | the prompt's H1 title, or `Prompt` until H1 becomes required |
+| the run starts | 0 | the prompt's required H1 title |
 | each section starts | sections entered so far, from 1 | the section's heading |
 
 Nothing else is sent. A section's end would repeat the frame already on the
@@ -529,6 +529,12 @@ promptforge: 1
 
 # Title
 
+```lua prompt
+function normalize(value)
+    return string.lower(value)
+end
+```
+
 Human-readable description (not executed).
 
 ## Section
@@ -536,9 +542,10 @@ Human-readable description (not executed).
 Prose the model reads.
 ```
 
-- `---` delimited YAML frontmatter (`name`, `description`, `version`, `promptforge` required; `tools`, `default_return`, `max_tool_iterations` optional).
+- `---` delimited YAML frontmatter (`name`, `description`, `version`, `promptforge` required; `default_return` and `max_tool_iterations` optional).
 - `promptforge:` is the **engine version** that marks the file as a promptforge prompt (supported major: `1`). It is distinct from `version:`, which is the author's own revision of the prompt. A file without a `promptforge:` version is not a promptforge prompt and the CLI declines to run it; an unsupported major is refused, never silently degraded.
-- `# Title` and the text before the first `##` are human-readable, not executed.
+- Exactly one `# Title` is required. Markdown before it is ignored.
+- The H1 may immediately open with one exact, unindented triple-backtick `lua prompt` fence after any number of blank lines. Its exact triple-backtick closing line ends the shared library, and the remaining H1 text is the human-readable description. A reserved `lua prompt` fence after description prose, a second one, or an inexact closing marker is an error. Indented markers, longer backtick runs, different capitalization, and extra info tokens are ordinary Markdown.
 - `## Section` headings are executable units; they run top to bottom (fall-through). Each may begin with a single ` ```lua ` block followed by prose.
 
 ## Prompt language
@@ -565,7 +572,7 @@ return args              -- finishes the run with this value; no model call
 If the block returns nothing (or there is no block), the section's prose is sent
 to the model.
 
-Core also exposes the next lifecycle's `SectionVm` building block. It runs an optional compiled shared program before delayed host injection, then keeps one hardened environment and one instruction budget across explicit `run_preamble`, `bind_reply`, `run_epilog`, and `teardown` operations. `bind_tool_declarations` runs shared code once against a deterministic `ToolResolver`, where `tools.need(alias, description)` records exact case-sensitive aliases and `tools.always(alias)` selects prompt-wide scope. `SectionVm::new_with_bindings` replays those declarations exactly without resolving again; after injection, H2 code may record declared aliases with `tools.add(alias)`, and `close_tool_scope` freezes prompt-wide aliases followed by section additions before any reply binding or epilog. Identity uniqueness and live-registry agreement remain later binding checks. Each lifecycle operation reports fixed payload-free start and outcome details. The current parser and executor still use the one-block language above; H1 and epilog grammar, the concrete picker adapter, alias-based model dispatch, and complete lifecycle wiring are later steps.
+Core also exposes the next lifecycle's `SectionVm` building block. The parser compiles and retains the optional H1 `lua prompt` program, but the current executor does not run it yet. `SectionVm` can run an optional compiled shared program before delayed host injection, then keep one hardened environment and one instruction budget across explicit `run_preamble`, `bind_reply`, `run_epilog`, and `teardown` operations. `bind_tool_declarations` runs shared code once against a deterministic `ToolResolver`, where `tools.need(alias, description)` records exact case-sensitive aliases and `tools.always(alias)` selects prompt-wide scope. `SectionVm::new_with_bindings` replays those declarations exactly without resolving again; after injection, H2 code may record declared aliases with `tools.add(alias)`, and `close_tool_scope` freezes prompt-wide aliases followed by section additions before any reply binding or epilog. Identity uniqueness and live-registry agreement remain later binding checks. Each lifecycle operation reports fixed payload-free start and outcome details. H2 epilog grammar, the concrete picker adapter, alias-based model dispatch, and complete lifecycle wiring are later steps.
 
 ### Substitution
 
@@ -600,6 +607,8 @@ completion. `sys.id` counts sections as you go (1, 2, 3, ...).
 `prompts/greet.md`:
 
 ```
+# Greet
+
 ## Main
 
 ` ` `lua
@@ -652,35 +661,14 @@ ship built in:
   description). It proxies through the gateway, which holds the Brave API key,
   so the credential never reaches the process running the prompt.
 
-A prompt declares the tools it needs in its frontmatter:
-
-```
----
-name: research
-description: Research a topic and summarize it
-version: 1
-tools: [web_search, web_fetch]
----
-
-## Main
-
-Research the topic "{{ args }}". Search the web, read the most relevant
-pages, and write a short summary with links.
-```
-
-`web_fetch` is always available. `web_search` needs the gateway - under the CLI
-that means `PROMPTFORGE_BASE_URL` and `PROMPTFORGE_TOKEN`, and under the MCP
-server the `[gateway]` table of `prompts.toml`. A prompt that asks for a tool the
-process cannot bind fails the run with an error naming it, rather than running
-without it.
+Concrete tool names no longer belong in YAML frontmatter. The parser now accepts a compiled H1 shared library, which is the source region the planned capability binder will use for `tools.need(alias, description)` and `tools.always(alias)`. That binder and host registry integration have not shipped, so the CLI and MCP adapters currently provide no prompt-selected tools. Library callers may still pass concrete tools directly to `execute::run` while the existing H2 `tools.add` execution path remains in place.
 
 ### The tool-call loop
 
-When a section declares tools, the executor advertises their JSON schemas to the
+When a library caller supplies and a section scopes tools, the executor advertises their JSON schemas to the
 model on that section's call. If the model replies with a tool call instead of
 text, the executor dispatches it (locally for `web_fetch`, or to the gateway for
 `web_search`), appends the result to the conversation, and re-sends. This repeats
 until the model returns a final text reply, capped at 24 round trips per section
 (the default when a prompt does not set `max_tool_iterations`) to prevent a
-runaway loop. Sections without a `tools` list behave exactly as
-before - one round trip, no tool advertising.
+runaway loop. Sections that scope no supplied tools make one round trip with no tool advertising.
