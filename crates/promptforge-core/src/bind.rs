@@ -5,13 +5,15 @@
 //! picker at most once during that pass. Binding then validates one-to-one
 //! alias and identity mappings against the complete live registry. The
 //! resulting [`BoundPrompt`] owns the parsed prompt, frozen declaration replay
-//! data, atomic forward and reverse maps, and selected picker diagnostics, but
-//! exposes no mutation path.
+//! data, atomic forward and reverse maps, selected picker diagnostics, and
+//! selected-set near-duplicate analysis, but exposes no mutation path.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
-use promptforge_tool_picker::{Outcome, ToolDescriptor, ToolId as PickerToolId, ToolPicker};
+use promptforge_tool_picker::{
+    NearDuplicate, Outcome, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
+};
 
 use crate::lua::{ToolBindings, ToolResolver, bind_tool_declarations};
 use crate::observe::{Observer, detail};
@@ -22,9 +24,10 @@ use crate::{Error, Result};
 /// A parsed prompt with one frozen H1 capability-binding result.
 ///
 /// The original prompt, exact Lua declaration replay sequence, and selected
-/// picker descriptors and validated forward and reverse maps are owned
-/// together. All fields are private and every accessor is shared, so a caller
-/// cannot change what later section VMs replay or dispatch.
+/// picker descriptors, validated forward and reverse maps, and selected-set
+/// near-duplicate analysis are owned together. All fields are private and every
+/// accessor is shared, so a caller cannot change what later section VMs replay,
+/// validate, or dispatch.
 #[derive(Debug, Clone)]
 pub struct BoundPrompt {
     prompt: Prompt,
@@ -32,6 +35,7 @@ pub struct BoundPrompt {
     diagnostics: BTreeMap<ToolId, ToolDescriptor>,
     alias_to_id: BTreeMap<String, ToolId>,
     id_to_alias: BTreeMap<ToolId, String>,
+    near_duplicates: Vec<NearDuplicate>,
 }
 
 impl BoundPrompt {
@@ -43,6 +47,29 @@ impl BoundPrompt {
             diagnostics: BTreeMap::new(),
             alias_to_id: BTreeMap::new(),
             id_to_alias: BTreeMap::new(),
+            near_duplicates: Vec::new(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_tools(
+        prompt: Prompt,
+        bindings: ToolBindings,
+        diagnostics: BTreeMap<ToolId, ToolDescriptor>,
+        alias_to_id: BTreeMap<String, ToolId>,
+        near_duplicates: Vec<NearDuplicate>,
+    ) -> Self {
+        let id_to_alias = alias_to_id
+            .iter()
+            .map(|(alias, id)| (id.clone(), alias.clone()))
+            .collect();
+        Self {
+            prompt,
+            bindings,
+            diagnostics,
+            alias_to_id,
+            id_to_alias,
+            near_duplicates,
         }
     }
 
@@ -75,6 +102,10 @@ impl BoundPrompt {
     pub fn id_to_alias(&self) -> &BTreeMap<ToolId, String> {
         &self.id_to_alias
     }
+
+    pub(crate) fn near_duplicates(&self) -> &[NearDuplicate] {
+        &self.near_duplicates
+    }
 }
 
 /// Binds every H1 `tools.need` declaration and validates the live registry.
@@ -84,7 +115,9 @@ impl BoundPrompt {
 /// cached picker decision, while descriptions differing by any byte are
 /// resolved independently. The complete `registry` is then checked for repeated
 /// stable identities before atomic forward and reverse binding maps are built.
-/// Every selected identity must be present in that registry.
+/// Every selected identity must be present in that registry. The picker then
+/// analyzes the complete selected set once so execution can validate each
+/// effective section scope without retaining or re-running the embedding model.
 ///
 /// Binding observations are the fixed payload-free details from
 /// [`crate::observe::detail`]. They contain no alias, capability, candidate,
@@ -97,7 +130,8 @@ impl BoundPrompt {
 /// errors for invalid declaration programs. Returns
 /// [`Error::DuplicateLiveToolId`], [`Error::DuplicateAlias`],
 /// [`Error::ToolIdSelectedTwice`], or [`Error::PickedToolNotLive`] when an
-/// identity boundary is not one-to-one and complete.
+/// identity boundary is not one-to-one and complete. Returns
+/// [`Error::ToolScopeAnalysis`] if the picker cannot analyze every selected ID.
 pub fn bind_prompt(
     prompt: Prompt,
     picker: &ToolPicker,
@@ -127,6 +161,14 @@ where
     let diagnostics = resolver.into_diagnostics()?;
     let (alias_to_id, id_to_alias) =
         validate_registry_and_bindings(&bindings, registry, observer, &prompt.title)?;
+    let selected_ids = bindings
+        .bindings()
+        .iter()
+        .map(|binding| picker_id(binding.id()))
+        .collect::<Vec<_>>();
+    let near_duplicates = source
+        .near_duplicates(&selected_ids)
+        .map_err(|detail| Error::ToolScopeAnalysis { detail })?;
 
     Ok(BoundPrompt {
         prompt,
@@ -134,6 +176,7 @@ where
         diagnostics,
         alias_to_id,
         id_to_alias,
+        near_duplicates,
     })
 }
 
@@ -235,11 +278,23 @@ impl CachedDecision {
 
 trait DecisionSource: Send + Sync {
     fn decide(&self, capability: &str) -> CachedDecision;
+
+    fn near_duplicates(
+        &self,
+        ids: &[PickerToolId],
+    ) -> std::result::Result<Vec<NearDuplicate>, String>;
 }
 
 impl DecisionSource for ToolPicker {
     fn decide(&self, capability: &str) -> CachedDecision {
         CachedDecision::from_picker(self.resolve(capability))
+    }
+
+    fn near_duplicates(
+        &self,
+        ids: &[PickerToolId],
+    ) -> std::result::Result<Vec<NearDuplicate>, String> {
+        ToolPicker::near_duplicates(self, ids).map_err(|error| error.to_string())
     }
 }
 
@@ -305,6 +360,10 @@ fn core_id(id: &PickerToolId) -> ToolId {
     ToolId::new(id.server(), id.name())
 }
 
+fn picker_id(id: &ToolId) -> PickerToolId {
+    PickerToolId::new(id.server(), id.name())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -353,6 +412,38 @@ mod tests {
                 ]),
                 _ => CachedDecision::Failed("fixture picker failure".to_owned()),
             }
+        }
+
+        fn near_duplicates(
+            &self,
+            _ids: &[PickerToolId],
+        ) -> std::result::Result<Vec<NearDuplicate>, String> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[derive(Debug)]
+    struct AnalysisSource {
+        fail: bool,
+    }
+
+    impl DecisionSource for AnalysisSource {
+        fn decide(&self, capability: &str) -> CachedDecision {
+            CachedDecision::Bind(FixtureSource::tool("server", capability))
+        }
+
+        fn near_duplicates(
+            &self,
+            ids: &[PickerToolId],
+        ) -> std::result::Result<Vec<NearDuplicate>, String> {
+            if self.fail {
+                return Err("private analysis failure".to_owned());
+            }
+            Ok(vec![NearDuplicate {
+                first: FixtureSource::tool(ids[0].server(), ids[0].name()),
+                second: FixtureSource::tool(ids[1].server(), ids[1].name()),
+                similarity: 0.96,
+            }])
         }
     }
 
@@ -653,6 +744,50 @@ mod tests {
             bound.id_to_alias().get(&ToolId::new("server", "other")),
             Some(&"other_alias".to_owned())
         );
+    }
+
+    #[test]
+    fn binding_precomputes_picker_near_duplicates_for_runtime_scope_validation() {
+        let first = FixtureLiveTool::new("server", "first");
+        let second = FixtureLiveTool::new("server", "second");
+        let registry = ToolRegistry::new([&first as &dyn Tool, &second as &dyn Tool]);
+        let bound = bind_with_source(
+            prompt(Some(program(
+                "tools.need('first_alias', 'first')\n\
+                 tools.need('second_alias', 'second')",
+            ))),
+            &AnalysisSource { fail: false },
+            &registry,
+            &NullObserver,
+        )
+        .unwrap();
+
+        assert_eq!(bound.near_duplicates().len(), 1);
+        assert_eq!(bound.near_duplicates()[0].first.name(), "first");
+        assert_eq!(bound.near_duplicates()[0].second.name(), "second");
+        assert!((bound.near_duplicates()[0].similarity - 0.96).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn picker_scope_analysis_failure_prevents_a_bound_prompt() {
+        let first = FixtureLiveTool::new("server", "first");
+        let second = FixtureLiveTool::new("server", "second");
+        let registry = ToolRegistry::new([&first as &dyn Tool, &second as &dyn Tool]);
+        let error = bind_with_source(
+            prompt(Some(program(
+                "tools.need('first_alias', 'first')\n\
+                 tools.need('second_alias', 'second')",
+            ))),
+            &AnalysisSource { fail: true },
+            &registry,
+            &NullObserver,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            Error::ToolScopeAnalysis { detail } if detail == "private analysis failure"
+        ));
     }
 
     #[test]

@@ -9,11 +9,15 @@ use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
+use promptforge_tool_picker::{
+    NearDuplicate, ToolAnnotations, ToolDescriptor, ToolId as PickerToolId,
+};
 use serde_json::Value;
 
 use super::*;
+use crate::lua::bind_tool_declarations;
 use crate::observe::{NullObserver, detail};
-use crate::tools::{Tool, ToolId};
+use crate::tools::{Tool, ToolId, ToolRegistry};
 
 /// Lua-only prompts never build the gateway client, so these run offline.
 fn parse(md: &str) -> Prompt {
@@ -28,6 +32,31 @@ fn parse(md: &str) -> Prompt {
 /// Build the tool-free bound form consumed by the complete lifecycle path.
 fn bound(md: &str) -> BoundPrompt {
     BoundPrompt::without_tools(parse(md))
+}
+
+fn bound_with_tools(
+    md: &str,
+    resolver: &dyn crate::lua::ToolResolver,
+    near_duplicates: Vec<NearDuplicate>,
+) -> BoundPrompt {
+    let prompt = parse(md);
+    let shared = prompt
+        .shared
+        .as_ref()
+        .expect("a tool fixture must declare shared Lua");
+    let bindings = bind_tool_declarations(shared, resolver, &NullObserver, &prompt.title).unwrap();
+    let alias_to_id = bindings
+        .bindings()
+        .iter()
+        .map(|binding| (binding.alias().to_owned(), binding.id().clone()))
+        .collect();
+    BoundPrompt::with_test_tools(
+        prompt,
+        bindings,
+        BTreeMap::new(),
+        alias_to_id,
+        near_duplicates,
+    )
 }
 
 /// Options that report nowhere and build no client - what a Lua-only,
@@ -359,6 +388,56 @@ impl Tool for FailingTool {
     }
 }
 
+struct ScopedFixtureTool {
+    id: ToolId,
+    wire_name: &'static str,
+    description: &'static str,
+    calls: Arc<AtomicUsize>,
+}
+
+impl ScopedFixtureTool {
+    fn new(name: &str, wire_name: &'static str, description: &'static str) -> Self {
+        Self {
+            id: ToolId::new("tests", name),
+            wire_name,
+            description,
+            calls: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Tool for ScopedFixtureTool {
+    fn id(&self) -> ToolId {
+        self.id.clone()
+    }
+
+    fn wire_name(&self) -> &str {
+        self.wire_name
+    }
+
+    fn description(&self) -> &str {
+        self.description
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"]
+        })
+    }
+
+    async fn call(&self, args: Value) -> Result<String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(format!(
+            "called {} with {}",
+            self.id.name(),
+            args["value"].as_str().unwrap_or_default()
+        ))
+    }
+}
+
 /// Spawn a mock gateway that returns a tool call on its first request and a
 /// final text reply on its second. The call counter is shared so the two
 /// responses are distinguishable.
@@ -431,6 +510,13 @@ fn schemas_for(tools: &[&dyn Tool]) -> Vec<ToolSchema> {
         .collect()
 }
 
+fn dispatch_for(tools: &[&dyn Tool]) -> BTreeMap<String, ToolId> {
+    tools
+        .iter()
+        .map(|tool| (tool.wire_name().to_owned(), tool.id()))
+        .collect()
+}
+
 #[tokio::test]
 async fn tool_loop_dispatches_then_returns_text() {
     // The loop is tested against a real client pointed at the mock gateway.
@@ -442,12 +528,15 @@ async fn tool_loop_dispatches_then_returns_text() {
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied());
 
     let mut turns = 0;
     let out = run_tool_loop(
         &client,
         &schemas,
-        tools,
+        &dispatch,
+        &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&mut turns),
@@ -504,12 +593,15 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied());
 
     let mut turns = 0;
     let err = run_tool_loop(
         &client,
         &schemas,
-        tools,
+        &dispatch,
+        &registry,
         "loop forever".to_string(),
         cap,
         silent_progress(&mut turns),
@@ -534,12 +626,15 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied());
 
     let mut turns = 0;
     let err = run_tool_loop(
         &client,
         &schemas,
-        tools,
+        &dispatch,
+        &registry,
         "loop forever".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&mut turns),
@@ -584,12 +679,14 @@ async fn tool_loop_errors_on_unknown_tool() {
     // targets, so the returned call resolves to no tool.
     let echo = EchoTool;
     let schemas = schemas_for(&[&echo]);
+    let registry = ToolRegistry::new(std::iter::empty());
 
     let mut turns = 0;
     let err = run_tool_loop(
         &client,
         &schemas,
-        &[],
+        &BTreeMap::new(),
+        &registry,
         "call unknown".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&mut turns),
@@ -613,13 +710,16 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     let failing = FailingTool;
     let tools: &[&dyn Tool] = &[&failing];
     let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied());
 
     let recorder = Recorder::default();
     let mut turns = 0;
     let err = run_tool_loop(
         &client,
         &schemas,
-        tools,
+        &dispatch,
+        &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
@@ -670,7 +770,8 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
     let error = run_tool_loop(
         &client,
         &[],
-        &[],
+        &BTreeMap::new(),
+        &ToolRegistry::new(std::iter::empty()),
         "private model input".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
@@ -789,12 +890,15 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     let echo = UntrustedEchoTool;
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied());
 
     let mut turns = 0;
     let out = run_tool_loop(
         &client,
         &schemas,
-        tools,
+        &dispatch,
+        &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&mut turns),
@@ -826,12 +930,15 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied());
 
     let mut turns = 0;
     let out = run_tool_loop(
         &client,
         &schemas,
-        tools,
+        &dispatch,
+        &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&mut turns),
@@ -1022,13 +1129,16 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied());
 
     let recorder = Recorder::default();
     let mut turns = 0;
     let out = run_tool_loop(
         &client,
         &schemas,
-        tools,
+        &dispatch,
+        &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
@@ -1254,6 +1364,14 @@ Ask using {{ var.question }}.\n\n\
             ("Only".to_owned(), detail::LUA_PREAMBLE_SUCCEEDED.to_owned(),),
             ("Only".to_owned(), detail::TOOL_SCOPE_CLOSING.to_owned()),
             ("Only".to_owned(), detail::TOOL_SCOPE_CLOSED.to_owned()),
+            (
+                "Only".to_owned(),
+                detail::TOOL_SCOPE_VALIDATION_STARTED.to_owned(),
+            ),
+            (
+                "Only".to_owned(),
+                detail::TOOL_SCOPE_VALIDATION_SUCCEEDED.to_owned(),
+            ),
             ("Only".to_owned(), detail::MODEL_TURN_COMPLETED.to_owned(),),
             (
                 "Only".to_owned(),
@@ -1314,8 +1432,78 @@ async fn default_return_precedes_the_last_model_reply() {
     assert_eq!(out, "fallback");
 }
 
+async fn spawn_aliased_tool_gateway(
+    alias: &str,
+) -> (SocketAddr, Arc<Mutex<Vec<Value>>>, Arc<AtomicUsize>) {
+    #[derive(Clone)]
+    struct AliasState {
+        alias: String,
+        requests: Arc<AtomicUsize>,
+        bodies: Arc<Mutex<Vec<Value>>>,
+    }
+
+    async fn completions(State(state): State<AliasState>, Json(body): Json<Value>) -> Json<Value> {
+        state.bodies.lock().unwrap().push(body);
+        let request = state.requests.fetch_add(1, Ordering::SeqCst);
+        if request == 0 {
+            Json(json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "aliased_call",
+                            "type": "function",
+                            "function": {
+                                "name": state.alias,
+                                "arguments": "{\"value\":\"payload\"}"
+                            }
+                        }]
+                    }
+                }]
+            }))
+        } else {
+            Json(json!({
+                "choices": [{
+                    "message": {"role": "assistant", "content": "aliased final"}
+                }]
+            }))
+        }
+    }
+
+    let bodies = Arc::new(Mutex::new(Vec::new()));
+    let requests = Arc::new(AtomicUsize::new(0));
+    let state = AliasState {
+        alias: alias.to_owned(),
+        requests: Arc::clone(&requests),
+        bodies: Arc::clone(&bodies),
+    };
+    let router = Router::new()
+        .route("/v1/chat/completions", post(completions))
+        .with_state(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    (addr, bodies, requests)
+}
+
+fn picker_descriptor(name: &str, description: &str) -> ToolDescriptor {
+    ToolDescriptor::new(
+        PickerToolId::new("tests", name),
+        description,
+        json!({"type": "object"}),
+    )
+    .with_annotations(ToolAnnotations {
+        read_only: Some(true),
+        destructive: Some(false),
+        idempotent: Some(true),
+    })
+}
+
 #[tokio::test]
-async fn lifecycle_model_call_advertises_no_tools() {
+async fn declared_tools_are_not_injected_without_always_or_add() {
     async fn completions(
         State(bodies): State<Arc<Mutex<Vec<Value>>>>,
         Json(body): Json<Value>,
@@ -1338,13 +1526,19 @@ async fn lifecycle_model_call_advertises_no_tools() {
         axum::serve(listener, router).await.unwrap();
     });
 
-    let echo = EchoTool;
+    let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Concrete description.");
     let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
-# Test prompt\n\n## Only\n\nAsk without tools.\n";
+# Test prompt\n\n```lua prompt\ntools.need('local_alias', 'capability')\n```\n\n\
+## Only\n\nAsk without tools.\n";
+    let prompt = bound_with_tools(
+        md,
+        &|_: &str| Ok(ToolId::new("tests", "concrete")),
+        Vec::new(),
+    );
     let out = run(
-        &bound(md),
+        &prompt,
         "",
-        &[&echo],
+        &[&tool],
         &Store::memory(),
         RunOptions {
             observer: &NullObserver,
@@ -1363,6 +1557,228 @@ async fn lifecycle_model_call_advertises_no_tools() {
     assert_eq!(bodies.len(), 1);
     assert!(
         bodies[0].get("tools").is_none(),
-        "the lifecycle-only model call must not advertise tools"
+        "declaring a need must not expose it without explicit scope"
     );
+}
+
+#[tokio::test]
+async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_id() {
+    let (addr, bodies, _) = spawn_aliased_tool_gateway("local_alias").await;
+    let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Concrete description.");
+    let prompt = bound_with_tools(
+        "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+# Test prompt\n\n```lua prompt\n\
+tools.need('local_alias', 'capability')\n\
+tools.always('local_alias')\n```\n\n\
+## Only\n\nUse the tool.\n",
+        &|_: &str| Ok(ToolId::new("tests", "concrete")),
+        Vec::new(),
+    );
+
+    let out = run(
+        &prompt,
+        "",
+        &[&tool],
+        &Store::memory(),
+        RunOptions {
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(
+                &format!("http://{addr}/v1"),
+                "test",
+                "test-model",
+            )),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(out, "aliased final");
+    assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
+    let bodies = bodies.lock().unwrap();
+    let function = &bodies[0]["tools"][0]["function"];
+    assert_eq!(function["name"], "local_alias");
+    assert_eq!(function["description"], "Concrete description.");
+    assert_eq!(
+        function["parameters"],
+        json!({
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+            "required": ["value"]
+        })
+    );
+    assert_ne!(function["name"], "canonical_wire");
+}
+
+#[tokio::test]
+async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
+    let (addr, bodies, _) = spawn_aliased_tool_gateway("section_tool").await;
+    let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Section concrete.");
+    let prompt = bound_with_tools(
+        "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+# Test prompt\n\n```lua prompt\n\
+tools.need('section_tool', 'capability')\n```\n\n\
+## Only\n\n```lua\ntools.add('section_tool')\n```\n\nUse the tool.\n",
+        &|_: &str| Ok(ToolId::new("tests", "concrete")),
+        Vec::new(),
+    );
+
+    let out = run(
+        &prompt,
+        "",
+        &[&tool],
+        &Store::memory(),
+        RunOptions {
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(
+                &format!("http://{addr}/v1"),
+                "test",
+                "test-model",
+            )),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(out, "aliased final");
+    assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        bodies.lock().unwrap()[0]["tools"][0]["function"]["name"],
+        "section_tool"
+    );
+}
+
+#[tokio::test]
+async fn near_duplicate_tools_are_valid_when_isolated_in_separate_sections() {
+    async fn completions(
+        State(requests): State<Arc<AtomicUsize>>,
+        Json(_body): Json<Value>,
+    ) -> Json<Value> {
+        requests.fetch_add(1, Ordering::SeqCst);
+        Json(json!({
+            "choices": [{"message": {"role": "assistant", "content": "text"}}]
+        }))
+    }
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let router = Router::new()
+        .route("/v1/chat/completions", post(completions))
+        .with_state(Arc::clone(&requests));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let first = ScopedFixtureTool::new("first", "first_wire", "First concrete.");
+    let second = ScopedFixtureTool::new("second", "second_wire", "Second concrete.");
+    let first_descriptor = picker_descriptor("first", "Similar operation one.");
+    let second_descriptor = picker_descriptor("second", "Similar operation two.");
+    let prompt = bound_with_tools(
+        "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+# Test prompt\n\n```lua prompt\n\
+tools.need('first_local', 'first')\n\
+tools.need('second_local', 'second')\n```\n\n\
+## First\n\n```lua\ntools.add('first_local')\n```\n\nFirst model turn.\n\n\
+## Second\n\n```lua\ntools.add('second_local')\n```\n\nSecond model turn.\n",
+        &|capability: &str| Ok(ToolId::new("tests", capability)),
+        vec![NearDuplicate {
+            first: first_descriptor,
+            second: second_descriptor,
+            similarity: 0.97,
+        }],
+    );
+
+    let out = run(
+        &prompt,
+        "",
+        &[&first, &second],
+        &Store::memory(),
+        RunOptions {
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(
+                &format!("http://{addr}/v1"),
+                "test",
+                "test-model",
+            )),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(out, "text");
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports() {
+    let (addr, _bodies, requests) = spawn_aliased_tool_gateway("first_local").await;
+    let first = ScopedFixtureTool::new("first", "first_wire", "First concrete.");
+    let second = ScopedFixtureTool::new("second", "second_wire", "Second concrete.");
+    let first_descriptor = picker_descriptor("first", "Private similar description one.");
+    let second_descriptor = picker_descriptor("second", "Private similar description two.");
+    let prompt = bound_with_tools(
+        "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
+# Test prompt\n\n```lua prompt\n\
+tools.need('first_local', 'first')\n\
+tools.need('second_local', 'second')\n```\n\n\
+## Only\n\n```lua\ntools.add('first_local', 'second_local')\n```\n\nDo not reach the model.\n",
+        &|capability: &str| Ok(ToolId::new("tests", capability)),
+        vec![NearDuplicate {
+            first: first_descriptor,
+            second: second_descriptor,
+            similarity: 0.98,
+        }],
+    );
+    let recorder = Recorder::default();
+
+    let error = run(
+        &prompt,
+        "",
+        &[&first, &second],
+        &Store::memory(),
+        RunOptions {
+            observer: &recorder,
+            client: Some(GatewayClient::new(
+                &format!("http://{addr}/v1"),
+                "test",
+                "test-model",
+            )),
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        Error::NearDuplicateTools {
+            diagnostic,
+        } if diagnostic.first_alias == "first_local"
+            && diagnostic.first_id == ToolId::new("tests", "first")
+            && diagnostic.first_description == "Private similar description one."
+            && diagnostic.first_annotations.read_only == Some(true)
+            && diagnostic.second_alias == "second_local"
+            && diagnostic.second_id == ToolId::new("tests", "second")
+            && diagnostic.second_description == "Private similar description two."
+            && diagnostic.second_annotations.idempotent == Some(true)
+            && (diagnostic.similarity - 0.98).abs() < f32::EPSILON
+    ));
+    assert_eq!(requests.load(Ordering::SeqCst), 0);
+    let events = recorder.events();
+    assert!(
+        events
+            .iter()
+            .any(|(_, detail)| { detail == detail::TOOL_SCOPE_VALIDATION_FAILED })
+    );
+    assert!(!events.iter().any(|(_, detail)| {
+        detail == detail::MODEL_TURN_COMPLETED || detail == detail::MODEL_TURN_FAILED
+    }));
+    let trace = format!("{events:?}");
+    for payload in [
+        "first_local",
+        "second_local",
+        "Private similar description",
+        "Do not reach the model",
+    ] {
+        assert!(!trace.contains(payload), "observation leaked {payload:?}");
+    }
 }
