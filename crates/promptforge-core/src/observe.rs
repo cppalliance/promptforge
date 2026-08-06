@@ -1,7 +1,7 @@
 //! Report-only observation for a run in flight.
 //!
-//! [`Observer`] receives borrowed `(section, detail)` strings at operational
-//! boundaries. The strings are the complete trace record: they contain no raw
+//! [`Observer`] receives borrowed `(execution, section, detail)` strings at
+//! operational boundaries. The strings are the complete trace record: they contain no raw
 //! prompt prose, model input or output, tool arguments or results, store paths
 //! or contents, credentials, or fetched content. Reports are synchronous and
 //! never consulted for a decision. [`NullObserver`] provides silence without a
@@ -131,7 +131,9 @@ pub mod detail {
 /// The runtime calls [`observe`](Self::observe) synchronously from the task
 /// driving a run, so implementations must be `Send + Sync`, non-blocking, and
 /// non-panicking. A forwarding implementation should copy the borrowed strings
-/// into a queue and return rather than awaiting or performing I/O.
+/// into a queue and return rather than awaiting or performing I/O. Concrete
+/// observers own synchronization; core provides no global observer lock and
+/// holds no observer-owned guard across an await.
 ///
 /// An observation is never read back by the runtime. Recording every report or
 /// discarding all of them must leave outputs, errors, ordering, and side effects
@@ -147,22 +149,22 @@ pub mod detail {
 /// struct Counter(AtomicUsize);
 ///
 /// impl Observer for Counter {
-///     fn observe(&self, _section: &str, _detail: &str) {
+///     fn observe(&self, _execution: &str, _section: &str, _detail: &str) {
 ///         self.0.fetch_add(1, Ordering::Relaxed);
 ///     }
 /// }
 ///
 /// let counter = Counter::default();
-/// counter.observe("Gather", "Section finished");
+/// counter.observe("example-run", "Gather", "Section finished");
 /// assert_eq!(counter.0.load(Ordering::Relaxed), 1);
 /// ```
 pub trait Observer: Send + Sync {
-    /// Reports one deterministic operational statement for `section`.
+    /// Reports one deterministic statement for `execution` and `section`.
     ///
     /// The report must not contain payloads or secrets and must not affect any
     /// execution decision. Implementations must return promptly and must not
     /// panic.
-    fn observe(&self, section: &str, detail: &str);
+    fn observe(&self, execution: &str, section: &str, detail: &str);
 }
 
 /// An [`Observer`] that discards every observation.
@@ -175,26 +177,28 @@ pub trait Observer: Send + Sync {
 /// use promptforge_core::observe::{NullObserver, Observer};
 ///
 /// let observer = NullObserver;
-/// observer.observe("Example prompt", "Run succeeded");
+/// observer.observe("example-run", "Example prompt", "Run succeeded");
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NullObserver;
 
 impl Observer for NullObserver {
-    fn observe(&self, _section: &str, _detail: &str) {}
+    fn observe(&self, _execution: &str, _section: &str, _detail: &str) {}
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Barrier, Mutex};
+
     use super::*;
 
     #[test]
     fn null_observer_accepts_reports() {
         let observer = NullObserver;
-        observer.observe("Prompt", "Run started");
-        observer.observe("Gather", "Section started");
-        observer.observe("Gather", "Section finished");
-        observer.observe("Prompt", "Run succeeded");
+        observer.observe("example-run", "Prompt", "Run started");
+        observer.observe("example-run", "Gather", "Section started");
+        observer.observe("example-run", "Gather", "Section finished");
+        observer.observe("example-run", "Prompt", "Run succeeded");
     }
 
     #[test]
@@ -203,6 +207,74 @@ mod tests {
         assert_send_sync::<dyn Observer>();
 
         let observer: &dyn Observer = &NullObserver;
-        observer.observe("Gather", "Section finished");
+        observer.observe("example-run", "Gather", "Section finished");
+    }
+
+    #[test]
+    fn mutex_recorder_keeps_interleaved_execution_ids_ordered() {
+        #[derive(Default)]
+        struct Recorder(Mutex<Vec<(String, String, String)>>);
+
+        impl Observer for Recorder {
+            fn observe(&self, execution: &str, section: &str, detail: &str) {
+                self.0
+                    .lock()
+                    .expect("recorder mutex must remain usable")
+                    .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+            }
+        }
+
+        let recorder = Arc::new(Recorder::default());
+        let barrier = Arc::new(Barrier::new(2));
+        let first_recorder = Arc::clone(&recorder);
+        let first_barrier = Arc::clone(&barrier);
+        let first = std::thread::spawn(move || {
+            first_recorder.observe("execution-a", "First", detail::SECTION_STARTED);
+            first_barrier.wait();
+            first_barrier.wait();
+            first_recorder.observe("execution-a", "First", detail::SECTION_FINISHED);
+            first_barrier.wait();
+            first_barrier.wait();
+        });
+        let second_recorder = Arc::clone(&recorder);
+        let second = std::thread::spawn(move || {
+            barrier.wait();
+            second_recorder.observe("execution-b", "Second", detail::SECTION_STARTED);
+            barrier.wait();
+            barrier.wait();
+            second_recorder.observe("execution-b", "Second", detail::SECTION_FINISHED);
+            barrier.wait();
+        });
+
+        first.join().expect("first recording thread must finish");
+        second.join().expect("second recording thread must finish");
+        assert_eq!(
+            *recorder
+                .0
+                .lock()
+                .expect("recorder mutex must remain usable"),
+            [
+                (
+                    "execution-a".to_owned(),
+                    "First".to_owned(),
+                    detail::SECTION_STARTED.to_owned(),
+                ),
+                (
+                    "execution-b".to_owned(),
+                    "Second".to_owned(),
+                    detail::SECTION_STARTED.to_owned(),
+                ),
+                (
+                    "execution-a".to_owned(),
+                    "First".to_owned(),
+                    detail::SECTION_FINISHED.to_owned(),
+                ),
+                (
+                    "execution-b".to_owned(),
+                    "Second".to_owned(),
+                    detail::SECTION_FINISHED.to_owned(),
+                ),
+            ]
+        );
     }
 }

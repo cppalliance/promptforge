@@ -10,7 +10,8 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
 use promptforge_tool_picker::{
-    NearDuplicate, ToolAnnotations, ToolDescriptor, ToolId as PickerToolId,
+    Catalog, Config as PickerConfig, NearDuplicate, ToolAnnotations, ToolDescriptor,
+    ToolId as PickerToolId, ToolPicker,
 };
 use serde_json::Value;
 
@@ -19,6 +20,8 @@ use crate::lua::bind_tool_declarations;
 use crate::observe::{NullObserver, detail};
 use crate::tools::{Tool, ToolId, ToolRegistry};
 
+const EXECUTION: &str = "execute-test";
+
 /// Lua-only prompts never build the gateway client, so these run offline.
 fn parse(md: &str) -> Prompt {
     let source = if md.lines().any(|line| line.starts_with("# ")) {
@@ -26,7 +29,7 @@ fn parse(md: &str) -> Prompt {
     } else {
         md.replacen("---\n\n", "---\n\n# Test prompt\n\n", 1)
     };
-    Prompt::parse(&source, &NullObserver).unwrap()
+    Prompt::parse(&source, EXECUTION, &NullObserver).unwrap()
 }
 
 /// Build the tool-free bound form consumed by the complete lifecycle path.
@@ -44,7 +47,8 @@ fn bound_with_tools(
         .shared
         .as_ref()
         .expect("a tool fixture must declare shared Lua");
-    let bindings = bind_tool_declarations(shared, resolver, &NullObserver, &prompt.title).unwrap();
+    let bindings =
+        bind_tool_declarations(shared, resolver, EXECUTION, &NullObserver, &prompt.title).unwrap();
     let alias_to_id = bindings
         .bindings()
         .iter()
@@ -63,6 +67,7 @@ fn bound_with_tools(
 /// offline test wants.
 fn silent() -> RunOptions<'static> {
     RunOptions {
+        execution: EXECUTION,
         observer: &NullObserver,
         client: None,
     }
@@ -78,30 +83,40 @@ async fn run_offline(md: &str) -> Result<String> {
 /// An [`Observer`] that keeps every observation it is handed, in order, so a test
 /// can assert on the whole sequence rather than on a count.
 #[derive(Default)]
-struct Recorder(Mutex<Vec<(String, String)>>);
+struct Recorder(Mutex<Vec<(String, String, String)>>);
 
 impl Observer for Recorder {
-    fn observe(&self, section: &str, detail: &str) {
+    fn observe(&self, execution: &str, section: &str, detail: &str) {
         self.0
             .lock()
             .expect("the recorder mutex must not be poisoned")
-            .push((section.to_owned(), detail.to_owned()));
+            .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
     }
 }
 
 impl Recorder {
-    /// The observations recorded so far, in order.
-    fn events(&self) -> Vec<(String, String)> {
+    /// The full correlated records recorded so far, in order.
+    fn records(&self) -> Vec<(String, String, String)> {
         self.0
             .lock()
             .expect("the recorder mutex must not be poisoned")
             .clone()
     }
+
+    /// The observations recorded so far, in order.
+    fn events(&self) -> Vec<(String, String)> {
+        self.0
+            .lock()
+            .expect("the recorder mutex must not be poisoned")
+            .iter()
+            .map(|(_, section, detail)| (section.clone(), detail.clone()))
+            .collect()
+    }
 }
 
 /// Run `md` offline under a fresh recorder and return the result together
-/// with everything the recorder saw.
-async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String)>) {
+/// with every complete correlated record the recorder saw.
+async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String, String)>) {
     let recorder = Recorder::default();
     let result = run(
         &bound(md),
@@ -109,12 +124,22 @@ async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String)>) {
         &[],
         &Store::memory(),
         RunOptions {
+            execution: EXECUTION,
             observer: &recorder,
             client: None,
         },
     )
     .await;
-    (result, recorder.events())
+    (result, recorder.records())
+}
+
+/// Discard only the execution field when an older ordering regression is
+/// intentionally about section and detail rather than correlation.
+fn events(records: &[(String, String, String)]) -> Vec<(String, String)> {
+    records
+        .iter()
+        .map(|(_, section, detail)| (section.clone(), detail.clone()))
+        .collect()
 }
 
 #[test]
@@ -492,6 +517,7 @@ async fn spawn_mock_gateway() -> SocketAddr {
 /// the borrow ends with the call.
 fn silent_progress(turns: &mut u32) -> SectionProgress<'_> {
     SectionProgress {
+        execution: EXECUTION,
         observer: &NullObserver,
         section: "Only",
         turns,
@@ -651,7 +677,7 @@ fn run_resolves_cap_from_frontmatter_else_default() {
     // Mirrors the resolution in `run`: a declared budget wins, an absent
     // one falls back to the raised default.
     let declared = "---\nname: t\ndescription: d\nversion: 1\nmax_tool_iterations: 5\n---\n\n# T\n\n## S\n\np\n";
-    let p = Prompt::parse(declared, &NullObserver).unwrap();
+    let p = Prompt::parse(declared, EXECUTION, &NullObserver).unwrap();
     assert_eq!(
         p.frontmatter
             .max_tool_iterations
@@ -660,7 +686,7 @@ fn run_resolves_cap_from_frontmatter_else_default() {
     );
 
     let absent = "---\nname: t\ndescription: d\nversion: 1\n---\n\n# T\n\n## S\n\np\n";
-    let p = Prompt::parse(absent, &NullObserver).unwrap();
+    let p = Prompt::parse(absent, EXECUTION, &NullObserver).unwrap();
     assert_eq!(
         p.frontmatter
             .max_tool_iterations
@@ -723,6 +749,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
+            execution: EXECUTION,
             observer: &recorder,
             section: "Gather",
             turns: &mut turns,
@@ -745,6 +772,12 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
             ("Gather".to_string(), detail::TOOL_CALL_FAILED.to_string(),),
         ],
         "the failed dispatch must be reported before the error propagates"
+    );
+    assert!(
+        recorder
+            .records()
+            .iter()
+            .all(|(execution, _, _)| execution == EXECUTION)
     );
 }
 
@@ -775,6 +808,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
         "private model input".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
+            execution: EXECUTION,
             observer: &recorder,
             section: "Gather",
             turns: &mut turns,
@@ -974,11 +1008,11 @@ const STORE_SECTIONS: &str = "---\nname: t\ndescription: d\nversion: 1\npromptfo
 
 #[tokio::test]
 async fn a_two_section_run_reports_the_exact_observation_sequence() {
-    let (result, observations) = run_recorded(TWO_SECTIONS).await;
+    let (result, records) = run_recorded(TWO_SECTIONS).await;
     assert_eq!(result.unwrap(), "second");
 
     assert_eq!(
-        observations,
+        events(&records),
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("First".to_string(), detail::SECTION_STARTED.to_string()),
@@ -1033,6 +1067,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         &[],
         &recorded_store,
         RunOptions {
+            execution: EXECUTION,
             observer: &sink,
             client: None,
         },
@@ -1064,6 +1099,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         &[],
         &Store::memory(),
         RunOptions {
+            execution: EXECUTION,
             observer: &sink,
             client: None,
         },
@@ -1086,11 +1122,11 @@ async fn a_run_refused_by_the_version_gate_reports_nothing() {
     // there is no RunStarted to pair a RunFinished with.
     let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 2\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
-    let (result, observations) = run_recorded(md).await;
+    let (result, records) = run_recorded(md).await;
     assert!(result.is_err());
     assert!(
-        observations.is_empty(),
-        "the gate must report nothing: {observations:?}"
+        records.is_empty(),
+        "the gate must report nothing: {records:?}"
     );
 }
 
@@ -1100,11 +1136,11 @@ async fn a_failing_run_still_reports_run_finished() {
     // observation must report the run failure.
     let md = "---\nname: t\ndescription: d\nversion: 1\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nerror('expected failure')\n```\n";
-    let (result, observations) = run_recorded(md).await;
+    let (result, records) = run_recorded(md).await;
     assert!(matches!(result, Err(Error::Lua(_))));
 
     assert_eq!(
-        observations,
+        events(&records),
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
@@ -1119,6 +1155,90 @@ async fn a_failing_run_still_reports_run_finished() {
         ],
         "a section that errors reports no SectionFinished"
     );
+}
+
+#[tokio::test]
+async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() {
+    let (addr, _, _) = spawn_aliased_tool_gateway("echo").await;
+    let tool = ScopedFixtureTool::new("echo", "canonical_echo", "Echo a test value.");
+    let descriptor = ToolDescriptor::new(
+        PickerToolId::new("tests", "echo"),
+        tool.description(),
+        tool.parameters_schema(),
+    );
+    let capability =
+        serde_json::to_string(&descriptor.enriched_text()).expect("serialize fixture capability");
+    let source = format!(
+        "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\nversion: 1\npromptforge: 1\n---\n\n\
+         # Lifecycle\n\n```lua prompt\n\
+         tools.need('echo', {capability})\n\
+         tools.always('echo')\n```\n\n\
+         ## Gather\n\n```lua\nstore.write('state.txt', 'before')\n```\n\n\
+         Use the echo tool.\n\n\
+         ```lua\nstore.append('state.txt', '\\nafter')\nreturn reply\n```\n"
+    );
+    let recorder = Recorder::default();
+    let prompt =
+        Prompt::parse(&source, EXECUTION, &recorder).expect("the lifecycle fixture must parse");
+    let picker = ToolPicker::build(Catalog::new(vec![descriptor]), PickerConfig::default())
+        .expect("the lifecycle picker must build");
+    let tools: &[&dyn Tool] = &[&tool];
+    let registry = ToolRegistry::new(tools.iter().copied());
+    let prompt = crate::bind::bind_prompt(prompt, &picker, &registry, EXECUTION, &recorder)
+        .expect("the lifecycle fixture must bind");
+    let store = Store::memory();
+
+    let result = run(
+        &prompt,
+        "",
+        tools,
+        &store,
+        RunOptions {
+            execution: EXECUTION,
+            observer: &recorder,
+            client: Some(GatewayClient::new(
+                &format!("http://{addr}/v1"),
+                "test",
+                "test-model",
+            )),
+        },
+    )
+    .await
+    .expect("the lifecycle fixture must run");
+
+    assert_eq!(result, "aliased final");
+    assert_eq!(store.read("state.txt").unwrap(), "1| before\n2| after");
+    assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
+    let records = recorder.records();
+    assert!(!records.is_empty());
+    assert!(
+        records
+            .iter()
+            .all(|(execution, _, _)| execution == EXECUTION),
+        "every lifecycle record must retain {EXECUTION}: {records:#?}"
+    );
+    let details = records
+        .iter()
+        .map(|(_, _, detail)| detail.as_str())
+        .collect::<Vec<_>>();
+    for expected in [
+        detail::PARSE_STARTED,
+        detail::TOOL_BINDING_STARTED,
+        detail::RUN_STARTED,
+        detail::SECTION_STARTED,
+        detail::LUA_PREAMBLE_STARTED,
+        detail::STORE_WRITE_SUCCEEDED,
+        detail::MODEL_TURN_COMPLETED,
+        detail::TOOL_CALL_SUCCEEDED,
+        detail::LUA_EPILOG_STARTED,
+        detail::STORE_APPEND_SUCCEEDED,
+        detail::RUN_SUCCEEDED,
+    ] {
+        assert!(
+            details.contains(&expected),
+            "the complete lifecycle must include {expected:?}: {records:#?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -1142,6 +1262,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
+            execution: EXECUTION,
             observer: &recorder,
             section: "Gather",
             turns: &mut turns,
@@ -1205,6 +1326,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         &[],
         &Store::memory(),
         RunOptions {
+            execution: EXECUTION,
             observer: &recorder,
             client: Some(GatewayClient::new(
                 &format!("http://{addr}/v1"),
@@ -1259,6 +1381,7 @@ async fn epilog_runs_after_reply_and_can_return() {
         &[],
         &store,
         RunOptions {
+            execution: EXECUTION,
             observer: &recorder,
             client: Some(GatewayClient::new(
                 &format!("http://{addr}/v1"),
@@ -1333,6 +1456,7 @@ Ask using {{ var.question }}.\n\n\
         &[],
         &Store::memory(),
         RunOptions {
+            execution: EXECUTION,
             observer: &recorder,
             client: Some(GatewayClient::new(
                 &format!("http://{addr}/v1"),
@@ -1418,6 +1542,7 @@ async fn default_return_precedes_the_last_model_reply() {
         &[],
         &Store::memory(),
         RunOptions {
+            execution: EXECUTION,
             observer: &NullObserver,
             client: Some(GatewayClient::new(
                 &format!("http://{addr}/v1"),
@@ -1541,6 +1666,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
         &[&tool],
         &Store::memory(),
         RunOptions {
+            execution: EXECUTION,
             observer: &NullObserver,
             client: Some(GatewayClient::new(
                 &format!("http://{addr}/v1"),
@@ -1581,6 +1707,7 @@ tools.always('local_alias')\n```\n\n\
         &[&tool],
         &Store::memory(),
         RunOptions {
+            execution: EXECUTION,
             observer: &NullObserver,
             client: Some(GatewayClient::new(
                 &format!("http://{addr}/v1"),
@@ -1628,6 +1755,7 @@ tools.need('section_tool', 'capability')\n```\n\n\
         &[&tool],
         &Store::memory(),
         RunOptions {
+            execution: EXECUTION,
             observer: &NullObserver,
             client: Some(GatewayClient::new(
                 &format!("http://{addr}/v1"),
@@ -1694,6 +1822,7 @@ tools.need('second_local', 'second')\n```\n\n\
         &[&first, &second],
         &Store::memory(),
         RunOptions {
+            execution: EXECUTION,
             observer: &NullObserver,
             client: Some(GatewayClient::new(
                 &format!("http://{addr}/v1"),
@@ -1737,6 +1866,7 @@ tools.need('second_local', 'second')\n```\n\n\
         &[&first, &second],
         &Store::memory(),
         RunOptions {
+            execution: EXECUTION,
             observer: &recorder,
             client: Some(GatewayClient::new(
                 &format!("http://{addr}/v1"),

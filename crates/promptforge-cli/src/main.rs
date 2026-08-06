@@ -47,6 +47,7 @@ async fn main() -> ExitCode {
 /// Parse the file, execute its sections with `input` as `args`, and print the
 /// result.
 async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
+    let execution = format!("cli-{:016x}", fastrand::u64(..));
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -62,7 +63,7 @@ async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let prompt = match Prompt::parse(&source, observer) {
+    let prompt = match Prompt::parse(&source, &execution, observer) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {e}");
@@ -82,7 +83,7 @@ async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
         }
     };
     let registry = available.registry();
-    let bound = match bind_prompt(prompt, &picker, &registry, observer) {
+    let bound = match bind_prompt(prompt, &picker, &registry, &execution, observer) {
         Ok(bound) => bound,
         Err(e) => {
             eprintln!("error: {e}");
@@ -98,6 +99,7 @@ async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
     // progress; its gateway client comes from the environment, which is what
     // `client: None` selects.
     let options = RunOptions {
+        execution: &execution,
         observer,
         client: None,
     };
@@ -110,6 +112,87 @@ async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
         Err(e) => {
             eprintln!("error: {e}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use promptforge_core::observe::{Observer, detail};
+
+    use super::run;
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<(String, String, String)>>);
+
+    impl Observer for Recorder {
+        fn observe(&self, execution: &str, section: &str, detail: &str) {
+            self.0
+                .lock()
+                .expect("the CLI recorder mutex must not be poisoned")
+                .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+        }
+    }
+
+    #[tokio::test]
+    async fn run_reuses_one_generated_execution_id_for_parse_bind_and_execution() {
+        let path = std::env::temp_dir().join(format!(
+            "promptforge-cli-execution-{:016x}.md",
+            fastrand::u64(..)
+        ));
+        std::fs::write(
+            &path,
+            "---\nname: lifecycle\ndescription: CLI lifecycle fixture\nversion: 1\npromptforge: 1\n---\n\n\
+             # Lifecycle\n\n## Run\n\n```lua\nreturn 'done'\n```\n",
+        )
+        .expect("write the CLI lifecycle fixture");
+        let recorder = Recorder::default();
+
+        let status = run(
+            path.to_str().expect("the fixture path must be UTF-8"),
+            "",
+            &recorder,
+        )
+        .await;
+        std::fs::remove_file(&path).expect("remove the CLI lifecycle fixture");
+
+        assert_eq!(status, std::process::ExitCode::SUCCESS);
+        let records = recorder
+            .0
+            .lock()
+            .expect("the CLI recorder mutex must not be poisoned");
+        let execution = records
+            .first()
+            .map(|(execution, _, _)| execution.as_str())
+            .expect("the CLI run must emit observations");
+        assert!(
+            execution.starts_with("cli-") && execution.len() == 20,
+            "the CLI must generate its documented execution id: {execution}"
+        );
+        assert!(
+            records
+                .iter()
+                .all(|(record_execution, _, _)| record_execution == execution),
+            "parse, bind, and execution must reuse one id: {records:#?}"
+        );
+        let details = records
+            .iter()
+            .map(|(_, _, detail)| detail.as_str())
+            .collect::<Vec<_>>();
+        for expected in [
+            detail::PARSE_STARTED,
+            detail::PARSE_SUCCEEDED,
+            detail::TOOL_BINDING_STARTED,
+            detail::TOOL_BINDING_SUCCEEDED,
+            detail::RUN_STARTED,
+            detail::RUN_SUCCEEDED,
+        ] {
+            assert!(
+                details.contains(&expected),
+                "the CLI lifecycle must include {expected:?}: {records:#?}"
+            );
         }
     }
 }

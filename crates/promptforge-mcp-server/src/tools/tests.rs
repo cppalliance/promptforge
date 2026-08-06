@@ -19,19 +19,19 @@ use crate::catalog::{Catalog, Entry};
 const BUILT_INS: [&str; 4] = ["list_prompts", "run_prompt", "need_prompt", "check_run"];
 
 /// A parsed prompt that runs offline: one section whose Lua returns at once.
-fn prompt(name: &str, description: &str) -> Prompt {
+fn prompt(name: &str, description: &str) -> (String, Prompt) {
     let source = format!(
         "---\nname: {name}\ndescription: {description}\nversion: 1\npromptforge: 1\n---\n\n\
          # Title\n\n## Main\n\n```lua\nreturn args\n```\n"
     );
-    Prompt::parse(&source, &NullObserver).expect("the fixture prompt parses")
+    let prompt =
+        Prompt::parse(&source, "test-run", &NullObserver).expect("the fixture prompt parses");
+    (source, prompt)
 }
 
 fn entry(name: &str, description: &str) -> Entry {
-    Entry::healthy(
-        PathBuf::from(format!("{name}.md")),
-        prompt(name, description),
-    )
+    let (source, prompt) = prompt(name, description);
+    Entry::healthy(PathBuf::from(format!("{name}.md")), source, prompt)
 }
 
 /// Three prompts, which is three more than the tool list ever reports.

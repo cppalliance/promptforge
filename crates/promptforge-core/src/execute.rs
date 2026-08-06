@@ -15,7 +15,7 @@
 //! section's conversation never does.
 //!
 //! A run reports itself as it goes: [`RunOptions::observer`] receives a
-//! borrowed `(section, detail)` pair when the run starts and ends, at each
+//! borrowed `(execution, section, detail)` record when the run starts and ends, at each
 //! section boundary, model turn, tool call, and harness-mediated store
 //! operation. Reporting is a side channel and never
 //! a decision, so passing [`crate::observe::NullObserver`] changes nothing but
@@ -100,12 +100,15 @@ fn make_nonce() -> String {
 /// use promptforge_core::observe::NullObserver;
 ///
 /// let opts = RunOptions {
+///     execution: "example-run",
 ///     observer: &NullObserver,
 ///     client: None,
 /// };
 /// assert!(opts.client.is_none());
 /// ```
 pub struct RunOptions<'a> {
+    /// The caller-provided identifier shared by every report in this execution.
+    pub execution: &'a str,
     /// Where the run reports its progress. Pass
     /// [`NullObserver`](crate::observe::NullObserver) to discard it.
     pub observer: &'a dyn Observer,
@@ -150,6 +153,7 @@ impl fmt::Debug for RunOptions<'_> {
     /// carries no `Debug`; its presence is reported instead.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RunOptions")
+            .field("execution", &self.execution)
             .field("observer", &"<dyn Observer>")
             .field("client", &self.client)
             .finish()
@@ -217,10 +221,14 @@ pub async fn run<'a>(
         }
     }
 
-    let RunOptions { observer, client } = opts;
+    let RunOptions {
+        execution,
+        observer,
+        client,
+    } = opts;
     let registry = ToolRegistry::new(tools.iter().copied());
     let prompt_section = prompt.title.as_str();
-    observer.observe(prompt_section, detail::RUN_STARTED);
+    observer.observe(execution, prompt_section, detail::RUN_STARTED);
 
     // The turn count is threaded through the whole run so `RunFinished` can
     // report the total even when a section fails part way through it.
@@ -231,6 +239,7 @@ pub async fn run<'a>(
         args,
         &registry,
         store,
+        execution,
         observer,
         client,
         &mut turns,
@@ -238,6 +247,7 @@ pub async fn run<'a>(
     .await;
 
     observer.observe(
+        execution,
         prompt_section,
         if result.is_ok() {
             detail::RUN_SUCCEEDED
@@ -268,6 +278,7 @@ async fn run_sections(
     args: &str,
     registry: &ToolRegistry<'_>,
     store: &Store,
+    execution: &str,
     observer: &dyn Observer,
     mut client: Option<GatewayClient>,
     turns: &mut u32,
@@ -287,13 +298,17 @@ async fn run_sections(
 
         // `completed` counts sections entered, so the first is 1. It only ever
         // grows, which is what the progress contract requires.
-        observer.observe(&section.name, detail::SECTION_STARTED);
+        observer.observe(execution, &section.name, detail::SECTION_STARTED);
 
         let mut vm = match (prompt.shared.as_ref(), bound) {
-            (Some(shared), Some(bound)) => {
-                SectionVm::new_with_bindings(shared, bound.bindings(), observer, &section.name)?
-            }
-            (shared, _) => SectionVm::new(shared, observer, &section.name)?,
+            (Some(shared), Some(bound)) => SectionVm::new_with_bindings(
+                shared,
+                bound.bindings(),
+                execution,
+                observer,
+                &section.name,
+            )?,
+            (shared, _) => SectionVm::new(shared, execution, observer, &section.name)?,
         };
         if let Err(error) = vm.inject_host(args, &sys, store) {
             vm.teardown(observer, &section.name);
@@ -313,7 +328,7 @@ async fn run_sections(
         };
         if let Some(value) = preamble_return {
             vm.teardown(observer, &section.name);
-            observer.observe(&section.name, detail::SECTION_FINISHED);
+            observer.observe(execution, &section.name, detail::SECTION_FINISHED);
             return Ok(value);
         }
 
@@ -348,7 +363,14 @@ async fn run_sections(
         if !prose.trim().is_empty() {
             let (schemas, dispatch) = match (bound, scope.as_ref()) {
                 (Some(bound), Some(scope)) => {
-                    match prepare_effective_scope(bound, scope, registry, observer, &section.name) {
+                    match prepare_effective_scope(
+                        bound,
+                        scope,
+                        registry,
+                        execution,
+                        observer,
+                        &section.name,
+                    ) {
                         Ok(prepared) => prepared,
                         Err(error) => {
                             vm.teardown(observer, &section.name);
@@ -376,6 +398,7 @@ async fn run_sections(
                     prose,
                     max_tool_iterations,
                     SectionProgress {
+                        execution,
                         observer,
                         section: &section.name,
                         turns,
@@ -409,7 +432,7 @@ async fn run_sections(
             None
         };
         vm.teardown(observer, &section.name);
-        observer.observe(&section.name, detail::SECTION_FINISHED);
+        observer.observe(execution, &section.name, detail::SECTION_FINISHED);
         if let Some(value) = epilog_return {
             return Ok(value);
         }
@@ -428,13 +451,15 @@ fn prepare_effective_scope(
     bound: &BoundPrompt,
     scope: &ToolScope,
     registry: &ToolRegistry<'_>,
+    execution: &str,
     observer: &dyn Observer,
     section: &str,
 ) -> Result<(Vec<ToolSchema>, BTreeMap<String, ToolId>)> {
-    observer.observe(section, detail::TOOL_SCOPE_VALIDATION_STARTED);
+    observer.observe(execution, section, detail::TOOL_SCOPE_VALIDATION_STARTED);
     let result = validate_effective_scope_inner(bound, scope)
         .and_then(|()| prepare_scoped_tools(scope, registry));
     observer.observe(
+        execution,
         section,
         if result.is_ok() {
             detail::TOOL_SCOPE_VALIDATION_SUCCEEDED
@@ -513,6 +538,8 @@ fn prepare_scoped_tools(
 /// readable, and so the counter is a run-wide total rather than a per-section
 /// one.
 struct SectionProgress<'a> {
+    /// The identifier every observation from this loop carries.
+    execution: &'a str,
     /// Where the loop reports its turns and tool calls.
     observer: &'a dyn Observer,
     /// The heading text every observation from this loop carries.
@@ -545,6 +572,7 @@ async fn run_tool_loop(
     progress: SectionProgress<'_>,
 ) -> Result<String> {
     let SectionProgress {
+        execution,
         observer,
         section,
         turns,
@@ -563,14 +591,14 @@ async fn run_tool_loop(
     for _ in 0..max_tool_iterations {
         let completion = client.complete(&conversation, tool_arg).await;
         if completion.is_err() {
-            observer.observe(section, detail::MODEL_TURN_FAILED);
+            observer.observe(execution, section, detail::MODEL_TURN_FAILED);
         }
         let completion = completion?;
 
         // A round trip that produced a reply is a turn, whether the reply is
         // the section's final text or a batch of tool calls.
         *turns = turns.saturating_add(1);
-        observer.observe(section, detail::MODEL_TURN_COMPLETED);
+        observer.observe(execution, section, detail::MODEL_TURN_COMPLETED);
 
         match completion {
             CompletionResult::Text(text) => return Ok(text),
@@ -596,15 +624,16 @@ async fn run_tool_loop(
                 // Dispatch each requested tool and append its result.
                 for call in &calls {
                     let Some(id) = dispatch.get(&call.name) else {
-                        observer.observe(section, detail::TOOL_CALL_FAILED);
+                        observer.observe(execution, section, detail::TOOL_CALL_FAILED);
                         return Err(Error::UnknownTool(call.name.clone()));
                     };
                     let Some(tool) = registry.get(id) else {
-                        observer.observe(section, detail::TOOL_CALL_FAILED);
+                        observer.observe(execution, section, detail::TOOL_CALL_FAILED);
                         return Err(Error::UnknownScopedTool(call.name.clone()));
                     };
                     let result = tool.call(call.arguments.clone()).await;
                     observer.observe(
+                        execution,
                         section,
                         if result.is_ok() {
                             detail::TOOL_CALL_SUCCEEDED

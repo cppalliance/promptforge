@@ -162,12 +162,13 @@ mod tests {
         let tools = PreparedTools::new(&config.gateway).expect("prepare fixture tools");
         let prompt = Prompt::parse(
             "---\nname: fixture\ndescription: Binding fixture\nversion: 1\npromptforge: 1\n---\n# Fixture\n\n```lua prompt\ntools.need(\"fetch\", \"Fetch a web page and return its main content as markdown.\")\n```\n\n## Run\n\n```lua\nreturn \"done\"\n```\n",
+            "test-run",
             &NullObserver,
         )
         .expect("parse fixture prompt");
         let registry = tools.registry();
 
-        let bound = bind_prompt(prompt, tools.picker(), &registry, &NullObserver)
+        let bound = bind_prompt(prompt, tools.picker(), &registry, "test-run", &NullObserver)
             .expect("bind available capability");
 
         assert_eq!(
@@ -194,11 +195,12 @@ mod tests {
                 "{} must not depend on concrete tool names",
                 path.display()
             );
-            let prompt = Prompt::parse(&source, &NullObserver).unwrap_or_else(|error| {
-                panic!("{} must parse: {error}", path.display());
-            });
+            let prompt =
+                Prompt::parse(&source, "test-run", &NullObserver).unwrap_or_else(|error| {
+                    panic!("{} must parse: {error}", path.display());
+                });
             let name = prompt.frontmatter.name.clone();
-            let bound = bind_prompt(prompt, tools.picker(), &registry, &NullObserver)
+            let bound = bind_prompt(prompt, tools.picker(), &registry, "test-run", &NullObserver)
                 .unwrap_or_else(|error| panic!("{} must bind: {error}", path.display()));
 
             if name == "research_person" {

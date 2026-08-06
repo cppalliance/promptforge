@@ -121,7 +121,7 @@ impl BoundPrompt {
 ///
 /// Binding observations are the fixed payload-free details from
 /// [`crate::observe::detail`]. They contain no alias, capability, candidate,
-/// identity, or picker diagnostic.
+/// identity, or picker diagnostic, and carry `execution` unchanged.
 ///
 /// # Errors
 /// Returns [`Error::Bind`] if the picker itself fails, [`Error::Absent`] when
@@ -136,15 +136,17 @@ pub fn bind_prompt(
     prompt: Prompt,
     picker: &ToolPicker,
     registry: &ToolRegistry<'_>,
+    execution: &str,
     observer: &dyn Observer,
 ) -> Result<BoundPrompt> {
-    bind_with_source(prompt, picker, registry, observer)
+    bind_with_source(prompt, picker, registry, execution, observer)
 }
 
 fn bind_with_source<S>(
     prompt: Prompt,
     source: &S,
     registry: &ToolRegistry<'_>,
+    execution: &str,
     observer: &dyn Observer,
 ) -> Result<BoundPrompt>
 where
@@ -152,15 +154,15 @@ where
 {
     let resolver = PickerResolver::new(source);
     let bindings = if let Some(shared) = &prompt.shared {
-        bind_tool_declarations(shared, &resolver, observer, &prompt.title)?
+        bind_tool_declarations(shared, &resolver, execution, observer, &prompt.title)?
     } else {
-        observer.observe(&prompt.title, detail::TOOL_BINDING_STARTED);
-        observer.observe(&prompt.title, detail::TOOL_BINDING_SUCCEEDED);
+        observer.observe(execution, &prompt.title, detail::TOOL_BINDING_STARTED);
+        observer.observe(execution, &prompt.title, detail::TOOL_BINDING_SUCCEEDED);
         ToolBindings::default()
     };
     let diagnostics = resolver.into_diagnostics()?;
     let (alias_to_id, id_to_alias) =
-        validate_registry_and_bindings(&bindings, registry, observer, &prompt.title)?;
+        validate_registry_and_bindings(&bindings, registry, execution, observer, &prompt.title)?;
     let selected_ids = bindings
         .bindings()
         .iter()
@@ -183,12 +185,14 @@ where
 fn validate_registry_and_bindings(
     bindings: &ToolBindings,
     registry: &ToolRegistry<'_>,
+    execution: &str,
     observer: &dyn Observer,
     section: &str,
 ) -> Result<(BTreeMap<String, ToolId>, BTreeMap<ToolId, String>)> {
-    observer.observe(section, detail::TOOL_REGISTRY_VALIDATION_STARTED);
+    observer.observe(execution, section, detail::TOOL_REGISTRY_VALIDATION_STARTED);
     let result = validate_registry_and_bindings_inner(bindings, registry);
     observer.observe(
+        execution,
         section,
         if result.is_ok() {
             detail::TOOL_REGISTRY_VALIDATION_SUCCEEDED
@@ -378,6 +382,8 @@ mod tests {
     use crate::parser::Frontmatter;
     use crate::tools::Tool;
 
+    const EXECUTION: &str = "bind-test";
+
     #[derive(Debug)]
     struct FixtureSource {
         calls: AtomicUsize,
@@ -492,28 +498,37 @@ mod tests {
     }
 
     #[derive(Debug, Default)]
-    struct Recorder(Mutex<Vec<(String, String)>>);
+    struct Recorder(Mutex<Vec<(String, String, String)>>);
 
     impl Observer for Recorder {
-        fn observe(&self, section: &str, detail: &str) {
+        fn observe(&self, execution: &str, section: &str, detail: &str) {
             self.0
                 .lock()
                 .expect("fixture recorder must not be poisoned")
-                .push((section.to_owned(), detail.to_owned()));
+                .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
         }
     }
 
     impl Recorder {
-        fn observations(&self) -> Vec<(String, String)> {
+        fn records(&self) -> Vec<(String, String, String)> {
             self.0
                 .lock()
                 .expect("fixture recorder must not be poisoned")
                 .clone()
         }
+
+        fn observations(&self) -> Vec<(String, String)> {
+            self.0
+                .lock()
+                .expect("fixture recorder must not be poisoned")
+                .iter()
+                .map(|(_, section, detail)| (section.clone(), detail.clone()))
+                .collect()
+        }
     }
 
     fn program(source: &str) -> LuaProgram {
-        LuaProgram::compile(source, "shared", &NullObserver, "Prompt")
+        LuaProgram::compile(source, "shared", EXECUTION, &NullObserver, "Prompt")
             .expect("fixture Lua must compile")
     }
 
@@ -544,7 +559,8 @@ mod tests {
             "tools.need('first', 'bind')\n\
              tools.need('second', 'bind')",
         );
-        let bindings = bind_tool_declarations(&shared, &resolver, &NullObserver, "Prompt").unwrap();
+        let bindings =
+            bind_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt").unwrap();
         let diagnostics = resolver.into_diagnostics().unwrap();
 
         assert_eq!(source.calls.load(Ordering::Relaxed), 1);
@@ -675,6 +691,7 @@ mod tests {
             let error = bind_tool_declarations(
                 &program(&format!("tools.need('alias', {capability:?})")),
                 &resolver,
+                EXECUTION,
                 &NullObserver,
                 "Prompt",
             )
@@ -701,6 +718,7 @@ mod tests {
         let error = bind_tool_declarations(
             &program("pcall(tools.need, 'alias', 'absent')"),
             &resolver,
+            EXECUTION,
             &NullObserver,
             "Prompt",
         )
@@ -722,6 +740,7 @@ mod tests {
             ))),
             &source,
             &registry,
+            EXECUTION,
             &NullObserver,
         )
         .unwrap();
@@ -758,6 +777,7 @@ mod tests {
             ))),
             &AnalysisSource { fail: false },
             &registry,
+            EXECUTION,
             &NullObserver,
         )
         .unwrap();
@@ -780,6 +800,7 @@ mod tests {
             ))),
             &AnalysisSource { fail: true },
             &registry,
+            EXECUTION,
             &NullObserver,
         )
         .unwrap_err();
@@ -808,9 +829,16 @@ mod tests {
                 )))),
                 &source,
                 &registry,
+                EXECUTION,
                 &recorder,
             );
             assert_eq!(result.is_ok(), outcome == "succeeded");
+            assert!(
+                recorder
+                    .records()
+                    .iter()
+                    .all(|(execution, _, _)| execution == EXECUTION)
+            );
             let expected = if outcome == "succeeded" {
                 vec![
                     (
@@ -857,7 +885,8 @@ mod tests {
         };
         let recorder = Recorder::default();
         let registry = ToolRegistry::new(std::iter::empty());
-        let bound = bind_with_source(prompt(None), &source, &registry, &recorder).unwrap();
+        let bound =
+            bind_with_source(prompt(None), &source, &registry, EXECUTION, &recorder).unwrap();
 
         assert!(bound.bindings().bindings().is_empty());
         assert!(bound.diagnostics().is_empty());
@@ -898,6 +927,7 @@ mod tests {
             prompt(Some(program("tools.need('alias', 'bind')"))),
             &source,
             &registry,
+            EXECUTION,
             &NullObserver,
         )
         .unwrap_err();
@@ -922,6 +952,7 @@ mod tests {
             ))),
             &source,
             &registry,
+            EXECUTION,
             &NullObserver,
         )
         .unwrap_err();
@@ -950,6 +981,7 @@ mod tests {
             prompt(Some(program("tools.need('alias', 'bind')"))),
             &source,
             &registry,
+            EXECUTION,
             &NullObserver,
         )
         .unwrap_err();
@@ -975,6 +1007,7 @@ mod tests {
             ))),
             &source,
             &registry,
+            EXECUTION,
             &recorder,
         );
 
