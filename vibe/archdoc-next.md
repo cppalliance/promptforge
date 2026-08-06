@@ -13,3 +13,5 @@
 - [2026-08-03-1-mcp-server-correction] reuse before machinery: The existing principle already requires Lua, store, or catalog reuse before new configuration or APIs.
 - [2026-08-03-1-mcp-server-correction] as-built document ownership: Co-locate each existing crate's as-built design document and keep unbuilt design as separate residue.
 - [2026-08-04-1-recover-core-design-rationale] irrecoverable contingency: Exact thresholds, external observations, and deleted alternatives cannot be reconstructed reliably from current code.
+- [2026-08-05-1-section-lua-lifecycle] exact declaration replay: Freeze capability bindings once and replay declarations without resolving again.
+- [2026-08-05-1-section-lua-lifecycle] observer side channel: Observation must remain non-blocking, payload-free, and irrelevant to execution decisions.

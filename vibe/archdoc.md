@@ -35,6 +35,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A14. Only prompts declaring a supported PromptForge major execute; missing or unsupported majors are refused.
 - A15. Every section entry gets a fresh model context; only Lua chooses transitions, and state crosses through the store or explicit payloads.
 - A16. Long-running runs survive client deadlines and remain collectable by opaque id until retention expires.
+- A17. Shared Lua executes in a fresh VM for each section; mutable Lua state never crosses section boundaries.
 
 ## Principles
 
@@ -51,5 +52,3 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 ## Decided against
 
 - 2026-09-04 Hosting the workshop UI inside the gateway was proposed and declined; the gateway remains separate.
-
-- 2026-08-03 Publishing prompts as model-selected per-prompt tools was reversed; invocation uses a fixed command surface and explicit prompt names.
