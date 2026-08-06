@@ -82,5 +82,5 @@ pub use catalog::{Catalog, QUALIFIED_KEY_SEPARATOR, ToolAnnotations, ToolDescrip
 pub use config::{Config, ModelId};
 pub use embed::{EMBEDDING_DIMENSIONS, Embedder};
 pub use error::{Error, Result};
-pub use picker::ToolPicker;
+pub use picker::{NearDuplicate, ToolPicker};
 pub use policy::Outcome;

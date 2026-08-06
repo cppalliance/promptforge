@@ -3,8 +3,8 @@
 //! Resolution itself is infallible and reports abstention as an outcome, so
 //! [`Error`] is the crate's one error type and its variants cover configuration
 //! validation - a threshold outside the cosine range, a zero-length shortlist -
-//! and the embedding backend: loading the compiled-in model, tokenizing, and
-//! the forward pass.
+//! selected identities absent from the picker, and the embedding backend:
+//! loading the compiled-in model, tokenizing, and the forward pass.
 //! The type is `#[non_exhaustive]`, so a later failure mode can add a variant
 //! without that being a breaking change.
 //!
@@ -14,9 +14,9 @@
 
 /// Something that went wrong before the engine could answer a need.
 ///
-/// Every variant names the offending value, because a configuration rejected
-/// without saying which field was wrong is a worse failure than the misbehaviour
-/// it prevents.
+/// Every variant names the offending value, because an input rejected without
+/// saying which value was wrong is a worse failure than the misbehaviour it
+/// prevents.
 ///
 /// The type is `Send + Sync + 'static` and never exposes a dependency's error
 /// type. It is `#[non_exhaustive]` at both the enum and the variant level: new
@@ -47,6 +47,17 @@ pub enum Error {
     /// margin against, so every need would abstain.
     #[error("top_k must be at least 1")]
     EmptyShortlist,
+
+    /// A selected tool identity is not present in the picker's catalog.
+    ///
+    /// Selected-set analysis is validation, so silently dropping an absent
+    /// identity would make an incomplete scope appear safe.
+    #[non_exhaustive]
+    #[error("tool identity is absent from the picker catalog: {id:?}")]
+    ToolNotInCatalog {
+        /// The requested identity that the picker could not find.
+        id: crate::ToolId,
+    },
 
     /// The embedded model could not be turned into a usable encoder.
     ///

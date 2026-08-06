@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use promptforge_tool_picker::{
-    Catalog, Config, Embedder, Outcome, ToolDescriptor, ToolId, ToolPicker,
+    Catalog, Config, Embedder, Error, NearDuplicate, Outcome, ToolDescriptor, ToolId, ToolPicker,
 };
 use serde_json::json;
 
@@ -55,6 +55,39 @@ fn a_caller_can_build_resolve_and_shortlist_through_the_public_api() {
     let candidates = picker.shortlist("fetch a web page over HTTP", 2).unwrap();
     assert_eq!(candidates[0].id, ToolId::new("net", "fetch_url"));
     assert!(candidates.len() <= 2);
+
+    let pairs: Vec<NearDuplicate> = picker
+        .near_duplicates(&[
+            ToolId::new("net", "fetch_url"),
+            ToolId::new("files", "read_file"),
+        ])
+        .unwrap();
+    assert!(pairs.is_empty());
+}
+
+#[test]
+fn selected_set_analysis_rejects_an_absent_id_and_accepts_repetition() {
+    let tools = catalog();
+    let picker = ToolPicker::build(tools.clone(), Config::default()).unwrap();
+    let missing = ToolId::new("missing", "tool");
+    let error = picker
+        .near_duplicates(&[
+            tools.tools()[0].id.clone(),
+            tools.tools()[0].id.clone(),
+            missing.clone(),
+        ])
+        .expect_err("an absent identity must reject the complete selected set");
+
+    assert!(
+        matches!(error, Error::ToolNotInCatalog { ref id, .. } if *id == missing),
+        "got {error:?}"
+    );
+    assert!(
+        picker
+            .near_duplicates(&[tools.tools()[0].id.clone(), tools.tools()[0].id.clone(),])
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
