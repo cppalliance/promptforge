@@ -38,13 +38,13 @@ fn recording() -> (Levels, tracing::subscriber::DefaultGuard) {
 
 /// The result a finished run of `prompt` leaves behind.
 fn completed(run_id: &str, prompt: &str) -> RunResult {
-    RunResult::completed(run_id.to_owned(), prompt, 1, "done".to_owned(), 2, 40)
+    RunResult::completed(run_id.to_owned(), prompt, "done".to_owned(), 2, 40)
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_run_that_outlives_the_deadline_keeps_going_and_is_collected_later() {
     let registry = registry("reply_deadline = \"50ms\"");
-    registry.started("r1", "slow", 1);
+    registry.started("r1", "slow");
     let task = tokio::spawn({
         let registry = Arc::clone(&registry);
         async move {
@@ -56,7 +56,7 @@ async fn a_run_that_outlives_the_deadline_keeps_going_and_is_collected_later() {
     });
 
     let started = Instant::now();
-    let reply = registry.settle("r1", "slow", 1, task).await;
+    let reply = registry.settle("r1", "slow", task).await;
     assert_eq!(started.elapsed(), Duration::from_millis(50));
     assert_eq!(reply.status, RunStatus::Running);
     assert_eq!(reply.run_id, "r1");
@@ -75,7 +75,7 @@ async fn a_run_that_outlives_the_deadline_keeps_going_and_is_collected_later() {
 #[tokio::test(start_paused = true)]
 async fn a_run_inside_the_deadline_answers_with_its_own_result() {
     let registry = registry("reply_deadline = \"5s\"");
-    registry.started("r1", "quick", 1);
+    registry.started("r1", "quick");
     let task = tokio::spawn({
         let registry = Arc::clone(&registry);
         async move {
@@ -85,7 +85,7 @@ async fn a_run_inside_the_deadline_answers_with_its_own_result() {
         }
     });
 
-    let reply = registry.settle("r1", "quick", 1, task).await;
+    let reply = registry.settle("r1", "quick", task).await;
     assert_eq!(reply.status, RunStatus::Completed);
     assert_eq!(reply.value.as_deref(), Some("done"));
 }
@@ -93,10 +93,10 @@ async fn a_run_inside_the_deadline_answers_with_its_own_result() {
 #[tokio::test(start_paused = true)]
 async fn a_run_that_panicked_is_reported_as_a_failure_and_recorded_as_one() {
     let registry = registry("");
-    registry.started("r1", "doomed", 1);
+    registry.started("r1", "doomed");
     let task = tokio::spawn(async { panic!("the run's own bug") });
 
-    let reply = registry.settle("r1", "doomed", 1, task).await;
+    let reply = registry.settle("r1", "doomed", task).await;
     assert_eq!(reply.status, RunStatus::Failed);
     assert_eq!(
         registry.check("r1").map(|run| run.status),
@@ -108,13 +108,13 @@ async fn a_run_that_panicked_is_reported_as_a_failure_and_recorded_as_one() {
 #[tokio::test(start_paused = true)]
 async fn a_backgrounded_run_that_panics_becomes_a_collectable_failure() {
     let registry = registry("reply_deadline = \"50ms\"\nretain_completed = \"1h\"");
-    registry.started("r1", "doomed", 1);
+    registry.started("r1", "doomed");
     let task = tokio::spawn(async {
         tokio::time::sleep(Duration::from_secs(5)).await;
         panic!("the run's own bug")
     });
 
-    let reply = registry.settle("r1", "doomed", 1, task).await;
+    let reply = registry.settle("r1", "doomed", task).await;
     assert_eq!(
         reply.status,
         RunStatus::Running,
@@ -143,7 +143,7 @@ async fn a_backgrounded_run_that_panics_becomes_a_collectable_failure() {
 async fn a_backgrounded_run_logs_the_id_without_duplicating_the_runner_terminal_log() {
     let (levels, _recording) = recording();
     let registry = registry("reply_deadline = \"50ms\"");
-    registry.started("r1", "slow", 1);
+    registry.started("r1", "slow");
     let task = tokio::spawn({
         let registry = Arc::clone(&registry);
         async move {
@@ -154,7 +154,7 @@ async fn a_backgrounded_run_logs_the_id_without_duplicating_the_runner_terminal_
         }
     });
 
-    let reply = registry.settle("r1", "slow", 1, task).await;
+    let reply = registry.settle("r1", "slow", task).await;
     assert_eq!(reply.status, RunStatus::Running);
     tokio::time::sleep(Duration::from_secs(6)).await;
 
@@ -204,7 +204,7 @@ async fn a_call_is_refused_once_every_slot_is_taken_and_admitted_when_one_return
 #[tokio::test(start_paused = true)]
 async fn a_finished_record_is_evicted_once_its_window_passes() {
     let registry = registry("retain_completed = \"1h\"");
-    registry.started("r1", "echo", 1);
+    registry.started("r1", "echo");
     registry.finished("r1", completed("r1", "echo"));
     assert!(registry.check("r1").is_some(), "inside the window");
 
@@ -218,7 +218,7 @@ async fn a_finished_record_is_evicted_once_its_window_passes() {
 #[tokio::test(start_paused = true)]
 async fn a_running_record_outlives_the_retention_window() {
     let registry = registry("retain_completed = \"1h\"");
-    registry.started("r1", "long", 1);
+    registry.started("r1", "long");
 
     tokio::time::sleep(Duration::from_secs(7200)).await;
     let running = registry

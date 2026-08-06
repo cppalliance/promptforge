@@ -53,7 +53,7 @@ To operate it: run `promptforge-mcp-server serve prompts.toml` for streamable HT
 
 Every property of every schema is a string, because a prompt name, a raw argument string, a run id, and a capability are all strings and no other property type is offered. `run_prompt` requires `prompt` alone, so a missing `args` is the empty string.
 
-`list_prompts` returns every enabled prompt as `{name, description, version, problem}`, where `problem` is absent on a healthy prompt and carries the parse failure on a broken one. The one publication rule that survives is a property of the build rather than of the catalog: `need_prompt` needs the ranking engine compiled in.
+`list_prompts` returns every enabled prompt as `{name, description, problem}`, where `problem` is absent on a healthy prompt and carries the parse failure on a broken one. The one publication rule that survives is a property of the build rather than of the catalog: `need_prompt` needs the ranking engine compiled in.
 
 The catalog is deliberately *not* embedded in `run_prompt`'s description. It would pay a context cost in prose no client can filter, and a client caches that description for the life of its process, so it would go stale the moment a prompt was added. Instead the description names `list_prompts` as where the names come from, the session instructions say the same once, and the error path carries the catalog for the models that skip both.
 
@@ -111,7 +111,6 @@ Successful binding produces a `BoundPrompt`, which the run task owns alongside t
 pub struct RunResult {
     pub run_id: String,
     pub prompt: String,
-    pub version: u32,
     pub status: RunStatus,     // running | completed | failed
     pub value: Option<String>,
     pub turns: u32,

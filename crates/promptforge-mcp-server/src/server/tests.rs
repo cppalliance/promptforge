@@ -43,7 +43,7 @@ fn prepared(config: &Config) -> Arc<PreparedTools> {
 /// A prompt that returns its input without calling a model.
 fn echo_prompt(name: &str, description: &str) -> String {
     format!(
-        "---\nname: {name}\ndescription: {description}\nversion: 3\npromptforge: 1\n---\n\n\
+        "---\nname: {name}\ndescription: {description}\npromptforge: 1\n---\n\n\
          # Test prompt\n\n## Main\n\n```lua\nreturn args\n```\n"
     )
 }
@@ -51,14 +51,14 @@ fn echo_prompt(name: &str, description: &str) -> String {
 /// A prompt whose valid Lua returns an unsupported value at execution.
 fn failing_lua_prompt(name: &str) -> String {
     format!(
-        "---\nname: {name}\ndescription: Fails on entry\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: {name}\ndescription: Fails on entry\npromptforge: 1\n---\n\n\
          # Test prompt\n\n## Main\n\n```lua\nreturn {{}}\n```\n"
     )
 }
 
 fn capability_prompt(name: &str, capability: &str) -> String {
     format!(
-        "---\nname: {name}\ndescription: Capability binding fixture\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: {name}\ndescription: Capability binding fixture\npromptforge: 1\n---\n\n\
          # Capability prompt\n\n```lua prompt\ntools.need(\"fetch\", \"{capability}\")\n```\n\n\
          ## Main\n\n```lua\ntools.add(\"fetch\")\n```\n\n```lua\nreturn \"bound\"\n```\n"
     )
@@ -154,7 +154,10 @@ async fn the_runner_runs_the_named_prompt_and_reports_the_value_twice() {
     assert_eq!(structured["value"], json!("hello"));
     assert_eq!(structured["status"], json!("completed"));
     assert_eq!(structured["prompt"], json!("echo"));
-    assert_eq!(structured["version"], json!(3));
+    assert!(
+        structured.get("version").is_none(),
+        "retired author versions must not reach run JSON: {structured}"
+    );
     assert!(
         structured["run_id"]
             .as_str()
@@ -490,7 +493,10 @@ async fn list_prompts_reports_every_enabled_prompt() {
         .map(|entry| entry["name"].as_str().unwrap_or_default())
         .collect();
     assert_eq!(names, ["echo", "explode", "greet", "summarize"]);
-    assert_eq!(prompts[2]["version"], json!(3));
+    assert!(
+        prompts.iter().all(|entry| entry.get("version").is_none()),
+        "retired author versions must not reach catalog JSON"
+    );
     assert!(
         prompts.iter().all(|entry| entry.get("direct").is_none()),
         "no prompt has a tool of its own to report"
@@ -606,7 +612,7 @@ fn speaking_server_with(gateway: SocketAddr, server_lines: &str) -> (TempDir, Pr
     write(
         dir.path(),
         "speak.md",
-        "---\nname: speak\ndescription: Say something\nversion: 1\npromptforge: 1\n---\n\n\
+        "---\nname: speak\ndescription: Say something\npromptforge: 1\n---\n\n\
          # Test prompt\n\n## Only\n\nSay something.\n",
     );
     let config = Config::from_toml_str(&format!(

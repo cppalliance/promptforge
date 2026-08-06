@@ -69,7 +69,7 @@ macro_rules! prompt_value {
 
 pub(crate) use prompt_value;
 
-const LIST_PROMPTS_DESCRIPTION: &str = "Names the PromptForge prompts this server can run. Each entry carries the prompt's name, its description, its version, and any problem that currently stops it running. The listing is read from the catalog as it stands, so a prompt written or edited since this conversation began is already in it. run_prompt takes a name from this listing.";
+const LIST_PROMPTS_DESCRIPTION: &str = "Names the PromptForge prompts this server can run. Each entry carries the prompt's name, its description, and any problem that currently stops it running. The listing is read from the catalog as it stands, so a prompt written or edited since this conversation began is already in it. run_prompt takes a name from this listing.";
 
 const RUN_PROMPT_DESCRIPTION: &str = concat!(
     "Runs the named PromptForge prompt and returns what it produced. This server executes prompts the caller names; the prompt argument is that name, as list_prompts reports it. ",

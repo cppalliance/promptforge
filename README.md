@@ -373,8 +373,8 @@ not change while the process runs:
 | `need_prompt` | `capability` | the `picker` feature is compiled in |
 | `check_run` | `run_id` | always |
 
-`list_prompts` reports every enabled prompt with its name, description, version,
-and any problem that stops it running; `run_prompt` runs one by name, taking the
+`list_prompts` reports every enabled prompt with its name, description, and any
+problem that stops it running; `run_prompt` runs one by name, taking the
 run's whole input as one optional string, where omitting it passes the empty
 string; `need_prompt` resolves a description of a prompt to the names of up to
 three close ones, running none of them. `check_run` collects a run that outlived
@@ -402,9 +402,9 @@ only one of the two.
 
 A call at `run_prompt` is one run against the configured gateway, reported as a
 `RunResult`. The result's
-`structuredContent` carries the whole record - `run_id`, `prompt`, `version`,
-`status` (`running`, `completed`, or `failed`), `value`, `turns`, `elapsed_ms`,
-`error` - and the text block beside it carries the plain product: the returned
+`structuredContent` carries the whole record - `run_id`, `prompt`, `status`
+(`running`, `completed`, or `failed`), `value`, `turns`, `elapsed_ms`, `error` -
+and the text block beside it carries the plain product: the returned
 value verbatim on completion, the error on failure. A failed run also sets
 `isError`. The value is the whole product, since the runtime writes no output
 files and so has no path to hand back instead.
@@ -520,7 +520,6 @@ of exact `Model turn completed` observations received by the same observer.
 ---
 name: hello
 description: Say hello
-version: 1
 promptforge: 1
 ---
 
@@ -550,8 +549,8 @@ return reply
 ```
 ```
 
-- `---` delimited YAML frontmatter (`name`, `description`, `version`, `promptforge` required; `default_return` and `max_tool_iterations` optional).
-- `promptforge:` is the **engine version** that marks the file as a promptforge prompt (supported major: `1`). It is distinct from `version:`, which is the author's own revision of the prompt. A file without a `promptforge:` version is not a promptforge prompt and the CLI declines to run it; an unsupported major is refused, never silently degraded.
+- `---` delimited YAML frontmatter (`name` and `description` required; `promptforge`, `default_return`, and `max_tool_iterations` optional to the parser).
+- `promptforge:` is the **engine version** that marks the file as a promptforge prompt (supported major: `1`). A file without a `promptforge:` version is not a promptforge prompt and the CLI declines to run it; an unsupported major is refused, never silently degraded.
 - Exactly one `# Title` is required. Markdown before it is ignored.
 - The H1 may immediately open with one exact, unindented triple-backtick `lua prompt` fence after any number of blank lines. Its exact triple-backtick closing line ends the shared library, and the remaining H1 text is the human-readable description. A reserved `lua prompt` fence after description prose, a second one, or an inexact closing marker is an error. Indented markers, longer backtick runs, different capitalization, and extra info tokens are ordinary Markdown.
 - `## Section` headings are executable units; they run top to bottom (fall-through). Each section parses as an optional exact leading `lua` preamble fence, prose, and an optional exact trailing `lua` epilog fence. Reserved fences use exact unindented lowercase ` ```lua ` opening lines and exact unindented ` ``` ` closing lines. Blank lines may surround them. A lone reserved fence is the preamble. Lua fences between prose, longer or indented fences, different capitalization, extra info tokens, and marker-looking lines inside a longer fence remain model-facing prose.

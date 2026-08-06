@@ -161,7 +161,7 @@ mod tests {
         let config = gateway("");
         let tools = PreparedTools::new(&config.gateway).expect("prepare fixture tools");
         let prompt = Prompt::parse(
-            "---\nname: fixture\ndescription: Binding fixture\nversion: 1\npromptforge: 1\n---\n# Fixture\n\n```lua prompt\ntools.need(\"fetch\", \"Fetch a web page and return its main content as markdown.\")\n```\n\n## Run\n\n```lua\nreturn \"done\"\n```\n",
+            "---\nname: fixture\ndescription: Binding fixture\npromptforge: 1\n---\n# Fixture\n\n```lua prompt\ntools.need(\"fetch\", \"Fetch a web page and return its main content as markdown.\")\n```\n\n## Run\n\n```lua\nreturn \"done\"\n```\n",
             "test-run",
             &NullObserver,
         )
