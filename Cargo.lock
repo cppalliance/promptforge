@@ -2739,6 +2739,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge-core-tests"
+version = "0.1.0"
+dependencies = [
+ "promptforge-core",
+]
+
+[[package]]
 name = "promptforge-gateway"
 version = "0.1.0"
 dependencies = [
