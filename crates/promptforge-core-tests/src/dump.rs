@@ -4,7 +4,7 @@
 //! directory next to the prompt file named `<prompt-stem>.store`, so a prompt
 //! author can inspect what the prompt wrote. The directory is cleared before
 //! each dump so stale files never masquerade as the current run, and it is
-//! removed entirely when the store is empty. Store paths that cannot map to a
+//! removed entirely when the store is empty. StoreRef paths that cannot map to a
 //! safe relative filesystem path are reported on the caller's status sink and
 //! skipped; nothing is ever written outside the dump directory.
 
@@ -12,7 +12,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
-use promptforge_core::store::Store;
+use promptforge_core::store::StoreRef;
 
 /// Copies every file in `store` under the prompt's dump directory,
 /// announcing each dumped path as one line on `status`.
@@ -28,7 +28,11 @@ use promptforge_core::store::Store;
 ///
 /// Returns an error when the dump path exists but is not a directory, or
 /// when removing, creating, or writing under the dump directory fails.
-pub(crate) fn dump_store(store: &Store, prompt_path: &Path, status: &mut dyn Write) -> Result<()> {
+pub(crate) fn dump_store(
+    store: &StoreRef,
+    prompt_path: &Path,
+    status: &mut dyn Write,
+) -> Result<()> {
     let directory = dump_directory(prompt_path);
     if directory.symlink_metadata().is_ok() {
         if !directory.is_dir() {
@@ -96,7 +100,7 @@ fn dump_directory(prompt_path: &Path) -> PathBuf {
 /// Maps one logical store path to a relative filesystem path, or `None` when
 /// the path cannot be written safely inside the dump directory.
 ///
-/// Store paths use `/` separators. A path is rejected when it is empty or
+/// StoreRef paths use `/` separators. A path is rejected when it is empty or
 /// absolute, when any component is empty, `.`, or `..`, when a component
 /// carries a separator or a character Windows reserves (`\ : * ? " < > |`, a
 /// control character, or a trailing dot or space), or when a component's stem
@@ -151,7 +155,7 @@ fn is_reserved_device_name(stem: &str) -> bool {
 mod tests {
     use super::*;
 
-    fn dump_to(directory: &Path, store: &Store) -> (PathBuf, String) {
+    fn dump_to(directory: &Path, store: &StoreRef) -> (PathBuf, String) {
         let prompt = directory.join("fixture.md");
         let mut status = Vec::new();
         dump_store(store, &prompt, &mut status).expect("the dump must succeed");
@@ -164,7 +168,7 @@ mod tests {
     #[test]
     fn dumps_every_store_file_to_its_relative_path_with_raw_contents() {
         let directory = tempfile::tempdir().expect("create dump fixture directory");
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store
             .write("evidence.md", "line one\nline two\n")
             .expect("write");
@@ -197,7 +201,7 @@ mod tests {
     #[test]
     fn unsafe_store_paths_are_skipped_with_a_status_report() {
         let directory = tempfile::tempdir().expect("create dump fixture directory");
-        let store = Store::memory();
+        let store = StoreRef::memory();
         let unsafe_paths = [
             "/absolute.txt",
             "../escape.txt",
@@ -231,12 +235,12 @@ mod tests {
     #[test]
     fn a_second_dump_clears_the_previous_runs_files() {
         let directory = tempfile::tempdir().expect("create dump fixture directory");
-        let first = Store::memory();
+        let first = StoreRef::memory();
         first.write("stale.txt", "from run one").expect("write");
         let (dump_dir, _) = dump_to(directory.path(), &first);
         assert!(dump_dir.join("stale.txt").is_file());
 
-        let second = Store::memory();
+        let second = StoreRef::memory();
         second.write("fresh.txt", "from run two").expect("write");
         dump_to(directory.path(), &second);
 
@@ -253,12 +257,12 @@ mod tests {
     #[test]
     fn an_empty_store_leaves_no_dump_directory() {
         let directory = tempfile::tempdir().expect("create dump fixture directory");
-        let populated = Store::memory();
+        let populated = StoreRef::memory();
         populated.write("residue.txt", "old").expect("write");
         let (dump_dir, _) = dump_to(directory.path(), &populated);
         assert!(dump_dir.is_dir());
 
-        let (dump_dir, status) = dump_to(directory.path(), &Store::memory());
+        let (dump_dir, status) = dump_to(directory.path(), &StoreRef::memory());
 
         assert!(
             !dump_dir.exists(),
@@ -273,7 +277,7 @@ mod tests {
         let prompt = directory.path().join("fixture.md");
         std::fs::write(prompt.with_extension("store"), "not a directory")
             .expect("occupy the dump path");
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store.write("a.txt", "x").expect("write");
 
         let error = dump_store(&store, &prompt, &mut Vec::new())
@@ -336,7 +340,7 @@ mod tests {
     #[test]
     fn a_file_directory_collision_skips_the_loser_and_dumps_the_rest() {
         let directory = tempfile::tempdir().expect("create dump fixture directory");
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store.write("a", "plain file").expect("write");
         store
             .write("a/b.txt", "wants a as a directory")

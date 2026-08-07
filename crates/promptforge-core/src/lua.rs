@@ -18,7 +18,7 @@
 //!
 //! The `store` table is a deterministic host capability (like `var`), always
 //! present and independent of tool scoping. Its methods are backed by the
-//! run-scoped [`Store`] handle threaded in from the executor, so every section
+//! run-scoped [`StoreRef`] handle threaded in from the executor, so every section
 //! in a run shares one set of virtual files even though contexts clear on each
 //! transition. A failed store op raises a Lua error, which surfaces from
 //! [`run_chunk`] as [`Error::Lua`].
@@ -34,7 +34,7 @@ use mlua::{
 use serde_json::Value as Json;
 
 use crate::observe::{Observer, detail};
-use crate::store::Store;
+use crate::store::StoreRef;
 use crate::tools::ToolId;
 use crate::{Error, Result};
 
@@ -515,7 +515,7 @@ pub struct SectionVm {
     lua: Lua,
     bound_tools: ToolBindings,
     tool_runtime: Arc<Mutex<ToolRuntime>>,
-    store: Option<Store>,
+    store: Option<StoreRef>,
     host_injected: bool,
 }
 
@@ -705,7 +705,7 @@ impl SectionVm {
     /// Installs the section's host values after the shared program has run.
     ///
     /// This operation may be called exactly once. The store callbacks own a
-    /// clone of the run-scoped store. Store functions are installed with
+    /// clone of the run-scoped store. StoreRef functions are installed with
     /// phase-local borrowed observation context by
     /// [`run_preamble`](Self::run_preamble) and [`run_epilog`](Self::run_epilog),
     /// so no observer reference is retained while the VM waits for a model reply.
@@ -718,14 +718,14 @@ impl SectionVm {
     /// ```
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
     /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
-    /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &Store::memory())?;
+    /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &StoreRef::memory())?;
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
-    pub fn inject_host(&mut self, args: &str, sys: &Json, store: &Store) -> Result<()> {
+    pub fn inject_host(&mut self, args: &str, sys: &Json, store: &StoreRef) -> Result<()> {
         if self.host_injected {
             return Err(Error::Lua(
                 "section VM host values were already injected".to_owned(),
@@ -761,7 +761,7 @@ impl SectionVm {
 
     /// Executes a compiled preamble in this VM's persistent environment.
     ///
-    /// Store-operation reports recorded by host callbacks are delivered in
+    /// StoreRef-operation reports recorded by host callbacks are delivered in
     /// operation order before this method returns, including when execution
     /// fails. A nil or absent top-level return produces `None`; strings,
     /// integers, numbers, and booleans produce their scalar string form.
@@ -777,7 +777,7 @@ impl SectionVm {
     /// ```
     /// use promptforge_core::lua::{LuaProgram, SectionVm};
     /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
     /// let preamble = LuaProgram::compile(
     ///     "var.answer = 42",
@@ -787,7 +787,7 @@ impl SectionVm {
     ///     "Example",
     /// )?;
     /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
-    /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
+    /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory())?;
     /// assert_eq!(vm.run_preamble(&preamble, &NullObserver, "Example")?, None);
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
@@ -827,10 +827,10 @@ impl SectionVm {
     /// ```
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
     /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
-    /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
+    /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory())?;
     /// vm.close_tool_scope(&NullObserver, "Example")?;
     /// vm.bind_reply("model answer", &NullObserver, "Example")?;
     /// vm.teardown(&NullObserver, "Example");
@@ -866,7 +866,7 @@ impl SectionVm {
 
     /// Executes a compiled epilog in this VM's persistent environment.
     ///
-    /// Store-operation reports are delivered in operation order between the
+    /// StoreRef-operation reports are delivered in operation order between the
     /// epilog's start and outcome reports. `log(message)` is available only for
     /// this call and reports under `execution` and `section`.
     ///
@@ -879,7 +879,7 @@ impl SectionVm {
     /// ```
     /// use promptforge_core::lua::{LuaProgram, SectionVm};
     /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
     /// let epilog = LuaProgram::compile(
     ///     "return reply",
@@ -889,7 +889,7 @@ impl SectionVm {
     ///     "Example",
     /// )?;
     /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
-    /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
+    /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory())?;
     /// vm.close_tool_scope(&NullObserver, "Example")?;
     /// vm.bind_reply("done", &NullObserver, "Example")?;
     /// assert_eq!(
@@ -938,10 +938,10 @@ impl SectionVm {
     /// ```
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
     /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
-    /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
+    /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory())?;
     /// assert_eq!(vm.var()?, serde_json::json!({}));
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
@@ -978,7 +978,7 @@ impl SectionVm {
     ///     LuaProgram, SectionVm, bind_tool_declarations,
     /// };
     /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     /// use promptforge_core::tools::ToolId;
     ///
     /// let shared = LuaProgram::compile(
@@ -995,7 +995,7 @@ impl SectionVm {
     ///     SectionVm::new_with_bindings(
     ///         &shared, &bindings, "example-run", &NullObserver, "Example"
     ///     )?;
-    /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
+    /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory())?;
     /// let preamble = LuaProgram::compile(
     ///     "tools.add('search')",
     ///     "preamble",
@@ -1221,7 +1221,7 @@ pub fn run_chunk(
     source: &str,
     args: &str,
     sys: &Json,
-    store: &Store,
+    store: &StoreRef,
     execution: &str,
     observer: &dyn Observer,
     section: &str,
@@ -1473,7 +1473,7 @@ fn finish_log_phase<T>(lua: &Lua, result: mlua::Result<T>) -> mlua::Result<T> {
 
 /// Expose an always-on `store` table whose six methods (`write`, `append`,
 /// `read`, `str_replace`, `delete`, `glob`) are backed by the run-scoped
-/// [`Store`] handle. The functions borrow the observer within an [`mlua::Scope`]
+/// [`StoreRef`] handle. The functions borrow the observer within an [`mlua::Scope`]
 /// so each operation reports immediately after its result is known.
 ///
 /// The table is a deterministic host capability, present regardless of tool
@@ -1483,7 +1483,7 @@ fn finish_log_phase<T>(lua: &Lua, result: mlua::Result<T>) -> mlua::Result<T> {
 /// an `mlua` error via [`mlua::Error::external`], so it aborts the chunk and
 /// surfaces from [`run_chunk`] as [`Error::Lua`].
 ///
-/// The `Store` handle locks a mutex internally per call and is synchronous, so
+/// The `StoreRef` handle locks a mutex internally per call and is synchronous, so
 /// nothing is held across an await.
 ///
 /// [`StoreError`]: crate::store::StoreError
@@ -1514,7 +1514,7 @@ fn install_store_table<'scope, 'env: 'scope>(
     lua: &Lua,
     scope: &'scope Scope<'scope, 'env>,
     globals: &mlua::Table,
-    store: &Store,
+    store: &StoreRef,
     execution: &'env str,
     observer: &'env dyn Observer,
     section: &'env str,
@@ -1718,7 +1718,7 @@ mod tests {
 
     use super::*;
     use crate::observe::NullObserver;
-    use crate::store::{FileStore, StoreError};
+    use crate::store::{Store, StoreError};
     use serde_json::json;
 
     const EXECUTION: &str = "lua-test";
@@ -1764,7 +1764,7 @@ mod tests {
         }
     }
 
-    impl FileStore for FailingStore {
+    impl Store for FailingStore {
         fn write(&mut self, path: &str, _contents: &str) -> std::result::Result<(), StoreError> {
             Err(Self::error(path))
         }
@@ -1800,7 +1800,7 @@ mod tests {
     }
 
     struct BoundaryRecorder {
-        store: Store,
+        store: StoreRef,
         snapshots: Mutex<Vec<Vec<String>>>,
     }
 
@@ -1818,7 +1818,7 @@ mod tests {
             source,
             args,
             &json!({ "id": 1, "when": "t" }),
-            &Store::memory(),
+            &StoreRef::memory(),
             EXECUTION,
             &NullObserver,
             "Test",
@@ -1827,7 +1827,7 @@ mod tests {
 
     /// Run a chunk against a caller-supplied store, so a test can inspect the
     /// store after the chunk has run.
-    fn run_with(source: &str, store: &Store) -> Result<LuaOutcome> {
+    fn run_with(source: &str, store: &StoreRef) -> Result<LuaOutcome> {
         run_chunk(
             source,
             "",
@@ -1882,7 +1882,7 @@ mod tests {
         let mut vm =
             SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
                 .expect("replay VM must not expose direct output");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host must inject");
         vm.run_preamble(
             &program("assert(print == nil); assert(warn == nil)"),
@@ -1926,7 +1926,7 @@ mod tests {
         let mut vm =
             SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &recorder, "Gather")
                 .expect("replay log must succeed");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host must inject");
         vm.run_preamble(&program("log('preamble checkpoint')"), &recorder, "Gather")
             .expect("preamble log must succeed");
@@ -2042,7 +2042,7 @@ mod tests {
              log('after write')",
             "",
             &json!({}),
-            &Store::memory(),
+            &StoreRef::memory(),
             "compatibility-run",
             &recorder,
             "Compatibility",
@@ -2100,7 +2100,7 @@ mod tests {
                 source,
                 "",
                 &json!({}),
-                &Store::memory(),
+                &StoreRef::memory(),
                 EXECUTION,
                 &recorder,
                 "Validation",
@@ -2138,7 +2138,7 @@ mod tests {
             &source,
             "",
             &json!({}),
-            &Store::memory(),
+            &StoreRef::memory(),
             EXECUTION,
             &recorder,
             "Validation",
@@ -2160,7 +2160,7 @@ mod tests {
                       var.answer = args\n\
                       store.write('answer.txt', args)\n\
                       return var.answer";
-        let recorded_store = Store::memory();
+        let recorded_store = StoreRef::memory();
         let recorder = Recorder::default();
         let observed_outcome = run_chunk(
             source,
@@ -2172,7 +2172,7 @@ mod tests {
             "Equivalence",
         )
         .expect("recorded execution must succeed");
-        let null_store = Store::memory();
+        let null_store = StoreRef::memory();
         let silent = run_chunk(
             source,
             "same",
@@ -2227,7 +2227,7 @@ mod tests {
         };
         let mut vm =
             SectionVm::new(None, EXECUTION, &NullObserver, "Section").expect("VM must construct");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host must inject");
         vm.run_preamble(
             &program("saved_log = log; log('first phase')"),
@@ -2303,7 +2303,7 @@ mod tests {
                     "log('first'); log('second')",
                     "",
                     &json!({}),
-                    &Store::memory(),
+                    &StoreRef::memory(),
                     execution,
                     recorder.as_ref(),
                     "Concurrent",
@@ -2470,7 +2470,7 @@ mod tests {
         let mut vm =
             SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
                 .expect("declarations must replay");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host must inject");
         vm.run_preamble(&preamble, &NullObserver, "Section")
             .expect("H2 additions must record");
@@ -2511,7 +2511,7 @@ mod tests {
         let mut vm =
             SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
                 .expect("declarations must replay");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host must inject");
         vm.run_preamble(&preamble, &NullObserver, "Section")
             .expect("caught failed add must not poison recording");
@@ -2536,7 +2536,7 @@ mod tests {
         let mut vm =
             SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
                 .expect("declarations must replay");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host must inject");
 
         let reply_error = vm
@@ -2568,7 +2568,7 @@ mod tests {
         let mut vm =
             SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
                 .expect("declarations must replay");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host must inject");
 
         let error = vm
@@ -2596,7 +2596,7 @@ mod tests {
         let mut vm =
             SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
                 .expect("declarations must replay");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host must inject");
         let error = vm
             .run_preamble(&program("tools.add('missing')"), &NullObserver, "Section")
@@ -2614,7 +2614,7 @@ mod tests {
         let mut vm =
             SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &recorder, "Section")
                 .expect("replay must succeed");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host must inject");
         vm.close_tool_scope(&recorder, "Section")
             .expect("empty H2 scope must close");
@@ -2688,7 +2688,7 @@ mod tests {
         );
         let epilog =
             program("return shared_saw_args == nil and decorate(reply) or 'host leaked early'");
-        let store = Store::memory();
+        let store = StoreRef::memory();
         let mut vm = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "Test")
             .expect("shared program must run");
         vm.inject_host("input", &json!({ "id": 7 }), &store)
@@ -2726,7 +2726,7 @@ mod tests {
     #[test]
     fn section_vm_requires_delayed_single_host_injection() {
         let no_op = program("return args");
-        let store = Store::memory();
+        let store = StoreRef::memory();
         let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
 
         let error = vm
@@ -2753,7 +2753,7 @@ mod tests {
         );
         let mut vm = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "Test")
             .expect("shared program must run");
-        vm.inject_host("private input", &json!({}), &Store::memory())
+        vm.inject_host("private input", &json!({}), &StoreRef::memory())
             .expect("raw host injection must bypass the shared metatable");
 
         assert_eq!(
@@ -2771,7 +2771,7 @@ mod tests {
         let recorder = Recorder::default();
         let mut vm =
             SectionVm::new(None, EXECUTION, &NullObserver, "Gather").expect("VM must build");
-        vm.inject_host("private input", &json!({}), &Store::memory())
+        vm.inject_host("private input", &json!({}), &StoreRef::memory())
             .expect("host values must inject");
 
         vm.run_preamble(&write, &recorder, "Gather")
@@ -2824,7 +2824,7 @@ mod tests {
 
     #[test]
     fn section_vm_accepts_only_scalar_top_level_returns() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         for (source, expected) in [
             ("return 'text'", Some("text")),
             ("return 42", Some("42")),
@@ -2857,7 +2857,7 @@ mod tests {
     fn section_vms_isolate_mutated_shared_globals() {
         let shared = program("counter = 0");
         let increment = program("counter = counter + 1; return counter");
-        let store = Store::memory();
+        let store = StoreRef::memory();
         let mut first = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "First")
             .expect("first VM must build");
         let mut second = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "Second")
@@ -2900,7 +2900,7 @@ mod tests {
         let work = program("for i = 1, 3000000 do local value = i end");
         let mut vm = SectionVm::new(Some(&work), EXECUTION, &NullObserver, "Test")
             .expect("shared work must fit the budget");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host values must inject");
 
         let error = vm
@@ -2917,7 +2917,7 @@ mod tests {
         let recorder = Recorder::default();
         let mut vm = SectionVm::new(Some(&shared), EXECUTION, &recorder, "Gather")
             .expect("shared program must run");
-        vm.inject_host("private input", &json!({}), &Store::memory())
+        vm.inject_host("private input", &json!({}), &StoreRef::memory())
             .expect("host values must inject");
         vm.run_preamble(&preamble, &recorder, "Gather")
             .expect("preamble must run");
@@ -3195,7 +3195,7 @@ mod tests {
     #[test]
     fn add_without_declarations_fails_in_a_preamble_without_a_shared_library() {
         let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host values must inject");
         let error = vm
             .run_preamble(&program("tools.add('web_search')"), &NullObserver, "Test")
@@ -3220,7 +3220,7 @@ mod tests {
         let mut vm =
             SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Test")
                 .expect("replay of no declarations must succeed");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host values must inject");
         let error = vm
             .run_preamble(&program("tools.add('web_search')"), &NullObserver, "Test")
@@ -3238,7 +3238,7 @@ mod tests {
         let mut vm =
             SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Test")
                 .expect("replay must succeed");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host values must inject");
         let error = vm
             .run_preamble(
@@ -3257,7 +3257,7 @@ mod tests {
     #[test]
     fn a_section_vm_without_declarations_closes_to_an_empty_scope() {
         let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
-        vm.inject_host("", &json!({}), &Store::memory())
+        vm.inject_host("", &json!({}), &StoreRef::memory())
             .expect("host values must inject");
         let scope = vm
             .close_tool_scope(&NullObserver, "Test")
@@ -3346,7 +3346,7 @@ mod tests {
     fn store_writes_are_visible_on_the_shared_handle() {
         // The table is backed by the caller's handle, so a write from Lua is
         // observable through a clone of that same handle after the chunk ends.
-        let store = Store::memory();
+        let store = StoreRef::memory();
         run_with("store.write('shared.txt', 'from lua')", &store).unwrap();
         assert_eq!(
             store.read("shared.txt").expect("read"),
@@ -3358,7 +3358,7 @@ mod tests {
     #[test]
     fn store_reports_are_ordered_exact_and_payload_free_on_failure() {
         let recorder = Recorder::default();
-        let store = Store::memory();
+        let store = StoreRef::memory();
         let source = "store.write('secret/path.txt', 'private contents')\n\
                       store.read('secret/path.txt')\n\
                       store.str_replace('secret/path.txt', 'missing secret', 'replacement')";
@@ -3413,12 +3413,12 @@ mod tests {
             source: &'static str,
             success: &'static str,
             failure: &'static str,
-            prepare: fn(&Store),
+            prepare: fn(&StoreRef),
         }
 
-        fn empty(_store: &Store) {}
+        fn empty(_store: &StoreRef) {}
 
-        fn existing(store: &Store) {
+        fn existing(store: &StoreRef) {
             store
                 .write("a.txt", "old")
                 .expect("the memory store can prepare a file");
@@ -3464,7 +3464,7 @@ mod tests {
         ];
 
         for case in cases {
-            let store = Store::memory();
+            let store = StoreRef::memory();
             (case.prepare)(&store);
             let recorder = Recorder::default();
             run_chunk(
@@ -3474,17 +3474,17 @@ mod tests {
                 &store,
                 EXECUTION,
                 &recorder,
-                "Store",
+                "StoreRef",
             )
             .expect("the memory store operation succeeds");
             assert_eq!(
                 recorder.observations(),
-                vec![("Store".to_owned(), case.success.to_owned())],
+                vec![("StoreRef".to_owned(), case.success.to_owned())],
                 "wrong success observation for {}",
                 case.source
             );
 
-            let store = Store::new(Box::new(FailingStore));
+            let store = StoreRef::new(Box::new(FailingStore));
             let recorder = Recorder::default();
             let error = run_chunk(
                 case.source,
@@ -3493,13 +3493,13 @@ mod tests {
                 &store,
                 EXECUTION,
                 &recorder,
-                "Store",
+                "StoreRef",
             )
             .expect_err("the failing backend rejects every operation");
             assert!(matches!(error, Error::Lua(_)));
             assert_eq!(
                 recorder.observations(),
-                vec![("Store".to_owned(), case.failure.to_owned())],
+                vec![("StoreRef".to_owned(), case.failure.to_owned())],
                 "wrong failure observation for {}",
                 case.source
             );
@@ -3508,7 +3508,7 @@ mod tests {
 
     #[test]
     fn store_observations_happen_before_later_lua_side_effects() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         let recorder = BoundaryRecorder {
             store: store.clone(),
             snapshots: Mutex::new(Vec::new()),
@@ -3521,7 +3521,7 @@ mod tests {
             &store,
             EXECUTION,
             &recorder,
-            "Store",
+            "StoreRef",
         )
         .expect("both writes succeed");
 

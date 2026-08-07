@@ -32,7 +32,7 @@ use promptforge_core::bind::{BoundPrompt, bind_prompt};
 use promptforge_core::client::GatewayClient;
 use promptforge_core::execute::{self, RunOptions};
 use promptforge_core::parser::Prompt;
-use promptforge_core::store::Store;
+use promptforge_core::store::StoreRef;
 use rmcp::model::{CallToolResult, ErrorData};
 use tokio::time::Instant;
 
@@ -271,7 +271,7 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
     } = launch;
 
     let live = tools.registry();
-    let store = Store::memory();
+    let store = StoreRef::memory();
     let options = RunOptions {
         execution: &run_id,
         observer: observer.as_ref(),

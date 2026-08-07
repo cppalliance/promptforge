@@ -77,7 +77,7 @@ fn silent() -> RunOptions<'static> {
 /// in-memory store created for the run - the ergonomic path for the
 /// Lua-only tests that do not care about the store's contents.
 async fn run_offline(md: &str) -> Result<String> {
-    run(&bound(md), "", &[], &Store::memory(), silent()).await
+    run(&bound(md), "", &[], &StoreRef::memory(), silent()).await
 }
 
 /// An [`Observer`] that keeps every observation it is handed, in order, so a test
@@ -122,7 +122,7 @@ async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String, String)
         &bound(md),
         "",
         &[],
-        &Store::memory(),
+        &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
             observer: &recorder,
@@ -275,7 +275,7 @@ async fn store_persists_across_sections() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Writer\n\n```lua\nstore.write('note.txt', 'carried across')\n```\n\n\
 ## Reader\n\n```lua\nvar.seen = store.read('note.txt')\nreturn var.seen\n```\n";
-    let store = Store::memory();
+    let store = StoreRef::memory();
     let out = run(&bound(md), "", &[], &store, silent()).await.unwrap();
     assert_eq!(
         out, "1| carried across",
@@ -1062,7 +1062,7 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
 #[tokio::test]
 async fn recording_and_null_observers_produce_the_same_result_and_store_state() {
     let prompt = bound(STORE_SECTIONS);
-    let recorded_store = Store::memory();
+    let recorded_store = StoreRef::memory();
     let sink = Recorder::default();
     let observed_result = run(
         &prompt,
@@ -1076,7 +1076,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         },
     )
     .await;
-    let null_store = Store::memory();
+    let null_store = StoreRef::memory();
     let null_result = run(&prompt, "", &[], &null_store, silent()).await;
 
     assert_eq!(observed_result.unwrap(), null_result.unwrap());
@@ -1100,7 +1100,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         &failing,
         "",
         &[],
-        &Store::memory(),
+        &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
             observer: &sink,
@@ -1109,7 +1109,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
     )
     .await
     .expect_err("the preamble fails");
-    let null_error = run(&failing, "", &[], &Store::memory(), silent())
+    let null_error = run(&failing, "", &[], &StoreRef::memory(), silent())
         .await
         .expect_err("the preamble fails");
     assert_eq!(
@@ -1189,7 +1189,7 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
     let registry = ToolRegistry::new(tools.iter().copied());
     let prompt = crate::bind::bind_prompt(prompt, &picker, &registry, EXECUTION, &recorder)
         .expect("the lifecycle fixture must bind");
-    let store = Store::memory();
+    let store = StoreRef::memory();
 
     let result = run(
         &prompt,
@@ -1327,7 +1327,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         &bound(md),
         "",
         &[],
-        &Store::memory(),
+        &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
             observer: &recorder,
@@ -1387,7 +1387,7 @@ async fn epilog_runs_after_reply_and_can_return() {
     assert!(prompt.prompt().entry().epilog.is_some());
 
     let recorder = Recorder::default();
-    let store = Store::memory();
+    let store = StoreRef::memory();
     let out = run(
         &prompt,
         "",
@@ -1457,7 +1457,7 @@ async fn add_in_an_unbound_prompt_without_declarations_fails_the_run_loudly() {
 # Test prompt\n\n\
 ## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
     let prompt = parse(md);
-    let error = run(&prompt, "", &[], &Store::memory(), silent())
+    let error = run(&prompt, "", &[], &StoreRef::memory(), silent())
         .await
         .expect_err("an undeclared alias must fail the run");
     assert!(
@@ -1474,7 +1474,7 @@ async fn add_in_a_bound_prompt_with_empty_needs_fails_the_run_loudly() {
 # Test prompt\n\n\
 ```lua\nfunction helper() return 'no declarations' end\n```\n\n\
 ## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
-    let error = run(&bound(md), "", &[], &Store::memory(), silent())
+    let error = run(&bound(md), "", &[], &StoreRef::memory(), silent())
         .await
         .expect_err("an undeclared alias must fail the run");
     assert!(
@@ -1490,7 +1490,7 @@ async fn preamble_return_skips_model_and_epilog() {
 ## Only\n\n```lua\nreturn 'early'\n```\n\n\
 This prose must not reach a model.\n\n\
 ```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'late'\n```\n";
-    let store = Store::memory();
+    let store = StoreRef::memory();
     let out = run(&bound(md), "", &[], &store, silent()).await.unwrap();
 
     assert_eq!(out, "early");
@@ -1511,7 +1511,7 @@ Ask using {{ var.question }}.\n\n\
         &bound(md),
         "input",
         &[],
-        &Store::memory(),
+        &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
             observer: &recorder,
@@ -1580,7 +1580,7 @@ async fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
 ```lua\nif reply ~= nil then error('empty prose must not bind a reply') end\nreturn var.phase .. '-epilog'\n```\n";
 
     assert_eq!(
-        run(&bound(md), "", &[], &Store::memory(), silent())
+        run(&bound(md), "", &[], &StoreRef::memory(), silent())
             .await
             .unwrap(),
         "preamble-epilog"
@@ -1597,7 +1597,7 @@ async fn default_return_precedes_the_last_model_reply() {
         &bound(md),
         "",
         &[],
-        &Store::memory(),
+        &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
@@ -1721,7 +1721,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
         &prompt,
         "",
         &[&tool],
-        &Store::memory(),
+        &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
@@ -1762,7 +1762,7 @@ tools.always('local_alias')\n```\n\n\
         &prompt,
         "",
         &[&tool],
-        &Store::memory(),
+        &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
@@ -1810,7 +1810,7 @@ tools.need('section_tool', 'capability')\n```\n\n\
         &prompt,
         "",
         &[&tool],
-        &Store::memory(),
+        &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
@@ -1877,7 +1877,7 @@ tools.need('second_local', 'second')\n```\n\n\
         &prompt,
         "",
         &[&first, &second],
-        &Store::memory(),
+        &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
@@ -1921,7 +1921,7 @@ tools.need('second_local', 'second')\n```\n\n\
         &prompt,
         "",
         &[&first, &second],
-        &Store::memory(),
+        &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
             observer: &recorder,
