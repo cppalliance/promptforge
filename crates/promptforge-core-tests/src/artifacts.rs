@@ -245,6 +245,10 @@ pub(crate) struct ProvisionedArtifacts {
 struct Provisioner {
     cache: PathBuf,
     client: Client,
+    /// Where per-artifact status lines print: stdout for the scenario suite's
+    /// pinned output contract, stderr for dev mode, whose stdout carries only
+    /// the final result.
+    status: crate::StatusStream,
 }
 
 impl Provisioner {
@@ -260,7 +264,14 @@ impl Provisioner {
         Ok(Self {
             cache: cache.to_owned(),
             client,
+            status: crate::StatusStream::Stdout,
         })
+    }
+
+    /// Returns this provisioner with its status lines routed to `status`.
+    fn with_status(mut self, status: crate::StatusStream) -> Self {
+        self.status = status;
+        self
     }
 
     fn provision_file(&self, asset: FileAsset<'_>, directory: &str) -> Result<PathBuf> {
@@ -284,16 +295,19 @@ impl Provisioner {
         let _lock = self.lock_artifact(&install)?;
         validate_cache_path(&self.cache, &install)?;
         if Self::install_is_valid(&install, asset.sha256)? {
-            println!("cache hit: llama-server installation {}", asset.platform);
+            self.status.emit(&format!(
+                "cache hit: llama-server installation {}",
+                asset.platform
+            ));
             return find_executable(&install, asset.executable_name, asset.archive_name);
         }
         self.ensure_blob(archive_asset, &archive)?;
         validate_cache_path(&self.cache, &archive)?;
 
-        println!(
+        self.status.emit(&format!(
             "installing cached llama-server archive for {}",
             asset.platform
-        );
+        ));
         remove_cache_entry(&self.cache, &install)?;
         let staging = part_path(&install);
         remove_cache_entry(&self.cache, &staging)?;
@@ -366,7 +380,7 @@ impl Provisioner {
 
         if destination.is_file() {
             if file_digest(destination)? == asset.sha256 {
-                println!("cache hit: {}", asset.name);
+                self.status.emit(&format!("cache hit: {}", asset.name));
                 return Ok(());
             }
             remove_cache_entry(&self.cache, destination)?;
@@ -381,7 +395,8 @@ impl Provisioner {
         };
         ensure_cache_directory(&self.cache, parent)?;
         validate_cache_path(&self.cache, &staging)?;
-        println!("downloading pinned artifact: {}", asset.name);
+        self.status
+            .emit(&format!("downloading pinned artifact: {}", asset.name));
         let actual = match self.download(asset.url, &staging) {
             Ok(actual) => actual,
             Err(error) => {
@@ -497,9 +512,17 @@ impl Provisioner {
 
 pub(crate) fn provision(kind: ModelKind) -> Result<ProvisionedArtifacts> {
     let cache = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.model-cache");
-    let provisioner = Provisioner::new(&cache)?;
+    let provisioner = provisioner_for(&cache, kind)?;
     let server = server_asset(kind, std::env::consts::OS, std::env::consts::ARCH)?;
     provision_assets(&provisioner, server, model_asset(kind))
+}
+
+/// Builds the provisioner `provision` uses for `kind`, rooted at `cache` and
+/// with its status lines routed per the kind's output contract: stderr for
+/// dev mode, whose stdout carries only the final result, stdout for the
+/// scenario suite's pinned output contract.
+fn provisioner_for(cache: &Path, kind: ModelKind) -> Result<Provisioner> {
+    Ok(Provisioner::new(cache)?.with_status(crate::StatusStream::for_kind(kind)))
 }
 
 fn provision_assets(
