@@ -132,6 +132,26 @@ pub trait FileStore {
     /// ```
     fn read(&self, path: &str) -> Result<String, StoreError>;
 
+    /// Returns the file's contents exactly as stored, with no line numbering.
+    ///
+    /// This is the accessor for exporting or copying a file verbatim; the
+    /// numbered rendering of [`FileStore::read`] cannot be reversed exactly
+    /// because `str::lines` drops a trailing newline.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::NotFound`] if no file exists at `path`.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::store::{FileStore, MemVfs};
+    ///
+    /// let mut fs = MemVfs::new();
+    /// fs.write("poem.txt", "roses\nviolets\n")?;
+    /// assert_eq!(fs.read_raw("poem.txt")?, "roses\nviolets\n");
+    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// ```
+    fn read_raw(&self, path: &str) -> Result<String, StoreError>;
+
     /// Replaces the single occurrence of `old` with `new` in the file at
     /// `path`.
     ///
@@ -258,6 +278,15 @@ impl FileStore for MemVfs {
             path: path.to_string(),
         })?;
         Ok(number_lines(contents))
+    }
+
+    fn read_raw(&self, path: &str) -> Result<String, StoreError> {
+        self.files
+            .get(path)
+            .cloned()
+            .ok_or_else(|| StoreError::NotFound {
+                path: path.to_string(),
+            })
     }
 
     fn str_replace(&mut self, path: &str, old: &str, new: &str) -> Result<(), StoreError> {
@@ -423,6 +452,25 @@ impl Store {
         self.lock().read(path)
     }
 
+    /// Reads the file at `path` exactly as stored, with no line numbering.
+    /// See [`FileStore::read_raw`].
+    ///
+    /// # Errors
+    /// Returns [`StoreError::NotFound`] if no file exists at `path`.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::store::Store;
+    ///
+    /// let store = Store::memory();
+    /// store.write("a.txt", "hi\n")?;
+    /// assert_eq!(store.read_raw("a.txt")?, "hi\n");
+    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// ```
+    pub fn read_raw(&self, path: &str) -> Result<String, StoreError> {
+        self.lock().read_raw(path)
+    }
+
     /// Replaces the unique occurrence of `old` with `new`. See
     /// [`FileStore::str_replace`].
     ///
@@ -560,6 +608,24 @@ mod tests {
         let numbered = store.read("a.txt").expect("read");
         assert!(numbered.starts_with(" 1| line1\n"));
         assert!(numbered.contains("\n10| line10"));
+    }
+
+    #[test]
+    fn read_raw_returns_contents_verbatim() {
+        let store = Store::memory();
+        store.write("a.txt", "first\nsecond\n").expect("write");
+        assert_eq!(
+            store.read_raw("a.txt").expect("read raw"),
+            "first\nsecond\n"
+        );
+        assert_eq!(store.read("a.txt").expect("read"), "1| first\n2| second");
+    }
+
+    #[test]
+    fn read_raw_missing_file_errors() {
+        let store = Store::memory();
+        let err = store.read_raw("absent.txt").expect_err("should fail");
+        assert!(matches!(err, StoreError::NotFound { .. }));
     }
 
     #[test]

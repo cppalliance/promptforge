@@ -2,6 +2,7 @@
 
 mod artifacts;
 mod dev;
+mod dump;
 mod scenarios;
 mod server;
 mod watch;
