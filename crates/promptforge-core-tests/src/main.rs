@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context as _, Result, bail};
 
-use crate::server::ServerGuard;
+use crate::server::{ServerGuard, ServerProfile};
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -48,7 +48,12 @@ async fn run_explicit_suite(interrupted: Arc<AtomicBool>) -> Result<()> {
     let server_executable = artifacts.llama_server;
     let model = artifacts.model;
     let server = tokio::task::spawn_blocking(move || {
-        ServerGuard::start(&server_executable, &model, &interrupted)
+        ServerGuard::start(
+            &server_executable,
+            &model,
+            ServerProfile::Scenario,
+            &interrupted,
+        )
     })
     .await
     .context("join llama-server startup")??;

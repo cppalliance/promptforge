@@ -28,13 +28,15 @@ The command provisions the pinned artifacts under repository-root `.model-cache/
 
 The process guard makes at most four fresh-port attempts. Each attempt asks the operating system for a free loopback port, creates a unique model alias and bearer token, starts the child with piped output, and drains each stream continuously into an independent 64 KiB tail buffer. Readiness requires both a successful `GET /health` and an authenticated `GET /v1/models` response containing that attempt's alias, with the child checked for exit before and after the probe. If the child exits while another listener remains on the selected port, the guard treats that as a bind collision and retries on a newly selected port. Other early exits fail immediately. Every attempt retains the 180-second readiness deadline, and failures include bounded stdout and stderr tails while redacting the bearer token. Dropping the guard kills and waits for the child, including normal success, returned error, panic unwinding, and Ctrl-C. Ctrl-C is installed around the complete suite; an atomic cancellation flag interrupts blocking startup polling, while dropping an active scenario immediately drops the guard.
 
-The exact pinned server argument shape is:
+The process guard selects its flags through a server profile. The explicit suite always launches the scenario profile, whose exact pinned argument shape is:
 
 ```text
 llama-server --model <cached-gguf> --alias <per-attempt-model-alias> --api-key <per-attempt-secret> --host 127.0.0.1 --port <selected-free-port> --ctx-size 4096 --n-predict 256 --parallel 1 --seed 424242 --temp 0 --jinja --reasoning off --reasoning-format deepseek
 ```
 
 These are supported by official llama.cpp release `b10082`. Jinja supplies OpenAI tool-call rendering and parsing from the model's embedded template. Reasoning is disabled, and the OpenAI response parser removes any empty Qwen thinking envelope. One slot, a fixed seed, temperature zero, a 4096-token context, and a 256-token generation ceiling keep both scenarios bounded and deterministic.
+
+The guard also defines a dev profile for interactive prompt development: a configurable context (`--ctx-size`, default 131072) and generation ceiling (`--n-predict`, default 8192), `--flash-attn on`, a q8_0-quantized KV cache, full GPU offload (`-ngl 99`), `--jinja`, `--reasoning-format auto` with thinking enabled and model-card sampling (`--temp 1.0 --top-p 0.95 --top-k 20 --presence-penalty 1.5`), and `--parallel 1`. A no-think variant turns reasoning off and switches sampling to the non-thinking preset (`--temp 0.7 --top-p 0.8`). No command launches this profile yet; the dev runner arrives in a later step.
 
 `execution/real-text.md` requires one nonempty text completion carrying a requested marker. Its Lua epilog prefixes the returned result, so the runner proves both reply binding and epilog visibility, and the observer must report exactly one completed model turn.
 
