@@ -14,3 +14,5 @@
 
 ## 2026-08-07 core: open the shared library with a plain lua fence
 
+## 2026-08-07 core: run all section VMs through the validating tools path
+
