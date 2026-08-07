@@ -59,7 +59,7 @@ fn failing_lua_prompt(name: &str) -> String {
 fn capability_prompt(name: &str, capability: &str) -> String {
     format!(
         "---\nname: {name}\ndescription: Capability binding fixture\npromptforge: 1\n---\n\n\
-         # Capability prompt\n\n```lua prompt\ntools.need(\"fetch\", \"{capability}\")\n```\n\n\
+         # Capability prompt\n\n```lua\ntools.need(\"fetch\", \"{capability}\")\n```\n\n\
          ## Main\n\n```lua\ntools.add(\"fetch\")\n```\n\n```lua\nreturn \"bound\"\n```\n"
     )
 }

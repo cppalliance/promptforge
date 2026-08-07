@@ -67,10 +67,10 @@ const INVALID_FIXTURES: &[InvalidFixture] = &[
         message_fragment: "requires an H1",
     },
     InvalidFixture {
-        name: "invalid/misplaced-shared-lua.md",
-        source: include_str!("../prompts/invalid/misplaced-shared-lua.md"),
+        name: "invalid/removed-lua-prompt.md",
+        source: include_str!("../prompts/invalid/removed-lua-prompt.md"),
         kind: ErrorKind::Parse,
-        message_fragment: "must immediately follow the H1",
+        message_fragment: "`lua prompt` fence form was removed",
     },
     InvalidFixture {
         name: "invalid/malformed-epilog.md",

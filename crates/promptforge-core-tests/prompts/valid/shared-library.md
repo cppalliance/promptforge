@@ -6,7 +6,7 @@ promptforge: 1
 
 # Shared Library
 
-```lua prompt
+```lua
 function normalize(value)
     return string.lower(value)
 end
