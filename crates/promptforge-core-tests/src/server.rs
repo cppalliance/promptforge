@@ -112,15 +112,11 @@ pub(crate) enum ServerProfile {
     Scenario,
     /// The interactive prompt-development flags: large context, GPU offload,
     /// quantized KV cache, and model-card sampling.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "constructed by the dev runner in a later step")
-    )]
     Dev(DevServerOptions),
 }
 
 /// Tunable knobs for [`ServerProfile::Dev`]; every other dev flag is fixed.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DevServerOptions {
     /// Context window passed as `--ctx-size`.
     pub(crate) ctx_size: u32,
