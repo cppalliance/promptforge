@@ -1,11 +1,11 @@
 //! Run-scoped virtual files, shared by Lua and the model.
 //!
 //! A prompt run keeps its bulk state in virtual files addressed by logical
-//! string paths. [`FileStore`] is the backend contract, [`MemVfs`] is an
-//! in-memory backend, and [`Store`] is the cheaply cloneable, thread-safe
+//! string paths. [`Store`] is the backend contract, [`MemStore`] is an
+//! in-memory backend, and [`StoreRef`] is the cheaply cloneable, thread-safe
 //! handle the runtime hands to both the Lua VM and (later) the model's file
 //! tools. Reads return numbered lines for navigation and error messages, and
-//! edits are anchor-based ([`FileStore::str_replace`]) rather than offset-based,
+//! edits are anchor-based ([`Store::str_replace`]) rather than offset-based,
 //! the shape that works for a model.
 //!
 //! This module wires no execution; it defines the store and its in-memory
@@ -60,20 +60,20 @@ pub enum StoreError {
 /// A backend for run-scoped virtual files addressed by logical string paths.
 ///
 /// All operations are synchronous. Implementors store text keyed by path; the
-/// runtime shares one behind a [`Store`] handle. Reads render numbered lines
-/// (see [`FileStore::read`]) and edits are anchored (see
-/// [`FileStore::str_replace`]).
+/// runtime shares one behind a [`StoreRef`] handle. Reads render numbered lines
+/// (see [`Store::read`]) and edits are anchored (see
+/// [`Store::str_replace`]).
 ///
 /// # Examples
 /// ```
-/// use promptforge_core::store::{FileStore, MemVfs};
+/// use promptforge_core::store::{Store, MemStore};
 ///
-/// let mut fs = MemVfs::new();
+/// let mut fs = MemStore::new();
 /// fs.write("greeting.txt", "hello")?;
 /// assert_eq!(fs.read("greeting.txt")?, "1| hello");
 /// # Ok::<(), promptforge_core::store::StoreError>(())
 /// ```
-pub trait FileStore {
+pub trait Store {
     /// Creates the file at `path`, or overwrites it if it already exists.
     ///
     /// # Errors
@@ -82,9 +82,9 @@ pub trait FileStore {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{FileStore, MemVfs};
+    /// use promptforge_core::store::{Store, MemStore};
     ///
-    /// let mut fs = MemVfs::new();
+    /// let mut fs = MemStore::new();
     /// fs.write("a.txt", "one")?;
     /// fs.write("a.txt", "two")?;
     /// assert_eq!(fs.read("a.txt")?, "1| two");
@@ -100,9 +100,9 @@ pub trait FileStore {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{FileStore, MemVfs};
+    /// use promptforge_core::store::{Store, MemStore};
     ///
-    /// let mut fs = MemVfs::new();
+    /// let mut fs = MemStore::new();
     /// fs.append("log.txt", "first\n")?;
     /// fs.append("log.txt", "second")?;
     /// assert_eq!(fs.read("log.txt")?, "1| first\n2| second");
@@ -123,9 +123,9 @@ pub trait FileStore {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{FileStore, MemVfs};
+    /// use promptforge_core::store::{Store, MemStore};
     ///
-    /// let mut fs = MemVfs::new();
+    /// let mut fs = MemStore::new();
     /// fs.write("poem.txt", "roses\nviolets")?;
     /// assert_eq!(fs.read("poem.txt")?, "1| roses\n2| violets");
     /// # Ok::<(), promptforge_core::store::StoreError>(())
@@ -135,7 +135,7 @@ pub trait FileStore {
     /// Returns the file's contents exactly as stored, with no line numbering.
     ///
     /// This is the accessor for exporting or copying a file verbatim; the
-    /// numbered rendering of [`FileStore::read`] cannot be reversed exactly
+    /// numbered rendering of [`Store::read`] cannot be reversed exactly
     /// because `str::lines` drops a trailing newline.
     ///
     /// # Errors
@@ -143,9 +143,9 @@ pub trait FileStore {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{FileStore, MemVfs};
+    /// use promptforge_core::store::{Store, MemStore};
     ///
-    /// let mut fs = MemVfs::new();
+    /// let mut fs = MemStore::new();
     /// fs.write("poem.txt", "roses\nviolets\n")?;
     /// assert_eq!(fs.read_raw("poem.txt")?, "roses\nviolets\n");
     /// # Ok::<(), promptforge_core::store::StoreError>(())
@@ -166,9 +166,9 @@ pub trait FileStore {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{FileStore, MemVfs};
+    /// use promptforge_core::store::{Store, MemStore};
     ///
-    /// let mut fs = MemVfs::new();
+    /// let mut fs = MemStore::new();
     /// fs.write("a.txt", "the quick brown fox")?;
     /// fs.str_replace("a.txt", "quick", "slow")?;
     /// assert_eq!(fs.read("a.txt")?, "1| the slow brown fox");
@@ -183,9 +183,9 @@ pub trait FileStore {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{FileStore, MemVfs};
+    /// use promptforge_core::store::{Store, MemStore};
     ///
-    /// let mut fs = MemVfs::new();
+    /// let mut fs = MemStore::new();
     /// fs.write("temp.txt", "scratch")?;
     /// fs.delete("temp.txt")?;
     /// assert!(fs.read("temp.txt").is_err());
@@ -205,9 +205,9 @@ pub trait FileStore {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{FileStore, MemVfs};
+    /// use promptforge_core::store::{Store, MemStore};
     ///
-    /// let mut fs = MemVfs::new();
+    /// let mut fs = MemStore::new();
     /// fs.write("src/a.rs", "")?;
     /// fs.write("src/b.rs", "")?;
     /// fs.write("src/deep/c.rs", "")?;
@@ -221,45 +221,45 @@ pub trait FileStore {
     fn glob(&self, pattern: &str) -> Result<Vec<String>, StoreError>;
 }
 
-/// An in-memory [`FileStore`] backend.
+/// An in-memory [`Store`] backend.
 ///
 /// Files live in a [`BTreeMap`] keyed by path, so listing and [`glob`] results
 /// are ordered without a sort step. It holds no resources and drops with the
 /// run.
 ///
-/// [`glob`]: FileStore::glob
+/// [`glob`]: Store::glob
 ///
 /// # Examples
 /// ```
-/// use promptforge_core::store::{FileStore, MemVfs};
+/// use promptforge_core::store::{Store, MemStore};
 ///
-/// let mut fs = MemVfs::new();
+/// let mut fs = MemStore::new();
 /// fs.write("notes.md", "todo")?;
 /// assert_eq!(fs.glob("*.md")?, vec!["notes.md"]);
 /// # Ok::<(), promptforge_core::store::StoreError>(())
 /// ```
 #[derive(Debug, Default, Clone)]
-pub struct MemVfs {
+pub struct MemStore {
     files: BTreeMap<String, String>,
 }
 
-impl MemVfs {
+impl MemStore {
     /// Creates an empty in-memory store.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::MemVfs;
+    /// use promptforge_core::store::MemStore;
     ///
-    /// let fs = MemVfs::new();
+    /// let fs = MemStore::new();
     /// # let _ = fs;
     /// ```
     #[must_use]
-    pub fn new() -> MemVfs {
-        MemVfs::default()
+    pub fn new() -> MemStore {
+        MemStore::default()
     }
 }
 
-impl FileStore for MemVfs {
+impl Store for MemStore {
     fn write(&mut self, path: &str, contents: &str) -> Result<(), StoreError> {
         self.files.insert(path.to_string(), contents.to_string());
         Ok(())
@@ -334,81 +334,81 @@ impl FileStore for MemVfs {
 
 /// A cheaply cloneable, thread-safe handle to a run's virtual files.
 ///
-/// The handle wraps `Arc<Mutex<Box<dyn FileStore + Send + Sync>>>`, so cloning
+/// The handle wraps `Arc<Mutex<Box<dyn Store + Send + Sync>>>`, so cloning
 /// shares one backend and the store can be held by both the synchronous Lua VM
 /// and an asynchronous tool whose `call` crosses an `.await`. The inherent
-/// methods mirror [`FileStore`], each taking the lock, delegating, and
+/// methods mirror [`Store`], each taking the lock, delegating, and
 /// releasing it before returning; no lock is ever held across an await, and the
 /// operations are synchronous in any case.
 ///
 /// # Examples
 /// ```
-/// use promptforge_core::store::Store;
+/// use promptforge_core::store::StoreRef;
 ///
-/// let store = Store::memory();
+/// let store = StoreRef::memory();
 /// let clone = store.clone();
 /// store.write("shared.txt", "state")?;
 /// assert_eq!(clone.read("shared.txt")?, "1| state");
 /// # Ok::<(), promptforge_core::store::StoreError>(())
 /// ```
 #[derive(Clone)]
-pub struct Store {
-    inner: Arc<Mutex<Box<dyn FileStore + Send + Sync>>>,
+pub struct StoreRef {
+    inner: Arc<Mutex<Box<dyn Store + Send + Sync>>>,
 }
 
-impl fmt::Debug for Store {
+impl fmt::Debug for StoreRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Store").finish_non_exhaustive()
+        f.debug_struct("StoreRef").finish_non_exhaustive()
     }
 }
 
-impl Store {
+impl StoreRef {
     /// Wraps `backend` in a shareable handle.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::{MemVfs, Store};
+    /// use promptforge_core::store::{MemStore, StoreRef};
     ///
-    /// let store = Store::new(Box::new(MemVfs::new()));
+    /// let store = StoreRef::new(Box::new(MemStore::new()));
     /// # let _ = store;
     /// ```
     #[must_use]
-    pub fn new(backend: Box<dyn FileStore + Send + Sync>) -> Store {
-        Store {
+    pub fn new(backend: Box<dyn Store + Send + Sync>) -> StoreRef {
+        StoreRef {
             inner: Arc::new(Mutex::new(backend)),
         }
     }
 
-    /// Builds a handle over a fresh in-memory [`MemVfs`] backend.
+    /// Builds a handle over a fresh in-memory [`MemStore`] backend.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
-    /// let store = Store::memory();
+    /// let store = StoreRef::memory();
     /// # let _ = store;
     /// ```
     #[must_use]
-    pub fn memory() -> Store {
-        Store::new(Box::new(MemVfs::new()))
+    pub fn memory() -> StoreRef {
+        StoreRef::new(Box::new(MemStore::new()))
     }
 
     /// Recovers the guard even if a prior holder panicked; the stored map stays
     /// consistent, so poisoning is not a fatal condition here.
-    fn lock(&self) -> MutexGuard<'_, Box<dyn FileStore + Send + Sync>> {
+    fn lock(&self) -> MutexGuard<'_, Box<dyn Store + Send + Sync>> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Creates or overwrites the file at `path`. See [`FileStore::write`].
+    /// Creates or overwrites the file at `path`. See [`Store::write`].
     ///
     /// # Errors
     /// Propagates any [`StoreError`] from the backend.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
-    /// let store = Store::memory();
+    /// let store = StoreRef::memory();
     /// store.write("a.txt", "hi")?;
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
@@ -417,16 +417,16 @@ impl Store {
     }
 
     /// Appends to the file at `path`, creating it if absent. See
-    /// [`FileStore::append`].
+    /// [`Store::append`].
     ///
     /// # Errors
     /// Propagates any [`StoreError`] from the backend.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
-    /// let store = Store::memory();
+    /// let store = StoreRef::memory();
     /// store.append("a.txt", "hi")?;
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
@@ -434,16 +434,16 @@ impl Store {
         self.lock().append(path, contents)
     }
 
-    /// Reads the file at `path` as numbered lines. See [`FileStore::read`].
+    /// Reads the file at `path` as numbered lines. See [`Store::read`].
     ///
     /// # Errors
     /// Returns [`StoreError::NotFound`] if no file exists at `path`.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
-    /// let store = Store::memory();
+    /// let store = StoreRef::memory();
     /// store.write("a.txt", "hi")?;
     /// assert_eq!(store.read("a.txt")?, "1| hi");
     /// # Ok::<(), promptforge_core::store::StoreError>(())
@@ -453,16 +453,16 @@ impl Store {
     }
 
     /// Reads the file at `path` exactly as stored, with no line numbering.
-    /// See [`FileStore::read_raw`].
+    /// See [`Store::read_raw`].
     ///
     /// # Errors
     /// Returns [`StoreError::NotFound`] if no file exists at `path`.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
-    /// let store = Store::memory();
+    /// let store = StoreRef::memory();
     /// store.write("a.txt", "hi\n")?;
     /// assert_eq!(store.read_raw("a.txt")?, "hi\n");
     /// # Ok::<(), promptforge_core::store::StoreError>(())
@@ -472,17 +472,17 @@ impl Store {
     }
 
     /// Replaces the unique occurrence of `old` with `new`. See
-    /// [`FileStore::str_replace`].
+    /// [`Store::str_replace`].
     ///
     /// # Errors
     /// Returns [`StoreError::NotFound`], [`StoreError::AnchorNotFound`], or
-    /// [`StoreError::AnchorAmbiguous`] per [`FileStore::str_replace`].
+    /// [`StoreError::AnchorAmbiguous`] per [`Store::str_replace`].
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
-    /// let store = Store::memory();
+    /// let store = StoreRef::memory();
     /// store.write("a.txt", "one two")?;
     /// store.str_replace("a.txt", "two", "three")?;
     /// assert_eq!(store.read("a.txt")?, "1| one three");
@@ -492,16 +492,16 @@ impl Store {
         self.lock().str_replace(path, old, new)
     }
 
-    /// Removes the file at `path`. See [`FileStore::delete`].
+    /// Removes the file at `path`. See [`Store::delete`].
     ///
     /// # Errors
     /// Returns [`StoreError::NotFound`] if no file exists at `path`.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
-    /// let store = Store::memory();
+    /// let store = StoreRef::memory();
     /// store.write("a.txt", "hi")?;
     /// store.delete("a.txt")?;
     /// # Ok::<(), promptforge_core::store::StoreError>(())
@@ -510,16 +510,16 @@ impl Store {
         self.lock().delete(path)
     }
 
-    /// Returns stored paths matching `pattern`, sorted. See [`FileStore::glob`].
+    /// Returns stored paths matching `pattern`, sorted. See [`Store::glob`].
     ///
     /// # Errors
     /// Propagates any [`StoreError`] from the backend.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::store::Store;
+    /// use promptforge_core::store::StoreRef;
     ///
-    /// let store = Store::memory();
+    /// let store = StoreRef::memory();
     /// store.write("a.txt", "")?;
     /// store.write("b.md", "")?;
     /// assert_eq!(store.glob("*.txt")?, vec!["a.txt"]);
@@ -588,7 +588,7 @@ mod tests {
 
     #[test]
     fn write_then_read_numbers_lines() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store.write("a.txt", "first\nsecond\nthird").expect("write");
         assert_eq!(
             store.read("a.txt").expect("read"),
@@ -598,7 +598,7 @@ mod tests {
 
     #[test]
     fn read_pads_numbers_to_width() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         let mut body = String::new();
         for n in 1..=10 {
             use std::fmt::Write as _;
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn read_raw_returns_contents_verbatim() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store.write("a.txt", "first\nsecond\n").expect("write");
         assert_eq!(
             store.read_raw("a.txt").expect("read raw"),
@@ -623,14 +623,14 @@ mod tests {
 
     #[test]
     fn read_raw_missing_file_errors() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         let err = store.read_raw("absent.txt").expect_err("should fail");
         assert!(matches!(err, StoreError::NotFound { .. }));
     }
 
     #[test]
     fn write_overwrites() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store.write("a.txt", "old").expect("write");
         store.write("a.txt", "new").expect("overwrite");
         assert_eq!(store.read("a.txt").expect("read"), "1| new");
@@ -638,14 +638,14 @@ mod tests {
 
     #[test]
     fn read_empty_file_is_empty_string() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store.write("e.txt", "").expect("write");
         assert_eq!(store.read("e.txt").expect("read"), "");
     }
 
     #[test]
     fn append_creates_then_extends() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store.append("log.txt", "one\n").expect("create via append");
         store.append("log.txt", "two").expect("extend");
         assert_eq!(store.read("log.txt").expect("read"), "1| one\n2| two");
@@ -653,7 +653,7 @@ mod tests {
 
     #[test]
     fn str_replace_replaces_unique() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store.write("a.txt", "the quick brown fox").expect("write");
         store
             .str_replace("a.txt", "quick", "slow")
@@ -663,7 +663,7 @@ mod tests {
 
     #[test]
     fn str_replace_missing_anchor_errors() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store.write("a.txt", "hello world").expect("write");
         let err = store
             .str_replace("a.txt", "absent", "x")
@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn str_replace_ambiguous_anchor_errors() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store.write("a.txt", "na na na").expect("write");
         let err = store
             .str_replace("a.txt", "na", "la")
@@ -686,7 +686,7 @@ mod tests {
 
     #[test]
     fn str_replace_on_missing_file_errors() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         let err = store
             .str_replace("nope.txt", "a", "b")
             .expect_err("should fail");
@@ -695,7 +695,7 @@ mod tests {
 
     #[test]
     fn delete_then_read_errors() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store.write("a.txt", "gone soon").expect("write");
         store.delete("a.txt").expect("delete");
         let err = store.read("a.txt").expect_err("should fail");
@@ -704,14 +704,14 @@ mod tests {
 
     #[test]
     fn delete_missing_errors() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         let err = store.delete("absent.txt").expect_err("should fail");
         assert!(matches!(err, StoreError::NotFound { .. }));
     }
 
     #[test]
     fn glob_matches_sorted() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         for path in ["src/b.rs", "src/a.rs", "src/deep/c.rs", "notes.md"] {
             store.write(path, "").expect("write");
         }
@@ -729,7 +729,7 @@ mod tests {
 
     #[test]
     fn glob_star_stops_at_slash() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         store.write("a/b.txt", "").expect("write");
         assert!(store.glob("*.txt").expect("glob").is_empty());
         assert_eq!(store.glob("a/*.txt").expect("glob"), vec!["a/b.txt"]);
@@ -737,7 +737,7 @@ mod tests {
 
     #[test]
     fn clones_share_backing_state() {
-        let store = Store::memory();
+        let store = StoreRef::memory();
         let clone = store.clone();
         store
             .write("shared.txt", "written by original")

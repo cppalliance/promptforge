@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use promptforge_core::bind::bind_prompt;
 use promptforge_core::execute::RunOptions;
 use promptforge_core::observe::{NullObserver, Observer};
-use promptforge_core::store::Store;
+use promptforge_core::store::StoreRef;
 use promptforge_core::{execute, parser::Prompt};
 use promptforge_tool_picker::{Config as PickerConfig, ToolPicker};
 
@@ -93,7 +93,7 @@ async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
 
     // One run-scoped store, created once and shared by every section. The CLI
     // uses the in-memory sandbox backend by default.
-    let store = Store::memory();
+    let store = StoreRef::memory();
 
     // The CLI prints the run's result and nothing else, so it discards
     // progress; its gateway client comes from the environment, which is what
