@@ -160,7 +160,7 @@ Hypotheses: H1 file order is the finished control-flow model: a linear pipeline 
             H3 order is incidental; sections could run in any order without changing behaviour
             H4 taste, unfalsifiable
 Evidence:   execute.rs:233 iterates prompt.sections.iter().enumerate() in file order
-            execute.rs:234 each section gets a fresh sys with id = index + 1; last_reply is not fed into the next section's prose (only Store crosses)
+            execute.rs:234 each section gets a fresh sys with id = index + 1; last_reply is not fed into the next section's prose (only StoreRef crosses)
             test sys_id_increments_per_section pins that id tracks position, so order is load-bearing
             no jump/goto/branch/next-section construct exists in the file; the only non-linear exit is the Lua return fence (E-006)
             absence: no field on Prompt or Section selects order or a successor
@@ -732,7 +732,7 @@ Hypotheses: H1 the store is a host capability the runtime always provides, like 
             H3 always-on for performance, to avoid re-installing the table per section
 Evidence:   run_chunk lua.rs:90 always calls install_store_table; there is no store analogue of scoped_tools
             tools have a scoping path: tools.add records names into a Vec<String> returned as LuaOutcome::scoped_tools for the executor to resolve; store has no such opt-in
-            the store table is backed by a run-scoped Store handle shared across sections, matching var/sys/args as ambient host state rather than a model-facing tool
+            the store table is backed by a run-scoped StoreRef handle shared across sections, matching var/sys/args as ambient host state rather than a model-facing tool
 Survives:   H1 and H2. Code shows tools carry a scoping mechanism and store deliberately does not, which reads as category placement, but "not yet scoped" is a statement about intent that code cannot strictly refute. H3 unnecessary: var and sys are also always-on and grouped as host state, so the category, not installation cost, is what puts store there.
 Verdict:    NARROWED
             H1 vs H2 distinguished by whether a later revision ever gates the store by tool scoping.
@@ -830,7 +830,7 @@ Proposal:   Candidate evidence found, and it is the clearest contradiction in it
             Cross-ref: ties to E-004 and E-024 - the same designed-but-unbuilt non-linear walk.
 
 ### E-032  File reads return numbered lines, not raw content
-Element:    number_lines / FileStore::read contract, crates/promptforge-core/src/store.rs
+Element:    number_lines / Store::read contract, crates/promptforge-core/src/store.rs
 Kind:       cross-cutting convention
 Hypotheses: H1 numbered lines serve a model reader: stable line references for a consumer that reasons over text
             H2 numbering is for human or debug display
@@ -861,7 +861,7 @@ Proposal:   Candidate evidence found; it leans H1 as intent, but the model consu
             absent because those tools are unbuilt. Verdict NARROWED unchanged.
 
 ### E-033  Edits are anchor-based and refuse unless the anchor is unique
-Element:    FileStore::str_replace / MemVfs::str_replace, crates/promptforge-core/src/store.rs
+Element:    Store::str_replace / MemStore::str_replace, crates/promptforge-core/src/store.rs
 Kind:       edit-model trade-off
 Hypotheses: H1 an offset-blind caller (a model quoting text, not byte ranges) needs a substring anchor as its edit primitive
             H2 anchors survive earlier edits that would invalidate byte or line offsets
@@ -876,7 +876,7 @@ Verdict:    NARROWED
 Reach:      every str_replace call site (Lua store table and later the model's edit tool)
 Seen by:    whoever edits a stored file
 Proposal:   Candidate evidence found; it supports H1 and leaves H2 unaddressed. store.rs:7-9 module doc:
-            "edits are anchor-based ([FileStore::str_replace]) rather than offset-based, the shape that
+            "edits are anchor-based ([Store::str_replace]) rather than offset-based, the shape that
             works for a model." This names the model as the reason the edit primitive is a substring anchor
             rather than a byte/line offset - exactly H1 (an offset-blind caller). Introduced by 4079d48
             (2026-07-31). The uniqueness refusal has its own stated reason: store.rs:46-47 AnchorAmbiguous
@@ -890,7 +890,7 @@ Proposal:   Candidate evidence found; it supports H1 and leaves H2 unaddressed. 
             archive, so it is neither confirmed nor killed. Verdict NARROWED unchanged, leaning H1.
 
 ### E-034  glob supports * within a path segment and ** across slashes
-Element:    glob_match / FileStore::glob semantics, crates/promptforge-core/src/store.rs
+Element:    glob_match / Store::glob semantics, crates/promptforge-core/src/store.rs
 Kind:       query convention
 Hypotheses: H1 the two-wildcard rules mirror shell / gitignore globbing, so authors and models already know them
             H2 * stopping at / is the minimal coherent design for segment-aware matching; without it * would span directories and the distinction would be pointless
@@ -909,7 +909,7 @@ Proposal:   Candidate evidence found, weak. The same two-wildcard convention (* 
             separator"). A rule that recurs in a second, unrelated subsystem is a house convention rather
             than a one-off, mild support for H1 (authors already know the rule). Provenance of the store
             matcher itself: commit 4079d48 "core: run-scoped virtual file store" (2026-07-31) introduced
-            glob in the FileStore trait list but records no rationale for the wildcard semantics.
+            glob in the Store trait list but records no rationale for the wildcard semantics.
             design-core.md:116 restates the behavior and gives no reason [not-independent]. The archive
             never states why the segment-aware rule was chosen, so it does not distinguish H1 from H2 -
             both produce identical behavior, exactly as pass 1 found. Verdict NARROWED unchanged.
@@ -1053,11 +1053,11 @@ Hypotheses: H1 forward-compatibility: a future backend (real filesystem, network
             H2 non_exhaustive to stop callers matching on the variants' fields
             H3 applied reflexively by convention, with no specific plan
 Evidence:   both the enum and every data-carrying variant carry #[non_exhaustive] (store.rs:26, :30, :38, :49)
-            FileStore is a trait whose write/append/glob return Result<_, StoreError> yet never fail for MemVfs - the fallible signatures are shaped for a future fallible backend
-            Store wraps Box<dyn FileStore + Send + Sync>, so the backend is swappable at runtime
+            Store is a trait whose write/append/glob return Result<_, StoreError> yet never fail for MemStore - the fallible signatures are shaped for a future fallible backend
+            StoreRef wraps Box<dyn Store + Send + Sync>, so the backend is swappable at runtime
 Survives:   H1. H2 unnecessary: the variants already expose named public fields (path, anchor, count), so the intent is to allow adding future fields and variants, not to hide the current ones. H3 refuted by a coherent pattern - fallible-but-infallible signatures, a boxed trait backend, and non_exhaustive together point at one plan (a future swappable backend), which is not reflexive.
 Verdict:    FORCED
-Reach:      every caller that matches a StoreError; every FileStore implementor
+Reach:      every caller that matches a StoreError; every Store implementor
 Seen by:    a caller handling store failures
 Proposal:   (Bears on a forced verdict; the verdict is unchanged.) This record is part of the
             #[non_exhaustive] family whose common origin is the documented workspace house rule
@@ -1167,20 +1167,20 @@ Proposal:   Candidate evidence found; it leans H1 but does not settle the three.
             enumerates the concerns rather than adjudicating them [not-independent]. The commit foregrounds
             H1; nothing in the archive kills H2 or H3, so OPEN stands. Verdict OPEN unchanged.
 
-### E-045  The Store handle is Arc<Mutex<Box<dyn FileStore + Send + Sync>>>
-Element:    Store struct, crates/promptforge-core/src/store.rs
+### E-045  The StoreRef handle is Arc<Mutex<Box<dyn Store + Send + Sync>>>
+Element:    StoreRef struct, crates/promptforge-core/src/store.rs
 Kind:       shape / concurrency contract
 Hypotheses: H1 one store is shared by the synchronous Lua VM and asynchronous model tools that cross .await, so it must be Send + Sync and cheaply cloneable
             H2 Mutex rather than RwLock because ops are short and mutate often
             H3 the boxed trait object is for testability, to swap a fake backend
 Evidence:   #[derive(Clone)] over an Arc inner shares one backend (test clones_share_backing_state)
-            the bound is Box<dyn FileStore + Send + Sync> - Send and Sync are explicitly required
+            the bound is Box<dyn Store + Send + Sync> - Send and Sync are explicitly required
             lua.rs clones the handle into six host-function closures (store.clone()), and the crate is async (async-trait dependency, tokio rt-multi-thread in the workspace); a handle used by a sync VM and async tools needs Send + Sync with interior mutability and no borrow lifetime
             the inherent methods take &self and lock internally, so callers share by clone, not &mut
 Survives:   H1. A purely synchronous single-thread consumer could use Rc<RefCell<..>>; the explicit Send + Sync bound and Arc signal a cross-thread or async consumer, which forces this mechanism. H2 is a live sub-choice the code does not settle - nothing distinguishes Mutex from RwLock here (open on that narrow point). H3 unnecessary: testability is served but does not need Send + Sync or clone-sharing; the async sharing forces them, so a swappable fake is a consequence.
 Verdict:    FORCED
             (the Mutex-vs-RwLock sub-choice is undetermined by this crate)
-Reach:      every holder of a Store - the Lua VM and every tool given the handle
+Reach:      every holder of a StoreRef - the Lua VM and every tool given the handle
 Seen by:    the runtime wiring the store, not the end user
 
 ### E-046  The Lua instruction ceiling is about 1e7 (10,000 x 1,000)
@@ -1280,8 +1280,8 @@ Proposal:   Candidate evidence found, strong. This is an unbuilt seam, and the h
             Cross-ref: the same designed-but-unbuilt non-linear walk as E-004, which independently runs
             sections in file order from sections[0].
 
-### E-049  Store::lock recovers a poisoned mutex instead of propagating
-Element:    Store::lock -> unwrap_or_else(PoisonError::into_inner), crates/promptforge-core/src/store.rs
+### E-049  StoreRef::lock recovers a poisoned mutex instead of propagating
+Element:    StoreRef::lock -> unwrap_or_else(PoisonError::into_inner), crates/promptforge-core/src/store.rs
 Kind:       failure-mode trade-off
 Hypotheses: H1 deliberate recovery: each op is a single insert/remove that leaves the map consistent, so a panic elsewhere should not brick the store for the rest of the run
             H2 into_inner is only a way to satisfy the unwrap_used / expect_used deny lints without adding a Result to every method
@@ -1300,7 +1300,7 @@ Proposal:   RECORDED ABSENCE - the archive was searched and nothing distinguishe
             describes the trait surface but says nothing about poison recovery. Seam context (bears on the
             store, not on this specific choice): the same commit notes the store was built ahead of its
             caller - "Not yet wired into execution (rung 2 step 1 of 4)" - and design-core.md:114 frames
-            FileStore as "the backend contract a filesystem or network backend would implement" [not-independent];
+            Store as "the backend contract a filesystem or network backend would implement" [not-independent];
             that intended fallible backend is the unbuilt caller behind E-040's StoreError and the
             fallible-but-infallible signatures, which is intention and does not speak to how a poisoned
             lock is handled. Verdict NARROWED unchanged with no candidate on its own question.

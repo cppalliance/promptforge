@@ -195,7 +195,7 @@ pub struct RunOptions<'a> {
     pub client: Option<GatewayClient>,
 }
 
-pub async fn run(prompt: &BoundPrompt, args: &str, tools: &[&dyn Tool], store: &Store, opts: RunOptions<'_>) -> Result<String>;
+pub async fn run(prompt: &BoundPrompt, args: &str, tools: &[&dyn Tool], store: &StoreRef, opts: RunOptions<'_>) -> Result<String>;
 ```
 
 `observe` is synchronous and must never block, await, or panic, which is the contract that lets the executor call it inline on the run's own path. The triple is the complete trace record. Every section and ordinary detail is a static label that excludes raw prompt prose, model input or output, tool arguments or results, store paths or contents, credentials, and fetched content. The sole author-controlled exception is the constrained `Lua: <message>` detail, which prompt authors must keep to a short static checkpoint label and must never use for those excluded payloads. Concrete observers own synchronization; core holds no global recorder lock and no lock across an await.

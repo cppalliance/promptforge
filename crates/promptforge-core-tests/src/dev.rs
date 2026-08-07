@@ -19,7 +19,7 @@ use promptforge_core::client::GatewayClient;
 use promptforge_core::execute::{RunOptions, run};
 use promptforge_core::observe::Observer;
 use promptforge_core::parser::Prompt;
-use promptforge_core::store::Store;
+use promptforge_core::store::StoreRef;
 use promptforge_core::tools::{Tool, ToolRegistry, WebSearch};
 use promptforge_tool_picker::{
     Catalog, Config as PickerConfig, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
@@ -106,7 +106,7 @@ async fn run_once_with(
     let bound = bind_prompt(prompt, &picker, &registry, &execution, observer)
         .with_context(|| format!("bind {}", prompt_path.display()))?;
 
-    let store = Store::memory();
+    let store = StoreRef::memory();
     let client = GatewayClient::new(base_url, api_key, model_alias);
     let options = RunOptions {
         execution: &execution,

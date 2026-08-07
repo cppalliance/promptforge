@@ -8,7 +8,7 @@ use promptforge_core::execute::{RunOptions, run};
 use promptforge_core::lua::{LuaProgram, ToolResolver, bind_tool_declarations};
 use promptforge_core::observe::{NullObserver, Observer};
 use promptforge_core::parser::Prompt;
-use promptforge_core::store::Store;
+use promptforge_core::store::StoreRef;
 use promptforge_core::tools::ToolId;
 
 type Record = (String, String, String);
@@ -293,7 +293,7 @@ async fn log_fixture_reports_exact_author_checkpoints() {
         LOG_EXECUTION,
         &recorder,
     );
-    let store = Store::memory();
+    let store = StoreRef::memory();
     let result = run(
         &prompt,
         "",
@@ -361,7 +361,7 @@ async fn preamble_return_fixture_skips_model_and_epilog() {
         PREAMBLE_EXECUTION,
         &recorder,
     );
-    let store = Store::memory();
+    let store = StoreRef::memory();
     let result = run(
         &prompt,
         "early result",
@@ -400,7 +400,7 @@ async fn store_fixture_persists_state_across_fall_through() {
         STORE_EXECUTION,
         &recorder,
     );
-    let store = Store::memory();
+    let store = StoreRef::memory();
     let result = run(
         &prompt,
         "carried value",
@@ -467,7 +467,7 @@ async fn concurrent_runs_keep_execution_ids_separate() {
             first_prompt.as_ref(),
             "first result",
             &[],
-            &Store::memory(),
+            &StoreRef::memory(),
             RunOptions {
                 execution: FIRST,
                 observer: first_recorder.as_ref(),
@@ -484,7 +484,7 @@ async fn concurrent_runs_keep_execution_ids_separate() {
             second_prompt.as_ref(),
             "second result",
             &[],
-            &Store::memory(),
+            &StoreRef::memory(),
             RunOptions {
                 execution: SECOND,
                 observer: second_recorder.as_ref(),

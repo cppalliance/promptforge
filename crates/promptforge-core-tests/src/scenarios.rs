@@ -9,7 +9,7 @@ use promptforge_core::client::GatewayClient;
 use promptforge_core::execute::{RunOptions, run};
 use promptforge_core::observe::{Observer, detail};
 use promptforge_core::parser::Prompt;
-use promptforge_core::store::Store;
+use promptforge_core::store::StoreRef;
 use promptforge_core::tools::{Tool, ToolId, ToolRegistry};
 use promptforge_tool_picker::{
     Catalog, Config, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
@@ -135,7 +135,7 @@ async fn run_text(base_url: &str, api_key: &str, model_alias: &str) -> Result<()
         &prompt,
         "",
         &[],
-        &Store::memory(),
+        &StoreRef::memory(),
         RunOptions {
             execution: TEXT_EXECUTION,
             observer: &observer,
@@ -197,7 +197,7 @@ async fn run_tool_call(base_url: &str, api_key: &str, model_alias: &str) -> Resu
         &bound,
         "",
         &tools,
-        &Store::memory(),
+        &StoreRef::memory(),
         RunOptions {
             execution: TOOL_EXECUTION,
             observer: &observer,

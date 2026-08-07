@@ -631,7 +631,7 @@ Substitution does no arithmetic - compute in Lua and reference the result
 ### Fall-through and the result
 
 Top-level `##` sections run in file order, each with fresh Lua state and a fresh
-model conversation. The run-scoped `Store` is the sole mutable channel carried
+model conversation. The run-scoped `StoreRef` is the sole mutable channel carried
 between sections. A section ends by either:
 
 - **returning a value from Lua** (`return ...`) - this finishes the whole run

@@ -9,7 +9,7 @@
 //! Running off the last section ends the run: the result is `default_return`
 //! from the frontmatter, else the last model reply, else a generic completion.
 //!
-//! One run-scoped [`Store`] is created once by the caller and threaded through
+//! One run-scoped [`StoreRef`] is created once by the caller and threaded through
 //! every section (both its Lua preamble and, later, the model's file tools), so
 //! bulk state persists across the context-clearing transitions even though a
 //! section's conversation never does.
@@ -41,7 +41,7 @@ use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::lua::{SectionVm, ToolBindings, ToolScope};
 use crate::observe::{Observer, detail};
 use crate::parser::Prompt;
-use crate::store::Store;
+use crate::store::StoreRef;
 use crate::subst;
 use crate::tools::{Tool, ToolId, ToolRegistry};
 use crate::{Error, NearDuplicateDiagnostic, Result};
@@ -179,7 +179,7 @@ impl fmt::Debug for RunOptions<'_> {
 /// dispatches a returned alias through its frozen [`crate::tools::ToolId`].
 ///
 /// `store` is the run's virtual-file handle. Create it once (typically with
-/// [`Store::memory`]) and pass it in; the same handle is given to every
+/// [`StoreRef::memory`]) and pass it in; the same handle is given to every
 /// section's Lua preamble, so files persist across sections even though each
 /// section's context is cleared on entry. It is a shared handle, so passing
 /// `&store` (not a fresh store per section) is what makes the state durable.
@@ -208,7 +208,7 @@ pub async fn run<'a>(
     prompt: impl Into<RunPrompt<'a>>,
     args: &str,
     tools: &[&dyn Tool],
-    store: &Store,
+    store: &StoreRef,
     opts: RunOptions<'_>,
 ) -> Result<String> {
     let run_prompt = prompt.into();
@@ -283,7 +283,7 @@ async fn run_sections(
     bound: Option<&BoundPrompt>,
     args: &str,
     registry: &ToolRegistry<'_>,
-    store: &Store,
+    store: &StoreRef,
     execution: &str,
     observer: &dyn Observer,
     mut client: Option<GatewayClient>,

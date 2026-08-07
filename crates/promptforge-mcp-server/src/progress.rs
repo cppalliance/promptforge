@@ -324,7 +324,7 @@ mod tests {
     use promptforge_core::execute::{self, RunOptions};
     use promptforge_core::observe::{NullObserver, Observer, detail};
     use promptforge_core::parser::Prompt;
-    use promptforge_core::store::Store;
+    use promptforge_core::store::StoreRef;
     use tracing::Level;
     use tracing_subscriber::layer::SubscriberExt;
 
@@ -420,7 +420,7 @@ mod tests {
             Prompt::parse(&source, "test-run", &NullObserver).expect("the fixture prompt parses");
         let (observer, _frames) = McpObserver::queued();
 
-        let store = Store::memory();
+        let store = StoreRef::memory();
         let options = RunOptions {
             execution: "test-run",
             observer: &observer,
