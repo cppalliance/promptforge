@@ -527,7 +527,7 @@ tools.need("search", "Search the web and return a list of results (title, url, d
     fn parse_prompt(declarations: &str) -> Prompt {
         Prompt::parse(
             &format!(
-                "---\nname: fixture\ndescription: dev registry fixture\npromptforge: 1\n---\n# Fixture\n\n```lua prompt\n{declarations}```\n\n## Run\n\n```lua\nreturn \"done\"\n```\n"
+                "---\nname: fixture\ndescription: dev registry fixture\npromptforge: 1\n---\n# Fixture\n\n```lua\n{declarations}```\n\n## Run\n\n```lua\nreturn \"done\"\n```\n"
             ),
             "dev-test",
             &NullObserver,

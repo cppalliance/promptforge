@@ -7,7 +7,7 @@ max_tool_iterations: 2
 
 # Real Tool Call
 
-```lua prompt
+```lua
 tools.need("ask_fixture", "Return one deterministic fixture value for one supplied string.")
 tools.always("ask_fixture")
 ```

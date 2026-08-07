@@ -12,3 +12,5 @@
 
 ## 2026-07-31 chore: gitignore vibe-review and conformance-audit files
 
+## 2026-08-07 core: open the shared library with a plain lua fence
+

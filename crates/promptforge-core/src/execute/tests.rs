@@ -1171,7 +1171,7 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
         serde_json::to_string(&descriptor.enriched_text()).expect("serialize fixture capability");
     let source = format!(
         "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 1\n---\n\n\
-         # Lifecycle\n\n```lua prompt\n\
+         # Lifecycle\n\n```lua\n\
          tools.need('echo', {capability})\n\
          tools.always('echo')\n```\n\n\
          ## Gather\n\n```lua\nstore.write('state.txt', 'before')\n```\n\n\
@@ -1446,7 +1446,7 @@ async fn shared_helper_survives_preamble_model_and_epilog() {
     let addr = spawn_text_gateway().await;
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
-```lua prompt\nfunction decorate(value) return '<' .. value .. '>' end\n```\n\n\
+```lua\nfunction decorate(value) return '<' .. value .. '>' end\n```\n\n\
 ## Only\n\n```lua\nvar.question = decorate(args)\n```\n\n\
 Ask using {{ var.question }}.\n\n\
 ```lua\nreturn decorate(reply)\n```\n";
@@ -1654,7 +1654,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
 
     let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Concrete description.");
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua prompt\ntools.need('local_alias', 'capability')\n```\n\n\
+# Test prompt\n\n```lua\ntools.need('local_alias', 'capability')\n```\n\n\
 ## Only\n\nAsk without tools.\n";
     let prompt = bound_with_tools(
         md,
@@ -1694,7 +1694,7 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
     let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Concrete description.");
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua prompt\n\
+# Test prompt\n\n```lua\n\
 tools.need('local_alias', 'capability')\n\
 tools.always('local_alias')\n```\n\n\
 ## Only\n\nUse the tool.\n",
@@ -1743,7 +1743,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Section concrete.");
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua prompt\n\
+# Test prompt\n\n```lua\n\
 tools.need('section_tool', 'capability')\n```\n\n\
 ## Only\n\n```lua\ntools.add('section_tool')\n```\n\nUse the tool.\n",
         &|_: &str| Ok(ToolId::new("tests", "concrete")),
@@ -1804,7 +1804,7 @@ async fn near_duplicate_tools_are_valid_when_isolated_in_separate_sections() {
     let second_descriptor = picker_descriptor("second", "Similar operation two.");
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua prompt\n\
+# Test prompt\n\n```lua\n\
 tools.need('first_local', 'first')\n\
 tools.need('second_local', 'second')\n```\n\n\
 ## First\n\n```lua\ntools.add('first_local')\n```\n\nFirst model turn.\n\n\
@@ -1848,7 +1848,7 @@ async fn near_duplicate_effective_scope_fails_before_the_model_without_payload_r
     let second_descriptor = picker_descriptor("second", "Private similar description two.");
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua prompt\n\
+# Test prompt\n\n```lua\n\
 tools.need('first_local', 'first')\n\
 tools.need('second_local', 'second')\n```\n\n\
 ## Only\n\n```lua\ntools.add('first_local', 'second_local')\n```\n\nDo not reach the model.\n",

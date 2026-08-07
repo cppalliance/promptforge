@@ -6,7 +6,7 @@ promptforge: 1
 
 # Dev Search Absent
 
-```lua prompt
+```lua
 tools.need("search", "Search the web and return a list of results (title, url, description).")
 ```
 

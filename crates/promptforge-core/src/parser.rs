@@ -1,8 +1,7 @@
 //! Prompt file parser.
 //!
 //! A prompt is one markdown file: YAML frontmatter, a required H1, an optional
-//! immediately leading shared `lua prompt` fence, then a sequence of H2
-//! sections.
+//! immediately leading shared `lua` fence, then a sequence of H2 sections.
 //! Sections nest recursively (H3 under H2, H4 under H3, and so on through H6).
 //! Each section has an optional exact leading `lua` preamble fence, prose, and
 //! an optional exact trailing `lua` epilog fence.
@@ -80,10 +79,10 @@ impl Prompt {
     ///
     /// # Errors
     /// Returns [`Error::Parse`] when the frontmatter delimiters are missing, the
-    /// frontmatter is invalid, the required H1 is missing, a shared library is
-    /// misplaced, a reserved fence is not closed exactly, or the body has no
-    /// `##` sections. Returns [`Error::LuaCompile`] when the shared library or a
-    /// section preamble or epilog is not valid Lua.
+    /// frontmatter is invalid, the required H1 is missing, the H1 opens with the
+    /// removed `lua prompt` fence form, a reserved fence is not closed exactly,
+    /// or the body has no `##` sections. Returns [`Error::LuaCompile`] when the
+    /// shared library or a section preamble or epilog is not valid Lua.
     pub fn parse(input: &str, execution: &str, observer: &dyn Observer) -> Result<Prompt> {
         observer.observe(execution, "Prompt", detail::PARSE_STARTED);
         let result = Self::parse_inner(input, execution, observer);
@@ -132,16 +131,6 @@ impl Prompt {
             .skip(*h1_index + 1)
             .filter(|h| h.level >= 2)
             .collect();
-        if section_headings
-            .iter()
-            .any(|heading| has_exact_shared_opening(&heading.content))
-        {
-            return Err(Error::Parse(if shared.is_some() {
-                "prompt contains more than one shared `lua prompt` fence".into()
-            } else {
-                "shared `lua prompt` fence must immediately follow the H1".into()
-            }));
-        }
         if section_headings.is_empty() {
             return Err(Error::Parse("prompt has no ## sections".into()));
         }
@@ -301,7 +290,8 @@ fn collect_headings(body: &str) -> Vec<Heading> {
 }
 
 /// Extracts and compiles the optional exact shared library at the start of the
-/// H1 content. Only blank lines may precede the opening fence.
+/// H1 content. Only blank lines may precede the opening fence; a later exact
+/// `lua` fence is ordinary description prose, mirroring section semantics.
 fn split_shared(
     content: &str,
     title: &str,
@@ -309,25 +299,16 @@ fn split_shared(
     observer: &dyn Observer,
 ) -> Result<(Option<LuaProgram>, String)> {
     let leading = trim_leading_blank_lines(content);
-    let after_open = leading
-        .strip_prefix("```lua prompt\r\n")
-        .or_else(|| leading.strip_prefix("```lua prompt\n"))
-        .or_else(|| (leading == "```lua prompt").then_some(""));
-    let Some(after_open) = after_open else {
-        if has_exact_shared_opening(content) {
-            return Err(Error::Parse(
-                "shared `lua prompt` fence must immediately follow the H1".into(),
-            ));
-        }
+    if leading.lines().next() == Some("```lua prompt") {
+        return Err(Error::Parse(
+            "the `lua prompt` fence form was removed; open the shared library with a plain `lua` fence".into(),
+        ));
+    }
+    let Some(after_open) = strip_exact_lua_opening(leading) else {
         return Ok((None, content.trim().to_string()));
     };
 
-    let (source, rest) = extract_exact_fence(after_open, "shared `lua prompt`")?;
-    if has_exact_shared_opening(rest) {
-        return Err(Error::Parse(
-            "prompt contains more than one shared `lua prompt` fence".into(),
-        ));
-    }
+    let (source, rest) = extract_exact_fence(after_open, "shared `lua`")?;
     let program =
         LuaProgram::compile(&source, "prompt shared library", execution, observer, title)?;
     Ok((Some(program), rest.trim().to_string()))
@@ -360,21 +341,6 @@ fn extract_exact_fence<'a>(content: &'a str, label: &str) -> Result<(String, &'a
         offset += line.len();
     }
     Err(Error::Parse(format!("{label} fence is not closed")))
-}
-
-/// Whether `content` contains an exact reserved shared-library opening line.
-fn has_exact_shared_opening(content: &str) -> bool {
-    Parser::new_ext(content, Options::empty())
-        .into_offset_iter()
-        .any(|(event, range)| {
-            let line_start = content[..range.start]
-                .rfind('\n')
-                .map_or(0, |newline| newline + 1);
-            matches!(
-                event,
-                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_)))
-            ) && content[line_start..].lines().next() == Some("```lua prompt")
-        })
 }
 
 /// Removes one exact unindented `lua` opening line from `content`.
@@ -648,7 +614,7 @@ Prose for the second section.\n";
 
     #[test]
     fn shared_library_allows_blank_lines_and_is_compiled() {
-        let src = "---\r\nname: x\r\ndescription: d\r\n---\r\n\r\n# T\r\n\r\n \t\r\n```lua prompt\r\nfunction answer() return 42 end\r\n```\r\n\r\nDescription.\r\n\r\n## S\r\n\r\np\r\n";
+        let src = "---\r\nname: x\r\ndescription: d\r\n---\r\n\r\n# T\r\n\r\n \t\r\n```lua\r\nfunction answer() return 42 end\r\n```\r\n\r\nDescription.\r\n\r\n## S\r\n\r\np\r\n";
         let prompt =
             Prompt::parse(src, "test", &NullObserver).expect("immediate shared Lua must parse");
         let shared = prompt.shared.expect("shared program must be present");
@@ -657,25 +623,81 @@ Prose for the second section.\n";
     }
 
     #[test]
-    fn duplicate_shared_libraries_error() {
-        let in_h1 = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua prompt\nlocal a = 1\n```\n\n```lua prompt\nlocal b = 2\n```\n\n## S\n\np\n";
-        let error = Prompt::parse(in_h1, "test", &NullObserver)
-            .expect_err("a second H1 library must be rejected");
-        assert!(error.to_string().contains("more than one"));
+    fn h1_lua_fence_after_prose_or_shared_library_remains_prose() {
+        let after_prose = "---\nname: x\ndescription: d\n---\n\n# T\n\nIntro prose.\n\n```lua\nnot compiled =\n```\n\n## S\n\np\n";
+        let prompt = Prompt::parse(after_prose, "test", &NullObserver)
+            .expect("a post-prose H1 Lua fence is model-facing prose");
+        assert!(prompt.shared.is_none());
+        assert_eq!(
+            prompt.description_text,
+            "Intro prose.\n\n```lua\nnot compiled =\n```"
+        );
 
-        let in_section = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua prompt\nlocal a = 1\n```\n\n## S\n\n```lua prompt\nlocal b = 2\n```\n";
-        let error = Prompt::parse(in_section, "test", &NullObserver)
-            .expect_err("a section library must be rejected");
-        assert!(error.to_string().contains("more than one"));
+        let after_shared = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nlocal a = 1\n```\n\n```lua\nnot compiled =\n```\n\n## S\n\np\n";
+        let prompt = Prompt::parse(after_shared, "test", &NullObserver)
+            .expect("only the leading H1 Lua fence is reserved");
+        let shared = prompt
+            .shared
+            .expect("the leading fence is the shared library");
+        assert_eq!(shared.source(), "local a = 1");
+        assert_eq!(prompt.description_text, "```lua\nnot compiled =\n```");
+    }
+
+    #[test]
+    fn removed_lua_prompt_form_is_a_targeted_error_when_leading() {
+        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua prompt\nlocal a = 1\n```\n\n## S\n\np\n";
+        let error = Prompt::parse(src, "test", &NullObserver)
+            .expect_err("the removed leading form must be rejected by name");
+        assert!(
+            error
+                .to_string()
+                .contains("`lua prompt` fence form was removed")
+        );
+    }
+
+    #[test]
+    fn lua_prompt_form_after_prose_is_ordinary_prose() {
+        let in_h1 = "---\nname: x\ndescription: d\n---\n\n# T\n\nIntro.\n\n```lua prompt\nnot compiled =\n```\n\n## S\n\np\n";
+        let prompt = Prompt::parse(in_h1, "test", &NullObserver)
+            .expect("the removed form after prose is ordinary Markdown");
+        assert!(prompt.shared.is_none());
+        assert!(prompt.description_text.contains("```lua prompt"));
+
+        let in_section = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua prompt\nnot compiled =\n```\n";
+        let prompt = Prompt::parse(in_section, "test", &NullObserver)
+            .expect("the removed form in a section is ordinary Markdown");
+        assert!(prompt.entry().preamble.is_none());
+        assert!(prompt.entry().prose.contains("```lua prompt"));
     }
 
     #[test]
     fn shared_fence_markers_must_be_exact() {
+        // Leading position is the discriminating placement: only the exact
+        // ```lua opener is reserved there, so each near-miss must stay prose.
+        // The removed ```lua prompt form is excluded because leading it is a
+        // targeted error, pinned by
+        // `removed_lua_prompt_form_is_a_targeted_error_when_leading`.
         for near_miss in [
-            "````lua prompt\nreturn 1\n````",
-            " ```lua prompt\nreturn 1\n ```",
-            "```Lua prompt\nreturn 1\n```",
-            "```lua prompt extra\nreturn 1\n```",
+            "````lua\nreturn 1\n````",
+            " ```lua\nreturn 1\n ```",
+            "```Lua\nreturn 1\n```",
+            "```lua extra\nreturn 1\n```",
+        ] {
+            let src =
+                format!("---\nname: x\ndescription: d\n---\n\n# T\n\n{near_miss}\n\n## S\n\np\n");
+            let prompt = Prompt::parse(&src, "test", &NullObserver)
+                .expect("leading near-miss shared markers must remain prose");
+            assert!(prompt.shared.is_none());
+            assert!(prompt.description_text.contains(near_miss.trim()));
+        }
+
+        // Post-prose position: everything is prose there, near-miss or not.
+        for near_miss in [
+            "````lua\nreturn 1\n````",
+            " ```lua\nreturn 1\n ```",
+            "```Lua\nreturn 1\n```",
+            "```lua extra\nreturn 1\n```",
+            "```lua prompt\nreturn 1\n```",
         ] {
             let src = format!(
                 "---\nname: x\ndescription: d\n---\n\n# T\n\nIntro.\n\n{near_miss}\n\n## S\n\np\n"
@@ -686,7 +708,8 @@ Prose for the second section.\n";
             assert!(prompt.description_text.contains(near_miss));
         }
 
-        let unclosed = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua prompt\nreturn 1\n````\n\n## S\n\np\n";
+        let unclosed =
+            "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nreturn 1\n````\n\n## S\n\np\n";
         let error = Prompt::parse(unclosed, "test", &NullObserver)
             .expect_err("near-miss closing marker must not close the fence");
         assert!(error.to_string().contains("not closed"));
@@ -694,14 +717,14 @@ Prose for the second section.\n";
 
     #[test]
     fn shared_markers_inside_longer_fences_remain_prose() {
-        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n````markdown\n```lua prompt\nreturn 1\n```\n````\n\nIntro.\n\n## S\n\n````markdown\n```lua prompt\nreturn 2\n```\n````\n";
+        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n````markdown\n```lua\nreturn 1\n```\n````\n\nIntro.\n\n## S\n\n````markdown\n```lua\nreturn 2\n```\n````\n";
         let prompt = Prompt::parse(src, "test", &NullObserver)
             .expect("nested shared markers must remain prose");
 
         assert!(prompt.shared.is_none());
-        assert!(prompt.description_text.contains("```lua prompt"));
+        assert!(prompt.description_text.contains("```lua"));
         assert!(prompt.sections[0].preamble.is_none());
-        assert!(prompt.sections[0].prose.contains("```lua prompt"));
+        assert!(prompt.sections[0].prose.contains("```lua"));
     }
 
     #[test]
@@ -709,7 +732,7 @@ Prose for the second section.\n";
         let recorder = Recorder::default();
         let source = "private_payload =";
         let src = format!(
-            "---\nname: x\ndescription: d\n---\n\n# Private title\n\n```lua prompt\n{source}\n```\n\n## S\n\np\n"
+            "---\nname: x\ndescription: d\n---\n\n# Private title\n\n```lua\n{source}\n```\n\n## S\n\np\n"
         );
         let error = Prompt::parse(&src, "parse-failure", &recorder)
             .expect_err("malformed shared Lua must fail");
@@ -750,7 +773,7 @@ Prose for the second section.\n";
     #[test]
     fn successful_parse_reports_only_fixed_boundaries() {
         let recorder = Recorder::default();
-        let source = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua prompt\nlocal secret = 42\n```\n\n## S\n\np\n";
+        let source = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nlocal secret = 42\n```\n\n## S\n\np\n";
         Prompt::parse(source, "parse-success", &recorder).expect("prompt must parse");
         assert!(
             recorder
