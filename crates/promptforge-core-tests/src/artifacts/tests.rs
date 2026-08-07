@@ -128,10 +128,28 @@ fn server_spec<'a>(
     kind: ArchiveKind,
     executable_name: &'a str,
 ) -> ServerAsset<'a> {
+    server_spec_on(
+        "test-platform",
+        archive_name,
+        url,
+        sha256,
+        kind,
+        executable_name,
+    )
+}
+
+fn server_spec_on<'a>(
+    platform: &'a str,
+    archive_name: &'a str,
+    url: &'a str,
+    sha256: &'a str,
+    kind: ArchiveKind,
+    executable_name: &'a str,
+) -> ServerAsset<'a> {
     ServerAsset {
         os: "test",
         arch: "test",
-        platform: "test-platform",
+        platform,
         archive_name,
         url,
         sha256,
@@ -230,42 +248,124 @@ fn tar_gz_special_entry(name: &[u8], entry_type: tar::EntryType, link: Option<&s
         .expect("finish tiny gzip stream")
 }
 
+const DESKTOP_PLATFORMS: [(&str, &str); 6] = [
+    ("windows", "x86_64"),
+    ("windows", "aarch64"),
+    ("linux", "x86_64"),
+    ("linux", "aarch64"),
+    ("macos", "x86_64"),
+    ("macos", "aarch64"),
+];
+
 #[test]
 fn official_manifest_covers_supported_desktop_platforms() {
-    let platforms = [
-        ("windows", "x86_64"),
-        ("windows", "aarch64"),
-        ("linux", "x86_64"),
-        ("linux", "aarch64"),
-        ("macos", "x86_64"),
-        ("macos", "aarch64"),
-    ];
-
-    for (os, arch) in platforms {
-        let asset = server_asset(os, arch).expect("supported platform has a manifest entry");
-        assert!(
-            asset
-                .url
-                .starts_with("https://github.com/ggml-org/llama.cpp/releases/download/b10082/")
-        );
-        assert_eq!(asset.sha256.len(), 64);
-        assert!(asset.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    for kind in [ModelKind::Scenario, ModelKind::Dev] {
+        for (os, arch) in DESKTOP_PLATFORMS {
+            let asset =
+                server_asset(kind, os, arch).expect("supported platform has a manifest entry");
+            assert!(
+                asset
+                    .url
+                    .starts_with("https://github.com/ggml-org/llama.cpp/releases/download/b10082/")
+            );
+            assert_eq!(asset.sha256.len(), 64);
+            assert!(asset.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        }
+        assert_eq!(server_assets(kind).len(), DESKTOP_PLATFORMS.len());
     }
-    assert_eq!(SERVER_ASSETS.len(), platforms.len());
-    assert_eq!(MODEL_ASSET.name, "Qwen3-0.6B-Q8_0.gguf");
+    assert_eq!(SCENARIO_MODEL_ASSET.name, "Qwen3-0.6B-Q8_0.gguf");
     assert_eq!(
-        MODEL_ASSET.url,
+        SCENARIO_MODEL_ASSET.url,
         "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf?download=true"
     );
     assert_eq!(
-        MODEL_ASSET.sha256,
+        SCENARIO_MODEL_ASSET.sha256,
         "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031"
     );
 }
 
 #[test]
+fn dev_manifest_pins_gpu_archives_and_model() {
+    let windows = server_asset(ModelKind::Dev, "windows", "x86_64").expect("windows dev asset");
+    assert_eq!(windows.platform, "windows-x86_64-vulkan");
+    assert_eq!(windows.archive_name, "llama-b10082-bin-win-vulkan-x64.zip");
+    assert_eq!(
+        windows.sha256,
+        "0a4b2e41cfb950da9a749baf8978e0626690fbead3b0ca96860785484cda5bde"
+    );
+
+    let linux = server_asset(ModelKind::Dev, "linux", "x86_64").expect("linux dev asset");
+    assert_eq!(linux.platform, "linux-x86_64-vulkan");
+    assert_eq!(
+        linux.archive_name,
+        "llama-b10082-bin-ubuntu-vulkan-x64.tar.gz"
+    );
+    assert_eq!(
+        linux.sha256,
+        "9003ea32e3d5d8a01da3e4b5d3124e0d21c63d51e112c40f5dcdef91ffaca7cc"
+    );
+
+    let linux_arm = server_asset(ModelKind::Dev, "linux", "aarch64").expect("linux arm dev asset");
+    assert_eq!(linux_arm.platform, "linux-aarch64-vulkan");
+    assert_eq!(
+        linux_arm.archive_name,
+        "llama-b10082-bin-ubuntu-vulkan-arm64.tar.gz"
+    );
+    assert_eq!(
+        linux_arm.sha256,
+        "2805902c3074f615a0105a5325ee29799500c8e29c90ccb986b59e1141df551e"
+    );
+
+    // Windows arm64 has no Vulkan build in b10082 and falls back to the CPU archive.
+    assert_eq!(
+        server_asset(ModelKind::Dev, "windows", "aarch64").expect("windows arm dev asset"),
+        server_asset(ModelKind::Scenario, "windows", "aarch64").expect("windows arm cpu asset"),
+    );
+    // The macOS release tars are already Metal-enabled; both kinds share them.
+    for arch in ["x86_64", "aarch64"] {
+        assert_eq!(
+            server_asset(ModelKind::Dev, "macos", arch).expect("macos dev asset"),
+            server_asset(ModelKind::Scenario, "macos", arch).expect("macos scenario asset"),
+        );
+    }
+
+    assert_eq!(DEV_MODEL_ASSET.name, "Qwen3.5-9B-Q4_K_M.gguf");
+    assert_eq!(
+        DEV_MODEL_ASSET.url,
+        "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf"
+    );
+    assert_eq!(
+        DEV_MODEL_ASSET.sha256,
+        "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8"
+    );
+}
+
+#[test]
+fn model_kind_selects_distinct_pinned_assets() {
+    assert_eq!(model_asset(ModelKind::Scenario), SCENARIO_MODEL_ASSET);
+    assert_eq!(model_asset(ModelKind::Dev), DEV_MODEL_ASSET);
+    assert_ne!(
+        model_asset(ModelKind::Scenario),
+        model_asset(ModelKind::Dev)
+    );
+    for (os, arch) in [
+        ("windows", "x86_64"),
+        ("linux", "x86_64"),
+        ("linux", "aarch64"),
+    ] {
+        let scenario = server_asset(ModelKind::Scenario, os, arch).expect("scenario asset");
+        let dev = server_asset(ModelKind::Dev, os, arch).expect("dev asset");
+        assert_ne!(scenario.url, dev.url);
+        assert_ne!(
+            scenario.platform, dev.platform,
+            "GPU installs need a distinct platform key"
+        );
+    }
+}
+
+#[test]
 fn production_entrypoint_is_wired_without_running_it() {
-    let entrypoint: fn() -> Result<ProvisionedArtifacts> = provision;
+    let entrypoint: fn(ModelKind) -> Result<ProvisionedArtifacts> = provision;
     let paths: fn(&ProvisionedArtifacts) -> (&Path, &Path) = artifact_paths;
     let _ = entrypoint;
     let _ = paths;
@@ -273,15 +373,18 @@ fn production_entrypoint_is_wired_without_running_it() {
 
 #[test]
 fn unsupported_platform_names_os_and_arch() {
-    let error = server_asset("plan9", "mips").expect_err("unsupported platform must fail");
-    assert!(matches!(
-        error,
-        Error::UnsupportedPlatform { ref os, ref arch } if os == "plan9" && arch == "mips"
-    ));
-    assert_eq!(
-        error.to_string(),
-        "unsupported llama-server platform `plan9/mips`"
-    );
+    for kind in [ModelKind::Scenario, ModelKind::Dev] {
+        let error =
+            server_asset(kind, "plan9", "mips").expect_err("unsupported platform must fail");
+        assert!(matches!(
+            error,
+            Error::UnsupportedPlatform { ref os, ref arch } if os == "plan9" && arch == "mips"
+        ));
+        assert_eq!(
+            error.to_string(),
+            "unsupported llama-server platform `plan9/mips`"
+        );
+    }
 }
 
 #[test]
@@ -941,4 +1044,150 @@ fn executable_mode_change_invalidates_and_repairs_install() {
         .mode();
     assert_ne!(mode & 0o111, 0);
     assert_eq!(server.requests(), 1, "permission repair must stay offline");
+}
+
+/// One fake artifact pair for one model kind: a zip server archive plus a
+/// model blob, each behind its own request-counting fake HTTP server.
+struct FakeKindAssets {
+    archive_server: FakeServer,
+    model_server: FakeServer,
+    executable_body: &'static [u8],
+    model_body: &'static [u8],
+    archive_sha256: String,
+    model_sha256: String,
+}
+
+impl FakeKindAssets {
+    fn new(executable_body: &'static [u8], model_body: &'static [u8]) -> Self {
+        let archive = zip_archive(&[("bundle/llama-server.exe", executable_body)]);
+        let archive_sha256 = digest(&archive);
+        let model_sha256 = digest(model_body);
+        Self {
+            archive_server: FakeServer::new(&archive),
+            model_server: FakeServer::new(model_body),
+            executable_body,
+            model_body,
+            archive_sha256,
+            model_sha256,
+        }
+    }
+
+    fn provision(
+        &self,
+        provisioner: &Provisioner,
+        platform: &str,
+        archive_name: &str,
+        model_name: &str,
+    ) -> ProvisionedArtifacts {
+        let archive_url = self.archive_server.url(archive_name);
+        let model_url = self.model_server.url(model_name);
+        provision_assets(
+            provisioner,
+            server_spec_on(
+                platform,
+                archive_name,
+                &archive_url,
+                &self.archive_sha256,
+                ArchiveKind::Zip,
+                "llama-server.exe",
+            ),
+            file_asset(model_name, &model_url, &self.model_sha256),
+        )
+        .expect("provision fake kind assets")
+    }
+
+    fn requests(&self) -> (usize, usize) {
+        (self.archive_server.requests(), self.model_server.requests())
+    }
+}
+
+#[test]
+fn provisioning_one_kind_downloads_no_other_kind_assets() {
+    let cache = TempDir::new().expect("create model cache");
+    let provisioner = Provisioner::new(cache.path()).expect("create provisioner");
+    let scenario = FakeKindAssets::new(b"scenario server", b"scenario model");
+    let dev = FakeKindAssets::new(b"dev server", b"dev model");
+
+    let scenario_artifacts = scenario.provision(
+        &provisioner,
+        "test-platform",
+        "scenario.zip",
+        "scenario.gguf",
+    );
+    assert_eq!(
+        fs::read(&scenario_artifacts.llama_server).expect("read scenario server"),
+        scenario.executable_body
+    );
+    assert_eq!(
+        fs::read(&scenario_artifacts.model).expect("read scenario model"),
+        scenario.model_body
+    );
+    assert_eq!(scenario.requests(), (1, 1));
+    assert_eq!(
+        dev.requests(),
+        (0, 0),
+        "scenario provisioning must not touch dev assets"
+    );
+
+    let dev_artifacts = dev.provision(&provisioner, "test-platform-vulkan", "dev.zip", "dev.gguf");
+    assert_eq!(
+        fs::read(&dev_artifacts.llama_server).expect("read dev server"),
+        dev.executable_body
+    );
+    assert_eq!(
+        fs::read(&dev_artifacts.model).expect("read dev model"),
+        dev.model_body
+    );
+    assert_eq!(dev.requests(), (1, 1));
+    assert_eq!(
+        scenario.requests(),
+        (1, 1),
+        "dev provisioning must not touch scenario assets"
+    );
+}
+
+#[test]
+fn gpu_platform_key_install_coexists_with_cpu_install() {
+    let cache = TempDir::new().expect("create model cache");
+    let provisioner = Provisioner::new(cache.path()).expect("create provisioner");
+    let cpu = FakeKindAssets::new(b"cpu server", b"scenario model");
+    let gpu = FakeKindAssets::new(b"gpu server", b"dev model");
+
+    let cpu_executable = cpu
+        .provision(&provisioner, "test-platform", "cpu.zip", "scenario.gguf")
+        .llama_server;
+    let gpu_executable = gpu
+        .provision(&provisioner, "test-platform-vulkan", "gpu.zip", "dev.gguf")
+        .llama_server;
+
+    assert!(
+        cpu_executable.starts_with(cache.path().join("llama.cpp/b10082-test-platform")),
+        "CPU install lives under its own platform key"
+    );
+    assert!(
+        gpu_executable.starts_with(cache.path().join("llama.cpp/b10082-test-platform-vulkan")),
+        "GPU install lives under its own platform key"
+    );
+    assert_eq!(
+        fs::read(&cpu_executable).expect("read coexisting cpu server"),
+        cpu.executable_body,
+        "GPU install must not disturb the CPU install"
+    );
+    assert_eq!(
+        fs::read(&gpu_executable).expect("read coexisting gpu server"),
+        gpu.executable_body
+    );
+
+    cpu.provision(&provisioner, "test-platform", "cpu.zip", "scenario.gguf");
+    gpu.provision(&provisioner, "test-platform-vulkan", "gpu.zip", "dev.gguf");
+    assert_eq!(
+        cpu.requests(),
+        (1, 1),
+        "coexisting installs stay cache hits"
+    );
+    assert_eq!(
+        gpu.requests(),
+        (1, 1),
+        "coexisting installs stay cache hits"
+    );
 }

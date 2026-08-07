@@ -11,11 +11,25 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 const LLAMA_RELEASE: &str = "b10082";
-const MODEL_FILE: &str = "Qwen3-0.6B-Q8_0.gguf";
-const MODEL_URL: &str =
-    "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf?download=true";
-const MODEL_SHA256: &str = "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031";
 const INSTALL_MARKER: &str = ".promptforge-install";
+
+/// Selects which pinned artifact set `provision` synchronizes.
+///
+/// One kind never downloads the other kind's artifacts: each kind names its
+/// own model pin and its own server archive table, and GPU-enabled server
+/// builds install under distinct platform keys so both installs coexist in
+/// the cache.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ModelKind {
+    /// The deterministic scenario suite: small pinned model, CPU-only server build.
+    Scenario,
+    /// Interactive prompt development: large pinned model, GPU-enabled server build.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the dev runner arrives in a later step")
+    )]
+    Dev,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ArchiveKind {
@@ -35,80 +49,143 @@ struct ServerAsset<'a> {
     executable_name: &'a str,
 }
 
-const SERVER_ASSETS: &[ServerAsset<'static>] = &[
-    ServerAsset {
-        os: "windows",
-        arch: "x86_64",
-        platform: "windows-x86_64",
-        archive_name: "llama-b10082-bin-win-cpu-x64.zip",
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-win-cpu-x64.zip",
-        sha256: "d606bd97164b61a3f504ded91d5c9a19f94281c6ac2e4672e09f85f41a232076",
-        archive_kind: ArchiveKind::Zip,
-        executable_name: "llama-server.exe",
-    },
-    ServerAsset {
-        os: "windows",
-        arch: "aarch64",
-        platform: "windows-aarch64",
-        archive_name: "llama-b10082-bin-win-cpu-arm64.zip",
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-win-cpu-arm64.zip",
-        sha256: "50dab63396f579cc0ceb4a4fc4b985414d55aaebd4722f363ad03696648711a4",
-        archive_kind: ArchiveKind::Zip,
-        executable_name: "llama-server.exe",
-    },
-    ServerAsset {
-        os: "linux",
-        arch: "x86_64",
-        platform: "linux-x86_64",
-        archive_name: "llama-b10082-bin-ubuntu-x64.tar.gz",
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-ubuntu-x64.tar.gz",
-        sha256: "01dcc9257ea1030bed5034aae667cd38c7f9cb620fd3e06c303d3813dd9e7d95",
-        archive_kind: ArchiveKind::TarGz,
-        executable_name: "llama-server",
-    },
-    ServerAsset {
-        os: "linux",
-        arch: "aarch64",
-        platform: "linux-aarch64",
-        archive_name: "llama-b10082-bin-ubuntu-arm64.tar.gz",
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-ubuntu-arm64.tar.gz",
-        sha256: "16baaea628e228d0c546f4ddc9bef1b5182201caca75f65baa5e73ddff8d1204",
-        archive_kind: ArchiveKind::TarGz,
-        executable_name: "llama-server",
-    },
-    ServerAsset {
-        os: "macos",
-        arch: "x86_64",
-        platform: "macos-x86_64",
-        archive_name: "llama-b10082-bin-macos-x64.tar.gz",
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-macos-x64.tar.gz",
-        sha256: "5a28fad0f05bf283c1adb92224c1bf3c25ee06acd0f4065b170016c14b490473",
-        archive_kind: ArchiveKind::TarGz,
-        executable_name: "llama-server",
-    },
-    ServerAsset {
-        os: "macos",
-        arch: "aarch64",
-        platform: "macos-aarch64",
-        archive_name: "llama-b10082-bin-macos-arm64.tar.gz",
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-macos-arm64.tar.gz",
-        sha256: "d644e16eefef3402e4fa86c0fcdce3b00a6786db68c3f216875ce87b45d29173",
-        archive_kind: ArchiveKind::TarGz,
-        executable_name: "llama-server",
-    },
+const WINDOWS_X86_64_CPU: ServerAsset<'static> = ServerAsset {
+    os: "windows",
+    arch: "x86_64",
+    platform: "windows-x86_64",
+    archive_name: "llama-b10082-bin-win-cpu-x64.zip",
+    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-win-cpu-x64.zip",
+    sha256: "d606bd97164b61a3f504ded91d5c9a19f94281c6ac2e4672e09f85f41a232076",
+    archive_kind: ArchiveKind::Zip,
+    executable_name: "llama-server.exe",
+};
+
+const WINDOWS_AARCH64_CPU: ServerAsset<'static> = ServerAsset {
+    os: "windows",
+    arch: "aarch64",
+    platform: "windows-aarch64",
+    archive_name: "llama-b10082-bin-win-cpu-arm64.zip",
+    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-win-cpu-arm64.zip",
+    sha256: "50dab63396f579cc0ceb4a4fc4b985414d55aaebd4722f363ad03696648711a4",
+    archive_kind: ArchiveKind::Zip,
+    executable_name: "llama-server.exe",
+};
+
+const LINUX_X86_64_CPU: ServerAsset<'static> = ServerAsset {
+    os: "linux",
+    arch: "x86_64",
+    platform: "linux-x86_64",
+    archive_name: "llama-b10082-bin-ubuntu-x64.tar.gz",
+    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-ubuntu-x64.tar.gz",
+    sha256: "01dcc9257ea1030bed5034aae667cd38c7f9cb620fd3e06c303d3813dd9e7d95",
+    archive_kind: ArchiveKind::TarGz,
+    executable_name: "llama-server",
+};
+
+const LINUX_AARCH64_CPU: ServerAsset<'static> = ServerAsset {
+    os: "linux",
+    arch: "aarch64",
+    platform: "linux-aarch64",
+    archive_name: "llama-b10082-bin-ubuntu-arm64.tar.gz",
+    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-ubuntu-arm64.tar.gz",
+    sha256: "16baaea628e228d0c546f4ddc9bef1b5182201caca75f65baa5e73ddff8d1204",
+    archive_kind: ArchiveKind::TarGz,
+    executable_name: "llama-server",
+};
+
+// The macOS release tars are already Metal-enabled, so both kinds share them.
+const MACOS_X86_64: ServerAsset<'static> = ServerAsset {
+    os: "macos",
+    arch: "x86_64",
+    platform: "macos-x86_64",
+    archive_name: "llama-b10082-bin-macos-x64.tar.gz",
+    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-macos-x64.tar.gz",
+    sha256: "5a28fad0f05bf283c1adb92224c1bf3c25ee06acd0f4065b170016c14b490473",
+    archive_kind: ArchiveKind::TarGz,
+    executable_name: "llama-server",
+};
+
+const MACOS_AARCH64: ServerAsset<'static> = ServerAsset {
+    os: "macos",
+    arch: "aarch64",
+    platform: "macos-aarch64",
+    archive_name: "llama-b10082-bin-macos-arm64.tar.gz",
+    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-macos-arm64.tar.gz",
+    sha256: "d644e16eefef3402e4fa86c0fcdce3b00a6786db68c3f216875ce87b45d29173",
+    archive_kind: ArchiveKind::TarGz,
+    executable_name: "llama-server",
+};
+
+const WINDOWS_X86_64_VULKAN: ServerAsset<'static> = ServerAsset {
+    os: "windows",
+    arch: "x86_64",
+    platform: "windows-x86_64-vulkan",
+    archive_name: "llama-b10082-bin-win-vulkan-x64.zip",
+    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-win-vulkan-x64.zip",
+    sha256: "0a4b2e41cfb950da9a749baf8978e0626690fbead3b0ca96860785484cda5bde",
+    archive_kind: ArchiveKind::Zip,
+    executable_name: "llama-server.exe",
+};
+
+const LINUX_X86_64_VULKAN: ServerAsset<'static> = ServerAsset {
+    os: "linux",
+    arch: "x86_64",
+    platform: "linux-x86_64-vulkan",
+    archive_name: "llama-b10082-bin-ubuntu-vulkan-x64.tar.gz",
+    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-ubuntu-vulkan-x64.tar.gz",
+    sha256: "9003ea32e3d5d8a01da3e4b5d3124e0d21c63d51e112c40f5dcdef91ffaca7cc",
+    archive_kind: ArchiveKind::TarGz,
+    executable_name: "llama-server",
+};
+
+const LINUX_AARCH64_VULKAN: ServerAsset<'static> = ServerAsset {
+    os: "linux",
+    arch: "aarch64",
+    platform: "linux-aarch64-vulkan",
+    archive_name: "llama-b10082-bin-ubuntu-vulkan-arm64.tar.gz",
+    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-ubuntu-vulkan-arm64.tar.gz",
+    sha256: "2805902c3074f615a0105a5325ee29799500c8e29c90ccb986b59e1141df551e",
+    archive_kind: ArchiveKind::TarGz,
+    executable_name: "llama-server",
+};
+
+const SCENARIO_SERVER_ASSETS: &[ServerAsset<'static>] = &[
+    WINDOWS_X86_64_CPU,
+    WINDOWS_AARCH64_CPU,
+    LINUX_X86_64_CPU,
+    LINUX_AARCH64_CPU,
+    MACOS_X86_64,
+    MACOS_AARCH64,
 ];
 
-#[derive(Clone, Copy, Debug)]
+// No Vulkan build exists for Windows arm64 in release b10082, so the dev
+// table falls back to the CPU archive there.
+const DEV_SERVER_ASSETS: &[ServerAsset<'static>] = &[
+    WINDOWS_X86_64_VULKAN,
+    WINDOWS_AARCH64_CPU,
+    LINUX_X86_64_VULKAN,
+    LINUX_AARCH64_VULKAN,
+    MACOS_X86_64,
+    MACOS_AARCH64,
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct FileAsset<'a> {
     name: &'a str,
     url: &'a str,
     sha256: &'a str,
 }
 
-const MODEL_ASSET: FileAsset<'static> = FileAsset {
-    name: MODEL_FILE,
-    url: MODEL_URL,
-    sha256: MODEL_SHA256,
+const SCENARIO_MODEL_ASSET: FileAsset<'static> = FileAsset {
+    name: "Qwen3-0.6B-Q8_0.gguf",
+    url: "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf?download=true",
+    sha256: "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+};
+
+const DEV_MODEL_ASSET: FileAsset<'static> = FileAsset {
+    name: "Qwen3.5-9B-Q4_K_M.gguf",
+    url: "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf",
+    sha256: "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
 };
 
 #[derive(Debug, Error)]
@@ -422,18 +499,40 @@ impl Provisioner {
     }
 }
 
-pub(crate) fn provision() -> Result<ProvisionedArtifacts> {
+pub(crate) fn provision(kind: ModelKind) -> Result<ProvisionedArtifacts> {
     let cache = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.model-cache");
     let provisioner = Provisioner::new(&cache)?;
-    let server = server_asset(std::env::consts::OS, std::env::consts::ARCH)?;
+    let server = server_asset(kind, std::env::consts::OS, std::env::consts::ARCH)?;
+    provision_assets(&provisioner, server, model_asset(kind))
+}
+
+fn provision_assets(
+    provisioner: &Provisioner,
+    server: ServerAsset<'_>,
+    model: FileAsset<'_>,
+) -> Result<ProvisionedArtifacts> {
     Ok(ProvisionedArtifacts {
         llama_server: provisioner.provision_server(server)?,
-        model: provisioner.provision_file(MODEL_ASSET, "models")?,
+        model: provisioner.provision_file(model, "models")?,
     })
 }
 
-fn server_asset(os: &str, arch: &str) -> Result<ServerAsset<'static>> {
-    SERVER_ASSETS
+const fn model_asset(kind: ModelKind) -> FileAsset<'static> {
+    match kind {
+        ModelKind::Scenario => SCENARIO_MODEL_ASSET,
+        ModelKind::Dev => DEV_MODEL_ASSET,
+    }
+}
+
+const fn server_assets(kind: ModelKind) -> &'static [ServerAsset<'static>] {
+    match kind {
+        ModelKind::Scenario => SCENARIO_SERVER_ASSETS,
+        ModelKind::Dev => DEV_SERVER_ASSETS,
+    }
+}
+
+fn server_asset(kind: ModelKind, os: &str, arch: &str) -> Result<ServerAsset<'static>> {
+    server_assets(kind)
         .iter()
         .copied()
         .find(|asset| asset.os == os && asset.arch == arch)
