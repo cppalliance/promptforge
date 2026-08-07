@@ -16,4 +16,5 @@
 - [2026-08-05-1-section-lua-lifecycle] exact declaration replay: Freeze capability bindings once and replay declarations without resolving again.
 - [2026-08-05-1-section-lua-lifecycle] observer side channel: Observation must remain non-blocking, payload-free, and irrelevant to execution decisions.
 - [2026-08-06-1-prompt-fixtures-logging] bounded author logging: Author logs are the sole payload-bearing observation exception and stay bounded and single-line.
-- [2026-08-06-1-prompt-fixtures-logging] test strata: Ordinary tests are deterministic and offline; live-model checks run only through explicit commands.
+- [2026-08-07-1-dev-loop] explicit development workflow: Real inference and artifact provisioning belong to explicit developer commands.
+- [2026-08-07-1-dev-loop] output channel discipline: Developer results use stdout; traces and diagnostics use stderr.
