@@ -622,11 +622,13 @@ Before the model sees the prose, `{{ path }}` placeholders are resolved from thr
 - `{{ args }}` - the raw input string.
 - `{{ var.x }}` - values the Lua preamble wrote (`var.x = ...`).
 - `{{ sys.when }}` / `{{ sys.now }}` / `{{ sys.id }}` - runtime metadata: the run's
-  launch timestamp, a build-time timestamp, and the context id.
+  launch timestamp, the time when the current section started, and the 1-based
+  section id.
 
 Scalars render as strings, tables as JSON, and a missing path is an error.
-Substitution does no arithmetic - compute in Lua and reference the result
-(`var.total = var.a + var.b`, then `{{ var.total }}`).
+In Lua, `sys` exposes only the keys the runtime injected: an unknown read or
+any write raises. Substitution does no arithmetic - compute in Lua and
+reference the result (`var.total = var.a + var.b`, then `{{ var.total }}`).
 
 ### Fall-through and the result
 

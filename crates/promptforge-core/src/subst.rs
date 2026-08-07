@@ -120,6 +120,11 @@ mod tests {
     fn missing_key_is_error() {
         assert!(run("{{ var.nope }}").is_err());
         assert!(run("{{ ghost.x }}").is_err());
+        let sys_error = run("{{ sys.bogus }}").expect_err("unknown sys field must fail");
+        assert!(
+            sys_error.to_string().contains("missing {{ sys.bogus }}"),
+            "error was {sys_error}"
+        );
     }
 
     #[test]

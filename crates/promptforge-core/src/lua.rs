@@ -736,12 +736,9 @@ impl SectionVm {
         globals
             .raw_set("args", args)
             .map_err(|error| Error::Lua(error.to_string()))?;
-        let sys_value = self
-            .lua
-            .to_value(sys)
-            .map_err(|error| Error::Lua(error.to_string()))?;
+        let sys_table = seal_sys(&self.lua, sys)?;
         globals
-            .raw_set("sys", sys_value)
+            .raw_set("sys", sys_table)
             .map_err(|error| Error::Lua(error.to_string()))?;
         let var = self
             .lua
@@ -1644,6 +1641,74 @@ fn install_store_table<'scope, 'env: 'scope>(
         .raw_set("store", table)
         .map_err(|e| Error::Lua(e.to_string()))?;
     Ok(())
+}
+
+/// Builds a sealed Lua `sys` table from runtime metadata.
+///
+/// The proxy is empty; reads go through `__index` against the real data table
+/// and raise when the field is absent. `__newindex` rejects every write.
+/// `__metatable` is set so author code cannot replace the seal.
+fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
+    let data = match lua
+        .to_value(sys)
+        .map_err(|error| Error::Lua(error.to_string()))?
+    {
+        Value::Table(table) => table,
+        other => {
+            return Err(Error::Lua(format!(
+                "sys must be a table, got {}",
+                other.type_name()
+            )));
+        }
+    };
+
+    let proxy = lua
+        .create_table()
+        .map_err(|error| Error::Lua(error.to_string()))?;
+    let metatable = lua
+        .create_table()
+        .map_err(|error| Error::Lua(error.to_string()))?;
+
+    let index = lua
+        .create_function(move |_lua, (_table, key): (Value, Value)| {
+            let Value::String(name) = key else {
+                return Err(mlua::Error::runtime(
+                    "sys fields must be accessed by string key".to_owned(),
+                ));
+            };
+            let field = name.to_string_lossy();
+            match data.get::<Value>(field.as_str())? {
+                Value::Nil => Err(mlua::Error::runtime(format!("unknown sys field '{field}'"))),
+                value => Ok(value),
+            }
+        })
+        .map_err(|error| Error::Lua(error.to_string()))?;
+    metatable
+        .set("__index", index)
+        .map_err(|error| Error::Lua(error.to_string()))?;
+
+    let newindex = lua
+        .create_function(
+            move |_lua, (_table, key, _value): (Value, Value, Value)| -> mlua::Result<()> {
+                let field = match key {
+                    Value::String(name) => name.to_string_lossy(),
+                    other => format!("{other:?}"),
+                };
+                Err(mlua::Error::runtime(format!(
+                    "sys is read-only; cannot set '{field}'"
+                )))
+            },
+        )
+        .map_err(|error| Error::Lua(error.to_string()))?;
+    metatable
+        .set("__newindex", newindex)
+        .map_err(|error| Error::Lua(error.to_string()))?;
+    metatable
+        .set("__metatable", "sys is sealed")
+        .map_err(|error| Error::Lua(error.to_string()))?;
+
+    proxy.set_metatable(Some(metatable));
+    Ok(proxy)
 }
 
 /// Remove code-loading, direct output, and reflection globals the base library
@@ -3147,6 +3212,39 @@ mod tests {
         assert_eq!(
             run("return sys.id", "").unwrap().returned.as_deref(),
             Some("1")
+        );
+        assert_eq!(
+            run("return sys.when", "").unwrap().returned.as_deref(),
+            Some("t")
+        );
+    }
+
+    #[test]
+    fn unknown_sys_field_is_a_lua_error() {
+        let error = run("return sys.bogus", "").expect_err("missing sys field must fail");
+        assert!(
+            error.to_string().contains("unknown sys field 'bogus'"),
+            "error was {error}"
+        );
+    }
+
+    #[test]
+    fn writing_sys_field_is_a_lua_error() {
+        let existing =
+            run("sys.when = 'x'", "").expect_err("writing an existing sys field must fail");
+        assert!(
+            existing
+                .to_string()
+                .contains("sys is read-only; cannot set 'when'"),
+            "error was {existing}"
+        );
+
+        let created = run("sys.extra = 1", "").expect_err("creating a sys field must fail");
+        assert!(
+            created
+                .to_string()
+                .contains("sys is read-only; cannot set 'extra'"),
+            "error was {created}"
         );
     }
 

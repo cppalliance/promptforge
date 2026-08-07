@@ -56,7 +56,7 @@ Every reserved opening line is exactly ```` ```lua ```` and every closing line i
 
 An H2 section may contain one leading executable fence and one trailing executable fence. One boundary fence is the preamble. Two may surround empty prose. An exact Lua fence in the middle of prose remains prose. An unclosed reserved boundary is an error located at the prompt region and phase. H3 through H6 children are parsed into the section tree but are not independently executed by the current fall-through runtime.
 
-Substitution applies only to prose. `{{ args }}` reads the single raw input string, `{{ var.x }}` reads section-local Lua values, and `{{ sys.when }}`, `{{ sys.now }}`, and `{{ sys.id }}` read runtime metadata. Scalars render as strings, tables render as JSON, and a missing path is an error. Lua source is never substituted.
+Substitution applies only to prose. `{{ args }}` reads the single raw input string, `{{ var.x }}` reads section-local Lua values, and `{{ sys.when }}`, `{{ sys.now }}`, and `{{ sys.id }}` read runtime metadata. Scalars render as strings, tables render as JSON, and a missing path is an error. Lua `sys` is sealed: unknown field reads and any writes raise. Lua source is never substituted.
 
 ## Section execution preserves local context and explicit fall-through
 
