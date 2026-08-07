@@ -1,6 +1,14 @@
 //! Explicit real-model entry point plus offline prompt fixture tests.
 
 mod artifacts;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "argv dispatch reaches the dev runner in a later step"
+    )
+)]
+mod dev;
 mod scenarios;
 mod server;
 
