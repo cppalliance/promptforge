@@ -98,6 +98,50 @@ impl BoundedCapture {
 
 type SharedCapture = Arc<Mutex<BoundedCapture>>;
 
+/// Default dev-profile context window, sized for long reasoning chains.
+const DEV_DEFAULT_CTX_SIZE: u32 = 131_072;
+/// Default dev-profile generation ceiling; reasoning chains are long.
+const DEV_DEFAULT_N_PREDICT: u32 = 8192;
+
+/// Selects the `llama-server` flag set used for a guarded launch.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ServerProfile {
+    /// The deterministic fixed-scenario flags: small context, fixed seed,
+    /// temperature zero, reasoning off. Byte-identical to the historical
+    /// invocation pinned by the crate README.
+    Scenario,
+    /// The interactive prompt-development flags: large context, GPU offload,
+    /// quantized KV cache, and model-card sampling.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "constructed by the dev runner in a later step")
+    )]
+    Dev(DevServerOptions),
+}
+
+/// Tunable knobs for [`ServerProfile::Dev`]; every other dev flag is fixed.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DevServerOptions {
+    /// Context window passed as `--ctx-size`.
+    pub(crate) ctx_size: u32,
+    /// Generation ceiling passed as `--n-predict`.
+    pub(crate) n_predict: u32,
+    /// When `true`, thinking stays enabled with the thinking sampling preset
+    /// (`--temp 1.0 --top-p 0.95`). When `false`, reasoning is turned off and
+    /// sampling switches to the non-thinking preset (`--temp 0.7 --top-p 0.8`).
+    pub(crate) think: bool,
+}
+
+impl Default for DevServerOptions {
+    fn default() -> Self {
+        Self {
+            ctx_size: DEV_DEFAULT_CTX_SIZE,
+            n_predict: DEV_DEFAULT_N_PREDICT,
+            think: true,
+        }
+    }
+}
+
 /// A running local server that is killed and reaped whenever its owner exits.
 #[derive(Debug)]
 pub(crate) struct ServerGuard {
@@ -111,8 +155,14 @@ pub(crate) struct ServerGuard {
 }
 
 impl ServerGuard {
-    /// Starts the pinned server and verifies its authenticated model identity.
-    pub(crate) fn start(executable: &Path, model: &Path, interrupted: &AtomicBool) -> Result<Self> {
+    /// Starts the pinned server with the given profile and verifies its
+    /// authenticated model identity.
+    pub(crate) fn start(
+        executable: &Path,
+        model: &Path,
+        profile: ServerProfile,
+        interrupted: &AtomicBool,
+    ) -> Result<Self> {
         let mut select_port = free_port;
         let mut make_identity = random_identity;
         let mut spawn = |request: &SpawnRequest<'_>| {
@@ -132,6 +182,7 @@ impl ServerGuard {
         Self::start_with(
             executable,
             model,
+            profile,
             interrupted,
             PRODUCTION_POLICY,
             &mut select_port,
@@ -140,9 +191,14 @@ impl ServerGuard {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the test seam threads three injected fakes beside the launch inputs"
+    )]
     fn start_with(
         executable: &Path,
         model: &Path,
+        profile: ServerProfile,
         interrupted: &AtomicBool,
         policy: StartupPolicy,
         select_port: &mut dyn FnMut() -> Result<u16>,
@@ -153,7 +209,13 @@ impl ServerGuard {
         for attempt in 1..=policy.attempts {
             let port = select_port()?;
             let identity = make_identity();
-            let args = server_args(model, port, &identity.model_alias, &identity.api_key);
+            let args = server_args(
+                model,
+                port,
+                &identity.model_alias,
+                &identity.api_key,
+                profile,
+            );
             let request = SpawnRequest {
                 executable,
                 args: &args,
@@ -407,8 +469,19 @@ fn readiness_belongs_to(
         })
 }
 
-fn server_args(model: &Path, port: u16, model_alias: &str, api_key: &str) -> Vec<OsString> {
-    [
+/// Builds the full `llama-server` argument vector for one launch attempt.
+///
+/// The leading identity and networking arguments are shared; the tail is
+/// selected by `profile`. The scenario tail must stay byte-identical to the
+/// invocation pinned by the crate README.
+fn server_args(
+    model: &Path,
+    port: u16,
+    model_alias: &str,
+    api_key: &str,
+    profile: ServerProfile,
+) -> Vec<OsString> {
+    let mut args = vec![
         OsString::from("--model"),
         model.as_os_str().to_owned(),
         OsString::from("--alias"),
@@ -419,23 +492,65 @@ fn server_args(model: &Path, port: u16, model_alias: &str, api_key: &str) -> Vec
         OsString::from(LOOPBACK),
         OsString::from("--port"),
         OsString::from(port.to_string()),
-        OsString::from("--ctx-size"),
-        OsString::from("4096"),
-        OsString::from("--n-predict"),
-        OsString::from("256"),
-        OsString::from("--parallel"),
-        OsString::from("1"),
-        OsString::from("--seed"),
-        OsString::from("424242"),
-        OsString::from("--temp"),
-        OsString::from("0"),
-        OsString::from("--jinja"),
-        OsString::from("--reasoning"),
-        OsString::from("off"),
-        OsString::from("--reasoning-format"),
-        OsString::from("deepseek"),
-    ]
-    .into()
+    ];
+    match profile {
+        ServerProfile::Scenario => args.extend([
+            OsString::from("--ctx-size"),
+            OsString::from("4096"),
+            OsString::from("--n-predict"),
+            OsString::from("256"),
+            OsString::from("--parallel"),
+            OsString::from("1"),
+            OsString::from("--seed"),
+            OsString::from("424242"),
+            OsString::from("--temp"),
+            OsString::from("0"),
+            OsString::from("--jinja"),
+            OsString::from("--reasoning"),
+            OsString::from("off"),
+            OsString::from("--reasoning-format"),
+            OsString::from("deepseek"),
+        ]),
+        ServerProfile::Dev(options) => {
+            args.extend([
+                OsString::from("--ctx-size"),
+                OsString::from(options.ctx_size.to_string()),
+                OsString::from("--n-predict"),
+                OsString::from(options.n_predict.to_string()),
+                OsString::from("--parallel"),
+                OsString::from("1"),
+                OsString::from("--flash-attn"),
+                OsString::from("on"),
+                OsString::from("--cache-type-k"),
+                OsString::from("q8_0"),
+                OsString::from("--cache-type-v"),
+                OsString::from("q8_0"),
+                OsString::from("-ngl"),
+                OsString::from("99"),
+                OsString::from("--jinja"),
+            ]);
+            if !options.think {
+                args.extend([OsString::from("--reasoning"), OsString::from("off")]);
+            }
+            args.extend([OsString::from("--reasoning-format"), OsString::from("auto")]);
+            let (temp, top_p) = if options.think {
+                ("1.0", "0.95")
+            } else {
+                ("0.7", "0.8")
+            };
+            args.extend([
+                OsString::from("--temp"),
+                OsString::from(temp),
+                OsString::from("--top-p"),
+                OsString::from(top_p),
+                OsString::from("--top-k"),
+                OsString::from("20"),
+                OsString::from("--presence-penalty"),
+                OsString::from("1.5"),
+            ]);
+        }
+    }
+    args
 }
 
 fn display_invocation(executable: &Path, args: &[OsString]) -> String {
@@ -664,6 +779,7 @@ mod tests {
         let guard = ServerGuard::start_with(
             Path::new("fake-llama-server"),
             Path::new("pinned-model.gguf"),
+            ServerProfile::Scenario,
             &interrupted,
             TEST_POLICY,
             &mut select_port,
@@ -709,6 +825,7 @@ mod tests {
         let error = ServerGuard::start_with(
             Path::new("fake-llama-server"),
             Path::new("pinned-model.gguf"),
+            ServerProfile::Scenario,
             &interrupted,
             TEST_POLICY,
             &mut select_port,
@@ -729,6 +846,10 @@ mod tests {
         );
     }
 
+    fn expected_args(pieces: &[&str]) -> Vec<OsString> {
+        pieces.iter().map(OsString::from).collect()
+    }
+
     #[test]
     fn invocation_pins_deterministic_jinja_settings() {
         let args = server_args(
@@ -736,22 +857,137 @@ mod tests {
             12345,
             "per-attempt-model",
             "private-key",
+            ServerProfile::Scenario,
+        );
+        assert_eq!(
+            args,
+            expected_args(&[
+                "--model",
+                "model.gguf",
+                "--alias",
+                "per-attempt-model",
+                "--api-key",
+                "private-key",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "12345",
+                "--ctx-size",
+                "4096",
+                "--n-predict",
+                "256",
+                "--parallel",
+                "1",
+                "--seed",
+                "424242",
+                "--temp",
+                "0",
+                "--jinja",
+                "--reasoning",
+                "off",
+                "--reasoning-format",
+                "deepseek",
+            ])
         );
         let rendered = display_invocation(Path::new("llama-server"), &args);
-        for expected in [
-            "--alias per-attempt-model",
-            "--api-key <per-attempt-secret>",
-            "--ctx-size 4096",
-            "--n-predict 256",
-            "--parallel 1",
-            "--seed 424242",
-            "--temp 0",
-            "--jinja",
-            "--reasoning off",
-            "--reasoning-format deepseek",
-        ] {
-            assert!(rendered.contains(expected), "missing setting {expected}");
-        }
+        assert!(rendered.contains("--api-key <per-attempt-secret>"));
         assert!(!rendered.contains("private-key"));
+    }
+
+    #[test]
+    fn dev_invocation_pins_gpu_cache_reasoning_and_sampling_flags() {
+        let args = server_args(
+            Path::new("model.gguf"),
+            12345,
+            "per-attempt-model",
+            "private-key",
+            ServerProfile::Dev(DevServerOptions::default()),
+        );
+        assert_eq!(
+            args,
+            expected_args(&[
+                "--model",
+                "model.gguf",
+                "--alias",
+                "per-attempt-model",
+                "--api-key",
+                "private-key",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "12345",
+                "--ctx-size",
+                "131072",
+                "--n-predict",
+                "8192",
+                "--parallel",
+                "1",
+                "--flash-attn",
+                "on",
+                "--cache-type-k",
+                "q8_0",
+                "--cache-type-v",
+                "q8_0",
+                "-ngl",
+                "99",
+                "--jinja",
+                "--reasoning-format",
+                "auto",
+                "--temp",
+                "1.0",
+                "--top-p",
+                "0.95",
+                "--top-k",
+                "20",
+                "--presence-penalty",
+                "1.5",
+            ])
+        );
+        let rendered = display_invocation(Path::new("llama-server"), &args);
+        assert!(rendered.contains("--api-key <per-attempt-secret>"));
+        assert!(!rendered.contains("private-key"));
+    }
+
+    #[test]
+    fn dev_invocation_plumbs_context_and_max_tokens() {
+        let args = server_args(
+            Path::new("model.gguf"),
+            12345,
+            "per-attempt-model",
+            "private-key",
+            ServerProfile::Dev(DevServerOptions {
+                ctx_size: 32_768,
+                n_predict: 512,
+                ..DevServerOptions::default()
+            }),
+        );
+        let rendered = display_invocation(Path::new("llama-server"), &args);
+        assert!(rendered.contains("--ctx-size 32768"));
+        assert!(rendered.contains("--n-predict 512"));
+        assert!(!rendered.contains("131072"));
+        assert!(!rendered.contains("8192"));
+    }
+
+    #[test]
+    fn dev_no_think_switches_to_the_non_thinking_preset() {
+        let args = server_args(
+            Path::new("model.gguf"),
+            12345,
+            "per-attempt-model",
+            "private-key",
+            ServerProfile::Dev(DevServerOptions {
+                think: false,
+                ..DevServerOptions::default()
+            }),
+        );
+        let rendered = display_invocation(Path::new("llama-server"), &args);
+        assert!(rendered.contains("--reasoning off"));
+        assert!(rendered.contains("--reasoning-format auto"));
+        assert!(rendered.contains("--temp 0.7"));
+        assert!(rendered.contains("--top-p 0.8"));
+        assert!(rendered.contains("--top-k 20"));
+        assert!(rendered.contains("--presence-penalty 1.5"));
+        assert!(!rendered.contains("--temp 1.0"));
+        assert!(!rendered.contains("--top-p 0.95"));
     }
 }
