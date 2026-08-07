@@ -1,7 +1,6 @@
 # PromptForge architecture queue
 
 - [2026-07-29-1-gateway-v0] caller-model alias: Restore the caller's model name after upstream routing; this may remain a wire-level detail.
-- [2026-07-29-2-lua-args-substitution] runtime metadata snapshots: Clarify which system values are fixed per run, fixed per step, or refreshed live.
 - [2026-07-29-4-webfetch-crate-extraction] fetch provenance contract: Return final URL, truncation, and extraction mode with fetched text so consumers know what they received.
 - [2026-07-29-5-multi-turn-research-prompt] prompt-owned tool budget: Let a prompt declare its tool-iteration budget while retaining a finite default.
 - [2026-07-29-5-multi-turn-research-prompt] soft output target: A prose token target is guidance, not an enforced output limit.
@@ -18,3 +17,4 @@
 - [2026-08-06-1-prompt-fixtures-logging] bounded author logging: Author logs are the sole payload-bearing observation exception and stay bounded and single-line.
 - [2026-08-07-1-dev-loop] explicit development workflow: Real inference and artifact provisioning belong to explicit developer commands.
 - [2026-08-07-1-dev-loop] output channel discipline: Developer results use stdout; traces and diagnostics use stderr.
+- [2026-08-07-2-store-type-rename] type names are not architecture: Store implementation renames should not alter the run-scoped filesystem contract.

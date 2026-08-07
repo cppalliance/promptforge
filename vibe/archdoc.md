@@ -13,7 +13,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - store: run-scoped virtual filesystem contract with interchangeable memory and file backends; depends on: none
 - Lua VM boundary: sandbox and coroutine bridge between prompt code and host capabilities; depends on: gateway, store, shared substrate
 - shared substrate: cross-product progress, loopback discovery, protocol, and sidecar facilities; depends on: none
-- build tooling: compile-time and packaging code linked into no runtime deliverable; depends on: none
 - tool picker: deterministic catalog resolver that can shortlist or abstain but cannot execute effects; depends on: none
 - MCP server: protocol adapter for prompt catalogs, execution, progress, and deferred collection; depends on: executor, gateway, store, tool picker, shared substrate
 
@@ -36,6 +35,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A16. Long-running runs survive client deadlines and remain collectable by opaque id until retention expires.
 - A17. Shared Lua executes in a fresh VM for each section; mutable Lua state never crosses section boundaries.
 - A18. One stable execution identity correlates parsing, binding, execution, and every observation for a run.
+- A19. Runtime metadata is sealed: unknown reads and all author writes fail, and every field has an explicit refresh boundary.
 
 ## Principles
 
