@@ -388,6 +388,36 @@ fn unsupported_platform_names_os_and_arch() {
 }
 
 #[test]
+fn provisioner_status_defaults_to_stdout_and_with_status_overrides() {
+    let cache = TempDir::new().expect("create model cache");
+    let provisioner = Provisioner::new(cache.path()).expect("create provisioner");
+    assert_eq!(provisioner.status, crate::StatusStream::Stdout);
+
+    let provisioner = provisioner.with_status(crate::StatusStream::Stderr);
+    assert_eq!(provisioner.status, crate::StatusStream::Stderr);
+}
+
+#[test]
+fn provision_entrypoint_provisioner_routes_status_by_kind() {
+    let cache = TempDir::new().expect("create model cache");
+
+    let dev = provisioner_for(cache.path(), ModelKind::Dev).expect("create dev provisioner");
+    assert_eq!(
+        dev.status,
+        crate::StatusStream::Stderr,
+        "dev status lines must stay off stdout, which carries only the final result"
+    );
+
+    let scenario =
+        provisioner_for(cache.path(), ModelKind::Scenario).expect("create scenario provisioner");
+    assert_eq!(
+        scenario.status,
+        crate::StatusStream::Stdout,
+        "scenario status lines are part of the pinned stdout contract"
+    );
+}
+
+#[test]
 fn model_download_uses_part_staging_and_repairs_corruption() {
     let cache = TempDir::new().expect("create model cache");
     let body = b"tiny fake model".to_vec();
