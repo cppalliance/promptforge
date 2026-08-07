@@ -24,10 +24,6 @@ pub(crate) enum ModelKind {
     /// The deterministic scenario suite: small pinned model, CPU-only server build.
     Scenario,
     /// Interactive prompt development: large pinned model, GPU-enabled server build.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the dev runner arrives in a later step")
-    )]
     Dev,
 }
 

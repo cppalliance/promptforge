@@ -2756,6 +2756,7 @@ dependencies = [
  "async-trait",
  "fastrand",
  "flate2",
+ "notify",
  "promptforge-core",
  "promptforge-tool-picker",
  "promptforge-webfetch",
