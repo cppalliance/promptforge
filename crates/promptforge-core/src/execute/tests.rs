@@ -1025,6 +1025,8 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
                 "First".to_string(),
                 detail::LUA_PREAMBLE_SUCCEEDED.to_string(),
             ),
+            ("First".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
+            ("First".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
             (
                 "First".to_string(),
                 detail::LUA_TEARDOWN_STARTED.to_string()
@@ -1345,6 +1347,16 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
+            ("Only".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
+            ("Only".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
+            (
+                "Only".to_string(),
+                detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
+            ),
+            (
+                "Only".to_string(),
+                detail::TOOL_SCOPE_VALIDATION_SUCCEEDED.to_string(),
+            ),
             ("Only".to_string(), detail::MODEL_TURN_COMPLETED.to_string(),),
             (
                 "Only".to_string(),
@@ -1401,6 +1413,16 @@ async fn epilog_runs_after_reply_and_can_return() {
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
+            ("Only".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
+            ("Only".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
+            (
+                "Only".to_string(),
+                detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
+            ),
+            (
+                "Only".to_string(),
+                detail::TOOL_SCOPE_VALIDATION_SUCCEEDED.to_string(),
+            ),
             ("Only".to_string(), detail::MODEL_TURN_COMPLETED.to_string()),
             (
                 "Only".to_string(),
@@ -1424,6 +1446,40 @@ async fn epilog_runs_after_reply_and_can_return() {
             ("Only".to_string(), detail::SECTION_FINISHED.to_string()),
             ("Test prompt".to_string(), detail::RUN_SUCCEEDED.to_string()),
         ]
+    );
+}
+
+#[tokio::test]
+async fn add_in_an_unbound_prompt_without_declarations_fails_the_run_loudly() {
+    // Parsed (unbound) input with no shared library: the run goes through the
+    // same validated VM with empty frozen bindings, so the alias is rejected.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
+    let prompt = parse(md);
+    let error = run(&prompt, "", &[], &Store::memory(), silent())
+        .await
+        .expect_err("an undeclared alias must fail the run");
+    assert!(
+        error.to_string().contains("not declared by tools.need"),
+        "the error must report the missing declaration: {error}"
+    );
+}
+
+#[tokio::test]
+async fn add_in_a_bound_prompt_with_empty_needs_fails_the_run_loudly() {
+    // A bound prompt whose shared library declares nothing closes over empty
+    // frozen bindings, so tools.add in a preamble is rejected the same way.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+```lua\nfunction helper() return 'no declarations' end\n```\n\n\
+## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
+    let error = run(&bound(md), "", &[], &Store::memory(), silent())
+        .await
+        .expect_err("an undeclared alias must fail the run");
+    assert!(
+        error.to_string().contains("not declared by tools.need"),
+        "the error must report the missing declaration: {error}"
     );
 }
 

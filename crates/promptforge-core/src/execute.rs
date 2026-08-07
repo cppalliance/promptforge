@@ -38,7 +38,7 @@ use serde_json::json;
 
 use crate::bind::BoundPrompt;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
-use crate::lua::{SectionVm, ToolScope};
+use crate::lua::{SectionVm, ToolBindings, ToolScope};
 use crate::observe::{Observer, detail};
 use crate::parser::Prompt;
 use crate::store::Store;
@@ -122,8 +122,11 @@ pub struct RunOptions<'a> {
 /// A prompt accepted by [`run`].
 ///
 /// A [`BoundPrompt`] supplies frozen H1 declaration replay data. A parsed
-/// [`Prompt`] remains accepted as a compatibility input for hosts that have not
-/// yet adopted the separate binding phase; it has no frozen declarations.
+/// [`Prompt`] remains accepted as a temporary input for tool-free hosts that
+/// have not yet adopted the separate binding phase; it executes on the same
+/// validated path as a bound prompt with empty frozen bindings, so any
+/// `tools.need` or `tools.add` in it fails loudly, and its shared Lua runs
+/// under full replay rules, where a scalar return is an error.
 #[derive(Debug, Clone, Copy)]
 pub struct RunPrompt<'a> {
     prompt: &'a Prompt,
@@ -166,7 +169,10 @@ impl fmt::Debug for RunOptions<'_> {
 ///
 /// `prompt` normally receives a [`BoundPrompt`], whose frozen H1 declarations
 /// replay in each section VM. Parsed [`Prompt`] values remain accepted so
-/// existing hosts keep compiling until they adopt the separate binding phase.
+/// existing tool-free hosts keep compiling until they adopt the separate
+/// binding phase; they run through the same validated VM with empty frozen
+/// bindings, so declaring or scoping any tool fails loudly and shared Lua
+/// replays under the same rules as a bound prompt.
 ///
 /// `tools` is the complete callable pool for this run. A bound section exposes
 /// only aliases in its effective `tools.always` plus `tools.add` scope, and
@@ -286,6 +292,12 @@ async fn run_sections(
     let when = now_rfc3339();
     let mut last_reply: Option<String> = None;
 
+    // A parsed prompt without a binding pass runs with empty frozen bindings,
+    // on the same validated VM path as a bound prompt: there is exactly one
+    // `tools.add`, and it rejects every undeclared alias.
+    let empty_bindings = ToolBindings::default();
+    let bindings = bound.map_or(&empty_bindings, BoundPrompt::bindings);
+
     // Resolve the tool-loop cap once: the prompt's declared budget, or the
     // runtime default when it declares none.
     let max_tool_iterations = prompt
@@ -300,15 +312,11 @@ async fn run_sections(
         // grows, which is what the progress contract requires.
         observer.observe(execution, &section.name, detail::SECTION_STARTED);
 
-        let mut vm = match (prompt.shared.as_ref(), bound) {
-            (Some(shared), Some(bound)) => SectionVm::new_with_bindings(
-                shared,
-                bound.bindings(),
-                execution,
-                observer,
-                &section.name,
-            )?,
-            (shared, _) => SectionVm::new(shared, execution, observer, &section.name)?,
+        let mut vm = match prompt.shared.as_ref() {
+            Some(shared) => {
+                SectionVm::new_with_bindings(shared, bindings, execution, observer, &section.name)?
+            }
+            None => SectionVm::new(None, execution, observer, &section.name)?,
         };
         if let Err(error) = vm.inject_host(args, &sys, store) {
             vm.teardown(observer, &section.name);
@@ -332,18 +340,14 @@ async fn run_sections(
             return Ok(value);
         }
 
-        // Bound VMs close declaration recording before reply binding or epilog
-        // execution. Unbound compatibility runs remain tool-free.
-        let scope = if bound.is_some() && prompt.shared.is_some() {
-            match vm.close_tool_scope(observer, &section.name) {
-                Ok(scope) => Some(scope),
-                Err(error) => {
-                    vm.teardown(observer, &section.name);
-                    return Err(error);
-                }
+        // Every VM closes declaration recording before reply binding or epilog
+        // execution; a prompt with empty bindings closes to an empty scope.
+        let scope = match vm.close_tool_scope(observer, &section.name) {
+            Ok(scope) => scope,
+            Err(error) => {
+                vm.teardown(observer, &section.name);
+                return Err(error);
             }
-        } else {
-            None
         };
 
         let var = match vm.var() {
@@ -361,11 +365,11 @@ async fn run_sections(
             }
         };
         if !prose.trim().is_empty() {
-            let (schemas, dispatch) = match (bound, scope.as_ref()) {
-                (Some(bound), Some(scope)) => {
+            let (schemas, dispatch) = match bound {
+                Some(bound) => {
                     match prepare_effective_scope(
                         bound,
-                        scope,
+                        &scope,
                         registry,
                         execution,
                         observer,
@@ -378,7 +382,7 @@ async fn run_sections(
                         }
                     }
                 }
-                _ => (Vec::new(), BTreeMap::new()),
+                None => (Vec::new(), BTreeMap::new()),
             };
             if client.is_none() {
                 match GatewayClient::from_env() {

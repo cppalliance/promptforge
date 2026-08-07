@@ -513,9 +513,8 @@ fn validate_alias(alias: &str) -> Result<()> {
 pub struct SectionVm {
     execution: String,
     lua: Lua,
-    scoped_tools: Arc<Mutex<Vec<String>>>,
-    bound_tools: Option<ToolBindings>,
-    tool_runtime: Option<Arc<Mutex<ToolRuntime>>>,
+    bound_tools: ToolBindings,
+    tool_runtime: Arc<Mutex<ToolRuntime>>,
     store: Option<Store>,
     host_injected: bool,
 }
@@ -529,6 +528,11 @@ impl SectionVm {
     /// retains `execution` for every later lifecycle report. Shared execution
     /// receives a phase-local `log(message)` callback; direct `print` is
     /// unavailable.
+    ///
+    /// The VM carries no frozen tool bindings, so the validating `tools.add`
+    /// installed by [`inject_host`](Self::inject_host) rejects every alias as
+    /// undeclared: a prompt without `tools.need` declarations cannot scope
+    /// tools.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened, or if the
@@ -564,9 +568,12 @@ impl SectionVm {
         let vm = Self {
             execution: execution.to_owned(),
             lua,
-            scoped_tools: Arc::new(Mutex::new(Vec::new())),
-            bound_tools: None,
-            tool_runtime: None,
+            bound_tools: ToolBindings::default(),
+            tool_runtime: Arc::new(Mutex::new(ToolRuntime {
+                phase: ToolPhase::Replay,
+                declaration_index: 0,
+                added: Vec::new(),
+            })),
             store: None,
             host_injected: false,
         };
@@ -646,9 +653,8 @@ impl SectionVm {
         let vm = Self {
             execution: execution.to_owned(),
             lua,
-            scoped_tools: Arc::new(Mutex::new(Vec::new())),
-            bound_tools: Some(bindings.clone()),
-            tool_runtime: Some(Arc::clone(&runtime)),
+            bound_tools: bindings.clone(),
+            tool_runtime: Arc::clone(&runtime),
             store: None,
             host_injected: false,
         };
@@ -744,11 +750,7 @@ impl SectionVm {
         globals
             .raw_set("var", var)
             .map_err(|error| Error::Lua(error.to_string()))?;
-        if let (Some(bindings), Some(runtime)) = (&self.bound_tools, &self.tool_runtime) {
-            install_h2_tools(&self.lua, &globals, bindings, runtime)?;
-        } else {
-            install_tools_table(&self.lua, &globals, &self.scoped_tools)?;
-        }
+        install_h2_tools(&self.lua, &globals, &self.bound_tools, &self.tool_runtime)?;
         globals
             .raw_set("reply", Value::Nil)
             .map_err(|error| Error::Lua(error.to_string()))?;
@@ -818,8 +820,8 @@ impl SectionVm {
     /// Binds the model reply for a later epilog in the same environment.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected, a bound
-    /// VM's tool scope remains open, or the reply cannot be installed.
+    /// Returns [`Error::Lua`] if host values have not been injected, the tool
+    /// scope remains open, or the reply cannot be installed.
     ///
     /// # Examples
     /// ```
@@ -829,6 +831,7 @@ impl SectionVm {
     ///
     /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
+    /// vm.close_tool_scope(&NullObserver, "Example")?;
     /// vm.bind_reply("model answer", &NullObserver, "Example")?;
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
@@ -868,9 +871,9 @@ impl SectionVm {
     /// this call and reports under `execution` and `section`.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected, a bound
-    /// VM's tool scope remains open, execution fails, the shared instruction
-    /// budget is exhausted, or the program returns a non-scalar value.
+    /// Returns [`Error::Lua`] if host values have not been injected, the tool
+    /// scope remains open, execution fails, the shared instruction budget is
+    /// exhausted, or the program returns a non-scalar value.
     ///
     /// # Examples
     /// ```
@@ -887,6 +890,7 @@ impl SectionVm {
     /// )?;
     /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
+    /// vm.close_tool_scope(&NullObserver, "Example")?;
     /// vm.bind_reply("done", &NullObserver, "Example")?;
     /// assert_eq!(
     ///     vm.run_epilog(&epilog, &NullObserver, "Example")?.as_deref(),
@@ -958,38 +962,6 @@ impl SectionVm {
             .map_err(|error| Error::Lua(error.to_string()))
     }
 
-    /// Returns tool names recorded by `tools.add`, in first-seen order.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the internal recorder mutex was poisoned.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge_core::lua::{LuaProgram, SectionVm};
-    /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::Store;
-    ///
-    /// let preamble = LuaProgram::compile(
-    ///     "tools.add('search')",
-    ///     "preamble",
-    ///     "example-run",
-    ///     &NullObserver,
-    ///     "Example",
-    /// )?;
-    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
-    /// vm.inject_host("", &serde_json::json!({}), &Store::memory())?;
-    /// vm.run_preamble(&preamble, &NullObserver, "Example")?;
-    /// assert_eq!(vm.scoped_tools()?, vec!["search"]);
-    /// vm.teardown(&NullObserver, "Example");
-    /// # Ok::<(), promptforge_core::Error>(())
-    /// ```
-    pub fn scoped_tools(&self) -> Result<Vec<String>> {
-        self.scoped_tools
-            .lock()
-            .map(|names| names.clone())
-            .map_err(|_| Error::Lua("section VM tool recorder was poisoned".to_owned()))
-    }
-
     /// Closes and returns this section's effective tool scope.
     ///
     /// Prompt-wide `tools.always` aliases come first, followed by first-seen
@@ -997,8 +969,8 @@ impl SectionVm {
     /// function references cannot add tools during an epilog.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] for an unbound VM, a poisoned recorder, or a
-    /// second closure attempt.
+    /// Returns [`Error::Lua`] for a poisoned declaration runtime, a closure
+    /// attempt before host injection, or a second closure attempt.
     ///
     /// # Examples
     /// ```
@@ -1053,15 +1025,9 @@ impl SectionVm {
     }
 
     fn close_tool_scope_inner(&self) -> Result<ToolScope> {
-        let bindings = self
-            .bound_tools
-            .as_ref()
-            .ok_or_else(|| Error::Lua("section VM has no prompt-level tool bindings".to_owned()))?;
-        let runtime = self
+        let bindings = &self.bound_tools;
+        let mut runtime = self
             .tool_runtime
-            .as_ref()
-            .ok_or_else(|| Error::Lua("section VM has no tool declaration runtime".to_owned()))?;
-        let mut runtime = runtime
             .lock()
             .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
         if runtime.phase != ToolPhase::H2 {
@@ -1090,10 +1056,8 @@ impl SectionVm {
     }
 
     fn require_closed_tool_scope(&self, operation: &str) -> Result<()> {
-        let Some(runtime) = &self.tool_runtime else {
-            return Ok(());
-        };
-        let runtime = runtime
+        let runtime = self
+            .tool_runtime
             .lock()
             .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
         if runtime.phase == ToolPhase::Closed {
@@ -1230,11 +1194,6 @@ pub struct LuaOutcome {
     pub returned: Option<String>,
     /// The `var` table after the block ran, as JSON, for prose substitution.
     pub var: Json,
-    /// The tool names the block advertised with `tools.add(...)`, in first-seen
-    /// order and de-duplicated. Empty when the block never called `tools.add`.
-    /// These names are recorded verbatim and are not validated here against any
-    /// tool registry; the executor resolves them per section.
-    pub scoped_tools: Vec<String>,
 }
 
 /// Run a section's Lua chunk with `args` and `sys` exposed, a writable `var`
@@ -1248,6 +1207,10 @@ pub struct LuaOutcome {
 /// given the same handle, so files a section writes persist for later sections
 /// even though each section starts a fresh context. The exposed `store` table
 /// is always present (a host capability, not a scoped tool).
+///
+/// The `tools` table is the same validating one every section VM installs,
+/// with no frozen bindings: a chunk that calls `tools.add(...)` fails loudly
+/// because no alias was declared by `tools.need`.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the sandbox cannot be built, `sys`/`var`/`store`
@@ -1267,13 +1230,8 @@ pub fn run_chunk(
     vm.inject_host(args, sys, store)?;
     let returned = vm.run_source(source, observer, section)?;
     let var = vm.var()?;
-    let scoped_tools = vm.scoped_tools()?;
 
-    Ok(LuaOutcome {
-        returned,
-        var,
-        scoped_tools,
-    })
+    Ok(LuaOutcome { returned, var })
 }
 
 fn install_replay_tools(
@@ -1300,7 +1258,7 @@ fn install_replay_tools(
             }
             let Some(declaration) = expected.declarations.get(state.declaration_index) else {
                 return Err(mlua::Error::external(
-                    "tool declaration replay had an extra tools.need call",
+                    "tools.need call has no matching bound declaration; bind the prompt before executing",
                 ));
             };
             if declaration != &(ToolDeclaration::Need { alias, description }) {
@@ -1332,7 +1290,7 @@ fn install_replay_tools(
             }
             let Some(declaration) = expected.declarations.get(state.declaration_index) else {
                 return Err(mlua::Error::external(
-                    "tool declaration replay had an extra tools.always call",
+                    "tools.always call has no matching bound declaration; bind the prompt before executing",
                 ));
             };
             if declaration != &ToolDeclaration::Always(alias) {
@@ -1365,15 +1323,9 @@ fn install_replay_tools(
 }
 
 fn finish_replay(vm: &SectionVm) -> Result<()> {
-    let bindings = vm
-        .bound_tools
-        .as_ref()
-        .ok_or_else(|| Error::Lua("section VM has no frozen tool bindings".to_owned()))?;
+    let bindings = &vm.bound_tools;
     let runtime = vm
         .tool_runtime
-        .as_ref()
-        .ok_or_else(|| Error::Lua("section VM has no tool declaration runtime".to_owned()))?;
-    let runtime = runtime
         .lock()
         .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
     if runtime.declaration_index != bindings.declarations.len() {
@@ -1458,44 +1410,6 @@ fn install_h2_tools(
     globals
         .raw_set("tools", tools)
         .map_err(|error| Error::Lua(error.to_string()))
-}
-
-/// Expose a `tools` table whose `add` host function records tool names into a
-/// shared, ordered, de-duplicated collection, and return a handle to that
-/// collection so the caller can read the accumulated names back after the
-/// chunk runs. `add` only records names; it validates nothing and never
-/// touches the model.
-///
-/// # Errors
-/// Returns [`Error::Lua`] if the `tools` table or its `add` function cannot be
-/// created or installed into the sandbox globals.
-fn install_tools_table(
-    lua: &Lua,
-    globals: &mlua::Table,
-    scoped: &Arc<Mutex<Vec<String>>>,
-) -> Result<()> {
-    let recorder = Arc::clone(scoped);
-    let add = lua
-        .create_function(move |_, names: Variadic<String>| {
-            let mut acc = recorder
-                .lock()
-                .map_err(|_| mlua::Error::external("tool recorder was poisoned"))?;
-            for name in names {
-                if !acc.iter().any(|existing| existing == &name) {
-                    acc.push(name);
-                }
-            }
-            Ok(())
-        })
-        .map_err(|e| Error::Lua(e.to_string()))?;
-    let tools = lua.create_table().map_err(|e| Error::Lua(e.to_string()))?;
-    tools
-        .set("add", add)
-        .map_err(|e| Error::Lua(e.to_string()))?;
-    globals
-        .raw_set("tools", tools)
-        .map_err(|e| Error::Lua(e.to_string()))?;
-    Ok(())
 }
 
 /// Installs the phase-local author diagnostic callback.
@@ -2268,7 +2182,6 @@ mod tests {
 
         assert_eq!(observed_outcome.returned, silent.returned);
         assert_eq!(observed_outcome.var, silent.var);
-        assert_eq!(observed_outcome.scoped_tools, silent.scoped_tools);
         assert_eq!(
             recorded_store
                 .read("answer.txt")
@@ -2324,6 +2237,8 @@ mod tests {
             "the phase must not retain its observer"
         );
 
+        vm.close_tool_scope(&NullObserver, "Section")
+            .expect("scope must close before the epilog");
         let second = Recorder::default();
         vm.run_epilog(
             &program(
@@ -2532,7 +2447,11 @@ mod tests {
                 "Section",
             )
             .expect_err("changed declarations must fail replay");
-            assert!(error.to_string().contains("replay"));
+            let message = error.to_string();
+            assert!(
+                message.contains("replay") || message.contains("no matching bound declaration"),
+                "unexpected replay failure message: {message}"
+            );
         }
     }
 
@@ -2728,9 +2647,9 @@ mod tests {
     fn scope_closure_failure_reports_exact_payload_free_sequence() {
         let recorder = Recorder::default();
         let vm = SectionVm::new(None, EXECUTION, &recorder, "private section")
-            .expect("unbound VM must construct");
+            .expect("VM must construct");
         vm.close_tool_scope(&recorder, "private section")
-            .expect_err("unbound scope closure must fail");
+            .expect_err("scope closure before host injection must fail");
 
         assert_eq!(
             recorder.observations(),
@@ -2761,13 +2680,10 @@ mod tests {
         );
         let preamble = program(
             "var.from_shared = decorate(args)\n\
-             tools.add('search')\n\
              store.write('phase.txt', var.from_shared)",
         );
-        let epilog = program(
-            "tools.add('fetch', 'search')\n\
-             return shared_saw_args == nil and decorate(reply) or 'host leaked early'",
-        );
+        let epilog =
+            program("return shared_saw_args == nil and decorate(reply) or 'host leaked early'");
         let store = Store::memory();
         let mut vm = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "Test")
             .expect("shared program must run");
@@ -2791,6 +2707,8 @@ mod tests {
             "1| <input>"
         );
 
+        vm.close_tool_scope(&NullObserver, "Test")
+            .expect("scope must close");
         vm.bind_reply("model answer", &NullObserver, "Test")
             .expect("reply must bind into the same environment");
         assert_eq!(
@@ -2798,10 +2716,6 @@ mod tests {
                 .expect("epilog must run")
                 .as_deref(),
             Some("<model answer>")
-        );
-        assert_eq!(
-            vm.scoped_tools().expect("tool recorder must be readable"),
-            vec!["search", "fetch"]
         );
     }
 
@@ -2858,6 +2772,8 @@ mod tests {
 
         vm.run_preamble(&write, &recorder, "Gather")
             .expect("preamble write must run");
+        vm.close_tool_scope(&recorder, "Gather")
+            .expect("scope must close");
         vm.bind_reply("private reply", &recorder, "Gather")
             .expect("reply must bind");
         vm.run_epilog(&read, &recorder, "Gather")
@@ -2876,6 +2792,8 @@ mod tests {
                     "Gather".to_owned(),
                     detail::LUA_PREAMBLE_SUCCEEDED.to_owned(),
                 ),
+                ("Gather".to_owned(), detail::TOOL_SCOPE_CLOSING.to_owned(),),
+                ("Gather".to_owned(), detail::TOOL_SCOPE_CLOSED.to_owned(),),
                 (
                     "Gather".to_owned(),
                     detail::LUA_REPLY_BINDING_STARTED.to_owned(),
@@ -2954,6 +2872,9 @@ mod tests {
                 .as_deref(),
             Some("1")
         );
+        first
+            .close_tool_scope(&NullObserver, "First")
+            .expect("first scope must close");
         assert_eq!(
             first
                 .run_epilog(&increment, &NullObserver, "First")
@@ -2996,6 +2917,8 @@ mod tests {
             .expect("host values must inject");
         vm.run_preamble(&preamble, &recorder, "Gather")
             .expect("preamble must run");
+        vm.close_tool_scope(&recorder, "Gather")
+            .expect("scope must close");
         vm.bind_reply("private reply", &recorder, "Gather")
             .expect("reply must bind");
         vm.run_epilog(&epilog, &recorder, "Gather")
@@ -3010,6 +2933,8 @@ mod tests {
                 detail::LUA_SHARED_LOAD_SUCCEEDED,
                 detail::LUA_PREAMBLE_STARTED,
                 detail::LUA_PREAMBLE_SUCCEEDED,
+                detail::TOOL_SCOPE_CLOSING,
+                detail::TOOL_SCOPE_CLOSED,
                 detail::LUA_REPLY_BINDING_STARTED,
                 detail::LUA_REPLY_BINDING_SUCCEEDED,
                 detail::LUA_EPILOG_STARTED,
@@ -3252,31 +3177,89 @@ mod tests {
     }
 
     #[test]
-    fn single_add_records_its_names() {
-        let out = run("tools.add('web_search', 'web_fetch')", "").unwrap();
-        assert_eq!(out.scoped_tools, vec!["web_search", "web_fetch"]);
+    fn add_without_declarations_fails_as_undeclared_in_a_chunk() {
+        let error =
+            run("tools.add('web_search')", "").expect_err("an undeclared alias must fail loudly");
+        assert!(
+            error
+                .to_string()
+                .contains("tools.add alias \"web_search\" was not declared by tools.need"),
+            "the error must name the undeclared alias: {error}"
+        );
     }
 
     #[test]
-    fn multiple_adds_accumulate_and_dedupe() {
-        let out = run(
-            "tools.add('web_search')\ntools.add('web_fetch', 'web_search')",
-            "",
-        )
-        .unwrap();
-        assert_eq!(out.scoped_tools, vec!["web_search", "web_fetch"]);
+    fn add_without_declarations_fails_in_a_preamble_without_a_shared_library() {
+        let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
+        vm.inject_host("", &json!({}), &Store::memory())
+            .expect("host values must inject");
+        let error = vm
+            .run_preamble(&program("tools.add('web_search')"), &NullObserver, "Test")
+            .expect_err("an undeclared alias must fail loudly");
+        assert!(
+            error.to_string().contains("not declared by tools.need"),
+            "the error must report the missing declaration: {error}"
+        );
+        vm.teardown(&NullObserver, "Test");
     }
 
     #[test]
-    fn add_inside_if_branch_records() {
-        let out = run("if true then tools.add('web_search') end", "").unwrap();
-        assert_eq!(out.scoped_tools, vec!["web_search"]);
+    fn add_with_empty_frozen_needs_fails_as_undeclared() {
+        let shared = program("function helper() return 'no declarations' end");
+        let resolver = |description: &str| -> Result<ToolId> {
+            panic!("a declaration-free program must not resolve {description:?}")
+        };
+        let bindings =
+            bind_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+                .expect("a declaration-free shared program must bind");
+        assert!(bindings.bindings().is_empty());
+        let mut vm =
+            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Test")
+                .expect("replay of no declarations must succeed");
+        vm.inject_host("", &json!({}), &Store::memory())
+            .expect("host values must inject");
+        let error = vm
+            .run_preamble(&program("tools.add('web_search')"), &NullObserver, "Test")
+            .expect_err("an undeclared alias must fail loudly");
+        assert!(
+            error.to_string().contains("not declared by tools.need"),
+            "the error must report the missing declaration: {error}"
+        );
+        vm.teardown(&NullObserver, "Test");
     }
 
     #[test]
-    fn no_add_leaves_scoped_tools_empty() {
-        let out = run("local x = 1", "").unwrap();
-        assert!(out.scoped_tools.is_empty());
+    fn add_with_a_description_argument_fails_alias_validation() {
+        let (shared, bindings) = fixture_bindings("tools.need('search', 'search the web')");
+        let mut vm =
+            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Test")
+                .expect("replay must succeed");
+        vm.inject_host("", &json!({}), &Store::memory())
+            .expect("host values must inject");
+        let error = vm
+            .run_preamble(
+                &program("tools.add('search', 'Search the web for pages matching a query.')"),
+                &NullObserver,
+                "Test",
+            )
+            .expect_err("a description passed to tools.add must fail alias validation");
+        assert!(
+            error.to_string().contains("invalid tool alias"),
+            "the error must report the invalid alias: {error}"
+        );
+        vm.teardown(&NullObserver, "Test");
+    }
+
+    #[test]
+    fn a_section_vm_without_declarations_closes_to_an_empty_scope() {
+        let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
+        vm.inject_host("", &json!({}), &Store::memory())
+            .expect("host values must inject");
+        let scope = vm
+            .close_tool_scope(&NullObserver, "Test")
+            .expect("an empty scope must close");
+        assert!(scope.bindings().is_empty());
+        vm.teardown(&NullObserver, "Test");
     }
 
     // --- The always-on `store` table ---
