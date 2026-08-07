@@ -555,7 +555,7 @@ promptforge: 1
 
 # Title
 
-```lua prompt
+```lua
 tools.need("fetch", "Fetch a web page and return its main content as markdown.")
 
 function normalize(value)
@@ -582,7 +582,7 @@ return reply
 - `---` delimited YAML frontmatter (`name` and `description` required; `promptforge`, `default_return`, and `max_tool_iterations` optional to the parser).
 - `promptforge:` is the **engine version** that marks the file as a promptforge prompt (supported major: `1`). A file without a `promptforge:` version is not a promptforge prompt and the CLI declines to run it; an unsupported major is refused, never silently degraded.
 - Exactly one `# Title` is required. Markdown before it is ignored.
-- The H1 may immediately open with one exact, unindented triple-backtick `lua prompt` fence after any number of blank lines. Its exact triple-backtick closing line ends the shared library, and the remaining H1 text is the human-readable description. A reserved `lua prompt` fence after description prose, a second one, or an inexact closing marker is an error. Indented markers, longer backtick runs, different capitalization, and extra info tokens are ordinary Markdown.
+- The H1 may immediately open with one exact, unindented triple-backtick `lua` fence after any number of blank lines. Its exact triple-backtick closing line ends the shared library, and the remaining H1 text is the human-readable description. A leading reserved fence with an inexact closing marker is an error; a `lua` fence after description prose is ordinary Markdown prose, mirroring section semantics. Indented markers, longer backtick runs, different capitalization, and extra info tokens are ordinary Markdown. The old `lua prompt` info-token form was removed; an H1 that opens with it is a parse error naming the removed form.
 - `## Section` headings are executable units; they run top to bottom (fall-through). Each section parses as an optional exact leading `lua` preamble fence, prose, and an optional exact trailing `lua` epilog fence. Reserved fences use exact unindented lowercase ` ```lua ` opening lines and exact unindented ` ``` ` closing lines. Blank lines may surround them. A lone reserved fence is the preamble. Lua fences between prose, longer or indented fences, different capitalization, extra info tokens, and marker-looking lines inside a longer fence remain model-facing prose.
 - Shared Lua declares semantic capabilities under prompt-local aliases with `tools.need(alias, description)`. A section exposes an alias deliberately with `tools.add(alias)`; `tools.always(alias)` belongs in shared Lua only when every model-facing section genuinely needs that capability. Declaration alone exposes nothing.
 
