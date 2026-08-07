@@ -1777,6 +1777,10 @@ mod tests {
             Err(Self::error(path))
         }
 
+        fn read_raw(&self, path: &str) -> std::result::Result<String, StoreError> {
+            Err(Self::error(path))
+        }
+
         fn str_replace(
             &mut self,
             path: &str,

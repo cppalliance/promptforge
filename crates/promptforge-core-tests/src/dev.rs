@@ -6,7 +6,8 @@
 //! server. Every `(execution, section, detail)` observer record streams to
 //! stderr; the returned result string is the caller's to print on stdout. On
 //! failure the runner returns the error so the caller can print it beside the
-//! server diagnostics it owns.
+//! server diagnostics it owns. After every executed run, success or failure,
+//! the run's store is dumped beside the prompt file (see [`crate::dump`]).
 
 use std::io::Write;
 use std::path::Path;
@@ -36,7 +37,9 @@ const DEFAULT_GATEWAY_BASE_URL: &str = "http://127.0.0.1:8081/v1";
 /// `llama-server`, exactly as the scenario runner consumes them. The gateway
 /// credentials for `web_search` come from the process environment
 /// (`PROMPTFORGE_TOKEN` and `PROMPTFORGE_BASE_URL`), independent of the model
-/// server. Trace records print to stderr; nothing prints to stdout.
+/// server. Trace records print to stderr; nothing prints to stdout. Whether
+/// the run succeeds or fails, its store is dumped to `<prompt-stem>.store`
+/// next to the prompt file, one announcement line per file on stderr.
 ///
 /// # Errors
 ///
@@ -110,9 +113,17 @@ async fn run_once_with(
         observer,
         client: Some(client),
     };
-    run(&bound, input, registry.tools(), &store, options)
+    let result = run(&bound, input, registry.tools(), &store, options)
         .await
-        .with_context(|| format!("run {}", prompt_path.display()))
+        .with_context(|| format!("run {}", prompt_path.display()));
+    // The dump runs on success and failure alike: a failed run's partial
+    // store is exactly what a debugging author needs. Dev-mode status lines
+    // go to stderr, keeping stdout for the result alone, and a dump failure
+    // is reported there rather than displacing the run's own outcome.
+    if let Err(error) = crate::dump::dump_store(&store, prompt_path, &mut std::io::stderr()) {
+        eprintln!("store dump failed: {error:#}");
+    }
+    result
 }
 
 /// Where `web_search` finds its gateway: the CLI's exact environment
@@ -471,6 +482,98 @@ tools.need("search", "Search the web and return a list of results (title, url, d
                 "the dev lifecycle must include {expected:?}: {records:#?}"
             );
         }
+    }
+
+    /// Writes a model-free fixture whose preamble runs `lua` and returns a
+    /// scalar, so no server is ever contacted, then runs it once.
+    async fn run_fixture(directory: &tempfile::TempDir, lua: &str) -> anyhow::Result<String> {
+        let path = directory.path().join("fixture.md");
+        std::fs::write(
+            &path,
+            format!(
+                "---\nname: fixture\ndescription: dev dump fixture\npromptforge: 1\n---\n\n\
+                 # Fixture\n\n## Run\n\n```lua\n{lua}\n```\n"
+            ),
+        )
+        .expect("write the dump fixture");
+        let gateway = GatewayConfig::from_lookup(lookup_from(&[]));
+        run_once_with(
+            &path,
+            "",
+            "http://127.0.0.1:1/v1",
+            "key",
+            "alias",
+            &gateway,
+            &Recorder::default(),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_successful_run_dumps_the_store_beside_the_prompt() {
+        let directory = tempfile::tempdir().expect("create dump fixture directory");
+        let result = run_fixture(
+            &directory,
+            "store.write('evidence.md', 'found\\nit\\n')\n\
+             store.write('notes/deep.txt', 'nested')\n\
+             return 'done'",
+        )
+        .await
+        .expect("the model-free fixture must run offline");
+
+        assert_eq!(result, "done");
+        let dump_dir = directory.path().join("fixture.store");
+        assert_eq!(
+            std::fs::read_to_string(dump_dir.join("evidence.md")).expect("read dumped file"),
+            "found\nit\n",
+            "the dump must carry raw contents, trailing newline included"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dump_dir.join("notes").join("deep.txt"))
+                .expect("read nested dumped file"),
+            "nested"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_run_still_dumps_its_partial_store() {
+        let directory = tempfile::tempdir().expect("create dump fixture directory");
+        let error = run_fixture(
+            &directory,
+            "store.write('partial.md', 'kept for debugging')\nerror('boom')",
+        )
+        .await
+        .expect_err("the fixture raises after writing");
+
+        assert!(
+            format!("{error:#}").contains("boom"),
+            "unexpected failure: {error:#}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("fixture.store").join("partial.md"))
+                .expect("read the failed run's dump"),
+            "kept for debugging",
+            "a failed run's partial store is exactly what a debugging author needs"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rerun_with_an_empty_store_removes_the_previous_dump() {
+        let directory = tempfile::tempdir().expect("create dump fixture directory");
+        run_fixture(&directory, "store.write('stale.txt', 'old')\nreturn 'one'")
+            .await
+            .expect("the first run must succeed");
+        let dump_dir = directory.path().join("fixture.store");
+        assert!(dump_dir.join("stale.txt").is_file());
+
+        run_fixture(&directory, "return 'two'")
+            .await
+            .expect("the second run must succeed");
+
+        assert!(
+            !dump_dir.exists(),
+            "an empty rerun must leave no dump directory"
+        );
     }
 
     #[tokio::test]

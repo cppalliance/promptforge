@@ -26,7 +26,9 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 /// process is interrupted.
 ///
 /// Each rerun re-reads, re-parses, re-binds, and re-executes the file against
-/// the caller's already-warm `server`. A failed run prints its error beside
+/// the caller's already-warm `server`, and dumps the run's store beside the
+/// prompt; the watcher's file-name filter keeps those dump writes from
+/// feeding back into the rerun loop. A failed run prints its error beside
 /// the server's bounded diagnostics on stderr and keeps watching; results
 /// print to stdout. The loop itself never returns except through an error
 /// while installing the watcher, so teardown happens when the caller's
@@ -182,6 +184,27 @@ mod tests {
             ),
             file_name,
         ));
+    }
+
+    #[test]
+    fn events_from_the_store_dump_directory_never_match_the_watched_prompt() {
+        // Every rerun dumps the store into `<prompt-stem>.store` beside the
+        // prompt, inside the watched directory; those writes must not feed
+        // back into the rerun loop.
+        let file_name = OsStr::new("prompt.md");
+        for path in [
+            "/w/prompt.store",
+            "/w/prompt.store/evidence.md",
+            "/w/prompt.store/notes/deep.txt",
+        ] {
+            assert!(
+                !event_touches(
+                    &event(EventKind::Create(CreateKind::Any), &[path]),
+                    file_name
+                ),
+                "{path} must not trigger a rerun"
+            );
+        }
     }
 
     #[test]
