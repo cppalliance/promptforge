@@ -39,10 +39,11 @@ async fn main() -> ExitCode {
 
 async fn run_explicit_suite(interrupted: Arc<AtomicBool>) -> Result<()> {
     println!("provisioning pinned real-model artifacts");
-    let artifacts = tokio::task::spawn_blocking(artifacts::provision)
-        .await
-        .context("join artifact provisioner")?
-        .context("provision pinned real-model artifacts")?;
+    let artifacts =
+        tokio::task::spawn_blocking(|| artifacts::provision(artifacts::ModelKind::Scenario))
+            .await
+            .context("join artifact provisioner")?
+            .context("provision pinned real-model artifacts")?;
     println!("pinned artifacts are ready");
 
     let server_executable = artifacts.llama_server;
