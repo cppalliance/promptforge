@@ -16,3 +16,5 @@
 
 ## 2026-08-07 core: run all section VMs through the validating tools path
 
+## 2026-08-07 dev: dump the run store beside the prompt after each run
+
