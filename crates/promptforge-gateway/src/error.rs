@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum GatewayError {
-    /// The bearer token was missing or did not match `server.token`.
+    /// The bearer key was missing or did not match `server.key`.
     #[error("unauthorized")]
     Unauthorized,
 

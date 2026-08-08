@@ -518,7 +518,7 @@ async fn tool_loop_dispatches_then_returns_text() {
     // `run_tool_loop` takes the client explicitly, so no process-global env
     // is needed (the crate forbids `unsafe`, which `env::set_var` requires).
     let addr = spawn_mock_gateway().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -583,7 +583,7 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     // trips against a never-converging model, then exhaust.
     let cap = 3;
     let (addr, calls) = spawn_always_tool_call().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -616,7 +616,7 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
     // Threading `DEFAULT_MAX_TOOL_ITERATIONS` (what `run` passes when a
     // prompt declares no budget) makes exactly that many round trips.
     let (addr, calls) = spawn_always_tool_call().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -669,7 +669,7 @@ fn run_resolves_cap_from_frontmatter_else_default() {
 async fn tool_loop_errors_on_unknown_tool() {
     // The model asks for "echo" but no tools are provided to the loop.
     let (addr, _calls) = spawn_always_tool_call().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
 
     // Advertise schemas so the request carries tools, but pass no dispatch
     // targets, so the returned call resolves to no tool.
@@ -701,7 +701,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     // still reported: the recorder must see `ToolCalled { ok: false }` and
     // the tool's own error must still end the loop.
     let (addr, _calls) = spawn_always_tool_call().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
 
     let failing = FailingTool;
     let tools: &[&dyn Tool] = &[&failing];
@@ -769,7 +769,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
         axum::serve(listener, router).await.unwrap();
     });
 
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "secret token", "test-model");
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "secret token");
     let recorder = Recorder::default();
     let mut turns = 0;
     let error = run_tool_loop(
@@ -836,7 +836,7 @@ async fn spawn_text_finish_gateway(
 }
 
 async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(String, String)>, u32) {
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
     let recorder = Recorder::default();
     let mut turns = 0;
     let out = run_tool_loop(
@@ -991,7 +991,7 @@ fn last_tool_turn_content(bodies: &Arc<Mutex<Vec<Value>>>) -> String {
 #[tokio::test]
 async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     let (addr, bodies) = spawn_recording_gateway().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
 
     let echo = UntrustedEchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -1031,7 +1031,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
 #[tokio::test]
 async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     let (addr, bodies) = spawn_recording_gateway().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -1281,11 +1281,7 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
         RunOptions {
             execution: EXECUTION,
             observer: &recorder,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -1333,7 +1329,7 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
 #[tokio::test]
 async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     let addr = spawn_mock_gateway().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -1469,11 +1465,7 @@ Ask the model.\n";
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "default-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -1509,11 +1501,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         RunOptions {
             execution: EXECUTION,
             observer: &recorder,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -1577,11 +1565,7 @@ async fn epilog_runs_after_reply_and_can_return() {
         RunOptions {
             execution: EXECUTION,
             observer: &recorder,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -1699,11 +1683,7 @@ Ask using {{ var.question }}.\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: &recorder,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -1790,11 +1770,7 @@ async fn default_return_precedes_the_last_model_reply() {
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -1820,11 +1796,7 @@ async fn reply_carries_forward_to_next_section_preamble() {
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -1849,11 +1821,7 @@ async fn reply_substitution_in_prose_uses_previous_section_reply() {
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -2006,11 +1974,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -2048,11 +2012,7 @@ tools.always('local_alias')\n```\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -2097,11 +2057,7 @@ tools.need('section_tool', 'capability')\n```\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -2165,11 +2121,7 @@ tools.need('second_local', 'second')\n```\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -2210,11 +2162,7 @@ tools.need('second_local', 'second')\n```\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: &recorder,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )
@@ -2298,11 +2246,7 @@ async fn debug_capture_receives_request_and_response_when_set() {
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: Some(&capture),
         },
     )
@@ -2317,7 +2261,7 @@ async fn debug_capture_receives_request_and_response_when_set() {
     assert_eq!(events[0].2, 1);
     match &events[0].3 {
         crate::debug::DebugEvent::Request { body } => {
-            assert_eq!(body["model"], "test-model");
+            assert_eq!(body["model"], "claude-sonnet-4-6");
             assert!(body["messages"].as_array().is_some_and(|m| !m.is_empty()));
         }
         other => panic!("expected request first, got {other:?}"),
@@ -2352,11 +2296,7 @@ async fn debug_capture_none_changes_nothing() {
         RunOptions {
             execution: EXECUTION,
             observer: &NullObserver,
-            client: Some(GatewayClient::new(
-                &format!("http://{addr}/v1"),
-                "test",
-                "test-model",
-            )),
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
     )

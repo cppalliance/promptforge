@@ -167,7 +167,7 @@ Three routes. `axum` on `hyper`.
 | `POST /v1/tools/web_search` | yes | The built-in search tool, proxied to the provider |
 | `GET /health` | no | Liveness for a service supervisor |
 
-`/health` takes no token because a supervisor probe should not need a secret, and answers `{"status":"serving"}` whenever the process is serving. `/v1/*` checks `Authorization: Bearer` against `server.token` in constant time, and a missing or wrong token is 401 with no detail. That token is the same shared secret the MCP server checks, settled rather than assumed: the gateway's check is defence in depth behind the production firewall, not a separate trust boundary, so a second string to rotate would buy nothing and add a way to be half-configured. Tension: one leaked string reaches both the prompt surface and the model credentials.
+`/health` takes no token because a supervisor probe should not need a secret, and answers `{"status":"serving"}` whenever the process is serving. `/v1/*` checks `Authorization: Bearer` against `server.key` in constant time, and a missing or wrong key is 401 with no detail. That key is the same shared secret the MCP server checks, settled rather than assumed: the gateway's check is defence in depth behind the production firewall, not a separate trust boundary, so a second string to rotate would buy nothing and add a way to be half-configured. Tension: one leaked string reaches both the prompt surface and the model credentials.
 
 ### `POST /v1/chat/completions`
 

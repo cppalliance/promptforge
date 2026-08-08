@@ -59,7 +59,7 @@ The catalog is deliberately *not* embedded in `run_prompt`'s description. It wou
 
 ## `prompts.toml` is the whole configuration, because a run cannot be configured from the environment
 
-The gateway URL, token, and model live in the file and the server constructs a gateway client explicitly. This is forced rather than chosen: setting a process environment variable is `unsafe` under edition 2024 and this workspace forbids unsafe, so the runtime's environment-based client cannot be driven from a config file. The runtime therefore takes an optional client, and `None` keeps the environment path the CLI uses.
+The gateway URL and key live in the file and the server constructs a gateway client explicitly. This is forced rather than chosen: setting a process environment variable is `unsafe` under edition 2024 and this workspace forbids unsafe, so the runtime's environment-based client cannot be driven from a config file. The runtime therefore takes an optional client, and `None` keeps the environment path the CLI uses. Model selection comes from prompt bindings, not from MCP config.
 
 One file serves both transports, which is why a setting the current transport does not read is logged as ignored rather than refused. The full surface:
 
@@ -79,8 +79,7 @@ prompts = 'C:\ProgramData\promptforge\prompts'   # default: prompts
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-token = "${PROMPTFORGE_TOKEN}"
-model = "claude-sonnet-4-6"          # optional; the runtime default otherwise
+key = "${PROMPTFORGE_GATEWAY_KEY}"
 
 [catalog]
 include = ["*.md", "governance/**/*.md"]

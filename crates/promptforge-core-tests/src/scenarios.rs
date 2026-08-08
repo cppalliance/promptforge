@@ -33,8 +33,9 @@ type Record = (String, String, String);
 
 /// Runs both explicit scenarios against one ready local server.
 pub(crate) async fn run_all(base_url: &str, api_key: &str, model_alias: &str) -> Result<()> {
-    run_text(base_url, api_key, model_alias).await?;
-    run_tool_call(base_url, api_key, model_alias).await
+    let _ = model_alias;
+    run_text(base_url, api_key).await?;
+    run_tool_call(base_url, api_key).await
 }
 
 #[derive(Debug, Default)]
@@ -126,11 +127,11 @@ impl Tool for StringFixtureTool {
     }
 }
 
-async fn run_text(base_url: &str, api_key: &str, model_alias: &str) -> Result<()> {
+async fn run_text(base_url: &str, api_key: &str) -> Result<()> {
     let observer = Recorder::default();
     let prompt = Prompt::parse(REAL_TEXT, TEXT_EXECUTION, &observer)
         .context("parse execution/real-text.md")?;
-    let client = GatewayClient::new(base_url, api_key, model_alias);
+    let client = GatewayClient::new(base_url, api_key);
     let result = run(
         &prompt,
         "",
@@ -162,7 +163,7 @@ async fn run_text(base_url: &str, api_key: &str, model_alias: &str) -> Result<()
     Ok(())
 }
 
-async fn run_tool_call(base_url: &str, api_key: &str, model_alias: &str) -> Result<()> {
+async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
     let observer = Recorder::default();
     let tool = StringFixtureTool::default();
     let prompt = Prompt::parse(REAL_TOOL_CALL, TOOL_EXECUTION, &observer)
@@ -200,7 +201,7 @@ async fn run_tool_call(base_url: &str, api_key: &str, model_alias: &str) -> Resu
         "fixture alias did not bind to the live string tool"
     );
 
-    let client = GatewayClient::new(base_url, api_key, model_alias);
+    let client = GatewayClient::new(base_url, api_key);
     let result = run(
         &bound,
         "",

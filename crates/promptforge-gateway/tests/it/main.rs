@@ -14,6 +14,7 @@ use axum::Json;
 use axum::Router;
 use axum::routing::post;
 use promptforge_core::client::GatewayClient;
+use promptforge_core::model::CompletionOptions;
 use promptforge_gateway::config::Config;
 use promptforge_gateway::routing::Routing;
 use promptforge_gateway::{AppState, build_router};
@@ -60,7 +61,7 @@ async fn gateway_for(backend: SocketAddr) -> SocketAddr {
         r#"
 [server]
 bind = "127.0.0.1:0"
-token = "test-token"
+key = "test-token"
 
 [[endpoint]]
 id = "fake"
@@ -79,7 +80,7 @@ endpoints = ["fake"]
     );
     let config = Config::from_toml_str(&toml).unwrap();
     let routing = Arc::new(Routing::from_config(&config).unwrap());
-    let state = AppState::new(routing, config.server.token);
+    let state = AppState::new(routing, config.server.key);
     spawn(build_router(state)).await
 }
 
@@ -88,12 +89,18 @@ async fn happy_path_through_the_real_client() {
     let backend = fake_backend().await;
     let gateway = gateway_for(backend).await;
 
-    let client = GatewayClient::new(&format!("http://{gateway}/v1"), "test-token", "test-model");
+    let client = GatewayClient::new(&format!("http://{gateway}/v1"), "test-token");
+    let options = CompletionOptions {
+        model: "test-model".into(),
+        temperature: None,
+        max_tokens: None,
+        thinking: None,
+    };
     let result = client
         .complete(
             &[promptforge_core::client::Message::user("ping")],
             None,
-            None,
+            &options,
         )
         .await
         .unwrap();
@@ -157,7 +164,7 @@ async fn gateway_with_web_search(brave: SocketAddr) -> SocketAddr {
         r#"
 [server]
 bind = "127.0.0.1:0"
-token = "test-token"
+key = "test-token"
 
 [[endpoint]]
 id = "fake"
@@ -184,7 +191,7 @@ base_url = "http://{brave}"
     let web_search = config.tools.and_then(|tools| tools.web_search).unwrap();
     let state = AppState::from_parts(
         routing,
-        config.server.token,
+        config.server.key,
         promptforge_gateway::local::LocalRuntime::empty(),
         Some(&web_search),
         None,
@@ -354,7 +361,7 @@ async fn gateway_with_queue(
         r#"
 [server]
 bind = "127.0.0.1:0"
-token = "test-token"
+key = "test-token"
 
 [queue]
 max_depth = {max_depth}
@@ -378,7 +385,7 @@ endpoints = ["fake"]
     );
     let config = Config::from_toml_str(&toml).unwrap();
     let routing = Arc::new(Routing::from_config(&config).unwrap());
-    let state = AppState::new(routing, config.server.token);
+    let state = AppState::new(routing, config.server.key);
     spawn(build_router(state)).await
 }
 
@@ -563,7 +570,7 @@ async fn local_model_chat_completion_returns_text() {
         r#"
 [server]
 bind = "127.0.0.1:0"
-token = "test-token"
+key = "test-token"
 
 [local]
 cache_dir = "{cache}"
@@ -627,14 +634,20 @@ n_predict = 64
         Some(description.as_str())
     );
 
-    let client = GatewayClient::new(&format!("http://{gateway}/v1"), "test-token", "qwen-tiny");
+    let client = GatewayClient::new(&format!("http://{gateway}/v1"), "test-token");
+    let options = CompletionOptions {
+        model: "qwen-tiny".into(),
+        temperature: None,
+        max_tokens: None,
+        thinking: None,
+    };
     let result = client
         .complete(
             &[promptforge_core::client::Message::user(
                 "Reply with exactly the word pong and nothing else.",
             )],
             None,
-            None,
+            &options,
         )
         .await
         .unwrap();
@@ -663,7 +676,7 @@ async fn switch_profile_updates_models_catalog() {
         r#"
 [server]
 bind = "127.0.0.1:0"
-token = "test-token"
+key = "test-token"
 
 [[endpoint]]
 id = "fake"
@@ -683,7 +696,7 @@ endpoints = ["fake"]
         r#"
 [server]
 bind = "127.0.0.1:0"
-token = "test-token"
+key = "test-token"
 
 [[endpoint]]
 id = "fake"
@@ -706,7 +719,7 @@ endpoints = ["fake"]
     let routing = Arc::new(Routing::from_config(&config).unwrap());
     let state = AppState::from_parts(
         routing,
-        config.server.token,
+        config.server.key,
         promptforge_gateway::local::LocalRuntime::empty(),
         None,
         Some(profiles.path().to_path_buf()),

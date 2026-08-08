@@ -19,7 +19,7 @@ prompts = "prompts"
 # The prompts run against the same gateway the CLI uses; it holds the vendor key.
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-token = "${PROMPTFORGE_TOKEN}"
+key = "${PROMPTFORGE_GATEWAY_KEY}"
 
 # Everything written under prompts/ is available. `*` stops at a separator and
 # `**` crosses one, so `**/*.md` reaches a prompt in a subdirectory too. The

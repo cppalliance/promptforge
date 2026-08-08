@@ -95,7 +95,7 @@ fn server_with(server_lines: &str) -> (TempDir, PromptForgeServer) {
 
     let config = Config::from_toml_str(&format!(
         "[server]\ntoken = \"t\"\n{server_lines}\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
          [catalog]\ninclude = [\"*.md\"]\n",
         root.display()
@@ -233,7 +233,7 @@ async fn the_runner_binds_and_executes_a_bound_prompt_against_the_shared_registr
     );
     let config = Config::from_toml_str(&format!(
         "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
     ))
@@ -271,7 +271,7 @@ async fn an_unbindable_capability_fails_before_admission_and_execution() {
     );
     let config = Config::from_toml_str(&format!(
         "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
     ))
@@ -364,7 +364,7 @@ async fn a_hyphen_resolves_to_the_underscore_it_stands_for() {
     );
     let config = Config::from_toml_str(&format!(
         "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
     ))
@@ -522,7 +522,7 @@ async fn list_prompts_carries_the_problem_that_stops_a_prompt_running() {
     );
     let config = Config::from_toml_str(&format!(
         "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
         root.display()
     ))
@@ -622,7 +622,7 @@ fn speaking_server_with(gateway: SocketAddr, server_lines: &str) -> (TempDir, Pr
     );
     let config = Config::from_toml_str(&format!(
         "[server]\ntoken = \"t\"\n{server_lines}\n\n\
-         [gateway]\nurl = \"http://{gateway}/v1\"\ntoken = \"gw\"\n\n\
+         [gateway]\nurl = \"http://{gateway}/v1\"\nkey = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
          [catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()

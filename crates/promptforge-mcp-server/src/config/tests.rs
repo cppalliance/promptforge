@@ -19,8 +19,7 @@ prompts = 'C:\ProgramData\promptforge\prompts'
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-token = "gateway-bearer"
-model = "claude-sonnet-4-6"
+key = "gateway-bearer"
 
 [catalog]
 include = ["*.md", "governance/**/*.md"]
@@ -40,7 +39,7 @@ token = "shared-bearer"
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-token = "gateway-bearer"
+key = "gateway-bearer"
 "#;
 
 #[test]
@@ -65,8 +64,7 @@ fn parses_a_full_config() {
     );
 
     assert_eq!(config.gateway.url, "http://127.0.0.1:8081/v1");
-    assert_eq!(config.gateway.token.expose(), "gateway-bearer");
-    assert_eq!(config.gateway.model.as_deref(), Some("claude-sonnet-4-6"));
+    assert_eq!(config.gateway.key.expose(), "gateway-bearer");
 
     assert_eq!(config.catalog.include, ["*.md", "governance/**/*.md"]);
     assert_eq!(config.catalog.exclude, ["_*.md", "drafts/**"]);
@@ -86,7 +84,6 @@ fn defaults_fill_in_every_optional_setting() {
     assert!(config.server.watch);
     assert_eq!(config.server.watch_debounce, Duration::from_millis(500));
     assert_eq!(config.paths.prompts, PathBuf::from("prompts"));
-    assert!(config.gateway.model.is_none());
 }
 
 #[test]
@@ -131,11 +128,11 @@ bind = "127.0.0.1:9310"
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-token = "t"
+key = "t"
 "#;
     let config = Config::from_toml_str(toml).expect("a config with no token loads");
     assert!(config.server.token.is_none());
-    assert_eq!(config.gateway.token.expose(), "t");
+    assert_eq!(config.gateway.key.expose(), "t");
 }
 
 #[test]
@@ -155,11 +152,8 @@ fn an_unset_variable_in_the_server_token_leaves_it_absent() {
 fn an_unset_variable_outside_the_server_token_is_still_an_error() {
     // The gateway token is required on both transports, so an unset variable
     // there fails the load rather than starting with a blank credential.
-    let toml = MINIMAL.replace(
-        "token = \"gateway-bearer\"",
-        "token = \"${NOT_SET_ANYWHERE}\"",
-    );
-    let err = Config::from_toml_str(&toml).expect_err("an unset gateway token is refused");
+    let toml = MINIMAL.replace("key = \"gateway-bearer\"", "key = \"${NOT_SET_ANYWHERE}\"");
+    let err = Config::from_toml_str(&toml).expect_err("an unset gateway key is refused");
     assert!(
         matches!(err, ConfigError::UnresolvedVar(ref name) if name == "NOT_SET_ANYWHERE"),
         "{err}"
@@ -176,7 +170,7 @@ fn an_empty_or_whitespace_server_token_is_an_error() {
     for token in ["", " ", r"\t\n"] {
         let toml = format!(
             "[server]\ntoken = \"{token}\"\n\n\
-             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"t\"\n"
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"t\"\n"
         );
         let err = Config::from_toml_str(&toml).expect_err("a token carrying nothing is refused");
         assert!(matches!(err, ConfigError::EmptyToken), "{err}");
