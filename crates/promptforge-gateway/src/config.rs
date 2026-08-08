@@ -6,7 +6,7 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::ConfigError;
 
@@ -103,6 +103,25 @@ pub struct EndpointConfig {
     pub api_key: Secret,
 }
 
+/// How a model exposes chain-of-thought / thinking tokens to callers.
+///
+/// Catalogued on each `[[model]]` so hosts can filter bindings before a
+/// request is built. `never` and `always` mean the backend ignores a
+/// per-call switch; `switchable` means the client may emit
+/// `chat_template_kwargs.enable_thinking`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum ThinkingMode {
+    /// The backend never emits thinking tokens; a per-call switch is ignored.
+    #[default]
+    Never,
+    /// The backend always emits thinking tokens; a per-call switch is ignored.
+    Always,
+    /// The client may turn thinking on or off per request.
+    Switchable,
+}
+
 /// One model name and the backend it resolves to.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -110,6 +129,13 @@ pub struct EndpointConfig {
 pub struct ModelConfig {
     /// The name callers request and that a slot resolves to.
     pub name: String,
+    /// Prose describing the model for catalog consumers and semantic bind.
+    pub description: String,
+    /// Context window size in tokens.
+    pub context: u32,
+    /// Whether thinking tokens are never, always, or switchably available.
+    #[serde(default)]
+    pub thinking: ThinkingMode,
     /// The string the backend knows this model by.
     pub upstream: String,
     /// The endpoint ids serving this model (v0 uses the first).
@@ -288,6 +314,8 @@ api_key = ""
 
 [[model]]
 name = "m1"
+description = "a small test model"
+context = 8192
 upstream = "u1"
 endpoints = ["anthropic"]
 "#;
@@ -297,7 +325,112 @@ endpoints = ["anthropic"]
         let config = Config::from_toml_str(SAMPLE).unwrap();
         assert_eq!(config.endpoints.len(), 1);
         assert_eq!(config.models[0].name, "m1");
+        assert_eq!(config.models[0].description, "a small test model");
+        assert_eq!(config.models[0].context, 8192);
+        assert_eq!(config.models[0].thinking, ThinkingMode::Never);
         assert_eq!(config.models[0].upstream, "u1");
+    }
+
+    #[test]
+    fn rejects_model_missing_description() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[[endpoint]]
+id = "anthropic"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+context = 8192
+upstream = "u"
+endpoints = ["anthropic"]
+"#;
+        assert!(matches!(
+            Config::from_toml_str(toml),
+            Err(ConfigError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_model_missing_context() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[[endpoint]]
+id = "anthropic"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+upstream = "u"
+endpoints = ["anthropic"]
+"#;
+        assert!(matches!(
+            Config::from_toml_str(toml),
+            Err(ConfigError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_unknown_model_key() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[[endpoint]]
+id = "anthropic"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["anthropic"]
+mystery = true
+"#;
+        assert!(matches!(
+            Config::from_toml_str(toml),
+            Err(ConfigError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn parses_thinking_modes() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[[endpoint]]
+id = "anthropic"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+thinking = "switchable"
+upstream = "u"
+endpoints = ["anthropic"]
+"#;
+        let config = Config::from_toml_str(toml).unwrap();
+        assert_eq!(config.models[0].thinking, ThinkingMode::Switchable);
     }
 
     #[test]
@@ -345,6 +478,8 @@ api_key = ""
 
 [[model]]
 name = "m"
+description = "prose"
+context = 8192
 upstream = "u"
 endpoints = ["dup"]
 "#;
@@ -369,6 +504,8 @@ api_key = ""
 
 [[model]]
 name = "m"
+description = "prose"
+context = 8192
 upstream = "u"
 endpoints = ["ghost"]
 "#;
@@ -393,6 +530,8 @@ api_key = ""
 
 [[model]]
 name = "m"
+description = "prose"
+context = 8192
 upstream = "u"
 endpoints = []
 "#;
@@ -417,6 +556,8 @@ api_key = ""
 
 [[model]]
 name = "m1"
+description = "a small test model"
+context = 8192
 upstream = "u1"
 endpoints = ["anthropic"]
 

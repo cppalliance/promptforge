@@ -9,6 +9,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::config::ThinkingMode;
+
 /// An incoming chat completions request.
 #[derive(Debug, Deserialize, Serialize)]
 #[non_exhaustive]
@@ -33,4 +35,30 @@ pub struct ChatResponse {
     /// Every field the gateway does not name, preserved verbatim.
     #[serde(flatten)]
     pub rest: Map<String, Value>,
+}
+
+/// The OpenAI-shaped model list returned by `GET /v1/models`.
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct ModelsResponse {
+    /// Always `"list"`.
+    pub object: &'static str,
+    /// One entry per configured `[[model]]`, in config order.
+    pub data: Vec<ModelInfo>,
+}
+
+/// One catalogued model, with PromptForge extensions beside the OpenAI `id`.
+#[derive(Debug, Serialize)]
+#[non_exhaustive]
+pub struct ModelInfo {
+    /// The caller-facing model name (`[[model]].name`).
+    pub id: String,
+    /// Always `"model"`.
+    pub object: &'static str,
+    /// Prose describing the model for catalog consumers and semantic bind.
+    pub description: String,
+    /// Context window size in tokens.
+    pub context: u32,
+    /// Whether thinking tokens are never, always, or switchably available.
+    pub thinking: ThinkingMode,
 }

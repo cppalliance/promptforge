@@ -92,6 +92,9 @@ api_key = "${ANTHROPIC_API_KEY}"     # the vendor credential; only the gateway s
 
 [[model]]
 name = "claude-sonnet-4-6"           # the name callers request (the public contract)
+description = "Anthropic Claude Sonnet 4.6 for analysis, coding, and general assistance"
+context = 200000                     # context window size in tokens
+thinking = "never"                   # never | always | switchable (default never)
 upstream = "claude-sonnet-4-6"       # the string the backend knows this model by
 endpoints = ["anthropic"]            # one or more endpoint ids (v0 uses the first)
 ```
@@ -101,6 +104,16 @@ Three distinct namespaces, on purpose:
 - `endpoint.id` - an operator-chosen handle. Yours to name (`anthropic`, `pod-a`, `east-1`); unique within the file; referenced by each model's `endpoints` list.
 - `model.name` - the caller-facing contract. This is what a client's `PROMPTFORGE_MODEL` (or a prompt) asks for. Changing it is a breaking change for callers.
 - `model.upstream` - the vendor's own model string, substituted into the request before it leaves the gateway.
+
+Each `[[model]]` also carries catalog metadata hosts read from `GET /v1/models`
+(bearer-authed with the same shared token as chat):
+
+- `description` - required prose for the catalog and for later semantic bind.
+- `context` - required context window size in tokens.
+- `thinking` - `never`, `always`, or `switchable`. Defaults to `never`. Chat
+  still passes `temperature`, `max_tokens`, and `chat_template_kwargs` through
+  unchanged via the request body's catch-all; the catalog only advertises what
+  a binding may ask for.
 
 Several models can share one endpoint (same `base_url` + `api_key`), which is why
 the endpoint is a separate entry rather than inlined per model.

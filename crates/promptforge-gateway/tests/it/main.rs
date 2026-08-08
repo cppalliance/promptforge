@@ -68,6 +68,9 @@ api_key = ""
 
 [[model]]
 name = "test-model"
+description = "a test model for integration"
+context = 8192
+thinking = "never"
 upstream = "backend-model"
 endpoints = ["fake"]
 "#
@@ -158,6 +161,9 @@ api_key = ""
 
 [[model]]
 name = "test-model"
+description = "a test model for integration"
+context = 8192
+thinking = "never"
 upstream = "backend-model"
 endpoints = ["fake"]
 
@@ -239,4 +245,51 @@ async fn health_needs_no_auth() {
         .await
         .unwrap();
     assert_eq!(response.status().as_u16(), 200);
+}
+
+#[tokio::test]
+async fn models_catalog_returns_configured_entries() {
+    let backend = fake_backend().await;
+    let gateway = gateway_for(backend).await;
+
+    let response = reqwest::Client::new()
+        .get(format!("http://{gateway}/v1/models"))
+        .bearer_auth("test-token")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("list"));
+    let data = body.get("data").and_then(Value::as_array).unwrap();
+    assert_eq!(data.len(), 1);
+    assert_eq!(
+        data[0].get("id").and_then(Value::as_str),
+        Some("test-model")
+    );
+    assert_eq!(data[0].get("object").and_then(Value::as_str), Some("model"));
+    assert_eq!(
+        data[0].get("description").and_then(Value::as_str),
+        Some("a test model for integration")
+    );
+    assert_eq!(data[0].get("context").and_then(Value::as_u64), Some(8192));
+    assert_eq!(
+        data[0].get("thinking").and_then(Value::as_str),
+        Some("never")
+    );
+}
+
+#[tokio::test]
+async fn models_catalog_wrong_token_is_401() {
+    let backend = fake_backend().await;
+    let gateway = gateway_for(backend).await;
+
+    let response = reqwest::Client::new()
+        .get(format!("http://{gateway}/v1/models"))
+        .bearer_auth("wrong-token")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 401);
 }

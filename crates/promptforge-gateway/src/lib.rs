@@ -7,10 +7,11 @@
 //! holds a vendor key.
 //!
 //! What ships: one OpenAI passthrough at `POST /v1/chat/completions` with
-//! bearer auth and model routing, a Brave-backed `POST /v1/tools/web_search`
-//! configured by `[tools.web_search]`, and `GET /health`. Admission control,
-//! endpoint pinning, model packs, hot reload, streaming, and the Anthropic
-//! protocol shim are deferred.
+//! bearer auth and model routing, a bearer-authed `GET /v1/models` catalog,
+//! a Brave-backed `POST /v1/tools/web_search` configured by
+//! `[tools.web_search]`, and `GET /health`. Admission control, endpoint
+//! pinning, model packs, hot reload, streaming, and the Anthropic protocol
+//! shim are deferred.
 
 pub mod config;
 pub mod error;
@@ -32,7 +33,7 @@ use crate::config::{Secret, WebSearchConfig};
 use crate::error::GatewayError;
 use crate::routing::Routing;
 use crate::tools::WebSearchState;
-use crate::wire::{ChatRequest, ChatResponse};
+use crate::wire::{ChatRequest, ChatResponse, ModelInfo, ModelsResponse};
 
 /// Shared handler state: the routing table, the shared bearer token, and the
 /// optional web-search capability.
@@ -73,6 +74,7 @@ impl AppState {
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/models", get(list_models))
         .route("/v1/tools/web_search", post(tools::web_search))
         .route("/health", get(health))
         .with_state(state)
@@ -97,6 +99,30 @@ async fn chat_completions(
         .send(request, &model.upstream_name)
         .await?;
     Ok(Json(response))
+}
+
+/// Bearer-authed catalog of configured models for host bind.
+async fn list_models(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ModelsResponse>, GatewayError> {
+    check_auth(&state, &headers)?;
+    let data = state
+        .routing
+        .models()
+        .iter()
+        .map(|model| ModelInfo {
+            id: model.name.clone(),
+            object: "model",
+            description: model.description.clone(),
+            context: model.context,
+            thinking: model.thinking,
+        })
+        .collect();
+    Ok(Json(ModelsResponse {
+        object: "list",
+        data,
+    }))
 }
 
 /// Compare the request's bearer token against the configured token.
