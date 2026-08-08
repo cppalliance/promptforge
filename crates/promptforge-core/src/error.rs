@@ -275,6 +275,28 @@ pub enum Error {
     /// so it is refused rather than run under mismatched rules.
     #[error("unsupported promptforge version: {0} (this build supports major 1)")]
     UnsupportedVersion(u32),
+
+    /// No registered dialect matched the provided evidence.
+    #[error("no tool dialect matched the provided evidence")]
+    DialectNone,
+
+    /// Two or more dialects tied for the highest detection score.
+    #[error("tool dialect detection tied among: {candidates:?}")]
+    #[non_exhaustive]
+    DialectTie {
+        /// The dialect identifiers that shared the top score.
+        candidates: Vec<crate::dialects::ToolDialectId>,
+    },
+
+    /// A dialect operation that is not yet implemented (step 1 stub).
+    #[error("dialect {dialect} has not implemented {operation}")]
+    #[non_exhaustive]
+    DialectNotImplemented {
+        /// Which dialect was called.
+        dialect: crate::dialects::ToolDialectId,
+        /// Which operation was attempted.
+        operation: &'static str,
+    },
 }
 
 impl Error {
