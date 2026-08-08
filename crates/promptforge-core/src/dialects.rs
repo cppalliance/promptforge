@@ -8,6 +8,8 @@
 
 #[path = "dialects/openai.rs"]
 mod openai;
+#[path = "dialects/gemma3_tool_code.rs"]
+mod gemma3_tool_code;
 
 use serde_json::Value;
 
@@ -15,6 +17,7 @@ use crate::client::{Message, ToolCall};
 use crate::normalize::NormalizedTurn;
 use crate::{Error, Result};
 
+pub use gemma3_tool_code::Gemma3ToolCodeDialect;
 pub use openai::OpenAiDialect;
 
 /// Identifies a registered tool dialect.
@@ -26,12 +29,15 @@ pub use openai::OpenAiDialect;
 pub enum ToolDialectId {
     /// Standard OpenAI function-calling protocol.
     OpenAi,
+    /// Gemma-3 `tool_code` fence protocol for models without native tool support.
+    Gemma3ToolCode,
 }
 
 impl std::fmt::Display for ToolDialectId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ToolDialectId::OpenAi => f.write_str("openai"),
+            ToolDialectId::Gemma3ToolCode => f.write_str("gemma3_tool_code"),
         }
     }
 }
@@ -46,6 +52,12 @@ impl std::fmt::Display for ToolDialectId {
 pub struct DialectEvidence {
     /// Whether the model endpoint advertises native tool-call support.
     pub supports_tool_calls: Option<bool>,
+    /// The raw Jinja chat template string, when available from model metadata.
+    pub chat_template: Option<String>,
+    /// The model identifier from the catalog or endpoint metadata.
+    pub model_id: Option<String>,
+    /// The model's source or provenance label (e.g. GGUF filename).
+    pub source: Option<String>,
 }
 
 /// A dialect's confidence that it matches some [`DialectEvidence`].
@@ -119,7 +131,10 @@ impl ToolDialectRegistry {
     #[must_use]
     pub fn builtin() -> ToolDialectRegistry {
         ToolDialectRegistry {
-            dialects: vec![Box::new(OpenAiDialect)],
+            dialects: vec![
+                Box::new(OpenAiDialect),
+                Box::new(Gemma3ToolCodeDialect),
+            ],
         }
     }
 
@@ -129,7 +144,7 @@ impl ToolDialectRegistry {
         self.dialects
             .iter()
             .find(|d| d.id() == id)
-            .map(|d| d.as_ref())
+            .map(std::convert::AsRef::as_ref)
     }
 
     /// Resolve evidence into a single dialect, failing on ties or no match.
@@ -148,7 +163,7 @@ impl ToolDialectRegistry {
             return Err(Error::DialectNone);
         }
 
-        scored.sort_by(|a, b| b.1.cmp(&a.1));
+        scored.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
         if scored.len() > 1 && scored[0].1 == scored[1].1 {
             let tied: Vec<ToolDialectId> = scored
@@ -183,8 +198,22 @@ mod tests {
         let registry = ToolDialectRegistry::builtin();
         let evidence = DialectEvidence {
             supports_tool_calls: Some(true),
+            ..Default::default()
         };
         let id = registry.resolve(&evidence).expect("should resolve");
         assert_eq!(id, ToolDialectId::OpenAi);
+    }
+
+    #[test]
+    fn gemma_scores_when_no_native_tools_and_template() {
+        let registry = ToolDialectRegistry::builtin();
+        let evidence = DialectEvidence {
+            supports_tool_calls: Some(false),
+            chat_template: Some("<start_of_turn>user\n".to_string()),
+            model_id: Some("gemma-3-27b-it".to_string()),
+            source: None,
+        };
+        let id = registry.resolve(&evidence).expect("should resolve");
+        assert_eq!(id, ToolDialectId::Gemma3ToolCode);
     }
 }
