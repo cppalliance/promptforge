@@ -24,3 +24,5 @@
 
 ## 2026-08-08 docs: add portrait image to the README
 
+## 2026-08-08 docs: add the briefer demo prompt
+
