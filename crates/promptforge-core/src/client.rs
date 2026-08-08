@@ -9,9 +9,13 @@
 //! never sees it. Point `PROMPTFORGE_BASE_URL` at a local server or another
 //! gateway to retarget it.
 
+use std::fmt;
+use std::sync::Arc;
+
 use serde_json::Value;
 
 use crate::model::CompletionOptions;
+use crate::normalize::{CompletionNormalizer, OpenAiChatNormalizer};
 use crate::{Error, Result};
 
 /// Default backend base URL (the local development gateway).
@@ -141,7 +145,7 @@ pub struct Completion {
     pub result: CompletionResult,
     /// The choice's `finish_reason`, when the backend supplied one.
     pub finish_reason: Option<String>,
-    /// The message's `reasoning_content`, when the backend supplied one.
+    /// The message's reasoning side channel, when the backend supplied one.
     pub reasoning_content: Option<String>,
     /// The JSON body sent to the gateway.
     pub(crate) request_body: Value,
@@ -150,17 +154,29 @@ pub struct Completion {
 }
 
 /// A chat completions client bound to one gateway, token, and model.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GatewayClient {
     http: reqwest::Client,
     base_url: String,
     token: String,
     model: String,
+    normalizer: Arc<dyn CompletionNormalizer>,
+}
+
+impl fmt::Debug for GatewayClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GatewayClient")
+            .field("base_url", &self.base_url)
+            .field("token", &self.token)
+            .field("model", &self.model)
+            .finish_non_exhaustive()
+    }
 }
 
 impl GatewayClient {
     /// Build a client from explicit parts (used by tests and by
     /// [`GatewayClient::from_env`]). A trailing slash on `base_url` is trimmed.
+    /// The response normalizer defaults to [`OpenAiChatNormalizer`].
     #[must_use]
     pub fn new(
         base_url: &str,
@@ -172,7 +188,15 @@ impl GatewayClient {
             base_url: base_url.trim_end_matches('/').to_string(),
             token: token.into(),
             model: model.into(),
+            normalizer: OpenAiChatNormalizer::shared(),
         }
+    }
+
+    /// Replace the response normalizer used by [`GatewayClient::complete`].
+    #[must_use]
+    pub fn with_normalizer(mut self, normalizer: Arc<dyn CompletionNormalizer>) -> GatewayClient {
+        self.normalizer = normalizer;
+        self
     }
 
     /// Build a client from the environment.
@@ -213,8 +237,10 @@ impl GatewayClient {
     ///
     /// # Errors
     /// Returns [`Error::Http`] on a transport failure, [`Error::Backend`] when
-    /// the gateway responds with a non-success status, and
-    /// [`Error::MalformedResponse`] when the response carries no usable content.
+    /// the gateway responds with a non-success status,
+    /// [`Error::MalformedResponse`] when the response shape is unusable, and
+    /// [`Error::EmptyModelReply`] when the turn has neither non-empty tool
+    /// calls nor non-empty text.
     pub async fn complete(
         &self,
         messages: &[Message],
@@ -284,214 +310,20 @@ impl GatewayClient {
         }
 
         let response_body: Value = response.json().await.map_err(Error::http)?;
-        let (result, finish_reason, reasoning_content) = parse_completion(&response_body)?;
+        let turn = self.normalizer.normalize(&response_body)?;
         Ok(Completion {
-            result,
-            finish_reason,
-            reasoning_content,
+            result: turn.outcome,
+            finish_reason: turn.finish_reason,
+            reasoning_content: turn.reasoning_content,
             request_body,
             response_body,
         })
     }
 }
 
-/// Parse a chat-completions response body into its outcome and metadata.
-///
-/// Prefers a non-empty `tool_calls` array on the first choice's message; each
-/// entry's `function.arguments` (a JSON-encoded string) is parsed into a
-/// [`Value`], falling back to a string `Value` when it is not valid JSON. When
-/// there are no tool calls, the message `content` is returned as text.
-/// `finish_reason` is read from the choice; `reasoning_content` from the
-/// message when present.
-///
-/// # Errors
-/// Returns [`Error::MalformedResponse`] when there are no choices, or when the
-/// chosen message has neither `content` nor `tool_calls`.
-fn parse_completion(
-    response_json: &Value,
-) -> Result<(CompletionResult, Option<String>, Option<String>)> {
-    let choice = response_json
-        .get("choices")
-        .and_then(Value::as_array)
-        .and_then(|choices| choices.first())
-        .ok_or_else(|| Error::MalformedResponse("no choices in response".into()))?;
-    let finish_reason = choice
-        .get("finish_reason")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let message = choice
-        .get("message")
-        .ok_or_else(|| Error::MalformedResponse("choice had no message".into()))?;
-    let reasoning_content = message
-        .get("reasoning_content")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-
-    if let Some(raw_calls) = message
-        .get("tool_calls")
-        .and_then(Value::as_array)
-        .filter(|calls| !calls.is_empty())
-    {
-        let mut calls = Vec::with_capacity(raw_calls.len());
-        for raw in raw_calls {
-            let id = raw
-                .get("id")
-                .and_then(Value::as_str)
-                .ok_or_else(|| Error::MalformedResponse("tool call had no id".into()))?
-                .to_string();
-            let function = raw
-                .get("function")
-                .ok_or_else(|| Error::MalformedResponse("tool call had no function".into()))?;
-            let name = function
-                .get("name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| Error::MalformedResponse("tool call had no name".into()))?
-                .to_string();
-            let arguments = match function.get("arguments").and_then(Value::as_str) {
-                Some(raw_args) => serde_json::from_str::<Value>(raw_args)
-                    .unwrap_or_else(|_| Value::String(raw_args.to_string())),
-                None => Value::Null,
-            };
-            calls.push(ToolCall {
-                id,
-                name,
-                arguments,
-            });
-        }
-        return Ok((
-            CompletionResult::ToolCalls(calls),
-            finish_reason,
-            reasoning_content,
-        ));
-    }
-
-    if let Some(content) = message.get("content").and_then(Value::as_str) {
-        return Ok((
-            CompletionResult::Text(content.to_string()),
-            finish_reason,
-            reasoning_content,
-        ));
-    }
-
-    Err(Error::MalformedResponse(
-        "choice had neither content nor tool_calls".into(),
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_tool_calls_from_response() {
-        let response = serde_json::json!({
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {
-                            "name": "web_search",
-                            "arguments": "{\"query\":\"rust\",\"count\":3}"
-                        }
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        });
-
-        let (result, finish_reason, reasoning_content) = parse_completion(&response).unwrap();
-        assert_eq!(finish_reason.as_deref(), Some("tool_calls"));
-        assert_eq!(reasoning_content, None);
-        match result {
-            CompletionResult::ToolCalls(calls) => {
-                assert_eq!(calls.len(), 1);
-                assert_eq!(calls[0].id, "call_1");
-                assert_eq!(calls[0].name, "web_search");
-                assert_eq!(
-                    calls[0].arguments,
-                    serde_json::json!({ "query": "rust", "count": 3 })
-                );
-            }
-            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
-        }
-    }
-
-    #[test]
-    fn falls_back_to_string_for_unparseable_arguments() {
-        let response = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "tool_calls": [{
-                        "id": "call_2",
-                        "type": "function",
-                        "function": { "name": "web_fetch", "arguments": "not json" }
-                    }]
-                }
-            }]
-        });
-
-        let (result, _, _) = parse_completion(&response).unwrap();
-        match result {
-            CompletionResult::ToolCalls(calls) => {
-                assert_eq!(calls[0].arguments, Value::String("not json".into()));
-            }
-            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
-        }
-    }
-
-    #[test]
-    fn parses_text_when_no_tool_calls() {
-        let response = serde_json::json!({
-            "choices": [{
-                "message": { "role": "assistant", "content": "hello" }
-            }]
-        });
-
-        let (result, _, _) = parse_completion(&response).unwrap();
-        match result {
-            CompletionResult::Text(text) => assert_eq!(text, "hello"),
-            CompletionResult::ToolCalls(_) => panic!("expected text, got tool calls"),
-        }
-    }
-
-    #[test]
-    fn parses_finish_reason_and_reasoning_content() {
-        let response = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "answer",
-                    "reasoning_content": "scratch work"
-                },
-                "finish_reason": "stop"
-            }]
-        });
-
-        let (result, finish_reason, reasoning_content) = parse_completion(&response).unwrap();
-        assert_eq!(finish_reason.as_deref(), Some("stop"));
-        assert_eq!(reasoning_content.as_deref(), Some("scratch work"));
-        match result {
-            CompletionResult::Text(text) => assert_eq!(text, "answer"),
-            CompletionResult::ToolCalls(_) => panic!("expected text, got tool calls"),
-        }
-    }
-
-    #[test]
-    fn errors_when_neither_content_nor_tool_calls() {
-        let response = serde_json::json!({
-            "choices": [{ "message": { "role": "assistant" } }]
-        });
-
-        assert!(matches!(
-            parse_completion(&response),
-            Err(Error::MalformedResponse(_))
-        ));
-    }
 
     #[tokio::test]
     async fn complete_merges_per_call_options() {
@@ -542,5 +374,42 @@ mod tests {
         assert_eq!(body["temperature"], 0.0);
         assert_eq!(body["max_tokens"], 128);
         assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+    }
+
+    #[tokio::test]
+    async fn complete_hard_fails_on_empty_model_reply() {
+        use axum::Router;
+        use axum::extract::Json;
+        use axum::routing::post;
+        use serde_json::{Value, json};
+        use tokio::net::TcpListener;
+
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(|Json(_body): Json<Value>| async move {
+                Json(json!({
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "reasoning_content": "ignored"
+                        },
+                        "finish_reason": "stop"
+                    }]
+                }))
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = GatewayClient::new(&format!("http://{addr}/v1"), "tok", "m");
+        let err = client
+            .complete(&[Message::user("hi")], None, None)
+            .await
+            .expect_err("empty product must fail");
+        assert!(matches!(err, Error::EmptyModelReply { .. }));
     }
 }

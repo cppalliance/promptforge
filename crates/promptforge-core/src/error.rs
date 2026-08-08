@@ -58,6 +58,17 @@ pub enum Error {
     #[error("malformed response: {0}")]
     MalformedResponse(String),
 
+    /// The model returned neither non-empty tool calls nor non-empty text.
+    ///
+    /// Reasoning side-channel text, when present, is never promoted into the
+    /// answer; `detail` may note that it was ignored, without pasting it.
+    #[error("{detail}")]
+    #[non_exhaustive]
+    EmptyModelReply {
+        /// Fixed phrase naming the empty product (and ignored reasoning).
+        detail: &'static str,
+    },
+
     /// A section's Lua phase failed to build, run, or return a usable value.
     #[error("lua error: {0}")]
     Lua(String),
