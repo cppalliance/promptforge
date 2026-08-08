@@ -28,3 +28,4 @@
 - [2026-08-08-4-add-sys-model] host transport role: Hosts supply gateway location and credentials while prompts own capability and inference choices.
 - [2026-08-08-5-extract-dev-crate] narrow developer interface: Prompt files own model knobs; the development command owns only file, input, and watch concerns.
 - [2026-08-08-6-local-toml-bigger-model] profile composition: Resolve includes relative to the declaring profile; child objects replace by identity and otherwise append.
+- [2026-08-08-7-gateway-download-progress] progress observation seam: Artifact transfer reports through a replaceable observer independent of the download loop.
