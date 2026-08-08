@@ -84,7 +84,7 @@ impl Routing {
                 &endpoint.base_url,
                 endpoint.api_key.clone(),
             ));
-            let lane = match endpoint.concurrency {
+            let lane = match config.endpoint_concurrency(endpoint) {
                 Some(n) => EndpointLane::new(n, &config.queue),
                 None => EndpointLane::unlimited(),
             };

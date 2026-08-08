@@ -9,21 +9,24 @@
 //! What ships: one OpenAI passthrough at `POST /v1/chat/completions` with
 //! bearer auth and model routing, per-endpoint concurrency limits with a fair
 //! waiting queue (`[queue]` / `concurrency`), gateway-owned local generative
-//! inference via a managed `llama-server` subprocess (`[[local_model]]`), a
-//! bearer-authed `GET /v1/models` catalog, a Brave-backed
+//! inference via a managed `llama-server` subprocess (`[[local_model]]`), named
+//! profiles with recursive `include` and immediate `POST /admin/switch-profile`,
+//! a bearer-authed `GET /v1/models` catalog, a Brave-backed
 //! `POST /v1/tools/web_search` configured by `[tools.web_search]`, and
-//! `GET /health`. In-process llama.cpp FFI, profiles, endpoint pinning, model
-//! packs, hot reload, streaming, and the Anthropic protocol shim are deferred.
+//! `GET /health`. In-process llama.cpp FFI, endpoint pinning, model packs,
+//! streaming, and the Anthropic protocol shim are deferred.
 
 pub mod config;
 pub mod error;
 pub mod local;
+pub mod profile;
 pub mod queue;
 pub mod routing;
 pub mod tools;
 pub mod upstream;
 pub mod wire;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Json;
@@ -32,45 +35,72 @@ use axum::http::HeaderMap;
 use axum::http::header::AUTHORIZATION;
 use axum::routing::{get, post};
 use axum::{Router, response::IntoResponse};
+use serde::Deserialize;
+use tokio::sync::RwLock;
 
 use crate::config::{Secret, WebSearchConfig};
 use crate::error::GatewayError;
+use crate::local::LocalRuntime;
 use crate::routing::Routing;
 use crate::tools::WebSearchState;
 use crate::wire::{ChatRequest, ChatResponse, ModelInfo, ModelsResponse};
 
-/// Shared handler state: the routing table, the shared bearer token, and the
-/// optional web-search capability.
+/// Mutable live configuration held behind a lock so profile switches can swap
+/// routing and local children without rebuilding the axum router.
+#[derive(Debug)]
+struct LiveState {
+    routing: Arc<Routing>,
+    token: Secret,
+    web_search: Option<Arc<WebSearchState>>,
+    local: LocalRuntime,
+    profile_name: Option<String>,
+}
+
+/// Directory used by admin profile routes.
+#[derive(Debug)]
+struct ProfilesContext {
+    dir: PathBuf,
+}
+
+/// Shared handler state: live routing/token/local runtime, and optional profiles dir.
 #[derive(Debug, Clone)]
 pub struct AppState {
-    routing: Arc<Routing>,
-    token: Arc<Secret>,
-    web_search: Option<Arc<WebSearchState>>,
+    live: Arc<RwLock<LiveState>>,
+    profiles: Option<Arc<ProfilesContext>>,
 }
 
 impl AppState {
-    /// Build handler state from a routing table and the server token. The
-    /// web-search capability is absent; add it with [`AppState::with_web_search`].
+    /// Build handler state from a routing table and the server token.
     #[must_use]
     pub fn new(routing: Arc<Routing>, token: Secret) -> AppState {
+        AppState::from_parts(routing, token, LocalRuntime::empty(), None, None, None)
+    }
+
+    /// Build full runtime state for `serve` and integration tests.
+    #[must_use]
+    pub fn from_parts(
+        routing: Arc<Routing>,
+        token: Secret,
+        local: LocalRuntime,
+        web_search: Option<&WebSearchConfig>,
+        profiles_dir: Option<PathBuf>,
+        profile_name: Option<String>,
+    ) -> AppState {
         AppState {
-            routing,
-            token: Arc::new(token),
-            web_search: None,
+            live: Arc::new(RwLock::new(LiveState {
+                routing,
+                token,
+                web_search: web_search.map(|cfg| Arc::new(WebSearchState::new(cfg))),
+                local,
+                profile_name,
+            })),
+            profiles: profiles_dir.map(|dir| Arc::new(ProfilesContext { dir })),
         }
     }
 
-    /// Enable the web-search tool from its configuration.
-    #[must_use]
-    pub fn with_web_search(mut self, cfg: &WebSearchConfig) -> AppState {
-        self.web_search = Some(Arc::new(WebSearchState::new(cfg)));
-        self
-    }
-
     /// The web-search capability, when configured.
-    #[must_use]
-    pub(crate) fn web_search(&self) -> Option<&WebSearchState> {
-        self.web_search.as_deref()
+    pub(crate) async fn web_search(&self) -> Option<Arc<WebSearchState>> {
+        self.live.read().await.web_search.clone()
     }
 }
 
@@ -81,6 +111,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/models", get(list_models))
         .route("/v1/tools/web_search", post(tools::web_search))
         .route("/health", get(health))
+        .route("/admin/profiles", get(admin_list_profiles))
+        .route("/admin/status", get(admin_status))
+        .route("/admin/switch-profile", post(admin_switch_profile))
         .with_state(state)
 }
 
@@ -98,8 +131,11 @@ async fn chat_completions(
     headers: HeaderMap,
     Json(request): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, GatewayError> {
-    check_auth(&state, &headers)?;
-    let model = state.routing.model(&request.model)?;
+    check_auth(&state, &headers).await?;
+    let model = {
+        let live = state.live.read().await;
+        live.routing.model(&request.model)?
+    };
     let client_key = headers
         .get(CLIENT_HEADER)
         .and_then(|value| value.to_str().ok())
@@ -118,8 +154,9 @@ async fn list_models(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<ModelsResponse>, GatewayError> {
-    check_auth(&state, &headers)?;
-    let data = state
+    check_auth(&state, &headers).await?;
+    let live = state.live.read().await;
+    let data = live
         .routing
         .models()
         .iter()
@@ -137,14 +174,142 @@ async fn list_models(
     }))
 }
 
+#[derive(Debug, Deserialize)]
+struct SwitchProfileRequest {
+    name: String,
+}
+
+/// Lists `*.toml` stems in the profiles directory.
+async fn admin_list_profiles(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    check_auth(&state, &headers).await?;
+    let dir = profiles_dir(&state)?;
+    let profiles =
+        profile::list_profiles(dir).map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
+    Ok(Json(serde_json::json!({ "profiles": profiles })))
+}
+
+/// Current profile name, loaded model names, and a queue note.
+async fn admin_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    check_auth(&state, &headers).await?;
+    let live = state.live.read().await;
+    let models: Vec<&str> = live
+        .routing
+        .models()
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect();
+    Ok(Json(serde_json::json!({
+        "profile": live.profile_name,
+        "models": models,
+        "local_children": live.local.child_count(),
+        "queue": "per-endpoint waiting queue; switch-profile is immediate (no drain)",
+    })))
+}
+
+/// Immediately switches to another named profile. Unloads the previous local
+/// runtime (killing its children) before loading the next; in-flight chat
+/// requests may fail with 503 or a transport error. A load failure leaves
+/// remote-only routing from the new profile with empty local models.
+async fn admin_switch_profile(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<SwitchProfileRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    check_auth(&state, &headers).await?;
+    let dir = profiles_dir(&state)?.to_path_buf();
+    let name = request.name.trim();
+    if name.is_empty() {
+        return Err(GatewayError::SwitchFailed(
+            "profile name must not be empty".to_string(),
+        ));
+    }
+
+    let path = dir.join(format!("{name}.toml"));
+    if !path.is_file() {
+        return Err(GatewayError::ProfileNotFound(name.to_owned()));
+    }
+
+    let config =
+        profile::load_named(&dir, name).map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
+
+    // Remote-only routing for the interim (and failure) live state. Kept owned
+    // so a successful load can merge local models without reloading the file.
+    let remote_routing =
+        Routing::from_config(&config).map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
+    let interim_routing = Routing::new(remote_routing.models().to_vec());
+    let new_web_search = config
+        .tools
+        .as_ref()
+        .and_then(|t| t.web_search.as_ref())
+        .map(WebSearchState::new)
+        .map(Arc::new);
+    let new_token = config.server.token.clone();
+
+    // Immediate unload under the write lock, then drop old children before load
+    // so old and new llama-server processes never hold VRAM at once.
+    let old_local = {
+        let mut live = state.live.write().await;
+        let old_local = std::mem::replace(&mut live.local, LocalRuntime::empty());
+        live.routing = Arc::new(interim_routing);
+        live.token = new_token;
+        live.web_search = new_web_search;
+        live.profile_name = Some(name.to_owned());
+        old_local
+    };
+    drop(old_local);
+
+    let new_local = match tokio::task::spawn_blocking(move || LocalRuntime::start(&config)).await {
+        Ok(Ok(runtime)) => runtime,
+        Ok(Err(e)) => {
+            return Err(GatewayError::SwitchFailed(e.to_string()));
+        }
+        Err(e) => {
+            return Err(GatewayError::SwitchFailed(format!(
+                "local runtime start task failed: {e}"
+            )));
+        }
+    };
+
+    let routing = remote_routing
+        .merge(new_local.models().iter().cloned())
+        .map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
+
+    {
+        let mut live = state.live.write().await;
+        live.local = new_local;
+        live.routing = Arc::new(routing);
+    }
+
+    tracing::info!(profile = %name, "switched profile");
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "profile": name,
+    })))
+}
+
+fn profiles_dir(state: &AppState) -> Result<&Path, GatewayError> {
+    state
+        .profiles
+        .as_ref()
+        .map(|ctx| ctx.dir.as_path())
+        .ok_or(GatewayError::ProfilesUnavailable)
+}
+
 /// Compare the request's bearer token against the configured token.
-pub(crate) fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), GatewayError> {
+pub(crate) async fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), GatewayError> {
     let presented = headers
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .unwrap_or("");
-    if constant_time_eq(presented.as_bytes(), state.token.expose().as_bytes()) {
+    let live = state.live.read().await;
+    if constant_time_eq(presented.as_bytes(), live.token.expose().as_bytes()) {
         Ok(())
     } else {
         Err(GatewayError::Unauthorized)
