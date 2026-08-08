@@ -161,10 +161,6 @@ pub(crate) async fn run_fanout_arms(
             }
         };
         let scope = scopes.tools;
-        let completion_options = scopes
-            .model
-            .as_ref()
-            .map(crate::model::ModelBinding::completion_options);
 
         // Substitution with item
         let var = match vm.var() {
@@ -192,6 +188,13 @@ pub(crate) async fn run_fanout_arms(
         // Model turn (if prose is non-empty)
         let mut arm_reply: Option<String> = None;
         if !prose.trim().is_empty() {
+            let Some(model_binding) = scopes.model else {
+                vm.teardown(ctx.observer, &worker.name);
+                return Err(crate::Error::ModelRequired {
+                    section: worker.name.clone(),
+                });
+            };
+            let completion_options = model_binding.completion_options();
             let (schemas, dispatch) = match ctx.bound {
                 Some(bound) => {
                     match crate::execute::prepare_effective_scope(
@@ -225,7 +228,7 @@ pub(crate) async fn run_fanout_arms(
                         section: &worker.name,
                         turns: &mut turns,
                         debug: ctx.debug,
-                        completion_options: completion_options.as_ref(),
+                        completion_options: &completion_options,
                     },
                 )
                 .await
@@ -328,5 +331,64 @@ mod tests {
         let err =
             resolve_sibling("Worker", &sections).expect_err("bare name without ### must error");
         assert!(err.to_string().contains("### markers"), "error was: {err}");
+    }
+
+    #[tokio::test]
+    async fn model_required_when_arm_prose_has_no_binding() {
+        use crate::Error;
+        use crate::client::GatewayClient;
+        use crate::model::ModelBindings;
+        use crate::observe::NullObserver;
+        use crate::parser::Section;
+        use crate::store::StoreRef;
+        use crate::tools::ToolRegistry;
+
+        let worker = Section {
+            name: "Worker".to_string(),
+            level: 3,
+            preamble: None,
+            prose: "Ask the model about {{ item }}.".to_string(),
+            epilog: None,
+            children: Vec::new(),
+            items: Vec::new(),
+        };
+        let items = vec!["alpha".to_string()];
+        let store = StoreRef::memory();
+        let bindings = ToolBindings::default();
+        let models = ModelBindings::default();
+        let registry = ToolRegistry::new(std::iter::empty());
+        let client: Option<GatewayClient> = None;
+        let observer = NullObserver;
+        let ctx = FanoutContext {
+            args: "",
+            store: &store,
+            execution: "fanout-test",
+            observer: &observer,
+            client: &client,
+            debug: None,
+            shared: None,
+            bindings: &bindings,
+            models: &models,
+            bound: None,
+            registry: &registry,
+            max_tool_iterations: 24,
+            last_reply: None,
+            when: "2026-08-08",
+            parent_id: 1,
+        };
+
+        let error = run_fanout_arms(&worker, &items, &ctx)
+            .await
+            .expect_err("non-empty arm prose without a model binding must fail");
+        assert!(
+            matches!(error, Error::ModelRequired { .. }),
+            "expected ModelRequired, got {error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("model binding required for section Worker"),
+            "error must name the worker section: {error}"
+        );
     }
 }

@@ -52,16 +52,6 @@ use crate::{Error, NearDuplicateDiagnostic, Result};
 /// frontmatter does not declare its own `max_tool_iterations`.
 const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 
-/// Interim model name for sections without `models.use` until sys.model lands.
-const INTERIM_HOST_MODEL: &str = "claude-sonnet-4-6";
-
-fn effective_completion_options<'a>(
-    binding: Option<&'a CompletionOptions>,
-    fallback: &'a CompletionOptions,
-) -> &'a CompletionOptions {
-    binding.unwrap_or(fallback)
-}
-
 /// The prompt language major this executor implements.
 const SUPPORTED_MAJOR: u32 = 1;
 
@@ -395,10 +385,6 @@ async fn run_sections(
             }
         };
         let scope = scopes.tools;
-        let completion_options = scopes
-            .model
-            .as_ref()
-            .map(crate::model::ModelBinding::completion_options);
 
         let var = match vm.var() {
             Ok(var) => var,
@@ -422,6 +408,13 @@ async fn run_sections(
             }
         };
         if !prose.trim().is_empty() {
+            let Some(model_binding) = scopes.model else {
+                vm.teardown(observer, &section.name);
+                return Err(Error::ModelRequired {
+                    section: section.name.clone(),
+                });
+            };
+            let completion_options = model_binding.completion_options();
             let (schemas, dispatch) = match bound {
                 Some(bound) => {
                     match prepare_effective_scope(
@@ -464,7 +457,7 @@ async fn run_sections(
                         section: &section.name,
                         turns,
                         debug,
-                        completion_options: completion_options.as_ref(),
+                        completion_options: &completion_options,
                     },
                 )
                 .await
@@ -720,8 +713,8 @@ pub(crate) struct SectionProgress<'a> {
     pub(crate) turns: &'a mut u32,
     /// Opt-in raw request/response capture for each model turn.
     pub(crate) debug: Option<&'a dyn DebugCapture>,
-    /// Per-call model fields from `models.use`, or an interim host default when `None`.
-    pub(crate) completion_options: Option<&'a CompletionOptions>,
+    /// Per-call model fields from the section's selected binding.
+    pub(crate) completion_options: &'a CompletionOptions,
 }
 
 /// Drive one section's model call to a final text reply, dispatching any tool
@@ -738,10 +731,6 @@ pub(crate) struct SectionProgress<'a> {
 /// `dispatch`,
 /// [`Error::ToolLoopExhausted`] if the cap is hit without a text reply, or any
 /// transport/backend error from a model call or a tool's own failure.
-#[expect(
-    clippy::too_many_lines,
-    reason = "the loop keeps conversation, dispatch, and observation inline so each early failure path stays visible"
-)]
 pub(crate) async fn run_tool_loop(
     client: &GatewayClient,
     schemas: &[ToolSchema],
@@ -759,13 +748,6 @@ pub(crate) async fn run_tool_loop(
         debug,
         completion_options,
     } = progress;
-    let fallback_options = CompletionOptions {
-        model: INTERIM_HOST_MODEL.to_owned(),
-        temperature: None,
-        max_tokens: None,
-        thinking: None,
-    };
-    let options = effective_completion_options(completion_options, &fallback_options);
     let mut conversation = vec![Message::user(prose)];
     let tool_arg = if schemas.is_empty() {
         None
@@ -778,7 +760,9 @@ pub(crate) async fn run_tool_loop(
     let nonce = untrusted::nonce();
 
     for _ in 0..max_tool_iterations {
-        let completion = client.complete(&conversation, tool_arg, options).await;
+        let completion = client
+            .complete(&conversation, tool_arg, completion_options)
+            .await;
         if completion.is_err() {
             observer.observe(execution, section, detail::MODEL_TURN_FAILED);
         }

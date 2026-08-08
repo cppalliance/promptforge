@@ -10,6 +10,7 @@ max_tool_iterations: 20
 ```lua
 tools.need("search", "Search the web and return a list of results (title, url, description).")
 tools.need("fetch", "Fetch a web page and return its main content as markdown.")
+models.always("researcher", "A model suited for careful analysis, coding, and general assistance")
 ```
 
 ## Research

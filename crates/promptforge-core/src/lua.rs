@@ -147,7 +147,7 @@ impl ToolScope {
 pub struct ClosedScopes {
     /// Effective tool bindings for this section.
     pub tools: ToolScope,
-    /// Selected model binding from `models.use`, or `None` for the host default.
+    /// Selected model binding from `models.use` or prompt-wide `models.always`.
     pub model: Option<ModelBinding>,
 }
 

@@ -28,16 +28,23 @@ use crate::config::Config;
 use crate::progress::McpObserver;
 use crate::result::NO_TURNS;
 use crate::retrieval::Retrieval;
+use promptforge_core::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_core::observe::detail;
+
+fn fixture_model_catalog() -> ModelCatalog {
+    ModelCatalog::new([ModelDescriptor::new(
+        ModelId::gateway("claude-sonnet-4-6"),
+        "A model suited for careful analysis, coding, and general assistance",
+        200_000,
+        ThinkingMode::Never,
+    )])
+}
 
 fn prepared(config: &Config) -> Arc<PreparedTools> {
     static SEED: OnceLock<PreparedTools> = OnceLock::new();
     let seed = SEED.get_or_init(|| {
-        PreparedTools::new(
-            &config.gateway,
-            promptforge_core::model::ModelCatalog::empty(),
-        )
-        .expect("prepare fixture tool model")
+        PreparedTools::new(&config.gateway, fixture_model_catalog())
+            .expect("prepare fixture tool model")
     });
     Arc::new(
         seed.rebuild(&config.gateway)
@@ -618,7 +625,9 @@ fn speaking_server_with(gateway: SocketAddr, server_lines: &str) -> (TempDir, Pr
         dir.path(),
         "speak.md",
         "---\nname: speak\ndescription: Say something\npromptforge: 1\n---\n\n\
-         # Test prompt\n\n## Only\n\nSay something.\n",
+         # Test prompt\n\n```lua\n\
+         models.always(\"writer\", \"A model suited for careful analysis, coding, and general assistance\")\n\
+         ```\n\n## Only\n\nSay something.\n",
     );
     let config = Config::from_toml_str(&format!(
         "[server]\ntoken = \"t\"\n{server_lines}\n\n\
