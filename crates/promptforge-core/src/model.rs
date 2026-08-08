@@ -264,6 +264,7 @@ impl Eq for CompletionOptions {}
 pub struct ModelBindings {
     bindings: Vec<ModelBinding>,
     declarations: Vec<ModelDeclaration>,
+    always: Option<String>,
 }
 
 impl ModelBindings {
@@ -279,6 +280,12 @@ impl ModelBindings {
         self.bindings.is_empty()
     }
 
+    /// Returns the prompt-wide default alias set by `models.always`, if any.
+    #[must_use]
+    pub fn always(&self) -> Option<&str> {
+        self.always.as_deref()
+    }
+
     pub(crate) fn binding(&self, alias: &str) -> Option<&ModelBinding> {
         self.bindings.iter().find(|binding| binding.alias == alias)
     }
@@ -290,10 +297,12 @@ impl ModelBindings {
     pub(crate) fn from_parts(
         bindings: Vec<ModelBinding>,
         declarations: Vec<ModelDeclaration>,
+        always: Option<String>,
     ) -> Self {
         Self {
             bindings,
             declarations,
+            always,
         }
     }
 }
@@ -306,6 +315,7 @@ pub(crate) enum ModelDeclaration {
         description: String,
         opts: ModelNeedOpts,
     },
+    Always(String),
 }
 
 /// Complete live model set for one bind pass.
@@ -883,5 +893,491 @@ mod tests {
                 .is_err()
         );
         vm.teardown(&NullObserver, "Section");
+    }
+
+    #[test]
+    fn models_always_records_binding() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.need("writer", "A tiny model", { thinking = false, temperature = 0 })
+               models.always("writer")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (_tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        assert_eq!(models.always(), Some("writer"));
+    }
+
+    #[test]
+    fn models_always_without_prior_need_fails() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.always("writer")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let error = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap_err();
+        let msg = error.to_string();
+        assert!(msg.contains("not declared"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn models_always_duplicate_fails() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.need("writer", "A tiny model")
+               models.always("writer")
+               models.always("writer")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let error = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap_err();
+        let msg = error.to_string();
+        assert!(msg.contains("at most once"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn models_always_replays_exactly() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.need("writer", "A tiny model")
+               models.always("writer")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let mut vm = SectionVm::new_with_shared_bindings(
+            &shared,
+            &tools,
+            &models,
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .unwrap();
+        let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
+        assert_eq!(
+            scopes.model.as_ref().map(ModelBinding::alias),
+            Some("writer")
+        );
+        vm.teardown(&NullObserver, "Section");
+    }
+
+    #[test]
+    fn models_always_provides_completion_options_without_use() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.need("writer", "A tiny model", { thinking = false, temperature = 0 })
+               models.always("writer")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let mut vm = SectionVm::new_with_shared_bindings(
+            &shared,
+            &tools,
+            &models,
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .unwrap();
+        let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
+        let opts = scopes.model.as_ref().map(ModelBinding::completion_options);
+        let expected = CompletionOptions {
+            model: Some("small".to_owned()),
+            temperature: Some(0.0),
+            max_tokens: None,
+            thinking: Some(false),
+        };
+        assert_eq!(opts, Some(expected));
+        vm.teardown(&NullObserver, "Section");
+    }
+
+    #[test]
+    fn models_use_overrides_always() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.need("writer", "A tiny model", { thinking = false })
+               models.need("analyst", "careful analysis", { thinking = true })
+               models.always("writer")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let mut vm = SectionVm::new_with_shared_bindings(
+            &shared,
+            &tools,
+            &models,
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .unwrap();
+        let preamble = crate::lua::LuaProgram::compile(
+            r#"models.use("analyst")"#,
+            "preamble",
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        vm.run_preamble(&preamble, &NullObserver, "Section")
+            .unwrap();
+        let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
+        assert_eq!(
+            scopes.model.as_ref().map(ModelBinding::alias),
+            Some("analyst")
+        );
+        vm.teardown(&NullObserver, "Section");
+    }
+
+    #[test]
+    fn models_always_from_h2_preamble_fails() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.need("writer", "A tiny model")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let mut vm = SectionVm::new_with_shared_bindings(
+            &shared,
+            &tools,
+            &models,
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .unwrap();
+        let preamble = crate::lua::LuaProgram::compile(
+            r#"models.always("writer")"#,
+            "preamble",
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        let result = vm.run_preamble(&preamble, &NullObserver, "Section");
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("only available during H1"),
+            "unexpected error: {msg}"
+        );
+        vm.teardown(&NullObserver, "Section");
+    }
+
+    #[test]
+    fn models_always_multi_arg_records_need_and_always() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.always("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (_tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        assert_eq!(models.always(), Some("writer"));
+        assert!(models.binding("writer").is_some());
+        assert_eq!(models.declarations().len(), 2);
+        assert!(matches!(
+            &models.declarations()[0],
+            ModelDeclaration::Need { alias, .. } if alias == "writer"
+        ));
+        assert!(matches!(
+            &models.declarations()[1],
+            ModelDeclaration::Always(alias) if alias == "writer"
+        ));
+    }
+
+    #[test]
+    fn models_always_multi_arg_two_args() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.always("writer", "A tiny model")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (_tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        assert_eq!(models.always(), Some("writer"));
+        assert!(models.binding("writer").is_some());
+    }
+
+    #[test]
+    fn models_always_multi_arg_provides_completion_options() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.always("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let mut vm = SectionVm::new_with_shared_bindings(
+            &shared,
+            &tools,
+            &models,
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .unwrap();
+        let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
+        let opts = scopes.model.as_ref().map(ModelBinding::completion_options);
+        let expected = CompletionOptions {
+            model: Some("small".to_owned()),
+            temperature: Some(0.0),
+            max_tokens: None,
+            thinking: Some(false),
+        };
+        assert_eq!(opts, Some(expected));
+        vm.teardown(&NullObserver, "Section");
+    }
+
+    #[test]
+    fn models_always_multi_arg_replays_exactly() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.always("writer", "A tiny model", { thinking = false })"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let mut vm = SectionVm::new_with_shared_bindings(
+            &shared,
+            &tools,
+            &models,
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .unwrap();
+        let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
+        assert_eq!(
+            scopes.model.as_ref().map(ModelBinding::alias),
+            Some("writer")
+        );
+        vm.teardown(&NullObserver, "Section");
+    }
+
+    #[test]
+    fn models_always_multi_arg_and_single_arg_cannot_both_be_called() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.need("analyst", "careful analysis")
+               models.always("writer", "A tiny model")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (_tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        assert_eq!(models.always(), Some("writer"));
+
+        // Now verify that a second always (single-arg) after multi-arg always fails.
+        let shared2 = crate::lua::LuaProgram::compile(
+            r#"models.always("writer", "A tiny model")
+               models.always("writer")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let error = bind_shared_declarations(
+            &shared2,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap_err();
+        let msg = error.to_string();
+        assert!(msg.contains("at most once"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn models_always_multi_arg_duplicate_alias_fails() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.need("writer", "A tiny model")
+               models.always("writer", "A tiny model")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let error = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap_err();
+        let msg = error.to_string();
+        assert!(
+            msg.contains("duplicate")
+                || msg.contains("Duplicate")
+                || msg.contains("declared more than once"),
+            "unexpected error: {msg}"
+        );
     }
 }

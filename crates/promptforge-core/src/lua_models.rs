@@ -45,7 +45,95 @@ impl ModelRuntime {
 pub(crate) struct ModelBindingState {
     pub(crate) bindings: Vec<ModelBinding>,
     pub(crate) declarations: Vec<ModelDeclaration>,
+    pub(crate) always: Option<String>,
     pub(crate) callback_error: Option<Error>,
+}
+
+/// Records one `models.need` binding into the accumulator. Shared by
+/// `models.need` and the multi-arg `models.always` form.
+fn record_need_binding(
+    state: &mut ModelBindingState,
+    resolver: &dyn ModelResolver,
+    alias: String,
+    description: String,
+    opts: ModelNeedOpts,
+) -> mlua::Result<()> {
+    if state.bindings.iter().any(|b| b.alias() == alias) {
+        if state.callback_error.is_none() {
+            state.callback_error = Some(Error::DuplicateModelAlias {
+                alias: alias.clone(),
+            });
+        }
+        return Err(mlua::Error::external("duplicate model alias"));
+    }
+    let ResolvedModel { id, invocation } = match resolver.resolve(&description, &opts) {
+        Ok(selection) => selection,
+        Err(error) => {
+            if state.callback_error.is_none() {
+                state.callback_error = Some(error);
+            }
+            return Err(mlua::Error::external("model capability resolution failed"));
+        }
+    };
+    state.bindings.push(ModelBinding::new(
+        alias.clone(),
+        description.clone(),
+        id,
+        invocation,
+    ));
+    state.declarations.push(ModelDeclaration::Need {
+        alias,
+        description,
+        opts,
+    });
+    Ok(())
+}
+
+/// Records a `models.always` selection, enforcing at-most-once.
+fn record_always_selection(state: &mut ModelBindingState, alias: String) -> mlua::Result<()> {
+    if state.always.is_some() {
+        return Err(mlua::Error::external(
+            "models.always may be called at most once per prompt",
+        ));
+    }
+    state.always = Some(alias.clone());
+    state.declarations.push(ModelDeclaration::Always(alias));
+    Ok(())
+}
+
+/// Extracts a single string alias from a `MultiValue` (for the 1-arg form).
+fn parse_single_alias(args: &MultiValue, label: &str) -> mlua::Result<String> {
+    match args.iter().next() {
+        Some(Value::String(value)) => value
+            .to_str()
+            .map_err(|_| mlua::Error::external(format!("{label} alias must be a UTF-8 string")))
+            .map(|s| s.to_owned()),
+        _ => Err(mlua::Error::external(format!(
+            "{label} expects a string alias as first argument"
+        ))),
+    }
+}
+
+/// Replays one declaration against the bound sequence, failing on mismatch.
+fn replay_declaration(
+    bindings: &ModelBindings,
+    runtime: &mut ModelRuntime,
+    expected: &ModelDeclaration,
+    label: &str,
+) -> mlua::Result<()> {
+    let Some(declaration) = bindings.declarations().get(runtime.declaration_index) else {
+        return Err(mlua::Error::external(format!(
+            "{label} call has no matching bound declaration; bind the prompt before executing"
+        )));
+    };
+    if declaration != expected {
+        return Err(mlua::Error::external(format!(
+            "model declaration replay mismatch at declaration {}",
+            runtime.declaration_index + 1
+        )));
+    }
+    runtime.declaration_index += 1;
+    Ok(())
 }
 
 /// Installs H1 binding-mode `models.need` / forbidden `models.use`.
@@ -64,46 +152,44 @@ pub(crate) fn install_bind_models<'scope, 'env: 'scope>(
         .create_function(move |_, args: MultiValue| -> mlua::Result<()> {
             let (alias, description, opts) = parse_need_args(args)?;
             validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
-            let mut declarations = needs
+            let mut guard = needs
                 .lock()
                 .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
-            if declarations
-                .bindings
-                .iter()
-                .any(|binding| binding.alias() == alias)
-            {
-                if declarations.callback_error.is_none() {
-                    declarations.callback_error = Some(Error::DuplicateModelAlias {
-                        alias: alias.clone(),
-                    });
-                }
-                return Err(mlua::Error::external("duplicate model alias"));
-            }
-            let ResolvedModel { id, invocation } = match resolver.resolve(&description, &opts) {
-                Ok(selection) => selection,
-                Err(error) => {
-                    if declarations.callback_error.is_none() {
-                        declarations.callback_error = Some(error);
-                    }
-                    return Err(mlua::Error::external("model capability resolution failed"));
-                }
-            };
-            declarations.bindings.push(ModelBinding::new(
-                alias.clone(),
-                description.clone(),
-                id,
-                invocation,
-            ));
-            declarations.declarations.push(ModelDeclaration::Need {
-                alias,
-                description,
-                opts,
-            });
-            Ok(())
+            record_need_binding(&mut guard, resolver, alias, description, opts)
         })
         .map_err(|error| Error::Lua(error.to_string()))?;
     models
         .set("need", need)
+        .map_err(|error| Error::Lua(error.to_string()))?;
+
+    let always_state = Arc::clone(state);
+    let always = scope
+        .create_function(move |_, args: MultiValue| -> mlua::Result<()> {
+            if args.len() >= 2 {
+                let (alias, description, opts) = parse_need_args(args)?;
+                validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
+                let mut guard = always_state
+                    .lock()
+                    .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
+                record_need_binding(&mut guard, resolver, alias.clone(), description, opts)?;
+                record_always_selection(&mut guard, alias)
+            } else {
+                let alias = parse_single_alias(&args, "models.always")?;
+                validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
+                let mut guard = always_state
+                    .lock()
+                    .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
+                if !guard.bindings.iter().any(|b| b.alias() == alias) {
+                    return Err(mlua::Error::external(format!(
+                        "models.always alias {alias:?} was not declared by models.need"
+                    )));
+                }
+                record_always_selection(&mut guard, alias)
+            }
+        })
+        .map_err(|error| Error::Lua(error.to_string()))?;
+    models
+        .set("always", always)
         .map_err(|error| Error::Lua(error.to_string()))?;
 
     let use_fn = scope
@@ -122,7 +208,7 @@ pub(crate) fn install_bind_models<'scope, 'env: 'scope>(
         .map_err(|error| Error::Lua(error.to_string()))
 }
 
-/// Installs exact-replay `models.need` and forbidden `models.use`.
+/// Installs exact-replay `models.need`, `models.always`, and forbidden `models.use`.
 pub(crate) fn install_replay_models(
     lua: &Lua,
     bindings: &ModelBindings,
@@ -146,28 +232,51 @@ pub(crate) fn install_replay_models(
                     "models.need is only available during H1 binding or replay",
                 ));
             }
-            let Some(declaration) = expected.declarations().get(state.declaration_index) else {
-                return Err(mlua::Error::external(
-                    "models.need call has no matching bound declaration; bind the prompt before executing",
-                ));
-            };
             let expected_decl = ModelDeclaration::Need {
                 alias,
                 description,
                 opts,
             };
-            if declaration != &expected_decl {
-                return Err(mlua::Error::external(format!(
-                    "model declaration replay mismatch at declaration {}",
-                    state.declaration_index + 1
-                )));
-            }
-            state.declaration_index += 1;
-            Ok(())
+            replay_declaration(&expected, &mut state, &expected_decl, "models.need")
         })
         .map_err(|error| Error::Lua(error.to_string()))?;
     models
         .set("need", need)
+        .map_err(|error| Error::Lua(error.to_string()))?;
+
+    let expected_always = bindings.clone();
+    let always_state = Arc::clone(runtime);
+    let always = lua
+        .create_function(move |_, args: MultiValue| {
+            let mut state = always_state
+                .lock()
+                .map_err(|_| mlua::Error::external("model declaration runtime was poisoned"))?;
+            if state.phase != ModelPhase::Replay {
+                return Err(mlua::Error::external(
+                    "models.always is only available during H1 binding or replay",
+                ));
+            }
+            if args.len() >= 2 {
+                let (alias, description, opts) = parse_need_args(args)?;
+                validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
+                let need_decl = ModelDeclaration::Need {
+                    alias: alias.clone(),
+                    description,
+                    opts,
+                };
+                replay_declaration(&expected_always, &mut state, &need_decl, "models.always")?;
+                let always_decl = ModelDeclaration::Always(alias);
+                replay_declaration(&expected_always, &mut state, &always_decl, "models.always")
+            } else {
+                let alias = parse_single_alias(&args, "models.always")?;
+                validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
+                let always_decl = ModelDeclaration::Always(alias);
+                replay_declaration(&expected_always, &mut state, &always_decl, "models.always")
+            }
+        })
+        .map_err(|error| Error::Lua(error.to_string()))?;
+    models
+        .set("always", always)
         .map_err(|error| Error::Lua(error.to_string()))?;
 
     let use_fn = lua
@@ -218,6 +327,17 @@ pub(crate) fn install_h2_models(
         .map_err(|error| Error::Lua(error.to_string()))?;
     models
         .set("need", need)
+        .map_err(|error| Error::Lua(error.to_string()))?;
+
+    let always_fn = lua
+        .create_function(|_, _: MultiValue| -> mlua::Result<()> {
+            Err(mlua::Error::external(
+                "models.always is only available during H1 binding or replay",
+            ))
+        })
+        .map_err(|error| Error::Lua(error.to_string()))?;
+    models
+        .set("always", always_fn)
         .map_err(|error| Error::Lua(error.to_string()))?;
 
     let frozen = bindings.clone();
@@ -303,7 +423,11 @@ fn close_model_scope_inner(
         ));
     }
     runtime.phase = ModelPhase::Closed;
-    match runtime.used.clone() {
+    let effective_alias = runtime
+        .used
+        .clone()
+        .or_else(|| bindings.always().map(String::from));
+    match effective_alias {
         Some(alias) => {
             let binding = bindings.binding(&alias).cloned().ok_or_else(|| {
                 Error::Lua(format!("model alias {alias:?} has no frozen binding"))
