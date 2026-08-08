@@ -127,6 +127,8 @@ n_predict = 8192
 
 On start (and after switch-profile), each local model becomes a catalog entry: `description` appears in `GET /v1/models` so semantic bind works the same as for remote models. Dropping `LocalRuntime` (process exit or profile replace) kills every child.
 
+First-time GGUF (and other blob) downloads show an indicatif progress bar on an interactive stderr TTY - percent, bytes, rate, and ETA. When stderr is not a TTY, the same download emits periodic `tracing` progress lines instead.
+
 See `gateway.local.example.toml` at the repository root for a full sample pinned to the same Qwen3.5-9B Q4_K_M digest as `promptforge-core-tests`.
 
 ## The boundary is one process wide, and everything above it is a client
