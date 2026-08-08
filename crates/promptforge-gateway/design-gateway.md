@@ -127,6 +127,8 @@ n_predict = 8192
 
 On start (and after switch-profile), each local model becomes a catalog entry: `description` appears in `GET /v1/models` so semantic bind works the same as for remote models. Dropping `LocalRuntime` (process exit or profile replace) kills every child.
 
+After a local child is healthy, the gateway GETs llama `/props`, builds `DialectEvidence`, and resolves a `tool_dialect` through `promptforge-core`'s `ToolDialectRegistry` (hard-fail on none or tie). The catalog advertises `tool_dialect` and `tools_mode` (`native` or `emulated`). Remote OpenAI-compat models default to `openai` / `native`. When `/props` omits `chat_template`, a sibling `<stem>.md` beside the GGUF (written at HF provision with frontmatter plus a fenced Jinja `chat_template`) supplies fallback evidence; live props always win over a conflicting sidecar.
+
 First-time GGUF (and other blob) downloads show an indicatif progress bar on an interactive stderr TTY - percent, bytes, rate, and ETA. When stderr is not a TTY, the same download emits periodic `tracing` progress lines instead.
 
 See `gateway.local.example.toml` at the repository root for a full sample pinned to the same Qwen3.5-9B Q4_K_M digest as `promptforge-core-tests`.
