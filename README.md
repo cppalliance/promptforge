@@ -5,12 +5,12 @@ markdown is the program, the model is the CPU.
 
 ## Workspace
 
-- `crates/promptforge-core` - library: prompt parser, gateway client, section execution, source-retaining `LuaProgram` compilation to process-local Lua 5.4 bytecode, synchronous four-outcome picker binding with atomic one-to-one alias and stable-identity maps validated against the complete live registry, a sendable persistent `SectionVm` lifecycle seam, deterministic Lua tool declaration binding and exact per-section replay with immutable H2 scope closure, stable live-tool identity (`ToolId`, `ToolRegistry`, and transport-only wire names), and `observe`, the report-only progress seam (`Observer`, `NullObserver`) that a caller hooks to watch a long run. A run reports borrowed `(execution, section, detail)` strings through it as it goes, including constrained author checkpoints from phase-local Lua `log(message)` calls (see "Watching a run" below)
+- `crates/promptforge-core` - library: prompt parser, gateway client, section execution, source-retaining `LuaProgram` compilation to process-local Lua 5.4 bytecode, synchronous four-outcome picker binding for tools and models (`tools.need` / `models.need`) with atomic one-to-one alias and stable-identity maps validated against the complete live registries, a sendable persistent `SectionVm` lifecycle seam, deterministic Lua declaration binding and exact per-section replay with immutable H2 scope closure (`tools.add` / `models.use`), stable live-tool identity (`ToolId`, `ToolRegistry`, and transport-only wire names), model catalog types (`ModelId`, `ModelCatalog`, `ModelBindings`), opt-in `DebugCapture` for raw turn JSON, and `observe`, the report-only progress seam (`Observer`, `NullObserver`) that a caller hooks to watch a long run. A run reports borrowed `(execution, section, detail)` strings through it as it goes, including constrained author checkpoints from phase-local Lua `log(message)` calls (see "Watching a run" below)
 - `crates/promptforge-core-tests` - unpublished binary and test harness: owns complete author-shaped valid, invalid, deterministic offline, real-text, and real-tool-call prompt documents. Ordinary tests assert public parse and error contracts, exact Lua checkpoints, scalar preamble return, store fall-through, concurrent execution-ID separation, and artifact handling without external access. `cargo run -p promptforge-core-tests` provisions pinned official llama.cpp b10082 and Qwen3-0.6B Q8 assets under `.model-cache/`, starts a guarded local server, connects `GatewayClient` directly without `promptforge-gateway`, and behaviorally verifies text, one-string aliased tool dispatch, tool-result continuation, final answer, epilog, and turn budgets; `cargo run -p promptforge-core-tests -- dev <prompt> [input]` runs any prompt file against a separately pinned GPU-served Qwen3.5 9B for interactive prompt development, with `--watch` rerunning on every save
 - `crates/promptforge-webfetch` - library: the `web_fetch` tool, which fetches a URL in-process and returns its main content as markdown. It needs no credential, so it runs wherever the prompt runs rather than through the gateway
-- `crates/promptforge-cli` - binary `promptforge`: the command-line tool, `promptforge run <file.md> [input]`. It builds a matching live registry and semantic-picker catalog for the tools available at launch, binds H1 needs synchronously, and executes the resulting `BoundPrompt`
-- `crates/promptforge-gateway` - binary `promptforge-gateway`: the inference gateway that holds backend credentials and routes OpenAI-shaped chat completions
-- `crates/promptforge-mcp-server` - binary `promptforge-mcp-server`: the MCP server that runs a prompt an agentic harness names to `run_prompt`. It prepares one semantic picker and matching complete live registry at boot, binds each prompt's H1 capabilities on Tokio's blocking pool, executes the resulting `BoundPrompt` against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, re-reads the catalog when a prompt is saved, retrieves the prompts closest to a plain-English capability, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
+- `crates/promptforge-cli` - binary `promptforge`: the command-line tool, `promptforge run <file.md> [input]`. It builds a matching live registry and semantic-picker catalog for the tools available at launch, fetches `GET /v1/models` when `PROMPTFORGE_TOKEN` is set, binds H1 tool and model needs synchronously, and executes the resulting `BoundPrompt`
+- `crates/promptforge-gateway` - binary `promptforge-gateway`: the inference gateway that holds backend credentials, routes OpenAI-shaped chat completions, and serves bearer-authed `GET /v1/models` from `[[model]]` catalog metadata
+- `crates/promptforge-mcp-server` - binary `promptforge-mcp-server`: the MCP server that runs a prompt an agentic harness names to `run_prompt`. It prepares one semantic tool picker, matching live registry, and gateway `ModelCatalog` at boot (soft-failing the models fetch to empty when needed), binds each prompt's H1 tool and model needs on Tokio's blocking pool, executes the resulting `BoundPrompt` against the gateway, reports that run as it goes through `notifications/progress`, hands back a run id rather than losing the work when a run outlasts the client's patience, re-reads the prompt catalog when a prompt is saved, retrieves the prompts closest to a plain-English capability, and serves all of it over streamable HTTP or stdio (see "MCP server configuration" below)
 - `crates/promptforge-tool-picker` - library: resolves a plain-English capability need to a tool from an abstract catalog. `ToolPicker::build(Catalog, Config)` embeds the whole catalog once with a compiled-in CPU model; `resolve(need)` answers with one of four outcomes (`Outcome::Bind`, `Duplicate`, `Ambiguous`, or `Absent`) and `shortlist(need, k)` hands back the matching tools, best first, for a caller that would rather choose for itself. Loading the model is the expensive part, so a caller whose catalog changes keeps one encoder and re-indexes over it: `build_with(Arc<Embedder>, Catalog, Config)` is the one indexing path and `picker.rebuild(catalog)` reaches it with this engine's own encoder and configuration. No Lua, no MCP, no network
 
 ## Build
@@ -68,7 +68,7 @@ cargo run -p promptforge-cli -- run prompts/hello.md
 
 Runs the prompt's sections top to bottom and prints the run's result.
 
-The CLI always offers the local `web_fetch` tool for semantic capability binding. It offers gateway-backed `web_search` only when `PROMPTFORGE_TOKEN` is present; without that credential, a prompt needing web search fails as an absent capability before execution. The picker catalog is derived from the same concrete instances as the live registry, so every selectable identity has a callable match. `PROMPTFORGE_BASE_URL` defaults to `http://127.0.0.1:8081/v1`.
+The CLI always offers the local `web_fetch` tool for semantic capability binding. It offers gateway-backed `web_search` only when `PROMPTFORGE_TOKEN` is present; without that credential, a prompt needing web search fails as an absent capability before execution. When the token is present the CLI also fetches `GET /v1/models` to build the `ModelCatalog` (hard-fail on fetch error); without a token the model catalog is empty and prompts that omit `models.need` still run. The tool picker catalog is derived from the same concrete instances as the live registry, so every selectable identity has a callable match. `PROMPTFORGE_BASE_URL` defaults to `http://127.0.0.1:8081/v1`.
 
 Only a **promptforge prompt** runs: the file's frontmatter must declare a
 `promptforge:` version (see below). A file without it is not a promptforge
@@ -92,7 +92,7 @@ api_key = "${ANTHROPIC_API_KEY}"     # the vendor credential; only the gateway s
 
 [[model]]
 name = "claude-sonnet-4-6"           # the name callers request (the public contract)
-description = "Anthropic Claude Sonnet 4.6 for analysis, coding, and general assistance"
+description = "A model suited for careful analysis, coding, and general assistance"
 context = 200000                     # context window size in tokens
 thinking = "never"                   # never | always | switchable (default never)
 upstream = "claude-sonnet-4-6"       # the string the backend knows this model by
@@ -175,7 +175,7 @@ it does not have to be set. `[gateway].token` is required either way, because
 every transport runs prompts and every run goes through the gateway. Logs go to
 stdout on HTTP and to stderr on stdio, where stdout is the protocol wire.
 
-Either way, boot resolves the whole catalog first and refuses to serve on an incomplete one, printing every fault before a non-zero exit. It then builds the complete live registry (`web_fetch` and `web_search`) and a picker catalog derived from those same concrete instances before starting Tokio. Every `run_prompt` reuses its existing run id as the observer execution id, reparses the validated catalog source snapshot under that id, binds H1 `tools.need` declarations in `spawn_blocking`, then executes the immutable `BoundPrompt` with the same observer and id. Binding reports that are not progress boundaries are tolerated as unknown details and logged at debug level.
+Either way, boot resolves the whole prompt catalog first and refuses to serve on an incomplete one, printing every fault before a non-zero exit. It then builds the complete live tool registry (`web_fetch` and `web_search`) and a picker catalog derived from those same concrete instances, and fetches `GET /v1/models` for the `ModelCatalog` (soft-fail to empty with a warning when the gateway is unreachable, so offline stdio still boots). Every `run_prompt` reuses its existing run id as the observer execution id, reparses the validated catalog source snapshot under that id, binds H1 `tools.need` and `models.need` declarations in `spawn_blocking`, then executes the immutable `BoundPrompt` with the same observer and id. Binding reports that are not progress boundaries are tolerated as unknown details and logged at debug level.
 
 The repository ships a working `prompts.toml` at its root, beside `gateway.toml`.
 It serves this repository's own `prompts/` directory, expects `PROMPTFORGE_TOKEN`
@@ -570,6 +570,7 @@ promptforge: 1
 
 ```lua
 tools.need("fetch", "Fetch a web page and return its main content as markdown.")
+models.need("analyst", "A model suited for careful analysis", { thinking = false, temperature = 0, context = 40000 })
 
 function normalize(value)
     return string.lower(value)
@@ -583,6 +584,7 @@ Human-readable description (not executed).
 ```lua
 var.subject = args
 tools.add("fetch")
+models.use("analyst")
 ```
 
 Prose the model reads.
@@ -597,7 +599,7 @@ return reply
 - Exactly one `# Title` is required. Markdown before it is ignored.
 - The H1 may immediately open with one exact, unindented triple-backtick `lua` fence after any number of blank lines. Its exact triple-backtick closing line ends the shared library, and the remaining H1 text is the human-readable description. A leading reserved fence with an inexact closing marker is an error; a `lua` fence after description prose is ordinary Markdown prose, mirroring section semantics. Indented markers, longer backtick runs, different capitalization, and extra info tokens are ordinary Markdown. The old `lua prompt` info-token form was removed; an H1 that opens with it is a parse error naming the removed form.
 - `## Section` headings are executable units; they run top to bottom (fall-through). Each section parses as an optional exact leading `lua` preamble fence, prose, and an optional exact trailing `lua` epilog fence. Reserved fences use exact unindented lowercase ` ```lua ` opening lines and exact unindented ` ``` ` closing lines. Blank lines may surround them. A lone reserved fence is the preamble. Lua fences between prose, longer or indented fences, different capitalization, extra info tokens, and marker-looking lines inside a longer fence remain model-facing prose.
-- Shared Lua declares semantic capabilities under prompt-local aliases with `tools.need(alias, description)`. A section exposes an alias deliberately with `tools.add(alias)`; `tools.always(alias)` belongs in shared Lua only when every model-facing section genuinely needs that capability. Declaration alone exposes nothing.
+- Shared Lua declares semantic capabilities under prompt-local aliases: `tools.need(alias, description)` for tools and `models.need(alias, description, opts?)` for models. A section exposes a tool alias with `tools.add(alias)` and selects a model binding with `models.use(alias)` (at most once). `tools.always(alias)` belongs in shared Lua only when every model-facing section genuinely needs that capability. Declaration alone exposes nothing and selects no model; omitting `models.use` keeps the host default client model.
 
 ## Prompt language
 
@@ -626,7 +628,7 @@ return args              -- finishes the run with this value; no model call
 
 If the preamble returns nothing (or there is no preamble), the section's prose is sent to the model. Empty prose skips the model but still runs the epilog with `reply` nil. A scalar epilog return ends the run.
 
-`bind_tool_declarations` runs shared code once against a deterministic `ToolResolver`, where `tools.need(alias, description)` records exact case-sensitive aliases and `tools.always(alias)` selects prompt-wide scope. `bind::bind_prompt` supplies the concrete `ToolPicker` adapter and complete live `ToolRegistry`, caches byte-identical capability descriptions during one synchronous H1 pass, maps picker failures and `Absent`, `Duplicate`, and `Ambiguous` outcomes to distinct core errors, rejects identity collisions, and precomputes the picker's near-duplicate pairs for the immutable selected set. `SectionVm::new_with_bindings` replays those declarations without resolving again. H2 `tools.add(alias)` records section-local additions, and scope closure orders prompt-wide aliases before those additions. Before a non-empty model turn, core rejects any precomputed near-duplicate pair present together in that effective scope. It advertises each surviving concrete tool's exact description and schema under the prompt-local alias, then dispatches returned aliases through the frozen `ToolId`. Similar tools remain valid when isolated in separate sections. Scope, model, and tool reports use fixed payload-free details.
+`bind::bind_prompt` runs shared code once. For tools, `tools.need(alias, description)` records exact case-sensitive aliases and `tools.always(alias)` selects prompt-wide scope; the host supplies a `ToolPicker` and complete live `ToolRegistry`. For models, `models.need(alias, description, opts?)` filters the host `ModelCatalog` by hard constraints then resolves the description semantically (same picker stack, rebuilt over the filtered catalog). Optional `opts` is a Lua table (not keyword arguments): `context` (minimum window), `thinking` (boolean filter and frozen switch), `temperature`, and `max_tokens`. `context` and `thinking` filter the catalog; `temperature`, `max_tokens`, and a requested `thinking` switch ride on every completion under that binding. Same catalog weights under different invocation params are legal as distinct aliases. Prompts that declare no `models.need` keep working with an empty catalog. Hosts differ when the catalog cannot be fetched: the CLI hard-fails `GET /v1/models` when `PROMPTFORGE_TOKEN` is set, before bind; the MCP server soft-fails fetch to an empty catalog and warns, then a prompt that declares models fails as `ModelAbsent` at bind. Outcomes `Absent`, `Duplicate`, and `Ambiguous` map to distinct core errors for both tools and models. Binding rejects tool identity collisions and precomputes near-duplicate tool pairs; model aliases are not rejected for sharing weights. `SectionVm` replays frozen declarations without resolving again. H2 `tools.add(alias)` records section-local tool additions; H2 `models.use(alias)` selects at most one binding before scope close. Before a non-empty model turn, core rejects any precomputed near-duplicate tool pair in the effective scope, advertises each surviving tool under its local alias, and dispatches returned aliases through the frozen `ToolId`. Completions in that section use the selected binding's frozen invocation, or the host default client model when no `models.use` ran. Scope, model, and tool reports use fixed payload-free details. See `prompts/analyst-example.md` for a minimal `models.need` / `models.use` prompt.
 
 ### Substitution
 
@@ -676,7 +678,8 @@ Repeat exactly, with no extra words: {{ var.greeting }}
 
 `promptforge run prompts/greet.md "World"` sends `Repeat exactly, with no extra
 words: Hello, World!` to the model. `prompts/echo.md` (just `return args`) prints
-its input with no model call and no gateway.
+its input with no model call and no gateway. `prompts/analyst-example.md` shows
+`models.need` / `models.use` against the gateway catalog.
 
 ## Watching a run
 
@@ -709,8 +712,9 @@ let result = execute::run(&prompt, input, &tools, &store, opts).await?;
 
 ## Tools
 
-A prompt can let the model reach outside itself while a section runs. Two tools
-ship built in:
+Model selection is separate from tools: see `models.need` / `models.use` under
+"Prompt language" above. A prompt can also let the model reach outside itself
+while a section runs. Two tools ship built in:
 
 - `web_fetch` - fetch a URL and get back its main content as markdown. It runs
   in-process wherever the prompt runs, the CLI and the MCP server alike, because
