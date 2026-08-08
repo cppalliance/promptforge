@@ -20,6 +20,7 @@
 pub mod bind;
 pub mod client;
 pub mod debug;
+pub mod dialects;
 mod error;
 pub mod execute;
 pub(crate) mod fanout;
