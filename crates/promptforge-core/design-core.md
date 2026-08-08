@@ -6,6 +6,12 @@
 
 Prompts depend on semantic aliases, never deployment tool or model vendor strings. H1 `tools.need` declarations bind once through the prepared picker to stable `ToolId` values, `tools.always` explicitly selects genuinely universal aliases, and H2 `tools.add` explicitly selects section-local aliases. H1 `models.need` declarations filter a host `ModelCatalog` then resolve descriptions through the same picker stack into frozen `ModelBindings`; H2 `models.use` selects at most one binding per section, and omitting it keeps the host default client model. Binding is one-to-one, immutable, and complete before execution. The observer reports deterministic borrowed `(execution, section, detail)` strings and cannot steer behavior. Fixed runtime details are payload-free, including `Model turn truncated` after a successful non-empty final-text parse. Empty model product is always `Error::EmptyModelReply` (observed as `Model turn failed`), never a soft empty success; response wire quirks concentrate in `CompletionNormalizer`. Constrained phase-local Lua `log(message)` calls supply the sole author-controlled `Lua: <message>` exception. Opt-in `DebugCapture` on `RunOptions` receives owned raw request and response JSON without widening the observer. Expected parse, binding, Lua, substitution, model, tool, and store failures return errors. The authoritative result is one string, selected by scalar Lua return, frontmatter fallback, last model reply, or `"done"`.
 
+## Standing rule
+
+**No defaults. Everything explicit. Implicit is the enemy of precision.**
+
+A PromptForge prompt declares what it needs - tools, models, context, thinking, temperature - in the prompt. The host supplies credentials and the gateway URL, not silent choices about capability. If a prompt can accept any model, it says so with an explicit `models.need` / `models.always` capability sentence and constraints. Omitting a declaration never means "pick something sensible."
+
 ## Key design choices
 
 1. **A run is a free function over caller-owned resources.** The public path is parse, bind, then `execute::run`; there is no executor object or process-global run state. The caller owns the execution id, prompt, live tools, model catalog, store, observer, optional gateway client, and optional `DebugCapture`, which keeps deployment policy outside the core and makes concurrent runs independent.
