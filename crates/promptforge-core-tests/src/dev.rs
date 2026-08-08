@@ -1,13 +1,14 @@
-//! Single-shot dev-mode prompt execution against a guarded local server.
+//! Single-shot dev-mode prompt execution against a guarded local gateway.
 //!
 //! [`run_once`] mirrors the CLI pipeline: read the file, require a
 //! `promptforge:` version, parse, build the live tool registry, bind, and
 //! execute with a [`GatewayClient`] pointed at the caller's already-running
-//! server. Every `(execution, section, detail)` observer record streams to
-//! stderr; the returned result string is the caller's to print on stdout. On
-//! failure the runner returns the error so the caller can print it beside the
-//! server diagnostics it owns. After every executed run, success or failure,
-//! the run's store is dumped beside the prompt file (see [`crate::dump`]).
+//! `promptforge-gateway`. Every `(execution, section, detail)` observer record
+//! streams to stderr; the returned result string is the caller's to print on
+//! stdout. On failure the runner returns the error so the caller can print it
+//! beside the gateway diagnostics it owns. After every executed run, success
+//! or failure, the run's store is dumped beside the prompt file (see
+//! [`crate::dump`]).
 
 use std::io::Write;
 use std::path::Path;
@@ -31,16 +32,17 @@ use promptforge_webfetch::WebFetch;
 /// matching the CLI's default.
 const DEFAULT_GATEWAY_BASE_URL: &str = "http://127.0.0.1:8081/v1";
 
-/// Runs one prompt file once against a ready local server and returns the
+/// Runs one prompt file once against a ready local gateway and returns the
 /// final result string.
 ///
 /// `base_url`, `api_key`, and `model_alias` identify the caller's guarded
-/// `llama-server`, exactly as the scenario runner consumes them. The gateway
-/// credentials for `web_search` come from the process environment
-/// (`PROMPTFORGE_TOKEN` and `PROMPTFORGE_BASE_URL`), independent of the model
-/// server. Trace records print to stderr; nothing prints to stdout. Whether
-/// the run succeeds or fails, its store is dumped to `<prompt-stem>.store`
-/// next to the prompt file, one announcement line per file on stderr.
+/// `promptforge-gateway`, exactly as the scenario runner consumes them. The
+/// separate credentials for `web_search` come from the process environment
+/// (`PROMPTFORGE_TOKEN` and `PROMPTFORGE_BASE_URL`) when that tool should hit
+/// a different gateway instance. Trace records print to stderr; nothing prints
+/// to stdout. Whether the run succeeds or fails, its store is dumped to
+/// `<prompt-stem>.store` next to the prompt file, one announcement line per
+/// file on stderr.
 ///
 /// # Errors
 ///

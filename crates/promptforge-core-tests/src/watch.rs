@@ -4,8 +4,8 @@
 //! to the prompt's file name, because editors often save through an atomic
 //! rename that replaces the watched inode. Raw change notifications funnel
 //! into a channel, and [`rerun_on_changes`] coalesces each notification burst
-//! behind a quiet period before driving one rerun. The caller's provisioned
-//! artifacts and server guard stay warm across every rerun.
+//! behind a quiet period before driving one rerun. The caller's gateway guard
+//! stays warm across every rerun.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -16,7 +16,7 @@ use notify::{RecursiveMode, Watcher as _};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use crate::dev;
-use crate::server::ServerGuard;
+use crate::gateway::GatewayGuard;
 
 /// Quiet period that must elapse after the last change notification before a
 /// rerun fires, absorbing editor write-then-rename save bursts.
@@ -26,10 +26,10 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 /// process is interrupted.
 ///
 /// Each rerun re-reads, re-parses, re-binds, and re-executes the file against
-/// the caller's already-warm `server`, and dumps the run's store beside the
+/// the caller's already-warm `gateway`, and dumps the run's store beside the
 /// prompt; the watcher's file-name filter keeps those dump writes from
 /// feeding back into the rerun loop. A failed run prints its error beside
-/// the server's bounded diagnostics on stderr and keeps watching; results
+/// the gateway's bounded diagnostics on stderr and keeps watching; results
 /// print to stdout. The loop itself never returns except through an error
 /// while installing the watcher, so teardown happens when the caller's
 /// Ctrl-C handling drops the guard.
@@ -38,7 +38,7 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 ///
 /// Returns an error when the prompt path has no file name or the filesystem
 /// watcher cannot be installed on its parent directory.
-pub(crate) async fn run(prompt: &Path, input: &str, server: &ServerGuard) -> Result<()> {
+pub(crate) async fn run(prompt: &Path, input: &str, server: &GatewayGuard) -> Result<()> {
     let file_name = prompt
         .file_name()
         .with_context(|| format!("{} names no file to watch", prompt.display()))?
@@ -131,9 +131,9 @@ async fn next_rerun(receiver: &mut UnboundedReceiver<()>, debounce: Duration) ->
     }
 }
 
-/// Runs the prompt once against the warm server, printing the result to
-/// stdout or the error beside the server's bounded diagnostics to stderr.
-async fn run_and_report(prompt: &Path, input: &str, server: &ServerGuard) {
+/// Runs the prompt once against the warm gateway, printing the result to
+/// stdout or the error beside the gateway's bounded diagnostics to stderr.
+async fn run_and_report(prompt: &Path, input: &str, server: &GatewayGuard) {
     match dev::run_once(
         prompt,
         input,
