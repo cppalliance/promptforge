@@ -36,6 +36,10 @@ pub mod detail {
     pub const MODEL_TURN_COMPLETED: &str = "Model turn completed";
     /// A model round trip returned an error.
     pub const MODEL_TURN_FAILED: &str = "Model turn failed";
+    /// A successful parse bound an empty final text reply.
+    pub const MODEL_REPLY_EMPTY: &str = "Model reply was empty";
+    /// A successful parse ended because the model hit its length limit.
+    pub const MODEL_TURN_TRUNCATED: &str = "Model turn truncated";
     /// A tool dispatch completed successfully.
     pub const TOOL_CALL_SUCCEEDED: &str = "Tool call succeeded";
     /// A tool dispatch returned an error.
