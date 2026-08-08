@@ -45,6 +45,20 @@ pub enum GatewayError {
     /// The endpoint's waiting queue is full.
     #[error("queue full")]
     QueueFull,
+
+    /// `POST /admin/switch-profile` named a profile that is not on disk.
+    #[non_exhaustive]
+    #[error("profile not found: {0}")]
+    ProfileNotFound(String),
+
+    /// Profile reload failed (bad TOML, include error, or local spawn failure).
+    #[non_exhaustive]
+    #[error("switch profile failed: {0}")]
+    SwitchFailed(String),
+
+    /// Admin profile routes were reached without a configured profiles directory.
+    #[error("profiles directory not configured")]
+    ProfilesUnavailable,
 }
 
 impl From<crate::queue::AdmitError> for GatewayError {
@@ -101,6 +115,21 @@ impl GatewayError {
                 "server_error",
                 "queue_full",
             ),
+            GatewayError::ProfileNotFound(_) => (
+                StatusCode::NOT_FOUND,
+                "invalid_request_error",
+                "profile_not_found",
+            ),
+            GatewayError::SwitchFailed(_) => (
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                "switch_failed",
+            ),
+            GatewayError::ProfilesUnavailable => (
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                "profiles_unavailable",
+            ),
         }
     }
 }
@@ -149,4 +178,24 @@ pub enum ConfigError {
     #[non_exhaustive]
     #[error("invalid config: {0}")]
     Validation(String),
+
+    /// An `include` chain revisited a file already being resolved.
+    #[non_exhaustive]
+    #[error("include cycle at {path} (chain: {chain})")]
+    IncludeCycle {
+        /// The path that closed the cycle.
+        path: String,
+        /// The include stack when the cycle was detected.
+        chain: String,
+    },
+
+    /// An `include` chain exceeded the maximum nesting depth.
+    #[non_exhaustive]
+    #[error("include depth exceeded {max} at {path}")]
+    IncludeDepth {
+        /// The path that would have been loaded next.
+        path: String,
+        /// The configured maximum depth.
+        max: usize,
+    },
 }

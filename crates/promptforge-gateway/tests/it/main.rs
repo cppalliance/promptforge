@@ -182,7 +182,14 @@ base_url = "http://{brave}"
     let config = Config::from_toml_str(&toml).unwrap();
     let routing = Arc::new(Routing::from_config(&config).unwrap());
     let web_search = config.tools.and_then(|tools| tools.web_search).unwrap();
-    let state = AppState::new(routing, config.server.token).with_web_search(&web_search);
+    let state = AppState::from_parts(
+        routing,
+        config.server.token,
+        promptforge_gateway::local::LocalRuntime::empty(),
+        Some(&web_search),
+        None,
+        None,
+    );
     spawn(build_router(state)).await
 }
 
@@ -638,4 +645,139 @@ n_predict = 64
         other => panic!("expected text reply, got {other:?}"),
     }
     drop(local);
+}
+
+/// Switch-profile rebuilds the catalog from a remote-only profile (no llama spawn).
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "end-to-end admin flow is clearer inline"
+)]
+async fn switch_profile_updates_models_catalog() {
+    use std::fs;
+
+    let backend = fake_backend().await;
+    let profiles = tempfile::tempdir().unwrap();
+
+    let alpha = format!(
+        r#"
+[server]
+bind = "127.0.0.1:0"
+token = "test-token"
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+
+[[model]]
+name = "alpha-model"
+description = "alpha catalog entry"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+"#
+    );
+    let beta = format!(
+        r#"
+[server]
+bind = "127.0.0.1:0"
+token = "test-token"
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+
+[[model]]
+name = "beta-model"
+description = "beta catalog entry"
+context = 4096
+upstream = "backend-model"
+endpoints = ["fake"]
+"#
+    );
+    fs::write(profiles.path().join("alpha.toml"), alpha).unwrap();
+    fs::write(profiles.path().join("beta.toml"), beta).unwrap();
+
+    let config = promptforge_gateway::profile::load_named(profiles.path(), "alpha").unwrap();
+    let routing = Arc::new(Routing::from_config(&config).unwrap());
+    let state = AppState::from_parts(
+        routing,
+        config.server.token,
+        promptforge_gateway::local::LocalRuntime::empty(),
+        None,
+        Some(profiles.path().to_path_buf()),
+        Some("alpha".to_owned()),
+    );
+    let gateway = spawn(build_router(state)).await;
+    let http = reqwest::Client::new();
+
+    let catalog = http
+        .get(format!("http://{gateway}/v1/models"))
+        .bearer_auth("test-token")
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    let ids: Vec<&str> = catalog["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m.get("id").and_then(Value::as_str))
+        .collect();
+    assert_eq!(ids, vec!["alpha-model"]);
+
+    let listed = http
+        .get(format!("http://{gateway}/admin/profiles"))
+        .bearer_auth("test-token")
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(listed["profiles"], serde_json::json!(["alpha", "beta"]));
+
+    let switched = http
+        .post(format!("http://{gateway}/admin/switch-profile"))
+        .bearer_auth("test-token")
+        .json(&serde_json::json!({ "name": "beta" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(switched.status().as_u16(), 200);
+
+    let catalog = http
+        .get(format!("http://{gateway}/v1/models"))
+        .bearer_auth("test-token")
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    let ids: Vec<&str> = catalog["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m.get("id").and_then(Value::as_str))
+        .collect();
+    assert_eq!(ids, vec!["beta-model"]);
+
+    let status = http
+        .get(format!("http://{gateway}/admin/status"))
+        .bearer_auth("test-token")
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(status["profile"], "beta");
+    assert_eq!(status["models"], serde_json::json!(["beta-model"]));
 }
