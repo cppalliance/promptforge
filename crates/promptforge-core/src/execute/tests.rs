@@ -896,20 +896,14 @@ async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(Strin
 }
 
 #[tokio::test]
-async fn empty_final_text_reports_model_reply_empty() {
+async fn empty_final_text_fails_the_turn() {
     let addr = spawn_text_finish_gateway("", "stop").await;
     let (out, events, turns) = run_tool_loop_recorded(addr).await;
-    assert_eq!(out.unwrap(), "");
-    assert_eq!(turns, 1);
+    assert!(matches!(out, Err(Error::EmptyModelReply { .. })));
+    assert_eq!(turns, 0);
     assert_eq!(
         events,
-        vec![
-            (
-                "Gather".to_string(),
-                detail::MODEL_TURN_COMPLETED.to_string(),
-            ),
-            ("Gather".to_string(), detail::MODEL_REPLY_EMPTY.to_string(),),
-        ]
+        vec![("Gather".to_string(), detail::MODEL_TURN_FAILED.to_string(),)]
     );
 }
 
@@ -935,24 +929,14 @@ async fn length_finish_reason_reports_model_turn_truncated() {
 }
 
 #[tokio::test]
-async fn empty_truncated_final_text_reports_both_details() {
+async fn empty_truncated_final_text_fails_without_truncation_detail() {
     let addr = spawn_text_finish_gateway("", "length").await;
     let (out, events, turns) = run_tool_loop_recorded(addr).await;
-    assert_eq!(out.unwrap(), "");
-    assert_eq!(turns, 1);
+    assert!(matches!(out, Err(Error::EmptyModelReply { .. })));
+    assert_eq!(turns, 0);
     assert_eq!(
         events,
-        vec![
-            (
-                "Gather".to_string(),
-                detail::MODEL_TURN_COMPLETED.to_string(),
-            ),
-            ("Gather".to_string(), detail::MODEL_REPLY_EMPTY.to_string(),),
-            (
-                "Gather".to_string(),
-                detail::MODEL_TURN_TRUNCATED.to_string(),
-            ),
-        ]
+        vec![("Gather".to_string(), detail::MODEL_TURN_FAILED.to_string(),)]
     );
 }
 
