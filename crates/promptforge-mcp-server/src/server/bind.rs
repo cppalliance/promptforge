@@ -5,7 +5,7 @@
 //! across every run. A picker identity therefore cannot exist without a
 //! callable registry entry carrying the same stable identity.
 
-use promptforge_core::client::{DEFAULT_MODEL, GatewayClient};
+use promptforge_core::client::GatewayClient;
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::tools::{Tool, ToolRegistry, WebSearch};
 use promptforge_tool_picker::{
@@ -46,7 +46,7 @@ impl PreparedTools {
     /// # Errors
     /// Returns a boxed error when the tool picker cannot load.
     pub async fn load(gateway: &GatewayConfig) -> Result<Self, Box<dyn std::error::Error>> {
-        let models = match fetch_model_catalog(&gateway.url, gateway.token.expose()).await {
+        let models = match fetch_model_catalog(&gateway.url, gateway.key.expose()).await {
             Ok(catalog) => catalog,
             Err(error) => {
                 tracing::warn!("gateway model catalog unavailable: {error}");
@@ -116,7 +116,7 @@ impl PreparedTools {
 fn live_tools(gateway: &GatewayConfig) -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(WebFetch::new()),
-        Box::new(WebSearch::new(&gateway.url, gateway.token.expose())),
+        Box::new(WebSearch::new(&gateway.url, gateway.key.expose())),
     ]
 }
 
@@ -129,8 +129,7 @@ fn catalog(live: &[Box<dyn Tool>]) -> Catalog {
 /// under edition 2024 and this workspace forbids unsafe, so a configured server
 /// hands the executor a client instead of arranging for one to be found.
 pub(super) fn gateway_client(gateway: &GatewayConfig) -> GatewayClient {
-    let model = gateway.model.as_deref().unwrap_or(DEFAULT_MODEL);
-    GatewayClient::new(&gateway.url, gateway.token.expose(), model)
+    GatewayClient::new(&gateway.url, gateway.key.expose())
 }
 
 /// Derives one abstract descriptor from its callable live instance.
@@ -156,9 +155,9 @@ mod tests {
     use super::{PreparedTools, gateway_client};
     use crate::config::Config;
 
-    fn gateway(model: &str) -> Config {
+    fn gateway(extra: &str) -> Config {
         Config::from_toml_str(&format!(
-            "[server]\ntoken = \"t\"\n\n[gateway]\nurl = \"http://127.0.0.1:8081/v1/\"\ntoken = \"gw\"\n{model}"
+            "[server]\ntoken = \"t\"\n\n[gateway]\nurl = \"http://127.0.0.1:8081/v1/\"\nkey = \"gw\"\n{extra}"
         ))
         .expect("the fixture configuration parses")
     }
@@ -311,17 +310,11 @@ mod tests {
     }
 
     #[test]
-    fn a_configured_model_wins_over_the_default() {
-        let config = gateway("model = \"some-other-model\"\n");
-        assert_eq!(gateway_client(&config.gateway).model(), "some-other-model");
-    }
-
-    #[test]
-    fn no_configured_model_falls_back_to_the_core_default() {
+    fn gateway_client_is_built_from_url_and_key() {
         let config = gateway("");
         assert_eq!(
-            gateway_client(&config.gateway).model(),
-            promptforge_core::client::DEFAULT_MODEL
+            format!("{:?}", gateway_client(&config.gateway)),
+            "GatewayClient { base_url: \"http://127.0.0.1:8081/v1\", key: \"gw\", .. }"
         );
     }
 }

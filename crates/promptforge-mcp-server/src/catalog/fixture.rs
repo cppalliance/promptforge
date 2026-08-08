@@ -39,7 +39,7 @@ pub(super) fn write_prompt(root: &Path, relative: &str, name: &str, description:
 pub(super) fn config_at(root: &Path, extra: &str) -> Config {
     let toml = format!(
         "[server]\ntoken = \"shared\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n{extra}",
         root.display()
     );

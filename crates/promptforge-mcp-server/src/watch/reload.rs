@@ -224,11 +224,8 @@ pub(super) fn ignored_changes(boot: &Config, candidate: &Config) -> Vec<&'static
     if boot.gateway.url != candidate.gateway.url {
         ignored.push("[gateway].url");
     }
-    if boot.gateway.token.expose() != candidate.gateway.token.expose() {
-        ignored.push("[gateway].token");
-    }
-    if boot.gateway.model != candidate.gateway.model {
-        ignored.push("[gateway].model");
+    if boot.gateway.key.expose() != candidate.gateway.key.expose() {
+        ignored.push("[gateway].key");
     }
     ignored
 }

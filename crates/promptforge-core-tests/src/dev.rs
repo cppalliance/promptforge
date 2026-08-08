@@ -28,17 +28,13 @@ use promptforge_tool_picker::{
 };
 use promptforge_webfetch::WebFetch;
 
-/// The gateway API root assumed when `PROMPTFORGE_BASE_URL` is unset,
-/// matching the CLI's default.
-const DEFAULT_GATEWAY_BASE_URL: &str = "http://127.0.0.1:8081/v1";
-
 /// Runs one prompt file once against a ready local gateway and returns the
 /// final result string.
 ///
 /// `base_url`, `api_key`, and `model_alias` identify the caller's guarded
 /// `promptforge-gateway`, exactly as the scenario runner consumes them. The
 /// separate credentials for `web_search` come from the process environment
-/// (`PROMPTFORGE_TOKEN` and `PROMPTFORGE_BASE_URL`) when that tool should hit
+/// (`PROMPTFORGE_GATEWAY_KEY` and `PROMPTFORGE_GATEWAY_URL`) when that tool should hit
 /// a different gateway instance. Trace records print to stderr; nothing prints
 /// to stdout. Whether the run succeeds or fails, its store is dumped to
 /// `<prompt-stem>.store` next to the prompt file, one announcement line per
@@ -111,7 +107,7 @@ async fn run_once_with(
         .with_context(|| format!("bind {}", prompt_path.display()))?;
 
     let store = StoreRef::memory();
-    let client = GatewayClient::new(base_url, api_key, model_alias);
+    let client = GatewayClient::new(base_url, api_key);
     let capture = crate::dump::TraceCapture::new(prompt_path);
 
     // Clear the previous run's dump before starting so stale trace files
@@ -148,15 +144,15 @@ async fn run_once_with(
 /// process environment.
 #[derive(Debug)]
 struct GatewayConfig {
-    /// The gateway API root, defaulting to [`DEFAULT_GATEWAY_BASE_URL`].
-    base_url: String,
+    /// The gateway API root for `web_search`; absent when unset in the environment.
+    base_url: Option<String>,
     /// The bearer credential; `web_search` joins the registry only when this
-    /// is present.
-    token: Option<String>,
+    /// and `base_url` are both present.
+    key: Option<String>,
 }
 
 impl GatewayConfig {
-    /// Reads `PROMPTFORGE_BASE_URL` and `PROMPTFORGE_TOKEN` from the process
+    /// Reads `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` from the process
     /// environment.
     fn from_process_env() -> Self {
         Self::from_lookup(|name| std::env::var(name).ok())
@@ -165,9 +161,8 @@ impl GatewayConfig {
     /// Builds the configuration from an injected variable lookup.
     fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Self {
         Self {
-            base_url: lookup("PROMPTFORGE_BASE_URL")
-                .unwrap_or_else(|| DEFAULT_GATEWAY_BASE_URL.to_owned()),
-            token: lookup("PROMPTFORGE_TOKEN"),
+            base_url: lookup("PROMPTFORGE_GATEWAY_URL"),
+            key: lookup("PROMPTFORGE_GATEWAY_KEY"),
         }
     }
 }
@@ -209,13 +204,13 @@ impl AvailableTools {
 /// Builds every concrete tool currently available to a dev run.
 ///
 /// `web_fetch` is unconditional. `web_search` is included only when the
-/// gateway configuration carries a token, because that bearer is the
-/// credential needed to invoke the gateway; a prompt needing search then
-/// fails loudly as `Absent` at bind.
+/// gateway configuration carries both a URL and a key, because those are the
+/// credentials needed to invoke the gateway; a prompt needing search then
+/// fails loudly as `Absent` at bind when either is missing.
 fn available_tools(gateway: &GatewayConfig) -> AvailableTools {
     let mut live: Vec<Box<dyn Tool>> = vec![Box::new(WebFetch::new())];
-    if let Some(token) = &gateway.token {
-        live.push(Box::new(WebSearch::new(&gateway.base_url, token.as_str())));
+    if let (Some(base_url), Some(key)) = (&gateway.base_url, &gateway.key) {
+        live.push(Box::new(WebSearch::new(base_url, key.as_str())));
     }
 
     let catalog = Catalog::new(live.iter().map(|tool| descriptor(tool.as_ref())).collect());
@@ -281,8 +276,7 @@ mod tests {
     use promptforge_tool_picker::{Config, ToolPicker};
 
     use super::{
-        DEFAULT_GATEWAY_BASE_URL, GatewayConfig, VerboseObserver, available_tools, format_record,
-        run_once, run_once_with,
+        GatewayConfig, VerboseObserver, available_tools, format_record, run_once, run_once_with,
     };
 
     /// A cloneable in-memory `Write` sink, so a test can keep reading what the
@@ -356,39 +350,39 @@ mod tests {
     }
 
     #[test]
-    fn gateway_config_defaults_base_url_and_omits_token() {
+    fn gateway_config_omits_url_and_key_when_unset() {
         let gateway = GatewayConfig::from_lookup(lookup_from(&[]));
-        assert_eq!(gateway.base_url, DEFAULT_GATEWAY_BASE_URL);
-        assert!(gateway.token.is_none());
+        assert!(gateway.base_url.is_none());
+        assert!(gateway.key.is_none());
     }
 
     #[test]
     fn gateway_config_reads_injected_values() {
         let gateway = GatewayConfig::from_lookup(lookup_from(&[
-            ("PROMPTFORGE_BASE_URL", "http://10.0.0.7:9999/v1"),
-            ("PROMPTFORGE_TOKEN", "dev-secret"),
+            ("PROMPTFORGE_GATEWAY_URL", "http://10.0.0.7:9999/v1"),
+            ("PROMPTFORGE_GATEWAY_KEY", "dev-secret"),
         ]));
-        assert_eq!(gateway.base_url, "http://10.0.0.7:9999/v1");
-        assert_eq!(gateway.token.as_deref(), Some("dev-secret"));
+        assert_eq!(gateway.base_url.as_deref(), Some("http://10.0.0.7:9999/v1"));
+        assert_eq!(gateway.key.as_deref(), Some("dev-secret"));
     }
 
     #[test]
-    fn token_alone_includes_web_search_on_the_default_gateway() {
+    fn key_alone_omits_web_search_without_url() {
         let gateway =
-            GatewayConfig::from_lookup(lookup_from(&[("PROMPTFORGE_TOKEN", "dev-secret")]));
-        assert_eq!(gateway.base_url, DEFAULT_GATEWAY_BASE_URL);
+            GatewayConfig::from_lookup(lookup_from(&[("PROMPTFORGE_GATEWAY_KEY", "dev-secret")]));
+        assert!(gateway.base_url.is_none());
         let available = available_tools(&gateway);
         assert!(
             available
                 .registry()
                 .tools()
                 .iter()
-                .any(|tool| tool.id().name() == "web_search")
+                .all(|tool| tool.id().name() != "web_search")
         );
     }
 
     #[test]
-    fn no_token_leaves_web_fetch_alone_and_search_binds_absent() {
+    fn no_key_leaves_web_fetch_alone_and_search_binds_absent() {
         let gateway = GatewayConfig::from_lookup(lookup_from(&[]));
         let available = available_tools(&gateway);
         let registry = available.registry();
@@ -421,8 +415,8 @@ tools.need("search", "Search the web and return a list of results (title, url, d
 
     #[test]
     fn live_registry_and_picker_catalog_have_identical_ids() {
-        for token in [&[][..], &[("PROMPTFORGE_TOKEN", "dev-secret")][..]] {
-            let gateway = GatewayConfig::from_lookup(lookup_from(token));
+        for key in [&[][..], &[("PROMPTFORGE_GATEWAY_KEY", "dev-secret")][..]] {
+            let gateway = GatewayConfig::from_lookup(lookup_from(key));
             let available = available_tools(&gateway);
             let live_ids = available
                 .registry()

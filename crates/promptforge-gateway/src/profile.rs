@@ -335,7 +335,7 @@ mod tests {
             r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -402,7 +402,7 @@ endpoints = ["anthropic"]
             r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "e"
@@ -448,7 +448,7 @@ include = ["nested/base.toml"]
                 r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 "#
                 .to_owned()
             } else {
@@ -469,7 +469,7 @@ token = "t"
             r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "base-token"
+key = "base-token"
 
 [queue]
 max_depth = 10
@@ -482,14 +482,14 @@ max_depth = 10
 include = ["base.toml"]
 
 [server]
-token = "child-token"
+key = "child-token"
 
 [queue]
 max_depth = 50
 "#,
         );
         let config = load_path(&tmp.path().join("child.toml")).unwrap();
-        assert_eq!(config.server.token.expose(), "child-token");
+        assert_eq!(config.server.key.expose(), "child-token");
         assert_eq!(config.queue.max_depth, 50);
         assert_eq!(config.server.bind.to_string(), "127.0.0.1:8081");
     }
@@ -521,7 +521,7 @@ max_depth = 50
             r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "e"
@@ -550,7 +550,7 @@ endpoints = ["e"]
             r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[local_model]]
 name = "q"
@@ -587,7 +587,7 @@ context = 2048
             r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[device]]
 id = "anthropic"

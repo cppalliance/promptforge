@@ -50,7 +50,7 @@ use crate::wire::{ChatRequest, ChatResponse, ModelInfo, ModelsResponse};
 #[derive(Debug)]
 struct LiveState {
     routing: Arc<Routing>,
-    token: Secret,
+    key: Secret,
     web_search: Option<Arc<WebSearchState>>,
     local: LocalRuntime,
     profile_name: Option<String>,
@@ -62,7 +62,7 @@ struct ProfilesContext {
     dir: PathBuf,
 }
 
-/// Shared handler state: live routing/token/local runtime, and optional profiles dir.
+/// Shared handler state: live routing/key/local runtime, and optional profiles dir.
 #[derive(Debug, Clone)]
 pub struct AppState {
     live: Arc<RwLock<LiveState>>,
@@ -70,17 +70,17 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Build handler state from a routing table and the server token.
+    /// Build handler state from a routing table and the server key.
     #[must_use]
-    pub fn new(routing: Arc<Routing>, token: Secret) -> AppState {
-        AppState::from_parts(routing, token, LocalRuntime::empty(), None, None, None)
+    pub fn new(routing: Arc<Routing>, key: Secret) -> AppState {
+        AppState::from_parts(routing, key, LocalRuntime::empty(), None, None, None)
     }
 
     /// Build full runtime state for `serve` and integration tests.
     #[must_use]
     pub fn from_parts(
         routing: Arc<Routing>,
-        token: Secret,
+        key: Secret,
         local: LocalRuntime,
         web_search: Option<&WebSearchConfig>,
         profiles_dir: Option<PathBuf>,
@@ -89,7 +89,7 @@ impl AppState {
         AppState {
             live: Arc::new(RwLock::new(LiveState {
                 routing,
-                token,
+                key,
                 web_search: web_search.map(|cfg| Arc::new(WebSearchState::new(cfg))),
                 local,
                 profile_name,
@@ -249,7 +249,7 @@ async fn admin_switch_profile(
         .and_then(|t| t.web_search.as_ref())
         .map(WebSearchState::new)
         .map(Arc::new);
-    let new_token = config.server.token.clone();
+    let new_key = config.server.key.clone();
 
     // Immediate unload under the write lock, then drop old children before load
     // so old and new llama-server processes never hold VRAM at once.
@@ -257,7 +257,7 @@ async fn admin_switch_profile(
         let mut live = state.live.write().await;
         let old_local = std::mem::replace(&mut live.local, LocalRuntime::empty());
         live.routing = Arc::new(interim_routing);
-        live.token = new_token;
+        live.key = new_key;
         live.web_search = new_web_search;
         live.profile_name = Some(name.to_owned());
         old_local
@@ -309,7 +309,7 @@ pub(crate) async fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<
         .and_then(|value| value.strip_prefix("Bearer "))
         .unwrap_or("");
     let live = state.live.read().await;
-    if constant_time_eq(presented.as_bytes(), live.token.expose().as_bytes()) {
+    if constant_time_eq(presented.as_bytes(), live.key.expose().as_bytes()) {
         Ok(())
     } else {
         Err(GatewayError::Unauthorized)

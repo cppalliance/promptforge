@@ -65,7 +65,7 @@ pub(crate) fn catalog(prompts: &[(&str, &str)]) -> Prompts {
     }
     let config = Config::from_toml_str(&format!(
         "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
          [catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()

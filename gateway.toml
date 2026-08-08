@@ -1,10 +1,10 @@
 # PromptForge gateway - development profile.
 # The single endpoint is Anthropic's OpenAI-compatible endpoint. The gateway
-# holds the vendor key; the executor only knows this gateway's URL and token.
+# holds the vendor key; the executor only knows this gateway's URL and key.
 
 [server]
 bind = "127.0.0.1:8081"
-token = "${PROMPTFORGE_TOKEN}"
+key = "${PROMPTFORGE_GATEWAY_KEY}"
 
 [queue]
 max_depth = 100

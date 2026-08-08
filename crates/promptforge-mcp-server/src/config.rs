@@ -155,11 +155,8 @@ impl Default for PathsConfig {
 pub struct GatewayConfig {
     /// The gateway base URL, for example `http://127.0.0.1:8081/v1`.
     pub url: String,
-    /// The shared token the gateway requires.
-    pub token: Secret,
-    /// The model to request. Absent leaves the core's own default in place.
-    #[serde(default)]
-    pub model: Option<String>,
+    /// The shared key the gateway requires.
+    pub key: Secret,
 }
 
 /// The globs that assemble the catalog.
@@ -231,7 +228,7 @@ impl Config {
     ///
     /// [gateway]
     /// url = "http://127.0.0.1:8081/v1"
-    /// token = "gateway-bearer"
+    /// key = "gateway-bearer"
     /// "#,
     /// )?;
     /// assert_eq!(config.server.bind.port(), 9310);

@@ -164,7 +164,7 @@ mod tests {
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "e"

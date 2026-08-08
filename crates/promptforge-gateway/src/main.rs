@@ -104,7 +104,7 @@ fn serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|tools| tools.web_search.as_ref());
     let state = AppState::from_parts(
         routing,
-        config.server.token,
+        config.server.key,
         local,
         web_search,
         Some(args.profiles_dir),

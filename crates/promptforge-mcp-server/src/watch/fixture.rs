@@ -33,7 +33,7 @@ pub(super) fn unparsable() -> &'static str {
 pub(super) fn config_source(root: &Path, extra: &str) -> String {
     format!(
         "[server]\ntoken = \"shared\"\n{extra}\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
          [catalog]\ninclude = [\"*.md\"]\n",
         root.join("prompts").display()
