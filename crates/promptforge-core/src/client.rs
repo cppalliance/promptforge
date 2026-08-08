@@ -126,6 +126,28 @@ pub enum CompletionResult {
     ToolCalls(Vec<ToolCall>),
 }
 
+/// A parsed chat-completions round trip, including metadata later steps need.
+///
+/// [`CompletionResult`] remains the decision the tool loop matches on.
+/// `finish_reason` and `reasoning_content` ride beside it so observers can
+/// report payload-free signals without reading the raw bodies. The request and
+/// response bodies are `pub(crate)` for the opt-in [`crate::debug::DebugCapture`]
+/// seam; they are not part of the public host API.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct Completion {
+    /// The text or tool-call outcome the tool loop consumes.
+    pub result: CompletionResult,
+    /// The choice's `finish_reason`, when the backend supplied one.
+    pub finish_reason: Option<String>,
+    /// The message's `reasoning_content`, when the backend supplied one.
+    pub reasoning_content: Option<String>,
+    /// The JSON body sent to the gateway.
+    pub(crate) request_body: Value,
+    /// The JSON body returned by the gateway.
+    pub(crate) response_body: Value,
+}
+
 /// A chat completions client bound to one gateway, token, and model.
 #[derive(Debug, Clone)]
 pub struct GatewayClient {
@@ -190,8 +212,8 @@ impl GatewayClient {
         &self,
         messages: &[Message],
         tools: Option<&[ToolSchema]>,
-    ) -> Result<CompletionResult> {
-        let mut body = serde_json::json!({
+    ) -> Result<Completion> {
+        let mut request_body = serde_json::json!({
             "model": self.model,
             "messages": messages,
         });
@@ -209,15 +231,15 @@ impl GatewayClient {
                     })
                 })
                 .collect();
-            body["tools"] = Value::Array(wrapped);
-            body["tool_choice"] = Value::String("auto".into());
+            request_body["tools"] = Value::Array(wrapped);
+            request_body["tool_choice"] = Value::String("auto".into());
         }
 
         let response = self
             .http
             .post(format!("{}/chat/completions", self.base_url))
             .bearer_auth(&self.token)
-            .json(&body)
+            .json(&request_body)
             .send()
             .await
             .map_err(Error::http)?;
@@ -237,30 +259,49 @@ impl GatewayClient {
             });
         }
 
-        let parsed: Value = response.json().await.map_err(Error::http)?;
-        parse_completion(&parsed)
+        let response_body: Value = response.json().await.map_err(Error::http)?;
+        let (result, finish_reason, reasoning_content) = parse_completion(&response_body)?;
+        Ok(Completion {
+            result,
+            finish_reason,
+            reasoning_content,
+            request_body,
+            response_body,
+        })
     }
 }
 
-/// Parse a chat-completions response body into a [`CompletionResult`].
+/// Parse a chat-completions response body into its outcome and metadata.
 ///
 /// Prefers a non-empty `tool_calls` array on the first choice's message; each
 /// entry's `function.arguments` (a JSON-encoded string) is parsed into a
 /// [`Value`], falling back to a string `Value` when it is not valid JSON. When
 /// there are no tool calls, the message `content` is returned as text.
+/// `finish_reason` is read from the choice; `reasoning_content` from the
+/// message when present.
 ///
 /// # Errors
 /// Returns [`Error::MalformedResponse`] when there are no choices, or when the
 /// chosen message has neither `content` nor `tool_calls`.
-fn parse_completion(response_json: &Value) -> Result<CompletionResult> {
+fn parse_completion(
+    response_json: &Value,
+) -> Result<(CompletionResult, Option<String>, Option<String>)> {
     let choice = response_json
         .get("choices")
         .and_then(Value::as_array)
         .and_then(|choices| choices.first())
         .ok_or_else(|| Error::MalformedResponse("no choices in response".into()))?;
+    let finish_reason = choice
+        .get("finish_reason")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let message = choice
         .get("message")
         .ok_or_else(|| Error::MalformedResponse("choice had no message".into()))?;
+    let reasoning_content = message
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
 
     if let Some(raw_calls) = message
         .get("tool_calls")
@@ -293,11 +334,19 @@ fn parse_completion(response_json: &Value) -> Result<CompletionResult> {
                 arguments,
             });
         }
-        return Ok(CompletionResult::ToolCalls(calls));
+        return Ok((
+            CompletionResult::ToolCalls(calls),
+            finish_reason,
+            reasoning_content,
+        ));
     }
 
     if let Some(content) = message.get("content").and_then(Value::as_str) {
-        return Ok(CompletionResult::Text(content.to_string()));
+        return Ok((
+            CompletionResult::Text(content.to_string()),
+            finish_reason,
+            reasoning_content,
+        ));
     }
 
     Err(Error::MalformedResponse(
@@ -330,7 +379,9 @@ mod tests {
             }]
         });
 
-        let result = parse_completion(&response).unwrap();
+        let (result, finish_reason, reasoning_content) = parse_completion(&response).unwrap();
+        assert_eq!(finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(reasoning_content, None);
         match result {
             CompletionResult::ToolCalls(calls) => {
                 assert_eq!(calls.len(), 1);
@@ -360,7 +411,7 @@ mod tests {
             }]
         });
 
-        let result = parse_completion(&response).unwrap();
+        let (result, _, _) = parse_completion(&response).unwrap();
         match result {
             CompletionResult::ToolCalls(calls) => {
                 assert_eq!(calls[0].arguments, Value::String("not json".into()));
@@ -377,9 +428,31 @@ mod tests {
             }]
         });
 
-        let result = parse_completion(&response).unwrap();
+        let (result, _, _) = parse_completion(&response).unwrap();
         match result {
             CompletionResult::Text(text) => assert_eq!(text, "hello"),
+            CompletionResult::ToolCalls(_) => panic!("expected text, got tool calls"),
+        }
+    }
+
+    #[test]
+    fn parses_finish_reason_and_reasoning_content() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "answer",
+                    "reasoning_content": "scratch work"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+
+        let (result, finish_reason, reasoning_content) = parse_completion(&response).unwrap();
+        assert_eq!(finish_reason.as_deref(), Some("stop"));
+        assert_eq!(reasoning_content.as_deref(), Some("scratch work"));
+        match result {
+            CompletionResult::Text(text) => assert_eq!(text, "answer"),
             CompletionResult::ToolCalls(_) => panic!("expected text, got tool calls"),
         }
     }

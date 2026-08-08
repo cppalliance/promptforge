@@ -303,6 +303,7 @@ async fn log_fixture_reports_exact_author_checkpoints() {
             execution: LOG_EXECUTION,
             observer: &recorder,
             client: None,
+            debug: None,
         },
     )
     .await
@@ -371,6 +372,7 @@ async fn preamble_return_fixture_skips_model_and_epilog() {
             execution: PREAMBLE_EXECUTION,
             observer: &recorder,
             client: None,
+            debug: None,
         },
     )
     .await
@@ -410,6 +412,7 @@ async fn store_fixture_persists_state_across_fall_through() {
             execution: STORE_EXECUTION,
             observer: &recorder,
             client: None,
+            debug: None,
         },
     )
     .await
@@ -472,6 +475,7 @@ async fn concurrent_runs_keep_execution_ids_separate() {
                 execution: FIRST,
                 observer: first_recorder.as_ref(),
                 client: None,
+                debug: None,
             },
         )
         .await
@@ -489,6 +493,7 @@ async fn concurrent_runs_keep_execution_ids_separate() {
                 execution: SECOND,
                 observer: second_recorder.as_ref(),
                 client: None,
+                debug: None,
             },
         )
         .await
