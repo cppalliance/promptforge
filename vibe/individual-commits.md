@@ -18,3 +18,5 @@
 
 ## 2026-08-07 dev: dump the run store beside the prompt after each run
 
+## 2026-08-08 chore: gitignore prompt store dump directories
+

@@ -1,4 +1,5 @@
 /target
 /.model-cache/
+*.store/
 /vibe-review.md
 /conformance-audit.md
