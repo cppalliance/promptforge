@@ -7,6 +7,10 @@ max_tool_iterations: 1
 
 # Dev Verification
 
+```lua
+models.always('writer', 'A general model for dev verification')
+```
+
 This prompt verifies the dev command end to end against the real dev model: a
 preamble checkpoint, one substituted model turn, and an epilog that must see
 the reply.

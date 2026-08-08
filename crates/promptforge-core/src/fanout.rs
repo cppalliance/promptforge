@@ -162,6 +162,17 @@ pub(crate) async fn run_fanout_arms(
         };
         let scope = scopes.tools;
 
+        let sys = if let Some(model_binding) = scopes.model.as_ref() {
+            let enriched = crate::lua::enrich_sys_model(&sys, model_binding);
+            if let Err(error) = vm.re_seal_sys(&enriched) {
+                vm.teardown(ctx.observer, &worker.name);
+                return Err(error);
+            }
+            enriched
+        } else {
+            sys
+        };
+
         // Substitution with item
         let var = match vm.var() {
             Ok(var) => var,

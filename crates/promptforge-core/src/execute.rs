@@ -386,6 +386,17 @@ async fn run_sections(
         };
         let scope = scopes.tools;
 
+        let sys = if let Some(model_binding) = scopes.model.as_ref() {
+            let enriched = crate::lua::enrich_sys_model(&sys, model_binding);
+            if let Err(error) = vm.re_seal_sys(&enriched) {
+                vm.teardown(observer, &section.name);
+                return Err(error);
+            }
+            enriched
+        } else {
+            sys
+        };
+
         let var = match vm.var() {
             Ok(var) => var,
             Err(error) => {
