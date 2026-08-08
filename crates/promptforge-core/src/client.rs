@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::dialects::{DialectRequest, ToolDialectRegistry};
 use crate::model::CompletionOptions;
 use crate::normalize::{CompletionNormalizer, OpenAiChatNormalizer};
 use crate::{Error, Result};
@@ -178,6 +179,7 @@ pub struct GatewayClient {
     base_url: String,
     key: String,
     normalizer: Arc<dyn CompletionNormalizer>,
+    dialect_registry: Arc<ToolDialectRegistry>,
 }
 
 impl fmt::Debug for GatewayClient {
@@ -200,6 +202,7 @@ impl GatewayClient {
             base_url: base_url.trim_end_matches('/').to_string(),
             key: key.into(),
             normalizer: OpenAiChatNormalizer::shared(),
+            dialect_registry: Arc::new(ToolDialectRegistry::builtin()),
         }
     }
 
@@ -276,6 +279,15 @@ impl GatewayClient {
             });
         }
 
+        let dialect = self
+            .dialect_registry
+            .get(options.tool_dialect)
+            .ok_or(Error::UnknownDialect(options.tool_dialect))?;
+        let mut dr = DialectRequest {
+            body: &mut request_body,
+        };
+        dialect.prepare_request(&mut dr)?;
+
         let response = self
             .http
             .post(format!("{}/chat/completions", self.base_url))
@@ -301,7 +313,7 @@ impl GatewayClient {
         }
 
         let response_body: Value = response.json().await.map_err(Error::http)?;
-        let turn = self.normalizer.normalize(&response_body)?;
+        let turn = dialect.parse_turn(&response_body)?;
         Ok(Completion {
             result: turn.outcome,
             tool_history: turn.tool_history,
@@ -409,6 +421,7 @@ mod tests {
             temperature: Some(0.0),
             max_tokens: Some(128),
             thinking: Some(false),
+            tool_dialect: crate::dialects::ToolDialectId::OpenAi,
         };
         client
             .complete(&[Message::user("hi")], None, &options)
@@ -456,6 +469,7 @@ mod tests {
             temperature: None,
             max_tokens: None,
             thinking: None,
+            tool_dialect: crate::dialects::ToolDialectId::OpenAi,
         };
         let err = client
             .complete(&[Message::user("hi")], None, &options)

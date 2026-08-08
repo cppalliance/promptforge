@@ -123,6 +123,15 @@ impl ToolDialectRegistry {
         }
     }
 
+    /// Look up a dialect by its [`ToolDialectId`].
+    #[must_use]
+    pub fn get(&self, id: ToolDialectId) -> Option<&dyn ToolDialect> {
+        self.dialects
+            .iter()
+            .find(|d| d.id() == id)
+            .map(|d| d.as_ref())
+    }
+
     /// Resolve evidence into a single dialect, failing on ties or no match.
     ///
     /// # Errors
