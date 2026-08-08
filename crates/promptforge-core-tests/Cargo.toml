@@ -15,21 +15,16 @@ path = "src/main.rs"
 anyhow.workspace = true
 async-trait.workspace = true
 fastrand.workspace = true
-flate2.workspace = true
 notify.workspace = true
 promptforge-core.workspace = true
 promptforge-tool-picker.workspace = true
 promptforge-webfetch.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 serde_json.workspace = true
-sha2.workspace = true
-tar.workspace = true
-thiserror.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["signal", "time"] }
-zip.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]

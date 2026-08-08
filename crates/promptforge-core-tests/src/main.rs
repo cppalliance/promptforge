@@ -1,10 +1,9 @@
 //! Explicit real-model entry point plus offline prompt fixture tests.
 
-mod artifacts;
 mod dev;
 mod dump;
+mod gateway;
 mod scenarios;
-mod server;
 mod watch;
 
 #[cfg(test)]
@@ -17,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context as _, Result, bail};
 
-use crate::server::{DevServerOptions, ServerGuard, ServerProfile};
+use crate::gateway::{DevServerOptions, GatewayGuard, GatewayProfile, ModelKind};
 
 /// Usage text printed beneath every argument error.
 const USAGE: &str = "usage:
@@ -73,11 +72,11 @@ enum StatusStream {
 }
 
 impl StatusStream {
-    /// Selects the status stream for provisioning `kind`.
-    fn for_kind(kind: artifacts::ModelKind) -> Self {
+    /// Selects the status stream for launching `kind`.
+    fn for_kind(kind: ModelKind) -> Self {
         match kind {
-            artifacts::ModelKind::Scenario => Self::Stdout,
-            artifacts::ModelKind::Dev => Self::Stderr,
+            ModelKind::Scenario => Self::Stdout,
+            ModelKind::Dev => Self::Stderr,
         }
     }
 
@@ -210,40 +209,27 @@ async fn run_command(command: Command, interrupted: Arc<AtomicBool>) -> Result<(
     }
 }
 
-/// Provisions `kind`'s pinned artifacts off the runtime and starts the
-/// guarded server with `profile`.
-async fn provision_and_start(
-    kind: artifacts::ModelKind,
-    profile: ServerProfile,
+/// Starts `promptforge-gateway` with a generated profile for `kind`.
+async fn start_gateway(
+    kind: ModelKind,
+    profile: GatewayProfile,
     interrupted: Arc<AtomicBool>,
-) -> Result<ServerGuard> {
+) -> Result<GatewayGuard> {
     let status = StatusStream::for_kind(kind);
-    status.emit("provisioning pinned real-model artifacts");
-    let artifacts = tokio::task::spawn_blocking(move || artifacts::provision(kind))
+    status.emit("starting promptforge-gateway with generated profile");
+    let server = tokio::task::spawn_blocking(move || GatewayGuard::start(profile, &interrupted))
         .await
-        .context("join artifact provisioner")?
-        .context("provision pinned real-model artifacts")?;
-    status.emit("pinned artifacts are ready");
-
-    let server_executable = artifacts.llama_server;
-    let model = artifacts.model;
-    let server = tokio::task::spawn_blocking(move || {
-        ServerGuard::start(&server_executable, &model, profile, &interrupted)
-    })
-    .await
-    .context("join llama-server startup")??;
-    status.emit(&format!("llama-server is ready at {}", server.base_url()));
+        .context("join promptforge-gateway startup")??;
+    status.emit(&format!(
+        "promptforge-gateway is ready at {}",
+        server.base_url()
+    ));
     Ok(server)
 }
 
 /// Runs the fixed deterministic scenario suite against the scenario profile.
 async fn run_explicit_suite(interrupted: Arc<AtomicBool>) -> Result<()> {
-    let server = provision_and_start(
-        artifacts::ModelKind::Scenario,
-        ServerProfile::Scenario,
-        interrupted,
-    )
-    .await?;
+    let server = start_gateway(ModelKind::Scenario, GatewayProfile::Scenario, interrupted).await?;
     let result =
         scenarios::run_all(&server.base_url(), server.api_key(), server.model_alias()).await;
     if let Err(error) = result {
@@ -255,9 +241,9 @@ async fn run_explicit_suite(interrupted: Arc<AtomicBool>) -> Result<()> {
 
 /// Runs one prompt against the dev profile, single-shot or in watch mode.
 async fn run_dev(command: DevCommand, interrupted: Arc<AtomicBool>) -> Result<()> {
-    let server = provision_and_start(
-        artifacts::ModelKind::Dev,
-        ServerProfile::Dev(command.options),
+    let server = start_gateway(
+        ModelKind::Dev,
+        GatewayProfile::Dev(command.options),
         interrupted,
     )
     .await?;
@@ -448,13 +434,10 @@ mod tests {
     #[test]
     fn dev_status_lines_route_to_stderr_and_scenario_lines_to_stdout() {
         assert_eq!(
-            StatusStream::for_kind(artifacts::ModelKind::Scenario),
+            StatusStream::for_kind(ModelKind::Scenario),
             StatusStream::Stdout
         );
-        assert_eq!(
-            StatusStream::for_kind(artifacts::ModelKind::Dev),
-            StatusStream::Stderr
-        );
+        assert_eq!(StatusStream::for_kind(ModelKind::Dev), StatusStream::Stderr);
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
