@@ -6,7 +6,7 @@
 //! normal OpenAI-routed [`Model`](crate::routing::Model). Dropping
 //! [`LocalRuntime`] kills the children.
 
-mod artifacts;
+pub(crate) mod artifacts;
 mod error;
 mod server;
 
@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use crate::config::{Config, LocalModelConfig, ThinkingMode};
-use crate::queue::{EndpointLane, QueueConfig};
+use crate::queue::EndpointLane;
 use crate::routing::{Endpoint, Model};
 use crate::upstream::OpenAiUpstream;
 
@@ -40,6 +40,16 @@ pub struct LocalRuntime {
 }
 
 impl LocalRuntime {
+    /// An empty runtime with no children. Used when no `[[local_model]]` is set
+    /// and as the placeholder before the first profile switch.
+    #[must_use]
+    pub fn empty() -> LocalRuntime {
+        LocalRuntime {
+            guards: Vec::new(),
+            models: Vec::new(),
+        }
+    }
+
     /// Provisions binaries/models and starts one `llama-server` per local model.
     ///
     /// When `config.local_models` is empty, returns an empty runtime without
@@ -49,10 +59,7 @@ impl LocalRuntime {
     /// Returns [`LocalError`] when download, verification, spawn, or readiness fails.
     pub fn start(config: &Config) -> Result<LocalRuntime, LocalError> {
         if config.local_models.is_empty() {
-            return Ok(LocalRuntime {
-                guards: Vec::new(),
-                models: Vec::new(),
-            });
+            return Ok(LocalRuntime::empty());
         }
 
         let cache_root = resolve_cache_root(config.local.cache_dir.as_deref());
@@ -83,7 +90,10 @@ impl LocalRuntime {
                 &guard.base_url(),
                 crate::config::Secret::from(guard.api_key().to_owned()),
             ));
-            let lane = EndpointLane::new(1, &QueueConfig::default());
+            let concurrency = config
+                .local_model_concurrency(local_model)
+                .map_err(|e| LocalError::Server(e.to_string()))?;
+            let lane = EndpointLane::new(concurrency, &config.queue);
             let endpoint = Arc::new(Endpoint {
                 id: endpoint_id,
                 upstream,

@@ -167,9 +167,10 @@ pub async fn web_search(
     headers: HeaderMap,
     Json(request): Json<WebSearchRequest>,
 ) -> Result<Json<WebSearchResponse>, GatewayError> {
-    check_auth(&state, &headers)?;
+    check_auth(&state, &headers).await?;
     let web_search = state
         .web_search()
+        .await
         .ok_or(GatewayError::ToolNotConfigured("web_search"))?;
     let count = request.count.unwrap_or(DEFAULT_COUNT);
     let response = brave_search(

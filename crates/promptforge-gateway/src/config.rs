@@ -91,6 +91,9 @@ pub struct Config {
     /// Cache and binary settings for gateway-owned local inference.
     #[serde(default)]
     pub local: LocalConfig,
+    /// Physical compute resources with concurrency limits.
+    #[serde(rename = "device", default)]
+    pub devices: Vec<DeviceConfig>,
     /// The configured backends.
     #[serde(rename = "endpoint", default)]
     pub endpoints: Vec<EndpointConfig>,
@@ -104,6 +107,50 @@ pub struct Config {
     /// is present.
     #[serde(default)]
     pub tools: Option<ToolsConfig>,
+}
+
+/// Whether a device is a remote provider or a local GPU managed by the gateway.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum DeviceKind {
+    /// A remote HTTP provider; concurrency is flat (no lanes required).
+    Remote,
+    /// A local GPU; concurrency comes from `[[device.lane]]` entries.
+    Local,
+}
+
+/// One compute device declared as `[[device]]`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct DeviceConfig {
+    /// Operator-chosen device id, referenced by endpoints and local models.
+    pub id: String,
+    /// Remote provider or local GPU.
+    #[serde(rename = "type")]
+    pub kind: DeviceKind,
+    /// Max concurrent requests for a remote device. Ignored for local devices
+    /// (use lanes instead).
+    #[serde(default)]
+    pub concurrency: Option<usize>,
+    /// Lanes nested via `[[device.lane]]` under this device.
+    #[serde(default, rename = "lane")]
+    pub lanes: Vec<LaneConfig>,
+}
+
+/// A concurrency lane within a local device (`[[device.lane]]`).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct LaneConfig {
+    /// Lane id referenced by `[[local_model]].lane`.
+    pub id: String,
+    /// Max concurrent inferences on this lane.
+    pub concurrency: usize,
+    /// Optional explicit device id (redundant when nested under `[[device]]`).
+    #[serde(default)]
+    pub device: Option<String>,
 }
 
 /// Settings under `[local]` for artifact cache paths.
@@ -134,6 +181,12 @@ pub struct LocalModelConfig {
     /// Optional SHA-256 pin (lowercase hex). Verified after download when set.
     #[serde(default)]
     pub sha256: Option<String>,
+    /// Optional device id (`[[device]]`); used with [`Self::lane`] for concurrency.
+    #[serde(default)]
+    pub device: Option<String>,
+    /// Optional lane id under the device (`[[device.lane]]`).
+    #[serde(default)]
+    pub lane: Option<String>,
     /// Context window size in tokens (`--ctx-size`).
     pub context: u32,
     /// Whether thinking tokens are never, always, or switchably available.
@@ -183,8 +236,13 @@ pub struct EndpointConfig {
     pub api_key: Secret,
     /// Maximum in-flight requests to this endpoint. Absent means unlimited
     /// (the waiting queue is a no-op pass-through for that endpoint).
+    /// When [`Self::device`] is set and this field is absent, the device's
+    /// concurrency is used instead.
     #[serde(default)]
     pub concurrency: Option<usize>,
+    /// Optional remote device id whose concurrency governs this endpoint.
+    #[serde(default)]
+    pub device: Option<String>,
 }
 
 /// How a model exposes chain-of-thought / thinking tokens to callers.
@@ -270,18 +328,72 @@ pub enum SearchProvider {
 }
 
 impl Config {
-    /// Load, interpolate, parse, and validate a configuration file.
+    /// Load a configuration file with recursive `include` resolution.
     ///
     /// # Errors
-    /// Returns [`ConfigError`] if the file cannot be read, an interpolation is
-    /// malformed or references an unset variable, the TOML is invalid, or a
-    /// semantic check fails.
+    /// Returns [`ConfigError`] if the file cannot be read, an include cycle or
+    /// depth limit is hit, an interpolation is malformed or references an unset
+    /// variable, the TOML is invalid, or a semantic check fails.
     pub fn load(path: &Path) -> Result<Config, ConfigError> {
-        let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
-            path: path.display().to_string(),
-            source,
-        })?;
-        Config::from_toml_str(&raw)
+        crate::profile::load_path(path)
+    }
+
+    /// Resolve the concurrency limit for an endpoint: explicit
+    /// `concurrency`, else the referenced remote device's concurrency, else
+    /// unlimited (`None`).
+    #[must_use]
+    pub fn endpoint_concurrency(&self, endpoint: &EndpointConfig) -> Option<usize> {
+        if let Some(n) = endpoint.concurrency {
+            return Some(n);
+        }
+        let device_id = endpoint.device.as_deref()?;
+        self.devices
+            .iter()
+            .find(|d| d.id == device_id)
+            .and_then(|d| d.concurrency)
+    }
+
+    /// Resolve lane concurrency for a local model. Defaults to 1 when no
+    /// device/lane is declared.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError::Validation`] when the device or lane is missing.
+    pub fn local_model_concurrency(&self, model: &LocalModelConfig) -> Result<usize, ConfigError> {
+        match (&model.device, &model.lane) {
+            (None, None) => Ok(1),
+            (Some(device_id), Some(lane_id)) => {
+                let device = self
+                    .devices
+                    .iter()
+                    .find(|d| d.id == *device_id)
+                    .ok_or_else(|| {
+                        ConfigError::Validation(format!(
+                            "local_model {} names undefined device {device_id}",
+                            model.name
+                        ))
+                    })?;
+                let lane = device
+                    .lanes
+                    .iter()
+                    .find(|l| l.id == *lane_id)
+                    .ok_or_else(|| {
+                        ConfigError::Validation(format!(
+                            "local_model {} names undefined lane {lane_id} on device {device_id}",
+                            model.name
+                        ))
+                    })?;
+                if lane.concurrency < 1 {
+                    return Err(ConfigError::Validation(format!(
+                        "device {device_id} lane {lane_id} concurrency must be at least 1"
+                    )));
+                }
+                Ok(lane.concurrency)
+            }
+            _ => Err(ConfigError::Validation(format!(
+                "local_model {} must set both device and lane, or neither",
+                model.name
+            ))),
+        }
     }
 
     /// Interpolate, parse, and validate a configuration from a TOML string.
@@ -310,7 +422,68 @@ impl Config {
                 "queue.max_depth must be at least 1".to_string(),
             ));
         }
+        self.validate_devices()?;
+        let endpoint_ids = self.validate_endpoints()?;
+        self.validate_models(&endpoint_ids)?;
+        Ok(())
+    }
 
+    fn validate_devices(&self) -> Result<(), ConfigError> {
+        let mut device_ids = HashSet::new();
+        for device in &self.devices {
+            if device.id.is_empty() {
+                return Err(ConfigError::Validation(
+                    "device id must not be empty".to_string(),
+                ));
+            }
+            if !device_ids.insert(device.id.as_str()) {
+                return Err(ConfigError::Validation(format!(
+                    "duplicate device id {}",
+                    device.id
+                )));
+            }
+            if let Some(concurrency) = device.concurrency
+                && concurrency < 1
+            {
+                return Err(ConfigError::Validation(format!(
+                    "device {} concurrency must be at least 1",
+                    device.id
+                )));
+            }
+            let mut lane_ids = HashSet::new();
+            for lane in &device.lanes {
+                if lane.id.is_empty() {
+                    return Err(ConfigError::Validation(format!(
+                        "device {} lane id must not be empty",
+                        device.id
+                    )));
+                }
+                if !lane_ids.insert(lane.id.as_str()) {
+                    return Err(ConfigError::Validation(format!(
+                        "duplicate lane id {} on device {}",
+                        lane.id, device.id
+                    )));
+                }
+                if lane.concurrency < 1 {
+                    return Err(ConfigError::Validation(format!(
+                        "device {} lane {} concurrency must be at least 1",
+                        device.id, lane.id
+                    )));
+                }
+                if let Some(ref_id) = &lane.device
+                    && ref_id != &device.id
+                {
+                    return Err(ConfigError::Validation(format!(
+                        "lane {} device {ref_id} does not match parent device {}",
+                        lane.id, device.id
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_endpoints(&self) -> Result<HashSet<&str>, ConfigError> {
         let mut endpoint_ids = HashSet::new();
         for endpoint in &self.endpoints {
             if !endpoint_ids.insert(endpoint.id.as_str()) {
@@ -327,8 +500,26 @@ impl Config {
                     endpoint.id
                 )));
             }
+            if let Some(device_id) = &endpoint.device {
+                let device = self.devices.iter().find(|d| d.id == *device_id);
+                let Some(device) = device else {
+                    return Err(ConfigError::Validation(format!(
+                        "endpoint {} names undefined device {device_id}",
+                        endpoint.id
+                    )));
+                };
+                if device.kind != DeviceKind::Remote {
+                    return Err(ConfigError::Validation(format!(
+                        "endpoint {} references non-remote device {device_id}",
+                        endpoint.id
+                    )));
+                }
+            }
         }
+        Ok(endpoint_ids)
+    }
 
+    fn validate_models(&self, endpoint_ids: &HashSet<&str>) -> Result<(), ConfigError> {
         let mut model_names = HashSet::new();
         for model in &self.models {
             if !model_names.insert(model.name.as_str()) {
@@ -403,6 +594,7 @@ impl Config {
                     local_model.name
                 )));
             }
+            self.local_model_concurrency(local_model)?;
         }
         Ok(())
     }
@@ -967,6 +1159,91 @@ name = "q"
 description = "prose"
 source = ""
 context = 4096
+"#;
+        assert!(matches!(
+            Config::from_toml_str(toml),
+            Err(ConfigError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn parses_devices_lanes_and_endpoint_device() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[[device]]
+id = "anthropic"
+type = "remote"
+concurrency = 7
+
+[[device]]
+id = "local-gpu"
+type = "local"
+
+[[device.lane]]
+device = "local-gpu"
+id = "generative"
+concurrency = 1
+
+[[endpoint]]
+id = "anthropic"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+device = "anthropic"
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["anthropic"]
+
+[[local_model]]
+name = "q"
+description = "prose"
+source = "https://example.com/m.gguf"
+device = "local-gpu"
+lane = "generative"
+context = 4096
+"#;
+        let config = Config::from_toml_str(toml).unwrap();
+        assert_eq!(config.devices.len(), 2);
+        assert_eq!(config.devices[0].kind, DeviceKind::Remote);
+        assert_eq!(config.devices[0].concurrency, Some(7));
+        assert_eq!(config.devices[1].lanes.len(), 1);
+        assert_eq!(config.devices[1].lanes[0].id, "generative");
+        assert_eq!(config.endpoint_concurrency(&config.endpoints[0]), Some(7));
+        assert_eq!(
+            config
+                .local_model_concurrency(&config.local_models[0])
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn rejects_endpoint_naming_undefined_device() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+device = "missing"
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
 "#;
         assert!(matches!(
             Config::from_toml_str(toml),

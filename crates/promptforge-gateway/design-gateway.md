@@ -4,7 +4,7 @@
 
 This crate is one always-on service process. It accepts OpenAI-shaped chat completion requests over HTTP, resolves the request's model name to a configured backend, holds the credential that backend needs, forwards the request, and relays the answer back. Nothing above it holds a vendor key, and nothing above it knows which machine answers: a prompt names `reasoning-large`, and whether that is an Anthropic key or a pod on the intranet is a line in one configuration file.
 
-Three routes serve. `POST /v1/chat/completions` is the only one that reaches a backend. `POST /v1/tools/web_search` is a built-in tool the gateway answers itself, for the same reason it holds the model credential: it is the process that holds keys. `GET /health` is a liveness probe and takes no token; the other two check a bearer against one shared secret in constant time.
+`POST /v1/chat/completions` is the only route that reaches a backend. `POST /v1/tools/web_search` is a built-in tool the gateway answers itself, for the same reason it holds the model credential. `GET /v1/models` is the catalog. Admin routes under `/admin/*` list and switch profiles. `GET /health` is a liveness probe and takes no token; every other route checks a bearer against one shared secret in constant time.
 
 Routing is one exact string match with a 404 on a miss - no prefixes, no aliases, no default model - and the request body is passed through with only `model` substituted, so a sampling parameter the gateway has never heard of reaches the backend anyway and the caller's model name comes back rather than the vendor's. Configuration is one TOML file that rejects an unknown key outright and expands `${VAR}` from the environment before it parses, so a deployment that forgot to export a credential fails at startup rather than serving with a blank one.
 
@@ -18,7 +18,7 @@ What is not here is as load-bearing as what is: no streaming, no retries, no tok
 
 3. **Model resolution is one exact string lookup, and a miss is a 404.** No prefix matching, no regex, no alias chain, and no default model, because every one of those turns a typo into a silent charge against the wrong backend. A model name is any string the deployment chooses, and naming it by capability rather than by vendor is the mechanism that lets one prompt stay fixed while the machine under it changes between development and production.
 
-4. **A model resolves to exactly one endpoint, fixed at load.** `from_config` takes the first id in the model's `endpoints` list and the rest are parsed and ignored; the table is built once and held behind an `Arc` and does not change while the process runs. Selection among endpoints and endpoint health are deliberately unbuilt: a list that is parsed but not chosen from is honest about what exists, where a half-built selector would look like a mechanism.
+4. **A model resolves to exactly one endpoint, fixed for the active profile.** `from_config` takes the first id in the model's `endpoints` list and the rest are parsed and ignored. The table is held behind a `tokio::sync::RwLock` so `POST /admin/switch-profile` can replace routing and local children without restarting the listener. Selection among endpoints and endpoint health are deliberately unbuilt.
 
 5. **The gateway answers one tool itself, for the same reason it holds the model credential.** `POST /v1/tools/web_search` is proxied to the search provider with the provider's key, and the executor never sees that key. `web_fetch` needs no credential and so stays in the executor with no route here. The rule is the credential and not the category of work, which means there is one place to look for a secret rather than two.
 
@@ -40,9 +40,71 @@ What is not here is as load-bearing as what is: no streaming, no retries, no tok
 
 14. **Local generative inference is a managed `llama-server` subprocess, not in-process `llama-cpp-2`.** Linking llama.cpp into the gateway binary is deferred. When `[[local_model]]` is present, startup downloads a pinned b10082 `llama-server` (GPU builds: Vulkan on Windows/Linux, Metal on macOS), downloads each GGUF into `~/.promptforge` (or `[local].cache_dir`), spawns one child per local model, and registers each as a normal routed `Model` whose `base_url` is the child's `http://127.0.0.1:{port}/v1`. Operator experience matches the plan: one `gateway.toml`, no separate Ollama install. `unsafe_code` stays forbidden. Falsifier for revisiting in-process FFI: if subprocess IPC or lifecycle (startup races, clean shutdown, multi-model VRAM contention) proves inadequate for production workloads.
 
-## Local generative models (`[[local_model]]`)
+## Profiles (named configs with include and hot switch)
 
-Configuration declares local models beside remote ones. There is no profile inheritance or `switch-profile` admin API yet (Layer 3).
+A profile is a TOML file describing the active model catalog, endpoints, optional devices/lanes, and local models. The gateway runs one profile at a time.
+
+```
+promptforge-gateway serve --profile analytical
+promptforge-gateway serve --profiles-dir ./profiles --profile base
+promptforge-gateway serve gateway.toml   # path still works; includes resolve relative to the file
+```
+
+Default profiles directory: `~/.promptforge/profiles/` (Windows: `%USERPROFILE%\.promptforge\profiles\`). Example profiles live in the repo under `profiles/` (`base.toml`, `analytical.toml`).
+
+Inheritance:
+
+```toml
+include = ["base.toml"]
+```
+
+- Paths are relative to the including file
+- Resolution is depth-first; max depth 16; cycles are `ConfigError`
+- Arrays (`endpoint` / `model` / `local_model` / `device`) merge by append; same `id` or `name` is replaced by the later (child) definition
+- Scalars (`server.*`, `queue.*`, `local.cache_dir`) - later wins
+
+Admin routes (same bearer token as `/v1`):
+
+| Route | Behaviour |
+|---|---|
+| `GET /admin/profiles` | List `*.toml` stems in the profiles directory |
+| `GET /admin/status` | Current profile name, model names, local child count, queue note |
+| `POST /admin/switch-profile` `{"name":"threat"}` | Immediate switch: under the write lock replace local with empty and install remote-only routing from the new profile, drop the old `LocalRuntime` (kills previous llama-server processes), then `spawn_blocking` `LocalRuntime::start` and install the result. On start failure leave empty local models and the remote-only live state, return `SwitchFailed`. No queue drain. In-flight chat may fail. |
+
+`AppState` holds routing, token, web-search, and `LocalRuntime` behind `tokio::sync::RwLock` so switch can rebuild without restarting the HTTP listener. Bind address does not change on switch (restart required).
+
+Optional devices/lanes (Layer 3):
+
+```toml
+[[device]]
+id = "anthropic"
+type = "remote"
+concurrency = 10
+
+[[device]]
+id = "local-gpu"
+type = "local"
+
+[[device.lane]]
+device = "local-gpu"
+id = "generative"
+concurrency = 1
+
+[[endpoint]]
+id = "anthropic"
+device = "anthropic"   # or keep endpoint-level concurrency =
+# ...
+
+[[local_model]]
+name = "qwen-local"
+device = "local-gpu"
+lane = "generative"
+# ...
+```
+
+Remote endpoints may still set `concurrency` directly (Layer 1). Local models default to concurrency 1 when device/lane are omitted.
+
+## Local generative models (`[[local_model]]`)
 
 ```toml
 [local]
@@ -63,7 +125,7 @@ cache_type_v = "q4_0"
 n_predict = 8192
 ```
 
-On start, each local model becomes a catalog entry: `description` appears in `GET /v1/models` so semantic bind (for example briefer's `models.always("writer", "A careful analysis...")`) works the same as for remote models. Each local endpoint uses `concurrency = 1`. Dropping `LocalRuntime` (process exit) kills every child.
+On start (and after switch-profile), each local model becomes a catalog entry: `description` appears in `GET /v1/models` so semantic bind works the same as for remote models. Dropping `LocalRuntime` (process exit or profile replace) kills every child.
 
 See `gateway.local.example.toml` at the repository root for a full sample pinned to the same Qwen3.5-9B Q4_K_M digest as `promptforge-core-tests`.
 
@@ -393,6 +455,6 @@ Two departures from the rule the unbuilt design states, that `code` is the varia
 
 No `#[tokio::main]` anywhere in the crate. A Windows service entry point is called by the SCM on a thread the SCM owns, after `main` has already handed control to `service_dispatcher`, so the runtime has to be constructed inside the service handler. An attribute macro on `main` builds it in the wrong place and at the wrong time. The foreground path builds a runtime the same way, so when the service path is added there is exactly one construction site and the two cannot drift.
 
-Startup order is load, start `LocalRuntime` (provision + spawn children when `[[local_model]]` is set), build the routing table (remote then local), build handler state, bind, serve. A configuration that will not load or validate is a startup failure with the error on stderr, so a broken file never reaches a listening socket. Process exit drops `LocalRuntime` and kills every child.
+Startup order is load profile (with includes), start `LocalRuntime` (provision + spawn children when `[[local_model]]` is set), build the routing table (remote then local), build handler state (including profiles dir for admin routes), bind, serve. A configuration that will not load or validate is a startup failure with the error on stderr, so a broken file never reaches a listening socket. Process exit or profile switch drops the previous `LocalRuntime` and kills its children.
 
 *2026-08-08 - cursor-grok-4.5*

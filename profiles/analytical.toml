@@ -1,0 +1,31 @@
+# Analytical profile: inherits remote Anthropic from base, plus an optional
+# local generative model. Uncomment [[local_model]] when a GGUF URL/path is ready.
+include = ["base.toml"]
+
+[[device]]
+id = "local-gpu"
+type = "local"
+
+[[device.lane]]
+device = "local-gpu"
+id = "generative"
+concurrency = 1
+
+[[device.lane]]
+device = "local-gpu"
+id = "utility"
+concurrency = 8
+
+# Example local model (commented so the profile loads without downloading a GGUF).
+# [[local_model]]
+# name = "qwen-local"
+# description = "Dense local model for structured analysis and long-context review"
+# source = "https://huggingface.co/bartowski/Qwen_Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf"
+# device = "local-gpu"
+# lane = "generative"
+# context = 65536
+# thinking = "never"
+# cache_type_k = "q8_0"
+# cache_type_v = "q4_0"
+# flash_attention = true
+# gpu_layers = 99
