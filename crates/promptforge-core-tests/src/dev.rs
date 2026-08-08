@@ -111,6 +111,14 @@ async fn run_once_with(
     let store = StoreRef::memory();
     let client = GatewayClient::new(base_url, api_key, model_alias);
     let capture = crate::dump::TraceCapture::new(prompt_path);
+
+    // Clear the previous run's dump before starting so stale trace files
+    // are never visible while a new run is in flight.
+    let dump_dir = crate::dump::dump_directory(prompt_path);
+    if dump_dir.is_dir() {
+        let _ = std::fs::remove_dir_all(&dump_dir);
+    }
+
     let options = RunOptions {
         execution: &execution,
         observer,
