@@ -34,7 +34,9 @@ use std::fmt;
 use serde_json::json;
 
 use crate::bind::BoundPrompt;
-use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
+use crate::client::{
+    CompletionResult, GatewayClient, Message, ToolCall, ToolHistoryStyle, ToolSchema,
+};
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::fanout;
 use crate::lua::{SectionVm, ToolBindings, ToolScope};
@@ -815,24 +817,36 @@ pub(crate) async fn run_tool_loop(
                 return Ok(text);
             }
             CompletionResult::ToolCalls(calls) => {
-                // Echo the assistant's tool-call turn back into the history. The
-                // parsed `ToolCall`s are reconstructed into the raw OpenAI wire
-                // shape (`function.arguments` re-encoded as a JSON string).
-                let raw_calls = calls
-                    .iter()
-                    .map(|call| {
-                        json!({
-                            "id": call.id,
-                            "type": "function",
-                            "function": {
-                                "name": call.name,
-                                "arguments": call.arguments.to_string(),
-                            },
-                        })
-                    })
-                    .collect();
-                conversation.push(Message::assistant_tool_calls(raw_calls));
+                match completion.tool_history {
+                    ToolHistoryStyle::OpenAi => {
+                        // Echo the assistant's tool-call turn back into the
+                        // history. The parsed `ToolCall`s are reconstructed into
+                        // the raw OpenAI wire shape (`function.arguments`
+                        // re-encoded as a JSON string).
+                        let raw_calls = calls
+                            .iter()
+                            .map(|call| {
+                                json!({
+                                    "id": call.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": call.name,
+                                        "arguments": call.arguments.to_string(),
+                                    },
+                                })
+                            })
+                            .collect();
+                        conversation.push(Message::assistant_tool_calls(raw_calls));
+                    }
+                    ToolHistoryStyle::ContentFence => {
+                        // Gemma-style local templates reject `role=tool` history.
+                        // Echo the dialect the model emitted and return results
+                        // as a follow-up user turn after dispatch.
+                        conversation.push(Message::assistant(render_tool_code_fence(&calls)));
+                    }
+                }
 
+                let mut fence_results = Vec::new();
                 // Dispatch each requested tool and append its result.
                 for call in &calls {
                     let Some(id) = dispatch.get(&call.name) else {
@@ -862,13 +876,70 @@ pub(crate) async fn run_tool_loop(
                     } else {
                         result
                     };
-                    conversation.push(Message::tool(call.id.clone(), result));
+                    match completion.tool_history {
+                        ToolHistoryStyle::OpenAi => {
+                            conversation.push(Message::tool(call.id.clone(), result));
+                        }
+                        ToolHistoryStyle::ContentFence => {
+                            fence_results.push(format!(
+                                "TOOL RESULT {} ({}):\n{}",
+                                call.name, call.id, result
+                            ));
+                        }
+                    }
+                }
+                if completion.tool_history == ToolHistoryStyle::ContentFence {
+                    let mut follow_up = fence_results.join("\n\n");
+                    follow_up.push_str(
+                        "\n\nContinue the protocol. Call another tool with a tool_code fence, or write the final evidence from fetch bodies only.",
+                    );
+                    conversation.push(Message::user(follow_up));
                 }
             }
         }
     }
 
     Err(Error::ToolLoopExhausted)
+}
+
+/// Render parsed tool calls as the Gemma ` ```tool_code ` content dialect.
+fn render_tool_code_fence(calls: &[ToolCall]) -> String {
+    let mut body = String::from("```tool_code\n");
+    for call in calls {
+        body.push_str(&call.name);
+        body.push('(');
+        match &call.arguments {
+            serde_json::Value::Object(map) => {
+                let mut first = true;
+                for (key, value) in map {
+                    if !first {
+                        body.push_str(", ");
+                    }
+                    first = false;
+                    body.push_str(key);
+                    body.push('=');
+                    body.push_str(&render_tool_code_arg(value));
+                }
+            }
+            other => {
+                body.push_str("arguments=");
+                body.push_str(&render_tool_code_arg(other));
+            }
+        }
+        body.push_str(")\n");
+    }
+    body.push_str("```");
+    body
+}
+
+fn render_tool_code_arg(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => format!("\"{s}\""),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Null => "null".into(),
+        other => format!("\"{}\"", other),
+    }
 }
 
 /// The current UTC time as an RFC 3339 string, or empty on a formatting error.
