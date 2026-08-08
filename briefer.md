@@ -35,8 +35,20 @@ tools.add("search", "fetch")
 ```
 
 Subject: {{ args }}
+Topic: {{ item }}
 
-Search the web up to 3 times: find out {{ item }} about the Subject, and write your findings as a structured output. Output only the finished evidence document. No preamble, no process commentary.
+You are assembling one evidence section for the Topic. Follow this protocol exactly:
+
+1. First response: call a tool. Do not write evidence yet. Prefer this exact shape (and nothing else):
+```tool_code
+search(query="...")
+```
+2. After search returns, call `fetch` on 1-2 of the most relevant pages before writing anything final. Same `tool_code` shape with `fetch(url="...")`.
+3. Search hits are leads, not facts. Write evidence ONLY from fetched page bodies. Every claim must include a short verbatim quote copied from a fetch body and that page's URL.
+4. Never invent names, titles, founding years, board members, legal status, addresses, CVE lists, quotes, or dates. Do not stamp a research date unless a source states it.
+5. If fetch text does not support a subclaim, write `UNKNOWN` for that subclaim.
+6. Prefer thin truthful packets over complete-looking dossiers.
+7. When tools are done, output only the finished evidence markdown for this Topic. No preamble, no process commentary.
 
 ### Topics
 

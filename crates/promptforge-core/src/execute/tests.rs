@@ -1184,6 +1184,123 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     );
 }
 
+/// Spawn a mock that asks for one `echo` via a sole `tool_code` fence, then
+/// returns final text, recording every request body.
+async fn spawn_content_fence_recording_gateway() -> (SocketAddr, Arc<Mutex<Vec<Value>>>) {
+    #[derive(Clone)]
+    struct RecordingState {
+        calls: Arc<AtomicUsize>,
+        bodies: Arc<Mutex<Vec<Value>>>,
+    }
+
+    async fn completions(
+        State(state): State<RecordingState>,
+        Json(body): Json<Value>,
+    ) -> Json<Value> {
+        state
+            .bodies
+            .lock()
+            .expect("the recorded-bodies mutex must not be poisoned")
+            .push(body);
+        let n = state.calls.fetch_add(1, Ordering::SeqCst);
+        if n == 0 {
+            Json(json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "```tool_code\necho(value=\"hi\")\n```"
+                    }
+                }]
+            }))
+        } else {
+            Json(json!({
+                "choices": [{
+                    "message": { "role": "assistant", "content": "final answer" }
+                }]
+            }))
+        }
+    }
+
+    let bodies = Arc::new(Mutex::new(Vec::new()));
+    let state = RecordingState {
+        calls: Arc::new(AtomicUsize::new(0)),
+        bodies: Arc::clone(&bodies),
+    };
+    let router = Router::new()
+        .route("/v1/chat/completions", post(completions))
+        .with_state(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    (addr, bodies)
+}
+
+#[tokio::test]
+async fn content_fence_tool_loop_echoes_user_tool_result() {
+    let (addr, bodies) = spawn_content_fence_recording_gateway().await;
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
+
+    let echo = EchoTool;
+    let tools: &[&dyn Tool] = &[&echo];
+    let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied());
+
+    let mut turns = 0;
+    let options = test_completion_options();
+    let out = run_tool_loop(
+        &client,
+        &schemas,
+        &dispatch,
+        &registry,
+        "ask".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        silent_progress(&mut turns, &options),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, "final answer");
+
+    let bodies = bodies
+        .lock()
+        .expect("the recorded-bodies mutex must not be poisoned");
+    let last = bodies.last().expect("the loop must send a second request");
+    let messages = last["messages"]
+        .as_array()
+        .expect("a request body must carry a messages array");
+    assert!(
+        messages.iter().all(|m| m["role"] != "tool"),
+        "content-fence history must not use role=tool: {messages:?}"
+    );
+    let assistant = messages
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "assistant")
+        .expect("re-sent conversation must include the assistant tool_code turn");
+    let assistant_content = assistant["content"]
+        .as_str()
+        .expect("assistant content must be a string");
+    assert!(
+        assistant_content.contains("```tool_code") && assistant_content.contains("echo("),
+        "assistant turn must re-render the tool_code fence, got: {assistant_content}"
+    );
+    let user = messages
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "user")
+        .expect("re-sent conversation must include the user TOOL RESULT turn");
+    let user_content = user["content"]
+        .as_str()
+        .expect("user content must be a string");
+    assert!(
+        user_content.contains("TOOL RESULT echo (call_tool_code_0):")
+            && user_content.contains("echoed: hi"),
+        "user turn must carry TOOL RESULT with the tool body, got: {user_content}"
+    );
+}
+
 // --- Progress reporting ---
 
 /// The two-section fixture the fall-through test uses: the first section
