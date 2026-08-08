@@ -28,12 +28,12 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A11. Every repeated model or tool operation has a finite explicit budget and fails visibly when exhausted.
 - A12. Each section receives only capabilities it explicitly names; unknown names fail before the model turn.
 - A15. Every section and fan-out arm gets a fresh model context; only explicit Lua chooses transitions, and state crosses through the store or named payloads.
-- A16. Long-running runs survive client deadlines and remain collectable by opaque id until retention expires.
 - A17. Shared Lua executes in a fresh VM for each section; mutable Lua state never crosses section boundaries.
 - A18. One stable execution identity correlates parsing, binding, execution, and every observation for a run.
 - A19. Runtime metadata is sealed: unknown reads and all author writes fail, and every field has an explicit refresh boundary.
 - A20. Payload-bearing diagnostics use an opt-in capture channel separate from payload-free operational observation.
 - A21. A normalized model turn yields non-empty text or tool calls; empty products fail, and reasoning is never promoted to answer text.
+- A22. A section-local model selection overrides the prompt-wide model selection for that section only.
 
 ## Principles
 
