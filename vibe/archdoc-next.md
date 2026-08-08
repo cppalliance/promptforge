@@ -21,3 +21,5 @@
 - [2026-08-07-3-models-debug-cluster] frozen model binding: Bind prompt-local model aliases from gateway catalog metadata once per run.
 - [2026-08-07-3-models-debug-cluster] constraint and invocation split: Capability constraints filter models; sampling settings travel with each invocation.
 - [2026-08-07-4-completion-normalize-layer] dialect concentration: Provider response quirks belong at one protocol normalization boundary.
+- [2026-08-07-5-store-and-fanout] trust-selective store reads: Raw reads serve trusted code; model-facing reinjection uses an untrusted envelope.
+- [2026-08-07-5-store-and-fanout] explicit cross-section handoff: State crosses through the store or named reply and item payloads, never shared Lua memory.
