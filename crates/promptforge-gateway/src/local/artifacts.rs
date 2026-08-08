@@ -240,9 +240,11 @@ impl ArtifactStore {
     }
 
     fn download(&self, url: &str, destination: &Path) -> Result<String> {
-        let mut response = self
-            .client
-            .get(url)
+        let mut request = self.client.get(url);
+        if let Some(token) = hub_bearer_token(env_var) {
+            request = request.bearer_auth(token);
+        }
+        let mut response = request
             .send()
             .and_then(reqwest::blocking::Response::error_for_status)
             .map_err(|source| LocalError::Download {
@@ -873,6 +875,27 @@ fn file_digest(path: &Path) -> Result<String> {
     Ok(hex_digest(hasher))
 }
 
+/// Reads a process environment variable as UTF-8 text.
+fn env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+/// Hugging Face hub bearer token for gated downloads.
+///
+/// Prefers `HF_TOKEN`, then `HUGGING_FACE_HUB_TOKEN`. Empty or whitespace-only
+/// values are ignored. The token is never logged.
+fn hub_bearer_token(lookup: impl Fn(&str) -> Option<String>) -> Option<String> {
+    for key in ["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"] {
+        if let Some(value) = lookup(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_owned());
+            }
+        }
+    }
+    None
+}
+
 fn hex_digest(hasher: Sha256) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let bytes = hasher.finalize();
@@ -1167,6 +1190,41 @@ mod tests {
         let mut hasher = Sha256::new();
         hasher.update(bytes);
         hex_digest(hasher)
+    }
+
+    #[test]
+    fn hub_bearer_token_prefers_hf_token() {
+        let token = hub_bearer_token(|key| match key {
+            "HF_TOKEN" => Some(" hf_primary ".to_owned()),
+            "HUGGING_FACE_HUB_TOKEN" => Some("hf_secondary".to_owned()),
+            _ => None,
+        });
+        assert_eq!(token.as_deref(), Some("hf_primary"));
+    }
+
+    #[test]
+    fn hub_bearer_token_falls_back_to_hugging_face_hub_token() {
+        let token = hub_bearer_token(|key| match key {
+            "HUGGING_FACE_HUB_TOKEN" => Some("hf_fallback".to_owned()),
+            _ => None,
+        });
+        assert_eq!(token.as_deref(), Some("hf_fallback"));
+    }
+
+    #[test]
+    fn hub_bearer_token_ignores_empty_and_missing() {
+        assert!(hub_bearer_token(|_| None).is_none());
+        assert!(hub_bearer_token(|_| Some(String::new())).is_none());
+        assert!(hub_bearer_token(|_| Some("   ".to_owned())).is_none());
+        assert_eq!(
+            hub_bearer_token(|key| match key {
+                "HF_TOKEN" => Some(String::new()),
+                "HUGGING_FACE_HUB_TOKEN" => Some("hf_ok".to_owned()),
+                _ => None,
+            })
+            .as_deref(),
+            Some("hf_ok")
+        );
     }
 
     #[test]
