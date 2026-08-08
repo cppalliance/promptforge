@@ -481,6 +481,23 @@ fn a_picker_can_be_shared_across_threads() {
     assert_send_sync::<ToolPicker>();
 }
 
+#[test]
+fn paraphrased_need_binds_sole_tool() {
+    let catalog = Catalog::new(vec![ToolDescriptor::new(
+        ToolId::new("search", "web_search"),
+        "Search the web and return a list of results (title, url, description).",
+        json!({"properties": {"query": {"type": "string"}}}),
+    )]);
+    let picker = ToolPicker::build(catalog.clone(), Config::default()).unwrap();
+    assert_eq!(
+        picker
+            .resolve("Search the web and return a list of results.")
+            .unwrap(),
+        Outcome::Bind(catalog.tools()[0].clone()),
+        "a paraphrased need should bind the sole tool via the solo-candidate rule"
+    );
+}
+
 /// One tool, plainly unlike anything in [`tiny_catalog`].
 fn other_catalog() -> Catalog {
     Catalog::new(vec![ToolDescriptor::new(

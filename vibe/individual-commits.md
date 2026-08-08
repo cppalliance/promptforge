@@ -26,3 +26,5 @@
 
 ## 2026-08-08 docs: add the briefer demo prompt
 
+## 2026-08-08 picker: bind a solo candidate below the strict floor
+

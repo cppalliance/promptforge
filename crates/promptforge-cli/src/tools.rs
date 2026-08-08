@@ -70,7 +70,6 @@ fn descriptor(tool: &dyn Tool) -> ToolDescriptor {
 
 #[cfg(test)]
 mod tests {
-    use promptforge_core::Error;
     use promptforge_core::bind::bind_prompt;
     use promptforge_core::observe::NullObserver;
     use promptforge_core::parser::Prompt;
@@ -112,7 +111,7 @@ tools.need("fetch", "Fetch a web page and return its main content as markdown.")
     }
 
     #[test]
-    fn key_without_url_excludes_web_search_and_need_is_absent() {
+    fn key_without_url_excludes_web_search_and_solo_candidate_binds_web_fetch() {
         let available = available_tools("", Some("test-token"));
         let registry = available.registry();
         assert!(
@@ -129,7 +128,7 @@ tools.need("search", "Search the web and return a list of results (title, url, d
 "#,
         );
 
-        let error = bind_prompt(
+        let bound = bind_prompt(
             prompt,
             &picker,
             &registry,
@@ -137,9 +136,15 @@ tools.need("search", "Search the web and return a list of results (title, url, d
             "test-run",
             &NullObserver,
         )
-        .expect_err("search without a gateway URL must not bind");
+        .expect("solo-candidate rule should bind web_fetch as the only match");
 
-        assert!(matches!(error, Error::Absent { .. }));
+        assert_eq!(
+            bound.alias_to_id().get("search"),
+            Some(&promptforge_core::tools::ToolId::new(
+                "promptforge",
+                "web_fetch"
+            ))
+        );
     }
 
     #[test]
@@ -187,7 +192,7 @@ tools.need("search", "Search the web and return a list of results (title, url, d
     }
 
     #[test]
-    fn no_token_excludes_web_search_and_need_is_absent() {
+    fn no_token_excludes_web_search_and_solo_candidate_binds_web_fetch() {
         let available = available_tools(BASE_URL, None);
         let registry = available.registry();
         assert!(
@@ -211,7 +216,7 @@ tools.need("search", "Search the web and return a list of results (title, url, d
 "#,
         );
 
-        let error = bind_prompt(
+        let bound = bind_prompt(
             prompt,
             &picker,
             &registry,
@@ -219,9 +224,15 @@ tools.need("search", "Search the web and return a list of results (title, url, d
             "test-run",
             &NullObserver,
         )
-        .expect_err("unavailable search capability must not bind");
+        .expect("solo-candidate rule should bind web_fetch as the only match");
 
-        assert!(matches!(error, Error::Absent { .. }));
+        assert_eq!(
+            bound.alias_to_id().get("search"),
+            Some(&promptforge_core::tools::ToolId::new(
+                "promptforge",
+                "web_fetch"
+            ))
+        );
     }
 
     #[test]

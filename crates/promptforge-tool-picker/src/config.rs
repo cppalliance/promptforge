@@ -93,6 +93,13 @@ pub struct Config {
     /// whatever is being asked of them. It is unrelated to
     /// `similarity_floor`, which measures a need against a tool.
     pub duplicate_threshold: f32,
+    /// Minimum score at which a lone candidate still binds.
+    ///
+    /// When a single tool is the only match above `solo_floor` but below
+    /// `similarity_floor`, it wins because there is nothing to confuse it
+    /// with. A runner-up above `solo_floor` restores the strict floor.
+    /// Set equal to `similarity_floor` to disable the rule.
+    pub solo_floor: f32,
     /// How many candidates an ambiguous or duplicate outcome reports.
     ///
     /// This bounds the group [`Outcome::Ambiguous`] and [`Outcome::Duplicate`]
@@ -107,7 +114,7 @@ pub struct Config {
 }
 
 impl Default for Config {
-    /// The defaults, three of them measured and one of them provisional.
+    /// The defaults, three of them measured, one provisional, and one derived.
     ///
     /// `model_id` is [`ModelId::BgeSmallEnV15`], the only model there is.
     ///
@@ -117,6 +124,12 @@ impl Default for Config {
     /// looser 10% budget to `0.805`, so the floor is the dial that trades
     /// coverage against wrong bindings - raise it and the engine binds less
     /// often but is wrong less often when it does.
+    ///
+    /// `solo_floor` is `0.5`: well below `similarity_floor`, it catches any
+    /// reasonable paraphrase while rejecting garbage. When the leader is
+    /// between `solo_floor` and `similarity_floor` and no runner-up reaches
+    /// `solo_floor`, the leader binds because there is nothing to confuse it
+    /// with. Set it equal to `similarity_floor` to disable the rule.
     ///
     /// `duplicate_threshold` is `0.98`: at or above that cosine similarity
     /// between two tools' own embeddings, the pair was found to be twins
@@ -135,6 +148,7 @@ impl Default for Config {
         Self {
             model_id: ModelId::BgeSmallEnV15,
             similarity_floor: 0.825,
+            solo_floor: 0.5,
             margin: 0.05,
             duplicate_threshold: 0.98,
             top_k: 3,
@@ -157,9 +171,9 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ThresholdOutOfRange`] if `similarity_floor`, `margin`,
-    /// or `duplicate_threshold` is NaN or falls outside `0.0..=1.0`, and
-    /// [`Error::EmptyShortlist`] if `top_k` is zero.
+    /// Returns [`Error::ThresholdOutOfRange`] if `similarity_floor`,
+    /// `solo_floor`, `margin`, or `duplicate_threshold` is NaN or falls
+    /// outside `0.0..=1.0`, and [`Error::EmptyShortlist`] if `top_k` is zero.
     ///
     /// No relation between the thresholds is checked, because none holds.
     /// `duplicate_threshold` measures one tool against another and
@@ -169,6 +183,7 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         for (field, value) in [
             ("similarity_floor", self.similarity_floor),
+            ("solo_floor", self.solo_floor),
             ("margin", self.margin),
             ("duplicate_threshold", self.duplicate_threshold),
         ] {
@@ -209,6 +224,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.model_id, ModelId::BgeSmallEnV15);
         assert_exact(config.similarity_floor, 0.825);
+        assert_exact(config.solo_floor, 0.5);
         assert_exact(config.margin, 0.05);
         assert_exact(config.duplicate_threshold, 0.98);
         assert_eq!(config.top_k, 3);
@@ -239,6 +255,13 @@ mod tests {
                     "similarity_floor",
                     Config {
                         similarity_floor: bad,
+                        ..Config::default()
+                    },
+                ),
+                (
+                    "solo_floor",
+                    Config {
+                        solo_floor: bad,
                         ..Config::default()
                     },
                 ),
@@ -313,6 +336,16 @@ mod tests {
         assert_eq!(
             Config {
                 top_k: 7,
+                ..Config::default()
+            },
+            parsed
+        );
+
+        let parsed: Config = serde_json::from_str(r#"{"solo_floor": 0.6}"#).unwrap();
+        assert_exact(parsed.solo_floor, 0.6);
+        assert_eq!(
+            Config {
+                solo_floor: 0.6,
                 ..Config::default()
             },
             parsed
