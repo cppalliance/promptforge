@@ -607,7 +607,7 @@ mod tests {
     }
 
     fn program(source: &str) -> LuaProgram {
-        LuaProgram::compile(source, "shared", EXECUTION, &NullObserver, "Prompt")
+        LuaProgram::compile(source, "shared", 1, EXECUTION, &NullObserver, "Prompt")
             .expect("fixture Lua must compile")
     }
 

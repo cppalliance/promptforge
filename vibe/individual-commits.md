@@ -28,3 +28,5 @@
 
 ## 2026-08-08 picker: bind a solo candidate below the strict floor
 
+## 2026-08-08 core: map Lua runtime errors to prompt source lines
+

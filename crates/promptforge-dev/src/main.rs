@@ -59,6 +59,7 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let prompt_path = args.prompt.clone();
 
     let result = tokio::select! {
         result = dispatch(args) => result,
@@ -73,7 +74,7 @@ async fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("dev run failed: {error:#}");
+            eprintln!("{}", run::format_dev_failure(&prompt_path, &error));
             ExitCode::FAILURE
         }
     }
