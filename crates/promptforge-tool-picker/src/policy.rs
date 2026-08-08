@@ -75,9 +75,11 @@ use crate::rank::{Candidate, Vectors, comparable};
 /// The checks apply in this order, and the first one that matches is the
 /// answer:
 ///
-/// 1. **Absent** - the top score is below `similarity_floor`. Nothing else is
-///    asked, because if nothing in the catalog fits the need then whether the
-///    two things that do not fit resemble each other is beside the point.
+/// 1. **Absent** - the top score is below `similarity_floor` and either below
+///    `solo_floor` or accompanied by a runner-up at or above `solo_floor`.
+///    When the leader is the only candidate above `solo_floor`, it binds
+///    despite being below the strict floor, because there is nothing to
+///    confuse it with.
 /// 2. **Duplicate** - at least one other candidate shares the leader's server
 ///    and has a stored vector at or above `duplicate_threshold` similar to the
 ///    leader's. This is ahead of the margin test on purpose: the outcome
@@ -223,6 +225,12 @@ pub(crate) fn decide(
     };
 
     if leader.score < config.similarity_floor {
+        if leader.score >= config.solo_floor {
+            let has_peer = ranked.get(1).is_some_and(|r| r.score >= config.solo_floor);
+            if !has_peer {
+                return Outcome::Bind(leader.tool.clone());
+            }
+        }
         return Outcome::Absent;
     }
 
@@ -280,11 +288,23 @@ pub(crate) fn shortlist(
     tools: &[ToolDescriptor],
     config: &Config,
 ) -> Vec<ToolDescriptor> {
-    order(candidates, tools)
-        .into_iter()
+    let ranked = order(candidates, tools);
+    let above_floor: Vec<ToolDescriptor> = ranked
+        .iter()
         .filter(|candidate| candidate.score >= config.similarity_floor)
         .map(|candidate| candidate.tool.clone())
-        .collect()
+        .collect();
+
+    if !above_floor.is_empty() {
+        return above_floor;
+    }
+
+    let solo = ranked
+        .first()
+        .filter(|leader| leader.score >= config.solo_floor)
+        .filter(|_| !ranked.get(1).is_some_and(|r| r.score >= config.solo_floor));
+
+    solo.into_iter().map(|r| r.tool.clone()).collect()
 }
 
 /// How many candidates a shortlist may carry.
@@ -462,7 +482,7 @@ mod tests {
     #[test]
     fn nothing_above_the_floor_is_an_abstention() {
         let outcome = decide(
-            &ranking(&[0.8, 0.4]),
+            &ranking(&[0.4, 0.3]),
             &two_servers(),
             rows(distinct(2)),
             &Config::default(),
@@ -960,6 +980,66 @@ mod tests {
                 "catalog order must survive {first:?} against {second:?}"
             );
         }
+    }
+
+    #[test]
+    fn solo_candidate_below_floor_binds() {
+        let config = Config {
+            similarity_floor: 0.8,
+            solo_floor: 0.5,
+            ..Config::default()
+        };
+        let tools = two_servers();
+        assert_eq!(
+            decide(&ranking(&[0.7]), &tools, rows(distinct(2)), &config),
+            Outcome::Bind(tools[0].clone()),
+            "a lone candidate between solo_floor and similarity_floor binds"
+        );
+    }
+
+    #[test]
+    fn solo_candidate_below_solo_floor_is_absent() {
+        let config = Config {
+            similarity_floor: 0.8,
+            solo_floor: 0.5,
+            ..Config::default()
+        };
+        let tools = two_servers();
+        assert_eq!(
+            decide(&ranking(&[0.4]), &tools, rows(distinct(2)), &config),
+            Outcome::Absent,
+            "a candidate below solo_floor is rejected"
+        );
+    }
+
+    #[test]
+    fn two_candidates_below_floor_is_absent() {
+        let config = Config {
+            similarity_floor: 0.8,
+            solo_floor: 0.5,
+            ..Config::default()
+        };
+        let tools = two_servers();
+        assert_eq!(
+            decide(&ranking(&[0.7, 0.6]), &tools, rows(distinct(2)), &config),
+            Outcome::Absent,
+            "two candidates between solo_floor and similarity_floor are ambiguous, not solo"
+        );
+    }
+
+    #[test]
+    fn solo_candidate_disabled_when_solo_floor_equals_similarity_floor() {
+        let config = Config {
+            similarity_floor: 0.8,
+            solo_floor: 0.8,
+            ..Config::default()
+        };
+        let tools = two_servers();
+        assert_eq!(
+            decide(&ranking(&[0.7]), &tools, rows(distinct(2)), &config),
+            Outcome::Absent,
+            "solo_floor equal to similarity_floor disables the rule"
+        );
     }
 
     #[test]
