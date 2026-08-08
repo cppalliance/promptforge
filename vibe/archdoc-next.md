@@ -20,3 +20,4 @@
 - [2026-08-07-2-store-type-rename] type names are not architecture: Store implementation renames should not alter the run-scoped filesystem contract.
 - [2026-08-07-3-models-debug-cluster] frozen model binding: Bind prompt-local model aliases from gateway catalog metadata once per run.
 - [2026-08-07-3-models-debug-cluster] constraint and invocation split: Capability constraints filter models; sampling settings travel with each invocation.
+- [2026-08-07-4-completion-normalize-layer] dialect concentration: Provider response quirks belong at one protocol normalization boundary.
