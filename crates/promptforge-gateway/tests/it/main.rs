@@ -8,6 +8,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::Json;
 use axum::Router;
@@ -17,6 +18,7 @@ use promptforge_gateway::config::Config;
 use promptforge_gateway::routing::Routing;
 use promptforge_gateway::{AppState, build_router};
 use serde_json::Value;
+use tokio::sync::Notify;
 
 /// Spawn a server on an ephemeral port and return its address.
 async fn spawn(router: Router) -> SocketAddr {
@@ -296,4 +298,242 @@ async fn models_catalog_wrong_token_is_401() {
         .await
         .unwrap();
     assert_eq!(response.status().as_u16(), 401);
+}
+
+/// A fake backend that holds each request until `release` is notified.
+///
+/// `in_flight` counts how many requests are currently inside the handler
+/// (after arrival, before release).
+async fn slow_fake_backend(release: Arc<Notify>, in_flight: Arc<AtomicUsize>) -> SocketAddr {
+    async fn completions(
+        axum::extract::State((release, in_flight)): axum::extract::State<(
+            Arc<Notify>,
+            Arc<AtomicUsize>,
+        )>,
+        Json(body): Json<Value>,
+    ) -> Json<Value> {
+        in_flight.fetch_add(1, Ordering::SeqCst);
+        release.notified().await;
+        in_flight.fetch_sub(1, Ordering::SeqCst);
+        let model = body
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        Json(serde_json::json!({
+            "id": "cmpl-test",
+            "object": "chat.completion",
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "message": { "role": "assistant", "content": "pong" },
+                "finish_reason": "stop"
+            }]
+        }))
+    }
+    let router = Router::new()
+        .route("/chat/completions", post(completions))
+        .with_state((release, in_flight));
+    spawn(router).await
+}
+
+/// Gateway with an explicit concurrency / queue configuration.
+async fn gateway_with_queue(
+    backend: SocketAddr,
+    concurrency: usize,
+    max_depth: usize,
+) -> SocketAddr {
+    let toml = format!(
+        r#"
+[server]
+bind = "127.0.0.1:0"
+token = "test-token"
+
+[queue]
+max_depth = {max_depth}
+fair_scheduling = true
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+concurrency = {concurrency}
+
+[[model]]
+name = "test-model"
+description = "a test model for integration"
+context = 8192
+thinking = "never"
+upstream = "backend-model"
+endpoints = ["fake"]
+"#
+    );
+    let config = Config::from_toml_str(&toml).unwrap();
+    let routing = Arc::new(Routing::from_config(&config).unwrap());
+    let state = AppState::new(routing, config.server.token);
+    spawn(build_router(state)).await
+}
+
+fn chat_body() -> Value {
+    serde_json::json!({
+        "model": "test-model",
+        "messages": [{ "role": "user", "content": "ping" }]
+    })
+}
+
+#[tokio::test]
+async fn concurrency_one_allows_only_one_in_flight_at_backend() {
+    // max_depth is waiting slots only; with concurrency=1, a second request
+    // waits while the first is in-flight, and only one reaches the backend.
+    let release = Arc::new(Notify::new());
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let backend = slow_fake_backend(Arc::clone(&release), Arc::clone(&in_flight)).await;
+    let gateway = gateway_with_queue(backend, 1, 10).await;
+
+    let client = reqwest::Client::new();
+    let url = format!("http://{gateway}/v1/chat/completions");
+
+    let first = tokio::spawn({
+        let client = client.clone();
+        let url = url.clone();
+        async move {
+            client
+                .post(url)
+                .bearer_auth("test-token")
+                .json(&chat_body())
+                .send()
+                .await
+        }
+    });
+    let second = tokio::spawn({
+        let client = client.clone();
+        let url = url.clone();
+        async move {
+            client
+                .post(url)
+                .bearer_auth("test-token")
+                .json(&chat_body())
+                .send()
+                .await
+        }
+    });
+
+    // Wait until the first request is inside the slow backend.
+    for _ in 0..50 {
+        if in_flight.load(Ordering::SeqCst) == 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        in_flight.load(Ordering::SeqCst),
+        1,
+        "only one request should reach the backend under concurrency=1"
+    );
+    // Second request should be queued at the gateway, not in the backend.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert_eq!(
+        in_flight.load(Ordering::SeqCst),
+        1,
+        "second request must not enter the backend while the first holds the slot"
+    );
+
+    // Release the held backend request; the waiter should then enter.
+    release.notify_one();
+    for _ in 0..50 {
+        // After the first leaves, the second should become the sole in-flight.
+        if in_flight.load(Ordering::SeqCst) == 1 {
+            // Distinguish "first still held" from "second entered" by waiting
+            // for first to finish, then checking again.
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let first_status = first.await.unwrap().unwrap().status().as_u16();
+    assert_eq!(first_status, 200);
+    for _ in 0..50 {
+        if in_flight.load(Ordering::SeqCst) == 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        in_flight.load(Ordering::SeqCst),
+        1,
+        "second request should enter after the first is released"
+    );
+
+    release.notify_one();
+    assert_eq!(second.await.unwrap().unwrap().status().as_u16(), 200);
+}
+
+#[tokio::test]
+async fn queue_full_returns_503_when_waiting_slots_exhausted() {
+    // concurrency=1, max_depth=1: one in-flight + one waiting; a third gets 503.
+    // max_depth counts waiting requests only, not in-flight.
+    let release = Arc::new(Notify::new());
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let backend = slow_fake_backend(Arc::clone(&release), Arc::clone(&in_flight)).await;
+    let gateway = gateway_with_queue(backend, 1, 1).await;
+
+    let client = reqwest::Client::new();
+    let url = format!("http://{gateway}/v1/chat/completions");
+
+    let first_handle = tokio::spawn({
+        let client = client.clone();
+        let url = url.clone();
+        async move {
+            client
+                .post(url)
+                .bearer_auth("test-token")
+                .json(&chat_body())
+                .send()
+                .await
+        }
+    });
+
+    // Wait until the first request is inside the slow backend.
+    for _ in 0..50 {
+        if in_flight.load(Ordering::SeqCst) == 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(in_flight.load(Ordering::SeqCst), 1);
+
+    let second = tokio::spawn({
+        let client = client.clone();
+        let url = url.clone();
+        async move {
+            client
+                .post(url)
+                .bearer_auth("test-token")
+                .json(&chat_body())
+                .send()
+                .await
+        }
+    });
+    // Let the second request enter the waiting queue.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let third = client
+        .post(&url)
+        .bearer_auth("test-token")
+        .json(&chat_body())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(third.status().as_u16(), 503);
+    let body: Value = third.json().await.unwrap();
+    assert_eq!(
+        body.pointer("/error/code").and_then(Value::as_str),
+        Some("queue_full")
+    );
+
+    // Drain: wake the in-flight request, then the waiter once it reaches the backend.
+    release.notify_one();
+    assert_eq!(first_handle.await.unwrap().unwrap().status().as_u16(), 200);
+    release.notify_one();
+    assert_eq!(second.await.unwrap().unwrap().status().as_u16(), 200);
 }

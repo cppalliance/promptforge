@@ -6,11 +6,16 @@
 bind = "127.0.0.1:8081"
 token = "${PROMPTFORGE_TOKEN}"
 
+[queue]
+max_depth = 100
+fair_scheduling = true
+
 [[endpoint]]
 id = "anthropic"
 protocol = "openai"
 base_url = "https://api.anthropic.com/v1"
 api_key = "${ANTHROPIC_API_KEY}"
+concurrency = 10
 
 [[model]]
 name = "claude-sonnet-4-6"

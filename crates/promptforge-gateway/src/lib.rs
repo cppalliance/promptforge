@@ -7,14 +7,15 @@
 //! holds a vendor key.
 //!
 //! What ships: one OpenAI passthrough at `POST /v1/chat/completions` with
-//! bearer auth and model routing, a bearer-authed `GET /v1/models` catalog,
-//! a Brave-backed `POST /v1/tools/web_search` configured by
-//! `[tools.web_search]`, and `GET /health`. Admission control, endpoint
-//! pinning, model packs, hot reload, streaming, and the Anthropic protocol
-//! shim are deferred.
+//! bearer auth and model routing, per-endpoint concurrency limits with a fair
+//! waiting queue (`[queue]` / `concurrency`), a bearer-authed `GET /v1/models`
+//! catalog, a Brave-backed `POST /v1/tools/web_search` configured by
+//! `[tools.web_search]`, and `GET /health`. Endpoint pinning, model packs,
+//! hot reload, streaming, and the Anthropic protocol shim are deferred.
 
 pub mod config;
 pub mod error;
+pub mod queue;
 pub mod routing;
 pub mod tools;
 pub mod upstream;
@@ -85,6 +86,9 @@ async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "serving" }))
 }
 
+/// Header naming the caller for fair queue scheduling. Absent → `"default"`.
+const CLIENT_HEADER: &str = "X-PromptForge-Client";
+
 /// The one route that reaches a backend.
 async fn chat_completions(
     State(state): State<AppState>,
@@ -93,6 +97,11 @@ async fn chat_completions(
 ) -> Result<Json<ChatResponse>, GatewayError> {
     check_auth(&state, &headers)?;
     let model = state.routing.model(&request.model)?;
+    let client_key = headers
+        .get(CLIENT_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("default");
+    let _permit = model.endpoint.lane.admit(client_key).await?;
     let response = model
         .endpoint
         .upstream
