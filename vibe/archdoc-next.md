@@ -8,7 +8,6 @@
 - [2026-07-29-7-guard-wrap-untrusted-output] nonce delimiter mechanics: Random XML-style tags and escaping are model-specific mitigation details, not an isolation guarantee.
 - [2026-07-31-1-orchestrator-only] three-axis budgets: Track nesting, section transitions, and tool calls independently rather than using one global limit.
 - [2026-08-02-1-tool-picker] picker threshold calibration: Similarity floors and duplicate thresholds are workload evidence, not general architecture.
-- [2026-08-02-2-mcp-server] coherent catalog snapshots: Boot requires a complete catalog; reloads expose per-entry faults while in-flight runs retain their starting snapshot.
 - [2026-08-03-1-mcp-server-correction] reuse before machinery: The existing principle already requires Lua, store, or catalog reuse before new configuration or APIs.
 - [2026-08-03-1-mcp-server-correction] as-built document ownership: Co-locate each existing crate's as-built design document and keep unbuilt design as separate residue.
 - [2026-08-04-1-recover-core-design-rationale] irrecoverable contingency: Exact thresholds, external observations, and deleted alternatives cannot be reconstructed reliably from current code.
@@ -25,3 +24,5 @@
 - [2026-08-07-5-store-and-fanout] explicit cross-section handoff: State crosses through the store or named reply and item payloads, never shared Lua memory.
 - [2026-08-08-1-models-always] host model fallback: Absence of prompt selection still falls back to a host model in this era.
 - [2026-08-08-2-webfetch-soft-errors] error body exclusion: HTTP error bodies never enter model-facing recovery results.
+- [2026-08-08-3-gateway-local-inference] bounded resource scheduling: Concurrency is limited at device or lane boundaries with visible backpressure.
+- [2026-08-08-3-gateway-local-inference] inference engine attachment: Sidecar versus in-process inference is an implementation choice behind the gateway boundary.
