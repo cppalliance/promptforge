@@ -838,6 +838,119 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
     }
 }
 
+/// Spawn a mock that answers once with fixed `content` and `finish_reason`.
+async fn spawn_text_finish_gateway(
+    content: &'static str,
+    finish_reason: &'static str,
+) -> SocketAddr {
+    async fn completions(
+        State((content, finish_reason)): State<(&'static str, &'static str)>,
+        Json(_body): Json<Value>,
+    ) -> Json<Value> {
+        Json(json!({
+            "choices": [{
+                "finish_reason": finish_reason,
+                "message": { "role": "assistant", "content": content }
+            }]
+        }))
+    }
+
+    let router = Router::new().route(
+        "/v1/chat/completions",
+        post(completions).with_state((content, finish_reason)),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    addr
+}
+
+async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(String, String)>, u32) {
+    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test", "test-model");
+    let recorder = Recorder::default();
+    let mut turns = 0;
+    let out = run_tool_loop(
+        &client,
+        &[],
+        &BTreeMap::new(),
+        &ToolRegistry::new(std::iter::empty()),
+        "ask the model".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        SectionProgress {
+            execution: EXECUTION,
+            observer: &recorder,
+            section: "Gather",
+            turns: &mut turns,
+            debug: None,
+        },
+    )
+    .await;
+    (out, recorder.events(), turns)
+}
+
+#[tokio::test]
+async fn empty_final_text_reports_model_reply_empty() {
+    let addr = spawn_text_finish_gateway("", "stop").await;
+    let (out, events, turns) = run_tool_loop_recorded(addr).await;
+    assert_eq!(out.unwrap(), "");
+    assert_eq!(turns, 1);
+    assert_eq!(
+        events,
+        vec![
+            (
+                "Gather".to_string(),
+                detail::MODEL_TURN_COMPLETED.to_string(),
+            ),
+            ("Gather".to_string(), detail::MODEL_REPLY_EMPTY.to_string(),),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn length_finish_reason_reports_model_turn_truncated() {
+    let addr = spawn_text_finish_gateway("partial answer", "length").await;
+    let (out, events, turns) = run_tool_loop_recorded(addr).await;
+    assert_eq!(out.unwrap(), "partial answer");
+    assert_eq!(turns, 1);
+    assert_eq!(
+        events,
+        vec![
+            (
+                "Gather".to_string(),
+                detail::MODEL_TURN_COMPLETED.to_string(),
+            ),
+            (
+                "Gather".to_string(),
+                detail::MODEL_TURN_TRUNCATED.to_string(),
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn empty_truncated_final_text_reports_both_details() {
+    let addr = spawn_text_finish_gateway("", "length").await;
+    let (out, events, turns) = run_tool_loop_recorded(addr).await;
+    assert_eq!(out.unwrap(), "");
+    assert_eq!(turns, 1);
+    assert_eq!(
+        events,
+        vec![
+            (
+                "Gather".to_string(),
+                detail::MODEL_TURN_COMPLETED.to_string(),
+            ),
+            ("Gather".to_string(), detail::MODEL_REPLY_EMPTY.to_string(),),
+            (
+                "Gather".to_string(),
+                detail::MODEL_TURN_TRUNCATED.to_string(),
+            ),
+        ]
+    );
+}
+
 // --- Guard-wrapping of untrusted tool results in the loop ---
 
 /// Spawn a mock gateway that asks for one `echo` tool call, then returns a
