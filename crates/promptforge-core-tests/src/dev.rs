@@ -382,7 +382,7 @@ mod tests {
     }
 
     #[test]
-    fn no_key_leaves_web_fetch_alone_and_search_binds_absent() {
+    fn no_key_leaves_web_fetch_alone_and_search_solo_binds_web_fetch() {
         let gateway = GatewayConfig::from_lookup(lookup_from(&[]));
         let available = available_tools(&gateway);
         let registry = available.registry();
@@ -401,7 +401,7 @@ mod tests {
 tools.need("search", "Search the web and return a list of results (title, url, description).")
 "#,
         );
-        let error = bind_prompt(
+        let bound = bind_prompt(
             prompt,
             &picker,
             &registry,
@@ -409,8 +409,14 @@ tools.need("search", "Search the web and return a list of results (title, url, d
             "dev-test",
             &NullObserver,
         )
-        .expect_err("unavailable search capability must not bind");
-        assert!(matches!(error, Error::Absent { .. }));
+        .expect("solo-candidate rule should bind web_fetch as the only match");
+        assert_eq!(
+            bound.alias_to_id().get("search"),
+            Some(&promptforge_core::tools::ToolId::new(
+                "promptforge",
+                "web_fetch"
+            ))
+        );
     }
 
     #[test]
