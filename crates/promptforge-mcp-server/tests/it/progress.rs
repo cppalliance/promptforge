@@ -68,7 +68,13 @@ fn trio_server() -> (TempDir, PromptForgeServer) {
     .expect("the fixture configuration parses");
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
-    let tools = Arc::new(PreparedTools::new(&config.gateway).expect("prepare fixture live tools"));
+    let tools = Arc::new(
+        PreparedTools::new(
+            &config.gateway,
+            promptforge_core::model::ModelCatalog::empty(),
+        )
+        .expect("prepare fixture live tools"),
+    );
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),

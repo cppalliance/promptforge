@@ -183,8 +183,15 @@ async fn run_tool_call(base_url: &str, api_key: &str, model_alias: &str) -> Resu
     .context("build deterministic one-tool fixture picker")?;
     let tools: [&dyn Tool; 1] = [&tool];
     let registry = ToolRegistry::new(tools);
-    let bound = bind_prompt(prompt, &picker, &registry, TOOL_EXECUTION, &observer)
-        .context("bind execution/real-tool-call.md")?;
+    let bound = bind_prompt(
+        prompt,
+        &picker,
+        &registry,
+        &promptforge_core::model::ModelCatalog::empty(),
+        TOOL_EXECUTION,
+        &observer,
+    )
+    .context("bind execution/real-tool-call.md")?;
     ensure!(
         bound
             .alias_to_id()

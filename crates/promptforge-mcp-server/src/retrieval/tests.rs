@@ -41,7 +41,13 @@ fn server(retrieval: Retrieval) -> PromptForgeServer {
         Arc::clone(&prompts.config),
         Arc::new(CatalogHandle::new(prompts.catalog.clone())),
         Arc::new(retrieval),
-        Arc::new(PreparedTools::new(&prompts.config.gateway).expect("prepare fixture live tools")),
+        Arc::new(
+            PreparedTools::new(
+                &prompts.config.gateway,
+                promptforge_core::model::ModelCatalog::empty(),
+            )
+            .expect("prepare fixture live tools"),
+        ),
     )
 }
 

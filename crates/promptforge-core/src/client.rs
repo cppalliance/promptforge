@@ -11,6 +11,7 @@
 
 use serde_json::Value;
 
+use crate::model::CompletionOptions;
 use crate::{Error, Result};
 
 /// Default backend base URL (the local development gateway).
@@ -204,6 +205,12 @@ impl GatewayClient {
     /// `tool_choice` set to `auto`); passing `None` or an empty slice sends no
     /// `tools` field, preserving the plain chat-completions behavior.
     ///
+    /// When `options` is `Some`, its fields override or extend the request:
+    /// `model` replaces the client's construction-time model, `temperature` and
+    /// `max_tokens` are set when present, and `thinking` emits
+    /// `chat_template_kwargs.enable_thinking`. Passing `None` keeps today's
+    /// host-default request shape.
+    ///
     /// # Errors
     /// Returns [`Error::Http`] on a transport failure, [`Error::Backend`] when
     /// the gateway responds with a non-success status, and
@@ -212,9 +219,13 @@ impl GatewayClient {
         &self,
         messages: &[Message],
         tools: Option<&[ToolSchema]>,
+        options: Option<&CompletionOptions>,
     ) -> Result<Completion> {
+        let model = options
+            .and_then(|options| options.model.as_deref())
+            .unwrap_or(&self.model);
         let mut request_body = serde_json::json!({
-            "model": self.model,
+            "model": model,
             "messages": messages,
         });
         if let Some(tools) = tools.filter(|tools| !tools.is_empty()) {
@@ -233,6 +244,19 @@ impl GatewayClient {
                 .collect();
             request_body["tools"] = Value::Array(wrapped);
             request_body["tool_choice"] = Value::String("auto".into());
+        }
+        if let Some(options) = options {
+            if let Some(temperature) = options.temperature {
+                request_body["temperature"] = serde_json::json!(temperature);
+            }
+            if let Some(max_tokens) = options.max_tokens {
+                request_body["max_tokens"] = serde_json::json!(max_tokens);
+            }
+            if let Some(thinking) = options.thinking {
+                request_body["chat_template_kwargs"] = serde_json::json!({
+                    "enable_thinking": thinking,
+                });
+            }
         }
 
         let response = self
@@ -467,5 +491,56 @@ mod tests {
             parse_completion(&response),
             Err(Error::MalformedResponse(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn complete_merges_per_call_options() {
+        use std::sync::{Arc, Mutex};
+
+        use axum::Router;
+        use axum::extract::Json;
+        use axum::routing::post;
+        use serde_json::{Value, json};
+        use tokio::net::TcpListener;
+
+        let captured: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+        let slot = Arc::clone(&captured);
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move |Json(body): Json<Value>| {
+                let slot = Arc::clone(&slot);
+                async move {
+                    *slot.lock().expect("capture lock") = Some(body);
+                    Json(json!({
+                        "choices": [{
+                            "message": { "role": "assistant", "content": "ok" },
+                            "finish_reason": "stop"
+                        }]
+                    }))
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = GatewayClient::new(&format!("http://{addr}/v1"), "tok", "default-model");
+        let options = CompletionOptions {
+            model: Some("analyst".into()),
+            temperature: Some(0.0),
+            max_tokens: Some(128),
+            thinking: Some(false),
+        };
+        client
+            .complete(&[Message::user("hi")], None, Some(&options))
+            .await
+            .unwrap();
+        let body = captured.lock().expect("capture lock").clone().unwrap();
+        assert_eq!(body["model"], "analyst");
+        assert_eq!(body["temperature"], 0.0);
+        assert_eq!(body["max_tokens"], 128);
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
     }
 }

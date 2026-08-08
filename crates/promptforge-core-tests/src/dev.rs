@@ -17,6 +17,7 @@ use anyhow::{Context as _, Result, bail, ensure};
 use promptforge_core::bind::bind_prompt;
 use promptforge_core::client::GatewayClient;
 use promptforge_core::execute::{RunOptions, run};
+use promptforge_core::model::pinned_qwen_dev_catalog;
 use promptforge_core::observe::Observer;
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
@@ -103,7 +104,8 @@ async fn run_once_with(
     let picker = ToolPicker::build(available.catalog().clone(), PickerConfig::default())
         .context("build the live tool picker")?;
     let registry = available.registry();
-    let bound = bind_prompt(prompt, &picker, &registry, &execution, observer)
+    let models = pinned_qwen_dev_catalog(model_alias);
+    let bound = bind_prompt(prompt, &picker, &registry, &models, &execution, observer)
         .with_context(|| format!("bind {}", prompt_path.display()))?;
 
     let store = StoreRef::memory();
@@ -395,8 +397,15 @@ mod tests {
 tools.need("search", "Search the web and return a list of results (title, url, description).")
 "#,
         );
-        let error = bind_prompt(prompt, &picker, &registry, "dev-test", &NullObserver)
-            .expect_err("unavailable search capability must not bind");
+        let error = bind_prompt(
+            prompt,
+            &picker,
+            &registry,
+            &promptforge_core::model::ModelCatalog::empty(),
+            "dev-test",
+            &NullObserver,
+        )
+        .expect_err("unavailable search capability must not bind");
         assert!(matches!(error, Error::Absent { .. }));
     }
 

@@ -1,0 +1,857 @@
+//! Prompt-local model bindings: catalog, need/use declarations, and invocation.
+//!
+//! A host builds a [`ModelCatalog`] from gateway `GET /v1/models` (or a pinned
+//! offline entry). H1 `models.need` resolves a description against that catalog
+//! under hard constraints, freezes invocation parameters, and stores the result
+//! in [`ModelBindings`]. H2 `models.use` selects at most one binding per
+//! section; absence means the host default client model.
+
+use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId, ToolPicker};
+use serde::Deserialize;
+use serde_json::Value;
+
+use crate::{Error, Result};
+
+/// Stable identity of one catalogued model.
+///
+/// v0 uses the `"gateway"` namespace plus the caller-facing model name (the
+/// gateway `[[model]].name` / OpenAI `id`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ModelId {
+    server: String,
+    name: String,
+}
+
+impl ModelId {
+    /// The v0 gateway identity namespace.
+    pub const GATEWAY: &'static str = "gateway";
+
+    /// Builds an identity from its server namespace and model name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge_core::model::ModelId;
+    ///
+    /// let id = ModelId::new(ModelId::GATEWAY, "claude-sonnet-4-6");
+    /// assert_eq!(id.server(), "gateway");
+    /// assert_eq!(id.name(), "claude-sonnet-4-6");
+    /// ```
+    #[must_use]
+    pub fn new(server: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            server: server.into(),
+            name: name.into(),
+        }
+    }
+
+    /// Builds a gateway-namespaced identity from a caller-facing model name.
+    #[must_use]
+    pub fn gateway(name: impl Into<String>) -> Self {
+        Self::new(Self::GATEWAY, name)
+    }
+
+    /// Returns the identity namespace.
+    #[must_use]
+    pub fn server(&self) -> &str {
+        &self.server
+    }
+
+    /// Returns the caller-facing model name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+/// Whether a catalogued model can emit thinking tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum ThinkingMode {
+    /// The backend never emits thinking tokens.
+    Never,
+    /// The backend always emits thinking tokens.
+    Always,
+    /// The client may turn thinking on or off per request.
+    Switchable,
+}
+
+/// One catalogued model with bind-time metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelDescriptor {
+    id: ModelId,
+    description: String,
+    context: u32,
+    thinking: ThinkingMode,
+}
+
+impl ModelDescriptor {
+    /// Builds a descriptor from its identity and catalog fields.
+    #[must_use]
+    pub fn new(
+        id: ModelId,
+        description: impl Into<String>,
+        context: u32,
+        thinking: ThinkingMode,
+    ) -> Self {
+        Self {
+            id,
+            description: description.into(),
+            context,
+            thinking,
+        }
+    }
+
+    /// Returns the stable identity.
+    #[must_use]
+    pub fn id(&self) -> &ModelId {
+        &self.id
+    }
+
+    /// Returns the prose used for semantic resolve.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the context window size in tokens.
+    #[must_use]
+    pub fn context(&self) -> u32 {
+        self.context
+    }
+
+    /// Returns the thinking capability.
+    #[must_use]
+    pub fn thinking(&self) -> ThinkingMode {
+        self.thinking
+    }
+}
+
+/// Optional hard constraints and invocation parameters from `models.need`.
+///
+/// `context` and `thinking` filter the catalog. `temperature`, `max_tokens`,
+/// and a requested `thinking` switch ride on each completion for the binding.
+#[derive(Debug, Clone, Default)]
+pub struct ModelNeedOpts {
+    /// When set, filters models by thinking capability and freezes the switch.
+    pub thinking: Option<bool>,
+    /// Minimum context window size in tokens.
+    pub context: Option<u32>,
+    /// Sampling temperature for every complete under this binding.
+    pub temperature: Option<f64>,
+    /// Maximum generation tokens for every complete under this binding.
+    pub max_tokens: Option<u32>,
+}
+
+impl PartialEq for ModelNeedOpts {
+    fn eq(&self, other: &Self) -> bool {
+        self.thinking == other.thinking
+            && self.context == other.context
+            && self.max_tokens == other.max_tokens
+            && match (self.temperature, other.temperature) {
+                (None, None) => true,
+                (Some(left), Some(right)) => left.to_bits() == right.to_bits(),
+                _ => false,
+            }
+    }
+}
+
+impl Eq for ModelNeedOpts {}
+
+/// Frozen per-request fields carried by a resolved model binding.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelInvocation {
+    /// Sampling temperature, when the need declared one.
+    pub temperature: Option<f64>,
+    /// Maximum generation tokens, when the need declared one.
+    pub max_tokens: Option<u32>,
+    /// Thinking switch for `chat_template_kwargs.enable_thinking`, when set.
+    pub thinking: Option<bool>,
+}
+
+impl Eq for ModelInvocation {}
+
+impl From<&ModelNeedOpts> for ModelInvocation {
+    fn from(opts: &ModelNeedOpts) -> Self {
+        Self {
+            temperature: opts.temperature,
+            max_tokens: opts.max_tokens,
+            thinking: opts.thinking,
+        }
+    }
+}
+
+/// One prompt-local alias bound to a model identity and frozen invocation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelBinding {
+    alias: String,
+    description: String,
+    id: ModelId,
+    invocation: ModelInvocation,
+}
+
+impl ModelBinding {
+    /// Builds a binding from its parts (tests and resolvers).
+    #[must_use]
+    pub fn new(
+        alias: impl Into<String>,
+        description: impl Into<String>,
+        id: ModelId,
+        invocation: ModelInvocation,
+    ) -> Self {
+        Self {
+            alias: alias.into(),
+            description: description.into(),
+            id,
+            invocation,
+        }
+    }
+
+    /// Returns the exact prompt-local alias.
+    #[must_use]
+    pub fn alias(&self) -> &str {
+        &self.alias
+    }
+
+    /// Returns the declared capability description.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the selected stable identity.
+    #[must_use]
+    pub fn id(&self) -> &ModelId {
+        &self.id
+    }
+
+    /// Returns the frozen per-request fields.
+    #[must_use]
+    pub fn invocation(&self) -> &ModelInvocation {
+        &self.invocation
+    }
+
+    /// Builds [`CompletionOptions`] for every complete under this binding.
+    #[must_use]
+    pub fn completion_options(&self) -> CompletionOptions {
+        CompletionOptions {
+            model: Some(self.id.name().to_owned()),
+            temperature: self.invocation.temperature,
+            max_tokens: self.invocation.max_tokens,
+            thinking: self.invocation.thinking,
+        }
+    }
+}
+
+/// Optional per-call overrides merged into a chat-completions request body.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CompletionOptions {
+    /// When set, overrides the client's construction-time model name.
+    pub model: Option<String>,
+    /// Sampling temperature.
+    pub temperature: Option<f64>,
+    /// Maximum generation tokens.
+    pub max_tokens: Option<u32>,
+    /// When set, emits `chat_template_kwargs.enable_thinking`.
+    pub thinking: Option<bool>,
+}
+
+impl Eq for CompletionOptions {}
+
+/// Immutable prompt-level model bindings from one H1 declaration pass.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModelBindings {
+    bindings: Vec<ModelBinding>,
+    declarations: Vec<ModelDeclaration>,
+}
+
+impl ModelBindings {
+    /// Returns bindings in declaration order.
+    #[must_use]
+    pub fn bindings(&self) -> &[ModelBinding] {
+        &self.bindings
+    }
+
+    /// Returns whether any model was declared.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.bindings.is_empty()
+    }
+
+    pub(crate) fn binding(&self, alias: &str) -> Option<&ModelBinding> {
+        self.bindings.iter().find(|binding| binding.alias == alias)
+    }
+
+    pub(crate) fn declarations(&self) -> &[ModelDeclaration] {
+        &self.declarations
+    }
+
+    pub(crate) fn from_parts(
+        bindings: Vec<ModelBinding>,
+        declarations: Vec<ModelDeclaration>,
+    ) -> Self {
+        Self {
+            bindings,
+            declarations,
+        }
+    }
+}
+
+/// Exact H1 declaration recorded for section replay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ModelDeclaration {
+    Need {
+        alias: String,
+        description: String,
+        opts: ModelNeedOpts,
+    },
+}
+
+/// Complete live model set for one bind pass.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModelCatalog {
+    models: Vec<ModelDescriptor>,
+}
+
+impl ModelCatalog {
+    /// Builds a catalog from descriptors in host order.
+    #[must_use]
+    pub fn new(models: impl IntoIterator<Item = ModelDescriptor>) -> Self {
+        Self {
+            models: models.into_iter().collect(),
+        }
+    }
+
+    /// An empty catalog; every `models.need` resolves as absent.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::new(std::iter::empty())
+    }
+
+    /// Returns every descriptor.
+    #[must_use]
+    pub fn models(&self) -> &[ModelDescriptor] {
+        &self.models
+    }
+
+    /// Returns whether the catalog has no entries.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.models.is_empty()
+    }
+
+    /// Looks up a descriptor by stable identity.
+    #[must_use]
+    pub fn get(&self, id: &ModelId) -> Option<&ModelDescriptor> {
+        self.models.iter().find(|model| model.id() == id)
+    }
+
+    /// Filters by hard constraints from `opts`.
+    #[must_use]
+    pub fn filter(&self, opts: &ModelNeedOpts) -> Self {
+        let models = self
+            .models
+            .iter()
+            .filter(|model| satisfies_constraints(model, opts))
+            .cloned()
+            .collect();
+        Self { models }
+    }
+
+    /// Builds a tool-picker [`Catalog`] from model descriptions for semantic resolve.
+    #[must_use]
+    pub fn to_picker_catalog(&self) -> Catalog {
+        Catalog::new(
+            self.models
+                .iter()
+                .map(|model| {
+                    ToolDescriptor::new(
+                        PickerToolId::new(model.id.server(), model.id.name()),
+                        model.description.clone(),
+                        Value::Object(serde_json::Map::new()),
+                    )
+                })
+                .collect(),
+        )
+    }
+}
+
+/// Registry view of the live catalog for membership checks after resolve.
+#[derive(Debug, Clone)]
+pub struct ModelRegistry<'a> {
+    catalog: &'a ModelCatalog,
+}
+
+impl<'a> ModelRegistry<'a> {
+    /// Borrows a catalog as the live registry.
+    #[must_use]
+    pub fn new(catalog: &'a ModelCatalog) -> Self {
+        Self { catalog }
+    }
+
+    /// Returns whether `id` is present in the live catalog.
+    #[must_use]
+    pub fn contains(&self, id: &ModelId) -> bool {
+        self.catalog.get(id).is_some()
+    }
+
+    /// Returns the borrowed catalog.
+    #[must_use]
+    pub fn catalog(&self) -> &'a ModelCatalog {
+        self.catalog
+    }
+}
+
+/// Resolves one `models.need` description under optional hard constraints.
+pub trait ModelResolver: Send + Sync {
+    /// Resolves `description` with `opts` to a binding identity and invocation.
+    ///
+    /// # Errors
+    /// Returns a core error when the capability cannot be resolved uniquely or
+    /// no catalog entry satisfies the constraints.
+    fn resolve(&self, description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel>;
+}
+
+impl<F> ModelResolver for F
+where
+    F: Fn(&str, &ModelNeedOpts) -> Result<ResolvedModel> + Send + Sync,
+{
+    fn resolve(&self, description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel> {
+        self(description, opts)
+    }
+}
+
+/// The identity and invocation produced by a successful model resolve.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedModel {
+    /// The selected catalog identity.
+    pub id: ModelId,
+    /// Frozen per-request fields from the need's opts.
+    pub invocation: ModelInvocation,
+}
+
+/// Wire shape of one entry from gateway `GET /v1/models`.
+#[derive(Debug, Deserialize)]
+struct ModelsListEntry {
+    id: String,
+    description: String,
+    context: u32,
+    thinking: ThinkingMode,
+}
+
+/// Wire shape of gateway `GET /v1/models`.
+#[derive(Debug, Deserialize)]
+struct ModelsListResponse {
+    data: Vec<ModelsListEntry>,
+}
+
+/// Fetches a [`ModelCatalog`] from a bearer-authed gateway `/models` endpoint.
+///
+/// `base_url` is the OpenAI-shaped API root (for example `http://127.0.0.1:8081/v1`).
+///
+/// # Errors
+/// Returns [`Error::Http`] on transport failure, [`Error::Backend`] on a
+/// non-success status, and [`Error::MalformedResponse`] when the body is not a
+/// model list.
+pub async fn fetch_model_catalog(base_url: &str, token: &str) -> Result<ModelCatalog> {
+    let base = base_url.trim_end_matches('/');
+    let http = reqwest::Client::new();
+    let response = http
+        .get(format!("{base}/models"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(Error::http)?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        let body: String = body.chars().take(2000).collect();
+        return Err(Error::Backend {
+            status: status.as_u16(),
+            body: if body.is_empty() {
+                "(empty body)".to_owned()
+            } else {
+                body
+            },
+        });
+    }
+    let list: ModelsListResponse = response.json().await.map_err(Error::http)?;
+    Ok(ModelCatalog::new(list.data.into_iter().map(|entry| {
+        ModelDescriptor::new(
+            ModelId::gateway(entry.id),
+            entry.description,
+            entry.context,
+            entry.thinking,
+        )
+    })))
+}
+
+/// Builds a [`ToolPicker`] over `catalog` by reusing `base`'s embedder.
+///
+/// # Errors
+/// Returns [`Error::ModelBind`] when the picker cannot index the catalog.
+pub fn model_picker_from(base: &ToolPicker, catalog: &ModelCatalog) -> Result<ToolPicker> {
+    base.rebuild(catalog.to_picker_catalog())
+        .map_err(|error| Error::ModelBind {
+            capability: String::new(),
+            detail: error.to_string(),
+        })
+}
+
+/// Resolver that filters the catalog, then semantically resolves via a picker.
+#[derive(Debug)]
+pub struct PickerModelResolver<'a> {
+    catalog: &'a ModelCatalog,
+    picker: &'a ToolPicker,
+}
+
+impl<'a> PickerModelResolver<'a> {
+    /// Borrows a catalog and a picker built over that catalog's descriptors.
+    #[must_use]
+    pub fn new(catalog: &'a ModelCatalog, picker: &'a ToolPicker) -> Self {
+        Self { catalog, picker }
+    }
+}
+
+impl ModelResolver for PickerModelResolver<'_> {
+    fn resolve(&self, description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel> {
+        let filtered = self.catalog.filter(opts);
+        if filtered.is_empty() {
+            return Err(Error::ModelAbsent {
+                capability: description.to_owned(),
+            });
+        }
+        let picker = self
+            .picker
+            .rebuild(filtered.to_picker_catalog())
+            .map_err(|error| Error::ModelBind {
+                capability: description.to_owned(),
+                detail: error.to_string(),
+            })?;
+        match picker.resolve(description) {
+            Ok(promptforge_tool_picker::Outcome::Bind(tool)) => Ok(ResolvedModel {
+                id: ModelId::new(tool.id.server(), tool.id.name()),
+                invocation: ModelInvocation::from(opts),
+            }),
+            Ok(promptforge_tool_picker::Outcome::Absent) => Err(Error::ModelAbsent {
+                capability: description.to_owned(),
+            }),
+            Ok(promptforge_tool_picker::Outcome::Duplicate(tools)) => Err(Error::ModelDuplicate {
+                capability: description.to_owned(),
+                candidates: tools
+                    .iter()
+                    .map(|tool| ModelId::new(tool.id.server(), tool.id.name()))
+                    .collect(),
+            }),
+            Ok(promptforge_tool_picker::Outcome::Ambiguous(tools)) => Err(Error::ModelAmbiguous {
+                capability: description.to_owned(),
+                candidates: tools
+                    .iter()
+                    .map(|tool| ModelId::new(tool.id.server(), tool.id.name()))
+                    .collect(),
+            }),
+            Err(error) => Err(Error::ModelBind {
+                capability: description.to_owned(),
+                detail: error.to_string(),
+            }),
+        }
+    }
+}
+
+fn satisfies_constraints(model: &ModelDescriptor, opts: &ModelNeedOpts) -> bool {
+    if let Some(min_context) = opts.context
+        && model.context < min_context
+    {
+        return false;
+    }
+    match opts.thinking {
+        Some(true) => matches!(
+            model.thinking,
+            ThinkingMode::Switchable | ThinkingMode::Always
+        ),
+        Some(false) => matches!(
+            model.thinking,
+            ThinkingMode::Switchable | ThinkingMode::Never
+        ),
+        None => true,
+    }
+}
+
+/// Dev-runner catalog entry for the pinned Qwen3.5 analysis model.
+///
+/// Context matches the llama-server profile default (`131072`). Thinking is
+/// switchable so `models.need` can request it on or off.
+#[must_use]
+pub fn pinned_qwen_dev_catalog(model_alias: &str) -> ModelCatalog {
+    ModelCatalog::new([ModelDescriptor::new(
+        ModelId::gateway(model_alias),
+        "A careful analysis model suited to structured reasoning and long-context review",
+        131_072,
+        ThinkingMode::Switchable,
+    )])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lua::{SectionVm, bind_shared_declarations};
+    use crate::observe::NullObserver;
+    use crate::store::StoreRef;
+    use serde_json::json;
+
+    const EXECUTION: &str = "model-bind-test";
+
+    fn catalog() -> ModelCatalog {
+        ModelCatalog::new([
+            ModelDescriptor::new(
+                ModelId::gateway("small"),
+                "A tiny model",
+                8_192,
+                ThinkingMode::Never,
+            ),
+            ModelDescriptor::new(
+                ModelId::gateway("analyst"),
+                "A careful analysis model",
+                131_072,
+                ThinkingMode::Switchable,
+            ),
+            ModelDescriptor::new(
+                ModelId::gateway("always-think"),
+                "Always thinks aloud",
+                64_000,
+                ThinkingMode::Always,
+            ),
+        ])
+    }
+
+    fn fixture_resolver(description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel> {
+        let filtered = catalog().filter(opts);
+        let hit = filtered
+            .models()
+            .iter()
+            .find(|model| {
+                (description.contains("analysis") && model.id().name() == "analyst")
+                    || (description.contains("tiny") && model.id().name() == "small")
+            })
+            .ok_or_else(|| Error::ModelAbsent {
+                capability: description.to_owned(),
+            })?;
+        Ok(ResolvedModel {
+            id: hit.id().clone(),
+            invocation: ModelInvocation::from(opts),
+        })
+    }
+
+    #[test]
+    fn context_filter_drops_small_windows() {
+        let filtered = catalog().filter(&ModelNeedOpts {
+            context: Some(40_000),
+            ..ModelNeedOpts::default()
+        });
+        let names: Vec<_> = filtered.models().iter().map(|m| m.id().name()).collect();
+        assert_eq!(names, ["analyst", "always-think"]);
+    }
+
+    #[test]
+    fn thinking_false_keeps_never_and_switchable() {
+        let filtered = catalog().filter(&ModelNeedOpts {
+            thinking: Some(false),
+            ..ModelNeedOpts::default()
+        });
+        let names: Vec<_> = filtered.models().iter().map(|m| m.id().name()).collect();
+        assert_eq!(names, ["small", "analyst"]);
+    }
+
+    #[test]
+    fn thinking_true_keeps_switchable_and_always() {
+        let filtered = catalog().filter(&ModelNeedOpts {
+            thinking: Some(true),
+            ..ModelNeedOpts::default()
+        });
+        let names: Vec<_> = filtered.models().iter().map(|m| m.id().name()).collect();
+        assert_eq!(names, ["analyst", "always-think"]);
+    }
+
+    #[test]
+    fn same_weights_different_invocation_compare_unequal() {
+        let id = ModelId::gateway("analyst");
+        let a = ModelBinding::new(
+            "cool",
+            "careful analysis",
+            id.clone(),
+            ModelInvocation {
+                temperature: Some(0.0),
+                max_tokens: None,
+                thinking: Some(false),
+            },
+        );
+        let b = ModelBinding::new(
+            "warm",
+            "careful analysis",
+            id,
+            ModelInvocation {
+                temperature: Some(0.7),
+                max_tokens: None,
+                thinking: Some(false),
+            },
+        );
+        assert_eq!(a.id(), b.id());
+        assert_ne!(a.invocation(), b.invocation());
+    }
+
+    #[test]
+    fn models_need_resolves_and_use_selects_section_binding() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.need("analyst", "careful analysis", { thinking = false, temperature = 0, context = 40000 })"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        assert_eq!(models.bindings()[0].id().name(), "analyst");
+        assert_eq!(models.bindings()[0].invocation().thinking, Some(false));
+
+        let mut vm = SectionVm::new_with_shared_bindings(
+            &shared,
+            &tools,
+            &models,
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
+        let preamble = crate::lua::LuaProgram::compile(
+            r#"models.use("analyst")"#,
+            "preamble",
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        vm.run_preamble(&preamble, &NullObserver, "Section")
+            .unwrap();
+        let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
+        assert_eq!(scopes.model.unwrap().alias(), "analyst");
+        vm.teardown(&NullObserver, "Section");
+    }
+
+    #[test]
+    fn no_models_use_keeps_host_default() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.need("analyst", "careful analysis")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let mut vm = SectionVm::new_with_shared_bindings(
+            &shared,
+            &tools,
+            &models,
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
+        let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
+        assert!(scopes.model.is_none());
+        vm.teardown(&NullObserver, "Section");
+    }
+
+    #[test]
+    fn constraint_filter_makes_need_absent() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.need("analyst", "careful analysis", { context = 200000 })"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let error = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap_err();
+        assert!(matches!(error, Error::ModelAbsent { .. }));
+    }
+
+    #[test]
+    fn undeclared_models_use_fails_loudly() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"models.need("analyst", "careful analysis")"#,
+            "shared",
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let mut vm = SectionVm::new_with_shared_bindings(
+            &shared,
+            &tools,
+            &models,
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
+        let preamble = crate::lua::LuaProgram::compile(
+            r#"models.use("missing")"#,
+            "preamble",
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .unwrap();
+        assert!(
+            vm.run_preamble(&preamble, &NullObserver, "Section")
+                .is_err()
+        );
+        vm.teardown(&NullObserver, "Section");
+    }
+}

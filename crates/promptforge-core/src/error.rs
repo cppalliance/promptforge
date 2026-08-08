@@ -176,6 +176,64 @@ pub enum Error {
         diagnostic: Box<NearDuplicateDiagnostic>,
     },
 
+    /// The concrete picker failed while resolving a model capability declaration.
+    #[error("could not bind model capability {capability:?}: {detail}")]
+    #[non_exhaustive]
+    ModelBind {
+        /// The exact capability description passed to `models.need`.
+        capability: String,
+        /// The picker failure without exposing its concrete error type.
+        detail: String,
+    },
+
+    /// No catalog entry matched a declared model capability under its constraints.
+    #[error("no model matches capability {capability:?}")]
+    #[non_exhaustive]
+    ModelAbsent {
+        /// The exact capability description passed to `models.need`.
+        capability: String,
+    },
+
+    /// One server published duplicate model matches for a declared capability.
+    #[error("duplicate models match capability {capability:?}: {candidates:?}")]
+    #[non_exhaustive]
+    ModelDuplicate {
+        /// The exact capability description passed to `models.need`.
+        capability: String,
+        /// The stable identities reported by the picker, in picker order.
+        candidates: Vec<crate::model::ModelId>,
+    },
+
+    /// The picker could not choose uniquely among model capability matches.
+    #[error("ambiguous models match capability {capability:?}: {candidates:?}")]
+    #[non_exhaustive]
+    ModelAmbiguous {
+        /// The exact capability description passed to `models.need`.
+        capability: String,
+        /// The stable identities reported by the picker, in picker order.
+        candidates: Vec<crate::model::ModelId>,
+    },
+
+    /// One prompt-local model alias was declared more than once.
+    #[error("model alias {alias:?} was declared more than once")]
+    #[non_exhaustive]
+    DuplicateModelAlias {
+        /// The exact case-sensitive alias declared by the prompt.
+        alias: String,
+    },
+
+    /// A picker-selected model identity is absent from the live catalog.
+    #[error(
+        "alias {alias:?} selected model identity {id:?}, which is absent from the live catalog"
+    )]
+    #[non_exhaustive]
+    PickedModelNotLive {
+        /// The prompt-local alias whose selection cannot be fulfilled.
+        alias: String,
+        /// The selected stable identity absent from the catalog.
+        id: crate::model::ModelId,
+    },
+
     /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
     #[error("substitution error: {0}")]
     Substitution(String),
