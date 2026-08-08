@@ -648,6 +648,8 @@ async fn tool_loop_dispatches_then_returns_text() {
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&mut turns, &options),
+        None,
+        None,
     )
     .await
     .unwrap();
@@ -714,6 +716,8 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
         "loop forever".to_string(),
         cap,
         silent_progress(&mut turns, &options),
+        None,
+        None,
     )
     .await
     .expect_err("a never-converging model should exhaust the loop");
@@ -748,6 +752,8 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
         "loop forever".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&mut turns, &options),
+        None,
+        None,
     )
     .await
     .expect_err("a never-converging model should exhaust the loop");
@@ -802,12 +808,22 @@ async fn tool_loop_errors_on_unknown_tool() {
         "call unknown".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&mut turns, &options),
+        None,
+        None,
     )
     .await
     .expect_err("an unprovided tool should be rejected");
     match err {
-        Error::UnknownTool(name) => assert_eq!(name, "echo"),
-        other => panic!("expected UnknownTool, got {other:?}"),
+        Error::OutOfScopeToolCall {
+            name,
+            global_exists,
+            in_scope,
+        } => {
+            assert_eq!(name, "echo");
+            assert!(!global_exists);
+            assert!(in_scope.is_empty());
+        }
+        other => panic!("expected OutOfScopeToolCall, got {other:?}"),
     }
 }
 
@@ -843,6 +859,8 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
             debug: None,
             completion_options: &options,
         },
+        None,
+        None,
     )
     .await
     .expect_err("a tool whose call fails must fail the loop");
@@ -905,6 +923,8 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
             debug: None,
             completion_options: &options,
         },
+        None,
+        None,
     )
     .await
     .expect_err("the backend failure must propagate");
@@ -973,6 +993,8 @@ async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(Strin
             debug: None,
             completion_options: &options,
         },
+        None,
+        None,
     )
     .await;
     (out, recorder.events(), turns)
@@ -1128,6 +1150,8 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&mut turns, &options),
+        None,
+        None,
     )
     .await
     .unwrap();
@@ -1169,6 +1193,8 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&mut turns, &options),
+        None,
+        None,
     )
     .await
     .unwrap();
@@ -1265,6 +1291,8 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&mut turns, &options),
+        None,
+        None,
     )
     .await
     .unwrap();
@@ -1600,6 +1628,8 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
             debug: None,
             completion_options: &options,
         },
+        None,
+        None,
     )
     .await
     .unwrap();
@@ -2736,4 +2766,249 @@ async fn debug_capture_none_changes_nothing() {
     .await
     .unwrap();
     assert_eq!(out, "hello from the mock");
+}
+
+// --- Per-VM tools.calls count tests ---
+
+#[tokio::test]
+async fn tool_calls_count_increments_on_successful_dispatch() {
+    let (addr, _, _) = spawn_aliased_tool_gateway("echo").await;
+    let tool = ScopedFixtureTool::new("echo", "canonical_echo", "Echo a test value.");
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Test prompt\n\n```lua\n\
+        tools.need('echo', 'echo tool')\n\
+        tools.always('echo')\n\
+        models.always('writer', 'A general model for tests')\n```\n\n\
+        ## Only\n\nUse the tool.\n\n\
+        ```lua\nassert(tools.calls['echo'] == 1, \
+        'expected 1 call, got ' .. tostring(tools.calls['echo']))\n\
+        return 'ok'\n```\n";
+    let prompt = bound_with_tools(
+        md,
+        &|_: &str| Ok(ToolId::new("tests", "echo")),
+        Vec::new(),
+    );
+    let out = run(
+        &prompt,
+        "",
+        &[&tool],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, "ok");
+    assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn tool_calls_count_increments_even_when_tool_errors() {
+    let counts = crate::lua::ToolCallCounts::new(["echo".to_string()]);
+    assert_eq!(counts.get("echo").unwrap(), Some(0));
+    counts.increment("echo").unwrap();
+    assert_eq!(counts.get("echo").unwrap(), Some(1));
+    counts.increment("echo").unwrap();
+    assert_eq!(counts.get("echo").unwrap(), Some(2));
+}
+
+#[tokio::test]
+async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Test prompt\n\n```lua\n\
+        tools.need('search', 'search tool')\n\
+        models.always('writer', 'A general model for tests')\n```\n\n\
+        ## Only\n\n```lua\ntools.add('search')\n```\n\n\
+        ```lua\nassert(tools.calls['search'] > 0, 'search was never called')\n\
+        return 'unreached'\n```\n";
+    let tool = ScopedFixtureTool::new("search", "canonical_search", "Search for things.");
+    let addr = spawn_text_gateway().await;
+    let prompt = bound_with_tools(
+        md,
+        &|_: &str| Ok(ToolId::new("tests", "search")),
+        Vec::new(),
+    );
+    let error = run(
+        &prompt,
+        "",
+        &[&tool],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .expect_err("epilog assert on zero count must fail the run");
+    assert!(
+        error.to_string().contains("search was never called"),
+        "error must carry the assert message: {error}"
+    );
+}
+
+#[tokio::test]
+async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Test prompt\n\n```lua\n\
+        tools.need('search', 'search tool')\n\
+        models.always('writer', 'A general model for tests')\n```\n\n\
+        ## Only\n\n```lua\ntools.add('search')\n```\n\n\
+        ```lua\nlocal _ = tools.calls['serach']\n\
+        return 'unreached'\n```\n";
+    let tool = ScopedFixtureTool::new("search", "canonical_search", "Search for things.");
+    let addr = spawn_text_gateway().await;
+    let prompt = bound_with_tools(
+        md,
+        &|_: &str| Ok(ToolId::new("tests", "search")),
+        Vec::new(),
+    );
+    let error = run(
+        &prompt,
+        "",
+        &[&tool],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .expect_err("accessing a typo alias in tools.calls must hard error");
+    let msg = error.to_string();
+    assert!(
+        msg.contains("serach") && msg.contains("not in this section's tool scope"),
+        "error must name the bad key and state it's out of scope: {msg}"
+    );
+    assert!(
+        msg.contains("search"),
+        "error must list in-scope aliases: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
+    let (addr, _, _) = spawn_aliased_tool_gateway("global_tool").await;
+    let scoped = ScopedFixtureTool::new("scoped", "canonical_scoped", "A scoped tool.");
+    let global = ScopedFixtureTool::new("global_tool", "canonical_global", "A global tool.");
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Test prompt\n\n```lua\n\
+        tools.need('scoped', 'scoped tool')\n\
+        tools.need('global_tool', 'global tool')\n\
+        tools.always('scoped')\n\
+        models.always('writer', 'A general model for tests')\n```\n\n\
+        ## Only\n\nUse the tool.\n";
+    let prompt = bound_with_tools(
+        md,
+        &|capability: &str| {
+            if capability.contains("scoped") {
+                Ok(ToolId::new("tests", "scoped"))
+            } else {
+                Ok(ToolId::new("tests", "global_tool"))
+            }
+        },
+        Vec::new(),
+    );
+    let error = run(
+        &prompt,
+        "",
+        &[&scoped, &global],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .expect_err("model calling a global-but-unscoped tool must fail");
+    match &error {
+        Error::OutOfScopeToolCall {
+            name,
+            global_exists,
+            in_scope,
+        } => {
+            assert_eq!(name, "global_tool");
+            assert!(
+                *global_exists,
+                "the alias was declared by tools.need"
+            );
+            assert!(
+                in_scope.contains(&"scoped".to_string()),
+                "in_scope must list the scoped alias: {in_scope:?}"
+            );
+            assert!(
+                !in_scope.contains(&"global_tool".to_string()),
+                "global_tool must not be in scope: {in_scope:?}"
+            );
+        }
+        other => panic!("expected OutOfScopeToolCall, got {other:?}"),
+    }
+    let msg = error.to_string();
+    assert!(
+        msg.contains("declared by tools.need but not added"),
+        "error message must hint declared-but-unscoped: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn model_calling_pure_unknown_tool_is_a_hard_error() {
+    let (addr, _, _) = spawn_aliased_tool_gateway("nonexistent").await;
+    let tool = ScopedFixtureTool::new("echo", "canonical_echo", "Echo a test value.");
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Test prompt\n\n```lua\n\
+        tools.need('echo', 'echo tool')\n\
+        tools.always('echo')\n\
+        models.always('writer', 'A general model for tests')\n```\n\n\
+        ## Only\n\nUse the tool.\n";
+    let prompt = bound_with_tools(
+        md,
+        &|_: &str| Ok(ToolId::new("tests", "echo")),
+        Vec::new(),
+    );
+    let error = run(
+        &prompt,
+        "",
+        &[&tool],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .expect_err("model calling a pure unknown tool must fail");
+    match &error {
+        Error::OutOfScopeToolCall {
+            name,
+            global_exists,
+            in_scope,
+        } => {
+            assert_eq!(name, "nonexistent");
+            assert!(
+                !*global_exists,
+                "the alias was never declared by tools.need"
+            );
+            assert!(
+                in_scope.contains(&"echo".to_string()),
+                "in_scope must list the scoped alias: {in_scope:?}"
+            );
+        }
+        other => panic!("expected OutOfScopeToolCall, got {other:?}"),
+    }
+    let msg = error.to_string();
+    assert!(
+        !msg.contains("declared by tools.need but not added"),
+        "pure unknown must not hint declared-but-unscoped: {msg}"
+    );
 }

@@ -257,6 +257,18 @@ pub enum Error {
     #[error("model called unknown tool {0}")]
     UnknownTool(String),
 
+    /// The model (or Lua) referenced a tool outside the VM's scoped aliases.
+    #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (alias was declared by tools.need but not added to this section's scope)" } else { "" })]
+    #[non_exhaustive]
+    OutOfScopeToolCall {
+        /// The alias or identifier the model/Lua code tried to use.
+        name: String,
+        /// Whether the name exists in the prompt-wide `tools.need` map.
+        global_exists: bool,
+        /// The aliases that are in scope for this VM.
+        in_scope: Vec<String>,
+    },
+
     /// A section's Lua preamble scoped a tool by a name absent from the run's
     /// supplied tool pool, so no matching tool could be advertised or dispatched.
     #[error("section scoped unknown tool {0}")]

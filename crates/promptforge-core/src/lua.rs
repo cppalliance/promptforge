@@ -23,6 +23,7 @@
 //! transition. A failed store op raises a Lua error, which surfaces from
 //! [`run_chunk`] as [`Error::Lua`].
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -125,6 +126,77 @@ impl ToolBindings {
 
     fn binding(&self, alias: &str) -> Option<&ToolBinding> {
         self.bindings.iter().find(|binding| binding.alias == alias)
+    }
+}
+
+/// Shared per-VM tool-call counts, pre-seeded at 0 for every in-scope alias.
+///
+/// The executor increments a count when dispatch is attempted (even if the tool
+/// later errors). Lua reads the snapshot through the `tools.calls` table.
+#[derive(Debug, Clone, Default)]
+pub struct ToolCallCounts {
+    inner: Arc<Mutex<BTreeMap<String, u64>>>,
+}
+
+impl ToolCallCounts {
+    /// Creates a counts map pre-seeded with 0 for every alias.
+    #[must_use]
+    pub fn new(aliases: impl IntoIterator<Item = String>) -> Self {
+        let map: BTreeMap<String, u64> = aliases.into_iter().map(|a| (a, 0)).collect();
+        Self {
+            inner: Arc::new(Mutex::new(map)),
+        }
+    }
+
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, BTreeMap<String, u64>>> {
+        self.inner
+            .lock()
+            .map_err(|_| Error::Lua("tool call counts mutex was poisoned".to_owned()))
+    }
+
+    /// Increments the count for `alias`.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the mutex is poisoned or alias is not in scope.
+    pub fn increment(&self, alias: &str) -> Result<()> {
+        let mut map = self.lock()?;
+        let count = map.get_mut(alias).ok_or_else(|| {
+            Error::Lua(format!("tool call counts: alias {alias:?} was not pre-seeded"))
+        })?;
+        *count += 1;
+        Ok(())
+    }
+
+    /// Returns whether `alias` is in the pre-seeded scope.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the mutex is poisoned.
+    pub fn contains(&self, alias: &str) -> Result<bool> {
+        Ok(self.lock()?.contains_key(alias))
+    }
+
+    /// Returns the current count for `alias`, or `None` if not in scope.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the mutex is poisoned.
+    pub fn get(&self, alias: &str) -> Result<Option<u64>> {
+        Ok(self.lock()?.get(alias).copied())
+    }
+
+    /// Returns a snapshot of all in-scope aliases.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the mutex is poisoned.
+    pub fn aliases(&self) -> Result<Vec<String>> {
+        Ok(self.lock()?.keys().cloned().collect())
+    }
+
+    /// Returns a snapshot of the counts.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the mutex is poisoned.
+    pub fn snapshot(&self) -> Result<BTreeMap<String, u64>> {
+        Ok(self.lock()?.clone())
     }
 }
 
@@ -603,6 +675,7 @@ pub struct SectionVm {
     bound_models: ModelBindings,
     tool_runtime: Arc<Mutex<ToolRuntime>>,
     model_runtime: Arc<Mutex<ModelRuntime>>,
+    tool_call_counts: Option<ToolCallCounts>,
     store: Option<StoreRef>,
     host_injected: bool,
 }
@@ -664,6 +737,7 @@ impl SectionVm {
                 added: Vec::new(),
             })),
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new_replay())),
+            tool_call_counts: None,
             store: None,
             host_injected: false,
         };
@@ -772,6 +846,7 @@ impl SectionVm {
             bound_models: models.clone(),
             tool_runtime: Arc::clone(&runtime),
             model_runtime: Arc::clone(&model_runtime),
+            tool_call_counts: None,
             store: None,
             host_injected: false,
         };
@@ -1337,6 +1412,27 @@ impl SectionVm {
         })
     }
 
+    /// Installs `tools.calls` as a read-only Lua table backed by the shared
+    /// [`ToolCallCounts`]. Each in-scope alias reads its live count; indexing
+    /// an unknown key is a hard error that names the bad key and lists the
+    /// in-scope set. When the key was declared by `tools.need` but not added
+    /// to this section's scope, the diagnostic says so.
+    ///
+    /// Returns the `ToolCallCounts` handle so the executor's tool loop can
+    /// increment it.
+    pub fn install_tool_call_counts(&mut self, scope: &ToolScope) -> Result<ToolCallCounts> {
+        let counts = ToolCallCounts::new(scope.bindings().iter().map(|b| b.alias().to_owned()));
+        self.tool_call_counts = Some(counts.clone());
+        let declared: Vec<String> = self
+            .bound_tools
+            .bindings()
+            .iter()
+            .map(|binding| binding.alias().to_owned())
+            .collect();
+        install_lua_tool_calls(&self.lua, &counts, &declared)?;
+        Ok(counts)
+    }
+
     fn require_closed_tool_scope(&self, operation: &str) -> Result<()> {
         let runtime = self
             .tool_runtime
@@ -1670,6 +1766,77 @@ fn finish_replay(vm: &SectionVm) -> Result<()> {
             bindings.declarations.len()
         )));
     }
+    Ok(())
+}
+
+/// Installs `tools.calls` on the existing `tools` global as a read-only table.
+///
+/// Reading a known alias returns its current count from `counts`. Indexing an
+/// unknown key raises a hard Lua error naming the bad key and listing the VM's
+/// in-scope aliases. `declared` is the prompt-wide `tools.need` set used to
+/// distinguish pure unknowns from declared-but-unscoped aliases.
+fn install_lua_tool_calls(
+    lua: &Lua,
+    counts: &ToolCallCounts,
+    declared: &[String],
+) -> Result<()> {
+    let globals = lua.globals();
+    let tools: mlua::Table = globals
+        .raw_get("tools")
+        .map_err(|error| Error::Lua(error.to_string()))?;
+
+    let calls_inner = lua
+        .create_table()
+        .map_err(|error| Error::Lua(error.to_string()))?;
+    let meta = lua
+        .create_table()
+        .map_err(|error| Error::Lua(error.to_string()))?;
+
+    let counts_for_index = counts.clone();
+    let declared: Vec<String> = declared.to_vec();
+    let index = lua
+        .create_function(move |_, (_table, key): (mlua::Table, String)| {
+            let value = counts_for_index
+                .get(&key)
+                .map_err(|e| mlua::Error::external(e.to_string()))?;
+            match value {
+                Some(count) => Ok(count),
+                None => {
+                    let in_scope = counts_for_index
+                        .aliases()
+                        .map_err(|e| mlua::Error::external(e.to_string()))?;
+                    let declared_unscoped = declared.iter().any(|alias| alias == &key);
+                    Err(mlua::Error::external(format!(
+                        "tools.calls: {key:?} is not in this section's tool scope; \
+                         in-scope aliases: {in_scope:?}{}",
+                        if declared_unscoped {
+                            " (alias was declared by tools.need but not added to this section's scope)"
+                        } else if in_scope.is_empty() {
+                            ""
+                        } else {
+                            " - check for typos or add it via tools.add"
+                        }
+                    )))
+                }
+            }
+        })
+        .map_err(|error| Error::Lua(error.to_string()))?;
+    meta.set("__index", index)
+        .map_err(|error| Error::Lua(error.to_string()))?;
+
+    let newindex_err = lua
+        .create_function(|_, _: MultiValue| -> mlua::Result<()> {
+            Err(mlua::Error::external("tools.calls is read-only"))
+        })
+        .map_err(|error| Error::Lua(error.to_string()))?;
+    meta.set("__newindex", newindex_err)
+        .map_err(|error| Error::Lua(error.to_string()))?;
+
+    calls_inner.set_metatable(Some(meta));
+
+    tools
+        .set("calls", calls_inner)
+        .map_err(|error| Error::Lua(error.to_string()))?;
     Ok(())
 }
 
