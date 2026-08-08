@@ -82,7 +82,10 @@ fn the_shipped_configuration_resolves_the_shipped_prompts() {
         .iter()
         .map(promptforge_mcp_server::Entry::name)
         .collect();
-    assert_eq!(names, ["echo", "greet", "hello", "research_person"]);
+    assert_eq!(
+        names,
+        ["analyst_example", "echo", "greet", "hello", "research_person"]
+    );
     for entry in catalog.entries() {
         assert!(
             entry.problem().is_none() && entry.prompt().is_some(),

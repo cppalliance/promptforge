@@ -149,6 +149,7 @@ mod tests {
     use std::path::Path;
 
     use promptforge_core::bind::bind_prompt;
+    use promptforge_core::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
     use promptforge_core::observe::NullObserver;
     use promptforge_core::parser::Prompt;
 
@@ -234,17 +235,20 @@ mod tests {
     #[test]
     fn every_repository_prompt_parses_and_binds() {
         let config = gateway("");
-        let tools = PreparedTools::new(
-            &config.gateway,
-            promptforge_core::model::ModelCatalog::empty(),
-        )
-        .expect("prepare repository tools");
+        let models = ModelCatalog::new([ModelDescriptor::new(
+            ModelId::gateway("claude-sonnet-4-6"),
+            "A model suited for careful analysis, coding, and general assistance",
+            200_000,
+            ThinkingMode::Never,
+        )]);
+        let tools =
+            PreparedTools::new(&config.gateway, models.clone()).expect("prepare repository tools");
         let registry = tools.registry();
         let prompts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts");
         let mut files = Vec::new();
         collect_markdown(&prompts, &mut files);
         files.sort();
-        assert_eq!(files.len(), 4, "every shipped markdown prompt is covered");
+        assert_eq!(files.len(), 5, "every shipped markdown prompt is covered");
 
         for path in files {
             let source = fs::read_to_string(&path).expect("read repository prompt");
@@ -262,7 +266,7 @@ mod tests {
                 prompt,
                 tools.picker(),
                 &registry,
-                &promptforge_core::model::ModelCatalog::empty(),
+                &models,
                 "test-run",
                 &NullObserver,
             )
@@ -283,11 +287,25 @@ mod tests {
                         "web_fetch"
                     ))
                 );
+                assert!(bound.models().is_empty(), "{name} declares no models");
+            } else if name == "analyst_example" {
+                assert!(
+                    bound.alias_to_id().is_empty(),
+                    "{name} declares no tool capabilities"
+                );
+                let model_bindings = bound.models().bindings();
+                assert_eq!(model_bindings.len(), 1);
+                assert_eq!(model_bindings[0].alias(), "analyst");
+                assert_eq!(
+                    model_bindings[0].id(),
+                    &ModelId::gateway("claude-sonnet-4-6")
+                );
             } else {
                 assert!(
                     bound.alias_to_id().is_empty(),
                     "{name} declares no capabilities"
                 );
+                assert!(bound.models().is_empty(), "{name} declares no models");
             }
         }
     }

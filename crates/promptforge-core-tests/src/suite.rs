@@ -551,7 +551,7 @@ fn every_shipped_prompt_parses_offline() {
     let mut files = Vec::new();
     collect_markdown(&prompts, &mut files);
     files.sort();
-    assert_eq!(files.len(), 4, "every shipped markdown prompt is covered");
+    assert_eq!(files.len(), 5, "every shipped markdown prompt is covered");
 
     for path in files {
         let source = fs::read_to_string(&path).expect("read shipped prompt");
