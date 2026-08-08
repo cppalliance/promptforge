@@ -12,6 +12,7 @@ use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId, T
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::dialects::ToolDialectId;
 use crate::{Error, Result};
 
 /// Stable identity of one catalogued model.
@@ -242,6 +243,7 @@ impl ModelBinding {
             temperature: self.invocation.temperature,
             max_tokens: self.invocation.max_tokens,
             thinking: self.invocation.thinking,
+            tool_dialect: ToolDialectId::OpenAi,
         }
     }
 }
@@ -257,6 +259,8 @@ pub struct CompletionOptions {
     pub max_tokens: Option<u32>,
     /// When set, emits `chat_template_kwargs.enable_thinking`.
     pub thinking: Option<bool>,
+    /// Which tool-calling dialect to use for this completion.
+    pub tool_dialect: ToolDialectId,
 }
 
 impl Eq for CompletionOptions {}
@@ -1055,6 +1059,7 @@ mod tests {
             temperature: Some(0.0),
             max_tokens: None,
             thinking: Some(false),
+            tool_dialect: ToolDialectId::OpenAi,
         };
         assert_eq!(opts, Some(expected));
         vm.teardown(&NullObserver, "Section");
@@ -1260,6 +1265,7 @@ mod tests {
             temperature: Some(0.0),
             max_tokens: None,
             thinking: Some(false),
+            tool_dialect: ToolDialectId::OpenAi,
         };
         assert_eq!(opts, Some(expected));
         vm.teardown(&NullObserver, "Section");

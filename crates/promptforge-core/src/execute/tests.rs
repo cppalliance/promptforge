@@ -61,6 +61,7 @@ fn test_completion_options() -> CompletionOptions {
         temperature: None,
         max_tokens: None,
         thinking: None,
+        tool_dialect: crate::dialects::ToolDialectId::OpenAi,
     }
 }
 
