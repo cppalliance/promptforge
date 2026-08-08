@@ -22,3 +22,5 @@
 
 ## 2026-08-08 dev: clear the store dump directory before each run
 
+## 2026-08-08 docs: add portrait image to the README
+
