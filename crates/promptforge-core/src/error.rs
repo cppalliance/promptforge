@@ -262,6 +262,15 @@ pub enum Error {
     #[error("section scoped unknown tool {0}")]
     UnknownScopedTool(String),
 
+    /// A model-facing section has non-empty prose but no `models.use` or
+    /// prompt-wide `models.always` binding.
+    #[error("model binding required for section {section}")]
+    #[non_exhaustive]
+    ModelRequired {
+        /// The H2 section heading that reached a model turn without a binding.
+        section: String,
+    },
+
     /// The prompt declares a `promptforge:` major this build does not support,
     /// so it is refused rather than run under mismatched rules.
     #[error("unsupported promptforge version: {0} (this build supports major 1)")]

@@ -4,7 +4,9 @@
 //! offline entry). H1 `models.need` resolves a description against that catalog
 //! under hard constraints, freezes invocation parameters, and stores the result
 //! in [`ModelBindings`]. H2 `models.use` selects at most one binding per
-//! section; absence means the host default client model.
+//! section; H1 `models.always` supplies the prompt-wide default for sections
+//! that omit `models.use`. Model-facing sections with neither binding fail with
+//! [`crate::Error::ModelRequired`].
 
 use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId, ToolPicker};
 use serde::Deserialize;
@@ -788,7 +790,7 @@ mod tests {
     }
 
     #[test]
-    fn no_models_use_keeps_host_default() {
+    fn no_models_use_or_always_leaves_section_unbound() {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.need("analyst", "careful analysis")"#,
             "shared",
