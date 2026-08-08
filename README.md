@@ -104,7 +104,7 @@ endpoints = ["anthropic"]            # one or more endpoint ids (v0 uses the fir
 Three distinct namespaces, on purpose:
 
 - `endpoint.id` - an operator-chosen handle. Yours to name (`anthropic`, `pod-a`, `east-1`); unique within the file; referenced by each model's `endpoints` list.
-- `model.name` - the caller-facing contract. This is what a client's `PROMPTFORGE_MODEL` (or a prompt) asks for. Changing it is a breaking change for callers.
+- `model.name` - the caller-facing catalog id. A prompt reaches it through `models.need` / `models.use` or `models.always`, not through a host environment variable. Changing it is a breaking change for callers.
 - `model.upstream` - the vendor's own model string, substituted into the request before it leaves the gateway.
 
 Each `[[model]]` also carries catalog metadata hosts read from `GET /v1/models`
