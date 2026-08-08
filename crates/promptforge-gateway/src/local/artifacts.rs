@@ -907,6 +907,11 @@ fn env_var(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
+/// Reads the HF bearer token from the process environment.
+pub(crate) fn hub_bearer_token_from_env() -> Option<String> {
+    hub_bearer_token(env_var)
+}
+
 /// Hugging Face hub bearer token for gated downloads.
 ///
 /// Prefers `HF_TOKEN`, then `HUGGING_FACE_HUB_TOKEN`. Empty or whitespace-only
