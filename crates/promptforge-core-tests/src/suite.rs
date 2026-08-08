@@ -19,6 +19,11 @@ const STORE_EXECUTION: &str = "fixture-store-fallthrough";
 const REPLY_NIL_EXECUTION: &str = "fixture-reply-nil";
 const STORE_TRIAD_EXECUTION: &str = "fixture-store-triad";
 const REPLY_SUBST_NIL_EXECUTION: &str = "fixture-reply-subst-nil";
+const FANOUT_BASIC_EXECUTION: &str = "fixture-fanout-basic";
+const FANOUT_EPILOG_EXECUTION: &str = "fixture-fanout-epilog";
+const FANOUT_STORE_EXECUTION: &str = "fixture-fanout-store";
+const FANOUT_FAILURE_EXECUTION: &str = "fixture-fanout-failure";
+const ITEM_OUTSIDE_EXECUTION: &str = "fixture-item-outside";
 const SHIPPED_PARSE: &str = "fixture-shipped-prompts";
 
 const LOG_CHECKPOINTS: &str = include_str!("../prompts/execution/log-checkpoints.md");
@@ -27,6 +32,12 @@ const STORE_FALLTHROUGH: &str = include_str!("../prompts/execution/store-fallthr
 const REPLY_NIL_SECTION_ONE: &str = include_str!("../prompts/execution/reply-nil-section-one.md");
 const STORE_TRIAD: &str = include_str!("../prompts/execution/store-triad.md");
 const REPLY_SUBSTITUTION_NIL: &str = include_str!("../prompts/invalid/reply-substitution-nil.md");
+const FANOUT_BASIC: &str = include_str!("../prompts/execution/fanout-basic.md");
+const FANOUT_EPILOG: &str = include_str!("../prompts/execution/fanout-epilog.md");
+const FANOUT_STORE_WRITES: &str = include_str!("../prompts/execution/fanout-store-writes.md");
+const FANOUT_ARM_FAILURE: &str = include_str!("../prompts/execution/fanout-arm-failure.md");
+const ITEM_OUTSIDE_FANOUT: &str = include_str!("../prompts/invalid/item-outside-fanout.md");
+const LIST_H3_NON_LIST: &str = include_str!("../prompts/invalid/list-h3-non-list-content.md");
 
 struct ValidFixture {
     name: &'static str,
@@ -97,15 +108,30 @@ const INVALID_FIXTURES: &[InvalidFixture] = &[
         kind: ErrorKind::LuaCompile,
         message_fragment: "section `Transform` epilog",
     },
+    InvalidFixture {
+        name: "invalid/list-h3-non-list-content.md",
+        source: LIST_H3_NON_LIST,
+        kind: ErrorKind::Parse,
+        message_fragment: "non-list content",
+    },
 ];
 
-const EXECUTION_ERROR_FIXTURES: &[ExecutionErrorFixture] = &[ExecutionErrorFixture {
-    name: "invalid/reply-substitution-nil.md",
-    source: REPLY_SUBSTITUTION_NIL,
-    execution: REPLY_SUBST_NIL_EXECUTION,
-    kind: ExecutionErrorKind::Substitution,
-    message_fragment: "nil",
-}];
+const EXECUTION_ERROR_FIXTURES: &[ExecutionErrorFixture] = &[
+    ExecutionErrorFixture {
+        name: "invalid/reply-substitution-nil.md",
+        source: REPLY_SUBSTITUTION_NIL,
+        execution: REPLY_SUBST_NIL_EXECUTION,
+        kind: ExecutionErrorKind::Substitution,
+        message_fragment: "nil",
+    },
+    ExecutionErrorFixture {
+        name: "invalid/item-outside-fanout.md",
+        source: ITEM_OUTSIDE_FANOUT,
+        execution: ITEM_OUTSIDE_EXECUTION,
+        kind: ExecutionErrorKind::Substitution,
+        message_fragment: "nil",
+    },
+];
 
 /// A synchronized observer shared by concurrent fixture runs.
 #[derive(Default)]
@@ -663,6 +689,147 @@ async fn reply_substitution_nil_errors() {
             fixture.message_fragment
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_basic_two_items_preamble_return() {
+    let recorder = Recorder::default();
+    let prompt = parse_execution_fixture(
+        FANOUT_BASIC,
+        "execution/fanout-basic.md",
+        FANOUT_BASIC_EXECUTION,
+        &recorder,
+    );
+    let store = StoreRef::memory();
+    let result = run(
+        &prompt,
+        "",
+        &[],
+        &store,
+        RunOptions {
+            execution: FANOUT_BASIC_EXECUTION,
+            observer: &recorder,
+            client: None,
+            debug: None,
+        },
+    )
+    .await
+    .expect("the fanout basic fixture must execute offline");
+
+    assert_eq!(result, "alpha-1\nbeta-2");
+
+    let records = recorder.records();
+    let arm_started: Vec<_> = records
+        .iter()
+        .filter(|(_, _, d)| d == "Fanout arm started")
+        .collect();
+    let arm_finished: Vec<_> = records
+        .iter()
+        .filter(|(_, _, d)| d == "Fanout arm finished")
+        .collect();
+    assert_eq!(arm_started.len(), 2, "two arms must start");
+    assert_eq!(arm_finished.len(), 2, "two arms must finish");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_epilog_two_items() {
+    let recorder = Recorder::default();
+    let prompt = parse_execution_fixture(
+        FANOUT_EPILOG,
+        "execution/fanout-epilog.md",
+        FANOUT_EPILOG_EXECUTION,
+        &recorder,
+    );
+    let store = StoreRef::memory();
+    let result = run(
+        &prompt,
+        "",
+        &[],
+        &store,
+        RunOptions {
+            execution: FANOUT_EPILOG_EXECUTION,
+            observer: &recorder,
+            client: None,
+            debug: None,
+        },
+    )
+    .await
+    .expect("the fanout epilog fixture must execute offline");
+
+    assert_eq!(result, "x-1,y-2");
+
+    let records = recorder.records();
+    let arm_started: Vec<_> = records
+        .iter()
+        .filter(|(_, _, d)| d == "Fanout arm started")
+        .collect();
+    let arm_finished: Vec<_> = records
+        .iter()
+        .filter(|(_, _, d)| d == "Fanout arm finished")
+        .collect();
+    assert_eq!(arm_started.len(), 2, "two arms must start");
+    assert_eq!(arm_finished.len(), 2, "two arms must finish");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_store_writes_persist_across_arms() {
+    let recorder = Recorder::default();
+    let prompt = parse_execution_fixture(
+        FANOUT_STORE_WRITES,
+        "execution/fanout-store-writes.md",
+        FANOUT_STORE_EXECUTION,
+        &recorder,
+    );
+    let store = StoreRef::memory();
+    let result = run(
+        &prompt,
+        "",
+        &[],
+        &store,
+        RunOptions {
+            execution: FANOUT_STORE_EXECUTION,
+            observer: &recorder,
+            client: None,
+            debug: None,
+        },
+    )
+    .await
+    .expect("the fanout store fixture must execute offline");
+
+    assert_eq!(result, "2:alpha,beta");
+    assert_eq!(store.read("arm-1.md").expect("arm 1 must write"), "alpha");
+    assert_eq!(store.read("arm-2.md").expect("arm 2 must write"), "beta");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_arm_failure_propagates() {
+    let recorder = Recorder::default();
+    let prompt = parse_execution_fixture(
+        FANOUT_ARM_FAILURE,
+        "execution/fanout-arm-failure.md",
+        FANOUT_FAILURE_EXECUTION,
+        &recorder,
+    );
+    let store = StoreRef::memory();
+    let error = run(
+        &prompt,
+        "",
+        &[],
+        &store,
+        RunOptions {
+            execution: FANOUT_FAILURE_EXECUTION,
+            observer: &recorder,
+            client: None,
+            debug: None,
+        },
+    )
+    .await
+    .expect_err("the fanout arm failure must propagate");
+
+    assert!(
+        error.to_string().contains("deliberately failed"),
+        "error must contain the arm's error message: {error}"
+    );
 }
 
 #[test]

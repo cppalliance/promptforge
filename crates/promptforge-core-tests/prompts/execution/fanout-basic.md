@@ -1,0 +1,27 @@
+---
+name: fanout_basic
+description: Two-item fanout with preamble-return arms
+promptforge: 1
+---
+
+# Fanout Basic
+
+## Research
+
+```lua
+local replies = fanout("### Worker", "### Topics")
+return table.concat(replies, "\n")
+```
+
+### Worker
+
+```lua
+return item .. "-" .. sys.taskid
+```
+
+Do work.
+
+### Topics
+
+- alpha
+- beta

@@ -53,6 +53,9 @@ pub struct Section {
     pub epilog: Option<LuaProgram>,
     /// Child sections nested under this one (deeper heading levels).
     pub children: Vec<Section>,
+    /// Pre-parsed bullet items for list-only sections (no preamble, no epilog).
+    /// Empty for non-list sections.
+    pub items: Vec<String>,
 }
 
 /// A fully parsed prompt file.
@@ -412,6 +415,68 @@ fn split_section_phases(
     Ok((preamble, prose.trim().to_string(), epilog))
 }
 
+/// Parses bullet items from prose in a list-only section.
+///
+/// A list-only section has no preamble and no epilog. Its prose must contain
+/// only unordered (`- ` or `* `) or ordered (`N. ` or `N) `) bullet lines,
+/// with blank lines ignored. Returns an error if the section contains non-list
+/// content or if the items list is empty.
+pub(crate) fn parse_bullet_items(prose: &str, section: &str) -> Result<Vec<String>> {
+    let mut items = Vec::new();
+    for line in prose.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(rest) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            if rest.trim().is_empty() {
+                return Err(Error::Parse(format!(
+                    "empty bullet item in list section `{section}`"
+                )));
+            }
+            items.push(rest.to_string());
+        } else if trimmed == "-" || trimmed == "*" {
+            return Err(Error::Parse(format!(
+                "empty bullet item in list section `{section}`"
+            )));
+        } else if let Some(item) = strip_ordered_marker(trimmed) {
+            if item.trim().is_empty() {
+                return Err(Error::Parse(format!(
+                    "empty bullet item in list section `{section}`"
+                )));
+            }
+            items.push(item.to_string());
+        } else {
+            return Err(Error::Parse(format!(
+                "section `{section}` is a list section but contains non-list content: {trimmed}"
+            )));
+        }
+    }
+    if items.is_empty() {
+        return Err(Error::Parse(format!(
+            "section `{section}` is a list section but has no items"
+        )));
+    }
+    Ok(items)
+}
+
+/// Strips an ordered-list marker (`N. ` or `N) `) and returns the remainder.
+fn strip_ordered_marker(line: &str) -> Option<&str> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == 0 {
+        return None;
+    }
+    let rest = &line[i..];
+    rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") "))
+}
+
 /// Build a section tree from a flat, document-ordered list of headings.
 ///
 /// Recursion consumes headings whose level is deeper than `parent_level`; a
@@ -434,6 +499,7 @@ fn build_sections(
         let h = &headings[*pos];
         let name = h.title.clone();
         let (preamble_source, prose, epilog_source) = split_section_phases(&h.content, &name)?;
+        let is_list_only = preamble_source.is_none() && epilog_source.is_none();
         let preamble = preamble_source
             .map(|source| {
                 LuaProgram::compile(
@@ -458,6 +524,13 @@ fn build_sections(
             .transpose()?;
         *pos += 1;
         let children = build_sections(headings, pos, level, execution, observer)?;
+
+        let items = if is_list_only && has_any_bullet_line(&prose) {
+            parse_bullet_items(&prose, &name)?
+        } else {
+            Vec::new()
+        };
+
         result.push(Section {
             name,
             level,
@@ -465,9 +538,20 @@ fn build_sections(
             prose,
             epilog,
             children,
+            items,
         });
     }
     Ok(result)
+}
+
+/// Returns true if the prose contains at least one bullet-list line.
+fn has_any_bullet_line(prose: &str) -> bool {
+    prose.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed.starts_with("- ")
+            || trimmed.starts_with("* ")
+            || strip_ordered_marker(trimmed).is_some()
+    })
 }
 
 #[cfg(test)]
@@ -1089,5 +1173,67 @@ Prose for the second section.\n";
         let without = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
         let p = Prompt::parse(without, "test", &NullObserver).unwrap();
         assert_eq!(p.frontmatter.promptforge, None);
+    }
+
+    #[test]
+    fn bullet_parser_strips_unordered_markers() {
+        let items = parse_bullet_items("- alpha\n* beta\n- gamma", "test").unwrap();
+        assert_eq!(items, vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn bullet_parser_strips_ordered_markers() {
+        let items = parse_bullet_items("1. first\n2. second\n3) third", "test").unwrap();
+        assert_eq!(items, vec!["first", "second", "third"]);
+    }
+
+    #[test]
+    fn bullet_parser_ignores_blank_lines() {
+        let items = parse_bullet_items("- alpha\n\n- beta\n  \n- gamma", "test").unwrap();
+        assert_eq!(items, vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn bullet_parser_rejects_non_list_content() {
+        let err = parse_bullet_items("- alpha\nnot a bullet\n- gamma", "test")
+            .expect_err("non-list content must error");
+        assert!(
+            err.to_string().contains("non-list content"),
+            "error was: {err}"
+        );
+    }
+
+    #[test]
+    fn bullet_parser_rejects_empty_list() {
+        let err = parse_bullet_items("", "test").expect_err("empty list must error");
+        assert!(err.to_string().contains("no items"), "error was: {err}");
+    }
+
+    #[test]
+    fn bullet_parser_rejects_empty_item() {
+        let err =
+            parse_bullet_items("- alpha\n- \n- gamma", "test").expect_err("empty item must error");
+        assert!(
+            err.to_string().contains("empty bullet item"),
+            "error was: {err}"
+        );
+    }
+
+    #[test]
+    fn list_h3_parses_items_at_load_time() {
+        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Parent\n\np\n\n### Items\n\n- alpha\n- beta\n";
+        let p = Prompt::parse(src, "test", &NullObserver).unwrap();
+        let items_section = &p.sections[0].children[0];
+        assert_eq!(items_section.name, "Items");
+        assert_eq!(items_section.items, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn non_list_h3_has_empty_items() {
+        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Parent\n\np\n\n### Worker\n\n```lua\nreturn item\n```\n\nDo work on {{ item }}.\n";
+        let p = Prompt::parse(src, "test", &NullObserver).unwrap();
+        let worker = &p.sections[0].children[0];
+        assert_eq!(worker.name, "Worker");
+        assert!(worker.items.is_empty());
     }
 }
