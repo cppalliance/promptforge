@@ -90,7 +90,7 @@ impl PreparedTools {
         Ok(Self {
             live,
             picker,
-            models: ModelCatalog::empty(),
+            models: self.models.clone(),
         })
     }
 
@@ -286,7 +286,13 @@ mod tests {
                         "web_fetch"
                     ))
                 );
-                assert!(bound.models().is_empty(), "{name} declares no models");
+                let model_bindings = bound.models().bindings();
+                assert_eq!(model_bindings.len(), 1);
+                assert_eq!(model_bindings[0].alias(), "researcher");
+                assert_eq!(
+                    model_bindings[0].id(),
+                    &ModelId::gateway("claude-sonnet-4-6")
+                );
             } else if name == "analyst_example" {
                 assert!(
                     bound.alias_to_id().is_empty(),
@@ -295,6 +301,18 @@ mod tests {
                 let model_bindings = bound.models().bindings();
                 assert_eq!(model_bindings.len(), 1);
                 assert_eq!(model_bindings[0].alias(), "analyst");
+                assert_eq!(
+                    model_bindings[0].id(),
+                    &ModelId::gateway("claude-sonnet-4-6")
+                );
+            } else if name == "hello" || name == "greet" {
+                assert!(
+                    bound.alias_to_id().is_empty(),
+                    "{name} declares no tool capabilities"
+                );
+                let model_bindings = bound.models().bindings();
+                assert_eq!(model_bindings.len(), 1);
+                assert_eq!(model_bindings[0].alias(), "writer");
                 assert_eq!(
                     model_bindings[0].id(),
                     &ModelId::gateway("claude-sonnet-4-6")

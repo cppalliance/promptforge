@@ -131,9 +131,21 @@ async fn run_text(base_url: &str, api_key: &str) -> Result<()> {
     let observer = Recorder::default();
     let prompt = Prompt::parse(REAL_TEXT, TEXT_EXECUTION, &observer)
         .context("parse execution/real-text.md")?;
+    let picker = ToolPicker::build(Catalog::default(), Config::default())
+        .context("build empty tool picker")?;
+    let registry = ToolRegistry::new(std::iter::empty());
+    let bound = bind_prompt(
+        prompt,
+        &picker,
+        &registry,
+        &promptforge_core::model::pinned_qwen_dev_catalog("writer"),
+        TEXT_EXECUTION,
+        &observer,
+    )
+    .context("bind execution/real-text.md")?;
     let client = GatewayClient::new(base_url, api_key);
     let result = run(
-        &prompt,
+        &bound,
         "",
         &[],
         &StoreRef::memory(),
@@ -188,7 +200,7 @@ async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
         prompt,
         &picker,
         &registry,
-        &promptforge_core::model::ModelCatalog::empty(),
+        &promptforge_core::model::pinned_qwen_dev_catalog("writer"),
         TOOL_EXECUTION,
         &observer,
     )

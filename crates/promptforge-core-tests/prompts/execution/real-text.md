@@ -7,6 +7,10 @@ max_tool_iterations: 1
 
 # Real Text
 
+```lua
+models.always("writer", "A careful analysis model suited to structured reasoning and long-context review")
+```
+
 ## Complete
 
 Reply with exactly `PF_TEXT_OK` and no other text.

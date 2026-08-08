@@ -63,6 +63,7 @@ impl BoundPrompt {
         diagnostics: BTreeMap<ToolId, ToolDescriptor>,
         alias_to_id: BTreeMap<String, ToolId>,
         near_duplicates: Vec<NearDuplicate>,
+        models: ModelBindings,
     ) -> Self {
         let id_to_alias = alias_to_id
             .iter()
@@ -71,7 +72,7 @@ impl BoundPrompt {
         Self {
             prompt,
             bindings,
-            models: ModelBindings::default(),
+            models,
             diagnostics,
             alias_to_id,
             id_to_alias,

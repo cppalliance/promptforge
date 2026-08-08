@@ -16,12 +16,20 @@ use promptforge_tool_picker::{
 use serde_json::Value;
 
 use super::*;
-use crate::lua::bind_tool_declarations;
-use crate::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
+use crate::lua::{bind_shared_declarations, bind_tool_declarations};
+use crate::model::{
+    CompletionOptions, ModelBindings, ModelCatalog, ModelDescriptor, ModelId, ModelInvocation,
+    ModelNeedOpts, ResolvedModel, ThinkingMode,
+};
 use crate::observe::{NullObserver, detail};
 use crate::tools::{Tool, ToolId, ToolRegistry};
 
 const EXECUTION: &str = "execute-test";
+
+const MODEL_ALWAYS_SHARED: &str =
+    "```lua\nmodels.always('writer', 'A general model for tests')\n```\n\n";
+
+const MODEL_ALWAYS_LINE: &str = "models.always('writer', 'A general model for tests')\n";
 
 /// Lua-only prompts never build the gateway client, so these run offline.
 fn parse(md: &str) -> Prompt {
@@ -38,6 +46,93 @@ fn bound(md: &str) -> BoundPrompt {
     BoundPrompt::without_tools(parse(md))
 }
 
+fn test_model_catalog() -> ModelCatalog {
+    ModelCatalog::new([ModelDescriptor::new(
+        ModelId::gateway("claude-sonnet-4-6"),
+        "A general model for tests",
+        131_072,
+        ThinkingMode::Switchable,
+    )])
+}
+
+fn test_completion_options() -> CompletionOptions {
+    CompletionOptions {
+        model: "claude-sonnet-4-6".to_owned(),
+        temperature: None,
+        max_tokens: None,
+        thinking: None,
+    }
+}
+
+#[expect(clippy::unnecessary_wraps, reason = "ModelResolver requires Result")]
+fn fixture_model_resolver(
+    _description: &str,
+    opts: &ModelNeedOpts,
+) -> crate::Result<ResolvedModel> {
+    Ok(ResolvedModel {
+        id: ModelId::gateway("claude-sonnet-4-6"),
+        invocation: ModelInvocation::from(opts),
+    })
+}
+
+fn ensure_model_shared(md: &str) -> String {
+    if md.contains("models.always") || md.contains("models.need") {
+        return md.to_string();
+    }
+    let first_section = md.find("\n\n## ");
+    if let Some(marker) = md.find("```lua\n")
+        && first_section.is_none_or(|section| marker < section)
+    {
+        let mut out = md.to_string();
+        out.insert_str(marker + 7, MODEL_ALWAYS_LINE);
+        return out;
+    }
+    if let Some(pos) = first_section {
+        let mut out = md.to_string();
+        out.insert_str(pos + 2, MODEL_ALWAYS_SHARED);
+        return out;
+    }
+    md.replacen(
+        "---\n\n",
+        &format!("---\n\n# Test prompt\n\n{MODEL_ALWAYS_SHARED}"),
+        1,
+    )
+}
+
+fn bound_for_model(md: &str) -> BoundPrompt {
+    let source = ensure_model_shared(md);
+    let prompt = parse(&source);
+    let no_tools = |_: &str| -> Result<ToolId> {
+        Err(Error::Absent {
+            capability: "unexpected tool need in model-only fixture".to_owned(),
+        })
+    };
+    let (bindings, models) = if let Some(shared) = &prompt.shared {
+        bind_shared_declarations(
+            shared,
+            &no_tools,
+            &fixture_model_resolver,
+            EXECUTION,
+            &NullObserver,
+            &prompt.title,
+        )
+        .expect("model fixture must bind")
+    } else {
+        (
+            crate::lua::ToolBindings::default(),
+            ModelBindings::default(),
+        )
+    };
+    BoundPrompt::with_test_tools(
+        prompt,
+        bindings,
+        BTreeMap::new(),
+        BTreeMap::new(),
+        Vec::new(),
+        models,
+    )
+}
+
 fn bound_with_tools(
     md: &str,
     resolver: &dyn crate::lua::ToolResolver,
@@ -48,9 +143,24 @@ fn bound_with_tools(
         .shared
         .as_ref()
         .expect("a tool fixture must declare shared Lua");
-    let bindings =
-        bind_tool_declarations(shared, resolver, EXECUTION, &NullObserver, &prompt.title).unwrap();
-    let alias_to_id = bindings
+    let (bindings, models) = if shared.source().contains("models.") {
+        bind_shared_declarations(
+            shared,
+            resolver,
+            &fixture_model_resolver,
+            EXECUTION,
+            &NullObserver,
+            &prompt.title,
+        )
+        .expect("tool and model fixture must bind")
+    } else {
+        (
+            bind_tool_declarations(shared, resolver, EXECUTION, &NullObserver, &prompt.title)
+                .unwrap(),
+            ModelBindings::default(),
+        )
+    };
+    let alias_to_id: BTreeMap<String, ToolId> = bindings
         .bindings()
         .iter()
         .map(|binding| (binding.alias().to_owned(), binding.id().clone()))
@@ -61,6 +171,7 @@ fn bound_with_tools(
         BTreeMap::new(),
         alias_to_id,
         near_duplicates,
+        models,
     )
 }
 
@@ -482,14 +593,14 @@ async fn spawn_mock_gateway() -> SocketAddr {
 /// Progress that reports nowhere, for the loop tests that assert on the
 /// reply rather than on the events. The caller owns the turn counter, so
 /// the borrow ends with the call.
-fn silent_progress(turns: &mut u32) -> SectionProgress<'_> {
+fn silent_progress<'a>(turns: &'a mut u32, options: &'a CompletionOptions) -> SectionProgress<'a> {
     SectionProgress {
         execution: EXECUTION,
         observer: &NullObserver,
         section: "Only",
         turns,
         debug: None,
-        completion_options: None,
+        completion_options: options,
     }
 }
 
@@ -527,6 +638,7 @@ async fn tool_loop_dispatches_then_returns_text() {
     let registry = ToolRegistry::new(tools.iter().copied());
 
     let mut turns = 0;
+    let options = test_completion_options();
     let out = run_tool_loop(
         &client,
         &schemas,
@@ -534,7 +646,7 @@ async fn tool_loop_dispatches_then_returns_text() {
         &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&mut turns),
+        silent_progress(&mut turns, &options),
     )
     .await
     .unwrap();
@@ -592,6 +704,7 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     let registry = ToolRegistry::new(tools.iter().copied());
 
     let mut turns = 0;
+    let options = test_completion_options();
     let err = run_tool_loop(
         &client,
         &schemas,
@@ -599,7 +712,7 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
         &registry,
         "loop forever".to_string(),
         cap,
-        silent_progress(&mut turns),
+        silent_progress(&mut turns, &options),
     )
     .await
     .expect_err("a never-converging model should exhaust the loop");
@@ -625,6 +738,7 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
     let registry = ToolRegistry::new(tools.iter().copied());
 
     let mut turns = 0;
+    let options = test_completion_options();
     let err = run_tool_loop(
         &client,
         &schemas,
@@ -632,7 +746,7 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
         &registry,
         "loop forever".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&mut turns),
+        silent_progress(&mut turns, &options),
     )
     .await
     .expect_err("a never-converging model should exhaust the loop");
@@ -678,6 +792,7 @@ async fn tool_loop_errors_on_unknown_tool() {
     let registry = ToolRegistry::new(std::iter::empty());
 
     let mut turns = 0;
+    let options = test_completion_options();
     let err = run_tool_loop(
         &client,
         &schemas,
@@ -685,7 +800,7 @@ async fn tool_loop_errors_on_unknown_tool() {
         &registry,
         "call unknown".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&mut turns),
+        silent_progress(&mut turns, &options),
     )
     .await
     .expect_err("an unprovided tool should be rejected");
@@ -711,6 +826,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
 
     let recorder = Recorder::default();
     let mut turns = 0;
+    let options = test_completion_options();
     let err = run_tool_loop(
         &client,
         &schemas,
@@ -724,7 +840,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
             section: "Gather",
             turns: &mut turns,
             debug: None,
-            completion_options: None,
+            completion_options: &options,
         },
     )
     .await
@@ -772,6 +888,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
     let client = GatewayClient::new(&format!("http://{addr}/v1"), "secret token");
     let recorder = Recorder::default();
     let mut turns = 0;
+    let options = test_completion_options();
     let error = run_tool_loop(
         &client,
         &[],
@@ -785,7 +902,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
             section: "Gather",
             turns: &mut turns,
             debug: None,
-            completion_options: None,
+            completion_options: &options,
         },
     )
     .await
@@ -839,6 +956,7 @@ async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(Strin
     let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
     let recorder = Recorder::default();
     let mut turns = 0;
+    let options = test_completion_options();
     let out = run_tool_loop(
         &client,
         &[],
@@ -852,7 +970,7 @@ async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(Strin
             section: "Gather",
             turns: &mut turns,
             debug: None,
-            completion_options: None,
+            completion_options: &options,
         },
     )
     .await;
@@ -1000,6 +1118,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     let registry = ToolRegistry::new(tools.iter().copied());
 
     let mut turns = 0;
+    let options = test_completion_options();
     let out = run_tool_loop(
         &client,
         &schemas,
@@ -1007,7 +1126,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&mut turns),
+        silent_progress(&mut turns, &options),
     )
     .await
     .unwrap();
@@ -1040,6 +1159,7 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     let registry = ToolRegistry::new(tools.iter().copied());
 
     let mut turns = 0;
+    let options = test_completion_options();
     let out = run_tool_loop(
         &client,
         &schemas,
@@ -1047,7 +1167,7 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&mut turns),
+        silent_progress(&mut turns, &options),
     )
     .await
     .unwrap();
@@ -1250,7 +1370,8 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
         "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 1\n---\n\n\
          # Lifecycle\n\n```lua\n\
          tools.need('echo', {capability})\n\
-         tools.always('echo')\n```\n\n\
+         tools.always('echo')\n\
+         models.always('writer', 'A general model for tests')\n```\n\n\
          ## Gather\n\n```lua\nstore.write('state.txt', 'before')\n```\n\n\
          Use the echo tool.\n\n\
          ```lua\nstore.append('state.txt', '\\nafter')\nreturn reply\n```\n"
@@ -1266,7 +1387,7 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
         prompt,
         &picker,
         &registry,
-        &crate::model::ModelCatalog::empty(),
+        &test_model_catalog(),
         EXECUTION,
         &recorder,
     )
@@ -1339,6 +1460,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
 
     let recorder = Recorder::default();
     let mut turns = 0;
+    let options = test_completion_options();
     let out = run_tool_loop(
         &client,
         &schemas,
@@ -1352,7 +1474,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
             section: "Gather",
             turns: &mut turns,
             debug: None,
-            completion_options: None,
+            completion_options: &options,
         },
     )
     .await
@@ -1494,7 +1616,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
 ## Only\n\nSay something.\n";
     let recorder = Recorder::default();
     let out = run(
-        &bound(md),
+        &bound_for_model(md),
         "",
         &[],
         &StoreRef::memory(),
@@ -1514,6 +1636,24 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
+            (
+                "Only".to_string(),
+                detail::LUA_SHARED_LOAD_STARTED.to_string()
+            ),
+            ("Only".to_string(), detail::TOOL_REPLAY_STARTED.to_string()),
+            ("Only".to_string(), detail::MODEL_REPLAY_STARTED.to_string()),
+            (
+                "Only".to_string(),
+                detail::TOOL_REPLAY_SUCCEEDED.to_string()
+            ),
+            (
+                "Only".to_string(),
+                detail::MODEL_REPLAY_SUCCEEDED.to_string()
+            ),
+            (
+                "Only".to_string(),
+                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string()
+            ),
             ("Only".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
             ("Only".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
             ("Only".to_string(), detail::MODEL_SCOPE_CLOSING.to_string()),
@@ -1551,7 +1691,7 @@ async fn epilog_runs_after_reply_and_can_return() {
     let addr = spawn_text_gateway().await;
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\nSay something.\n\n```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'epilog result'\n```\n";
-    let prompt = bound(md);
+    let prompt = bound_for_model(md);
     assert!(prompt.prompt().entry().preamble.is_none());
     assert!(prompt.prompt().entry().epilog.is_some());
 
@@ -1579,6 +1719,24 @@ async fn epilog_runs_after_reply_and_can_return() {
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
+            (
+                "Only".to_string(),
+                detail::LUA_SHARED_LOAD_STARTED.to_string()
+            ),
+            ("Only".to_string(), detail::TOOL_REPLAY_STARTED.to_string()),
+            ("Only".to_string(), detail::MODEL_REPLAY_STARTED.to_string()),
+            (
+                "Only".to_string(),
+                detail::TOOL_REPLAY_SUCCEEDED.to_string()
+            ),
+            (
+                "Only".to_string(),
+                detail::MODEL_REPLAY_SUCCEEDED.to_string()
+            ),
+            (
+                "Only".to_string(),
+                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string()
+            ),
             ("Only".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
             ("Only".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
             ("Only".to_string(), detail::MODEL_SCOPE_CLOSING.to_string()),
@@ -1676,7 +1834,7 @@ Ask using {{ var.question }}.\n\n\
 ```lua\nreturn decorate(reply)\n```\n";
     let recorder = Recorder::default();
     let out = run(
-        &bound(md),
+        &bound_for_model(md),
         "input",
         &[],
         &StoreRef::memory(),
@@ -1757,13 +1915,45 @@ async fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
 }
 
 #[tokio::test]
+async fn whitespace_only_prose_skips_model_without_binding() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+## Only\n\n```lua\nif reply ~= nil then error('whitespace prose must not bind a reply') end\nreturn 'ok'\n```\n\n   \n\t\n";
+    assert_eq!(
+        run(&bound(md), "", &[], &StoreRef::memory(), silent())
+            .await
+            .unwrap(),
+        "ok"
+    );
+}
+
+#[tokio::test]
+async fn model_required_when_non_empty_prose_has_no_binding() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\nAsk the model.\n";
+    let error = run(&bound(md), "", &[], &StoreRef::memory(), silent())
+        .await
+        .expect_err("non-empty prose without a model binding must fail");
+    assert!(
+        matches!(error, Error::ModelRequired { .. }),
+        "expected ModelRequired, got {error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("model binding required for section Only"),
+        "error must name the section: {error}"
+    );
+}
+
+#[tokio::test]
 async fn default_return_precedes_the_last_model_reply() {
     let addr = spawn_text_gateway().await;
     let md = "---\nname: t\ndescription: d\npromptforge: 1\ndefault_return: fallback\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\nAsk the model.\n";
     let out = run(
-        &bound(md),
+        &bound_for_model(md),
         "",
         &[],
         &StoreRef::memory(),
@@ -1789,7 +1979,7 @@ async fn reply_carries_forward_to_next_section_preamble() {
 ## First\n\nAsk the model.\n\n\
 ## Second\n\n```lua\nreturn reply\n```\n";
     let out = run(
-        &bound(md),
+        &bound_for_model(md),
         "",
         &[],
         &StoreRef::memory(),
@@ -1814,7 +2004,7 @@ async fn reply_substitution_in_prose_uses_previous_section_reply() {
 ## Second\n\nThe previous reply was: {{ reply }}\n\n\
 ```lua\nreturn reply\n```\n";
     run(
-        &bound(md),
+        &bound_for_model(md),
         "",
         &[],
         &StoreRef::memory(),
@@ -1959,7 +2149,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
 
     let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Concrete description.");
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua\ntools.need('local_alias', 'capability')\n```\n\n\
+# Test prompt\n\n```lua\ntools.need('local_alias', 'capability')\nmodels.always('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\nAsk without tools.\n";
     let prompt = bound_with_tools(
         md,
@@ -1998,7 +2188,8 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua\n\
 tools.need('local_alias', 'capability')\n\
-tools.always('local_alias')\n```\n\n\
+tools.always('local_alias')\n\
+models.always('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\nUse the tool.\n",
         &|_: &str| Ok(ToolId::new("tests", "concrete")),
         Vec::new(),
@@ -2043,7 +2234,8 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua\n\
-tools.need('section_tool', 'capability')\n```\n\n\
+tools.need('section_tool', 'capability')\n\
+models.always('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\n```lua\ntools.add('section_tool')\n```\n\nUse the tool.\n",
         &|_: &str| Ok(ToolId::new("tests", "concrete")),
         Vec::new(),
@@ -2102,7 +2294,8 @@ async fn near_duplicate_tools_are_valid_when_isolated_in_separate_sections() {
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua\n\
 tools.need('first_local', 'first')\n\
-tools.need('second_local', 'second')\n```\n\n\
+tools.need('second_local', 'second')\n\
+models.always('writer', 'A general model for tests')\n```\n\n\
 ## First\n\n```lua\ntools.add('first_local')\n```\n\nFirst model turn.\n\n\
 ## Second\n\n```lua\ntools.add('second_local')\n```\n\nSecond model turn.\n",
         &|capability: &str| Ok(ToolId::new("tests", capability)),
@@ -2143,7 +2336,8 @@ async fn near_duplicate_effective_scope_fails_before_the_model_without_payload_r
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua\n\
 tools.need('first_local', 'first')\n\
-tools.need('second_local', 'second')\n```\n\n\
+tools.need('second_local', 'second')\n\
+models.always('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\n```lua\ntools.add('first_local', 'second_local')\n```\n\nDo not reach the model.\n",
         &|capability: &str| Ok(ToolId::new("tests", capability)),
         vec![NearDuplicate {
@@ -2239,7 +2433,7 @@ async fn debug_capture_receives_request_and_response_when_set() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\nAsk the model.\n";
     let out = run(
-        &bound(md),
+        &bound_for_model(md),
         "",
         &[],
         &StoreRef::memory(),
@@ -2289,7 +2483,7 @@ async fn debug_capture_none_changes_nothing() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\nAsk the model.\n";
     let out = run(
-        &bound(md),
+        &bound_for_model(md),
         "",
         &[],
         &StoreRef::memory(),
