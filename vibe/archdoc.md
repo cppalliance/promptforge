@@ -34,6 +34,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A23. Recoverable target failures become actionable tool results; admission and security failures remain hard errors.
 - A24. Each run binds against one coherent catalog snapshot; catalog changes affect subsequent runs, not in-flight runs.
 - A25. Every model-facing section uses a prompt-declared model binding; hosts never choose a model implicitly.
+- A26. Artifact credentials are read from process secrets at request time and are never persisted or logged.
 
 ## Principles
 
@@ -42,4 +43,3 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - Treat each binary as a product boundary and reserve build features for real toolchain or native-build constraints.
 - Keep ordinary tests deterministic and offline; run network, process, download, and live-model checks only through explicit scenario commands.
 - Keep branching and fan-out explicit in sandboxed Lua; never infer control flow from model prose.
-- Author-facing runners consume existing infrastructure; only isolated test harnesses may self-host temporary infrastructure.
