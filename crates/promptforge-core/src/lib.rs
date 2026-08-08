@@ -25,6 +25,7 @@ pub mod execute;
 pub mod lua;
 mod lua_models;
 pub mod model;
+pub mod normalize;
 pub mod observe;
 pub mod parser;
 pub mod store;

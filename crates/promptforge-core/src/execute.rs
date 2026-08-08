@@ -602,10 +602,6 @@ struct SectionProgress<'a> {
 /// `dispatch`,
 /// [`Error::ToolLoopExhausted`] if the cap is hit without a text reply, or any
 /// transport/backend error from a model call or a tool's own failure.
-#[expect(
-    clippy::too_many_lines,
-    reason = "the tool-call loop is one sequential state machine; splitting it obscures the turn order"
-)]
 async fn run_tool_loop(
     client: &GatewayClient,
     schemas: &[ToolSchema],
@@ -670,11 +666,9 @@ async fn run_tool_loop(
 
         match completion.result {
             CompletionResult::Text(text) => {
-                // Payload-free signals for hosts watching empty or truncated
-                // final replies; MODEL_TURN_COMPLETED already fired above.
-                if text.is_empty() {
-                    observer.observe(execution, section, detail::MODEL_REPLY_EMPTY);
-                }
+                // Empty final text never reaches here: the normalizer hard-fails
+                // with EmptyModelReply (observed as MODEL_TURN_FAILED above).
+                // Truncation is reported only when non-empty text arrived.
                 if completion.finish_reason.as_deref() == Some("length") {
                     observer.observe(execution, section, detail::MODEL_TURN_TRUNCATED);
                 }

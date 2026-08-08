@@ -36,7 +36,10 @@ pub mod detail {
     pub const MODEL_TURN_COMPLETED: &str = "Model turn completed";
     /// A model round trip returned an error.
     pub const MODEL_TURN_FAILED: &str = "Model turn failed";
-    /// A successful parse bound an empty final text reply.
+    /// Formerly reported when a successful parse bound empty final text.
+    ///
+    /// Empty model product now fails the turn via [`crate::Error::EmptyModelReply`]
+    /// and [`MODEL_TURN_FAILED`]; this constant is retained for host compatibility.
     pub const MODEL_REPLY_EMPTY: &str = "Model reply was empty";
     /// A successful parse ended because the model hit its length limit.
     pub const MODEL_TURN_TRUNCATED: &str = "Model turn truncated";
