@@ -19,7 +19,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A1. The gateway runs in a process separate from every caller.
 - A2. The gateway is the sole holder of vendor and remote-service credentials.
 - A3. The executor installs no process-global state.
-- A4. The CLI and workshop UI delegate all prompt execution to the executor.
 - A5. The store confines every path to its configured backend root.
 - A6. The Lua VM boundary exposes only host-installed capabilities.
 - A10. Every model-chosen network destination is revalidated after DNS and on each redirect; private addresses are denied by default.
@@ -43,3 +42,4 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - Treat each binary as a product boundary and reserve build features for real toolchain or native-build constraints.
 - Keep ordinary tests deterministic and offline; run network, process, download, and live-model checks only through explicit scenario commands.
 - Keep branching and fan-out explicit in sandboxed Lua; never infer control flow from model prose.
+- Author-facing runners consume existing infrastructure; only isolated test harnesses may self-host temporary infrastructure.
