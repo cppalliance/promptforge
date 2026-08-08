@@ -638,9 +638,10 @@ Before the model sees the prose, `{{ path }}` placeholders are resolved from fiv
 - `{{ reply }}` - the previous section's model reply text (nil in section 1; using it when nil is a hard error).
 - `{{ item }}` - the current fanout arm's item text (nil outside arms; using it when nil is a hard error).
 - `{{ var.x }}` - values the Lua preamble wrote (`var.x = ...`).
-- `{{ sys.when }}` / `{{ sys.now }}` / `{{ sys.id }}` / `{{ sys.taskid }}` - runtime metadata: the run's
+- `{{ sys.when }}` / `{{ sys.now }}` / `{{ sys.id }}` / `{{ sys.taskid }}` / `{{ sys.model }}` - runtime metadata: the run's
   launch timestamp, the time when the current section started, the 1-based
-  section id, and the 1-based arm index inside a fanout.
+  section id, the 1-based arm index inside a fanout, and the bound catalog
+  model id after H2 scope close (unavailable in preamble or H1 shared Lua).
 
 Scalars render as strings, tables as JSON, and a missing path is an error.
 In Lua, `sys` exposes only the keys the runtime injected: an unknown read or

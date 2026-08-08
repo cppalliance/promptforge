@@ -1947,6 +1947,121 @@ async fn model_required_when_non_empty_prose_has_no_binding() {
 }
 
 #[tokio::test]
+async fn prologue_sys_model_unknown_during_shared_replay() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+```lua\nfunction read_sys_model()\n  return sys.model\nend\nmodels.always('writer', 'A general model for tests')\n```\n\n\
+## Only\n\n```lua\nreturn read_sys_model()\n```\n\nprose\n";
+    let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
+        .await
+        .expect_err("H1 shared Lua must not read sys.model before scope close");
+    assert!(
+        error.to_string().contains("unknown sys field 'model'"),
+        "error must name the missing field: {error}"
+    );
+}
+
+#[tokio::test]
+async fn preamble_sys_model_unknown_before_scope_close() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n```lua\nreturn sys.model\n```\n\nprose\n";
+    let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
+        .await
+        .expect_err("preamble must not read sys.model before scope close");
+    assert!(
+        error.to_string().contains("unknown sys field 'model'"),
+        "error must name the missing field: {error}"
+    );
+}
+
+#[tokio::test]
+async fn epilog_sees_sys_model_catalog_id_not_alias() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n```lua\n-- preamble\n```\n\n```lua\nreturn sys.model\n```\n\n";
+    assert_eq!(
+        run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
+            .await
+            .unwrap(),
+        "claude-sonnet-4-6"
+    );
+}
+
+#[tokio::test]
+async fn prose_substitution_sees_sys_model_catalog_id() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n```lua\n-- preamble\n```\n\nModel id is {{ sys.model }}.\n\n\
+```lua\nreturn 'done'\n```\n";
+    let (addr, captured) = spawn_capturing_text_gateway().await;
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, "done");
+
+    let body = captured
+        .lock()
+        .expect("capture lock")
+        .clone()
+        .expect("complete must reach the gateway");
+    let user_content = body["messages"]
+        .as_array()
+        .and_then(|messages| messages.first())
+        .and_then(|message| message["content"].as_str())
+        .expect("first message must carry substituted prose");
+    assert!(
+        user_content.contains("Model id is claude-sonnet-4-6."),
+        "substituted prose must carry catalog id, got: {user_content}"
+    );
+}
+
+#[tokio::test]
+async fn empty_prose_epilog_sees_sys_model_when_binding_present() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n```lua\n-- preamble\n```\n\n```lua\nreturn sys.model\n```\n\n";
+    assert_eq!(
+        run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
+            .await
+            .unwrap(),
+        "claude-sonnet-4-6"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_arm_epilog_sees_sys_model_catalog_id() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+## Parent\n\n```lua\nlocal r = fanout('### Worker', '### Items')\nreturn table.concat(r, ',')\n```\n\n\
+### Worker\n\n```lua\n-- preamble\n```\n\nAsk about {{ item }}.\n\n```lua\nreturn sys.model .. ':' .. item\n```\n\n\
+### Items\n\n- a\n";
+    let addr = spawn_text_gateway().await;
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, "claude-sonnet-4-6:a");
+}
+
+#[tokio::test]
 async fn default_return_precedes_the_last_model_reply() {
     let addr = spawn_text_gateway().await;
     let md = "---\nname: t\ndescription: d\npromptforge: 1\ndefault_return: fallback\n---\n\n\

@@ -906,6 +906,24 @@ impl SectionVm {
         Ok(())
     }
 
+    /// Replaces the sealed Lua `sys` global after scope close.
+    ///
+    /// Host injection must have run first. Used to expose `sys.model` once the
+    /// section's model binding is fixed.
+    pub(crate) fn re_seal_sys(&self, sys: &Json) -> Result<()> {
+        if !self.host_injected {
+            return Err(Error::Lua(
+                "section VM host values were not injected".to_owned(),
+            ));
+        }
+        let globals = self.lua.globals();
+        let sys_table = seal_sys(&self.lua, sys)?;
+        globals
+            .raw_set("sys", sys_table)
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        Ok(())
+    }
+
     /// Executes a compiled preamble in this VM's persistent environment.
     ///
     /// StoreRef-operation reports recorded by host callbacks are delivered in
@@ -1999,6 +2017,21 @@ fn install_store_table<'scope, 'env: 'scope>(
         .raw_set("store", table)
         .map_err(|e| Error::Lua(e.to_string()))?;
     Ok(())
+}
+
+/// Returns a copy of `sys` with the bound catalog model id under `"model"`.
+pub(crate) fn enrich_sys_model(sys: &Json, binding: &ModelBinding) -> Json {
+    match sys {
+        Json::Object(map) => {
+            let mut out = map.clone();
+            out.insert(
+                "model".to_owned(),
+                Json::String(binding.id().name().to_owned()),
+            );
+            Json::Object(out)
+        }
+        other => other.clone(),
+    }
 }
 
 /// Builds a sealed Lua `sys` table from runtime metadata.
