@@ -1,0 +1,45 @@
+# Example: gateway with one local generative model (managed llama-server child).
+# Copy and adjust paths/secrets. First start downloads the pinned llama-server
+# binary and the GGUF into ~/.promptforge (or [local].cache_dir).
+
+[server]
+bind = "127.0.0.1:8081"
+token = "${PROMPTFORGE_TOKEN}"
+
+[queue]
+max_depth = 100
+fair_scheduling = true
+
+# Optional. Defaults to ~/.promptforge (Windows: %USERPROFILE%\.promptforge).
+# GGUFs go in <cache_dir>/models; llama-server installs under <cache_dir>/llama.cpp.
+# [local]
+# cache_dir = "~/.promptforge"
+
+[[local_model]]
+name = "qwen-local"
+description = "A careful analysis model suited to structured reasoning and long-context review"
+source = "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf"
+sha256 = "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8"
+context = 65536
+thinking = "never"
+gpu_layers = 99
+flash_attention = true
+cache_type_k = "q8_0"
+cache_type_v = "q4_0"
+n_predict = 8192
+
+# Remote models can coexist; local models are registered beside them.
+# [[endpoint]]
+# id = "anthropic"
+# protocol = "openai"
+# base_url = "https://api.anthropic.com/v1"
+# api_key = "${ANTHROPIC_API_KEY}"
+# concurrency = 10
+#
+# [[model]]
+# name = "claude-sonnet-4-6"
+# description = "A model suited for careful analysis, coding, and general assistance"
+# context = 200000
+# thinking = "never"
+# upstream = "claude-sonnet-4-6"
+# endpoints = ["anthropic"]
