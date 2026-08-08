@@ -29,3 +29,4 @@
 - [2026-08-08-5-extract-dev-crate] narrow developer interface: Prompt files own model knobs; the development command owns only file, input, and watch concerns.
 - [2026-08-08-6-local-toml-bigger-model] profile composition: Resolve includes relative to the declaring profile; child objects replace by identity and otherwise append.
 - [2026-08-08-7-gateway-download-progress] progress observation seam: Artifact transfer reports through a replaceable observer independent of the download loop.
+- [2026-08-08-8-tool-dialect-plugins] dialect ambiguity is admission failure: A local tie or no match must fail visibly instead of silently choosing a protocol.
