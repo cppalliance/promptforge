@@ -9,6 +9,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ConfigError;
+use crate::queue::QueueConfig;
 
 /// A secret string (an API key or the shared token) that never serializes and
 /// redacts in both `Debug` and `Display`.
@@ -64,6 +65,9 @@ pub enum Protocol {
 pub struct Config {
     /// Server bind address and shared token.
     pub server: ServerConfig,
+    /// Waiting-queue settings for limited endpoints.
+    #[serde(default)]
+    pub queue: QueueConfig,
     /// The configured backends.
     #[serde(rename = "endpoint")]
     pub endpoints: Vec<EndpointConfig>,
@@ -101,6 +105,10 @@ pub struct EndpointConfig {
     pub base_url: String,
     /// The credential sent to this backend.
     pub api_key: Secret,
+    /// Maximum in-flight requests to this endpoint. Absent means unlimited
+    /// (the waiting queue is a no-op pass-through for that endpoint).
+    #[serde(default)]
+    pub concurrency: Option<usize>,
 }
 
 /// How a model exposes chain-of-thought / thinking tokens to callers.
@@ -217,14 +225,29 @@ impl Config {
     ///
     /// # Errors
     /// Returns [`ConfigError::Validation`] on a duplicate endpoint or model
-    /// name, a model with an empty endpoint list, or a model naming an
-    /// undefined endpoint.
+    /// name, a model with an empty endpoint list, a model naming an undefined
+    /// endpoint, `queue.max_depth` below 1, or an endpoint `concurrency`
+    /// below 1.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.queue.max_depth < 1 {
+            return Err(ConfigError::Validation(
+                "queue.max_depth must be at least 1".to_string(),
+            ));
+        }
+
         let mut endpoint_ids = HashSet::new();
         for endpoint in &self.endpoints {
             if !endpoint_ids.insert(endpoint.id.as_str()) {
                 return Err(ConfigError::Validation(format!(
                     "duplicate endpoint id {}",
+                    endpoint.id
+                )));
+            }
+            if let Some(concurrency) = endpoint.concurrency
+                && concurrency < 1
+            {
+                return Err(ConfigError::Validation(format!(
+                    "endpoint {} concurrency must be at least 1",
                     endpoint.id
                 )));
             }
@@ -585,5 +608,100 @@ api_key = "secret-key"
         assert_eq!(format!("{s}"), "redacted");
         assert_eq!(format!("{s:?}"), "Secret(redacted)");
         assert_eq!(s.expose(), "hunter2");
+    }
+
+    #[test]
+    fn parses_queue_and_endpoint_concurrency() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[queue]
+max_depth = 50
+fair_scheduling = false
+
+[[endpoint]]
+id = "anthropic"
+protocol = "openai"
+base_url = "https://api.anthropic.com/v1"
+api_key = ""
+concurrency = 4
+
+[[model]]
+name = "m1"
+description = "a small test model"
+context = 8192
+upstream = "u1"
+endpoints = ["anthropic"]
+"#;
+        let config = Config::from_toml_str(toml).unwrap();
+        assert_eq!(config.queue.max_depth, 50);
+        assert!(!config.queue.fair_scheduling);
+        assert_eq!(config.endpoints[0].concurrency, Some(4));
+    }
+
+    #[test]
+    fn queue_defaults_when_section_absent() {
+        let config = Config::from_toml_str(SAMPLE).unwrap();
+        assert_eq!(config.queue.max_depth, 100);
+        assert!(config.queue.fair_scheduling);
+        assert_eq!(config.endpoints[0].concurrency, None);
+    }
+
+    #[test]
+    fn rejects_zero_endpoint_concurrency() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[[endpoint]]
+id = "anthropic"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+concurrency = 0
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["anthropic"]
+"#;
+        assert!(matches!(
+            Config::from_toml_str(toml),
+            Err(ConfigError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_zero_queue_max_depth() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[queue]
+max_depth = 0
+
+[[endpoint]]
+id = "anthropic"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["anthropic"]
+"#;
+        assert!(matches!(
+            Config::from_toml_str(toml),
+            Err(ConfigError::Validation(_))
+        ));
     }
 }

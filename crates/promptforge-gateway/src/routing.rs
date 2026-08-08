@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::config::{Config, ThinkingMode};
 use crate::error::{ConfigError, GatewayError};
+use crate::queue::EndpointLane;
 use crate::upstream::{OpenAiUpstream, Upstream};
 
 /// One backend endpoint plus the upstream that talks to it.
@@ -13,12 +14,15 @@ pub struct Endpoint {
     pub id: String,
     /// The upstream implementation forwarding to this backend.
     pub upstream: Arc<dyn Upstream>,
+    /// Per-endpoint admission control (concurrency + waiting queue).
+    pub lane: EndpointLane,
 }
 
 impl std::fmt::Debug for Endpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Endpoint")
             .field("id", &self.id)
+            .field("lane", &self.lane)
             .finish_non_exhaustive()
     }
 }
@@ -80,11 +84,16 @@ impl Routing {
                 &endpoint.base_url,
                 endpoint.api_key.clone(),
             ));
+            let lane = match endpoint.concurrency {
+                Some(n) => EndpointLane::new(n, &config.queue),
+                None => EndpointLane::unlimited(),
+            };
             endpoints.insert(
                 endpoint.id.as_str(),
                 Arc::new(Endpoint {
                     id: endpoint.id.clone(),
                     upstream,
+                    lane,
                 }),
             );
         }
