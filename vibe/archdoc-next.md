@@ -24,3 +24,4 @@
 - [2026-08-07-5-store-and-fanout] trust-selective store reads: Raw reads serve trusted code; model-facing reinjection uses an untrusted envelope.
 - [2026-08-07-5-store-and-fanout] explicit cross-section handoff: State crosses through the store or named reply and item payloads, never shared Lua memory.
 - [2026-08-08-1-models-always] host model fallback: Absence of prompt selection still falls back to a host model in this era.
+- [2026-08-08-2-webfetch-soft-errors] error body exclusion: HTTP error bodies never enter model-facing recovery results.
