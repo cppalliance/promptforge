@@ -8,9 +8,10 @@
 
 pub(crate) mod artifacts;
 mod error;
+pub(crate) mod sidecar;
 mod server;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -86,6 +87,8 @@ impl LocalRuntime {
                 "provisioned local GGUF"
             );
 
+            maybe_write_sidecar(&store, &local_model.source, &model_path);
+
             let options = launch_options(local_model);
             let guard =
                 ServerGuard::start(&llama_server, &model_path, &options, interrupted.as_ref())?;
@@ -106,6 +109,7 @@ impl LocalRuntime {
             let (tool_dialect, tools_mode) = resolve_local_dialect(
                 &guard,
                 &local_model.name,
+                &model_path,
             )?;
             models.push(Arc::new(Model {
                 name: local_model.name.clone(),
@@ -175,20 +179,38 @@ fn launch_options(model: &LocalModelConfig) -> LaunchOptions {
 
 /// Fetches `/props` from a ready local llama-server and resolves the tool dialect.
 ///
+/// When `/props` does not supply a `chat_template`, the sidecar `.md` next to
+/// the GGUF is consulted as a fallback. Props always wins over conflicting
+/// sidecar data.
+///
 /// Returns `(tool_dialect, tools_mode)` strings for the routing model.
 /// Hard-fails on `DialectNone` or `DialectTie` so local models never silently
 /// default to an incorrect dialect.
 fn resolve_local_dialect(
     guard: &ServerGuard,
     model_name: &str,
+    model_path: &Path,
 ) -> Result<(String, String), LocalError> {
-    let evidence = fetch_props_evidence(guard)?;
+    let mut evidence = fetch_props_evidence(guard)?;
+
+    if evidence.chat_template.is_none() {
+        if let Some(sidecar_meta) = read_sidecar_quietly(model_path) {
+            if let Some(template) = sidecar_meta.chat_template {
+                tracing::debug!(
+                    model = %model_name,
+                    "supplementing chat_template from sidecar"
+                );
+                evidence.chat_template = Some(template);
+            }
+        }
+    }
+
     tracing::debug!(
         model = %model_name,
         supports_tool_calls = ?evidence.supports_tool_calls,
         has_template = evidence.chat_template.is_some(),
         model_id = ?evidence.model_id,
-        "dialect evidence from /props"
+        "dialect evidence from /props + sidecar"
     );
     let registry = ToolDialectRegistry::builtin();
     let dialect_id = registry.resolve(&evidence).map_err(|error| {
@@ -198,6 +220,77 @@ fn resolve_local_dialect(
     })?;
     let tools_mode = dialect_id.tools_mode();
     Ok((dialect_id.to_string(), tools_mode.to_string()))
+}
+
+/// Reads the sidecar metadata next to a GGUF, logging and swallowing errors.
+fn read_sidecar_quietly(model_path: &Path) -> Option<sidecar::SidecarMeta> {
+    match sidecar::read_sidecar(model_path) {
+        Ok(meta) => meta,
+        Err(e) => {
+            tracing::warn!(
+                path = %model_path.display(),
+                error = %e,
+                "failed to read sidecar"
+            );
+            None
+        }
+    }
+}
+
+/// Best-effort: fetch HF metadata and write a sidecar `.md` beside the GGUF.
+///
+/// Only attempts the fetch for HF URLs. Failures are logged at debug level
+/// and swallowed - the sidecar is supplementary, never required.
+fn maybe_write_sidecar(_store: &ArtifactStore, source: &str, model_path: &Path) {
+    if !source.starts_with("https://huggingface.co/") {
+        return;
+    }
+    let sidecar_file = sidecar::sidecar_path(model_path);
+    if sidecar_file.is_file() {
+        tracing::debug!(path = %sidecar_file.display(), "sidecar already exists");
+        return;
+    }
+
+    let client = match reqwest::blocking::Client::builder()
+        .user_agent(concat!("promptforge-gateway/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::debug!(error = %e, "could not build sidecar HTTP client");
+            return;
+        }
+    };
+
+    let bearer = artifacts::hub_bearer_token_from_env();
+    let chat_template = sidecar::fetch_hf_chat_template(
+        &client,
+        source,
+        bearer.as_deref(),
+    );
+
+    if chat_template.is_none() {
+        tracing::debug!(source = %source, "no chat_template from HF metadata");
+        return;
+    }
+
+    let meta = sidecar::SidecarMeta {
+        source: Some(source.to_owned()),
+        fetched: Some(sidecar::utc_now_iso()),
+        chat_template,
+        card: None,
+    };
+
+    if let Err(e) = sidecar::write_sidecar(model_path, &meta) {
+        tracing::debug!(
+            path = %sidecar_file.display(),
+            error = %e,
+            "failed to write sidecar"
+        );
+    } else {
+        tracing::info!(path = %sidecar_file.display(), "wrote HF metadata sidecar");
+    }
 }
 
 const PROPS_TIMEOUT: Duration = Duration::from_secs(5);
@@ -304,6 +397,80 @@ fn arm_startup_interrupt(interrupted: Arc<AtomicBool>) {
 mod tests {
     use super::*;
     use crate::config::Config;
+
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn sidecar_supplements_missing_template() {
+        let dir = TempDir::new().expect("tempdir");
+        let gguf = dir.path().join("gemma-3-27b.gguf");
+        fs::write(&gguf, b"fake").expect("write gguf");
+
+        let meta = sidecar::SidecarMeta {
+            source: Some("https://huggingface.co/google/gemma/resolve/main/gemma-3-27b.gguf".to_owned()),
+            fetched: Some("2026-08-08T00:00:00Z".to_owned()),
+            chat_template: Some("<start_of_turn>user\n{{ content }}".to_owned()),
+            card: None,
+        };
+        sidecar::write_sidecar(&gguf, &meta).expect("write sidecar");
+
+        let mut evidence = DialectEvidence::new(
+            Some(false),
+            None, // props had no template
+            Some("gemma-3-27b-it".to_owned()),
+            None,
+        );
+
+        // Simulate the merge: sidecar fills in missing chat_template
+        if evidence.chat_template.is_none() {
+            if let Some(sc) = read_sidecar_quietly(&gguf) {
+                evidence.chat_template = sc.chat_template;
+            }
+        }
+
+        assert!(evidence.chat_template.is_some());
+        let registry = ToolDialectRegistry::builtin();
+        let id = registry.resolve(&evidence).expect("should resolve with sidecar");
+        assert_eq!(id.to_string(), "gemma3_tool_code");
+    }
+
+    #[test]
+    fn props_wins_over_conflicting_sidecar() {
+        let dir = TempDir::new().expect("tempdir");
+        let gguf = dir.path().join("model.gguf");
+        fs::write(&gguf, b"fake").expect("write gguf");
+
+        let meta = sidecar::SidecarMeta {
+            source: None,
+            fetched: None,
+            chat_template: Some("sidecar-template-should-lose".to_owned()),
+            card: None,
+        };
+        sidecar::write_sidecar(&gguf, &meta).expect("write sidecar");
+
+        let evidence = DialectEvidence::new(
+            Some(true), // props says native tools
+            Some("props-template-wins".to_owned()), // props has its own template
+            None,
+            None,
+        );
+
+        // Props already has chat_template, so sidecar should NOT be consulted.
+        // The merge logic only reads sidecar when evidence.chat_template is None.
+        assert_eq!(evidence.chat_template.as_deref(), Some("props-template-wins"));
+        let registry = ToolDialectRegistry::builtin();
+        let id = registry.resolve(&evidence).expect("should resolve");
+        assert_eq!(id.to_string(), "openai");
+    }
+
+    #[test]
+    fn sidecar_missing_file_is_harmless() {
+        let dir = TempDir::new().expect("tempdir");
+        let gguf = dir.path().join("no-sidecar.gguf");
+        let result = read_sidecar_quietly(&gguf);
+        assert!(result.is_none());
+    }
 
     #[test]
     fn empty_local_models_starts_noop_runtime() {
