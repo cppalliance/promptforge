@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/promptforge-core",
     "crates/promptforge-core-tests",
+    "crates/promptforge-dev",
     "crates/promptforge-webfetch",
     "crates/promptforge-cli",
     "crates/promptforge-gateway",
