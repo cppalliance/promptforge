@@ -17,6 +17,7 @@ async-trait.workspace = true
 fastrand.workspace = true
 flate2.workspace = true
 indicatif.workspace = true
+promptforge-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -30,7 +31,6 @@ tracing-subscriber.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
-promptforge-core.workspace = true
 tempfile.workspace = true
 
 [lints]

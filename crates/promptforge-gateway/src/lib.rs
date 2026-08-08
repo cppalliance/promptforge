@@ -166,6 +166,8 @@ async fn list_models(
             description: model.description.clone(),
             context: model.context,
             thinking: model.thinking,
+            tool_dialect: model.tool_dialect.clone(),
+            tools_mode: model.tools_mode.clone(),
         })
         .collect();
     Ok(Json(ModelsResponse {

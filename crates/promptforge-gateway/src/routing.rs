@@ -38,6 +38,10 @@ pub struct Model {
     pub context: u32,
     /// Whether thinking tokens are never, always, or switchably available.
     pub thinking: ThinkingMode,
+    /// The tool-calling dialect used by this model (e.g. `"openai"`, `"gemma3_tool_code"`).
+    pub tool_dialect: String,
+    /// Whether tool calls are handled natively or emulated (`"native"`, `"emulated"`).
+    pub tools_mode: String,
     /// The string the backend knows this model by.
     pub upstream_name: String,
     /// The endpoint serving this model (v0 uses the first configured one).
@@ -114,6 +118,8 @@ impl Routing {
                 description: model.description.clone(),
                 context: model.context,
                 thinking: model.thinking,
+                tool_dialect: "openai".to_owned(),
+                tools_mode: "native".to_owned(),
                 upstream_name: model.upstream.clone(),
                 endpoint: Arc::clone(endpoint),
             }));

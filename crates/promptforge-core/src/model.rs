@@ -12,7 +12,7 @@ use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId, T
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::dialects::ToolDialectId;
+use crate::dialects::{ToolDialectId, ToolsMode};
 use crate::{Error, Result};
 
 /// Stable identity of one catalogued model.
@@ -87,10 +87,15 @@ pub struct ModelDescriptor {
     description: String,
     context: u32,
     thinking: ThinkingMode,
+    tool_dialect: ToolDialectId,
+    tools_mode: ToolsMode,
 }
 
 impl ModelDescriptor {
     /// Builds a descriptor from its identity and catalog fields.
+    ///
+    /// Defaults `tool_dialect` to [`ToolDialectId::OpenAi`] and `tools_mode` to
+    /// [`ToolsMode::Native`]. Use [`Self::with_dialect`] to override.
     #[must_use]
     pub fn new(
         id: ModelId,
@@ -103,7 +108,17 @@ impl ModelDescriptor {
             description: description.into(),
             context,
             thinking,
+            tool_dialect: ToolDialectId::OpenAi,
+            tools_mode: ToolsMode::Native,
         }
+    }
+
+    /// Sets the tool dialect and derives `tools_mode` from it.
+    #[must_use]
+    pub fn with_dialect(mut self, dialect: ToolDialectId) -> Self {
+        self.tool_dialect = dialect;
+        self.tools_mode = dialect.tools_mode();
+        self
     }
 
     /// Returns the stable identity.
@@ -128,6 +143,18 @@ impl ModelDescriptor {
     #[must_use]
     pub fn thinking(&self) -> ThinkingMode {
         self.thinking
+    }
+
+    /// Returns the tool-calling dialect for this model.
+    #[must_use]
+    pub fn tool_dialect(&self) -> ToolDialectId {
+        self.tool_dialect
+    }
+
+    /// Returns whether tool calls are native or emulated.
+    #[must_use]
+    pub fn tools_mode(&self) -> ToolsMode {
+        self.tools_mode
     }
 }
 
@@ -192,10 +219,14 @@ pub struct ModelBinding {
     description: String,
     id: ModelId,
     invocation: ModelInvocation,
+    tool_dialect: ToolDialectId,
 }
 
 impl ModelBinding {
     /// Builds a binding from its parts (tests and resolvers).
+    ///
+    /// Defaults `tool_dialect` to [`ToolDialectId::OpenAi`]. Use
+    /// [`Self::with_dialect`] to override after construction.
     #[must_use]
     pub fn new(
         alias: impl Into<String>,
@@ -208,7 +239,15 @@ impl ModelBinding {
             description: description.into(),
             id,
             invocation,
+            tool_dialect: ToolDialectId::OpenAi,
         }
+    }
+
+    /// Sets the tool dialect on this binding.
+    #[must_use]
+    pub fn with_dialect(mut self, dialect: ToolDialectId) -> Self {
+        self.tool_dialect = dialect;
+        self
     }
 
     /// Returns the exact prompt-local alias.
@@ -235,6 +274,12 @@ impl ModelBinding {
         &self.invocation
     }
 
+    /// Returns the tool dialect for this binding.
+    #[must_use]
+    pub fn tool_dialect(&self) -> ToolDialectId {
+        self.tool_dialect
+    }
+
     /// Builds [`CompletionOptions`] for every complete under this binding.
     #[must_use]
     pub fn completion_options(&self) -> CompletionOptions {
@@ -243,7 +288,7 @@ impl ModelBinding {
             temperature: self.invocation.temperature,
             max_tokens: self.invocation.max_tokens,
             thinking: self.invocation.thinking,
-            tool_dialect: ToolDialectId::OpenAi,
+            tool_dialect: self.tool_dialect,
         }
     }
 }
@@ -472,6 +517,8 @@ pub struct ResolvedModel {
     pub id: ModelId,
     /// Frozen per-request fields from the need's opts.
     pub invocation: ModelInvocation,
+    /// The tool dialect from the catalog entry.
+    pub tool_dialect: ToolDialectId,
 }
 
 /// Wire shape of one entry from gateway `GET /v1/models`.
@@ -481,6 +528,21 @@ struct ModelsListEntry {
     description: String,
     context: u32,
     thinking: ThinkingMode,
+    #[serde(default = "default_tool_dialect")]
+    tool_dialect: ToolDialectId,
+    /// Parsed for wire-shape completeness; the runtime derives tools_mode from
+    /// tool_dialect via [`ToolDialectId::tools_mode`].
+    #[serde(default = "default_tools_mode")]
+    #[allow(dead_code)]
+    tools_mode: ToolsMode,
+}
+
+fn default_tool_dialect() -> ToolDialectId {
+    ToolDialectId::OpenAi
+}
+
+fn default_tools_mode() -> ToolsMode {
+    ToolsMode::Native
 }
 
 /// Wire shape of gateway `GET /v1/models`.
@@ -527,6 +589,7 @@ pub async fn fetch_model_catalog(base_url: &str, token: &str) -> Result<ModelCat
             entry.context,
             entry.thinking,
         )
+        .with_dialect(entry.tool_dialect)
     })))
 }
 
@@ -573,10 +636,17 @@ impl ModelResolver for PickerModelResolver<'_> {
                 detail: error.to_string(),
             })?;
         match picker.resolve(description) {
-            Ok(promptforge_tool_picker::Outcome::Bind(tool)) => Ok(ResolvedModel {
-                id: model_from_picker_id(&tool.id),
-                invocation: ModelInvocation::from(opts),
-            }),
+            Ok(promptforge_tool_picker::Outcome::Bind(tool)) => {
+                let id = model_from_picker_id(&tool.id);
+                let dialect = filtered
+                    .get(&id)
+                    .map_or(ToolDialectId::OpenAi, ModelDescriptor::tool_dialect);
+                Ok(ResolvedModel {
+                    id,
+                    invocation: ModelInvocation::from(opts),
+                    tool_dialect: dialect,
+                })
+            }
             Ok(promptforge_tool_picker::Outcome::Absent) => Err(Error::ModelAbsent {
                 capability: description.to_owned(),
             }),
@@ -683,6 +753,7 @@ mod tests {
         Ok(ResolvedModel {
             id: hit.id().clone(),
             invocation: ModelInvocation::from(opts),
+            tool_dialect: hit.tool_dialect(),
         })
     }
 
@@ -1387,5 +1458,94 @@ mod tests {
                 || msg.contains("declared more than once"),
             "unexpected error: {msg}"
         );
+    }
+
+    #[test]
+    fn descriptor_with_dialect_sets_tools_mode() {
+        let descriptor = ModelDescriptor::new(
+            ModelId::gateway("gemma-local"),
+            "A Gemma model",
+            32_768,
+            ThinkingMode::Never,
+        )
+        .with_dialect(ToolDialectId::Gemma3ToolCode);
+        assert_eq!(descriptor.tool_dialect(), ToolDialectId::Gemma3ToolCode);
+        assert_eq!(
+            descriptor.tools_mode(),
+            crate::dialects::ToolsMode::Emulated
+        );
+    }
+
+    #[test]
+    fn descriptor_default_dialect_is_openai_native() {
+        let descriptor = ModelDescriptor::new(
+            ModelId::gateway("remote"),
+            "A remote model",
+            8_192,
+            ThinkingMode::Never,
+        );
+        assert_eq!(descriptor.tool_dialect(), ToolDialectId::OpenAi);
+        assert_eq!(descriptor.tools_mode(), crate::dialects::ToolsMode::Native);
+    }
+
+    #[test]
+    fn binding_with_dialect_propagates_to_completion_options() {
+        let binding = ModelBinding::new(
+            "gemma",
+            "a local gemma model",
+            ModelId::gateway("gemma-local"),
+            ModelInvocation {
+                temperature: None,
+                max_tokens: None,
+                thinking: None,
+            },
+        )
+        .with_dialect(ToolDialectId::Gemma3ToolCode);
+        let opts = binding.completion_options();
+        assert_eq!(opts.tool_dialect, ToolDialectId::Gemma3ToolCode);
+    }
+
+    #[test]
+    fn binding_default_dialect_is_openai() {
+        let binding = ModelBinding::new(
+            "remote",
+            "a remote model",
+            ModelId::gateway("remote"),
+            ModelInvocation {
+                temperature: None,
+                max_tokens: None,
+                thinking: None,
+            },
+        );
+        let opts = binding.completion_options();
+        assert_eq!(opts.tool_dialect, ToolDialectId::OpenAi);
+    }
+
+    #[test]
+    fn models_list_entry_parses_dialect_fields() {
+        let json = serde_json::json!({
+            "id": "gemma-local",
+            "description": "A Gemma model",
+            "context": 32768,
+            "thinking": "never",
+            "tool_dialect": "gemma3_tool_code",
+            "tools_mode": "emulated"
+        });
+        let entry: ModelsListEntry = serde_json::from_value(json).unwrap();
+        assert_eq!(entry.tool_dialect, ToolDialectId::Gemma3ToolCode);
+        assert_eq!(entry.tools_mode, crate::dialects::ToolsMode::Emulated);
+    }
+
+    #[test]
+    fn models_list_entry_defaults_to_openai_native() {
+        let json = serde_json::json!({
+            "id": "remote",
+            "description": "A remote model",
+            "context": 8192,
+            "thinking": "never"
+        });
+        let entry: ModelsListEntry = serde_json::from_value(json).unwrap();
+        assert_eq!(entry.tool_dialect, ToolDialectId::OpenAi);
+        assert_eq!(entry.tools_mode, crate::dialects::ToolsMode::Native);
     }
 }
