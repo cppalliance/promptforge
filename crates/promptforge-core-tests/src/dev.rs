@@ -108,10 +108,12 @@ async fn run_once_with(
 
     let store = StoreRef::memory();
     let client = GatewayClient::new(base_url, api_key, model_alias);
+    let capture = crate::dump::TraceCapture::new(prompt_path);
     let options = RunOptions {
         execution: &execution,
         observer,
         client: Some(client),
+        debug: Some(&capture),
     };
     let result = run(&bound, input, registry.tools(), &store, options)
         .await
@@ -123,6 +125,9 @@ async fn run_once_with(
     if let Err(error) = crate::dump::dump_store(&store, prompt_path, &mut std::io::stderr()) {
         eprintln!("store dump failed: {error:#}");
     }
+    // Trace files are flushed after the store dump so clearing `<stem>.store`
+    // cannot erase the turn JSON from the run that just finished.
+    capture.flush(&mut std::io::stderr());
     result
 }
 

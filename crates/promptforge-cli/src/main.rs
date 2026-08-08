@@ -102,6 +102,7 @@ async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
         execution: &execution,
         observer,
         client: None,
+        debug: None,
     };
 
     match execute::run(&bound, input, registry.tools(), &store, options).await {

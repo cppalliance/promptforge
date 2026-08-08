@@ -88,7 +88,7 @@ async fn happy_path_through_the_real_client() {
         .complete(&[promptforge_core::client::Message::user("ping")], None)
         .await
         .unwrap();
-    match result {
+    match result.result {
         promptforge_core::client::CompletionResult::Text(reply) => assert_eq!(reply, "pong"),
         other => panic!("expected text reply, got {other:?}"),
     }

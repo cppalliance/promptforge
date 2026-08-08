@@ -47,7 +47,7 @@ cargo build -p promptforge-core-tests --release
 ./target/release/promptforge-core-tests dev <prompt-file> [input]
 ```
 
-The result is the only thing on stdout; every trace record and Lua `log()` checkpoint streams to stderr. After each run the store's files are dumped to a `<prompt-stem>.store` directory beside the prompt, so whatever the prompt wrote with `store.write` is there to inspect, even after a failed run. For iteration, add `--watch`: the provisioned artifacts and the server stay warm and the prompt reruns on every save, so a rerun costs only inference. `--context N` and `--max-tokens N` override the 131072-token default context and 8192-token generation ceiling, and `--no-think` switches the model to its non-thinking preset. The first run downloads about 5.7 GB of pinned artifacts into `.model-cache/`; later runs report only cache hits.
+The result is the only thing on stdout; every trace record and Lua `log()` checkpoint streams to stderr. After each run the store's files are dumped to a `<prompt-stem>.store` directory beside the prompt, so whatever the prompt wrote with `store.write` is there to inspect, even after a failed run. Raw model turns land under `<prompt-stem>.store/.trace/` as `turn-N-request.json` and `turn-N-response.json` for the same inspection path. For iteration, add `--watch`: the provisioned artifacts and the server stay warm and the prompt reruns on every save, so a rerun costs only inference. `--context N` and `--max-tokens N` override the 131072-token default context and 8192-token generation ceiling, and `--no-think` switches the model to its non-thinking preset. The first run downloads about 5.7 GB of pinned artifacts into `.model-cache/`; later runs report only cache hits.
 
 Dev mode pins its own artifacts beside the scenario assets under `.model-cache/`: the community `unsloth/Qwen3.5-9B-GGUF` Q4_K_M model (about 5.7 GB, SHA-256-pinned) and GPU-enabled llama-server archives from the same b10082 release - Vulkan on Windows and Ubuntu x86-64 and Ubuntu arm64, the already-Metal-enabled tars on macOS, and the CPU archive on Windows arm64, which has no Vulkan build. One mode never downloads the other's artifacts, and a second dev run reports only cache hits.
 
@@ -678,6 +678,7 @@ let opts = RunOptions {
     execution: "example-run", // one caller-owned id for parse, bind, and run
     observer: &NullObserver,   // or your own Observer
     client: None,              // None builds the gateway client from the environment
+    debug: None,               // None skips raw request/response capture
 };
 let result = execute::run(&prompt, input, &tools, &store, opts).await?;
 ```
@@ -691,6 +692,7 @@ let result = execute::run(&prompt, input, &tools, &store, opts).await?;
   the first call that needs it, which is what the CLI uses. A caller configured
   from a file passes its own, because setting a process environment variable is
   `unsafe` under edition 2024 and this workspace forbids unsafe.
+- `debug` is the opt-in [`DebugCapture`](promptforge_core::debug::DebugCapture) seam for raw model request and response bodies. Production hosts leave it `None`. The dev runner wires a capture that writes each turn under `<prompt-stem>.store/.trace/`.
 
 ## Tools
 

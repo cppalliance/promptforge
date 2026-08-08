@@ -38,6 +38,7 @@ use serde_json::json;
 
 use crate::bind::BoundPrompt;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
+use crate::debug::{DebugCapture, DebugEvent};
 use crate::lua::{SectionVm, ToolBindings, ToolScope};
 use crate::observe::{Observer, detail};
 use crate::parser::Prompt;
@@ -103,8 +104,10 @@ fn make_nonce() -> String {
 ///     execution: "example-run",
 ///     observer: &NullObserver,
 ///     client: None,
+///     debug: None,
 /// };
 /// assert!(opts.client.is_none());
+/// assert!(opts.debug.is_none());
 /// ```
 pub struct RunOptions<'a> {
     /// The caller-provided identifier shared by every report in this execution.
@@ -117,6 +120,9 @@ pub struct RunOptions<'a> {
     /// what the CLI uses; a caller configured from a file (rather than from the
     /// environment) passes its own.
     pub client: Option<GatewayClient>,
+    /// Opt-in raw request/response capture for model turns. `None` (the
+    /// production default) skips the seam entirely so hosts pay nothing.
+    pub debug: Option<&'a dyn DebugCapture>,
 }
 
 /// A prompt accepted by [`run`].
@@ -152,13 +158,21 @@ impl<'a> From<&'a Prompt> for RunPrompt<'a> {
 }
 
 impl fmt::Debug for RunOptions<'_> {
-    /// Formats the options without the observer, which is a trait object and
-    /// carries no `Debug`; its presence is reported instead.
+    /// Formats the options without the observer or debug capture, which are
+    /// trait objects and carry no `Debug`; their presence is reported instead.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RunOptions")
             .field("execution", &self.execution)
             .field("observer", &"<dyn Observer>")
             .field("client", &self.client)
+            .field(
+                "debug",
+                &if self.debug.is_some() {
+                    "<dyn DebugCapture>"
+                } else {
+                    "None"
+                },
+            )
             .finish()
     }
 }
@@ -231,6 +245,7 @@ pub async fn run<'a>(
         execution,
         observer,
         client,
+        debug,
     } = opts;
     let registry = ToolRegistry::new(tools.iter().copied());
     let prompt_section = prompt.title.as_str();
@@ -248,6 +263,7 @@ pub async fn run<'a>(
         execution,
         observer,
         client,
+        debug,
         &mut turns,
     )
     .await;
@@ -287,6 +303,7 @@ async fn run_sections(
     execution: &str,
     observer: &dyn Observer,
     mut client: Option<GatewayClient>,
+    debug: Option<&dyn DebugCapture>,
     turns: &mut u32,
 ) -> Result<String> {
     let when = now_rfc3339();
@@ -406,6 +423,7 @@ async fn run_sections(
                         observer,
                         section: &section.name,
                         turns,
+                        debug,
                     },
                 )
                 .await
@@ -550,6 +568,8 @@ struct SectionProgress<'a> {
     section: &'a str,
     /// The run's model-turn total, advanced once per round trip.
     turns: &'a mut u32,
+    /// Opt-in raw request/response capture for each model turn.
+    debug: Option<&'a dyn DebugCapture>,
 }
 
 /// Drive one section's model call to a final text reply, dispatching any tool
@@ -580,6 +600,7 @@ async fn run_tool_loop(
         observer,
         section,
         turns,
+        debug,
     } = progress;
     let mut conversation = vec![Message::user(prose)];
     let tool_arg = if schemas.is_empty() {
@@ -602,9 +623,29 @@ async fn run_tool_loop(
         // A round trip that produced a reply is a turn, whether the reply is
         // the section's final text or a batch of tool calls.
         *turns = turns.saturating_add(1);
+        if let Some(capture) = debug {
+            capture.on_event(
+                execution,
+                section,
+                *turns,
+                DebugEvent::Request {
+                    body: completion.request_body,
+                },
+            );
+            capture.on_event(
+                execution,
+                section,
+                *turns,
+                DebugEvent::Response {
+                    body: completion.response_body.clone(),
+                    finish_reason: completion.finish_reason.clone(),
+                    reasoning_content: completion.reasoning_content.clone(),
+                },
+            );
+        }
         observer.observe(execution, section, detail::MODEL_TURN_COMPLETED);
 
-        match completion {
+        match completion.result {
             CompletionResult::Text(text) => return Ok(text),
             CompletionResult::ToolCalls(calls) => {
                 // Echo the assistant's tool-call turn back into the history. The
