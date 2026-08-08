@@ -41,6 +41,18 @@ pub enum GatewayError {
         /// The (truncated) upstream body, for diagnostics.
         body: String,
     },
+
+    /// The endpoint's waiting queue is full.
+    #[error("queue full")]
+    QueueFull,
+}
+
+impl From<crate::queue::AdmitError> for GatewayError {
+    fn from(value: crate::queue::AdmitError) -> Self {
+        match value {
+            crate::queue::AdmitError::QueueFull => GatewayError::QueueFull,
+        }
+    }
 }
 
 impl GatewayError {
@@ -84,6 +96,11 @@ impl GatewayError {
                     (StatusCode::BAD_GATEWAY, "server_error", "upstream_error")
                 }
             }
+            GatewayError::QueueFull => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "server_error",
+                "queue_full",
+            ),
         }
     }
 }

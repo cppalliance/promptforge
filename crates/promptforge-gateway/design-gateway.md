@@ -8,7 +8,7 @@ Three routes serve. `POST /v1/chat/completions` is the only one that reaches a b
 
 Routing is one exact string match with a 404 on a miss - no prefixes, no aliases, no default model - and the request body is passed through with only `model` substituted, so a sampling parameter the gateway has never heard of reaches the backend anyway and the caller's model name comes back rather than the vendor's. Configuration is one TOML file that rejects an unknown key outright and expands `${VAR}` from the environment before it parses, so a deployment that forgot to export a credential fails at startup rather than serving with a blank one.
 
-What is not here is as load-bearing as what is: no streaming, no retries, no admission control or token budget, no per-client identity, no storage, and no knowledge of prompts or runs. The one process every LLM consumer depends on is deliberately the simplest one in the system.
+What is not here is as load-bearing as what is: no streaming, no retries, no token budget, no storage, and no knowledge of prompts or runs. Per-endpoint concurrency limits and a fair waiting queue (`[queue]` / `[[endpoint]].concurrency`) are implemented; a full queue answers 503. The one process every LLM consumer depends on is deliberately the simplest one in the system.
 
 ## The key design choices
 
@@ -49,8 +49,8 @@ What it does not do:
 - Expose an MCP surface of any kind. Not a tool, not a prompt, not a resource. MCP exists to cross a process boundary and the gateway's work crosses none.
 - Read a prompt, parse markdown, resolve a slot, evaluate Lua, or know what a prompt is. It receives an assembled message array.
 - Touch storage. No database, no filesystem write. Logging is `tracing_subscriber`'s formatter on stdout; the rolling log file in the unbuilt design is not here.
-- Know what a run is. No request header is read beyond `Authorization`.
-- Authenticate per client, or attribute usage to one.
+- Know what a run is. Beyond `Authorization`, only `X-PromptForge-Client` is read (for fair queue scheduling; absent means `"default"`).
+- Authenticate per client. Fair scheduling attributes waiting slots by the optional client header, not by a login identity.
 - Retry a failed upstream request, or fail over mid-response.
 - Inspect, cache, or log message content. It rewrites the `model` field and nothing else.
 - Count tokens, enforce a token budget, or truncate a context.
@@ -276,7 +276,7 @@ impl Config {
 
 `[tools]` carries one optional `[tools.web_search]` table, itself `deny_unknown_fields`, whose keys are tabulated with the route above. Absent, the search route answers 404 and everything else is unaffected.
 
-`validate` rejects four things: a duplicate endpoint id; a duplicate model name; a model with an empty endpoint list; and a model naming an endpoint that is not defined. Every other check the unbuilt design describes - `queue_depth` against `inflight`, the admission and ceiling relation, a model on an `anthropic` endpoint without `default_max_tokens`, an unknown pack name - is about configuration this crate does not parse. An endpoint id that no model references is not an error.
+`validate` rejects a duplicate endpoint id; a duplicate model name; a model with an empty endpoint list; a model naming an endpoint that is not defined; `queue.max_depth` below 1; and an endpoint `concurrency` below 1 when present. `max_depth` is the number of *waiting* requests (not counting in-flight). An omitted `concurrency` means unlimited for that endpoint (queue is a pass-through). Every other check the unbuilt design describes - a model on an `anthropic` endpoint without `default_max_tokens`, an unknown pack name - is about configuration this crate does not parse. An endpoint id that no model references is not an error.
 
 The `${VAR}` interpolation is a load-time pass over the file's whole text rather than a per-field decoder, so it applies to any string value, and an unresolved variable fails the load before the TOML is parsed. That ordering is why a missing key is reported as a missing environment variable rather than as a type error somewhere further in.
 
