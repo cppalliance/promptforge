@@ -1107,6 +1107,38 @@ mod tests {
     }
 
     #[test]
+    fn shipped_analyst_example_binds_against_gateway_shaped_catalog() {
+        // Vendor model ids must not ride in the picker's embedding name, or
+        // ids like claude-sonnet-4-6 drown the capability description.
+        let catalog = ModelCatalog::new([ModelDescriptor::new(
+            ModelId::gateway("claude-sonnet-4-6"),
+            "A model suited for careful analysis, coding, and general assistance",
+            200_000,
+            ThinkingMode::Never,
+        )]);
+        let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
+            .expect("empty tool picker must build");
+        let registry = ToolRegistry::new(std::iter::empty());
+        let source = include_str!("../../../prompts/analyst-example.md");
+        let parsed =
+            Prompt::parse(source, EXECUTION, &NullObserver).expect("parse analyst example");
+        let bound = bind_prompt(
+            parsed,
+            &picker,
+            &registry,
+            &catalog,
+            EXECUTION,
+            &NullObserver,
+        )
+        .expect("parsed analyst example must bind");
+        assert_eq!(bound.models().bindings()[0].alias(), "analyst");
+        assert_eq!(
+            bound.models().bindings()[0].id(),
+            &ModelId::gateway("claude-sonnet-4-6")
+        );
+    }
+
+    #[test]
     fn two_model_aliases_sharing_one_id_with_different_invocation_bind() {
         // Tools reject one live id under two aliases; models keep that legal
         // when the aliases freeze different invocation params.
