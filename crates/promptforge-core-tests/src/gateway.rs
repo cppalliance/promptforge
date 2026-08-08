@@ -26,11 +26,6 @@ const SCENARIO_MODEL_SHA256: &str =
     "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031";
 const SCENARIO_MODEL_NAME: &str = "qwen3-0.6b";
 
-const DEV_MODEL_URL: &str =
-    "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf";
-const DEV_MODEL_SHA256: &str = "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8";
-const DEV_MODEL_NAME: &str = "qwen3.5-9b";
-
 const CAPTURE_LIMIT: usize = 64 * 1024;
 /// Cold starts may download a multi-GB GGUF inside the gateway before bind.
 const READINESS_DEADLINE: Duration = Duration::from_secs(1_800);
@@ -42,48 +37,11 @@ const STARTUP_ATTEMPTS: usize = 4;
 const LOOPBACK: &str = "127.0.0.1";
 const API_KEY_REDACTION: &str = "<per-attempt-secret>";
 
-/// Default dev-profile context window, sized for long reasoning chains.
-const DEV_DEFAULT_CTX_SIZE: u32 = 131_072;
-/// Default dev-profile generation ceiling; reasoning chains are long.
-const DEV_DEFAULT_N_PREDICT: u32 = 8192;
-
-/// Selects which pinned local model the generated gateway profile declares.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ModelKind {
-    /// Deterministic scenario suite: small Qwen3-0.6B, CPU-oriented knobs.
-    Scenario,
-    /// Interactive prompt development: large Qwen3.5-9B, GPU-oriented knobs.
-    Dev,
-}
-
-/// Tunable knobs for the generated dev profile; scenario knobs are fixed.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct DevServerOptions {
-    /// Context window written as `[[local_model]].context`.
-    pub(crate) ctx_size: u32,
-    /// Generation ceiling written as `[[local_model]].n_predict`.
-    pub(crate) n_predict: u32,
-    /// When `true`, `thinking = "switchable"`; when `false`, `thinking = "never"`.
-    pub(crate) think: bool,
-}
-
-impl Default for DevServerOptions {
-    fn default() -> Self {
-        Self {
-            ctx_size: DEV_DEFAULT_CTX_SIZE,
-            n_predict: DEV_DEFAULT_N_PREDICT,
-            think: true,
-        }
-    }
-}
-
 /// Profile shape written into the temporary TOML the gateway loads.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum GatewayProfile {
-    /// Fixed small-model scenario knobs.
+    /// Fixed small-model scenario knobs (Qwen3-0.6B, CPU-oriented).
     Scenario,
-    /// Dev knobs from the CLI flags.
-    Dev(DevServerOptions),
 }
 
 #[derive(Debug)]
@@ -418,7 +376,6 @@ fn gateway_executable_name() -> &'static str {
 fn model_name(profile: GatewayProfile) -> &'static str {
     match profile {
         GatewayProfile::Scenario => SCENARIO_MODEL_NAME,
-        GatewayProfile::Dev(_) => DEV_MODEL_NAME,
     }
 }
 
@@ -440,17 +397,6 @@ pub(crate) fn render_profile(
                 "never",
                 0_u32,
                 false,
-                "q8_0",
-            ),
-            GatewayProfile::Dev(options) => (
-                DEV_MODEL_URL,
-                DEV_MODEL_SHA256,
-                "Qwen3.5-9B for interactive promptforge prompt development",
-                options.ctx_size,
-                options.n_predict,
-                if options.think { "switchable" } else { "never" },
-                99_u32,
-                true,
                 "q8_0",
             ),
         };
@@ -574,42 +520,6 @@ mod tests {
         assert!(rendered.contains("thinking = \"never\""));
         assert!(rendered.contains("gpu_layers = 0"));
         assert!(rendered.contains("flash_attention = false"));
-    }
-
-    #[test]
-    fn dev_profile_plumbs_cli_knobs_and_gpu_defaults() {
-        let rendered = render_profile(
-            GatewayProfile::Dev(DevServerOptions {
-                ctx_size: 32_768,
-                n_predict: 512,
-                think: false,
-            }),
-            9_001,
-            "dev-token",
-            DEV_MODEL_NAME,
-        );
-        assert!(rendered.contains("bind = \"127.0.0.1:9001\""));
-        assert!(rendered.contains(DEV_MODEL_URL));
-        assert!(rendered.contains(DEV_MODEL_SHA256));
-        assert!(rendered.contains("context = 32768"));
-        assert!(rendered.contains("n_predict = 512"));
-        assert!(rendered.contains("thinking = \"never\""));
-        assert!(rendered.contains("gpu_layers = 99"));
-        assert!(rendered.contains("flash_attention = true"));
-        assert!(rendered.contains("cache_type_v = \"q8_0\""));
-    }
-
-    #[test]
-    fn dev_think_default_is_switchable() {
-        let rendered = render_profile(
-            GatewayProfile::Dev(DevServerOptions::default()),
-            1,
-            "t",
-            DEV_MODEL_NAME,
-        );
-        assert!(rendered.contains("thinking = \"switchable\""));
-        assert!(rendered.contains("context = 131072"));
-        assert!(rendered.contains("n_predict = 8192"));
     }
 
     #[test]

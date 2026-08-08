@@ -15,10 +15,8 @@ path = "src/main.rs"
 anyhow.workspace = true
 async-trait.workspace = true
 fastrand.workspace = true
-notify.workspace = true
 promptforge-core.workspace = true
 promptforge-tool-picker.workspace = true
-promptforge-webfetch.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 serde_json.workspace = true
 tempfile.workspace = true
