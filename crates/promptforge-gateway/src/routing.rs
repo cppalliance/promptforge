@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::config::Config;
+use crate::config::{Config, ThinkingMode};
 use crate::error::{ConfigError, GatewayError};
 use crate::upstream::{OpenAiUpstream, Upstream};
 
@@ -28,6 +28,12 @@ impl std::fmt::Debug for Endpoint {
 pub struct Model {
     /// The caller-facing model name.
     pub name: String,
+    /// Prose describing the model for catalog consumers.
+    pub description: String,
+    /// Context window size in tokens.
+    pub context: u32,
+    /// Whether thinking tokens are never, always, or switchably available.
+    pub thinking: ThinkingMode,
     /// The string the backend knows this model by.
     pub upstream_name: String,
     /// The endpoint serving this model (v0 uses the first configured one).
@@ -37,15 +43,27 @@ pub struct Model {
 /// A resolved routing table.
 #[derive(Debug)]
 pub struct Routing {
-    models: HashMap<String, Arc<Model>>,
+    by_name: HashMap<String, Arc<Model>>,
+    /// Configured models in `gateway.toml` order, for the catalog listing.
+    models: Vec<Arc<Model>>,
 }
 
 impl Routing {
     /// Build a routing table directly from resolved models. Intended for tests
-    /// and for [`Routing::from_config`].
+    /// and for [`Routing::from_config`]. Order of `models` is the catalog order.
     #[must_use]
-    pub fn new(models: HashMap<String, Arc<Model>>) -> Routing {
-        Routing { models }
+    pub fn new(models: Vec<Arc<Model>>) -> Routing {
+        let by_name = models
+            .iter()
+            .map(|model| (model.name.clone(), Arc::clone(model)))
+            .collect();
+        Routing { by_name, models }
+    }
+
+    /// Configured models in catalog order.
+    #[must_use]
+    pub fn models(&self) -> &[Arc<Model>] {
+        &self.models
     }
 
     /// Build a routing table from a validated [`Config`], constructing one
@@ -71,7 +89,7 @@ impl Routing {
             );
         }
 
-        let mut models = HashMap::new();
+        let mut models = Vec::with_capacity(config.models.len());
         for model in &config.models {
             let endpoint_id = model.endpoints.first().ok_or_else(|| {
                 ConfigError::Validation(format!("model {} has no endpoints", model.name))
@@ -82,14 +100,14 @@ impl Routing {
                     model.name
                 ))
             })?;
-            models.insert(
-                model.name.clone(),
-                Arc::new(Model {
-                    name: model.name.clone(),
-                    upstream_name: model.upstream.clone(),
-                    endpoint: Arc::clone(endpoint),
-                }),
-            );
+            models.push(Arc::new(Model {
+                name: model.name.clone(),
+                description: model.description.clone(),
+                context: model.context,
+                thinking: model.thinking,
+                upstream_name: model.upstream.clone(),
+                endpoint: Arc::clone(endpoint),
+            }));
         }
 
         Ok(Routing::new(models))
@@ -100,7 +118,7 @@ impl Routing {
     /// # Errors
     /// Returns [`GatewayError::UnknownModel`] when no `[[model]]` matches.
     pub fn model(&self, name: &str) -> Result<Arc<Model>, GatewayError> {
-        self.models
+        self.by_name
             .get(name)
             .cloned()
             .ok_or_else(|| GatewayError::UnknownModel(name.to_string()))
@@ -126,6 +144,8 @@ api_key = ""
 
 [[model]]
 name = "known"
+description = "a known test model"
+context = 8192
 upstream = "backend-name"
 endpoints = ["e"]
 "#;

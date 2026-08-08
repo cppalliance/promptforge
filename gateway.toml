@@ -14,6 +14,9 @@ api_key = "${ANTHROPIC_API_KEY}"
 
 [[model]]
 name = "claude-sonnet-4-6"
+description = "Anthropic Claude Sonnet 4.6 for analysis, coding, and general assistance"
+context = 200000
+thinking = "never"
 upstream = "claude-sonnet-4-6"
 endpoints = ["anthropic"]
 
