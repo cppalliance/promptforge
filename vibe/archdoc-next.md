@@ -18,3 +18,5 @@
 - [2026-08-07-1-dev-loop] explicit development workflow: Real inference and artifact provisioning belong to explicit developer commands.
 - [2026-08-07-1-dev-loop] output channel discipline: Developer results use stdout; traces and diagnostics use stderr.
 - [2026-08-07-2-store-type-rename] type names are not architecture: Store implementation renames should not alter the run-scoped filesystem contract.
+- [2026-08-07-3-models-debug-cluster] frozen model binding: Bind prompt-local model aliases from gateway catalog metadata once per run.
+- [2026-08-07-3-models-debug-cluster] constraint and invocation split: Capability constraints filter models; sampling settings travel with each invocation.
