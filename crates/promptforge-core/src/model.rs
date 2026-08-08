@@ -819,6 +819,7 @@ mod tests {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.need("analyst", "careful analysis", { thinking = false, temperature = 0, context = 40000 })"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -852,6 +853,7 @@ mod tests {
         let preamble = crate::lua::LuaProgram::compile(
             r#"models.use("analyst")"#,
             "preamble",
+            1,
             EXECUTION,
             &NullObserver,
             "Section",
@@ -869,6 +871,7 @@ mod tests {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.need("analyst", "careful analysis")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -906,6 +909,7 @@ mod tests {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.need("analyst", "careful analysis", { context = 200000 })"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -930,6 +934,7 @@ mod tests {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.need("analyst", "careful analysis")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -960,6 +965,7 @@ mod tests {
         let preamble = crate::lua::LuaProgram::compile(
             r#"models.use("missing")"#,
             "preamble",
+            1,
             EXECUTION,
             &NullObserver,
             "Section",
@@ -978,6 +984,7 @@ mod tests {
             r#"models.need("writer", "A tiny model", { thinking = false, temperature = 0 })
                models.always("writer")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1002,6 +1009,7 @@ mod tests {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.always("writer")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1029,6 +1037,7 @@ mod tests {
                models.always("writer")
                models.always("writer")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1055,6 +1064,7 @@ mod tests {
             r#"models.need("writer", "A tiny model")
                models.always("writer")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1096,6 +1106,7 @@ mod tests {
             r#"models.need("writer", "A tiny model", { thinking = false, temperature = 0 })
                models.always("writer")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1143,6 +1154,7 @@ mod tests {
                models.need("analyst", "careful analysis", { thinking = true })
                models.always("writer")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1173,6 +1185,7 @@ mod tests {
         let preamble = crate::lua::LuaProgram::compile(
             r#"models.use("analyst")"#,
             "preamble",
+            1,
             EXECUTION,
             &NullObserver,
             "Section",
@@ -1193,6 +1206,7 @@ mod tests {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.need("writer", "A tiny model")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1223,6 +1237,7 @@ mod tests {
         let preamble = crate::lua::LuaProgram::compile(
             r#"models.always("writer")"#,
             "preamble",
+            1,
             EXECUTION,
             &NullObserver,
             "Section",
@@ -1243,6 +1258,7 @@ mod tests {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.always("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1277,6 +1293,7 @@ mod tests {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.always("writer", "A tiny model")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1302,6 +1319,7 @@ mod tests {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.always("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1347,6 +1365,7 @@ mod tests {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.always("writer", "A tiny model", { thinking = false })"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1388,6 +1407,7 @@ mod tests {
             r#"models.need("analyst", "careful analysis")
                models.always("writer", "A tiny model")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1411,6 +1431,7 @@ mod tests {
             r#"models.always("writer", "A tiny model")
                models.always("writer")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",
@@ -1435,6 +1456,7 @@ mod tests {
             r#"models.need("writer", "A tiny model")
                models.always("writer", "A tiny model")"#,
             "shared",
+            1,
             EXECUTION,
             &NullObserver,
             "Prompt",

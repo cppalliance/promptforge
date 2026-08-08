@@ -133,7 +133,9 @@ async fn next_rerun(receiver: &mut UnboundedReceiver<()>, debounce: Duration) ->
 async fn run_and_report(prompt: &Path, input: &str) {
     match run::run_once(prompt, input).await {
         Ok(result) => println!("{result}"),
-        Err(error) => eprintln!("dev run failed: {error:#}"),
+        Err(error) => {
+            eprintln!("{}", run::format_dev_failure(prompt, &error));
+        }
     }
 }
 

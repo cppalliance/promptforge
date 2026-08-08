@@ -255,6 +255,14 @@ struct ToolRuntime {
 pub struct LuaProgram {
     source: String,
     bytecode: Vec<u8>,
+    /// Parser location string used as the Lua chunk name (for example
+    /// `section \`Web Search\` epilog`).
+    location: String,
+    /// 1-based line number in the prompt source where this Lua region begins.
+    ///
+    /// Used together with chunk-relative line numbers from Lua runtime errors
+    /// to produce an absolute prompt-source line: `source_line + chunk_line - 1`.
+    source_line: u32,
 }
 
 impl LuaProgram {
@@ -278,6 +286,7 @@ impl LuaProgram {
     /// let program = LuaProgram::compile(
     ///     "return 40 + 2",
     ///     "example preamble",
+    ///     1,
     ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
@@ -291,6 +300,7 @@ impl LuaProgram {
     pub fn compile(
         source: &str,
         location: &str,
+        source_line: u32,
         execution: &str,
         observer: &dyn Observer,
         section: &str,
@@ -314,17 +324,22 @@ impl LuaProgram {
                 observer.observe(execution, section, detail::LUA_COMPILATION_FAILED);
                 return Err(Error::LuaCompile {
                     location: location.to_owned(),
+                    source_line,
                     lua_source: source.to_owned(),
                     message: error.to_string(),
                 });
             }
         };
-        let bytecode = function.dump(true);
+        // Keep debug info so runtime errors report the chunk name and line
+        // (`dump(true)` strips them and leaves `?:` in the traceback).
+        let bytecode = function.dump(false);
 
         observer.observe(execution, section, detail::LUA_COMPILATION_SUCCEEDED);
         Ok(Self {
             source: source.to_owned(),
             bytecode,
+            location: location.to_owned(),
+            source_line,
         })
     }
 
@@ -332,6 +347,12 @@ impl LuaProgram {
     #[must_use]
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    /// Returns the 1-based prompt-source line where this Lua region begins.
+    #[must_use]
+    pub fn source_line(&self) -> u32 {
+        self.source_line
     }
 
     /// Loads the compiled function into `lua` without executing it.
@@ -346,6 +367,75 @@ impl LuaProgram {
         lua.load(self.bytecode.as_slice())
             .into_function()
             .map_err(|error| Error::Lua(error.to_string()))
+    }
+
+    /// Maps a Lua runtime error to an [`Error::Lua`] with the chunk-relative
+    /// line rewritten to an absolute prompt-source line.
+    ///
+    /// Lua errors look like `[string "chunk name"]:N: message`. This method
+    /// rewrites only this program's chunk-relative `:N:` to the absolute
+    /// prompt line `source_line + N - 1`, and prefixes a clear
+    /// `{location}:{absolute}:` tag so hosts can show `file:line` without
+    /// parsing Lua's `[string ...]` form. Nested errors from other chunks
+    /// (for example a fanout arm) are left unchanged.
+    pub(crate) fn map_runtime_error(&self, error: &mlua::Error) -> Error {
+        let raw = error.to_string();
+        let mapped = map_chunk_line_to_absolute(&raw, self.source_line, self.location());
+        Error::Lua(mapped)
+    }
+
+    /// Chunk name recorded at compile time (parser location string).
+    #[must_use]
+    pub fn location(&self) -> &str {
+        &self.location
+    }
+}
+
+/// Rewrites chunk-relative line numbers for one named chunk to absolute
+/// prompt-source lines.
+///
+/// Only `[string "{location}"]:N:` occurrences are rewritten, so a parent
+/// preamble that surfaces a fanout child's already-mapped error does not
+/// corrupt the child's absolute line. When `source_line` is 0 or the pattern
+/// is absent, the message passes through unchanged except for a leading
+/// `{location}:` tag when an absolute line can still be inferred.
+fn map_chunk_line_to_absolute(message: &str, source_line: u32, location: &str) -> String {
+    if source_line == 0 || location.is_empty() {
+        return message.to_owned();
+    }
+    let marker = format!("[string \"{location}\"]:");
+    let mut result = String::with_capacity(message.len() + 64);
+    let mut rest = message;
+    let mut first_absolute: Option<u32> = None;
+    while let Some(start) = rest.find(&marker) {
+        result.push_str(&rest[..start]);
+        result.push_str(&marker);
+        let after = &rest[start + marker.len()..];
+        let digit_end = after
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(after.len());
+        if digit_end == 0 {
+            rest = after;
+            continue;
+        }
+        if let Ok(chunk_line) = after[..digit_end].parse::<u32>() {
+            let absolute = source_line + chunk_line - 1;
+            if first_absolute.is_none() {
+                first_absolute = Some(absolute);
+            }
+            result.push_str(&absolute.to_string());
+            rest = &after[digit_end..];
+        } else {
+            rest = after;
+        }
+    }
+    result.push_str(rest);
+
+    if let Some(absolute) = first_absolute {
+        // Leading tag hosts can show next to the file name: `briefer.md:51: ...`
+        format!("{location}:{absolute}: {result}")
+    } else {
+        result
     }
 }
 
@@ -378,6 +468,7 @@ struct BindingState {
 /// let shared = LuaProgram::compile(
 ///     "tools.need('Web-Search', 'search the web'); tools.always('Web-Search')",
 ///     "shared",
+///     1,
 ///     "example-run",
 ///     &NullObserver,
 ///     "Example",
@@ -707,6 +798,7 @@ impl SectionVm {
     /// let shared = LuaProgram::compile(
     ///     "function decorate(s) return '<' .. s .. '>' end",
     ///     "shared",
+    ///     1,
     ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
@@ -778,6 +870,7 @@ impl SectionVm {
     /// let shared = LuaProgram::compile(
     ///     "tools.need('search', 'search the web')",
     ///     "shared",
+    ///     1,
     ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
@@ -1022,6 +1115,7 @@ impl SectionVm {
     /// let preamble = LuaProgram::compile(
     ///     "var.answer = 42",
     ///     "preamble",
+    ///     1,
     ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
@@ -1161,6 +1255,7 @@ impl SectionVm {
     /// let epilog = LuaProgram::compile(
     ///     "return reply",
     ///     "epilog",
+    ///     1,
     ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
@@ -1316,6 +1411,7 @@ impl SectionVm {
     /// let shared = LuaProgram::compile(
     ///     "tools.need('search', 'search the web')",
     ///     "shared",
+    ///     1,
     ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
@@ -1331,6 +1427,7 @@ impl SectionVm {
     /// let preamble = LuaProgram::compile(
     ///     "tools.add('search')",
     ///     "preamble",
+    ///     1,
     ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
@@ -1495,7 +1592,7 @@ impl SectionVm {
                     .call(());
                 finish_log_phase(&self.lua, result)
             })
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(|error| program.map_runtime_error(&error))?;
         scalar_return(returned)
     }
 
@@ -1529,7 +1626,7 @@ impl SectionVm {
                     .call(());
                 finish_log_phase(&self.lua, result)
             })
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(|error| program.map_runtime_error(&error))?;
         scalar_return(returned)
     }
 
@@ -1582,7 +1679,7 @@ impl SectionVm {
                     .call(());
                 finish_log_phase(&self.lua, result)
             })
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(|error| program.map_runtime_error(&error))?;
         scalar_return(returned)
     }
 
@@ -2463,7 +2560,7 @@ mod tests {
     }
 
     fn program(source: &str) -> LuaProgram {
-        LuaProgram::compile(source, "test program", EXECUTION, &NullObserver, "Test")
+        LuaProgram::compile(source, "test program", 1, EXECUTION, &NullObserver, "Test")
             .expect("test Lua must compile")
     }
 
@@ -3705,6 +3802,7 @@ mod tests {
         let program = LuaProgram::compile(
             source,
             "section Gather preamble",
+            1,
             EXECUTION,
             &NullObserver,
             "Gather",
@@ -3724,10 +3822,121 @@ mod tests {
     }
 
     #[test]
+    fn runtime_assert_failure_reports_chunk_name_and_line() {
+        let location = "section `Web Search` epilog";
+        let program = LuaProgram::compile(
+            "local x = 1\nassert(false)\nreturn x",
+            location,
+            1,
+            EXECUTION,
+            &NullObserver,
+            "Web Search",
+        )
+        .expect("valid Lua must compile");
+        let lua = Lua::new();
+        let function = program.load(&lua).expect("bytecode must load");
+        let error = function
+            .call::<()>(())
+            .expect_err("assert(false) must fail at runtime");
+        let message = error.to_string();
+        assert!(
+            message.contains(location),
+            "runtime error must name the chunk: {message}"
+        );
+        assert!(
+            message.contains(":2:") || message.contains(":2\n"),
+            "runtime error must include the failing line number: {message}"
+        );
+        assert!(
+            !message.contains("?:"),
+            "stripped debug info must not leave '?:' in the traceback: {message}"
+        );
+    }
+
+    #[test]
+    fn map_chunk_line_to_absolute_rewrites_line_numbers() {
+        let location = "section `Web Search` epilog";
+        let msg = r#"[string "section `Web Search` epilog"]:2: assertion failed!"#;
+        let result = map_chunk_line_to_absolute(msg, 50, location);
+        assert_eq!(
+            result,
+            r#"section `Web Search` epilog:51: [string "section `Web Search` epilog"]:51: assertion failed!"#
+        );
+    }
+
+    #[test]
+    fn map_chunk_line_to_absolute_only_rewrites_matching_chunk() {
+        let msg = r#"[string "section `Web Search` epilog"]:51: assertion failed!
+stack traceback:
+        [string "section `Main` preamble"]:3: in main chunk"#;
+        let result = map_chunk_line_to_absolute(msg, 22, "section `Main` preamble");
+        assert!(
+            result.contains("[string \"section `Web Search` epilog\"]:51:"),
+            "child absolute line must stay intact: {result}"
+        );
+        assert!(
+            result.contains("[string \"section `Main` preamble\"]:24:")
+                || result.starts_with("section `Main` preamble:24:"),
+            "parent chunk line must map with parent source_line: {result}"
+        );
+        assert!(
+            !result.contains("[string \"section `Main` preamble\"]:3:"),
+            "parent chunk-relative line must be rewritten: {result}"
+        );
+    }
+
+    #[test]
+    fn map_chunk_line_to_absolute_passthrough_when_source_line_zero() {
+        let msg = r#"[string "x"]:5: boom"#;
+        let result = map_chunk_line_to_absolute(msg, 0, "x");
+        assert_eq!(result, msg);
+    }
+
+    #[test]
+    fn map_chunk_line_to_absolute_no_match_passthrough() {
+        let msg = "some other error without chunk info";
+        let result = map_chunk_line_to_absolute(msg, 10, "section `Main` preamble");
+        assert_eq!(result, msg);
+    }
+
+    #[test]
+    fn runtime_error_maps_to_absolute_prompt_line() {
+        let location = "section `Web Search` epilog";
+        let source_line: u32 = 50;
+        let program = LuaProgram::compile(
+            "local x = 1\nassert(false)\nreturn x",
+            location,
+            source_line,
+            EXECUTION,
+            &NullObserver,
+            "Web Search",
+        )
+        .expect("valid Lua must compile");
+
+        let lua = Lua::new();
+        let function = program.load(&lua).expect("bytecode must load");
+        let raw_error = function
+            .call::<()>(())
+            .expect_err("assert(false) must fail at runtime");
+
+        let mapped = program.map_runtime_error(&raw_error);
+        let msg = mapped.to_string();
+        // chunk line 2 + source_line 50 - 1 = 51
+        assert!(
+            msg.contains(":51:"),
+            "mapped error must contain absolute line 51: {msg}"
+        );
+        assert!(
+            msg.contains(location),
+            "mapped error must preserve the chunk name: {msg}"
+        );
+    }
+
+    #[test]
     fn malformed_lua_reports_location_and_retains_source_diagnostic() {
         let source = "local secret =\nreturn secret";
         let location = "section Gather preamble";
-        let error = LuaProgram::compile(source, location, EXECUTION, &NullObserver, "Gather")
+        let error = LuaProgram::compile(source, location, 1, EXECUTION, &NullObserver, "Gather")
             .expect_err("malformed Lua must not compile");
 
         match &error {
@@ -3735,6 +3944,7 @@ mod tests {
                 location: actual_location,
                 lua_source: actual_source,
                 message,
+                ..
             } => {
                 assert_eq!(actual_location, location);
                 assert_eq!(actual_source, source);
@@ -3756,7 +3966,7 @@ mod tests {
         let recorder = Recorder::default();
         let source = "return 'private source payload'";
         let location = "private/location";
-        LuaProgram::compile(source, location, EXECUTION, &recorder, "Gather")
+        LuaProgram::compile(source, location, 1, EXECUTION, &recorder, "Gather")
             .expect("valid Lua must compile");
         assert_eq!(
             recorder.observations(),
@@ -3773,7 +3983,7 @@ mod tests {
         );
 
         let recorder = Recorder::default();
-        LuaProgram::compile("local private =", location, EXECUTION, &recorder, "Gather")
+        LuaProgram::compile("local private =", location, 1, EXECUTION, &recorder, "Gather")
             .expect_err("malformed Lua must fail");
         let observations = recorder.observations();
         assert_eq!(

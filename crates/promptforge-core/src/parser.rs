@@ -102,7 +102,7 @@ impl Prompt {
     }
 
     fn parse_inner(input: &str, execution: &str, observer: &dyn Observer) -> Result<Prompt> {
-        let (yaml, body) = split_frontmatter(input)?;
+        let (yaml, body, frontmatter_lines) = split_frontmatter(input)?;
         let frontmatter: Frontmatter = serde_yaml::from_str(&yaml)
             .map_err(|e| Error::Parse(format!("invalid frontmatter: {e}")))?;
 
@@ -125,7 +125,9 @@ impl Prompt {
             return Err(Error::Parse("prompt H1 title must not be empty".into()));
         }
         let title = h1.title.clone();
-        let (shared, description_text) = split_shared(&h1.content, &title, execution, observer)?;
+        let h1_content_abs_line = frontmatter_lines + h1.content_start_line;
+        let (shared, description_text) =
+            split_shared(&h1.content, &title, h1_content_abs_line, execution, observer)?;
 
         // Everything before the H1 is preface and has no prompt semantics.
         // Sections are headings after the H1 at level 2 or deeper.
@@ -138,7 +140,14 @@ impl Prompt {
             return Err(Error::Parse("prompt has no ## sections".into()));
         }
         let mut pos = 0;
-        let sections = build_sections(&section_headings, &mut pos, 1, execution, observer)?;
+        let sections = build_sections(
+            &section_headings,
+            &mut pos,
+            1,
+            frontmatter_lines,
+            execution,
+            observer,
+        )?;
 
         Ok(Prompt {
             frontmatter,
@@ -164,13 +173,17 @@ struct Heading {
     level: u8,
     title: String,
     content: String,
+    /// 1-based line number within `body` where `content` begins.
+    content_start_line: u32,
 }
 
-/// Split a file into its YAML frontmatter and its markdown body.
+/// Split a file into its YAML frontmatter, its markdown body, and the
+/// number of lines consumed by the frontmatter block (both `---` delimiters
+/// and everything between them).
 ///
 /// The file must open with a `---` line and close the frontmatter with another
 /// `---` line. `str::lines` handles both `\n` and `\r\n`.
-fn split_frontmatter(input: &str) -> Result<(String, String)> {
+fn split_frontmatter(input: &str) -> Result<(String, String, u32)> {
     let input = input.strip_prefix('\u{feff}').unwrap_or(input); // drop BOM
     let mut lines = input.lines();
     match lines.next() {
@@ -183,7 +196,9 @@ fn split_frontmatter(input: &str) -> Result<(String, String)> {
     }
     let mut yaml = String::new();
     let mut closed = false;
+    let mut line_count: u32 = 1; // opening ---
     for line in lines.by_ref() {
+        line_count += 1;
         if line.trim() == "---" {
             closed = true;
             break;
@@ -195,7 +210,7 @@ fn split_frontmatter(input: &str) -> Result<(String, String)> {
         return Err(Error::Parse("frontmatter was not closed with ---".into()));
     }
     let body = lines.collect::<Vec<_>>().join("\n");
-    Ok((yaml, body))
+    Ok((yaml, body, line_count))
 }
 
 /// Reports the promptforge engine major declared in `source`'s frontmatter.
@@ -224,9 +239,19 @@ pub fn promptforge_version(source: &str) -> Option<u32> {
         promptforge: Option<u32>,
     }
 
-    let (yaml, _body) = split_frontmatter(source).ok()?;
+    let (yaml, _body, _lines) = split_frontmatter(source).ok()?;
     let probe: Probe = serde_yaml::from_str(&yaml).ok()?;
     probe.promptforge
+}
+
+/// Counts the number of `\n` characters in `text[..byte_offset]`.
+fn newlines_before(text: &str, byte_offset: usize) -> u32 {
+    text[..byte_offset].matches('\n').count() as u32
+}
+
+/// Counts the number of lines in `text` (number of `\n` characters).
+fn count_lines(text: &str) -> u32 {
+    text.matches('\n').count() as u32
 }
 
 /// Convert a `HeadingLevel` to its numeric level.
@@ -283,10 +308,14 @@ fn collect_headings(body: &str) -> Vec<Heading> {
         let start = raws[i].range.end;
         let end = raws.get(i + 1).map_or(body.len(), |next| next.range.start);
         let content = &body[start..end];
+        // +1 because newlines_before gives 0-based offset, and we want
+        // the 1-based line number of the first content line.
+        let content_start_line = newlines_before(body, start) + 1;
         headings.push(Heading {
             level: raws[i].level,
             title: raws[i].title.clone(),
             content: content.to_string(),
+            content_start_line,
         });
     }
     headings
@@ -295,9 +324,13 @@ fn collect_headings(body: &str) -> Vec<Heading> {
 /// Extracts and compiles the optional exact shared library at the start of the
 /// H1 content. Only blank lines may precede the opening fence; a later exact
 /// `lua` fence is ordinary description prose, mirroring section semantics.
+///
+/// `content_abs_line` is the 1-based line number in the full input where
+/// `content` begins.
 fn split_shared(
     content: &str,
     title: &str,
+    content_abs_line: u32,
     execution: &str,
     observer: &dyn Observer,
 ) -> Result<(Option<LuaProgram>, String)> {
@@ -311,9 +344,20 @@ fn split_shared(
         return Ok((None, content.trim().to_string()));
     };
 
+    // The Lua source starts on the line after the ```lua opener.
+    // Blank lines skipped + the ```lua line itself.
+    let blank_lines = count_lines(content) - count_lines(leading);
+    let lua_source_line = content_abs_line + blank_lines + 1; // +1 for the ```lua line
+
     let (source, rest) = extract_exact_fence(after_open, "shared `lua`")?;
-    let program =
-        LuaProgram::compile(&source, "prompt shared library", execution, observer, title)?;
+    let program = LuaProgram::compile(
+        &source,
+        "prompt shared library",
+        lua_source_line,
+        execution,
+        observer,
+        title,
+    )?;
     Ok((Some(program), rest.trim().to_string()))
 }
 
@@ -376,24 +420,37 @@ fn exact_lua_openings(content: &str) -> Vec<usize> {
         .collect()
 }
 
+/// Result of splitting a section into its Lua phases and prose.
+struct SectionPhases {
+    preamble: Option<String>,
+    /// Line offset of the preamble Lua source within the section content
+    /// (number of lines before the first line of Lua source).
+    preamble_line_offset: u32,
+    prose: String,
+    epilog: Option<String>,
+    /// Line offset of the epilog Lua source within the section content.
+    epilog_line_offset: u32,
+}
+
 /// Splits a section into exact leading and trailing Lua source around prose.
 ///
 /// A lone reserved fence is the preamble for compatibility. Exact Lua fences
 /// between prose remain prose, as do all near-miss fence forms.
-fn split_section_phases(
-    content: &str,
-    section: &str,
-) -> Result<(Option<String>, String, Option<String>)> {
+fn split_section_phases(content: &str, section: &str) -> Result<SectionPhases> {
     let leading = trim_leading_blank_lines(content);
-    let (preamble, remainder) = if let Some(after_open) = strip_exact_lua_opening(leading) {
-        let label = format!("section `{section}` preamble `lua`");
-        let (source, rest) = extract_exact_fence(after_open, &label)?;
-        (Some(source), rest)
-    } else {
-        (None, content)
-    };
+    let blank_lines = count_lines(content) - count_lines(leading);
+    let (preamble, preamble_line_offset, remainder) =
+        if let Some(after_open) = strip_exact_lua_opening(leading) {
+            let label = format!("section `{section}` preamble `lua`");
+            let (source, rest) = extract_exact_fence(after_open, &label)?;
+            // +1 for the ```lua opener line
+            (Some(source), blank_lines + 1, rest)
+        } else {
+            (None, 0, content)
+        };
 
     let mut epilog = None;
+    let mut epilog_line_offset: u32 = 0;
     let mut prose = remainder;
     if let Some(opening) = exact_lua_openings(remainder).last().copied() {
         let Some(after_open) = strip_exact_lua_opening(&remainder[opening..]) else {
@@ -404,6 +461,16 @@ fn split_section_phases(
         let label = format!("section `{section}` epilog `lua`");
         match extract_exact_fence(after_open, &label) {
             Ok((source, rest)) if rest.trim().is_empty() => {
+                // Lines before the epilog opening within content:
+                // blank_lines to get to leading, then lines within remainder up
+                // to the opening, then +1 for the ```lua line.
+                let preamble_consumed = if preamble.is_some() {
+                    count_lines(content) - count_lines(remainder)
+                } else {
+                    0
+                };
+                epilog_line_offset =
+                    preamble_consumed + newlines_before(remainder, opening) + 1;
                 epilog = Some(source);
                 prose = &remainder[..opening];
             }
@@ -412,7 +479,13 @@ fn split_section_phases(
         }
     }
 
-    Ok((preamble, prose.trim().to_string(), epilog))
+    Ok(SectionPhases {
+        preamble,
+        preamble_line_offset,
+        prose: prose.trim().to_string(),
+        epilog,
+        epilog_line_offset,
+    })
 }
 
 /// Parses bullet items from prose in a list-only section.
@@ -487,6 +560,7 @@ fn build_sections(
     headings: &[Heading],
     pos: &mut usize,
     parent_level: u8,
+    frontmatter_lines: u32,
     execution: &str,
     observer: &dyn Observer,
 ) -> Result<Vec<Section>> {
@@ -498,24 +572,31 @@ fn build_sections(
         }
         let h = &headings[*pos];
         let name = h.title.clone();
-        let (preamble_source, prose, epilog_source) = split_section_phases(&h.content, &name)?;
-        let is_list_only = preamble_source.is_none() && epilog_source.is_none();
-        let preamble = preamble_source
+        let content_abs_line = frontmatter_lines + h.content_start_line;
+        let phases = split_section_phases(&h.content, &name)?;
+        let is_list_only = phases.preamble.is_none() && phases.epilog.is_none();
+        let preamble = phases
+            .preamble
             .map(|source| {
+                let abs_line = content_abs_line + phases.preamble_line_offset;
                 LuaProgram::compile(
                     &source,
                     &format!("section `{name}` preamble"),
+                    abs_line,
                     execution,
                     observer,
                     &name,
                 )
             })
             .transpose()?;
-        let epilog = epilog_source
+        let epilog = phases
+            .epilog
             .map(|source| {
+                let abs_line = content_abs_line + phases.epilog_line_offset;
                 LuaProgram::compile(
                     &source,
                     &format!("section `{name}` epilog"),
+                    abs_line,
                     execution,
                     observer,
                     &name,
@@ -523,8 +604,10 @@ fn build_sections(
             })
             .transpose()?;
         *pos += 1;
-        let children = build_sections(headings, pos, level, execution, observer)?;
+        let children =
+            build_sections(headings, pos, level, frontmatter_lines, execution, observer)?;
 
+        let prose = phases.prose;
         let items = if is_list_only && has_any_bullet_line(&prose) {
             parse_bullet_items(&prose, &name)?
         } else {
@@ -1235,5 +1318,140 @@ Prose for the second section.\n";
         let worker = &p.sections[0].children[0];
         assert_eq!(worker.name, "Worker");
         assert!(worker.items.is_empty());
+    }
+
+    #[test]
+    fn epilog_source_line_maps_runtime_error_to_absolute_line() {
+        // Lines:
+        //  1: ---
+        //  2: name: x
+        //  3: description: d
+        //  4: ---
+        //  5: (empty)
+        //  6: # T
+        //  7: (empty)
+        //  8: ## Check
+        //  9: (empty)
+        // 10: Ask the model.
+        // 11: (empty)
+        // 12: ```lua       <- epilog opens
+        // 13: local a = 1  <- epilog line 1 (source_line = 13)
+        // 14: assert(false) <- epilog line 2 (absolute = 14)
+        // 15: ```
+        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Check\n\nAsk the model.\n\n```lua\nlocal a = 1\nassert(false)\n```\n";
+        let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
+        let epilog = prompt.entry().epilog.as_ref().expect("epilog must exist");
+
+        assert_eq!(epilog.source_line(), 13, "epilog Lua starts on line 13");
+        assert_eq!(epilog.source(), "local a = 1\nassert(false)");
+
+        // Simulate a runtime error: assert(false) is on chunk line 2.
+        // Absolute line = 13 + 2 - 1 = 14.
+        let lua = mlua::Lua::new();
+        let function = epilog.load(&lua).expect("bytecode must load");
+        let raw_error = function
+            .call::<()>(())
+            .expect_err("assert(false) must fail");
+        let mapped = epilog.map_runtime_error(&raw_error);
+        let msg = mapped.to_string();
+        assert!(
+            msg.contains(":14:"),
+            "error must contain absolute line 14: {msg}"
+        );
+    }
+
+    #[test]
+    fn preamble_source_line_maps_correctly() {
+        // Lines:
+        //  1: ---
+        //  2: name: x
+        //  3: description: d
+        //  4: ---
+        //  5: (empty)
+        //  6: # T
+        //  7: (empty)
+        //  8: ## Work
+        //  9: (empty)
+        // 10: ```lua       <- preamble opens
+        // 11: assert(false) <- preamble line 1 (source_line = 11, absolute = 11)
+        // 12: ```
+        // 13: (empty)
+        // 14: Do the work.
+        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Work\n\n```lua\nassert(false)\n```\n\nDo the work.\n";
+        let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
+        let preamble = prompt.entry().preamble.as_ref().expect("preamble must exist");
+
+        assert_eq!(preamble.source_line(), 11, "preamble Lua starts on line 11");
+
+        let lua = mlua::Lua::new();
+        let function = preamble.load(&lua).expect("bytecode must load");
+        let raw_error = function
+            .call::<()>(())
+            .expect_err("assert(false) must fail");
+        let mapped = preamble.map_runtime_error(&raw_error);
+        let msg = mapped.to_string();
+        assert!(
+            msg.contains(":11:"),
+            "error must contain absolute line 11: {msg}"
+        );
+    }
+
+    #[test]
+    fn multi_line_chunk_maps_inner_line_correctly() {
+        // Epilog with assert on line 2 of the fence.
+        //  1-4: frontmatter
+        //  5: empty
+        //  6: # T
+        //  7: empty
+        //  8: ## S
+        //  9: empty
+        // 10: Prose.
+        // 11: empty
+        // 12: ```lua
+        // 13: local x = 1    <- source_line = 13
+        // 14: local y = 2
+        // 15: assert(false)  <- chunk line 3, absolute = 13 + 3 - 1 = 15
+        // 16: ```
+        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nProse.\n\n```lua\nlocal x = 1\nlocal y = 2\nassert(false)\n```\n";
+        let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
+        let epilog = prompt.entry().epilog.as_ref().expect("epilog must exist");
+
+        assert_eq!(epilog.source_line(), 13);
+
+        let lua = mlua::Lua::new();
+        let function = epilog.load(&lua).expect("bytecode must load");
+        let raw_error = function
+            .call::<()>(())
+            .expect_err("assert(false) must fail");
+        let mapped = epilog.map_runtime_error(&raw_error);
+        let msg = mapped.to_string();
+        assert!(
+            msg.contains(":15:"),
+            "error must contain absolute line 15: {msg}"
+        );
+    }
+
+    #[test]
+    fn shared_library_source_line_is_correct() {
+        // Lines:
+        //  1: ---
+        //  2: name: x
+        //  3: description: d
+        //  4: ---
+        //  5: (empty)
+        //  6: # T
+        //  7: (empty)
+        //  8: ```lua        <- shared opens
+        //  9: function f()  <- source_line = 9
+        // 10: end
+        // 11: ```
+        // 12: (empty)
+        // 13: ## S
+        // 14: (empty)
+        // 15: p
+        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua\nfunction f()\nend\n```\n\n## S\n\np\n";
+        let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
+        let shared = prompt.shared.as_ref().expect("shared must exist");
+        assert_eq!(shared.source_line(), 9, "shared Lua starts on line 9");
     }
 }
