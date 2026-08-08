@@ -646,7 +646,17 @@ async fn run_tool_loop(
         observer.observe(execution, section, detail::MODEL_TURN_COMPLETED);
 
         match completion.result {
-            CompletionResult::Text(text) => return Ok(text),
+            CompletionResult::Text(text) => {
+                // Payload-free signals for hosts watching empty or truncated
+                // final replies; MODEL_TURN_COMPLETED already fired above.
+                if text.is_empty() {
+                    observer.observe(execution, section, detail::MODEL_REPLY_EMPTY);
+                }
+                if completion.finish_reason.as_deref() == Some("length") {
+                    observer.observe(execution, section, detail::MODEL_TURN_TRUNCATED);
+                }
+                return Ok(text);
+            }
             CompletionResult::ToolCalls(calls) => {
                 // Echo the assistant's tool-call turn back into the history. The
                 // parsed `ToolCall`s are reconstructed into the raw OpenAI wire
