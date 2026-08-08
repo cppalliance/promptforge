@@ -6,10 +6,12 @@
 
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, IsTerminal, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use flate2::read::GzDecoder;
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 
@@ -17,6 +19,8 @@ use crate::local::error::LocalError;
 
 const LLAMA_RELEASE: &str = "b10082";
 const INSTALL_MARKER: &str = ".promptforge-install";
+/// Non-TTY log cadence: every 64 MiB or 5% of Content-Length, whichever fires first.
+const LOG_PROGRESS_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Pinned Qwen3.5-9B Q4_K_M GGUF URL (same pin as core-tests Dev).
 pub const DEV_MODEL_URL: &str =
@@ -240,6 +244,26 @@ impl ArtifactStore {
     }
 
     fn download(&self, url: &str, destination: &Path) -> Result<String> {
+        let label = download_label(url);
+        let progress = progress_for_download(&label, io::stderr().is_terminal());
+        match self.download_with_progress(url, destination, progress.as_ref()) {
+            Ok(digest) => {
+                progress.finish();
+                Ok(digest)
+            }
+            Err(error) => {
+                progress.abandon();
+                Err(error)
+            }
+        }
+    }
+
+    fn download_with_progress(
+        &self,
+        url: &str,
+        destination: &Path,
+        progress: &dyn DownloadProgress,
+    ) -> Result<String> {
         let mut request = self.client.get(url);
         if let Some(token) = hub_bearer_token(env_var) {
             request = request.bearer_auth(token);
@@ -251,6 +275,8 @@ impl ArtifactStore {
                 url: url.to_owned(),
                 source,
             })?;
+        let total = response.content_length();
+        progress.set_len(total);
         let file = File::create(destination).map_err(|source| LocalError::Io {
             operation: "create partial download",
             path: destination.to_owned(),
@@ -277,6 +303,7 @@ impl ArtifactStore {
                     source,
                 })?;
             hasher.update(&buffer[..count]);
+            progress.inc(count as u64);
         }
         writer.flush().map_err(|source| LocalError::Io {
             operation: "flush partial download",
@@ -896,6 +923,176 @@ fn hub_bearer_token(lookup: impl Fn(&str) -> Option<String>) -> Option<String> {
     None
 }
 
+/// Progress updates for a single HTTP blob download.
+trait DownloadProgress: Send {
+    fn set_len(&self, total: Option<u64>);
+    fn inc(&self, n: u64);
+    fn finish(&self);
+    fn abandon(&self);
+}
+
+/// Basename (or short fallback) shown on the progress bar / log lines.
+fn download_label(url: &str) -> String {
+    url.rsplit('/')
+        .next()
+        .and_then(|part| {
+            let name = part.split('?').next().unwrap_or(part);
+            (!name.is_empty()).then(|| name.to_owned())
+        })
+        .unwrap_or_else(|| "download".to_owned())
+}
+
+/// Chooses a TTY progress bar or non-TTY tracing progress for `label`.
+fn progress_for_download(label: &str, is_tty: bool) -> Box<dyn DownloadProgress> {
+    if is_tty {
+        Box::new(IndicatifProgress::new(label))
+    } else {
+        Box::new(TracingProgress::new(label))
+    }
+}
+
+/// Interactive stderr progress bar via indicatif.
+struct IndicatifProgress {
+    bar: ProgressBar,
+}
+
+impl IndicatifProgress {
+    fn new(label: &str) -> Self {
+        let bar = ProgressBar::new_spinner();
+        bar.set_message(label.to_owned());
+        if let Some(style) = bar_style() {
+            bar.set_style(style);
+        }
+        Self { bar }
+    }
+}
+
+fn bar_style() -> Option<ProgressStyle> {
+    ProgressStyle::with_template(
+        "{spinner:.green} {msg} [{bar:40.cyan/blue}] {percent:>3}% {bytes}/{total_bytes} ({bytes_per_sec}, ETA {eta})",
+    )
+    .ok()
+    .map(|style| style.progress_chars("=>-"))
+}
+
+fn spinner_style() -> Option<ProgressStyle> {
+    ProgressStyle::with_template("{spinner:.green} {msg} {bytes} ({bytes_per_sec})").ok()
+}
+
+impl DownloadProgress for IndicatifProgress {
+    fn set_len(&self, total: Option<u64>) {
+        match total {
+            Some(len) if len > 0 => {
+                self.bar.set_length(len);
+                if let Some(style) = bar_style() {
+                    self.bar.set_style(style);
+                }
+            }
+            _ => {
+                if let Some(style) = spinner_style() {
+                    self.bar.set_style(style);
+                }
+            }
+        }
+    }
+
+    fn inc(&self, n: u64) {
+        self.bar.inc(n);
+    }
+
+    fn finish(&self) {
+        self.bar.finish_and_clear();
+    }
+
+    fn abandon(&self) {
+        self.bar.abandon();
+    }
+}
+
+/// Non-TTY progress: periodic `tracing::info!` lines.
+struct TracingProgress {
+    label: String,
+    total: AtomicU64,
+    downloaded: AtomicU64,
+    last_logged: AtomicU64,
+}
+
+impl TracingProgress {
+    fn new(label: &str) -> Self {
+        Self {
+            label: label.to_owned(),
+            total: AtomicU64::new(0),
+            downloaded: AtomicU64::new(0),
+            last_logged: AtomicU64::new(0),
+        }
+    }
+
+    fn maybe_log(&self, force: bool) {
+        let downloaded = self.downloaded.load(Ordering::Relaxed);
+        let total = self.total.load(Ordering::Relaxed);
+        let last = self.last_logged.load(Ordering::Relaxed);
+        let step = if total > 0 {
+            (total / 20).max(LOG_PROGRESS_BYTES)
+        } else {
+            LOG_PROGRESS_BYTES
+        };
+        if !force && downloaded.saturating_sub(last) < step && downloaded != 0 {
+            return;
+        }
+        self.last_logged.store(downloaded, Ordering::Relaxed);
+        if let Some(percent) = downloaded.saturating_mul(100).checked_div(total) {
+            tracing::info!(
+                file = %self.label,
+                downloaded,
+                total,
+                percent,
+                "download progress"
+            );
+        } else {
+            tracing::info!(
+                file = %self.label,
+                downloaded,
+                "download progress"
+            );
+        }
+    }
+}
+
+impl DownloadProgress for TracingProgress {
+    fn set_len(&self, total: Option<u64>) {
+        if let Some(len) = total {
+            self.total.store(len, Ordering::Relaxed);
+        }
+        tracing::info!(
+            file = %self.label,
+            total = total.unwrap_or(0),
+            "download started"
+        );
+    }
+
+    fn inc(&self, n: u64) {
+        self.downloaded.fetch_add(n, Ordering::Relaxed);
+        self.maybe_log(false);
+    }
+
+    fn finish(&self) {
+        self.maybe_log(true);
+        tracing::info!(
+            file = %self.label,
+            downloaded = self.downloaded.load(Ordering::Relaxed),
+            "download finished"
+        );
+    }
+
+    fn abandon(&self) {
+        tracing::warn!(
+            file = %self.label,
+            downloaded = self.downloaded.load(Ordering::Relaxed),
+            "download abandoned"
+        );
+    }
+}
+
 fn hex_digest(hasher: Sha256) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let bytes = hasher.finalize();
@@ -1087,8 +1284,8 @@ fn write_synced(path: &Path, contents: &[u8]) -> Result<()> {
 mod tests {
     use std::io::{Read as _, Write as _};
     use std::net::{TcpListener, TcpStream};
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
     use std::thread::{self, JoinHandle};
     use std::time::Duration;
 
@@ -1096,6 +1293,43 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    /// Test double that records set_len / inc / finish / abandon calls.
+    struct RecordingProgress {
+        total: Mutex<Option<u64>>,
+        bytes: AtomicU64,
+        finished: AtomicU64,
+        abandoned: AtomicU64,
+    }
+
+    impl RecordingProgress {
+        fn new() -> Self {
+            Self {
+                total: Mutex::new(None),
+                bytes: AtomicU64::new(0),
+                finished: AtomicU64::new(0),
+                abandoned: AtomicU64::new(0),
+            }
+        }
+    }
+
+    impl DownloadProgress for RecordingProgress {
+        fn set_len(&self, total: Option<u64>) {
+            *self.total.lock().expect("progress total lock") = total;
+        }
+
+        fn inc(&self, n: u64) {
+            self.bytes.fetch_add(n, Ordering::Relaxed);
+        }
+
+        fn finish(&self) {
+            self.finished.fetch_add(1, Ordering::Relaxed);
+        }
+
+        fn abandon(&self) {
+            self.abandoned.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 
     struct FakeServer {
         address: String,
@@ -1190,6 +1424,54 @@ mod tests {
         let mut hasher = Sha256::new();
         hasher.update(bytes);
         hex_digest(hasher)
+    }
+
+    #[test]
+    fn download_label_uses_url_basename() {
+        assert_eq!(
+            download_label(
+                "https://huggingface.co/google/gemma/resolve/main/gemma-3-27b-it-q4_0.gguf"
+            ),
+            "gemma-3-27b-it-q4_0.gguf"
+        );
+        assert_eq!(
+            download_label("https://example.com/file.gguf?download=true"),
+            "file.gguf"
+        );
+    }
+
+    #[test]
+    fn progress_for_download_picks_bar_on_tty_and_log_off_tty() {
+        let tty = progress_for_download("x.gguf", true);
+        let log = progress_for_download("x.gguf", false);
+        // Type names are enough: both implement the trait and accept a finish.
+        tty.set_len(Some(10));
+        tty.inc(10);
+        tty.finish();
+        log.set_len(Some(10));
+        log.inc(10);
+        log.finish();
+    }
+
+    #[test]
+    fn download_with_progress_reports_content_length_and_bytes() {
+        let body = b"progress-fixture-bytes";
+        let server = FakeServer::new(body);
+        let temp = TempDir::new().expect("tempdir");
+        let store = ArtifactStore::new(temp.path()).expect("store");
+        let progress = RecordingProgress::new();
+        let dest = temp.path().join("out.gguf");
+        let digest = store
+            .download_with_progress(&server.url("out.gguf"), &dest, &progress)
+            .expect("download");
+        assert_eq!(digest, hex_sha256(body));
+        assert_eq!(
+            *progress.total.lock().expect("total"),
+            Some(body.len() as u64)
+        );
+        assert_eq!(progress.bytes.load(Ordering::Relaxed), body.len() as u64);
+        progress.finish();
+        assert_eq!(progress.finished.load(Ordering::Relaxed), 1);
     }
 
     #[test]
