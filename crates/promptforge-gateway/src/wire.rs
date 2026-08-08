@@ -61,4 +61,8 @@ pub struct ModelInfo {
     pub context: u32,
     /// Whether thinking tokens are never, always, or switchably available.
     pub thinking: ThinkingMode,
+    /// The tool-calling dialect used by this model (`"openai"`, `"gemma3_tool_code"`).
+    pub tool_dialect: String,
+    /// Whether tool calls are handled natively or emulated (`"native"`, `"emulated"`).
+    pub tools_mode: String,
 }

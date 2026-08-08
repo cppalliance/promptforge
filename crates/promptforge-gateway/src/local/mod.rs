@@ -14,6 +14,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
+use std::time::Duration;
+
+use promptforge_core::dialects::{DialectEvidence, ToolDialectRegistry};
+use serde_json::Value;
 
 use crate::config::{Config, LocalModelConfig, ThinkingMode};
 use crate::queue::EndpointLane;
@@ -99,11 +103,17 @@ impl LocalRuntime {
                 upstream,
                 lane,
             });
+            let (tool_dialect, tools_mode) = resolve_local_dialect(
+                &guard,
+                &local_model.name,
+            )?;
             models.push(Arc::new(Model {
                 name: local_model.name.clone(),
                 description: local_model.description.clone(),
                 context: local_model.context,
                 thinking: local_model.thinking,
+                tool_dialect,
+                tools_mode,
                 upstream_name: guard.model_alias().to_owned(),
                 endpoint,
             }));
@@ -163,6 +173,116 @@ fn launch_options(model: &LocalModelConfig) -> LaunchOptions {
     }
 }
 
+/// Fetches `/props` from a ready local llama-server and resolves the tool dialect.
+///
+/// Returns `(tool_dialect, tools_mode)` strings for the routing model.
+/// Hard-fails on `DialectNone` or `DialectTie` so local models never silently
+/// default to an incorrect dialect.
+fn resolve_local_dialect(
+    guard: &ServerGuard,
+    model_name: &str,
+) -> Result<(String, String), LocalError> {
+    let evidence = fetch_props_evidence(guard)?;
+    tracing::debug!(
+        model = %model_name,
+        supports_tool_calls = ?evidence.supports_tool_calls,
+        has_template = evidence.chat_template.is_some(),
+        model_id = ?evidence.model_id,
+        "dialect evidence from /props"
+    );
+    let registry = ToolDialectRegistry::builtin();
+    let dialect_id = registry.resolve(&evidence).map_err(|error| {
+        LocalError::Server(format!(
+            "dialect resolution failed for local model {model_name}: {error}"
+        ))
+    })?;
+    let tools_mode = dialect_id.tools_mode();
+    Ok((dialect_id.to_string(), tools_mode.to_string()))
+}
+
+const PROPS_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Fetches `GET /props` from a ready llama-server and builds [`DialectEvidence`].
+fn fetch_props_evidence(guard: &ServerGuard) -> Result<DialectEvidence, LocalError> {
+    let base = format!("http://127.0.0.1:{}", guard.port());
+    let client = reqwest::blocking::Client::builder()
+        .no_proxy()
+        .timeout(PROPS_TIMEOUT)
+        .build()
+        .map_err(|e| LocalError::Server(format!("build props client: {e}")))?;
+
+    let response = client
+        .get(format!("{base}/props"))
+        .bearer_auth(guard.api_key())
+        .send()
+        .map_err(|e| LocalError::Server(format!("GET /props failed: {e}")))?;
+
+    if !response.status().is_success() {
+        return Err(LocalError::Server(format!(
+            "GET /props returned {}",
+            response.status()
+        )));
+    }
+
+    let props: Value = response
+        .json()
+        .map_err(|e| LocalError::Server(format!("parse /props JSON: {e}")))?;
+
+    let chat_template = props
+        .get("chat_template")
+        .and_then(Value::as_str)
+        .map(String::from);
+
+    // llama-server /props exposes `default_generation_settings.model` as the
+    // loaded model path and `default_generation_settings.samplers` etc.
+    let model_id = props
+        .get("default_generation_settings")
+        .and_then(|dgs| dgs.get("model"))
+        .and_then(Value::as_str)
+        .map(String::from);
+
+    // `total_slots` and capabilities are top-level in /props. When the server
+    // was launched with `--jinja` and the template declares tool support, the
+    // /v1/models response carries `meta.has_tool_call_capability`. We check
+    // both /props and /v1/models for the capability flag.
+    let supports_tool_calls = fetch_tool_call_capability(&client, &base, guard.api_key());
+
+    Ok(DialectEvidence::new(
+        Some(supports_tool_calls),
+        chat_template,
+        model_id,
+        None,
+    ))
+}
+
+/// Checks the /v1/models response for native tool-call capability.
+fn fetch_tool_call_capability(
+    client: &reqwest::blocking::Client,
+    base: &str,
+    api_key: &str,
+) -> bool {
+    let Ok(response) = client
+        .get(format!("{base}/v1/models"))
+        .bearer_auth(api_key)
+        .send()
+    else {
+        return false;
+    };
+    if !response.status().is_success() {
+        return false;
+    }
+    let Ok(body) = response.json::<Value>() else {
+        return false;
+    };
+    body.get("data")
+        .and_then(Value::as_array)
+        .and_then(|models| models.first())
+        .and_then(|model| model.get("meta"))
+        .and_then(|meta| meta.get("has_tool_call_capability"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
 /// Arms a Ctrl-C watcher so readiness loops can abort while children are starting.
 fn arm_startup_interrupt(interrupted: Arc<AtomicBool>) {
     thread::spawn(move || {
@@ -211,5 +331,65 @@ endpoints = ["e"]
         let runtime = LocalRuntime::start(&config).expect("empty local runtime");
         assert_eq!(runtime.child_count(), 0);
         assert!(runtime.models().is_empty());
+    }
+
+    #[test]
+    fn gemma_props_resolve_to_gemma3_tool_code() {
+        let evidence = DialectEvidence::new(
+            Some(false),
+            Some("<start_of_turn>user\n".to_string()),
+            Some("gemma-3-27b-it".to_string()),
+            None,
+        );
+        let registry = ToolDialectRegistry::builtin();
+        let id = registry.resolve(&evidence).expect("should resolve");
+        assert_eq!(id.to_string(), "gemma3_tool_code");
+        assert_eq!(id.tools_mode().to_string(), "emulated");
+    }
+
+    #[test]
+    fn tools_true_resolves_to_openai() {
+        let evidence = DialectEvidence::new(Some(true), None, None, None);
+        let registry = ToolDialectRegistry::builtin();
+        let id = registry.resolve(&evidence).expect("should resolve");
+        assert_eq!(id.to_string(), "openai");
+        assert_eq!(id.tools_mode().to_string(), "native");
+    }
+
+    #[test]
+    fn dialect_none_is_hard_fail() {
+        let evidence = DialectEvidence::default();
+        let registry = ToolDialectRegistry::builtin();
+        let result = registry.resolve(&evidence);
+        assert!(result.is_err(), "empty evidence must hard-fail");
+    }
+
+    #[test]
+    fn remote_model_defaults_to_openai_native() {
+        let config = Config::from_toml_str(
+            r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+
+[[model]]
+name = "remote"
+description = "a remote model"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+"#,
+        )
+        .expect("config");
+        let routing = crate::routing::Routing::from_config(&config).unwrap();
+        let model = routing.model("remote").unwrap();
+        assert_eq!(model.tool_dialect, "openai");
+        assert_eq!(model.tools_mode, "native");
     }
 }
