@@ -2755,19 +2755,14 @@ dependencies = [
  "anyhow",
  "async-trait",
  "fastrand",
- "flate2",
  "notify",
  "promptforge-core",
  "promptforge-tool-picker",
  "promptforge-webfetch",
  "reqwest 0.12.28",
  "serde_json",
- "sha2",
- "tar",
  "tempfile",
- "thiserror 2.0.19",
  "tokio",
- "zip",
 ]
 
 [[package]]
