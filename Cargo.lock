@@ -2776,15 +2776,21 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "fastrand",
+ "flate2",
  "promptforge-core",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "toml",
  "tracing",
  "tracing-subscriber",
+ "zip",
 ]
 
 [[package]]

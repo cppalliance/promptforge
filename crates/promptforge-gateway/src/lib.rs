@@ -8,13 +8,16 @@
 //!
 //! What ships: one OpenAI passthrough at `POST /v1/chat/completions` with
 //! bearer auth and model routing, per-endpoint concurrency limits with a fair
-//! waiting queue (`[queue]` / `concurrency`), a bearer-authed `GET /v1/models`
-//! catalog, a Brave-backed `POST /v1/tools/web_search` configured by
-//! `[tools.web_search]`, and `GET /health`. Endpoint pinning, model packs,
-//! hot reload, streaming, and the Anthropic protocol shim are deferred.
+//! waiting queue (`[queue]` / `concurrency`), gateway-owned local generative
+//! inference via a managed `llama-server` subprocess (`[[local_model]]`), a
+//! bearer-authed `GET /v1/models` catalog, a Brave-backed
+//! `POST /v1/tools/web_search` configured by `[tools.web_search]`, and
+//! `GET /health`. In-process llama.cpp FFI, profiles, endpoint pinning, model
+//! packs, hot reload, streaming, and the Anthropic protocol shim are deferred.
 
 pub mod config;
 pub mod error;
+pub mod local;
 pub mod queue;
 pub mod routing;
 pub mod tools;

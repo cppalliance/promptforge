@@ -11,6 +11,26 @@ use serde::{Deserialize, Serialize};
 use crate::error::ConfigError;
 use crate::queue::QueueConfig;
 
+fn default_gpu_layers() -> u32 {
+    99
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_cache_type_k() -> String {
+    "q8_0".to_owned()
+}
+
+fn default_cache_type_v() -> String {
+    "q4_0".to_owned()
+}
+
+fn default_n_predict() -> u32 {
+    8192
+}
+
 /// A secret string (an API key or the shared token) that never serializes and
 /// redacts in both `Debug` and `Display`.
 #[derive(Clone, Deserialize)]
@@ -68,16 +88,72 @@ pub struct Config {
     /// Waiting-queue settings for limited endpoints.
     #[serde(default)]
     pub queue: QueueConfig,
+    /// Cache and binary settings for gateway-owned local inference.
+    #[serde(default)]
+    pub local: LocalConfig,
     /// The configured backends.
-    #[serde(rename = "endpoint")]
+    #[serde(rename = "endpoint", default)]
     pub endpoints: Vec<EndpointConfig>,
-    /// The routing table from model name to backend.
-    #[serde(rename = "model")]
+    /// The routing table from model name to remote backend.
+    #[serde(rename = "model", default)]
     pub models: Vec<ModelConfig>,
+    /// Local generative models served by a managed `llama-server` child.
+    #[serde(rename = "local_model", default)]
+    pub local_models: Vec<LocalModelConfig>,
     /// Optional built-in tool configuration. Absent when no `[tools]` section
     /// is present.
     #[serde(default)]
     pub tools: Option<ToolsConfig>,
+}
+
+/// Settings under `[local]` for artifact cache paths.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct LocalConfig {
+    /// Root directory for GGUF files and the pinned `llama-server` install.
+    ///
+    /// Defaults to `~/.promptforge` (Windows: `%USERPROFILE%\.promptforge`).
+    /// Models land in `<cache_dir>/models`; llama.cpp installs in
+    /// `<cache_dir>/llama.cpp`.
+    #[serde(default)]
+    pub cache_dir: Option<String>,
+}
+
+/// One local generative model declared as `[[local_model]]`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct LocalModelConfig {
+    /// Caller-facing model name in `/v1/models` and chat completions.
+    pub name: String,
+    /// Prose describing the model for catalog consumers and semantic bind.
+    pub description: String,
+    /// Hugging Face (or other) URL, or a local filesystem path to a GGUF.
+    pub source: String,
+    /// Optional SHA-256 pin (lowercase hex). Verified after download when set.
+    #[serde(default)]
+    pub sha256: Option<String>,
+    /// Context window size in tokens (`--ctx-size`).
+    pub context: u32,
+    /// Whether thinking tokens are never, always, or switchably available.
+    #[serde(default)]
+    pub thinking: ThinkingMode,
+    /// GPU layers offloaded (`-ngl`). Defaults to 99.
+    #[serde(default = "default_gpu_layers")]
+    pub gpu_layers: u32,
+    /// Enable flash attention (`--flash-attn on`). Defaults to true.
+    #[serde(default = "default_true")]
+    pub flash_attention: bool,
+    /// KV cache type for K. Defaults to `q8_0`.
+    #[serde(default = "default_cache_type_k")]
+    pub cache_type_k: String,
+    /// KV cache type for V. Defaults to `q4_0`.
+    #[serde(default = "default_cache_type_v")]
+    pub cache_type_v: String,
+    /// Generation ceiling (`--n-predict`). Defaults to 8192.
+    #[serde(default = "default_n_predict")]
+    pub n_predict: u32,
 }
 
 /// Server-level settings.
@@ -226,8 +302,8 @@ impl Config {
     /// # Errors
     /// Returns [`ConfigError::Validation`] on a duplicate endpoint or model
     /// name, a model with an empty endpoint list, a model naming an undefined
-    /// endpoint, `queue.max_depth` below 1, or an endpoint `concurrency`
-    /// below 1.
+    /// endpoint, an invalid `[[local_model]]`, `queue.max_depth` below 1, or
+    /// an endpoint `concurrency` below 1.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.queue.max_depth < 1 {
             return Err(ConfigError::Validation(
@@ -276,8 +352,64 @@ impl Config {
                 }
             }
         }
+
+        for local_model in &self.local_models {
+            if local_model.name.is_empty() {
+                return Err(ConfigError::Validation(
+                    "local_model name must not be empty".to_string(),
+                ));
+            }
+            if !model_names.insert(local_model.name.as_str()) {
+                return Err(ConfigError::Validation(format!(
+                    "duplicate model name {}",
+                    local_model.name
+                )));
+            }
+            if local_model.description.is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "local_model {} description must not be empty",
+                    local_model.name
+                )));
+            }
+            if local_model.source.is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "local_model {} source must not be empty",
+                    local_model.name
+                )));
+            }
+            if local_model.context < 1 {
+                return Err(ConfigError::Validation(format!(
+                    "local_model {} context must be at least 1",
+                    local_model.name
+                )));
+            }
+            if local_model.n_predict < 1 {
+                return Err(ConfigError::Validation(format!(
+                    "local_model {} n_predict must be at least 1",
+                    local_model.name
+                )));
+            }
+            if local_model.cache_type_k.is_empty() || local_model.cache_type_v.is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "local_model {} cache_type_k/v must not be empty",
+                    local_model.name
+                )));
+            }
+            if let Some(sha) = &local_model.sha256
+                && !is_sha256_hex(sha)
+            {
+                return Err(ConfigError::Validation(format!(
+                    "local_model {} sha256 must be 64 lowercase hex characters",
+                    local_model.name
+                )));
+            }
+        }
         Ok(())
     }
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
 }
 
 /// Expand `${VAR}` from the environment; `$$` is a literal `$`.
@@ -698,6 +830,143 @@ description = "prose"
 context = 8192
 upstream = "u"
 endpoints = ["anthropic"]
+"#;
+        assert!(matches!(
+            Config::from_toml_str(toml),
+            Err(ConfigError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn parses_local_model_with_defaults() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[[local_model]]
+name = "qwen-local"
+description = "A careful analysis model suited to structured reasoning and long-context review"
+source = "https://example.com/model.gguf"
+context = 65536
+thinking = "never"
+"#;
+        let config = Config::from_toml_str(toml).unwrap();
+        assert!(config.endpoints.is_empty());
+        assert!(config.models.is_empty());
+        assert_eq!(config.local_models.len(), 1);
+        let model = &config.local_models[0];
+        assert_eq!(model.name, "qwen-local");
+        assert_eq!(model.context, 65536);
+        assert_eq!(model.thinking, ThinkingMode::Never);
+        assert_eq!(model.gpu_layers, 99);
+        assert!(model.flash_attention);
+        assert_eq!(model.cache_type_k, "q8_0");
+        assert_eq!(model.cache_type_v, "q4_0");
+        assert_eq!(model.n_predict, 8192);
+        assert!(model.sha256.is_none());
+        assert!(config.local.cache_dir.is_none());
+    }
+
+    #[test]
+    fn parses_local_model_knobs_and_cache_dir() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[local]
+cache_dir = "/tmp/pf-models"
+
+[[local_model]]
+name = "qwen-local"
+description = "prose"
+source = "https://example.com/model.gguf"
+sha256 = "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8"
+context = 4096
+gpu_layers = 40
+flash_attention = false
+cache_type_k = "f16"
+cache_type_v = "f16"
+n_predict = 256
+"#;
+        let config = Config::from_toml_str(toml).unwrap();
+        assert_eq!(config.local.cache_dir.as_deref(), Some("/tmp/pf-models"));
+        let model = &config.local_models[0];
+        assert_eq!(
+            model.sha256.as_deref(),
+            Some("03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8")
+        );
+        assert_eq!(model.gpu_layers, 40);
+        assert!(!model.flash_attention);
+        assert_eq!(model.cache_type_k, "f16");
+        assert_eq!(model.n_predict, 256);
+    }
+
+    #[test]
+    fn rejects_duplicate_name_across_remote_and_local() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "shared"
+description = "remote"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+
+[[local_model]]
+name = "shared"
+description = "local"
+source = "https://example.com/model.gguf"
+context = 4096
+"#;
+        assert!(matches!(
+            Config::from_toml_str(toml),
+            Err(ConfigError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_local_model_sha256() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[[local_model]]
+name = "q"
+description = "prose"
+source = "https://example.com/model.gguf"
+sha256 = "not-a-digest"
+context = 4096
+"#;
+        assert!(matches!(
+            Config::from_toml_str(toml),
+            Err(ConfigError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_local_model_source() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+token = "t"
+
+[[local_model]]
+name = "q"
+description = "prose"
+source = ""
+context = 4096
 "#;
         assert!(matches!(
             Config::from_toml_str(toml),

@@ -122,6 +122,27 @@ impl Routing {
         Ok(Routing::new(models))
     }
 
+    /// Appends models (for example from [`crate::local::LocalRuntime`]) to this table.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError::Validation`] when a model name already exists.
+    pub fn merge(
+        mut self,
+        extras: impl IntoIterator<Item = Arc<Model>>,
+    ) -> Result<Routing, ConfigError> {
+        for model in extras {
+            if self.by_name.contains_key(&model.name) {
+                return Err(ConfigError::Validation(format!(
+                    "duplicate model name {}",
+                    model.name
+                )));
+            }
+            self.by_name.insert(model.name.clone(), Arc::clone(&model));
+            self.models.push(model);
+        }
+        Ok(self)
+    }
+
     /// Resolve a model name to its routing entry.
     ///
     /// # Errors
