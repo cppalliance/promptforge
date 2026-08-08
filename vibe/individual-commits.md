@@ -20,3 +20,5 @@
 
 ## 2026-08-08 chore: gitignore prompt store dump directories
 
+## 2026-08-08 dev: clear the store dump directory before each run
+
