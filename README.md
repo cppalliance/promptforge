@@ -1,5 +1,7 @@
 # PromptForge
 
+![PromptForge](images/promptforge-portrait.png)
+
 A runtime that executes analysis pipelines defined in a single markdown file. The
 markdown is the program, the model is the CPU.
 
