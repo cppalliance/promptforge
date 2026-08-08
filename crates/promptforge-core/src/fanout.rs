@@ -161,6 +161,13 @@ pub(crate) async fn run_fanout_arms(
             }
         };
         let scope = scopes.tools;
+        let counts = match vm.install_tool_call_counts(&scope) {
+            Ok(c) => Some(c),
+            Err(error) => {
+                vm.teardown(ctx.observer, &worker.name);
+                return Err(error);
+            }
+        };
 
         let sys = if let Some(model_binding) = scopes.model.as_ref() {
             let enriched = crate::lua::enrich_sys_model(&sys, model_binding);
@@ -226,6 +233,7 @@ pub(crate) async fn run_fanout_arms(
                 None => (Vec::new(), BTreeMap::new()),
             };
             if let Some(client) = ctx.client {
+                let global_aliases = ctx.bound.map(|b| b.alias_to_id());
                 let text = match crate::execute::run_tool_loop(
                     client,
                     &schemas,
@@ -241,6 +249,8 @@ pub(crate) async fn run_fanout_arms(
                         debug: ctx.debug,
                         completion_options: &completion_options,
                     },
+                    counts.as_ref(),
+                    global_aliases,
                 )
                 .await
                 {

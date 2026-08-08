@@ -38,7 +38,7 @@ use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::dialects::{ToolDialect, ToolDialectRegistry};
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::fanout;
-use crate::lua::{SectionVm, ToolBindings, ToolScope};
+use crate::lua::{SectionVm, ToolBindings, ToolCallCounts, ToolScope};
 use crate::model::{CompletionOptions, ModelBindings};
 use crate::observe::{Observer, detail};
 use crate::parser::Prompt;
@@ -386,6 +386,13 @@ async fn run_sections(
             }
         };
         let scope = scopes.tools;
+        let counts = match vm.install_tool_call_counts(&scope) {
+            Ok(c) => Some(c),
+            Err(error) => {
+                vm.teardown(observer, &section.name);
+                return Err(error);
+            }
+        };
 
         let sys = if let Some(model_binding) = scopes.model.as_ref() {
             let enriched = crate::lua::enrich_sys_model(&sys, model_binding);
@@ -456,6 +463,7 @@ async fn run_sections(
                 }
             }
             if let Some(client) = &client {
+                let global_aliases = bound.map(BoundPrompt::alias_to_id);
                 let text = match run_tool_loop(
                     client,
                     &schemas,
@@ -471,6 +479,8 @@ async fn run_sections(
                         debug,
                         completion_options: &completion_options,
                     },
+                    counts.as_ref(),
+                    global_aliases,
                 )
                 .await
                 {
@@ -743,6 +753,10 @@ pub(crate) struct SectionProgress<'a> {
 /// `dispatch`,
 /// [`Error::ToolLoopExhausted`] if the cap is hit without a text reply, or any
 /// transport/backend error from a model call or a tool's own failure.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "counts and global_aliases extend the loop's borrowed context for per-VM call tracking"
+)]
 pub(crate) async fn run_tool_loop(
     client: &GatewayClient,
     schemas: &[ToolSchema],
@@ -751,6 +765,8 @@ pub(crate) async fn run_tool_loop(
     prose: String,
     max_tool_iterations: usize,
     progress: SectionProgress<'_>,
+    counts: Option<&ToolCallCounts>,
+    global_aliases: Option<&BTreeMap<String, ToolId>>,
 ) -> Result<String> {
     let SectionProgress {
         execution,
@@ -824,12 +840,22 @@ pub(crate) async fn run_tool_loop(
                 for call in &calls {
                     let Some(id) = dispatch.get(&call.name) else {
                         observer.observe(execution, section, detail::TOOL_CALL_FAILED);
-                        return Err(Error::UnknownTool(call.name.clone()));
+                        let global_exists = global_aliases
+                            .is_some_and(|g| g.contains_key(&call.name));
+                        let in_scope: Vec<String> = dispatch.keys().cloned().collect();
+                        return Err(Error::OutOfScopeToolCall {
+                            name: call.name.clone(),
+                            global_exists,
+                            in_scope,
+                        });
                     };
                     let Some(tool) = registry.get(id) else {
                         observer.observe(execution, section, detail::TOOL_CALL_FAILED);
                         return Err(Error::UnknownScopedTool(call.name.clone()));
                     };
+                    if let Some(counts) = counts {
+                        counts.increment(&call.name)?;
+                    }
                     let result = tool.call(call.arguments.clone()).await;
                     observer.observe(
                         execution,
