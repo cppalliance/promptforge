@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use mlua::{Lua, MultiValue, Scope, Table, Value};
 
 use crate::model::{
-    ModelBinding, ModelBindings, ModelDeclaration, ModelNeedOpts, ModelResolver, ResolvedModel,
+    ModelBinding, ModelBindings, ModelDeclaration, ModelNeedOpts, ModelResolver,
 };
 use crate::observe::{Observer, detail};
 use crate::{Error, Result};
@@ -66,8 +66,8 @@ fn record_need_binding(
         }
         return Err(mlua::Error::external("duplicate model alias"));
     }
-    let ResolvedModel { id, invocation } = match resolver.resolve(&description, &opts) {
-        Ok(selection) => selection,
+    let selection = match resolver.resolve(&description, &opts) {
+        Ok(sel) => sel,
         Err(error) => {
             if state.callback_error.is_none() {
                 state.callback_error = Some(error);
@@ -75,12 +75,15 @@ fn record_need_binding(
             return Err(mlua::Error::external("model capability resolution failed"));
         }
     };
-    state.bindings.push(ModelBinding::new(
-        alias.clone(),
-        description.clone(),
-        id,
-        invocation,
-    ));
+    state.bindings.push(
+        ModelBinding::new(
+            alias.clone(),
+            description.clone(),
+            selection.id,
+            selection.invocation,
+        )
+        .with_dialect(selection.tool_dialect),
+    );
     state.declarations.push(ModelDeclaration::Need {
         alias,
         description,

@@ -95,6 +95,7 @@ async fn happy_path_through_the_real_client() {
         temperature: None,
         max_tokens: None,
         thinking: None,
+        tool_dialect: promptforge_core::dialects::ToolDialectId::OpenAi,
     };
     let result = client
         .complete(
@@ -297,6 +298,14 @@ async fn models_catalog_returns_configured_entries() {
     assert_eq!(
         data[0].get("thinking").and_then(Value::as_str),
         Some("never")
+    );
+    assert_eq!(
+        data[0].get("tool_dialect").and_then(Value::as_str),
+        Some("openai")
+    );
+    assert_eq!(
+        data[0].get("tools_mode").and_then(Value::as_str),
+        Some("native")
     );
 }
 
@@ -640,6 +649,7 @@ n_predict = 64
         temperature: None,
         max_tokens: None,
         thinking: None,
+        tool_dialect: promptforge_core::dialects::ToolDialectId::OpenAi,
     };
     let result = client
         .complete(

@@ -11,6 +11,7 @@ mod openai;
 #[path = "dialects/gemma3_tool_code.rs"]
 mod gemma3_tool_code;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::client::{Message, ToolCall};
@@ -23,13 +24,16 @@ pub use openai::OpenAiDialect;
 /// Identifies a registered tool dialect.
 ///
 /// Variants are `#[non_exhaustive]` so new backends can be added without a
-/// breaking change.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// breaking change. Serializes to the same lowercase strings used in catalog
+/// JSON (`"openai"`, `"gemma3_tool_code"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ToolDialectId {
     /// Standard OpenAI function-calling protocol.
+    #[serde(rename = "openai")]
     OpenAi,
     /// Gemma-3 `tool_code` fence protocol for models without native tool support.
+    #[serde(rename = "gemma3_tool_code")]
     Gemma3ToolCode,
 }
 
@@ -38,6 +42,40 @@ impl std::fmt::Display for ToolDialectId {
         match self {
             ToolDialectId::OpenAi => f.write_str("openai"),
             ToolDialectId::Gemma3ToolCode => f.write_str("gemma3_tool_code"),
+        }
+    }
+}
+
+/// Whether tool calls are handled natively by the backend or emulated by the
+/// runtime through content-fence parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ToolsMode {
+    /// The backend speaks a native tool-call protocol (e.g. OpenAI `tool_calls`).
+    #[serde(rename = "native")]
+    Native,
+    /// The runtime emulates tool calls by injecting tool descriptions into the
+    /// prompt and parsing structured fences from model output.
+    #[serde(rename = "emulated")]
+    Emulated,
+}
+
+impl std::fmt::Display for ToolsMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ToolsMode::Native => f.write_str("native"),
+            ToolsMode::Emulated => f.write_str("emulated"),
+        }
+    }
+}
+
+impl ToolDialectId {
+    /// The tools mode implied by this dialect.
+    #[must_use]
+    pub fn tools_mode(&self) -> ToolsMode {
+        match self {
+            ToolDialectId::OpenAi => ToolsMode::Native,
+            ToolDialectId::Gemma3ToolCode => ToolsMode::Emulated,
         }
     }
 }
@@ -58,6 +96,24 @@ pub struct DialectEvidence {
     pub model_id: Option<String>,
     /// The model's source or provenance label (e.g. GGUF filename).
     pub source: Option<String>,
+}
+
+impl DialectEvidence {
+    /// Builds evidence from the four optional axes.
+    #[must_use]
+    pub fn new(
+        supports_tool_calls: Option<bool>,
+        chat_template: Option<String>,
+        model_id: Option<String>,
+        source: Option<String>,
+    ) -> Self {
+        Self {
+            supports_tool_calls,
+            chat_template,
+            model_id,
+            source,
+        }
+    }
 }
 
 /// A dialect's confidence that it matches some [`DialectEvidence`].
@@ -215,5 +271,38 @@ mod tests {
         };
         let id = registry.resolve(&evidence).expect("should resolve");
         assert_eq!(id, ToolDialectId::Gemma3ToolCode);
+    }
+
+    #[test]
+    fn dialect_id_serde_round_trip() {
+        let openai = ToolDialectId::OpenAi;
+        let json = serde_json::to_string(&openai).unwrap();
+        assert_eq!(json, "\"openai\"");
+        let parsed: ToolDialectId = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, openai);
+
+        let gemma = ToolDialectId::Gemma3ToolCode;
+        let json = serde_json::to_string(&gemma).unwrap();
+        assert_eq!(json, "\"gemma3_tool_code\"");
+        let parsed: ToolDialectId = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, gemma);
+    }
+
+    #[test]
+    fn tools_mode_serde_round_trip() {
+        let native = ToolsMode::Native;
+        assert_eq!(serde_json::to_string(&native).unwrap(), "\"native\"");
+
+        let emulated = ToolsMode::Emulated;
+        assert_eq!(serde_json::to_string(&emulated).unwrap(), "\"emulated\"");
+    }
+
+    #[test]
+    fn dialect_id_tools_mode_mapping() {
+        assert_eq!(ToolDialectId::OpenAi.tools_mode(), ToolsMode::Native);
+        assert_eq!(
+            ToolDialectId::Gemma3ToolCode.tools_mode(),
+            ToolsMode::Emulated
+        );
     }
 }

@@ -271,6 +271,11 @@ impl ServerGuard {
         Ok(())
     }
 
+    /// Returns the port this server is listening on.
+    pub(crate) fn port(&self) -> u16 {
+        self.port
+    }
+
     /// Returns the bearer token accepted by this server attempt.
     pub(crate) fn api_key(&self) -> &str {
         self.api_key.expose()
