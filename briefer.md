@@ -70,7 +70,7 @@ You are a research analyist describing an entity. Write the following informatio
 - Domain-Specific Vulnerabilities - sector-specific risks with sources
 
 ```lua
-store.write("report.md", reply)
+store.write("report.md", reply .. "\n\n*" .. sys.when .. " - " .. sys.model .. "*")
 ```
 
 ## Epilog
