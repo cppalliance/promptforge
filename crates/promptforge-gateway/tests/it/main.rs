@@ -537,3 +537,105 @@ async fn queue_full_returns_503_when_waiting_slots_exhausted() {
     release.notify_one();
     assert_eq!(second.await.unwrap().unwrap().status().as_u16(), 200);
 }
+
+/// Live local-inference smoke test. Downloads the pinned llama-server binary and
+/// the tiny Qwen3-0.6B GGUF, starts a gateway with `[[local_model]]`, and checks
+/// that chat completions return text. Ignored by default so CI stays fast.
+#[tokio::test]
+#[ignore = "downloads llama-server + Qwen3-0.6B; set PROMPTFORGE_LIVE_LOCAL=1 to opt in"]
+async fn local_model_chat_completion_returns_text() {
+    if std::env::var_os("PROMPTFORGE_LIVE_LOCAL").is_none() {
+        // `cargo test -- --ignored` alone should still be an explicit choice;
+        // require the env var so a broad --ignored run does not surprise.
+        eprintln!("skipping: set PROMPTFORGE_LIVE_LOCAL=1 to run this test");
+        return;
+    }
+
+    let cache = tempfile::tempdir().unwrap();
+    let toml = format!(
+        r#"
+[server]
+bind = "127.0.0.1:0"
+token = "test-token"
+
+[local]
+cache_dir = "{cache}"
+
+[[local_model]]
+name = "qwen-tiny"
+description = "A careful analysis model suited to structured reasoning and long-context review"
+source = "{source}"
+sha256 = "{sha}"
+context = 4096
+thinking = "never"
+gpu_layers = 0
+flash_attention = false
+n_predict = 64
+"#,
+        cache = cache.path().display().to_string().replace('\\', "/"),
+        source = promptforge_gateway::local::SCENARIO_MODEL_URL,
+        sha = promptforge_gateway::local::SCENARIO_MODEL_SHA256,
+    );
+
+    let config = Config::from_toml_str(&toml).unwrap();
+    let local = tokio::task::spawn_blocking({
+        let config = Config::from_toml_str(&toml).unwrap();
+        move || promptforge_gateway::local::LocalRuntime::start(&config)
+    })
+    .await
+    .unwrap()
+    .expect("start local runtime");
+
+    let description = local.models()[0].description.clone();
+    assert!(description.contains("careful analysis"));
+
+    let routing = Arc::new(
+        Routing::from_config(&config)
+            .unwrap()
+            .merge(local.models().iter().cloned())
+            .unwrap(),
+    );
+    let token = promptforge_gateway::config::Secret::from("test-token".to_owned());
+    let state = AppState::new(routing, token);
+    let gateway = spawn(build_router(state)).await;
+
+    let catalog = reqwest::Client::new()
+        .get(format!("http://{gateway}/v1/models"))
+        .bearer_auth("test-token")
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    let ids: Vec<&str> = catalog["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m.get("id").and_then(Value::as_str))
+        .collect();
+    assert!(ids.contains(&"qwen-tiny"));
+    assert_eq!(
+        catalog["data"][0]["description"].as_str(),
+        Some(description.as_str())
+    );
+
+    let client = GatewayClient::new(&format!("http://{gateway}/v1"), "test-token", "qwen-tiny");
+    let result = client
+        .complete(
+            &[promptforge_core::client::Message::user(
+                "Reply with exactly the word pong and nothing else.",
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    match result.result {
+        promptforge_core::client::CompletionResult::Text(text) => {
+            assert!(!text.trim().is_empty(), "local model returned empty text");
+        }
+        other => panic!("expected text reply, got {other:?}"),
+    }
+    drop(local);
+}

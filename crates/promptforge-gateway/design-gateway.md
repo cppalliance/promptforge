@@ -8,7 +8,7 @@ Three routes serve. `POST /v1/chat/completions` is the only one that reaches a b
 
 Routing is one exact string match with a 404 on a miss - no prefixes, no aliases, no default model - and the request body is passed through with only `model` substituted, so a sampling parameter the gateway has never heard of reaches the backend anyway and the caller's model name comes back rather than the vendor's. Configuration is one TOML file that rejects an unknown key outright and expands `${VAR}` from the environment before it parses, so a deployment that forgot to export a credential fails at startup rather than serving with a blank one.
 
-What is not here is as load-bearing as what is: no streaming, no retries, no token budget, no storage, and no knowledge of prompts or runs. Per-endpoint concurrency limits and a fair waiting queue (`[queue]` / `[[endpoint]].concurrency`) are implemented; a full queue answers 503. The one process every LLM consumer depends on is deliberately the simplest one in the system.
+What is not here is as load-bearing as what is: no streaming, no retries, no token budget, and no knowledge of prompts or runs. Per-endpoint concurrency limits and a fair waiting queue (`[queue]` / `[[endpoint]].concurrency`) are implemented; a full queue answers 503. Local generative models are served by a gateway-owned `llama-server` subprocess (not in-process FFI). The one process every LLM consumer depends on is deliberately the simplest one in the system.
 
 ## The key design choices
 
@@ -37,6 +37,35 @@ What is not here is as load-bearing as what is: no streaming, no retries, no tok
 12. **`GET /health` takes no token.** A service supervisor's liveness probe should not need a secret to learn whether the process is up, and what the route reveals is only that it is serving. The two `/v1` routes check `Authorization: Bearer` in constant time and answer a missing or wrong token with a 401 carrying no detail.
 
 13. **That bearer token is the same shared secret the MCP server checks.** This is settled rather than assumed: the gateway sits behind the production firewall, so its check is defence in depth and not a separate trust boundary, and a second string to rotate would buy nothing while adding a way to be half-configured. Tension: one leaked string reaches both the prompt surface and the model credentials.
+
+14. **Local generative inference is a managed `llama-server` subprocess, not in-process `llama-cpp-2`.** Linking llama.cpp into the gateway binary is deferred. When `[[local_model]]` is present, startup downloads a pinned b10082 `llama-server` (GPU builds: Vulkan on Windows/Linux, Metal on macOS), downloads each GGUF into `~/.promptforge` (or `[local].cache_dir`), spawns one child per local model, and registers each as a normal routed `Model` whose `base_url` is the child's `http://127.0.0.1:{port}/v1`. Operator experience matches the plan: one `gateway.toml`, no separate Ollama install. `unsafe_code` stays forbidden. Falsifier for revisiting in-process FFI: if subprocess IPC or lifecycle (startup races, clean shutdown, multi-model VRAM contention) proves inadequate for production workloads.
+
+## Local generative models (`[[local_model]]`)
+
+Configuration declares local models beside remote ones. There is no profile inheritance or `switch-profile` admin API yet (Layer 3).
+
+```toml
+[local]
+# optional; default ~/.promptforge
+# cache_dir = "~/.promptforge"
+
+[[local_model]]
+name = "qwen-local"
+description = "A careful analysis model suited to structured reasoning and long-context review"
+source = "https://huggingface.co/.../model.gguf"
+sha256 = "..."          # optional pin
+context = 65536
+thinking = "never"
+gpu_layers = 99
+flash_attention = true
+cache_type_k = "q8_0"
+cache_type_v = "q4_0"
+n_predict = 8192
+```
+
+On start, each local model becomes a catalog entry: `description` appears in `GET /v1/models` so semantic bind (for example briefer's `models.always("writer", "A careful analysis...")`) works the same as for remote models. Each local endpoint uses `concurrency = 1`. Dropping `LocalRuntime` (process exit) kills every child.
+
+See `gateway.local.example.toml` at the repository root for a full sample pinned to the same Qwen3.5-9B Q4_K_M digest as `promptforge-core-tests`.
 
 ## The boundary is one process wide, and everything above it is a client
 
@@ -364,6 +393,6 @@ Two departures from the rule the unbuilt design states, that `code` is the varia
 
 No `#[tokio::main]` anywhere in the crate. A Windows service entry point is called by the SCM on a thread the SCM owns, after `main` has already handed control to `service_dispatcher`, so the runtime has to be constructed inside the service handler. An attribute macro on `main` builds it in the wrong place and at the wrong time. The foreground path builds a runtime the same way, so when the service path is added there is exactly one construction site and the two cannot drift.
 
-Startup order is load, build the routing table, build handler state, bind, serve. A configuration that will not load or validate is a startup failure with the error on stderr, so a broken file never reaches a listening socket.
+Startup order is load, start `LocalRuntime` (provision + spawn children when `[[local_model]]` is set), build the routing table (remote then local), build handler state, bind, serve. A configuration that will not load or validate is a startup failure with the error on stderr, so a broken file never reaches a listening socket. Process exit drops `LocalRuntime` and kills every child.
 
-*2026-08-03 - claude-opus-5*
+*2026-08-08 - cursor-grok-4.5*
