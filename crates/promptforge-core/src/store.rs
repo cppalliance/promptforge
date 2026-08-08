@@ -517,7 +517,7 @@ impl StoreRef {
     /// let store = StoreRef::memory();
     /// store.write("a.txt", "one two")?;
     /// store.str_replace("a.txt", "two", "three")?;
-    /// assert_eq!(store.read("a.txt")?, "1| one three");
+    /// assert_eq!(store.read_lines("a.txt")?, "1| one three");
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     pub fn str_replace(&self, path: &str, old: &str, new: &str) -> Result<(), StoreError> {
