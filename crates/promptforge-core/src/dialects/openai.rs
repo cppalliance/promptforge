@@ -18,9 +18,8 @@ use super::{DetectScore, DialectEvidence, DialectRequest, ToolDialect, ToolDiale
 /// - `prepare_request` is an identity passthrough: the OpenAI wire format
 ///   already carries `tools` / `tool_choice` when the caller sets them, so
 ///   the dialect has nothing to reshape.
-/// - `parse_turn` delegates to [`OpenAiChatNormalizer`], which handles both
-///   native `tool_calls` and the ContentFence fallback (the latter stays
-///   until step 3 migrates it to its own dialect).
+/// - `parse_turn` delegates to [`OpenAiChatNormalizer`], which handles
+///   native `tool_calls` or plain text content.
 /// - `echo_tool_results` pushes the assistant's `tool_calls` turn followed
 ///   by one `role=tool` message per result, matching the OpenAI wire shape.
 #[derive(Debug, Clone, Copy)]

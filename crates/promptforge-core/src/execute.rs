@@ -34,9 +34,8 @@ use std::fmt;
 use serde_json::json;
 
 use crate::bind::BoundPrompt;
-use crate::client::{
-    CompletionResult, GatewayClient, Message, ToolCall, ToolHistoryStyle, ToolSchema,
-};
+use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
+use crate::dialects::{ToolDialect, ToolDialectRegistry};
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::fanout;
 use crate::lua::{SectionVm, ToolBindings, ToolScope};
@@ -761,6 +760,12 @@ pub(crate) async fn run_tool_loop(
         debug,
         completion_options,
     } = progress;
+
+    let dialect_registry = ToolDialectRegistry::builtin();
+    let dialect: &dyn ToolDialect = dialect_registry
+        .get(completion_options.tool_dialect)
+        .ok_or(Error::UnknownDialect(completion_options.tool_dialect))?;
+
     let mut conversation = vec![Message::user(prose)];
     let tool_arg = if schemas.is_empty() {
         None
@@ -808,46 +813,14 @@ pub(crate) async fn run_tool_loop(
 
         match completion.result {
             CompletionResult::Text(text) => {
-                // Empty final text never reaches here: the normalizer hard-fails
-                // with EmptyModelReply (observed as MODEL_TURN_FAILED above).
-                // Truncation is reported only when non-empty text arrived.
                 if completion.finish_reason.as_deref() == Some("length") {
                     observer.observe(execution, section, detail::MODEL_TURN_TRUNCATED);
                 }
                 return Ok(text);
             }
             CompletionResult::ToolCalls(calls) => {
-                match completion.tool_history {
-                    ToolHistoryStyle::OpenAi => {
-                        // Echo the assistant's tool-call turn back into the
-                        // history. The parsed `ToolCall`s are reconstructed into
-                        // the raw OpenAI wire shape (`function.arguments`
-                        // re-encoded as a JSON string).
-                        let raw_calls = calls
-                            .iter()
-                            .map(|call| {
-                                json!({
-                                    "id": call.id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": call.name,
-                                        "arguments": call.arguments.to_string(),
-                                    },
-                                })
-                            })
-                            .collect();
-                        conversation.push(Message::assistant_tool_calls(raw_calls));
-                    }
-                    ToolHistoryStyle::ContentFence => {
-                        // Gemma-style local templates reject `role=tool` history.
-                        // Echo the dialect the model emitted and return results
-                        // as a follow-up user turn after dispatch.
-                        conversation.push(Message::assistant(render_tool_code_fence(&calls)));
-                    }
-                }
-
-                let mut fence_results = Vec::new();
-                // Dispatch each requested tool and append its result.
+                // Dispatch each requested tool and collect results.
+                let mut results: Vec<(String, String)> = Vec::with_capacity(calls.len());
                 for call in &calls {
                     let Some(id) = dispatch.get(&call.name) else {
                         observer.observe(execution, section, detail::TOOL_CALL_FAILED);
@@ -868,78 +841,20 @@ pub(crate) async fn run_tool_loop(
                         },
                     );
                     let result = result?;
-                    // An untrusted tool's result is wrapped in a guard block
-                    // before it enters the history; a trusted tool's is pushed
-                    // verbatim.
                     let result = if tool.untrusted_output() {
                         untrusted::wrap(&result, &nonce)
                     } else {
                         result
                     };
-                    match completion.tool_history {
-                        ToolHistoryStyle::OpenAi => {
-                            conversation.push(Message::tool(call.id.clone(), result));
-                        }
-                        ToolHistoryStyle::ContentFence => {
-                            fence_results.push(format!(
-                                "TOOL RESULT {} ({}):\n{}",
-                                call.name, call.id, result
-                            ));
-                        }
-                    }
+                    results.push((call.id.clone(), result));
                 }
-                if completion.tool_history == ToolHistoryStyle::ContentFence {
-                    let mut follow_up = fence_results.join("\n\n");
-                    follow_up.push_str(
-                        "\n\nContinue the protocol. Call another tool with a tool_code fence, or write the final evidence from fetch bodies only.",
-                    );
-                    conversation.push(Message::user(follow_up));
-                }
+
+                dialect.echo_tool_results(&mut conversation, &calls, &results);
             }
         }
     }
 
     Err(Error::ToolLoopExhausted)
-}
-
-/// Render parsed tool calls as the Gemma ` ```tool_code ` content dialect.
-fn render_tool_code_fence(calls: &[ToolCall]) -> String {
-    let mut body = String::from("```tool_code\n");
-    for call in calls {
-        body.push_str(&call.name);
-        body.push('(');
-        match &call.arguments {
-            serde_json::Value::Object(map) => {
-                let mut first = true;
-                for (key, value) in map {
-                    if !first {
-                        body.push_str(", ");
-                    }
-                    first = false;
-                    body.push_str(key);
-                    body.push('=');
-                    body.push_str(&render_tool_code_arg(value));
-                }
-            }
-            other => {
-                body.push_str("arguments=");
-                body.push_str(&render_tool_code_arg(other));
-            }
-        }
-        body.push_str(")\n");
-    }
-    body.push_str("```");
-    body
-}
-
-fn render_tool_code_arg(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => format!("\"{s}\""),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Null => "null".into(),
-        other => format!("\"{}\"", other),
-    }
 }
 
 /// The current UTC time as an RFC 3339 string, or empty on a formatting error.
