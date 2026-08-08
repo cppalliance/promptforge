@@ -288,6 +288,10 @@ pub enum Error {
         candidates: Vec<crate::dialects::ToolDialectId>,
     },
 
+    /// `CompletionOptions.tool_dialect` named a dialect not in the registry.
+    #[error("unknown tool dialect: {0}")]
+    UnknownDialect(crate::dialects::ToolDialectId),
+
     /// A dialect operation that is not yet implemented (step 1 stub).
     #[error("dialect {dialect} has not implemented {operation}")]
     #[non_exhaustive]
