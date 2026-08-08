@@ -22,6 +22,7 @@ pub mod client;
 pub mod debug;
 mod error;
 pub mod execute;
+pub(crate) mod fanout;
 pub mod lua;
 mod lua_models;
 pub mod model;

@@ -167,6 +167,10 @@ pub mod detail {
     pub const STORE_GLOB_SUCCEEDED: &str = "Store glob succeeded";
     /// A harness-mediated store glob failed.
     pub const STORE_GLOB_FAILED: &str = "Store glob failed";
+    /// A fanout arm began execution.
+    pub const FANOUT_ARM_STARTED: &str = "Fanout arm started";
+    /// A fanout arm completed execution.
+    pub const FANOUT_ARM_FINISHED: &str = "Fanout arm finished";
 }
 
 /// A report-only sink for operational observations.

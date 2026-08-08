@@ -632,14 +632,15 @@ If the preamble returns nothing (or there is no preamble), the section's prose i
 
 ### Substitution
 
-Before the model sees the prose, `{{ path }}` placeholders are resolved from four namespaces. Substitution applies only to prose - never to preamble or epilog Lua source:
+Before the model sees the prose, `{{ path }}` placeholders are resolved from five namespaces. Substitution applies only to prose - never to preamble or epilog Lua source:
 
 - `{{ args }}` - the raw input string.
 - `{{ reply }}` - the previous section's model reply text (nil in section 1; using it when nil is a hard error).
+- `{{ item }}` - the current fanout arm's item text (nil outside arms; using it when nil is a hard error).
 - `{{ var.x }}` - values the Lua preamble wrote (`var.x = ...`).
-- `{{ sys.when }}` / `{{ sys.now }}` / `{{ sys.id }}` - runtime metadata: the run's
-  launch timestamp, the time when the current section started, and the 1-based
-  section id.
+- `{{ sys.when }}` / `{{ sys.now }}` / `{{ sys.id }}` / `{{ sys.taskid }}` - runtime metadata: the run's
+  launch timestamp, the time when the current section started, the 1-based
+  section id, and the 1-based arm index inside a fanout.
 
 Scalars render as strings, tables as JSON, and a missing path is an error.
 In Lua, `sys` exposes only the keys the runtime injected: an unknown read or
@@ -661,6 +662,41 @@ text, nil in section 1). A section ends by either:
 Running off the last section ends the run. The result is `default_return` from
 the frontmatter if set, otherwise the last model reply, otherwise a generic
 completion. `sys.id` counts sections as you go (1, 2, 3, ...).
+
+### Fanout
+
+A parent section's preamble or epilog can fan out a worker template over a list of items parsed from a sibling section. Both heading arguments must include their `###` markers:
+
+````
+## Research
+
+```lua
+local replies = fanout("### Subagent", "### Topics")
+return table.concat(replies, "\n\n---\n\n")
+```
+
+### Subagent
+
+```lua
+tools.add("search", "fetch")
+```
+
+Search the web for {{ item }}
+
+```lua
+store.write("arm-" .. sys.taskid .. ".md", reply)
+```
+
+### Topics
+
+1. the angle
+2. the company
+3. the people
+````
+
+The list section (`### Topics`) is a list-only H3 - no preamble, no epilog - whose prose contains only bullet items parsed at load time. Unordered (`- `, `* `) and ordered (`N. `, `N) `) markers are stripped. The worker section (`### Subagent`) is a normal template section; each arm gets a fresh VM with `item` (the list text) and `sys.taskid` ("1", "2", ...) injected. `{{ item }}` substitution is available in the worker's prose; `item` is also a Lua global in preamble and epilog. Arms execute sequentially and share the run's store, so arm writes are visible to the invoker's reduce. `fanout` returns an ordered Lua table of arm replies.
+
+Children never execute by fall-through. Only an explicit `fanout(...)` call triggers child execution.
 
 ### Store
 

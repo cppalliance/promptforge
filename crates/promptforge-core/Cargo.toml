@@ -19,6 +19,7 @@ reqwest.workspace = true
 thiserror.workspace = true
 mlua.workspace = true
 time.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
 axum.workspace = true

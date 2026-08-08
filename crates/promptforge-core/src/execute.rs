@@ -36,6 +36,7 @@ use serde_json::json;
 use crate::bind::BoundPrompt;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::debug::{DebugCapture, DebugEvent};
+use crate::fanout;
 use crate::lua::{SectionVm, ToolBindings, ToolScope};
 use crate::model::{CompletionOptions, ModelBindings};
 use crate::observe::{Observer, detail};
@@ -309,12 +310,60 @@ async fn run_sections(
             return Err(error);
         }
 
+        let has_children = !section.children.is_empty();
         let preamble_return = if let Some(program) = &section.preamble {
-            match vm.run_preamble(program, observer, &section.name) {
-                Ok(returned) => returned,
-                Err(error) => {
-                    vm.teardown(observer, &section.name);
-                    return Err(error);
+            if has_children {
+                let children = &section.children;
+                let fanout_store = store.clone();
+                let fanout_args = args.to_string();
+                let fanout_execution = execution.to_string();
+                let fanout_when = when.clone();
+                let fanout_last_reply = last_reply.clone();
+                let fanout_shared = prompt.shared.clone();
+                let fanout_bindings = bindings.clone();
+                let fanout_models = models.clone();
+                let fanout_client = client.clone();
+                let fanout_max_iters = max_tool_iterations;
+                match vm.run_preamble_with_fanout(
+                    program,
+                    observer,
+                    &section.name,
+                    |worker_heading, list_heading| {
+                        make_fanout_callback(
+                            &worker_heading,
+                            &list_heading,
+                            children,
+                            &fanout_args,
+                            &fanout_store,
+                            &fanout_execution,
+                            observer,
+                            fanout_client.as_ref(),
+                            debug,
+                            fanout_shared.as_ref(),
+                            &fanout_bindings,
+                            &fanout_models,
+                            bound,
+                            registry,
+                            fanout_max_iters,
+                            fanout_last_reply.as_deref(),
+                            &fanout_when,
+                            index + 1,
+                        )
+                    },
+                ) {
+                    Ok(returned) => returned,
+                    Err(error) => {
+                        vm.teardown(observer, &section.name);
+                        return Err(error);
+                    }
+                }
+            } else {
+                match vm.run_preamble(program, observer, &section.name) {
+                    Ok(returned) => returned,
+                    Err(error) => {
+                        vm.teardown(observer, &section.name);
+                        return Err(error);
+                    }
                 }
             }
         } else {
@@ -348,8 +397,14 @@ async fn run_sections(
                 return Err(error);
             }
         };
-        let prose = match subst::substitute(&section.prose, args, last_reply.as_deref(), &var, &sys)
-        {
+        let prose = match subst::substitute(
+            &section.prose,
+            args,
+            last_reply.as_deref(),
+            None,
+            &var,
+            &sys,
+        ) {
             Ok(prose) => prose,
             Err(error) => {
                 vm.teardown(observer, &section.name);
@@ -419,11 +474,58 @@ async fn run_sections(
         }
 
         let epilog_return = if let Some(program) = &section.epilog {
-            match vm.run_epilog(program, observer, &section.name) {
-                Ok(returned) => returned,
-                Err(error) => {
-                    vm.teardown(observer, &section.name);
-                    return Err(error);
+            if has_children {
+                let children = &section.children;
+                let fanout_store = store.clone();
+                let fanout_args = args.to_string();
+                let fanout_execution = execution.to_string();
+                let fanout_when = when.clone();
+                let fanout_last_reply = last_reply.clone();
+                let fanout_shared = prompt.shared.clone();
+                let fanout_bindings = bindings.clone();
+                let fanout_models = models.clone();
+                let fanout_client = client.clone();
+                let fanout_max_iters = max_tool_iterations;
+                match vm.run_epilog_with_fanout(
+                    program,
+                    observer,
+                    &section.name,
+                    |worker_heading, list_heading| {
+                        make_fanout_callback(
+                            &worker_heading,
+                            &list_heading,
+                            children,
+                            &fanout_args,
+                            &fanout_store,
+                            &fanout_execution,
+                            observer,
+                            fanout_client.as_ref(),
+                            debug,
+                            fanout_shared.as_ref(),
+                            &fanout_bindings,
+                            &fanout_models,
+                            bound,
+                            registry,
+                            fanout_max_iters,
+                            fanout_last_reply.as_deref(),
+                            &fanout_when,
+                            index + 1,
+                        )
+                    },
+                ) {
+                    Ok(returned) => returned,
+                    Err(error) => {
+                        vm.teardown(observer, &section.name);
+                        return Err(error);
+                    }
+                }
+            } else {
+                match vm.run_epilog(program, observer, &section.name) {
+                    Ok(returned) => returned,
+                    Err(error) => {
+                        vm.teardown(observer, &section.name);
+                        return Err(error);
+                    }
                 }
             }
         } else {
@@ -445,7 +547,69 @@ async fn run_sections(
         .unwrap_or_else(|| "done".to_string()))
 }
 
-fn prepare_effective_scope(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "fanout callback threads all borrowed run context through to the arm executor"
+)]
+fn make_fanout_callback(
+    worker_heading: &str,
+    list_heading: &str,
+    children: &[crate::parser::Section],
+    args: &str,
+    store: &StoreRef,
+    execution: &str,
+    observer: &dyn Observer,
+    client: Option<&GatewayClient>,
+    debug: Option<&dyn DebugCapture>,
+    shared: Option<&crate::lua::LuaProgram>,
+    bindings: &ToolBindings,
+    models: &ModelBindings,
+    bound: Option<&BoundPrompt>,
+    registry: &ToolRegistry<'_>,
+    max_tool_iterations: usize,
+    last_reply: Option<&str>,
+    when: &str,
+    parent_id: usize,
+) -> std::result::Result<Vec<String>, String> {
+    let worker = fanout::resolve_sibling(worker_heading, children).map_err(|e| e.to_string())?;
+    let list = fanout::resolve_sibling(list_heading, children).map_err(|e| e.to_string())?;
+    if list.items.is_empty() {
+        return Err(format!("section `{}` has no pre-parsed items", list.name));
+    }
+    if worker.preamble.is_none() && worker.epilog.is_none() && !worker.items.is_empty() {
+        return Err(format!(
+            "section `{}` is a list section, not a worker template",
+            worker.name
+        ));
+    }
+
+    let fanout_client = client.cloned();
+    let ctx = fanout::FanoutContext {
+        args,
+        store,
+        execution,
+        observer,
+        client: &fanout_client,
+        debug,
+        shared,
+        bindings,
+        models,
+        bound,
+        registry,
+        max_tool_iterations,
+        last_reply,
+        when,
+        parent_id,
+    };
+
+    let handle = tokio::runtime::Handle::current();
+    tokio::task::block_in_place(|| {
+        handle.block_on(fanout::run_fanout_arms(worker, &list.items, &ctx))
+    })
+    .map_err(|e| e.to_string())
+}
+
+pub(crate) fn prepare_effective_scope(
     bound: &BoundPrompt,
     scope: &ToolScope,
     registry: &ToolRegistry<'_>,
@@ -535,19 +699,19 @@ fn prepare_scoped_tools(
 /// Bundled rather than passed as three parameters so the loop's signature stays
 /// readable, and so the counter is a run-wide total rather than a per-section
 /// one.
-struct SectionProgress<'a> {
+pub(crate) struct SectionProgress<'a> {
     /// The identifier every observation from this loop carries.
-    execution: &'a str,
+    pub(crate) execution: &'a str,
     /// Where the loop reports its turns and tool calls.
-    observer: &'a dyn Observer,
+    pub(crate) observer: &'a dyn Observer,
     /// The heading text every observation from this loop carries.
-    section: &'a str,
+    pub(crate) section: &'a str,
     /// The run's model-turn total, advanced once per round trip.
-    turns: &'a mut u32,
+    pub(crate) turns: &'a mut u32,
     /// Opt-in raw request/response capture for each model turn.
-    debug: Option<&'a dyn DebugCapture>,
+    pub(crate) debug: Option<&'a dyn DebugCapture>,
     /// Per-call model overrides from `models.use`, or host default when `None`.
-    completion_options: Option<&'a CompletionOptions>,
+    pub(crate) completion_options: Option<&'a CompletionOptions>,
 }
 
 /// Drive one section's model call to a final text reply, dispatching any tool
@@ -564,7 +728,7 @@ struct SectionProgress<'a> {
 /// `dispatch`,
 /// [`Error::ToolLoopExhausted`] if the cap is hit without a text reply, or any
 /// transport/backend error from a model call or a tool's own failure.
-async fn run_tool_loop(
+pub(crate) async fn run_tool_loop(
     client: &GatewayClient,
     schemas: &[ToolSchema],
     dispatch: &BTreeMap<String, ToolId>,
@@ -694,7 +858,7 @@ async fn run_tool_loop(
 }
 
 /// The current UTC time as an RFC 3339 string, or empty on a formatting error.
-fn now_rfc3339() -> String {
+pub(crate) fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default()

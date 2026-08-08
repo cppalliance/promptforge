@@ -960,6 +960,43 @@ impl SectionVm {
         result
     }
 
+    /// Executes a compiled preamble with a scoped `fanout` Lua function.
+    ///
+    /// See [`run_epilog_with_fanout`](Self::run_epilog_with_fanout) for the
+    /// callback contract.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if host values have not been injected or
+    /// execution fails.
+    pub fn run_preamble_with_fanout<F>(
+        &self,
+        program: &LuaProgram,
+        observer: &dyn Observer,
+        section: &str,
+        fanout_callback: F,
+    ) -> Result<Option<String>>
+    where
+        F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
+    {
+        observer.observe(&self.execution, section, detail::LUA_PREAMBLE_STARTED);
+        if !self.host_injected {
+            let error = Error::Lua("section VM host values have not been injected".to_owned());
+            observer.observe(&self.execution, section, detail::LUA_PREAMBLE_FAILED);
+            return Err(error);
+        }
+        let result = self.run_loaded_with_fanout(program, observer, section, fanout_callback);
+        observer.observe(
+            &self.execution,
+            section,
+            if result.is_ok() {
+                detail::LUA_PREAMBLE_SUCCEEDED
+            } else {
+                detail::LUA_PREAMBLE_FAILED
+            },
+        );
+        result
+    }
+
     /// Binds the model reply for a later epilog in the same environment.
     ///
     /// # Errors
@@ -1103,6 +1140,61 @@ impl SectionVm {
         self.lua
             .from_value(value)
             .map_err(|error| Error::Lua(error.to_string()))
+    }
+
+    /// Sets a string global in the VM, overwriting any existing value.
+    ///
+    /// Used by fanout to inject `item` after host injection.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the global cannot be set.
+    pub fn set_global_string(&self, name: &str, value: &str) -> Result<()> {
+        self.lua
+            .globals()
+            .raw_set(name, value)
+            .map_err(|error| Error::Lua(error.to_string()))
+    }
+
+    /// Executes a compiled epilog with host callbacks and a scoped
+    /// `fanout(worker, list)` Lua function installed.
+    ///
+    /// The fanout callback receives two heading strings and returns either an
+    /// ordered vec of arm reply strings or an error message.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if host values have not been injected, if the
+    /// tool scope is still open, or if execution fails.
+    pub fn run_epilog_with_fanout<F>(
+        &self,
+        program: &LuaProgram,
+        observer: &dyn Observer,
+        section: &str,
+        fanout_callback: F,
+    ) -> Result<Option<String>>
+    where
+        F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
+    {
+        observer.observe(&self.execution, section, detail::LUA_EPILOG_STARTED);
+        if !self.host_injected {
+            let error = Error::Lua("section VM host values have not been injected".to_owned());
+            observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
+            return Err(error);
+        }
+        if let Err(error) = self.require_closed_tool_scope("run an epilog") {
+            observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
+            return Err(error);
+        }
+        let result = self.run_loaded_with_fanout(program, observer, section, fanout_callback);
+        observer.observe(
+            &self.execution,
+            section,
+            if result.is_ok() {
+                detail::LUA_EPILOG_SUCCEEDED
+            } else {
+                detail::LUA_EPILOG_FAILED
+            },
+        );
+        result
     }
 
     /// Closes and returns this section's effective tool scope.
@@ -1313,6 +1405,59 @@ impl SectionVm {
                     section,
                 )
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
+                let result = program
+                    .load(&self.lua)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?
+                    .call(());
+                finish_log_phase(&self.lua, result)
+            })
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        scalar_return(returned)
+    }
+
+    fn run_loaded_with_fanout<F>(
+        &self,
+        program: &LuaProgram,
+        observer: &dyn Observer,
+        section: &str,
+        fanout_callback: F,
+    ) -> Result<Option<String>>
+    where
+        F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
+    {
+        let store = self.store.as_ref().ok_or_else(|| {
+            Error::Lua("section VM host values have not been injected".to_owned())
+        })?;
+        let returned: MultiValue = self
+            .lua
+            .scope(|scope| {
+                install_log(&self.lua, scope, &self.execution, observer, section)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+                install_store_table(
+                    &self.lua,
+                    scope,
+                    &self.lua.globals(),
+                    store,
+                    &self.execution,
+                    observer,
+                    section,
+                )
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+                let fanout_fn = scope
+                    .create_function(|lua, (worker, list): (String, String)| {
+                        let replies =
+                            fanout_callback(worker, list).map_err(mlua::Error::external)?;
+                        let table = lua.create_table_with_capacity(replies.len(), 0)?;
+                        for (i, reply) in replies.into_iter().enumerate() {
+                            table.raw_set(i + 1, reply)?;
+                        }
+                        Ok(table)
+                    })
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+                self.lua
+                    .globals()
+                    .raw_set("fanout", fanout_fn)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
                 let result = program
                     .load(&self.lua)
                     .map_err(|error| mlua::Error::external(error.to_string()))?
