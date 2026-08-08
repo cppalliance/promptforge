@@ -425,6 +425,7 @@ mod tests {
             execution: "test-run",
             observer: &observer,
             client: None,
+            debug: None,
         };
         let value = execute::run(&prompt, "", &[], &store, options)
             .await

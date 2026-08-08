@@ -70,6 +70,7 @@ fn silent() -> RunOptions<'static> {
         execution: EXECUTION,
         observer: &NullObserver,
         client: None,
+        debug: None,
     }
 }
 
@@ -127,6 +128,7 @@ async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String, String)
             execution: EXECUTION,
             observer: &recorder,
             client: None,
+            debug: None,
         },
     )
     .await;
@@ -521,6 +523,7 @@ fn silent_progress(turns: &mut u32) -> SectionProgress<'_> {
         observer: &NullObserver,
         section: "Only",
         turns,
+        debug: None,
     }
 }
 
@@ -754,6 +757,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
             observer: &recorder,
             section: "Gather",
             turns: &mut turns,
+            debug: None,
         },
     )
     .await
@@ -813,6 +817,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
             observer: &recorder,
             section: "Gather",
             turns: &mut turns,
+            debug: None,
         },
     )
     .await
@@ -1073,6 +1078,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
             execution: EXECUTION,
             observer: &sink,
             client: None,
+            debug: None,
         },
     )
     .await;
@@ -1105,6 +1111,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
             execution: EXECUTION,
             observer: &sink,
             client: None,
+            debug: None,
         },
     )
     .await
@@ -1204,6 +1211,7 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
                 "test",
                 "test-model",
             )),
+            debug: None,
         },
     )
     .await
@@ -1269,6 +1277,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
             observer: &recorder,
             section: "Gather",
             turns: &mut turns,
+            debug: None,
         },
     )
     .await
@@ -1336,6 +1345,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
                 "test",
                 "test-model",
             )),
+            debug: None,
         },
     )
     .await
@@ -1401,6 +1411,7 @@ async fn epilog_runs_after_reply_and_can_return() {
                 "test",
                 "test-model",
             )),
+            debug: None,
         },
     )
     .await
@@ -1520,6 +1531,7 @@ Ask using {{ var.question }}.\n\n\
                 "test",
                 "test-model",
             )),
+            debug: None,
         },
     )
     .await
@@ -1606,6 +1618,7 @@ async fn default_return_precedes_the_last_model_reply() {
                 "test",
                 "test-model",
             )),
+            debug: None,
         },
     )
     .await
@@ -1730,6 +1743,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
                 "test",
                 "test-model",
             )),
+            debug: None,
         },
     )
     .await
@@ -1771,6 +1785,7 @@ tools.always('local_alias')\n```\n\n\
                 "test",
                 "test-model",
             )),
+            debug: None,
         },
     )
     .await
@@ -1819,6 +1834,7 @@ tools.need('section_tool', 'capability')\n```\n\n\
                 "test",
                 "test-model",
             )),
+            debug: None,
         },
     )
     .await
@@ -1886,6 +1902,7 @@ tools.need('second_local', 'second')\n```\n\n\
                 "test",
                 "test-model",
             )),
+            debug: None,
         },
     )
     .await
@@ -1930,6 +1947,7 @@ tools.need('second_local', 'second')\n```\n\n\
                 "test",
                 "test-model",
             )),
+            debug: None,
         },
     )
     .await
@@ -1968,4 +1986,113 @@ tools.need('second_local', 'second')\n```\n\n\
     ] {
         assert!(!trace.contains(payload), "observation leaked {payload:?}");
     }
+}
+
+/// Records every [`DebugEvent`] so tests can assert capture wiring.
+#[derive(Default)]
+struct RecordingCapture(Mutex<Vec<(String, String, u32, crate::debug::DebugEvent)>>);
+
+impl crate::debug::DebugCapture for RecordingCapture {
+    fn on_event(
+        &self,
+        execution: &str,
+        section: &str,
+        turn_index: u32,
+        event: crate::debug::DebugEvent,
+    ) {
+        self.0
+            .lock()
+            .expect("the capture mutex must not be poisoned")
+            .push((execution.to_owned(), section.to_owned(), turn_index, event));
+    }
+}
+
+impl RecordingCapture {
+    fn events(&self) -> Vec<(String, String, u32, crate::debug::DebugEvent)> {
+        self.0
+            .lock()
+            .expect("the capture mutex must not be poisoned")
+            .clone()
+    }
+}
+
+#[tokio::test]
+async fn debug_capture_receives_request_and_response_when_set() {
+    let addr = spawn_text_gateway().await;
+    let capture = RecordingCapture::default();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\nAsk the model.\n";
+    let out = run(
+        &bound(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(
+                &format!("http://{addr}/v1"),
+                "test",
+                "test-model",
+            )),
+            debug: Some(&capture),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(out, "hello from the mock");
+    let events = capture.events();
+    assert_eq!(events.len(), 2, "one request and one response: {events:#?}");
+    assert_eq!(events[0].0, EXECUTION);
+    assert_eq!(events[0].1, "Only");
+    assert_eq!(events[0].2, 1);
+    match &events[0].3 {
+        crate::debug::DebugEvent::Request { body } => {
+            assert_eq!(body["model"], "test-model");
+            assert!(body["messages"].as_array().is_some_and(|m| !m.is_empty()));
+        }
+        other => panic!("expected request first, got {other:?}"),
+    }
+    match &events[1].3 {
+        crate::debug::DebugEvent::Response {
+            body,
+            finish_reason,
+            reasoning_content,
+        } => {
+            assert_eq!(finish_reason, &None);
+            assert_eq!(reasoning_content, &None);
+            assert_eq!(
+                body["choices"][0]["message"]["content"],
+                "hello from the mock"
+            );
+        }
+        other => panic!("expected response second, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn debug_capture_none_changes_nothing() {
+    let addr = spawn_text_gateway().await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\nAsk the model.\n";
+    let out = run(
+        &bound(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(
+                &format!("http://{addr}/v1"),
+                "test",
+                "test-model",
+            )),
+            debug: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, "hello from the mock");
 }

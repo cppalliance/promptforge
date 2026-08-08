@@ -140,6 +140,7 @@ async fn run_text(base_url: &str, api_key: &str, model_alias: &str) -> Result<()
             execution: TEXT_EXECUTION,
             observer: &observer,
             client: Some(client),
+            debug: None,
         },
     )
     .await
@@ -202,6 +203,7 @@ async fn run_tool_call(base_url: &str, api_key: &str, model_alias: &str) -> Resu
             execution: TOOL_EXECUTION,
             observer: &observer,
             client: Some(client),
+            debug: None,
         },
     )
     .await

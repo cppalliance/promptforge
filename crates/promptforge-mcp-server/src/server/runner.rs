@@ -276,6 +276,7 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
         execution: &run_id,
         observer: observer.as_ref(),
         client: Some(client),
+        debug: None,
     };
     let outcome = execute::run(&prompt, &args, live.tools(), &store, options).await;
 

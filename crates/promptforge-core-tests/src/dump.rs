@@ -7,11 +7,17 @@
 //! removed entirely when the store is empty. StoreRef paths that cannot map to a
 //! safe relative filesystem path are reported on the caller's status sink and
 //! skipped; nothing is ever written outside the dump directory.
+//!
+//! Dev mode also buffers raw model turns through [`TraceCapture`] and writes
+//! them under `<prompt-stem>.store/.trace/` after the store dump, so clearing
+//! the dump directory cannot erase the turn files from the run just finished.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 
 use anyhow::{Context as _, Result, bail};
+use promptforge_core::debug::{DebugCapture, DebugEvent};
 use promptforge_core::store::StoreRef;
 
 /// Copies every file in `store` under the prompt's dump directory,
@@ -93,8 +99,90 @@ pub(crate) fn dump_store(
 
 /// Returns the dump directory for `prompt_path`: the prompt's own path with
 /// its extension replaced by `store`, a sibling of the prompt file.
-fn dump_directory(prompt_path: &Path) -> PathBuf {
+pub(crate) fn dump_directory(prompt_path: &Path) -> PathBuf {
     prompt_path.with_extension("store")
+}
+
+/// Buffers raw model-turn payloads during a run and writes them under
+/// `<prompt-stem>.store/.trace/` when [`TraceCapture::flush`] runs.
+///
+/// Events are held in memory until flush so [`dump_store`]'s directory clear
+/// cannot delete turn files from the run that just finished. Flush is a no-op
+/// when no turns were captured.
+pub(crate) struct TraceCapture {
+    events: Mutex<Vec<(u32, DebugEvent)>>,
+    dump_root: PathBuf,
+}
+
+impl TraceCapture {
+    /// Captures turns for the dump directory beside `prompt_path`.
+    pub(crate) fn new(prompt_path: &Path) -> Self {
+        Self {
+            events: Mutex::new(Vec::new()),
+            dump_root: dump_directory(prompt_path),
+        }
+    }
+
+    /// Writes buffered turn files under `.trace/` and announces each path on
+    /// `status`. Status writes are advisory and never fail the flush.
+    pub(crate) fn flush(&self, status: &mut dyn Write) {
+        let events = self
+            .events
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if events.is_empty() {
+            return;
+        }
+        let trace_dir = self.dump_root.join(".trace");
+        if let Err(error) = std::fs::create_dir_all(&trace_dir) {
+            let _ignored = writeln!(
+                status,
+                "trace dump failed: create {}: {error}",
+                trace_dir.display()
+            );
+            return;
+        }
+        for (turn_index, event) in events {
+            let (name, body) = match &event {
+                DebugEvent::Request { body } => (format!("turn-{turn_index}-request.json"), body),
+                DebugEvent::Response { body, .. } => {
+                    (format!("turn-{turn_index}-response.json"), body)
+                }
+                _ => continue,
+            };
+            let target = trace_dir.join(name);
+            let rendered = match serde_json::to_string_pretty(body) {
+                Ok(text) => text,
+                Err(error) => {
+                    let _ignored = writeln!(
+                        status,
+                        "trace dump skipped {}: serialize: {error}",
+                        target.display()
+                    );
+                    continue;
+                }
+            };
+            if let Err(error) = std::fs::write(&target, rendered) {
+                let _ignored = writeln!(
+                    status,
+                    "trace dump skipped {}: write: {error}",
+                    target.display()
+                );
+                continue;
+            }
+            let _ignored = writeln!(status, "trace dump wrote {}", target.display());
+        }
+    }
+}
+
+impl DebugCapture for TraceCapture {
+    fn on_event(&self, _execution: &str, _section: &str, turn_index: u32, event: DebugEvent) {
+        self.events
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((turn_index, event));
+    }
 }
 
 /// Maps one logical store path to a relative filesystem path, or `None` when
@@ -357,6 +445,118 @@ mod tests {
         assert!(
             status.contains("store dump skipped"),
             "the colliding entry must be reported: {status}"
+        );
+    }
+
+    #[test]
+    fn trace_capture_flush_writes_turn_files_under_dot_trace() {
+        use promptforge_core::debug::DebugEvent;
+        use serde_json::json;
+
+        let directory = tempfile::tempdir().expect("create trace fixture directory");
+        let prompt = directory.path().join("fixture.md");
+        let capture = TraceCapture::new(&prompt);
+        capture.on_event(
+            "dev-1",
+            "Only",
+            1,
+            DebugEvent::Request {
+                body: json!({ "model": "test", "messages": [] }),
+            },
+        );
+        capture.on_event(
+            "dev-1",
+            "Only",
+            1,
+            DebugEvent::Response {
+                body: json!({
+                    "choices": [{ "message": { "role": "assistant", "content": "hi" } }]
+                }),
+                finish_reason: Some("stop".into()),
+                reasoning_content: None,
+            },
+        );
+
+        let mut status = Vec::new();
+        capture.flush(&mut status);
+        let status = String::from_utf8(status).expect("status must be UTF-8");
+        let trace_dir = dump_directory(&prompt).join(".trace");
+        let request =
+            std::fs::read_to_string(trace_dir.join("turn-1-request.json")).expect("request dump");
+        let response =
+            std::fs::read_to_string(trace_dir.join("turn-1-response.json")).expect("response dump");
+        assert!(request.contains("\"model\": \"test\""));
+        assert!(response.contains("\"content\": \"hi\""));
+        assert!(
+            status.contains("trace dump wrote") && status.contains("turn-1-request.json"),
+            "each dumped path must be announced: {status}"
+        );
+    }
+
+    #[test]
+    fn dump_store_then_flush_keeps_trace_files() {
+        use promptforge_core::debug::DebugEvent;
+        use serde_json::json;
+
+        let directory = tempfile::tempdir().expect("create dump-then-flush fixture directory");
+        let prompt = directory.path().join("fixture.md");
+        let store = StoreRef::memory();
+        store.write("evidence.md", "body").expect("write");
+        let capture = TraceCapture::new(&prompt);
+        capture.on_event(
+            "dev-1",
+            "Only",
+            1,
+            DebugEvent::Request {
+                body: json!({ "model": "test" }),
+            },
+        );
+        capture.on_event(
+            "dev-1",
+            "Only",
+            1,
+            DebugEvent::Response {
+                body: json!({ "choices": [] }),
+                finish_reason: Some("stop".into()),
+                reasoning_content: None,
+            },
+        );
+
+        let mut status = Vec::new();
+        dump_store(&store, &prompt, &mut status).expect("dump must succeed");
+        capture.flush(&mut status);
+
+        let dump_dir = dump_directory(&prompt);
+        assert_eq!(
+            std::fs::read_to_string(dump_dir.join("evidence.md")).expect("evidence"),
+            "body"
+        );
+        assert!(
+            dump_dir
+                .join(".trace")
+                .join("turn-1-request.json")
+                .is_file(),
+            "flush after dump_store must leave turn files under .trace"
+        );
+        assert!(
+            dump_dir
+                .join(".trace")
+                .join("turn-1-response.json")
+                .is_file()
+        );
+    }
+
+    #[test]
+    fn trace_capture_flush_is_noop_without_events() {
+        let directory = tempfile::tempdir().expect("create empty-trace fixture directory");
+        let prompt = directory.path().join("fixture.md");
+        let capture = TraceCapture::new(&prompt);
+        let mut status = Vec::new();
+        capture.flush(&mut status);
+        assert!(status.is_empty());
+        assert!(
+            !dump_directory(&prompt).join(".trace").exists(),
+            "no turns must leave no .trace directory"
         );
     }
 

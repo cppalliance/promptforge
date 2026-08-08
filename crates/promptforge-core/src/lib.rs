@@ -10,6 +10,8 @@
 //! flight; [`execute::run`] takes an [`execute::RunOptions`] carrying the
 //! [`observe::Observer`] the borrowed correlated report records go to, and
 //! [`observe::NullObserver`] is what a caller wanting silence passes.
+//! [`debug::DebugCapture`] is an opt-in raw request/response seam on the same
+//! options; production hosts leave it unset.
 //!
 //! A source is a promptforge prompt only when its frontmatter declares a
 //! `promptforge:` version; [`promptforge_version`] reports it (or `None`), and
@@ -17,6 +19,7 @@
 
 pub mod bind;
 pub mod client;
+pub mod debug;
 mod error;
 pub mod execute;
 pub mod lua;
