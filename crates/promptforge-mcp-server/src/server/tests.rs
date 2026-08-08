@@ -32,8 +32,13 @@ use promptforge_core::observe::detail;
 
 fn prepared(config: &Config) -> Arc<PreparedTools> {
     static SEED: OnceLock<PreparedTools> = OnceLock::new();
-    let seed = SEED
-        .get_or_init(|| PreparedTools::new(&config.gateway).expect("prepare fixture tool model"));
+    let seed = SEED.get_or_init(|| {
+        PreparedTools::new(
+            &config.gateway,
+            promptforge_core::model::ModelCatalog::empty(),
+        )
+        .expect("prepare fixture tool model")
+    });
     Arc::new(
         seed.rebuild(&config.gateway)
             .expect("index fixture live tools"),

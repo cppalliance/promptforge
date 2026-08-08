@@ -17,6 +17,7 @@ use serde_json::Value;
 
 use super::*;
 use crate::lua::bind_tool_declarations;
+use crate::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use crate::observe::{NullObserver, detail};
 use crate::tools::{Tool, ToolId, ToolRegistry};
 
@@ -524,6 +525,7 @@ fn silent_progress(turns: &mut u32) -> SectionProgress<'_> {
         section: "Only",
         turns,
         debug: None,
+        completion_options: None,
     }
 }
 
@@ -758,6 +760,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
             section: "Gather",
             turns: &mut turns,
             debug: None,
+            completion_options: None,
         },
     )
     .await
@@ -818,6 +821,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
             section: "Gather",
             turns: &mut turns,
             debug: None,
+            completion_options: None,
         },
     )
     .await
@@ -884,6 +888,7 @@ async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(Strin
             section: "Gather",
             turns: &mut turns,
             debug: None,
+            completion_options: None,
         },
     )
     .await;
@@ -1145,6 +1150,8 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
             ),
             ("First".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
             ("First".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
+            ("First".to_string(), detail::MODEL_SCOPE_CLOSING.to_string()),
+            ("First".to_string(), detail::MODEL_SCOPE_CLOSED.to_string()),
             (
                 "First".to_string(),
                 detail::LUA_TEARDOWN_STARTED.to_string()
@@ -1307,8 +1314,15 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
         .expect("the lifecycle picker must build");
     let tools: &[&dyn Tool] = &[&tool];
     let registry = ToolRegistry::new(tools.iter().copied());
-    let prompt = crate::bind::bind_prompt(prompt, &picker, &registry, EXECUTION, &recorder)
-        .expect("the lifecycle fixture must bind");
+    let prompt = crate::bind::bind_prompt(
+        prompt,
+        &picker,
+        &registry,
+        &crate::model::ModelCatalog::empty(),
+        EXECUTION,
+        &recorder,
+    )
+    .expect("the lifecycle fixture must bind");
     let store = StoreRef::memory();
 
     let result = run(
@@ -1391,6 +1405,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
             section: "Gather",
             turns: &mut turns,
             debug: None,
+            completion_options: None,
         },
     )
     .await
@@ -1436,6 +1451,96 @@ async fn spawn_text_gateway() -> SocketAddr {
     addr
 }
 
+/// Spawn a text gateway that captures the first chat-completions body.
+async fn spawn_capturing_text_gateway() -> (SocketAddr, Arc<Mutex<Option<Value>>>) {
+    async fn completions(
+        State(captured): State<Arc<Mutex<Option<Value>>>>,
+        Json(body): Json<Value>,
+    ) -> Json<Value> {
+        *captured.lock().expect("capture lock") = Some(body);
+        Json(json!({
+            "choices": [{
+                "message": { "role": "assistant", "content": "hello from the mock" }
+            }]
+        }))
+    }
+
+    let captured = Arc::new(Mutex::new(None));
+    let router = Router::new()
+        .route("/v1/chat/completions", post(completions))
+        .with_state(Arc::clone(&captured));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    (addr, captured)
+}
+
+#[tokio::test]
+async fn models_use_forwards_binding_completion_options_to_the_gateway() {
+    // models.use -> completion_options -> GatewayClient::complete must carry
+    // the binding's model and sampling fields on the chat body.
+    let (addr, captured) = spawn_capturing_text_gateway().await;
+    let catalog = ModelCatalog::new([ModelDescriptor::new(
+        ModelId::gateway("analyst"),
+        "A careful analysis model",
+        131_072,
+        ThinkingMode::Switchable,
+    )]);
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# T\n\n\
+```lua\n\
+models.need('analyst', 'careful analysis', { temperature = 0.25, max_tokens = 64, thinking = false })\n\
+```\n\n\
+## Only\n\n\
+```lua\nmodels.use('analyst')\n```\n\n\
+Ask the model.\n";
+    let prompt = Prompt::parse(md, EXECUTION, &NullObserver).expect("fixture must parse");
+    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
+        .expect("empty tool picker must build");
+    let registry = ToolRegistry::new(std::iter::empty());
+    let bound = crate::bind::bind_prompt(
+        prompt,
+        &picker,
+        &registry,
+        &catalog,
+        EXECUTION,
+        &NullObserver,
+    )
+    .expect("fixture must bind");
+
+    let out = run(
+        &bound,
+        "",
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(
+                &format!("http://{addr}/v1"),
+                "test",
+                "default-model",
+            )),
+            debug: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, "hello from the mock");
+
+    let body = captured
+        .lock()
+        .expect("capture lock")
+        .clone()
+        .expect("complete must reach the gateway");
+    assert_eq!(body["model"], "analyst");
+    assert_eq!(body["temperature"], 0.25);
+    assert_eq!(body["max_tokens"], 64);
+    assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+}
+
 #[tokio::test]
 async fn an_explicit_client_is_used_instead_of_the_environment() {
     // `client: Some(..)` is what a caller configured from a file passes;
@@ -1472,6 +1577,8 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
             ("Only".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
             ("Only".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
+            ("Only".to_string(), detail::MODEL_SCOPE_CLOSING.to_string()),
+            ("Only".to_string(), detail::MODEL_SCOPE_CLOSED.to_string()),
             (
                 "Only".to_string(),
                 detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
@@ -1539,6 +1646,8 @@ async fn epilog_runs_after_reply_and_can_return() {
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
             ("Only".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
             ("Only".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
+            ("Only".to_string(), detail::MODEL_SCOPE_CLOSING.to_string()),
+            ("Only".to_string(), detail::MODEL_SCOPE_CLOSED.to_string()),
             (
                 "Only".to_string(),
                 detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
@@ -1661,7 +1770,9 @@ Ask using {{ var.question }}.\n\n\
                 detail::LUA_SHARED_LOAD_STARTED.to_owned(),
             ),
             ("Only".to_owned(), detail::TOOL_REPLAY_STARTED.to_owned()),
+            ("Only".to_owned(), detail::MODEL_REPLAY_STARTED.to_owned()),
             ("Only".to_owned(), detail::TOOL_REPLAY_SUCCEEDED.to_owned(),),
+            ("Only".to_owned(), detail::MODEL_REPLAY_SUCCEEDED.to_owned()),
             (
                 "Only".to_owned(),
                 detail::LUA_SHARED_LOAD_SUCCEEDED.to_owned(),
@@ -1670,6 +1781,8 @@ Ask using {{ var.question }}.\n\n\
             ("Only".to_owned(), detail::LUA_PREAMBLE_SUCCEEDED.to_owned(),),
             ("Only".to_owned(), detail::TOOL_SCOPE_CLOSING.to_owned()),
             ("Only".to_owned(), detail::TOOL_SCOPE_CLOSED.to_owned()),
+            ("Only".to_owned(), detail::MODEL_SCOPE_CLOSING.to_owned()),
+            ("Only".to_owned(), detail::MODEL_SCOPE_CLOSED.to_owned()),
             (
                 "Only".to_owned(),
                 detail::TOOL_SCOPE_VALIDATION_STARTED.to_owned(),

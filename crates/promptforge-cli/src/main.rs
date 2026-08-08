@@ -10,6 +10,7 @@ use std::process::ExitCode;
 
 use promptforge_core::bind::bind_prompt;
 use promptforge_core::execute::RunOptions;
+use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::observe::{NullObserver, Observer};
 use promptforge_core::store::StoreRef;
 use promptforge_core::{execute, parser::Prompt};
@@ -82,8 +83,18 @@ async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let models = match &token {
+        Some(token) => match fetch_model_catalog(&base_url, token).await {
+            Ok(catalog) => catalog,
+            Err(error) => {
+                eprintln!("error: fetch model catalog: {error}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => ModelCatalog::empty(),
+    };
     let registry = available.registry();
-    let bound = match bind_prompt(prompt, &picker, &registry, &execution, observer) {
+    let bound = match bind_prompt(prompt, &picker, &registry, &models, &execution, observer) {
         Ok(bound) => bound,
         Err(e) => {
             eprintln!("error: {e}");

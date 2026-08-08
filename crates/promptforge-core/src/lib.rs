@@ -23,6 +23,8 @@ pub mod debug;
 mod error;
 pub mod execute;
 pub mod lua;
+mod lua_models;
+pub mod model;
 pub mod observe;
 pub mod parser;
 pub mod store;
