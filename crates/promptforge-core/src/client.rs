@@ -91,21 +91,6 @@ impl Message {
     }
 }
 
-/// How tool-call turns are echoed back into the next completion request.
-///
-/// OpenAI-compatible servers accept `assistant.tool_calls` plus `role=tool`
-/// messages. Some local templates (Gemma via llama.cpp) reject that shape with
-/// HTTP 400 and instead continue from an assistant ` ```tool_code ` fence plus
-/// a follow-up user message that carries the tool output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub enum ToolHistoryStyle {
-    /// `assistant.tool_calls` + `role=tool` result messages.
-    #[default]
-    OpenAi,
-    /// Assistant content is a `tool_code` fence; results arrive as a user turn.
-    ContentFence,
-}
 
 /// A tool advertised to the model, in the `OpenAI` function-calling shape.
 ///
@@ -160,8 +145,6 @@ pub enum CompletionResult {
 pub struct Completion {
     /// The text or tool-call outcome the tool loop consumes.
     pub result: CompletionResult,
-    /// How to echo a [`CompletionResult::ToolCalls`] turn into history.
-    pub tool_history: ToolHistoryStyle,
     /// The choice's `finish_reason`, when the backend supplied one.
     pub finish_reason: Option<String>,
     /// The message's reasoning side channel, when the backend supplied one.
@@ -316,7 +299,6 @@ impl GatewayClient {
         let turn = dialect.parse_turn(&response_body)?;
         Ok(Completion {
             result: turn.outcome,
-            tool_history: turn.tool_history,
             finish_reason: turn.finish_reason,
             reasoning_content: turn.reasoning_content,
             request_body,

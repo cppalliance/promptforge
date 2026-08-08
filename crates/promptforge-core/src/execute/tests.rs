@@ -1250,7 +1250,13 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
     let registry = ToolRegistry::new(tools.iter().copied());
 
     let mut turns = 0;
-    let options = test_completion_options();
+    let options = CompletionOptions {
+        model: "gemma-3-27b-it".to_owned(),
+        temperature: None,
+        max_tokens: None,
+        thinking: None,
+        tool_dialect: crate::dialects::ToolDialectId::Gemma3ToolCode,
+    };
     let out = run_tool_loop(
         &client,
         &schemas,
