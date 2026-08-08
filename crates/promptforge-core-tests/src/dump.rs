@@ -82,7 +82,7 @@ pub(crate) fn dump_store(
             continue;
         }
         let contents = store
-            .read_raw(&path)
+            .read(&path)
             .with_context(|| format!("read store file {path:?}"))?;
         if let Err(error) = std::fs::write(&target, contents) {
             let _ignored = writeln!(

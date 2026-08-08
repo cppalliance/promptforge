@@ -84,7 +84,13 @@ fn the_shipped_configuration_resolves_the_shipped_prompts() {
         .collect();
     assert_eq!(
         names,
-        ["analyst_example", "echo", "greet", "hello", "research_person"]
+        [
+            "analyst_example",
+            "echo",
+            "greet",
+            "hello",
+            "research_person"
+        ]
     );
     for entry in catalog.entries() {
         assert!(

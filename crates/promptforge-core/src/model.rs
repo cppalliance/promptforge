@@ -760,7 +760,8 @@ mod tests {
             "Section",
         )
         .unwrap();
-        vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .unwrap();
         let preamble = crate::lua::LuaProgram::compile(
             r#"models.use("analyst")"#,
             "preamble",
@@ -806,7 +807,8 @@ mod tests {
             "Section",
         )
         .unwrap();
-        vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .unwrap();
         let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
         assert!(scopes.model.is_none());
         vm.teardown(&NullObserver, "Section");
@@ -866,7 +868,8 @@ mod tests {
             "Section",
         )
         .unwrap();
-        vm.inject_host("", &json!({}), &StoreRef::memory()).unwrap();
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .unwrap();
         let preamble = crate::lua::LuaProgram::compile(
             r#"models.use("missing")"#,
             "preamble",

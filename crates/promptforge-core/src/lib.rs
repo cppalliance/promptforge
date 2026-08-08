@@ -31,6 +31,7 @@ pub mod parser;
 pub mod store;
 pub mod subst;
 pub mod tools;
+pub mod untrusted;
 
 pub use crate::error::{Error, NearDuplicateDiagnostic, Result};
 pub use crate::parser::promptforge_version;

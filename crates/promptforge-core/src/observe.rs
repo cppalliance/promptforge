@@ -143,10 +143,18 @@ pub mod detail {
     pub const STORE_APPEND_SUCCEEDED: &str = "Store append succeeded";
     /// A harness-mediated store append failed.
     pub const STORE_APPEND_FAILED: &str = "Store append failed";
-    /// A harness-mediated store read succeeded.
+    /// A harness-mediated store read_lines succeeded.
+    pub const STORE_READ_LINES_SUCCEEDED: &str = "Store read_lines succeeded";
+    /// A harness-mediated store read_lines failed.
+    pub const STORE_READ_LINES_FAILED: &str = "Store read_lines failed";
+    /// A harness-mediated store read (verbatim) succeeded.
     pub const STORE_READ_SUCCEEDED: &str = "Store read succeeded";
-    /// A harness-mediated store read failed.
+    /// A harness-mediated store read (verbatim) failed.
     pub const STORE_READ_FAILED: &str = "Store read failed";
+    /// A harness-mediated store inject succeeded.
+    pub const STORE_INJECT_SUCCEEDED: &str = "Store inject succeeded";
+    /// A harness-mediated store inject failed.
+    pub const STORE_INJECT_FAILED: &str = "Store inject failed";
     /// A harness-mediated store replacement succeeded.
     pub const STORE_REPLACE_SUCCEEDED: &str = "Store replace succeeded";
     /// A harness-mediated store replacement failed.

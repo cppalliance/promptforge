@@ -16,11 +16,17 @@ type Record = (String, String, String);
 const LOG_EXECUTION: &str = "fixture-log-checkpoints";
 const PREAMBLE_EXECUTION: &str = "fixture-preamble-return";
 const STORE_EXECUTION: &str = "fixture-store-fallthrough";
+const REPLY_NIL_EXECUTION: &str = "fixture-reply-nil";
+const STORE_TRIAD_EXECUTION: &str = "fixture-store-triad";
+const REPLY_SUBST_NIL_EXECUTION: &str = "fixture-reply-subst-nil";
 const SHIPPED_PARSE: &str = "fixture-shipped-prompts";
 
 const LOG_CHECKPOINTS: &str = include_str!("../prompts/execution/log-checkpoints.md");
 const PREAMBLE_RETURN: &str = include_str!("../prompts/execution/preamble-return.md");
 const STORE_FALLTHROUGH: &str = include_str!("../prompts/execution/store-fallthrough.md");
+const REPLY_NIL_SECTION_ONE: &str = include_str!("../prompts/execution/reply-nil-section-one.md");
+const STORE_TRIAD: &str = include_str!("../prompts/execution/store-triad.md");
+const REPLY_SUBSTITUTION_NIL: &str = include_str!("../prompts/invalid/reply-substitution-nil.md");
 
 struct ValidFixture {
     name: &'static str,
@@ -59,6 +65,19 @@ struct InvalidFixture {
     message_fragment: &'static str,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum ExecutionErrorKind {
+    Substitution,
+}
+
+struct ExecutionErrorFixture {
+    name: &'static str,
+    source: &'static str,
+    execution: &'static str,
+    kind: ExecutionErrorKind,
+    message_fragment: &'static str,
+}
+
 const INVALID_FIXTURES: &[InvalidFixture] = &[
     InvalidFixture {
         name: "invalid/missing-h1.md",
@@ -79,6 +98,14 @@ const INVALID_FIXTURES: &[InvalidFixture] = &[
         message_fragment: "section `Transform` epilog",
     },
 ];
+
+const EXECUTION_ERROR_FIXTURES: &[ExecutionErrorFixture] = &[ExecutionErrorFixture {
+    name: "invalid/reply-substitution-nil.md",
+    source: REPLY_SUBSTITUTION_NIL,
+    execution: REPLY_SUBST_NIL_EXECUTION,
+    kind: ExecutionErrorKind::Substitution,
+    message_fragment: "nil",
+}];
 
 /// A synchronized observer shared by concurrent fixture runs.
 #[derive(Default)]
@@ -312,7 +339,7 @@ async fn log_fixture_reports_exact_author_checkpoints() {
     assert_eq!(result, "logged");
     assert_eq!(
         store
-            .read("state.txt")
+            .read_lines("state.txt")
             .expect("the prepare section writes state"),
         "1| prepared"
     );
@@ -380,7 +407,7 @@ async fn preamble_return_fixture_skips_model_and_epilog() {
 
     assert_eq!(result, "early result");
     assert!(
-        store.read("unreachable.txt").is_err(),
+        store.read_lines("unreachable.txt").is_err(),
         "the epilog after a scalar preamble return must not run"
     );
     assert_eq!(
@@ -421,7 +448,7 @@ async fn store_fixture_persists_state_across_fall_through() {
     assert_eq!(result, "1| carried value");
     assert_eq!(
         store
-            .read("handoff.txt")
+            .read_lines("handoff.txt")
             .expect("the handoff remains stored"),
         "1| carried value"
     );
@@ -541,6 +568,99 @@ async fn concurrent_runs_keep_execution_ids_separate() {
                     section == "Preamble Return" && detail == "Run succeeded"
                 }),
             "{execution} must retain its own terminal run record"
+        );
+    }
+}
+
+#[tokio::test]
+async fn reply_nil_in_section_one() {
+    let recorder = Recorder::default();
+    let prompt = parse_execution_fixture(
+        REPLY_NIL_SECTION_ONE,
+        "execution/reply-nil-section-one.md",
+        REPLY_NIL_EXECUTION,
+        &recorder,
+    );
+    let result = run(
+        &prompt,
+        "",
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: REPLY_NIL_EXECUTION,
+            observer: &recorder,
+            client: None,
+            debug: None,
+        },
+    )
+    .await
+    .expect("the reply nil fixture must execute offline");
+
+    assert_eq!(result, "section one done");
+}
+
+#[tokio::test]
+async fn store_triad_numbered_vs_verbatim_vs_inject() {
+    let recorder = Recorder::default();
+    let prompt = parse_execution_fixture(
+        STORE_TRIAD,
+        "execution/store-triad.md",
+        STORE_TRIAD_EXECUTION,
+        &recorder,
+    );
+    let result = run(
+        &prompt,
+        "",
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: STORE_TRIAD_EXECUTION,
+            observer: &recorder,
+            client: None,
+            debug: None,
+        },
+    )
+    .await
+    .expect("the store triad fixture must execute offline");
+
+    assert_eq!(result, "1| alpha\n2| beta|alpha\nbeta");
+}
+
+#[tokio::test]
+async fn reply_substitution_nil_errors() {
+    for fixture in EXECUTION_ERROR_FIXTURES {
+        let recorder = Recorder::default();
+        let prompt =
+            parse_execution_fixture(fixture.source, fixture.name, fixture.execution, &recorder);
+        let error = run(
+            &prompt,
+            "",
+            &[],
+            &StoreRef::memory(),
+            RunOptions {
+                execution: fixture.execution,
+                observer: &recorder,
+                client: None,
+                debug: None,
+            },
+        )
+        .await
+        .expect_err(&format!("fixture {} must fail at execution", fixture.name));
+
+        let variant_matches = matches!(
+            (fixture.kind, &error),
+            (ExecutionErrorKind::Substitution, Error::Substitution(_))
+        );
+        assert!(
+            variant_matches,
+            "fixture {} returned the wrong error variant: expected {:?}, got {error:?}",
+            fixture.name, fixture.kind
+        );
+        assert!(
+            error.to_string().contains(fixture.message_fragment),
+            "fixture {} error did not contain {:?}: {error}",
+            fixture.name,
+            fixture.message_fragment
         );
     }
 }

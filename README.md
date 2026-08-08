@@ -632,9 +632,10 @@ If the preamble returns nothing (or there is no preamble), the section's prose i
 
 ### Substitution
 
-Before the model sees the prose, `{{ path }}` placeholders are resolved from three namespaces. Substitution applies only to prose - never to preamble or epilog Lua source:
+Before the model sees the prose, `{{ path }}` placeholders are resolved from four namespaces. Substitution applies only to prose - never to preamble or epilog Lua source:
 
 - `{{ args }}` - the raw input string.
+- `{{ reply }}` - the previous section's model reply text (nil in section 1; using it when nil is a hard error).
 - `{{ var.x }}` - values the Lua preamble wrote (`var.x = ...`).
 - `{{ sys.when }}` / `{{ sys.now }}` / `{{ sys.id }}` - runtime metadata: the run's
   launch timestamp, the time when the current section started, and the 1-based
@@ -648,8 +649,9 @@ reference the result (`var.total = var.a + var.b`, then `{{ var.total }}`).
 ### Fall-through and the result
 
 Top-level `##` sections run in file order, each with fresh Lua state and a fresh
-model conversation. The run-scoped `StoreRef` is the sole mutable channel carried
-between sections. A section ends by either:
+model conversation. Two channels carry state across sections: the run-scoped
+`StoreRef` (virtual files) and `reply` (the previous section's model reply
+text, nil in section 1). A section ends by either:
 
 - **returning a value from Lua** (`return ...`) - this finishes the whole run
   with that value, so sections after it are not reached by fall-through; or
@@ -659,6 +661,18 @@ between sections. A section ends by either:
 Running off the last section ends the run. The result is `default_return` from
 the frontmatter if set, otherwise the last model reply, otherwise a generic
 completion. `sys.id` counts sections as you go (1, 2, 3, ...).
+
+### Store
+
+The run-scoped store provides three read operations:
+
+| Op | Returns | Use |
+|---|---|---|
+| `store.read_lines(path)` | Numbered lines (`1\| ...`) | Editing, navigation, `str_replace` |
+| `store.read(path)` | Verbatim contents | Trusted handoff, run output, clean dumps |
+| `store.inject(path)` | Verbatim + untrusted envelope | Model-facing re-injection |
+
+`store.write(path, contents)` creates or overwrites. `store.append`, `store.str_replace`, `store.delete`, and `store.glob` round out the API.
 
 ### Example
 
