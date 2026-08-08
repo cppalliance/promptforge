@@ -360,6 +360,11 @@ impl ModelCatalog {
     }
 
     /// Builds a tool-picker [`Catalog`] from model descriptions for semantic resolve.
+    ///
+    /// The picker's `enriched_text` prefixes the tool name, so vendor model ids
+    /// must not ride in that name or they drown the capability description.
+    /// Identity is encoded in the picker id's server field; every entry uses the
+    /// neutral label [`PICKER_MODEL_LABEL`].
     #[must_use]
     pub fn to_picker_catalog(&self) -> Catalog {
         Catalog::new(
@@ -367,13 +372,35 @@ impl ModelCatalog {
                 .iter()
                 .map(|model| {
                     ToolDescriptor::new(
-                        PickerToolId::new(model.id.server(), model.id.name()),
+                        model_to_picker_id(model.id()),
                         model.description.clone(),
                         Value::Object(serde_json::Map::new()),
                     )
                 })
                 .collect(),
         )
+    }
+}
+
+/// Neutral picker name so `enriched_text` does not inject vendor model ids.
+const PICKER_MODEL_LABEL: &str = "model";
+
+/// Separates server and model name inside the picker's server field.
+const PICKER_ID_SEPARATOR: char = '\u{1e}';
+
+fn model_to_picker_id(id: &ModelId) -> PickerToolId {
+    PickerToolId::new(
+        format!("{}{}{}", id.server(), PICKER_ID_SEPARATOR, id.name()),
+        PICKER_MODEL_LABEL,
+    )
+}
+
+fn model_from_picker_id(id: &PickerToolId) -> ModelId {
+    match id.server().split_once(PICKER_ID_SEPARATOR) {
+        Some((server, name)) if !server.is_empty() && !name.is_empty() => {
+            ModelId::new(server, name)
+        }
+        _ => ModelId::new(id.server(), id.name()),
     }
 }
 
@@ -531,7 +558,7 @@ impl ModelResolver for PickerModelResolver<'_> {
             })?;
         match picker.resolve(description) {
             Ok(promptforge_tool_picker::Outcome::Bind(tool)) => Ok(ResolvedModel {
-                id: ModelId::new(tool.id.server(), tool.id.name()),
+                id: model_from_picker_id(&tool.id),
                 invocation: ModelInvocation::from(opts),
             }),
             Ok(promptforge_tool_picker::Outcome::Absent) => Err(Error::ModelAbsent {
@@ -541,14 +568,14 @@ impl ModelResolver for PickerModelResolver<'_> {
                 capability: description.to_owned(),
                 candidates: tools
                     .iter()
-                    .map(|tool| ModelId::new(tool.id.server(), tool.id.name()))
+                    .map(|tool| model_from_picker_id(&tool.id))
                     .collect(),
             }),
             Ok(promptforge_tool_picker::Outcome::Ambiguous(tools)) => Err(Error::ModelAmbiguous {
                 capability: description.to_owned(),
                 candidates: tools
                     .iter()
-                    .map(|tool| ModelId::new(tool.id.server(), tool.id.name()))
+                    .map(|tool| model_from_picker_id(&tool.id))
                     .collect(),
             }),
             Err(error) => Err(Error::ModelBind {
