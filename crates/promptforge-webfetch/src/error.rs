@@ -163,6 +163,16 @@ pub enum FetchError {
         /// The unrecognized charset label, verbatim from the response header.
         charset: String,
     },
+
+    /// The target URL returned a non-success HTTP status.
+    #[non_exhaustive]
+    #[error("HTTP {status} from {url}; try a different URL")]
+    HttpStatus {
+        /// The URL (after redirects) that returned the error status.
+        url: String,
+        /// The HTTP status code.
+        status: u16,
+    },
 }
 
 impl FetchError {
@@ -180,6 +190,27 @@ impl FetchError {
             }
             other => other.to_string(),
         }
+    }
+
+    /// Whether this failure is a recoverable target failure that should be
+    /// returned as tool text rather than aborting the tool call.
+    ///
+    /// Recoverable: the target server/network failed or the content cannot be
+    /// processed. The model can try a different URL.
+    /// Hard (not recoverable): the URL itself violates admission policy or SSRF
+    /// defenses, so retrying another URL of the same shape will fail too.
+    #[must_use]
+    pub fn is_recoverable(&self) -> bool {
+        matches!(
+            self,
+            FetchError::HttpStatus { .. }
+                | FetchError::UnsupportedContentType { .. }
+                | FetchError::NoContentType { .. }
+                | FetchError::Timeout { .. }
+                | FetchError::TooLarge { .. }
+                | FetchError::Undecodable { .. }
+                | FetchError::Dns { .. }
+        )
     }
 }
 
@@ -224,5 +255,53 @@ mod tests {
             facing.contains("metadata.internal") && facing.contains("not fetchable"),
             "model-facing text should name the host as not fetchable, got: {facing}"
         );
+    }
+
+    #[test]
+    fn recoverable_classification() {
+        // Recoverable
+        assert!(
+            FetchError::HttpStatus {
+                url: "u".into(),
+                status: 404
+            }
+            .is_recoverable()
+        );
+        assert!(
+            FetchError::UnsupportedContentType {
+                url: "u".into(),
+                content_type: "application/pdf".into()
+            }
+            .is_recoverable()
+        );
+        assert!(FetchError::NoContentType { url: "u".into() }.is_recoverable());
+        assert!(FetchError::Timeout { url: "u".into() }.is_recoverable());
+        assert!(
+            FetchError::TooLarge {
+                url: "u".into(),
+                limit: 100
+            }
+            .is_recoverable()
+        );
+        assert!(
+            FetchError::Undecodable {
+                url: "u".into(),
+                charset: "x".into()
+            }
+            .is_recoverable()
+        );
+        assert!(
+            FetchError::Dns {
+                host: "h".into(),
+                message: "m".into()
+            }
+            .is_recoverable()
+        );
+        // Hard
+        assert!(!FetchError::InvalidUrl("u".into()).is_recoverable());
+        assert!(!FetchError::BlockedScheme("http".into()).is_recoverable());
+        assert!(!FetchError::Userinfo.is_recoverable());
+        assert!(!FetchError::BlockedPort(22).is_recoverable());
+        assert!(!FetchError::IpLiteral("1.2.3.4".into()).is_recoverable());
     }
 }

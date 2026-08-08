@@ -31,9 +31,6 @@ pub use redirect::{check_redirect, redirect_policy};
 pub use resolver::{GuardedResolver, Lookup, SystemLookup};
 pub use url_policy::check_url;
 
-/// The largest error body kept for diagnostics, in characters.
-const MAX_ERROR_BODY: usize = 2000;
-
 /// The minimum extracted length below which the whole-page fallback fires.
 const MIN_CONTENT_LEN: usize = 100;
 
@@ -100,28 +97,54 @@ impl WebFetch {
     }
 }
 
-/// Recovers a [`FetchError`] carried as a source of a reqwest error.
+/// Converts a [`FetchError`] into a tool outcome: recoverable failures become
+/// successful tool text the model reads; policy/admission failures remain hard errors.
+fn soft_or_hard(err: FetchError) -> Result<String> {
+    if err.is_recoverable() {
+        Ok(err.model_facing())
+    } else {
+        Err(err.into())
+    }
+}
+
+/// Maps a core [`Error`] from the body-read path into either a soft tool result
+/// (recoverable) or a hard `Err` (policy/admission).
 ///
-/// The guarded resolver and the redirect policy report refusals by boxing a
-/// [`FetchError`] into the error reqwest ultimately returns. Walking the source
-/// chain recovers it so the model sees the policy reason ([`Error::Parse`])
-/// rather than an opaque transport error. A reqwest timeout maps to
-/// [`FetchError::Timeout`] for `url`. Anything else stays an [`Error::Http`].
-fn map_send_error(err: reqwest::Error, url: &str) -> Error {
-    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&err);
+/// At body-read time, `Error::Parse` comes only from [`FetchError`] (TooLarge or
+/// Undecodable), both recoverable. Transport errors during streaming are also
+/// recoverable since the model can try a different URL.
+fn body_read_outcome(err: Error) -> Result<String> {
+    match err {
+        Error::Parse(msg) => Ok(msg),
+        Error::Http(_) => {
+            Ok("fetch failed: network error during download; try a different URL".into())
+        }
+        other => Err(other),
+    }
+}
+
+/// Maps a reqwest send error into either a soft tool result (recoverable) or
+/// a hard `Err` (policy/admission).
+fn map_send_error_to_outcome(err: &reqwest::Error, url: &str) -> Result<String> {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(err);
     while let Some(current) = source {
         if let Some(fetch_err) = current.downcast_ref::<FetchError>() {
-            return Error::Parse(fetch_err.model_facing());
+            if fetch_err.is_recoverable() {
+                return Ok(fetch_err.model_facing());
+            }
+            return Err(Error::Parse(fetch_err.model_facing()));
         }
         source = current.source();
     }
     if err.is_timeout() {
-        return FetchError::Timeout {
+        return Ok(FetchError::Timeout {
             url: url.to_string(),
         }
-        .into();
+        .model_facing());
     }
-    Error::Http(Box::new(err))
+    Ok(format!(
+        "fetch failed for {url}: network error; try a different URL"
+    ))
 }
 
 impl Default for WebFetch {
@@ -369,12 +392,10 @@ impl Tool for WebFetch {
         // Enforce the URL-admission policy before any network access.
         let url = check_url(url, &self.config)?;
 
-        let response = self
-            .http
-            .get(url.clone())
-            .send()
-            .await
-            .map_err(|err| map_send_error(err, url.as_str()))?;
+        let response = match self.http.get(url.clone()).send().await {
+            Ok(resp) => resp,
+            Err(err) => return map_send_error_to_outcome(&err, url.as_str()),
+        };
 
         // The final URL after any redirects; this is the provenance the model
         // cites, since the bytes came from here, not from where it aimed.
@@ -382,17 +403,11 @@ impl Tool for WebFetch {
 
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            let body: String = body.chars().take(MAX_ERROR_BODY).collect();
-            let body = if body.is_empty() {
-                "(empty body)".to_string()
-            } else {
-                body
-            };
-            return Err(Error::Backend {
+            let err = FetchError::HttpStatus {
+                url: final_url.to_string(),
                 status: status.as_u16(),
-                body,
-            });
+            };
+            return Ok(err.model_facing());
         }
 
         // Route on the response Content-Type, read before the body: a binary or
@@ -406,28 +421,26 @@ impl Tool for WebFetch {
             .map(str::to_owned);
 
         let Some(content_type) = content_type else {
-            // Absent Content-Type: refuse rather than sniff.
-            return Err(FetchError::NoContentType {
+            return soft_or_hard(FetchError::NoContentType {
                 url: final_url.to_string(),
-            }
-            .into());
+            });
         };
 
-        let parsed_mime: mime::Mime =
-            content_type
-                .parse()
-                .map_err(|_| FetchError::UnsupportedContentType {
+        let parsed_mime: mime::Mime = match content_type.parse() {
+            Ok(m) => m,
+            Err(_) => {
+                return soft_or_hard(FetchError::UnsupportedContentType {
                     url: final_url.to_string(),
                     content_type: content_type.clone(),
-                })?;
+                });
+            }
+        };
 
         let Some(route) = classify(&parsed_mime) else {
-            // PDF and any other binary type: refuse with an actionable message.
-            return Err(FetchError::UnsupportedContentType {
+            return soft_or_hard(FetchError::UnsupportedContentType {
                 url: final_url.to_string(),
                 content_type: content_type.clone(),
-            }
-            .into());
+            });
         };
 
         let charset = parsed_mime
@@ -436,29 +449,41 @@ impl Tool for WebFetch {
 
         let (decoded, extraction, size_truncated) = match route {
             Route::Html => {
-                // Structured extraction is all-or-nothing on size: an oversized
-                // HTML body is a hard refusal, never a prefix.
                 let body =
-                    read_body_capped(response, final_url.as_str(), self.config.max_bytes).await?;
-                let decoded = decode_body(&body, charset.as_deref(), final_url.as_str())?;
+                    match read_body_capped(response, final_url.as_str(), self.config.max_bytes)
+                        .await
+                    {
+                        Ok(b) => b,
+                        Err(e) => return body_read_outcome(e),
+                    };
+                let decoded = match decode_body(&body, charset.as_deref(), final_url.as_str()) {
+                    Ok(d) => d,
+                    Err(e) => return soft_or_hard(e),
+                };
                 let (markdown, extraction) = extract_html(&decoded, Some(final_url.as_str()), raw);
                 (markdown, extraction, false)
             }
             Route::Plain { structured: true } => {
-                // JSON and XML are structured: a truncated prefix is invalid, so
-                // an oversized body is a hard refusal on the byte cap, never a
-                // prefix. Extraction mode is still plain (no readability).
                 let body =
-                    read_body_capped(response, final_url.as_str(), self.config.max_bytes).await?;
-                let decoded = decode_body(&body, charset.as_deref(), final_url.as_str())?;
+                    match read_body_capped(response, final_url.as_str(), self.config.max_bytes)
+                        .await
+                    {
+                        Ok(b) => b,
+                        Err(e) => return body_read_outcome(e),
+                    };
+                let decoded = match decode_body(&body, charset.as_deref(), final_url.as_str()) {
+                    Ok(d) => d,
+                    Err(e) => return soft_or_hard(e),
+                };
                 (decoded, Extraction::Plain, false)
             }
             Route::Plain { structured: false } => {
-                // Flat text is a legitimate prefix: a body over the cap is
-                // truncated at the cap and flagged, not refused.
                 let (body, size_truncated) =
                     read_body_truncating(response, self.config.max_bytes).await?;
-                let decoded = decode_body(&body, charset.as_deref(), final_url.as_str())?;
+                let decoded = match decode_body(&body, charset.as_deref(), final_url.as_str()) {
+                    Ok(d) => d,
+                    Err(e) => return soft_or_hard(e),
+                };
                 (decoded, Extraction::Plain, size_truncated)
             }
         };
@@ -861,6 +886,24 @@ mod tests {
             .expect("building the no-content-type response must succeed")
     }
 
+    /// Serves a 404 Not Found response.
+    async fn not_found_route() -> Response {
+        Response::builder()
+            .status(axum::http::StatusCode::NOT_FOUND)
+            .header(CONTENT_TYPE, "text/html")
+            .body(Body::from("<html><body>Not Found</body></html>"))
+            .expect("building the 404 response must succeed")
+    }
+
+    /// Serves a 500 Internal Server Error response.
+    async fn internal_error_route() -> Response {
+        Response::builder()
+            .status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+            .header(CONTENT_TYPE, "text/html")
+            .body(Body::from("<html><body>Server Error</body></html>"))
+            .expect("building the 500 response must succeed")
+    }
+
     /// Serves `Café` encoded in ISO-8859-1 under a declared latin-1 charset.
     ///
     /// The `é` is byte `0xE9`, which is invalid standalone UTF-8, so a correct
@@ -912,6 +955,8 @@ mod tests {
             .route("/pdf", get(pdf_route))
             .route("/octet", get(octet_route))
             .route("/notype", get(notype_route))
+            .route("/notfound", get(not_found_route))
+            .route("/error500", get(internal_error_route))
             .route("/latin1", get(latin1_route))
             .route("/plainbig", get(plainbig_route))
             .with_state(state);
@@ -1011,9 +1056,6 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn slow_server_past_total_timeout_yields_timeout() {
         let (port, _recorded) = spawn_recording_server().await;
-        // A tiny total timeout so the test is fast; the slow route sleeps far
-        // past it, so the request must abort with a timeout rather than wait for
-        // the default 20-second budget.
         let config = FetchConfig {
             timeout: std::time::Duration::from_millis(200),
             ..loopback_config(port)
@@ -1021,14 +1063,14 @@ mod tests {
         let tool = WebFetch::with_config(config);
 
         let url = format!("http://localhost:{port}/slow");
-        let err = tool
+        let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect_err("a server slower than the total timeout must yield a timeout");
+            .expect("a timeout is now a soft (recoverable) return");
 
         assert!(
-            matches!(&err, Error::Parse(msg) if msg.contains("timed out")),
-            "expected a Timeout error naming the timeout, got: {err:?}"
+            result.contains("timed out"),
+            "expected a timeout message, got: {result}"
         );
     }
 
@@ -1195,25 +1237,20 @@ mod tests {
         let tool = WebFetch::with_config(config);
 
         let url = format!("http://localhost:{port}/large");
-        let err = tool
+        let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect_err("an oversized HTML body must be refused");
+            .expect("an oversized HTML body is now a soft (recoverable) return");
 
         assert!(
-            matches!(&err, Error::Parse(msg) if msg.contains("exceeds") && msg.contains("4096")),
-            "expected a TooLarge refusal naming the cap, got: {err:?}"
+            result.contains("exceeds") && result.contains("4096"),
+            "expected a TooLarge message naming the cap, got: {result}"
         );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn declared_content_length_over_cap_is_refused_before_read() {
         let (port, _hits) = spawn_server().await;
-        // The cap sits far below the declared 1_000_000-byte Content-Length but
-        // far above the tiny real body. A streamed byte counter would accept the
-        // real body, so the only thing that can produce a refusal here is the
-        // pre-read Content-Length check: deleting that precheck turns this fetch
-        // into a success and breaks this test.
         let config = FetchConfig {
             max_bytes: 4096,
             ..loopback_config(port)
@@ -1221,23 +1258,20 @@ mod tests {
         let tool = WebFetch::with_config(config);
 
         let url = format!("http://localhost:{port}/liar");
-        let err = tool
+        let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect_err("a declared Content-Length over the cap must be refused before the read");
+            .expect("a declared Content-Length over the cap is now a soft return");
 
         assert!(
-            matches!(&err, Error::Parse(msg) if msg.contains("exceeds") && msg.contains("4096")),
-            "expected a TooLarge refusal naming the cap from the precheck, got: {err:?}"
+            result.contains("exceeds") && result.contains("4096"),
+            "expected a TooLarge message naming the cap from the precheck, got: {result}"
         );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn gzip_bomb_refused_on_decompressed_count() {
         let (port, _hits) = spawn_server().await;
-        // The cap is far larger than the compressed wire size (a few hundred
-        // bytes) but far smaller than the 200_000-byte decompressed body, so a
-        // refusal can only come from counting decompressed bytes.
         let config = FetchConfig {
             max_bytes: 4096,
             ..loopback_config(port)
@@ -1245,14 +1279,14 @@ mod tests {
         let tool = WebFetch::with_config(config);
 
         let url = format!("http://localhost:{port}/gzip");
-        let err = tool
+        let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect_err("a gzip body that decompresses past the cap must be refused");
+            .expect("a gzip body that decompresses past the cap is now a soft return");
 
         assert!(
-            matches!(&err, Error::Parse(msg) if msg.contains("exceeds")),
-            "expected a TooLarge refusal on the decompressed count, got: {err:?}"
+            result.contains("exceeds"),
+            "expected a TooLarge message on the decompressed count, got: {result}"
         );
     }
 
@@ -1387,10 +1421,6 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn oversized_json_is_hard_refused_not_truncated() {
         let (port, _hits) = spawn_server().await;
-        // A structured JSON body over the cap must be refused whole: a truncated
-        // prefix would be invalid JSON. The cap sits far below the body, so a
-        // refusal here proves the structured route reads all-or-nothing rather
-        // than routing JSON down the truncating flat-text path.
         let config = FetchConfig {
             max_bytes: 4096,
             ..loopback_config(port)
@@ -1398,14 +1428,14 @@ mod tests {
         let tool = WebFetch::with_config(config);
 
         let url = format!("http://localhost:{port}/jsonbig");
-        let err = tool
+        let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect_err("an oversized json body must be hard-refused, not truncated");
+            .expect("an oversized json body is now a soft (recoverable) return");
 
         assert!(
-            matches!(&err, Error::Parse(msg) if msg.contains("exceeds") && msg.contains("4096")),
-            "expected a TooLarge refusal for oversized json, not a truncated prefix, got: {err:?}"
+            result.contains("exceeds") && result.contains("4096"),
+            "expected a TooLarge message for oversized json, got: {result}"
         );
     }
 
@@ -1415,14 +1445,14 @@ mod tests {
         let tool = WebFetch::with_config(loopback_config(port));
 
         let url = format!("http://localhost:{port}/badcharset");
-        let err = tool
+        let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect_err("an unrecognized charset label must be refused as Undecodable");
+            .expect("an unrecognized charset is now a soft (recoverable) return");
 
         assert!(
-            matches!(&err, Error::Parse(msg) if msg.contains("not-a-charset")),
-            "expected an Undecodable refusal naming the charset label, got: {err:?}"
+            result.contains("not-a-charset"),
+            "expected an Undecodable message naming the charset label, got: {result}"
         );
     }
 
@@ -1432,14 +1462,14 @@ mod tests {
         let tool = WebFetch::with_config(loopback_config(port));
 
         let url = format!("http://localhost:{port}/pdf");
-        let err = tool
+        let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect_err("a pdf response must be refused");
+            .expect("a pdf response is now a soft (recoverable) return");
 
         assert!(
-            matches!(&err, Error::Parse(msg) if msg.contains("application/pdf")),
-            "expected an unsupported-type refusal naming the pdf type, got: {err:?}"
+            result.contains("application/pdf"),
+            "expected an unsupported-type message naming the pdf type, got: {result}"
         );
     }
 
@@ -1449,14 +1479,14 @@ mod tests {
         let tool = WebFetch::with_config(loopback_config(port));
 
         let url = format!("http://localhost:{port}/octet");
-        let err = tool
+        let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect_err("an octet-stream response must be refused");
+            .expect("an octet-stream response is now a soft (recoverable) return");
 
         assert!(
-            matches!(&err, Error::Parse(msg) if msg.contains("application/octet-stream")),
-            "expected an unsupported-type refusal naming the octet-stream type, got: {err:?}"
+            result.contains("application/octet-stream"),
+            "expected an unsupported-type message naming the octet-stream type, got: {result}"
         );
     }
 
@@ -1466,14 +1496,14 @@ mod tests {
         let tool = WebFetch::with_config(loopback_config(port));
 
         let url = format!("http://localhost:{port}/notype");
-        let err = tool
+        let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect_err("an absent content type must be refused, not sniffed");
+            .expect("an absent content type is now a soft (recoverable) return");
 
         assert!(
-            matches!(&err, Error::Parse(msg) if msg.contains("no content type")),
-            "expected a no-content-type refusal, got: {err:?}"
+            result.contains("no content type"),
+            "expected a no-content-type message, got: {result}"
         );
     }
 
@@ -1587,6 +1617,72 @@ mod tests {
         assert!(
             markdown.contains("short"),
             "fallback should preserve the page text, got: {markdown}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn soft_return_on_404() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/notfound");
+        let result = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect("a 404 must be a soft (recoverable) return, not a hard error");
+
+        assert!(
+            result.contains("404"),
+            "the soft return must mention the status code 404, got: {result}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn soft_return_on_500() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/error500");
+        let result = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect("a 500 must be a soft (recoverable) return, not a hard error");
+
+        assert!(
+            result.contains("500"),
+            "the soft return must mention the status code 500, got: {result}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn soft_return_on_pdf_content_type() {
+        let (port, _hits) = spawn_server().await;
+        let tool = WebFetch::with_config(loopback_config(port));
+
+        let url = format!("http://localhost:{port}/pdf");
+        let result = tool
+            .call(serde_json::json!({ "url": url }))
+            .await
+            .expect("a PDF content type must be a soft return, not a hard error");
+
+        assert!(
+            result.contains("application/pdf"),
+            "the soft return must mention the content type, got: {result}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn blocked_url_still_hard_fails() {
+        let tool = WebFetch::new();
+
+        let err = tool
+            .call(serde_json::json!({ "url": "https://1.2.3.4/secret" }))
+            .await
+            .expect_err("a bare IP literal URL must still be a hard error");
+
+        assert!(
+            matches!(&err, Error::Parse(msg) if msg.contains("ip literal")),
+            "expected a policy rejection for a bare IP literal, got: {err:?}"
         );
     }
 }
