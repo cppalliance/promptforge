@@ -40,6 +40,7 @@ use crate::bind::BoundPrompt;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::lua::{SectionVm, ToolBindings, ToolScope};
+use crate::model::{CompletionOptions, ModelBindings};
 use crate::observe::{Observer, detail};
 use crate::parser::Prompt;
 use crate::store::StoreRef;
@@ -313,7 +314,9 @@ async fn run_sections(
     // on the same validated VM path as a bound prompt: there is exactly one
     // `tools.add`, and it rejects every undeclared alias.
     let empty_bindings = ToolBindings::default();
+    let empty_models = ModelBindings::default();
     let bindings = bound.map_or(&empty_bindings, BoundPrompt::bindings);
+    let models = bound.map_or(&empty_models, BoundPrompt::models);
 
     // Resolve the tool-loop cap once: the prompt's declared budget, or the
     // runtime default when it declares none.
@@ -330,9 +333,14 @@ async fn run_sections(
         observer.observe(execution, &section.name, detail::SECTION_STARTED);
 
         let mut vm = match prompt.shared.as_ref() {
-            Some(shared) => {
-                SectionVm::new_with_bindings(shared, bindings, execution, observer, &section.name)?
-            }
+            Some(shared) => SectionVm::new_with_shared_bindings(
+                shared,
+                bindings,
+                models,
+                execution,
+                observer,
+                &section.name,
+            )?,
             None => SectionVm::new(None, execution, observer, &section.name)?,
         };
         if let Err(error) = vm.inject_host(args, &sys, store) {
@@ -359,13 +367,18 @@ async fn run_sections(
 
         // Every VM closes declaration recording before reply binding or epilog
         // execution; a prompt with empty bindings closes to an empty scope.
-        let scope = match vm.close_tool_scope(observer, &section.name) {
-            Ok(scope) => scope,
+        let scopes = match vm.close_scopes(observer, &section.name) {
+            Ok(scopes) => scopes,
             Err(error) => {
                 vm.teardown(observer, &section.name);
                 return Err(error);
             }
         };
+        let scope = scopes.tools;
+        let completion_options = scopes
+            .model
+            .as_ref()
+            .map(crate::model::ModelBinding::completion_options);
 
         let var = match vm.var() {
             Ok(var) => var,
@@ -424,6 +437,7 @@ async fn run_sections(
                         section: &section.name,
                         turns,
                         debug,
+                        completion_options: completion_options.as_ref(),
                     },
                 )
                 .await
@@ -570,6 +584,8 @@ struct SectionProgress<'a> {
     turns: &'a mut u32,
     /// Opt-in raw request/response capture for each model turn.
     debug: Option<&'a dyn DebugCapture>,
+    /// Per-call model overrides from `models.use`, or host default when `None`.
+    completion_options: Option<&'a CompletionOptions>,
 }
 
 /// Drive one section's model call to a final text reply, dispatching any tool
@@ -586,6 +602,10 @@ struct SectionProgress<'a> {
 /// `dispatch`,
 /// [`Error::ToolLoopExhausted`] if the cap is hit without a text reply, or any
 /// transport/backend error from a model call or a tool's own failure.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the tool-call loop is one sequential state machine; splitting it obscures the turn order"
+)]
 async fn run_tool_loop(
     client: &GatewayClient,
     schemas: &[ToolSchema],
@@ -601,6 +621,7 @@ async fn run_tool_loop(
         section,
         turns,
         debug,
+        completion_options,
     } = progress;
     let mut conversation = vec![Message::user(prose)];
     let tool_arg = if schemas.is_empty() {
@@ -614,7 +635,9 @@ async fn run_tool_loop(
     let nonce = make_nonce();
 
     for _ in 0..max_tool_iterations {
-        let completion = client.complete(&conversation, tool_arg).await;
+        let completion = client
+            .complete(&conversation, tool_arg, completion_options)
+            .await;
         if completion.is_err() {
             observer.observe(execution, section, detail::MODEL_TURN_FAILED);
         }

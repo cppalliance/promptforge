@@ -294,7 +294,13 @@ async fn a_call_after_a_reload_runs_the_new_body_and_a_broken_prompt_answers_wit
         Arc::clone(&fixture.config),
         Arc::clone(&fixture.catalog),
         Arc::new(Retrieval::idle()),
-        Arc::new(PreparedTools::new(&fixture.config.gateway).expect("prepare fixture live tools")),
+        Arc::new(
+            PreparedTools::new(
+                &fixture.config.gateway,
+                promptforge_core::model::ModelCatalog::empty(),
+            )
+            .expect("prepare fixture live tools"),
+        ),
     );
 
     let before = server
@@ -339,7 +345,13 @@ async fn a_prompt_added_mid_session_is_callable_on_the_same_handler() {
         Arc::clone(&fixture.config),
         Arc::clone(&fixture.catalog),
         Arc::new(Retrieval::idle()),
-        Arc::new(PreparedTools::new(&fixture.config.gateway).expect("prepare fixture live tools")),
+        Arc::new(
+            PreparedTools::new(
+                &fixture.config.gateway,
+                promptforge_core::model::ModelCatalog::empty(),
+            )
+            .expect("prepare fixture live tools"),
+        ),
     );
 
     let missing = server

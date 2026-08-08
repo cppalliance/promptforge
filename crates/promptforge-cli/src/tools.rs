@@ -91,8 +91,15 @@ tools.need("fetch", "Fetch a web page and return its main content as markdown.")
 "#,
         );
 
-        let bound = bind_prompt(prompt, &picker, &registry, "test-run", &NullObserver)
-            .expect("available fetch capability should bind");
+        let bound = bind_prompt(
+            prompt,
+            &picker,
+            &registry,
+            &promptforge_core::model::ModelCatalog::empty(),
+            "test-run",
+            &NullObserver,
+        )
+        .expect("available fetch capability should bind");
 
         assert_eq!(
             bound.alias_to_id().get("fetch"),
@@ -128,8 +135,15 @@ tools.need("search", "Search the web and return a list of results (title, url, d
 "#,
         );
 
-        let bound = bind_prompt(prompt, &picker, &registry, "test-run", &NullObserver)
-            .expect("available search capability should bind");
+        let bound = bind_prompt(
+            prompt,
+            &picker,
+            &registry,
+            &promptforge_core::model::ModelCatalog::empty(),
+            "test-run",
+            &NullObserver,
+        )
+        .expect("available search capability should bind");
 
         assert_eq!(
             bound.alias_to_id().get("search"),
@@ -165,8 +179,15 @@ tools.need("search", "Search the web and return a list of results (title, url, d
 "#,
         );
 
-        let error = bind_prompt(prompt, &picker, &registry, "test-run", &NullObserver)
-            .expect_err("unavailable search capability must not bind");
+        let error = bind_prompt(
+            prompt,
+            &picker,
+            &registry,
+            &promptforge_core::model::ModelCatalog::empty(),
+            "test-run",
+            &NullObserver,
+        )
+        .expect_err("unavailable search capability must not bind");
 
         assert!(matches!(error, Error::Absent { .. }));
     }

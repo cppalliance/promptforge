@@ -39,7 +39,13 @@ fn router_with(token: Secret) -> (TempDir, axum::Router) {
     let (dir, config) = fixture(&format!("token = \"{TOKEN}\"\n"));
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
-    let tools = Arc::new(PreparedTools::new(&config.gateway).expect("prepare fixture live tools"));
+    let tools = Arc::new(
+        PreparedTools::new(
+            &config.gateway,
+            promptforge_core::model::ModelCatalog::empty(),
+        )
+        .expect("prepare fixture live tools"),
+    );
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
@@ -233,7 +239,13 @@ async fn serving_over_http_without_a_token_is_refused_by_name() {
     assert!(config.server.token.is_none());
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
-    let tools = Arc::new(PreparedTools::new(&config.gateway).expect("prepare fixture live tools"));
+    let tools = Arc::new(
+        PreparedTools::new(
+            &config.gateway,
+            promptforge_core::model::ModelCatalog::empty(),
+        )
+        .expect("prepare fixture live tools"),
+    );
 
     let error = serve_http(
         Arc::new(config),

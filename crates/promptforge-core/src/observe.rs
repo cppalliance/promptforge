@@ -108,6 +108,30 @@ pub mod detail {
     pub const TOOL_SCOPE_VALIDATION_SUCCEEDED: &str = "Tool scope validation succeeded";
     /// A model-visible tool scope failed semantic validation.
     pub const TOOL_SCOPE_VALIDATION_FAILED: &str = "Tool scope validation failed";
+    /// Prompt-level model declarations began binding.
+    pub const MODEL_BINDING_STARTED: &str = "Model binding started";
+    /// Prompt-level model declarations bound successfully.
+    pub const MODEL_BINDING_SUCCEEDED: &str = "Model binding succeeded";
+    /// Prompt-level model declaration binding failed.
+    pub const MODEL_BINDING_FAILED: &str = "Model binding failed";
+    /// Live-catalog model binding validation began.
+    pub const MODEL_CATALOG_VALIDATION_STARTED: &str = "Model catalog validation started";
+    /// Live-catalog model binding validation succeeded.
+    pub const MODEL_CATALOG_VALIDATION_SUCCEEDED: &str = "Model catalog validation succeeded";
+    /// Live-catalog model binding validation failed.
+    pub const MODEL_CATALOG_VALIDATION_FAILED: &str = "Model catalog validation failed";
+    /// A section VM began replaying prompt-level model declarations.
+    pub const MODEL_REPLAY_STARTED: &str = "Model replay started";
+    /// A section VM replayed prompt-level model declarations exactly.
+    pub const MODEL_REPLAY_SUCCEEDED: &str = "Model replay succeeded";
+    /// A section VM's prompt-level model declaration replay differed.
+    pub const MODEL_REPLAY_FAILED: &str = "Model replay failed";
+    /// A section began closing its model selection.
+    pub const MODEL_SCOPE_CLOSING: &str = "Model scope closing";
+    /// A section's model selection was closed successfully.
+    pub const MODEL_SCOPE_CLOSED: &str = "Model scope closed";
+    /// A section's model selection could not be closed.
+    pub const MODEL_SCOPE_FAILED: &str = "Model scope failed";
     /// A harness-mediated store write succeeded.
     pub const STORE_WRITE_SUCCEEDED: &str = "Store write succeeded";
     /// A harness-mediated store write failed.

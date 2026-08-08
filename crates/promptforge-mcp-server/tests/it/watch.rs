@@ -86,7 +86,13 @@ async fn a_saved_prompt_is_callable_on_the_session_that_was_already_open() {
     .expect("the watcher starts")
     .expect("watch defaults to on");
 
-    let tools = Arc::new(PreparedTools::new(&config.gateway).expect("prepare fixture live tools"));
+    let tools = Arc::new(
+        PreparedTools::new(
+            &config.gateway,
+            promptforge_core::model::ModelCatalog::empty(),
+        )
+        .expect("prepare fixture live tools"),
+    );
     let server = PromptForgeServer::new(config, Arc::clone(&catalog), retrieval, tools);
     let (server_io, client_io) = tokio::io::duplex(4096);
     tokio::spawn(async move {

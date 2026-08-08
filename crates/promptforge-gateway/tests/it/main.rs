@@ -88,7 +88,11 @@ async fn happy_path_through_the_real_client() {
 
     let client = GatewayClient::new(&format!("http://{gateway}/v1"), "test-token", "test-model");
     let result = client
-        .complete(&[promptforge_core::client::Message::user("ping")], None)
+        .complete(
+            &[promptforge_core::client::Message::user("ping")],
+            None,
+            None,
+        )
         .await
         .unwrap();
     match result.result {

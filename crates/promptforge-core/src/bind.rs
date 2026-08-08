@@ -1,12 +1,11 @@
 //! Synchronous prompt-level capability binding.
 //!
-//! [`bind_prompt`] executes the parsed H1 shared program once in Lua tool
-//! declaration mode. Exact capability strings are resolved through the concrete
-//! picker at most once during that pass. Binding then validates one-to-one
-//! alias and identity mappings against the complete live registry. The
-//! resulting [`BoundPrompt`] owns the parsed prompt, frozen declaration replay
-//! data, atomic forward and reverse maps, selected picker diagnostics, and
-//! selected-set near-duplicate analysis, but exposes no mutation path.
+//! [`bind_prompt`] executes the parsed H1 shared program once in Lua
+//! declaration mode for tools and models. Exact capability strings are resolved
+//! through the concrete pickers during that pass. Binding then validates
+//! mappings against the live tool registry and model catalog. The resulting
+//! [`BoundPrompt`] owns the parsed prompt, frozen declaration replay data, and
+//! selected-set near-duplicate analysis for tools, but exposes no mutation path.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
@@ -15,7 +14,11 @@ use promptforge_tool_picker::{
     NearDuplicate, Outcome, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
 
-use crate::lua::{ToolBindings, ToolResolver, bind_tool_declarations};
+use crate::lua::{ToolBindings, ToolResolver, bind_shared_declarations};
+use crate::model::{
+    ModelBindings, ModelCatalog, ModelNeedOpts, ModelRegistry, ModelResolver, PickerModelResolver,
+    ResolvedModel, model_picker_from,
+};
 use crate::observe::{Observer, detail};
 use crate::parser::Prompt;
 use crate::tools::{ToolId, ToolRegistry};
@@ -32,6 +35,7 @@ use crate::{Error, Result};
 pub struct BoundPrompt {
     prompt: Prompt,
     bindings: ToolBindings,
+    models: ModelBindings,
     diagnostics: BTreeMap<ToolId, ToolDescriptor>,
     alias_to_id: BTreeMap<String, ToolId>,
     id_to_alias: BTreeMap<ToolId, String>,
@@ -44,6 +48,7 @@ impl BoundPrompt {
         Self {
             prompt,
             bindings: ToolBindings::default(),
+            models: ModelBindings::default(),
             diagnostics: BTreeMap::new(),
             alias_to_id: BTreeMap::new(),
             id_to_alias: BTreeMap::new(),
@@ -66,6 +71,7 @@ impl BoundPrompt {
         Self {
             prompt,
             bindings,
+            models: ModelBindings::default(),
             diagnostics,
             alias_to_id,
             id_to_alias,
@@ -79,10 +85,16 @@ impl BoundPrompt {
         &self.prompt
     }
 
-    /// Returns the frozen bindings and exact declaration replay sequence.
+    /// Returns the frozen tool bindings and exact declaration replay sequence.
     #[must_use]
     pub fn bindings(&self) -> &ToolBindings {
         &self.bindings
+    }
+
+    /// Returns the frozen model bindings and exact declaration replay sequence.
+    #[must_use]
+    pub fn models(&self) -> &ModelBindings {
+        &self.models
     }
 
     /// Returns selected picker descriptors keyed by stable core identity.
@@ -108,44 +120,49 @@ impl BoundPrompt {
     }
 }
 
-/// Binds every H1 `tools.need` declaration and validates the live registry.
+/// Binds every H1 `tools.need` and `models.need` declaration.
 ///
-/// The optional shared program is executed exactly once in the existing Lua
-/// declaration mode. Repeated byte-identical capability descriptions replay a
-/// cached picker decision, while descriptions differing by any byte are
-/// resolved independently. The complete `registry` is then checked for repeated
-/// stable identities before atomic forward and reverse binding maps are built.
-/// Every selected identity must be present in that registry. The picker then
-/// analyzes the complete selected set once so execution can validate each
-/// effective section scope without retaining or re-running the embedding model.
-///
-/// Binding observations are the fixed payload-free details from
-/// [`crate::observe::detail`]. They contain no alias, capability, candidate,
-/// identity, or picker diagnostic, and carry `execution` unchanged.
+/// The optional shared program is executed exactly once. Tool capabilities
+/// resolve through `picker`; model capabilities filter `models` then resolve
+/// through a picker rebuilt from that catalog (reusing `picker`'s embedder).
+/// Prompts that declare no `models.need` keep working with an empty catalog.
 ///
 /// # Errors
-/// Returns [`Error::Bind`] if the picker itself fails, [`Error::Absent`] when
-/// nothing fits, [`Error::Duplicate`] for one server's duplicate matches,
-/// [`Error::Ambiguous`] for a non-unique shortlist, or the existing Lua binding
-/// errors for invalid declaration programs. Returns
-/// [`Error::DuplicateLiveToolId`], [`Error::DuplicateAlias`],
-/// [`Error::ToolIdSelectedTwice`], or [`Error::PickedToolNotLive`] when an
-/// identity boundary is not one-to-one and complete. Returns
-/// [`Error::ToolScopeAnalysis`] if the picker cannot analyze every selected ID.
+/// Returns tool-binding errors as today, plus [`Error::ModelBind`],
+/// [`Error::ModelAbsent`], [`Error::ModelDuplicate`], [`Error::ModelAmbiguous`],
+/// [`Error::DuplicateModelAlias`], or [`Error::PickedModelNotLive`] for model
+/// declarations. Same-weight model aliases with different invocation params are
+/// legal and are not rejected as identity collisions.
 pub fn bind_prompt(
     prompt: Prompt,
     picker: &ToolPicker,
     registry: &ToolRegistry<'_>,
+    models: &ModelCatalog,
     execution: &str,
     observer: &dyn Observer,
 ) -> Result<BoundPrompt> {
-    bind_with_source(prompt, picker, registry, execution, observer)
+    let model_picker = if models.is_empty() {
+        None
+    } else {
+        Some(model_picker_from(picker, models)?)
+    };
+    bind_with_source(
+        prompt,
+        picker,
+        registry,
+        models,
+        model_picker.as_ref(),
+        execution,
+        observer,
+    )
 }
 
 fn bind_with_source<S>(
     prompt: Prompt,
     source: &S,
     registry: &ToolRegistry<'_>,
+    models: &ModelCatalog,
+    model_picker: Option<&ToolPicker>,
     execution: &str,
     observer: &dyn Observer,
 ) -> Result<BoundPrompt>
@@ -153,16 +170,36 @@ where
     S: DecisionSource + ?Sized,
 {
     let resolver = PickerResolver::new(source);
-    let bindings = if let Some(shared) = &prompt.shared {
-        bind_tool_declarations(shared, &resolver, execution, observer, &prompt.title)?
+    let model_resolver: Box<dyn ModelResolver> = match model_picker {
+        Some(model_picker) => Box::new(PickerModelResolver::new(models, model_picker)),
+        None => Box::new(
+            |description: &str, _: &ModelNeedOpts| -> Result<ResolvedModel> {
+                Err(Error::ModelAbsent {
+                    capability: description.to_owned(),
+                })
+            },
+        ),
+    };
+    let (bindings, model_bindings) = if let Some(shared) = &prompt.shared {
+        bind_shared_declarations(
+            shared,
+            &resolver,
+            model_resolver.as_ref(),
+            execution,
+            observer,
+            &prompt.title,
+        )?
     } else {
         observer.observe(execution, &prompt.title, detail::TOOL_BINDING_STARTED);
         observer.observe(execution, &prompt.title, detail::TOOL_BINDING_SUCCEEDED);
-        ToolBindings::default()
+        observer.observe(execution, &prompt.title, detail::MODEL_BINDING_STARTED);
+        observer.observe(execution, &prompt.title, detail::MODEL_BINDING_SUCCEEDED);
+        (ToolBindings::default(), ModelBindings::default())
     };
     let diagnostics = resolver.into_diagnostics()?;
     let (alias_to_id, id_to_alias) =
         validate_registry_and_bindings(&bindings, registry, execution, observer, &prompt.title)?;
+    validate_model_catalog(&model_bindings, models, execution, observer, &prompt.title)?;
     let selected_ids = bindings
         .bindings()
         .iter()
@@ -175,11 +212,49 @@ where
     Ok(BoundPrompt {
         prompt,
         bindings,
+        models: model_bindings,
         diagnostics,
         alias_to_id,
         id_to_alias,
         near_duplicates,
     })
+}
+
+fn validate_model_catalog(
+    bindings: &ModelBindings,
+    catalog: &ModelCatalog,
+    execution: &str,
+    observer: &dyn Observer,
+    section: &str,
+) -> Result<()> {
+    observer.observe(execution, section, detail::MODEL_CATALOG_VALIDATION_STARTED);
+    let registry = ModelRegistry::new(catalog);
+    let result = (|| {
+        let mut seen_aliases = BTreeSet::new();
+        for binding in bindings.bindings() {
+            let alias = binding.alias().to_owned();
+            if !seen_aliases.insert(alias.clone()) {
+                return Err(Error::DuplicateModelAlias { alias });
+            }
+            if !registry.contains(binding.id()) {
+                return Err(Error::PickedModelNotLive {
+                    alias,
+                    id: binding.id().clone(),
+                });
+            }
+        }
+        Ok(())
+    })();
+    observer.observe(
+        execution,
+        section,
+        if result.is_ok() {
+            detail::MODEL_CATALOG_VALIDATION_SUCCEEDED
+        } else {
+            detail::MODEL_CATALOG_VALIDATION_FAILED
+        },
+    );
+    result
 }
 
 fn validate_registry_and_bindings(
@@ -375,8 +450,11 @@ mod tests {
 
     use serde_json::{Value, json};
 
+    use promptforge_tool_picker::{Catalog, Config as PickerConfig};
+
     use super::*;
-    use crate::lua::LuaProgram;
+    use crate::lua::{LuaProgram, bind_tool_declarations};
+    use crate::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
     use crate::observe::NullObserver;
     use crate::observe::Observer;
     use crate::parser::Frontmatter;
@@ -739,6 +817,8 @@ mod tests {
             ))),
             &source,
             &registry,
+            &ModelCatalog::empty(),
+            None,
             EXECUTION,
             &NullObserver,
         )
@@ -776,6 +856,8 @@ mod tests {
             ))),
             &AnalysisSource { fail: false },
             &registry,
+            &ModelCatalog::empty(),
+            None,
             EXECUTION,
             &NullObserver,
         )
@@ -799,6 +881,8 @@ mod tests {
             ))),
             &AnalysisSource { fail: true },
             &registry,
+            &ModelCatalog::empty(),
+            None,
             EXECUTION,
             &NullObserver,
         )
@@ -828,6 +912,8 @@ mod tests {
                 )))),
                 &source,
                 &registry,
+                &ModelCatalog::empty(),
+                None,
                 EXECUTION,
                 &recorder,
             );
@@ -846,7 +932,15 @@ mod tests {
                     ),
                     (
                         "Private title".to_owned(),
+                        detail::MODEL_BINDING_STARTED.to_owned(),
+                    ),
+                    (
+                        "Private title".to_owned(),
                         detail::TOOL_BINDING_SUCCEEDED.to_owned(),
+                    ),
+                    (
+                        "Private title".to_owned(),
+                        detail::MODEL_BINDING_SUCCEEDED.to_owned(),
                     ),
                     (
                         "Private title".to_owned(),
@@ -855,6 +949,14 @@ mod tests {
                     (
                         "Private title".to_owned(),
                         detail::TOOL_REGISTRY_VALIDATION_SUCCEEDED.to_owned(),
+                    ),
+                    (
+                        "Private title".to_owned(),
+                        detail::MODEL_CATALOG_VALIDATION_STARTED.to_owned(),
+                    ),
+                    (
+                        "Private title".to_owned(),
+                        detail::MODEL_CATALOG_VALIDATION_SUCCEEDED.to_owned(),
                     ),
                 ]
             } else {
@@ -865,7 +967,15 @@ mod tests {
                     ),
                     (
                         "Private title".to_owned(),
+                        detail::MODEL_BINDING_STARTED.to_owned(),
+                    ),
+                    (
+                        "Private title".to_owned(),
                         detail::TOOL_BINDING_FAILED.to_owned(),
+                    ),
+                    (
+                        "Private title".to_owned(),
+                        detail::MODEL_BINDING_FAILED.to_owned(),
                     ),
                 ]
             };
@@ -884,8 +994,16 @@ mod tests {
         };
         let recorder = Recorder::default();
         let registry = ToolRegistry::new(std::iter::empty());
-        let bound =
-            bind_with_source(prompt(None), &source, &registry, EXECUTION, &recorder).unwrap();
+        let bound = bind_with_source(
+            prompt(None),
+            &source,
+            &registry,
+            &ModelCatalog::empty(),
+            None,
+            EXECUTION,
+            &recorder,
+        )
+        .unwrap();
 
         assert!(bound.bindings().bindings().is_empty());
         assert!(bound.diagnostics().is_empty());
@@ -903,11 +1021,27 @@ mod tests {
                 ),
                 (
                     "Private title".to_owned(),
+                    detail::MODEL_BINDING_STARTED.to_owned(),
+                ),
+                (
+                    "Private title".to_owned(),
+                    detail::MODEL_BINDING_SUCCEEDED.to_owned(),
+                ),
+                (
+                    "Private title".to_owned(),
                     detail::TOOL_REGISTRY_VALIDATION_STARTED.to_owned(),
                 ),
                 (
                     "Private title".to_owned(),
                     detail::TOOL_REGISTRY_VALIDATION_SUCCEEDED.to_owned(),
+                ),
+                (
+                    "Private title".to_owned(),
+                    detail::MODEL_CATALOG_VALIDATION_STARTED.to_owned(),
+                ),
+                (
+                    "Private title".to_owned(),
+                    detail::MODEL_CATALOG_VALIDATION_SUCCEEDED.to_owned(),
                 ),
             ]
         );
@@ -926,6 +1060,8 @@ mod tests {
             prompt(Some(program("tools.need('alias', 'bind')"))),
             &source,
             &registry,
+            &ModelCatalog::empty(),
+            None,
             EXECUTION,
             &NullObserver,
         )
@@ -951,6 +1087,8 @@ mod tests {
             ))),
             &source,
             &registry,
+            &ModelCatalog::empty(),
+            None,
             EXECUTION,
             &NullObserver,
         )
@@ -969,6 +1107,47 @@ mod tests {
     }
 
     #[test]
+    fn two_model_aliases_sharing_one_id_with_different_invocation_bind() {
+        // Tools reject one live id under two aliases; models keep that legal
+        // when the aliases freeze different invocation params.
+        let catalog = ModelCatalog::new([ModelDescriptor::new(
+            ModelId::gateway("analyst"),
+            "A careful analysis model",
+            131_072,
+            ThinkingMode::Switchable,
+        )]);
+        let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
+            .expect("empty tool picker must build");
+        let registry = ToolRegistry::new(std::iter::empty());
+
+        let bound = bind_prompt(
+            prompt(Some(program(
+                r#"models.need("cool", "careful analysis", { temperature = 0, thinking = false })
+models.need("warm", "careful analysis", { temperature = 0.7, thinking = true, max_tokens = 128 })"#,
+            ))),
+            &picker,
+            &registry,
+            &catalog,
+            EXECUTION,
+            &NullObserver,
+        )
+        .expect("same ModelId under two aliases with different invocation must bind");
+
+        let models = bound.models().bindings();
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].alias(), "cool");
+        assert_eq!(models[1].alias(), "warm");
+        assert_eq!(models[0].id(), models[1].id());
+        assert_eq!(models[0].id().name(), "analyst");
+        assert_ne!(models[0].invocation(), models[1].invocation());
+        assert_eq!(models[0].invocation().temperature, Some(0.0));
+        assert_eq!(models[0].invocation().thinking, Some(false));
+        assert_eq!(models[1].invocation().temperature, Some(0.7));
+        assert_eq!(models[1].invocation().thinking, Some(true));
+        assert_eq!(models[1].invocation().max_tokens, Some(128));
+    }
+
+    #[test]
     fn picker_selected_id_absent_from_live_registry_fails_atomically() {
         let source = FixtureSource {
             calls: AtomicUsize::new(0),
@@ -980,6 +1159,8 @@ mod tests {
             prompt(Some(program("tools.need('alias', 'bind')"))),
             &source,
             &registry,
+            &ModelCatalog::empty(),
+            None,
             EXECUTION,
             &NullObserver,
         )
@@ -1006,6 +1187,8 @@ mod tests {
             ))),
             &source,
             &registry,
+            &ModelCatalog::empty(),
+            None,
             EXECUTION,
             &recorder,
         );
@@ -1020,7 +1203,15 @@ mod tests {
                 ),
                 (
                     "Private title".to_owned(),
+                    detail::MODEL_BINDING_STARTED.to_owned(),
+                ),
+                (
+                    "Private title".to_owned(),
                     detail::TOOL_BINDING_SUCCEEDED.to_owned(),
+                ),
+                (
+                    "Private title".to_owned(),
+                    detail::MODEL_BINDING_SUCCEEDED.to_owned(),
                 ),
                 (
                     "Private title".to_owned(),

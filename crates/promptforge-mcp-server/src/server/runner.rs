@@ -167,6 +167,7 @@ async fn run_observed(
             prompt,
             binding_tools.picker(),
             &live,
+            binding_tools.models(),
             &binding_execution,
             binding_observer.as_ref(),
         )

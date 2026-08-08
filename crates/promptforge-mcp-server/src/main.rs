@@ -102,10 +102,6 @@ fn run(invocation: &Invocation) -> Result<(), Box<dyn std::error::Error>> {
     // ten prompts is one whose catalog silently disagrees with its own
     // configuration, and a client sees only a missing tool.
     let catalog = Catalog::resolve(&config, OnBroken::Reject)?;
-    // Tool capability binding is synchronous and model-backed. Prepare its
-    // complete live registry and picker once before the async executor exists,
-    // then share the immutable result across every run.
-    let tools = Arc::new(PreparedTools::new(&config.gateway)?);
     // Prepare the optional prompt-retrieval index before the runtime for the
     // same blocking-CPU reason. Unlike the required execution picker above, a
     // failed retrieval index costs `need_prompt` and nothing else.
@@ -116,6 +112,10 @@ fn run(invocation: &Invocation) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
+    // Tool/model capability binding is synchronous and model-backed. Prepare
+    // the live registry, picker, and gateway model catalog once, then share
+    // the immutable result across every run.
+    let tools = Arc::new(runtime.block_on(PreparedTools::load(&config.gateway))?);
     let stdio = invocation.stdio;
     runtime.block_on(async move {
         // Started inside the runtime, because the debounce window is a task, and
