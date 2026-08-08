@@ -45,6 +45,54 @@ pub(crate) fn require_gateway_env() -> Result<GatewayEnv> {
     require_gateway_env_from(|name| std::env::var(name).ok())
 }
 
+/// Formats a failed run so the first line leads with `prompt.md:LINE:` when
+/// core mapped a Lua error to an absolute prompt line.
+pub(crate) fn format_dev_failure(prompt_path: &Path, error: &anyhow::Error) -> String {
+    let detail = format!("{error:#}");
+    if let Some(line) = first_mapped_prompt_line(&detail) {
+        format!(
+            "dev run failed: {}:{}: {detail}",
+            prompt_path.display(),
+            line
+        )
+    } else {
+        format!("dev run failed: {detail}")
+    }
+}
+
+/// Pulls the innermost absolute prompt line from a core-mapped Lua error.
+///
+/// Core prefixes failures as `section \`Name\` epilog:51: ...`. Prefer the
+/// last such tag so a fanout parent wrapper does not hide the arm that failed.
+fn first_mapped_prompt_line(message: &str) -> Option<u32> {
+    let mut found = None;
+    let mut rest = message;
+    while let Some(idx) = rest.find(':') {
+        let after = &rest[idx + 1..];
+        let digit_end = after
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(after.len());
+        if digit_end > 0
+            && after.as_bytes().get(digit_end) == Some(&b':')
+            && let Ok(line) = after[..digit_end].parse::<u32>()
+        {
+            // Ignore tiny lines that are just HTTP status noise; prompt lines
+            // for real files are almost never in the URL/port range alone, but
+            // the surrounding tag (`epilog` / `preamble` / `library`) is the
+            // real filter.
+            let before = &rest[..idx];
+            if before.ends_with("epilog")
+                || before.ends_with("preamble")
+                || before.ends_with("library")
+            {
+                found = Some(line);
+            }
+        }
+        rest = &rest[idx + 1..];
+    }
+    found
+}
+
 /// [`require_gateway_env`] with an injected variable lookup for offline tests.
 pub(crate) fn require_gateway_env_from(
     lookup: impl Fn(&str) -> Option<String>,
@@ -195,8 +243,11 @@ mod tests {
     use promptforge_core::model::ModelCatalog;
     use promptforge_core::observe::{Observer, detail};
 
+    use std::path::Path;
+
     use super::{
-        GatewayEnv, VerboseObserver, format_record, require_gateway_env_from, run_once_with,
+        GatewayEnv, VerboseObserver, first_mapped_prompt_line, format_dev_failure, format_record,
+        require_gateway_env_from, run_once_with,
     };
 
     #[derive(Clone, Debug, Default)]
@@ -255,6 +306,19 @@ mod tests {
         assert_eq!(
             format_record("dev-00000000deadbeef", "Research", "Lua: checkpoint"),
             "[dev-00000000deadbeef] Research: Lua: checkpoint"
+        );
+    }
+
+    #[test]
+    fn mapped_lua_failure_leads_with_prompt_path_and_line() {
+        let detail = "run briefer.md: lua error: lua error: section `Web Search` epilog:51: \
+             [string \"section `Web Search` epilog\"]:51: assertion failed!";
+        assert_eq!(first_mapped_prompt_line(detail), Some(51));
+        let error = anyhow::anyhow!(detail);
+        let formatted = format_dev_failure(Path::new("briefer.md"), &error);
+        assert!(
+            formatted.starts_with("dev run failed: briefer.md:51:"),
+            "expected path:line prefix, got {formatted}"
         );
     }
 

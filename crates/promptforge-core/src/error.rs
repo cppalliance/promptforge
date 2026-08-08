@@ -74,10 +74,12 @@ pub enum Error {
     Lua(String),
 
     /// Lua source was not syntactically valid at its prompt location.
-    #[error("lua compilation error at {location}: {message}")]
+    #[error("lua compilation error at {location} (line {source_line}): {message}")]
     LuaCompile {
         /// The prompt region supplied by the parser, such as a section preamble.
         location: String,
+        /// 1-based line number in the prompt source where this Lua region starts.
+        source_line: u32,
         /// The retained source that failed to compile.
         lua_source: String,
         /// The Lua 5.4 compiler diagnostic.
