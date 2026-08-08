@@ -10,7 +10,7 @@ max_tool_iterations: 100
 ```lua
 models.always("writer",
     "A careful analysis model suited to structured reasoning and long-context review",
-    { thinking = false, temperature = 0 })
+    { thinking = false, temperature = 0, context = 65536 })
 tools.need("search", "Search the web and return a list of results.")
 tools.need("fetch", "Fetch a URL and return its main content as markdown.")
 ```
@@ -61,7 +61,7 @@ Evidence packet:
 
 {{ var.evidence }}
 
-You are a research analyist describing an entity. Write the following information as a structured report. ALWAYS use evidence from the packet. NEVER invent or fabricate facts.
+You are a research analyst describing an entity. Write the following information as a structured report. ALWAYS use evidence from the packet. NEVER invent or fabricate facts.
 
 - Subject Profile - founding, leadership, structure, stated mission
 - Domain Primer - three to five structural facts a reader needs to understand this domain
@@ -70,7 +70,7 @@ You are a research analyist describing an entity. Write the following informatio
 - Domain-Specific Vulnerabilities - sector-specific risks with sources
 
 ```lua
-store.write("report.md", reply .. "\n\n*" .. sys.when .. " - " .. sys.model .. "*")
+store.write("report.md", (reply:gsub("%s+$", "")) .. "\n\n*" .. sys.when .. " - " .. sys.model .. "*")
 ```
 
 ## Epilog
