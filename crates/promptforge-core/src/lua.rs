@@ -545,7 +545,11 @@ fn bind_shared_declarations_inner(
             always: state.always,
             declarations: state.declarations,
         },
-        ModelBindings::from_parts(model_state.bindings, model_state.declarations),
+        ModelBindings::from_parts(
+            model_state.bindings,
+            model_state.declarations,
+            model_state.always,
+        ),
     ))
 }
 
