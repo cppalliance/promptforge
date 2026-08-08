@@ -18,8 +18,6 @@ use promptforge_tool_picker::{Config as PickerConfig, ToolPicker};
 
 mod tools;
 
-const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8081/v1";
-
 /// Entry point. Dispatches subcommands and maps errors to a non-zero exit.
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -72,10 +70,16 @@ async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
         }
     };
 
-    let base_url =
-        std::env::var("PROMPTFORGE_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_owned());
-    let token = std::env::var("PROMPTFORGE_TOKEN").ok();
-    let available = tools::available_tools(&base_url, token.as_deref());
+    let key = std::env::var("PROMPTFORGE_GATEWAY_KEY").ok();
+    let base_url = match std::env::var("PROMPTFORGE_GATEWAY_URL") {
+        Ok(url) => url,
+        Err(_) if key.is_some() => {
+            eprintln!("error: missing environment variable PROMPTFORGE_GATEWAY_URL");
+            return ExitCode::FAILURE;
+        }
+        Err(_) => String::new(),
+    };
+    let available = tools::available_tools(&base_url, key.as_deref());
     let picker = match ToolPicker::build(available.catalog().clone(), PickerConfig::default()) {
         Ok(picker) => picker,
         Err(e) => {
@@ -83,8 +87,8 @@ async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let models = match &token {
-        Some(token) => match fetch_model_catalog(&base_url, token).await {
+    let models = match &key {
+        Some(key) => match fetch_model_catalog(&base_url, key).await {
             Ok(catalog) => catalog,
             Err(error) => {
                 eprintln!("error: fetch model catalog: {error}");

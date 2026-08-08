@@ -83,7 +83,7 @@ pub enum Protocol {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Config {
-    /// Server bind address and shared token.
+    /// Server bind address and shared key.
     pub server: ServerConfig,
     /// Waiting-queue settings for limited endpoints.
     #[serde(default)]
@@ -216,8 +216,8 @@ pub struct LocalModelConfig {
 pub struct ServerConfig {
     /// The socket address to bind.
     pub bind: SocketAddr,
-    /// The shared bearer token every `/v1/*` request must present.
-    pub token: Secret,
+    /// The shared bearer key every `/v1/*` request must present.
+    pub key: Secret,
 }
 
 /// One backend the gateway can forward to.
@@ -651,7 +651,7 @@ mod tests {
     const SAMPLE: &str = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -683,7 +683,7 @@ endpoints = ["anthropic"]
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -708,7 +708,7 @@ endpoints = ["anthropic"]
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -733,7 +733,7 @@ endpoints = ["anthropic"]
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -760,7 +760,7 @@ mystery = true
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -809,7 +809,7 @@ endpoints = ["anthropic"]
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "dup"
@@ -841,7 +841,7 @@ endpoints = ["dup"]
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "real"
@@ -867,7 +867,7 @@ endpoints = ["ghost"]
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "real"
@@ -893,7 +893,7 @@ endpoints = []
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -939,7 +939,7 @@ api_key = "secret-key"
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [queue]
 max_depth = 50
@@ -978,7 +978,7 @@ endpoints = ["anthropic"]
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -1005,7 +1005,7 @@ endpoints = ["anthropic"]
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [queue]
 max_depth = 0
@@ -1034,7 +1034,7 @@ endpoints = ["anthropic"]
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[local_model]]
 name = "qwen-local"
@@ -1065,7 +1065,7 @@ thinking = "never"
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [local]
 cache_dir = "/tmp/pf-models"
@@ -1100,7 +1100,7 @@ n_predict = 256
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "e"
@@ -1132,7 +1132,7 @@ context = 4096
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[local_model]]
 name = "q"
@@ -1152,7 +1152,7 @@ context = 4096
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[local_model]]
 name = "q"
@@ -1171,7 +1171,7 @@ context = 4096
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[device]]
 id = "anthropic"
@@ -1229,7 +1229,7 @@ context = 4096
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-token = "t"
+key = "t"
 
 [[endpoint]]
 id = "e"

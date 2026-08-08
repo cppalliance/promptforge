@@ -10,7 +10,7 @@ promptforge: 1
 tools.need("search", "Search the web and return a list of results (title, url, description).")
 ```
 
-This prompt declares a web-search capability. Without `PROMPTFORGE_TOKEN` the
+This prompt declares a web-search capability. Without `PROMPTFORGE_GATEWAY_KEY` the
 dev registry carries only `web_fetch`, so binding must fail loudly as an
 absent capability before any model call.
 

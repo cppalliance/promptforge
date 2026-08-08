@@ -210,12 +210,11 @@ fn every_setting_a_reload_cannot_apply_is_named() {
 
     let elsewhere = Config::from_toml_str(
         "[server]\ntoken = \"shared\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:9999/v1\"\ntoken = \"gw\"\nmodel = \"m\"\n",
+         [gateway]\nurl = \"http://127.0.0.1:9999/v1\"\nkey = \"gw\"\n",
     )
     .expect("the candidate configuration");
     let named = ignored_changes(&boot, &elsewhere);
     assert!(named.contains(&"[gateway].url"), "{named:?}");
-    assert!(named.contains(&"[gateway].model"), "{named:?}");
     assert!(named.contains(&"[paths].prompts"), "{named:?}");
 }
 

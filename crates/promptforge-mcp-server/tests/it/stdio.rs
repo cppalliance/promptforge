@@ -60,7 +60,7 @@ fn fixture_with(root: &Path, prompts: &[(&str, &str)], server_lines: &str) -> Pa
         &config,
         format!(
             "[server]\n{server_lines}\n\
-             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
              [paths]\nprompts = '{}'\n\n\
              [catalog]\ninclude = [\"*.md\"]\n",
             directory.display()

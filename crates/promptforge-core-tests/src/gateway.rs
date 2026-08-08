@@ -458,7 +458,7 @@ pub(crate) fn render_profile(
     format!(
         r#"[server]
 bind = "{LOOPBACK}:{port}"
-token = "{token}"
+key = "{token}"
 
 [[local_model]]
 name = "{model_name}"
@@ -565,7 +565,7 @@ mod tests {
             SCENARIO_MODEL_NAME,
         );
         assert!(rendered.contains("bind = \"127.0.0.1:12345\""));
-        assert!(rendered.contains("token = \"secret-token\""));
+        assert!(rendered.contains("key = \"secret-token\""));
         assert!(rendered.contains(&format!("name = \"{SCENARIO_MODEL_NAME}\"")));
         assert!(rendered.contains(SCENARIO_MODEL_URL));
         assert!(rendered.contains(SCENARIO_MODEL_SHA256));

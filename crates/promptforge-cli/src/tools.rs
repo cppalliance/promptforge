@@ -46,12 +46,13 @@ impl AvailableTools {
 
 /// Builds every concrete tool currently available to the CLI.
 ///
-/// `web_fetch` is unconditional. `web_search` is included only when `token` is
-/// present, because that bearer is the credential needed to invoke the gateway.
-pub(crate) fn available_tools(base_url: &str, token: Option<&str>) -> AvailableTools {
+/// `web_fetch` is unconditional. `web_search` is included only when `key` and a
+/// non-empty gateway URL are both present, because that bearer and base URL are
+/// the credentials needed to invoke the gateway.
+pub(crate) fn available_tools(base_url: &str, key: Option<&str>) -> AvailableTools {
     let mut live: Vec<Box<dyn Tool>> = vec![Box::new(WebFetch::new())];
-    if let Some(token) = token {
-        live.push(Box::new(WebSearch::new(base_url, token)));
+    if let Some(key) = key.filter(|_| !base_url.is_empty()) {
+        live.push(Box::new(WebSearch::new(base_url, key)));
     }
 
     let catalog = Catalog::new(live.iter().map(|tool| descriptor(tool.as_ref())).collect());
@@ -108,6 +109,37 @@ tools.need("fetch", "Fetch a web page and return its main content as markdown.")
                 "web_fetch"
             ))
         );
+    }
+
+    #[test]
+    fn key_without_url_excludes_web_search_and_need_is_absent() {
+        let available = available_tools("", Some("test-token"));
+        let registry = available.registry();
+        assert!(
+            registry
+                .tools()
+                .iter()
+                .all(|tool| tool.id().name() != "web_search")
+        );
+        let picker = ToolPicker::build(available.catalog().clone(), Config::default())
+            .expect("fixture picker should build");
+        let prompt = parse_prompt(
+            r#"
+tools.need("search", "Search the web and return a list of results (title, url, description).")
+"#,
+        );
+
+        let error = bind_prompt(
+            prompt,
+            &picker,
+            &registry,
+            &promptforge_core::model::ModelCatalog::empty(),
+            "test-run",
+            &NullObserver,
+        )
+        .expect_err("search without a gateway URL must not bind");
+
+        assert!(matches!(error, Error::Absent { .. }));
     }
 
     #[test]

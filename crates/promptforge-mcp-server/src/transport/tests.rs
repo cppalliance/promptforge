@@ -62,7 +62,7 @@ fn fixture(server_lines: &str) -> (TempDir, Config) {
     fs::write(dir.path().join("echo.md"), ECHO).expect("write the fixture prompt");
     let config = Config::from_toml_str(&format!(
         "[server]\n{server_lines}\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\ntoken = \"gw\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
          [catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()

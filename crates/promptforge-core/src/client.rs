@@ -5,8 +5,8 @@
 //! asked for. [`GatewayClient::complete`] sends a `tools` array when the caller
 //! supplies one, so the executor's tool-call loop runs over this client.
 //! Streaming is not supported. The client holds only the gateway's URL and the
-//! shared token; the vendor credential lives in the gateway, so the executor
-//! never sees it. Point `PROMPTFORGE_BASE_URL` at a local server or another
+//! shared key; the vendor credential lives in the gateway, so the executor
+//! never sees it. Point `PROMPTFORGE_GATEWAY_URL` at a local server or another
 //! gateway to retarget it.
 
 use std::fmt;
@@ -17,17 +17,6 @@ use serde_json::Value;
 use crate::model::CompletionOptions;
 use crate::normalize::{CompletionNormalizer, OpenAiChatNormalizer};
 use crate::{Error, Result};
-
-/// Default backend base URL (the local development gateway).
-const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8081/v1";
-/// The model a run uses when nothing names one.
-///
-/// [`GatewayClient::from_env`] falls back to it when `PROMPTFORGE_MODEL` is
-/// unset. It is public because a caller configured from a file rather than the
-/// environment - the MCP server is one - needs the same fallback when its
-/// configuration leaves the model out, and two spellings of "the default model"
-/// would drift.
-pub const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
 
 /// A single chat message.
 ///
@@ -153,13 +142,12 @@ pub struct Completion {
     pub(crate) response_body: Value,
 }
 
-/// A chat completions client bound to one gateway, token, and model.
+/// A chat completions client bound to one gateway URL and shared bearer key.
 #[derive(Clone)]
 pub struct GatewayClient {
     http: reqwest::Client,
     base_url: String,
-    token: String,
-    model: String,
+    key: String,
     normalizer: Arc<dyn CompletionNormalizer>,
 }
 
@@ -167,8 +155,7 @@ impl fmt::Debug for GatewayClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GatewayClient")
             .field("base_url", &self.base_url)
-            .field("token", &self.token)
-            .field("model", &self.model)
+            .field("key", &self.key)
             .finish_non_exhaustive()
     }
 }
@@ -178,16 +165,11 @@ impl GatewayClient {
     /// [`GatewayClient::from_env`]). A trailing slash on `base_url` is trimmed.
     /// The response normalizer defaults to [`OpenAiChatNormalizer`].
     #[must_use]
-    pub fn new(
-        base_url: &str,
-        token: impl Into<String>,
-        model: impl Into<String>,
-    ) -> GatewayClient {
+    pub fn new(base_url: &str, key: impl Into<String>) -> GatewayClient {
         GatewayClient {
             http: reqwest::Client::new(),
             base_url: base_url.trim_end_matches('/').to_string(),
-            token: token.into(),
-            model: model.into(),
+            key: key.into(),
             normalizer: OpenAiChatNormalizer::shared(),
         }
     }
@@ -201,25 +183,13 @@ impl GatewayClient {
 
     /// Build a client from the environment.
     ///
-    /// - Base URL: `PROMPTFORGE_BASE_URL`, else the local gateway.
-    /// - Model: `PROMPTFORGE_MODEL`, else a sane default.
-    /// - Token: `PROMPTFORGE_TOKEN`, the gateway's shared bearer. Required.
+    /// - URL: `PROMPTFORGE_GATEWAY_URL`. Required.
+    /// - Key: `PROMPTFORGE_GATEWAY_KEY`, the gateway's shared bearer. Required.
     ///
     /// # Errors
-    /// Returns [`Error::MissingEnv`] when `PROMPTFORGE_TOKEN` is not set.
+    /// Returns [`Error::MissingEnv`] when either variable is not set.
     pub fn from_env() -> Result<GatewayClient> {
-        let token = std::env::var("PROMPTFORGE_TOKEN")
-            .map_err(|_| Error::MissingEnv("PROMPTFORGE_TOKEN".into()))?;
-        let base_url =
-            std::env::var("PROMPTFORGE_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.into());
-        let model = std::env::var("PROMPTFORGE_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into());
-        Ok(GatewayClient::new(&base_url, token, model))
-    }
-
-    /// The model this client will call.
-    #[must_use]
-    pub fn model(&self) -> &str {
-        &self.model
+        from_env_with(|name| std::env::var(name).ok())
     }
 
     /// Send a list of messages and return the model's outcome.
@@ -229,11 +199,8 @@ impl GatewayClient {
     /// `tool_choice` set to `auto`); passing `None` or an empty slice sends no
     /// `tools` field, preserving the plain chat-completions behavior.
     ///
-    /// When `options` is `Some`, its fields override or extend the request:
-    /// `model` replaces the client's construction-time model, `temperature` and
-    /// `max_tokens` are set when present, and `thinking` emits
-    /// `chat_template_kwargs.enable_thinking`. Passing `None` keeps today's
-    /// host-default request shape.
+    /// `options.model` names the model on the wire. Optional `temperature`,
+    /// `max_tokens`, and `thinking` extend the request when present.
     ///
     /// # Errors
     /// Returns [`Error::Http`] on a transport failure, [`Error::Backend`] when
@@ -245,13 +212,10 @@ impl GatewayClient {
         &self,
         messages: &[Message],
         tools: Option<&[ToolSchema]>,
-        options: Option<&CompletionOptions>,
+        options: &CompletionOptions,
     ) -> Result<Completion> {
-        let model = options
-            .and_then(|options| options.model.as_deref())
-            .unwrap_or(&self.model);
         let mut request_body = serde_json::json!({
-            "model": model,
+            "model": options.model,
             "messages": messages,
         });
         if let Some(tools) = tools.filter(|tools| !tools.is_empty()) {
@@ -271,24 +235,22 @@ impl GatewayClient {
             request_body["tools"] = Value::Array(wrapped);
             request_body["tool_choice"] = Value::String("auto".into());
         }
-        if let Some(options) = options {
-            if let Some(temperature) = options.temperature {
-                request_body["temperature"] = serde_json::json!(temperature);
-            }
-            if let Some(max_tokens) = options.max_tokens {
-                request_body["max_tokens"] = serde_json::json!(max_tokens);
-            }
-            if let Some(thinking) = options.thinking {
-                request_body["chat_template_kwargs"] = serde_json::json!({
-                    "enable_thinking": thinking,
-                });
-            }
+        if let Some(temperature) = options.temperature {
+            request_body["temperature"] = serde_json::json!(temperature);
+        }
+        if let Some(max_tokens) = options.max_tokens {
+            request_body["max_tokens"] = serde_json::json!(max_tokens);
+        }
+        if let Some(thinking) = options.thinking {
+            request_body["chat_template_kwargs"] = serde_json::json!({
+                "enable_thinking": thinking,
+            });
         }
 
         let response = self
             .http
             .post(format!("{}/chat/completions", self.base_url))
-            .bearer_auth(&self.token)
+            .bearer_auth(&self.key)
             .json(&request_body)
             .send()
             .await
@@ -321,12 +283,65 @@ impl GatewayClient {
     }
 }
 
+fn from_env_with(lookup: impl Fn(&str) -> Option<String>) -> Result<GatewayClient> {
+    let base_url = lookup("PROMPTFORGE_GATEWAY_URL")
+        .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_URL".into()))?;
+    let key = lookup("PROMPTFORGE_GATEWAY_KEY")
+        .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_KEY".into()))?;
+    Ok(GatewayClient::new(&base_url, key))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn lookup_from<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        let pairs: Vec<(String, String)> = pairs
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect();
+        move |name| {
+            pairs
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone())
+        }
+    }
+
+    #[test]
+    fn from_env_missing_gateway_url() {
+        let err = from_env_with(lookup_from(&[("PROMPTFORGE_GATEWAY_KEY", "tok")]))
+            .expect_err("missing URL must fail");
+        assert!(matches!(
+            err,
+            Error::MissingEnv(name) if name == "PROMPTFORGE_GATEWAY_URL"
+        ));
+    }
+
+    #[test]
+    fn from_env_missing_gateway_key() {
+        let err = from_env_with(lookup_from(&[(
+            "PROMPTFORGE_GATEWAY_URL",
+            "http://127.0.0.1:8081/v1",
+        )]))
+        .expect_err("missing key must fail");
+        assert!(matches!(
+            err,
+            Error::MissingEnv(name) if name == "PROMPTFORGE_GATEWAY_KEY"
+        ));
+    }
+
+    #[test]
+    fn client_constructs_without_model() {
+        let client = GatewayClient::new("http://127.0.0.1:8081/v1", "tok");
+        assert_eq!(
+            format!("{client:?}"),
+            "GatewayClient { base_url: \"http://127.0.0.1:8081/v1\", key: \"tok\", .. }"
+        );
+    }
+
     #[tokio::test]
-    async fn complete_merges_per_call_options() {
+    async fn complete_sends_completion_options_model_on_the_wire() {
         use std::sync::{Arc, Mutex};
 
         use axum::Router;
@@ -358,15 +373,15 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        let client = GatewayClient::new(&format!("http://{addr}/v1"), "tok", "default-model");
+        let client = GatewayClient::new(&format!("http://{addr}/v1"), "tok");
         let options = CompletionOptions {
-            model: Some("analyst".into()),
+            model: "analyst".into(),
             temperature: Some(0.0),
             max_tokens: Some(128),
             thinking: Some(false),
         };
         client
-            .complete(&[Message::user("hi")], None, Some(&options))
+            .complete(&[Message::user("hi")], None, &options)
             .await
             .unwrap();
         let body = captured.lock().expect("capture lock").clone().unwrap();
@@ -405,9 +420,15 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        let client = GatewayClient::new(&format!("http://{addr}/v1"), "tok", "m");
+        let client = GatewayClient::new(&format!("http://{addr}/v1"), "tok");
+        let options = CompletionOptions {
+            model: "m".into(),
+            temperature: None,
+            max_tokens: None,
+            thinking: None,
+        };
         let err = client
-            .complete(&[Message::user("hi")], None, None)
+            .complete(&[Message::user("hi")], None, &options)
             .await
             .expect_err("empty product must fail");
         assert!(matches!(err, Error::EmptyModelReply { .. }));

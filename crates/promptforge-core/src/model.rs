@@ -236,7 +236,7 @@ impl ModelBinding {
     #[must_use]
     pub fn completion_options(&self) -> CompletionOptions {
         CompletionOptions {
-            model: Some(self.id.name().to_owned()),
+            model: self.id.name().to_owned(),
             temperature: self.invocation.temperature,
             max_tokens: self.invocation.max_tokens,
             thinking: self.invocation.thinking,
@@ -244,11 +244,11 @@ impl ModelBinding {
     }
 }
 
-/// Optional per-call overrides merged into a chat-completions request body.
-#[derive(Debug, Clone, Default, PartialEq)]
+/// Per-call fields merged into a chat-completions request body.
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompletionOptions {
-    /// When set, overrides the client's construction-time model name.
-    pub model: Option<String>,
+    /// The caller-facing model name sent on the wire.
+    pub model: String,
     /// Sampling temperature.
     pub temperature: Option<f64>,
     /// Maximum generation tokens.
@@ -1049,7 +1049,7 @@ mod tests {
         let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
         let opts = scopes.model.as_ref().map(ModelBinding::completion_options);
         let expected = CompletionOptions {
-            model: Some("small".to_owned()),
+            model: "small".to_owned(),
             temperature: Some(0.0),
             max_tokens: None,
             thinking: Some(false),
@@ -1254,7 +1254,7 @@ mod tests {
         let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
         let opts = scopes.model.as_ref().map(ModelBinding::completion_options);
         let expected = CompletionOptions {
-            model: Some("small".to_owned()),
+            model: "small".to_owned(),
             temperature: Some(0.0),
             max_tokens: None,
             thinking: Some(false),
