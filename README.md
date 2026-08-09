@@ -47,7 +47,7 @@ Edit a prompt, run it against an already-running gateway, read the result. Inter
 cargo run -p promptforge-dev -- <prompt.md> [input] [--watch]
 ```
 
-The result is the only thing on stdout; every trace record and Lua `log()` checkpoint streams to stderr. After each run the store is cleared then dumped to `<prompt-stem>.store` beside the prompt (including after a failed run). Raw model turns land under `<prompt-stem>.store/.trace/`. Context, thinking, and `max_tokens` belong on the prompt under `models.need` / `models.always` - the binary accepts only the prompt path, optional input, and `--watch`. Full author workflow: [`crates/promptforge-dev/README.md`](crates/promptforge-dev/README.md).
+The result is the only thing on stdout; every trace record and Lua `log()` checkpoint streams to stderr. Each run clears `<prompt-stem>.store` beside the prompt, then write-through mirrors store files and raw model turns under `.trace/` as they arrive (including after a failed run). Context, thinking, and `max_tokens` belong on the prompt under `models.need` / `models.always` - the binary accepts only the prompt path, optional input, and `--watch`. Full author workflow: [`crates/promptforge-dev/README.md`](crates/promptforge-dev/README.md).
 
 ## Run
 
