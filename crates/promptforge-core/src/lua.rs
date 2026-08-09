@@ -1398,6 +1398,69 @@ impl SectionVm {
         Ok(vm)
     }
 
+    /// Creates a section VM, loads its shared library, then installs captured bindings.
+    ///
+    /// The shared program runs before any host API, including `log`, or captured
+    /// binding exists.
+    /// Its functions may refer to those globals because Lua resolves globals
+    /// when a function is called. Rust installs each captured Tool and Model
+    /// object directly after the shared load, without replaying H1 code.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if VM construction, shared-library execution, or
+    /// captured-binding installation fails.
+    pub fn new_for_section(
+        replay: Option<&LuaProgram>,
+        tools: &ToolBindings,
+        models: &ModelBindings,
+        execution: &str,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<Self> {
+        let mut vm = Self::new(None, execution, observer, section)?;
+        if let Some(program) = replay {
+            observer.observe(execution, section, detail::LUA_SHARED_LOAD_STARTED);
+            match vm.run_loaded_without_host(program) {
+                Ok(_) => observer.observe(execution, section, detail::LUA_SHARED_LOAD_SUCCEEDED),
+                Err(error) => {
+                    observer.observe(execution, section, detail::LUA_SHARED_LOAD_FAILED);
+                    return vm.construction_failed(error, observer, section);
+                }
+            }
+        }
+        vm.bound_tools = tools.clone();
+        vm.bound_models = models.clone();
+        if let Err(error) = vm.install_captured_bindings() {
+            return vm.construction_failed(error, observer, section);
+        }
+        Ok(vm)
+    }
+
+    fn install_captured_bindings(&self) -> Result<()> {
+        let globals = self.lua.globals();
+        for binding in self.bound_tools.bindings() {
+            let handle =
+                LuaToolHandle::from_binding(binding.alias(), binding.description(), binding.id());
+            let userdata = self
+                .lua
+                .create_userdata(handle)
+                .map_err(|error| Error::Lua(error.to_string()))?;
+            globals
+                .raw_set(binding.alias(), userdata)
+                .map_err(|error| Error::Lua(error.to_string()))?;
+        }
+        for binding in self.bound_models.bindings() {
+            let userdata = self
+                .lua
+                .create_userdata(LuaModelHandle::from_binding(binding))
+                .map_err(|error| Error::Lua(error.to_string()))?;
+            globals
+                .raw_set(binding.alias(), userdata)
+                .map_err(|error| Error::Lua(error.to_string()))?;
+        }
+        Ok(())
+    }
+
     /// Creates a section VM and replays frozen H1 tool declarations exactly.
     ///
     /// Model declarations are empty; use [`Self::new_with_shared_bindings`] when
@@ -2347,6 +2410,14 @@ impl SectionVm {
                     .call(());
                 finish_log_phase(&self.lua, result)
             })
+            .map_err(|error| program.map_runtime_error(&error))?;
+        scalar_return(returned)
+    }
+
+    fn run_loaded_without_host(&self, program: &LuaProgram) -> Result<Option<String>> {
+        let returned: MultiValue = program
+            .load(&self.lua)?
+            .call(())
             .map_err(|error| program.map_runtime_error(&error))?;
         scalar_return(returned)
     }

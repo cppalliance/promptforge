@@ -932,17 +932,27 @@ async fn run_sections(
         // grows, which is what the progress contract requires.
         observer.observe(execution, &section.name, detail::SECTION_STARTED);
 
-        let mut vm = match (live_path, prompt.replay.as_ref()) {
-            (true, replay) => SectionVm::new(replay, execution, observer, &section.name)?,
-            (false, Some(shared)) => SectionVm::new_with_shared_bindings(
-                shared,
+        let mut vm = if live_path {
+            SectionVm::new_for_section(
+                prompt.replay.as_ref(),
                 bindings,
                 models,
                 execution,
                 observer,
                 &section.name,
-            )?,
-            (false, None) => SectionVm::new(None, execution, observer, &section.name)?,
+            )?
+        } else {
+            match prompt.replay.as_ref() {
+                Some(shared) => SectionVm::new_with_shared_bindings(
+                    shared,
+                    bindings,
+                    models,
+                    execution,
+                    observer,
+                    &section.name,
+                )?,
+                None => SectionVm::new(None, execution, observer, &section.name)?,
+            }
         };
         if let Err(error) =
             vm.inject_host_with_var(args, &sys, store, last_reply.as_deref(), initial_var)
@@ -1452,16 +1462,20 @@ async fn run_execute_section(
     });
     observer.observe(execution, &section.name, detail::SECTION_STARTED);
 
-    let mut vm = match shared {
-        Some(program) => SectionVm::new_with_shared_bindings(
-            program,
-            bindings,
-            models,
-            execution,
-            observer,
-            &section.name,
-        )?,
-        None => SectionVm::new(None, execution, observer, &section.name)?,
+    let mut vm = if bound.is_none() {
+        SectionVm::new_for_section(shared, bindings, models, execution, observer, &section.name)?
+    } else {
+        match shared {
+            Some(program) => SectionVm::new_with_shared_bindings(
+                program,
+                bindings,
+                models,
+                execution,
+                observer,
+                &section.name,
+            )?,
+            None => SectionVm::new(None, execution, observer, &section.name)?,
+        }
     };
     if let Err(error) = vm.inject_host(args, &sys, store, last_reply) {
         vm.teardown(observer, &section.name);

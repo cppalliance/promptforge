@@ -309,16 +309,27 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
     let observer = observer.as_ref() as &dyn Observer;
     observer.observe(&execution, &worker.name, detail::FANOUT_ARM_STARTED);
 
-    let mut vm = match shared.as_ref() {
-        Some(program) => SectionVm::new_with_shared_bindings(
-            program,
+    let mut vm = if bound.is_none() {
+        SectionVm::new_for_section(
+            shared.as_ref(),
             &bindings,
             &models,
             &execution,
             observer,
             &worker.name,
-        )?,
-        None => SectionVm::new(None, &execution, observer, &worker.name)?,
+        )?
+    } else {
+        match shared.as_ref() {
+            Some(program) => SectionVm::new_with_shared_bindings(
+                program,
+                &bindings,
+                &models,
+                &execution,
+                observer,
+                &worker.name,
+            )?,
+            None => SectionVm::new(None, &execution, observer, &worker.name)?,
+        }
     };
 
     let sys = json!({
