@@ -6,7 +6,7 @@ promptforge: 1
 
 # Log Checkpoints
 
-```lua
+```lua shared
 log("shared loaded")
 ```
 

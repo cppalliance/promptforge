@@ -214,7 +214,7 @@ mod tests {
         )
         .expect("prepare fixture tools");
         let prompt = Prompt::parse(
-            "---\nname: fixture\ndescription: Binding fixture\npromptforge: 1\n---\n# Fixture\n\n```lua\ntools.need(\"fetch\", \"Fetch a web page and return its main content as markdown.\")\n```\n\n## Run\n\n```lua\nreturn \"done\"\n```\n",
+            "---\nname: fixture\ndescription: Binding fixture\npromptforge: 1\n---\n# Fixture\n\n```lua shared\ntools.need(\"fetch\", \"Fetch a web page and return its main content as markdown.\")\n```\n\n## Run\n\n```lua\nreturn \"done\"\n```\n",
             "test-run",
             &NullObserver,
         )

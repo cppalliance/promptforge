@@ -29,7 +29,7 @@ use crate::tools::{Tool, ToolId, ToolRegistry};
 const EXECUTION: &str = "execute-test";
 
 const MODEL_ALWAYS_SHARED: &str =
-    "```lua\nmodels.always('writer', 'A general model for tests')\n```\n\n";
+    "```lua shared\nmodels.always('writer', 'A general model for tests')\n```\n\n";
 
 const MODEL_ALWAYS_LINE: &str = "models.always('writer', 'A general model for tests')\n";
 
@@ -81,23 +81,28 @@ fn fixture_model_resolver(
 }
 
 fn ensure_model_shared(md: &str) -> String {
-    if md.contains("models.always") || md.contains("models.need") {
-        return md.to_string();
-    }
     let first_section = md.find("\n\n## ");
-    if let Some(marker) = md.find("```lua\n")
+    let mut source = md.to_string();
+    if let Some(marker) = source.find("```lua\n")
         && first_section.is_none_or(|section| marker < section)
     {
-        let mut out = md.to_string();
-        out.insert_str(marker + 7, MODEL_ALWAYS_LINE);
-        return out;
+        source.replace_range(marker..marker + "```lua".len(), "```lua shared");
+    }
+    if source.contains("models.always") || source.contains("models.need") {
+        return source;
+    }
+    if let Some(marker) = source.find("```lua shared\n")
+        && first_section.is_none_or(|section| marker < section)
+    {
+        source.insert_str(marker + "```lua shared\n".len(), MODEL_ALWAYS_LINE);
+        return source;
     }
     if let Some(pos) = first_section {
-        let mut out = md.to_string();
+        let mut out = source;
         out.insert_str(pos + 2, MODEL_ALWAYS_SHARED);
         return out;
     }
-    md.replacen(
+    source.replacen(
         "---\n\n",
         &format!("---\n\n# Test prompt\n\n{MODEL_ALWAYS_SHARED}"),
         1,
@@ -112,7 +117,7 @@ fn bound_for_model(md: &str) -> BoundPrompt {
             capability: "unexpected tool need in model-only fixture".to_owned(),
         })
     };
-    let (bindings, models) = if let Some(shared) = &prompt.shared {
+    let (bindings, models) = if let Some(shared) = &prompt.replay {
         bind_shared_declarations(
             shared,
             &no_tools,
@@ -145,7 +150,7 @@ fn bound_with_tools(
 ) -> BoundPrompt {
     let prompt = parse(md);
     let shared = prompt
-        .shared
+        .replay
         .as_ref()
         .expect("a tool fixture must declare shared Lua");
     let (bindings, models) = if shared.source().contains("models.") {
@@ -1536,7 +1541,7 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
         serde_json::to_string(&descriptor.enriched_text()).expect("serialize fixture capability");
     let source = format!(
         "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 1\n---\n\n\
-         # Lifecycle\n\n```lua\n\
+         # Lifecycle\n\n```lua shared\n\
          tools.need('echo', {capability})\n\
          tools.always('echo')\n\
          models.always('writer', 'A general model for tests')\n```\n\n\
@@ -1729,7 +1734,7 @@ async fn models_use_forwards_binding_completion_options_to_the_gateway() {
     )]);
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # T\n\n\
-```lua\n\
+```lua shared\n\
 models.need('analyst', 'careful analysis', { temperature = 0.25, max_tokens = 64, thinking = false })\n\
 ```\n\n\
 ## Only\n\n\
@@ -2435,7 +2440,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
 
     let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Concrete description.");
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua\ntools.need('local_alias', 'capability')\nmodels.always('writer', 'A general model for tests')\n```\n\n\
+# Test prompt\n\n```lua shared\ntools.need('local_alias', 'capability')\nmodels.always('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\nAsk without tools.\n";
     let prompt = bound_with_tools(
         md,
@@ -2476,7 +2481,7 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
     ));
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua\n\
+# Test prompt\n\n```lua shared\n\
 tools.need('local_alias', 'capability')\n\
 tools.always('local_alias')\n\
 models.always('writer', 'A general model for tests')\n```\n\n\
@@ -2527,7 +2532,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     ));
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua\n\
+# Test prompt\n\n```lua shared\n\
 tools.need('section_tool', 'capability')\n\
 models.always('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\n```lua\ntools.add('section_tool')\n```\n\nUse the tool.\n",
@@ -2586,7 +2591,7 @@ async fn near_duplicate_tools_are_valid_when_isolated_in_separate_sections() {
     let second_descriptor = picker_descriptor("second", "Similar operation two.");
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua\n\
+# Test prompt\n\n```lua shared\n\
 tools.need('first_local', 'first')\n\
 tools.need('second_local', 'second')\n\
 models.always('writer', 'A general model for tests')\n```\n\n\
@@ -2631,7 +2636,7 @@ async fn near_duplicate_effective_scope_fails_before_the_model_without_payload_r
     let second_descriptor = picker_descriptor("second", "Private similar description two.");
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua\n\
+# Test prompt\n\n```lua shared\n\
 tools.need('first_local', 'first')\n\
 tools.need('second_local', 'second')\n\
 models.always('writer', 'A general model for tests')\n```\n\n\
@@ -2810,7 +2815,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         "Echo a test value.",
     ));
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Test prompt\n\n```lua\n\
+        # Test prompt\n\n```lua shared\n\
         tools.need('echo', 'echo tool')\n\
         tools.always('echo')\n\
         models.always('writer', 'A general model for tests')\n```\n\n\
@@ -2850,7 +2855,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
 #[tokio::test]
 async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Test prompt\n\n```lua\n\
+        # Test prompt\n\n```lua shared\n\
         tools.need('search', 'search tool')\n\
         models.always('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n```lua\ntools.add('search')\n```\n\n\
@@ -2886,7 +2891,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
 #[tokio::test]
 async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Test prompt\n\n```lua\n\
+        # Test prompt\n\n```lua shared\n\
         tools.need('search', 'search tool')\n\
         models.always('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n```lua\ntools.add('search')\n```\n\n\
@@ -2930,7 +2935,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
     let scoped = ScopedFixtureTool::new("scoped", "canonical_scoped", "A scoped tool.");
     let global = ScopedFixtureTool::new("global_tool", "canonical_global", "A global tool.");
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Test prompt\n\n```lua\n\
+        # Test prompt\n\n```lua shared\n\
         tools.need('scoped', 'scoped tool')\n\
         tools.need('global_tool', 'global tool')\n\
         tools.always('scoped')\n\
@@ -2995,7 +3000,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
     let (addr, _, _) = spawn_aliased_tool_gateway("nonexistent").await;
     let tool = ScopedFixtureTool::new("echo", "canonical_echo", "Echo a test value.");
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Test prompt\n\n```lua\n\
+        # Test prompt\n\n```lua shared\n\
         tools.need('echo', 'echo tool')\n\
         tools.always('echo')\n\
         models.always('writer', 'A general model for tests')\n```\n\n\
@@ -3045,7 +3050,7 @@ async fn model_infer_single_shot_returns_text() {
     let addr = spawn_mock_gateway().await;
     let echo = Arc::new(EchoTool);
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-        # Test prompt\n\n```lua\n\
+        # Test prompt\n\n```lua shared\n\
         tools.need('echo', 'echo tool')\n\
         tools.always('echo')\n\
         writer = models.always('writer', 'A general model for tests')\n```\n\n\
@@ -3549,7 +3554,7 @@ Do work.\n\n\
 async fn fanout_exhausted_arm_exposes_failure_metadata() {
     let (addr, _) = spawn_always_tool_call().await;
     let md = "---\nname: t\ndescription: d\npromptforge: 1\nmax_tool_iterations: 2\n---\n\n\
-# Test prompt\n\n```lua\n\
+# Test prompt\n\n```lua shared\n\
 tools.need('echo', 'echo tool')\n\
 models.always('writer', 'A general model for tests')\n```\n\n\
 ## Parent\n\n\

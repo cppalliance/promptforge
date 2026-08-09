@@ -181,7 +181,7 @@ where
             },
         ),
     };
-    let (bindings, model_bindings) = if let Some(shared) = &prompt.shared {
+    let (bindings, model_bindings) = if let Some(shared) = &prompt.replay {
         bind_shared_declarations(
             shared,
             &resolver,
@@ -611,7 +611,7 @@ mod tests {
             .expect("fixture Lua must compile")
     }
 
-    fn prompt(shared: Option<LuaProgram>) -> Prompt {
+    fn prompt(replay: Option<LuaProgram>) -> Prompt {
         Prompt {
             frontmatter: Frontmatter {
                 name: "fixture".to_owned(),
@@ -621,7 +621,8 @@ mod tests {
                 max_tool_iterations: None,
             },
             title: "Private title".to_owned(),
-            shared,
+            replay,
+            h1_blocks: Vec::new(),
             description_text: String::new(),
             sections: Vec::new(),
         }
