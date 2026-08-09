@@ -3514,3 +3514,73 @@ return 'helped:' .. store.read('seen.txt')\n\
     assert_eq!(out, "helped:check");
     assert_eq!(store.read("seen.txt").expect("seen"), "check");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_returns_structured_results() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', '### Items')\n\
+assert(r[1].text == 'alpha-1')\n\
+assert(r[1].ok == true)\n\
+assert(r[1].item == 'alpha')\n\
+assert(r[1].exhausted == false)\n\
+assert(r[2].text == 'beta-2')\n\
+assert(r[2].ok == true)\n\
+assert(r[2].item == 'beta')\n\
+assert(r[2].exhausted == false)\n\
+assert(tostring(r[1]) == r[1].text)\n\
+assert(table.concat(r, ',') == 'alpha-1,beta-2')\n\
+return 'ok'\n\
+```\n\n\
+### Worker\n\n\
+```lua\nreturn item .. '-' .. sys.taskid\n```\n\n\
+Do work.\n\n\
+### Items\n\n\
+- alpha\n\
+- beta\n";
+    let out = run(&bound(md), "", &[], &StoreRef::memory(), silent())
+        .await
+        .expect("fanout must return structured results");
+    assert_eq!(out, "ok");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_exhausted_arm_exposes_failure_metadata() {
+    let (addr, _) = spawn_always_tool_call().await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\nmax_tool_iterations: 2\n---\n\n\
+# Test prompt\n\n```lua\n\
+tools.need('echo', 'echo tool')\n\
+models.always('writer', 'A general model for tests')\n```\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', '### Items')\n\
+assert(r[1].ok == false)\n\
+assert(r[1].exhausted == true)\n\
+assert(r[1].item == 'alpha')\n\
+assert(r[1].text:find('tool loop exhausted', 1, true))\n\
+assert(tostring(r[1]) == r[1].text)\n\
+return 'ok'\n\
+```\n\n\
+### Worker\n\n\
+```lua\ntools.add('echo')\n```\n\n\
+Loop forever on {{ item }}.\n\n\
+### Items\n\n\
+- alpha\n";
+    let prompt = bound_with_tools(md, &|_: &str| Ok(ToolId::new("tests", "echo")), Vec::new());
+    let out = run(
+        &prompt,
+        "",
+        &[Arc::new(EchoTool) as Arc<dyn Tool>],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .expect("soft-degraded fanout must still return structured results");
+    assert_eq!(out, "ok");
+}
