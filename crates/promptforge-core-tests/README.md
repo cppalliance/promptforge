@@ -1,6 +1,6 @@
 # `promptforge-core-tests`
 
-This unpublished workspace binary crate owns complete, author-shaped PromptForge files that exercise the public `promptforge-core` parse, deterministic declaration-binding, and offline execution APIs, plus an opt-in 0.6B scenario harness that self-hosts a temporary gateway for CI. It complements the core crate's narrow inline grammar and lifecycle tests without creating a second parser or fixture discovery mechanism.
+This unpublished workspace binary crate owns complete, author-shaped PromptForge files that exercise the public `promptforge-core` parse and live H1 execution APIs, plus an opt-in 0.6B scenario harness that self-hosts a temporary gateway for CI. It complements the core crate's narrow inline grammar and lifecycle tests without creating a second parser or fixture discovery mechanism.
 
 Interactive prompt development lives in `promptforge-dev`, not here.
 
@@ -14,7 +14,7 @@ cargo test -p promptforge-core-tests
 
 Every fixture is registered by name with an explicit `include_str!` in `src/suite.rs`, so adding a file without adding its expected public structure, error contract, or execution assertion cannot silently expand the suite. Valid fixtures assert parsed frontmatter, titles, shared Lua, section trees, and phase boundaries. Invalid fixtures assert the public error variant and a stable message fragment. Tool-free execution fixtures parse and run directly through the public live H1 path with an empty picker and model catalog. They assert exact Lua checkpoint sequences, scalar prologue early return, and store-backed fall-through across isolated sections using stable execution IDs and a mutex-backed observer. A concurrent regression partitions one shared recording by execution ID.
 
-The shipped-prompt smoke test discovers every Markdown file under the repository's `prompts/` directory, rejects concrete tool names, and requires each file to parse. The MCP server's owner tests retain the shipped-prompt semantic binding assertion against its complete live registry.
+The shipped-prompt smoke test discovers every Markdown file under the repository's `prompts/` directory, rejects concrete tool names, and requires each file to parse. The MCP server's owner tests retain the shipped-prompt live semantic resolution assertion against its complete registry.
 
 Ordinary tests do not load a generation model, start `promptforge-gateway`, call an external host, or require credentials. A cold workspace build may still acquire the core tool picker's separately pinned build-time embedding assets.
 
@@ -40,7 +40,7 @@ Ctrl-C is installed around the complete suite; an atomic cancellation flag inter
 
 `execution/real-text.md` requires one nonempty text completion carrying a requested marker. Its Lua epilog prefixes the returned result, so the runner proves both reply binding and epilog visibility, and the observer must report exactly one completed model turn.
 
-`execution/real-tool-call.md` exposes one concrete one-string tool under the prompt-local alias `ask_fixture`, distinct from its concrete wire name. The fixture requires a call with exactly `{"value":"promptforge-probe"}`. The tool rejects any extra, missing, or non-string argument, returns a deterministic result unavailable before dispatch, and records the parsed arguments. The runner proves one schema-valid aliased dispatch, a tool-result continuation, a nonempty final answer carrying both final and result markers, epilog visibility, exactly one successful tool call, and exactly two completed model turns under the fixture's two-turn budget. Its one-entry picker uses a zero similarity floor and margin so the scenario tests binding mechanics without making semantic ranking another live-model variable.
+`execution/real-tool-call.md` exposes one concrete one-string tool under the prompt-local alias `ask_fixture`, distinct from its concrete wire name. The fixture requires a call with exactly `{"value":"promptforge-probe"}`. The tool rejects any extra, missing, or non-string argument, returns a deterministic result unavailable before dispatch, and records the parsed arguments. The runner proves one schema-valid aliased dispatch, a tool-result continuation, a nonempty final answer carrying both final and result markers, epilog visibility, exactly one successful tool call, and exactly two completed model turns under the fixture's two-turn budget. Its one-entry picker uses a zero similarity floor and margin so the scenario tests live resolution mechanics without making semantic ranking another live-model variable.
 
 ## Pinned model (via gateway profile)
 

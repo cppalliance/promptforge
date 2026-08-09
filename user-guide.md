@@ -25,10 +25,10 @@ Say hello and tell the user something interesting about the number 42.
 A prompt file is Markdown with three parts:
 
 - **Frontmatter** - YAML between `---` fences. `name` and `description` are required at parse time. `promptforge: 1` is required when you run the prompt (engine major must be `1`).
-- **H1 heading** - exactly one. This is the prompt's title.
+- **H1 heading** - exactly one. This is the prompt's title and starts the live H1 program.
 - **H2 sections** - executable units. They run top to bottom.
 
-Prose between the H1 and the first H2 is the H1 description. It is not part of any H2 section.
+Ordinary Lua and prose between the H1 and the first H2 form the live H1 program. They run once before any H2 section. A file may also place one exact `lua shared` library fence there for functions that section VMs need.
 
 Save this as `hello.md` and run it:
 
@@ -102,7 +102,7 @@ The fenced `lua` block before the prose is the **prologue**. It runs before the 
 
 The prologue is an exact, unindented ` ```lua ` opening and ` ``` ` closing. Indented fences, longer backtick runs, or different capitalization are treated as ordinary prose.
 
-`models.use("writer")` selects a model binding resolved in live H1 (covered next). Without H1 declaring models, this would fail. For now, note the pattern: the prologue sets up what the model turn needs.
+`models.use("writer")` selects a model resolved in live H1 (covered next). Without H1 resolving models, this would fail. For now, note the pattern: the prologue sets up what the model turn needs.
 
 The prologue runs Lua before the model sees the prose.
 
@@ -536,11 +536,11 @@ Tell me one fact about {{ args }}.
 | `.max_tokens` | number or nil | Frozen max tokens, if set |
 | `.dialect` | string | Tool dialect name |
 
-All properties are read-only. The Model object represents a frozen binding - its parameters are locked when live H1 resolves it and cannot change during execution.
+All properties are read-only. The Model object is frozen - its parameters are locked when live H1 resolves it and cannot change during execution.
 
 You can declare multiple models with `models.need` and select between them per section with `models.use`. `models.always` sets the prompt-wide default.
 
-Model objects let you inspect bound model properties and select between multiple declared models.
+Model objects let you inspect resolved model properties and select between multiple resolved models.
 
 ## 12. Explicit Inference with model:infer()
 
@@ -761,7 +761,7 @@ return briefing
 - Runs the full section lifecycle
 - Returns the section's reply as a string
 
-The called section shares the run's store, observer, execution id, gateway client, and tool registry. It gets fresh `var`, a fresh conversation, and a fresh VM. Optional `input` overrides `args` for the callee; omit it to inherit the caller's input.
+The called section shares the run's store, observer, execution id, gateway client, and tool registry. It gets a fresh copy of the captured H1 `var`, a fresh conversation, and a fresh VM. Optional `input` overrides `args` for the callee; omit it to inherit the caller's input.
 
 `tasks["## Name"]` returns a Section object with `.name` and `.has_prose`. Missing headings are a hard error.
 
@@ -1134,7 +1134,7 @@ This prompt uses every major feature:
 
 | Feature | Where |
 |---|---|
-| Live H1 | Resolves model and tool bindings once |
+| Live H1 | Resolves models and tools once |
 | Tool objects | `search` and `fetch` globals passed to `tools.add` |
 | Model object | `writer` returned by `models.always` |
 | Fanout | `## Main` fans out `### Gather` over `### Topics` |
@@ -1158,7 +1158,7 @@ The execution flow:
 6. `## Report` injects evidence, model writes briefing, epilog stamps and returns
 7. `## Main` returns the report
 
-A complete pipeline prompt combines live H1 bindings, tool objects, fanout, store, execute, substitution, validation, and sys metadata.
+A complete pipeline prompt combines live H1 resolution, tool objects, fanout, store, execute, substitution, validation, and sys metadata.
 
 ## 21. API Reference
 
@@ -1177,8 +1177,8 @@ var.subject = args
 #### `reply`
 
 - **Type:** string or nil
-- **Available:** After a model turn in the current section; prologue of sections 2+ (previous section's reply); prose substitution as `{{ reply }}`
-- **Description:** The model's response text. Set after prose or `model:infer()`. Nil in section 1 before the first model turn. Using `{{ reply }}` when nil is a hard error.
+- **Available:** After a model turn in live H1 or the current section; prologue of sections 2+ (previous section's reply); prose substitution as `{{ reply }}`
+- **Description:** The model's response text. Set after prose or `model:infer()`. Nil before the first model turn. Using `{{ reply }}` when nil is a hard error.
 
 ```lua
 store.write("output.md", reply)
@@ -1433,7 +1433,7 @@ models.use("fast")
 
 - **Signature:** `model:infer(prompt: string, opts?: table) -> string`
 - **Returns:** Model response text
-- **Available:** Section Lua (requires an execution infer hook)
+- **Available:** Live H1 and section Lua (requires an execution infer hook)
 - **Description:** Explicit model call from Lua. Snapshots the current tool bag, runs the full tool loop, sets `reply`, returns the text. An optional `opts` table is accepted but currently ignored.
 
 ```lua
@@ -1648,6 +1648,25 @@ Worker prose with {{ item }}
 
 ---
 
+## 22. Quick Reference
+
+> **Rules:**
+>
+> - Non-final prose blocks: single-shot. One model round (may include tool calls for that round). Control moves to the next lua block after the model responds. Conversation accumulates.
+> - Final prose block: full tool loop. Model keeps calling tools until it produces text. That text becomes `reply`. Same as today.
+> - Lua blocks: run sequentially. Can mutate tool scope (`tools.add`), write to store, inspect `reply`, call `execute()` or `jump()`, call `model:infer()` explicitly.
+> - One conversation per section. Context grows across all blocks within the section. Cleared between sections.
+> - Sections are subroutines. `execute("## Name", input?)` runs a section in a fresh VM, full tool loop, returns its reply. Like fanout but sequential and single.
+> - `jump("## Name")` transfers control. Context clears. The current section stops. The named section runs next. No return to caller.
+
+H1 and section block order is:
+
+```
+[lua] [prose] [lua] [prose] ... [lua]
+```
+
+Live H1 runs this sequence exactly once. There is no bind phase and its blocks are never replayed. The optional H1-only `lua shared` library is compiled as `Prompt.replay` and loaded into each fresh section VM before host injection. Host APIs and captured capability objects are unavailable while that library loads, so top-level host calls fail. Functions defined there can use host APIs later, when called from section code.
+
 ### Quick Reference Table
 
 | Name | Kind | Available | Signature | Returns |
@@ -1671,3 +1690,5 @@ Worker prose with {{ item }}
 | `jump` | function | Section Lua | `jump(target)` | never |
 | `fanout` | function | Section Lua | `fanout(worker, list)` | FanoutResult[] |
 | `store.*` | functions | Live H1, section Lua | see Store Methods | varies |
+
+![Robot internals](images/banner-05.png)

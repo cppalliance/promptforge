@@ -1,14 +1,22 @@
-# `promptforge-core` produces bound, isolated Markdown prompt runs
+# `promptforge-core` produces isolated Markdown prompt runs
 
 ## Executive summary
 
-`promptforge-core` turns one PromptForge Markdown source into a validated run result. A host creates one execution id, parses the source into `Prompt`, binds semantic tool and model declarations into an immutable `BoundPrompt`, supplies one raw input string, a complete live tool registry, a model catalog, a run-scoped virtual file store, and an observer, then awaits `execute::run` under that same id.
+`promptforge-core` turns one PromptForge Markdown source into a validated run result. A host creates one execution id, parses the source into `Prompt`, then supplies that prompt, one raw input string, a prepared tool picker, a complete live tool registry, a model catalog, a run-scoped virtual file store, and an observer to `execute::run` under the same id. There is no bind phase.
 
-The language requires one H1, permits one immediately leading shared `lua` program, and executes top-level H2 sections in file order. Each section is an ordered sequence of alternating `lua` and prose blocks sharing one isolated Lua 5.4 VM and one accumulating conversation. Non-final prose is single-shot; the final prose block runs the full tool loop. Lua may call `model:infer`, `execute`, or `jump` for explicit inference and control flow. No Lua memory crosses sections; `StoreRef` and the previous section's `reply` text are the intentional mutable channels.
+The language requires one H1 and executes top-level H2 sections in file order. Ordinary H1 blocks alternate exactly like section blocks:
+
+```
+[lua] [prose] [lua] [prose] ... [lua]
+```
+
+Those H1 blocks run live exactly once, in source order. `tools.need`, `models.need`, and `models.always` resolve when reached, H1 may call `model:infer`, and H1 `var` and store effects become run state. One exact `lua shared` fence may appear anywhere in H1. The parser compiles that separate library chunk as `Prompt.replay`; each section VM loads it before any host APIs or frozen capability objects are installed. The live H1 blocks are never replayed.
+
+Each section is an ordered sequence of alternating `lua` and prose blocks sharing one isolated Lua 5.4 VM and one accumulating conversation. Non-final prose is single-shot; the final prose block runs the full tool loop. Lua may call `model:infer`, `execute`, or `jump` for explicit inference and control flow. No Lua memory crosses sections; captured H1 `var`, `StoreRef`, and the previous section's `reply` text are the intentional mutable channels.
 
 **Principle: prose in Markdown, code in Lua, no mixing.** Model-facing text lives in prose blocks. Programmable logic lives in exact `lua` fences. A `lua` fence in the middle of prose is prose; substitution never rewrites Lua source.
 
-Prompts depend on semantic aliases, never deployment vendor strings. Binding freezes one-to-one alias maps before execution. The observer reports deterministic borrowed `(execution, section, detail)` strings and cannot steer behavior. Expected failures return errors. The authoritative result is one string: scalar Lua return, frontmatter `default_return`, last model reply, or `"done"`.
+Prompts depend on semantic aliases, never deployment vendor strings. Live H1 resolution captures one-to-one alias maps for section VMs. The observer reports deterministic borrowed `(execution, section, detail)` strings and cannot steer behavior. Expected failures return errors. The authoritative result is one string: scalar Lua return, frontmatter `default_return`, last model reply, or `"done"`.
 
 `design-core-orig.md` is byte-for-byte historical and is not part of the current contract.
 
@@ -20,11 +28,11 @@ A prompt declares tools, models, context, thinking, and temperature. The host su
 
 ## Key design choices
 
-1. **A run is a free function over caller-owned resources.** Parse, bind, then `execute::run`. No executor object or process-global run state. The caller owns the execution id, prompt, live tools, model catalog, store, observer, optional gateway client, and optional `DebugCapture`.
+1. **A run is a free function over caller-owned resources.** Parse, then `execute::run`. No bind phase, executor object, or process-global run state. The caller owns the execution id, prompt, picker, live tools, model catalog, store, observer, optional gateway client, and optional `DebugCapture`.
 
-2. **One required H1 is the semantic prompt boundary.** Frontmatter is followed by exactly one non-empty H1. The H1 supplies the stable run title and the only location for shared declarations.
+2. **One required H1 is the semantic prompt boundary and a live program.** Frontmatter is followed by exactly one non-empty H1. Its ordinary Lua and prose blocks execute exactly once before the first H2. Capability resolution, inference, store access, and serializable `var` mutation are available there.
 
-3. **One exact leading `lua` fence carries shared code.** Blank lines may separate H1 from the unindented fence; only the leading position is reserved. The removed `lua prompt` info-token form is a parse error in that position.
+3. **One explicit `lua shared` fence carries the section library.** It may appear anywhere in H1 and is removed from the live block sequence. More than one, or any beneath H1, is a parse error. A plain H1 `lua` fence is always live code, with no single-fence compatibility magic. `Prompt.replay` stores the compiled library chunk.
 
 4. **A section is an ordered list of blocks, not a fixed three-phase template.** `Section.blocks` is `Vec<Block>` where `Block = Lua(program) | Prose { text, loop_capable }`. Any number of alternating lua/prose blocks is legal. Today's prologue/prose/epilog is exactly `[Lua, Prose, Lua]` and needs no migration. Compatibility helpers `Section::prologue`, `Section::prose`, and `Section::epilog` still project the classic shape when present.
 
@@ -34,7 +42,7 @@ A prompt declares tools, models, context, thinking, and temperature. The host su
 
 7. **Lua compiles at parse time; bytecode stays process-local.** `LuaProgram` retains source for diagnostics and private Lua 5.4 bytecode. A successful `Prompt` is syntactically executable; bytecode is never persisted.
 
-8. **One isolated VM survives the whole section lifecycle.** Shared load, host injection, every lua block, model awaits, `reply` binding, and teardown use one `SectionVm`. The VM is destroyed before fall-through.
+8. **One isolated VM survives the whole section lifecycle.** `Prompt.replay` loads first, while host APIs are unavailable. Rust then installs captured Tool and Model objects, followed by host injection. Every section Lua block, model await, `reply` update, and teardown uses that `SectionVm`. The VM is destroyed before fall-through.
 
 9. **Scalar Lua return is the only early exit from the run.** A top-level string, integer, number, or boolean return becomes the run result; nil continues; unsupported values fail. Inside `execute()`, a scalar return ends that subroutine and becomes its reply string; `jump` inside `execute()` is a hard error.
 
@@ -46,17 +54,17 @@ A prompt declares tools, models, context, thinking, and temperature. The host su
     - `models.need` / `models.always` return a Model userdata: `.name`, `.model_id`, `.description`, `.context`, `.thinking`, `.temperature`, `.max_tokens`, `.dialect`.
     - The `tasks` table maps `"## Name"` to Section userdata: `.name`, `.has_prose`. Pass a string or Section object to `execute` / `jump`.
 
-12. **`model:infer(prompt, opts?)` is explicit inference from Lua.** Available during section execution via `block_in_place` + `Handle::block_on` (same pattern as fanout). It snapshot-reads the current tool bag, runs the tool loop, returns text, sets the `reply` global, increments `tools.calls`, and publishes `sys.reply_finish_reason`. Multiple infers: last completed inference wins for `reply`. The implicit prose path stays executor-driven and does not call `infer`.
+12. **`model:infer(prompt, opts?)` is explicit inference from Lua.** Available during live H1 and section execution via `block_in_place` + `Handle::block_on` (same pattern as fanout). It snapshot-reads the current tool bag, runs the tool loop, returns text, sets the `reply` global, increments `tools.calls`, and publishes `sys.reply_finish_reason`. Multiple infers: last completed inference wins for `reply`. The implicit prose path stays executor-driven and does not call `infer`.
 
 13. **`ToolBag` caches schemas behind a generation counter.** `tools.add` bumps `ToolRuntime::generation`. `model:infer` rebuilds schemas/dispatch only on generation mismatch. Counts persist across infer and prose calls within the section; newly added tools seed at 0. The implicit prose path still uses `prepare_effective_scope`.
 
-14. **`execute(target, input?)` runs a section as a subroutine.** Fresh VM, fresh conversation, fresh `var`, same store/observer/execution id/gateway/registry. Recursion capped at 8. Returns the section's reply string. Target is `"## Name"` or a Section object.
+14. **`execute(target, input?)` runs a section as a subroutine.** Fresh VM, fresh conversation, a fresh copy of the captured H1 `var`, same store/observer/execution id/gateway/registry. Recursion capped at 8. Returns the section's reply string. Target is `"## Name"` or a Section object.
 
 15. **`jump(target)` transfers control.** The current section stops (no further blocks). Conversation and cross-section `reply` clear. The named top-level H2 runs next. No return to the caller. Unknown target is a hard error.
 
-16. **Prompts declare semantic needs under local aliases.** H1 `tools.need(alias, description)` and `models.need(alias, description, opts?)` use case-sensitive aliases matching `[A-Za-z][A-Za-z0-9_-]{0,63}`. Optional model `opts`: `context`, `thinking`, `temperature`, `max_tokens`. Declaring a need exposes nothing and selects no model. H2 `tools.add` scopes tools; H1 `tools.always` is for every model-facing section. H2 `models.use` selects at most one binding; H1 `models.always` is the prompt-wide default. Non-empty model-facing prose without either fails with `Error::ModelRequired`.
+16. **Prompts resolve semantic needs live under local aliases.** H1 `tools.need(alias, description)` and `models.need(alias, description, opts?)` use case-sensitive aliases matching `[A-Za-z][A-Za-z0-9_-]{0,63}`. Each call immediately asks the prepared picker and returns a frozen Tool or Model object. Optional model `opts`: `context`, `thinking`, `temperature`, `max_tokens`. A need exposes nothing and selects no model. H2 `tools.add` scopes tools; H1 `tools.always` is for every model-facing section. H2 `models.use` selects at most one captured model; H1 `models.always` is the prompt-wide default. Non-empty model-facing prose without either fails with `Error::ModelRequired`.
 
-17. **Binding freezes one-to-one maps before execution.** `bind_prompt` resolves tools through one prepared `ToolPicker`, validates the live `ToolRegistry`, filters `ModelCatalog` for models, and freezes `ModelBindings`. Duplicate live IDs, duplicate aliases, two aliases selecting one tool ID, and selected IDs absent from the registry all fail before execution. Effective-scope near-duplicates fail before a model sees tools.
+17. **Live H1 resolution captures one-to-one maps during execution.** Conditional needs resolve only when their branch runs. Duplicate live IDs, duplicate aliases, two aliases selecting one tool ID, and selected IDs absent from the registry fail at the resolving call. Rust installs the captured handles directly into every section VM, with no declaration replay or embedding work. Effective-scope near-duplicates fail before a model sees tools.
 
 18. **Per-VM `tools.calls` counts measure model behaviour.** Seeded at 0 for every in-scope alias. Incremented when dispatch is attempted. Unknown keys are hard errors. Out-of-scope model tool calls are `Error::OutOfScopeToolCall`. Counts are not rolled up across fanout arms.
 
@@ -74,28 +82,29 @@ A prompt declares tools, models, context, thinking, and temperature. The host su
 
 ## The public lifecycle
 
-`Prompt::parse(source, execution, observer)` validates structure, compiles executable Lua, and returns a `Prompt` (frontmatter, title, optional shared program, H1 description, top-level section tree with `blocks`).
+`Prompt::parse(source, execution, observer)` validates structure, compiles executable Lua, and returns a `Prompt` containing frontmatter, title, `h1_blocks`, optional `replay`, and the top-level section tree.
 
-`bind::bind_prompt(prompt, picker, registry, models, execution, observer)` returns `BoundPrompt`. No chat completion or tool call during binding.
-
-`execute::run(bound, args, tools, store, RunOptions)` gates the engine major, walks top-level H2 sections in source order (honoring `jump` transfers), and returns one string. After first prose (or scope close), a selected `models.use` or prompt-wide `models.always` supplies `CompletionOptions`. The model loop / infer path is capped by `max_tool_iterations` (default 24). Falling off the last section returns `default_return`, else last model reply, else `"done"`.
+`execute::run(prompt, args, ResolutionContext, tools, store, RunOptions)` gates the engine major, executes `h1_blocks` live exactly once, captures resolved Tool and Model objects plus the serialized H1 `var`, then walks top-level H2 sections in source order while honoring `jump` transfers. `ResolutionContext` carries the picker, complete tool registry, and model catalog. After first prose or scope close, a selected `models.use` or prompt-wide `models.always` supplies `CompletionOptions`. The model loop and infer path are capped by `max_tool_iterations` (default 24). Falling off the last section returns `default_return`, else last model reply, else `"done"`.
 
 ## Exact grammar keeps Markdown examples inert
 
-Every reserved opening line is exactly ```` ```lua ```` and every closing line is exactly ```` ``` ````. Openers are unindented and lowercase with no extra info tokens. Longer markers, indentation, other languages, and nested marker-looking lines remain prose.
+Ordinary executable openings are exactly ```` ```lua ````. The one library opening is exactly ```` ```lua shared ````. Every closing line is exactly ```` ``` ````. Openers are unindented and lowercase. Longer markers, indentation, other languages, and nested marker-looking lines remain prose.
 
-An H2 section may contain any number of exact leading/trailing/interior reserved fences alternating with prose. An exact Lua fence that is not a reserved boundary shape inside a longer fence remains prose. An unclosed reserved boundary is an error. H3 through H6 children parse into the tree; only explicit `fanout` runs children.
+H1 and each H2 section may contain ordinary Lua and prose in alternating source order. `lua shared` is allowed once in H1 only and does not become an H1 block. An exact Lua fence that is not a reserved boundary shape inside a longer fence remains prose. An unclosed reserved boundary is an error. H3 through H6 children parse into the tree; only explicit `fanout` runs children.
 
 ## Section execution
 
+Before the section walk, execute every live H1 block once. Resolver calls talk to the real picker, inference and store APIs are live, and the final serializable `var` is captured with the frozen capability maps.
+
 For each top-level section:
 
-1. Create `SectionVm`, load shared bytecode, inject `args`, sealed `sys` (including `section_name`, `execution`, `section_count`), new `var`, `store`, replay-backed `tools` / `models`, `tasks`, `execute`, `jump`, and previous `reply`.
-2. Walk `blocks` in order.
-3. Lua blocks run on the live VM. Scalar return ends the run (or the `execute` subroutine). `jump` stops the section and transfers.
-4. Before the first prose, close tool/model scope, seed `tools.calls`, enrich `sys.model`, prepare effective tool schemas.
-5. Non-empty prose substitutes, then runs single-shot or full loop per `loop_capable`. Empty/whitespace prose skips the model. Bind non-empty final text to `reply`; publish `sys.reply_finish_reason`.
-6. Teardown the VM. On jump: clear `reply`, jump to the target index. On scalar return: end the run. Else fall through.
+1. Create `SectionVm` and load `Prompt.replay` before host injection. At library load time `args`, `sys`, `var`, `store`, `reply`, `log`, tools, models, and control-flow APIs are unavailable, so top-level host calls fail. Pure Lua definitions may refer to those globals for later call-time resolution.
+2. Install captured Tool and Model handles directly from Rust, then inject `args`, sealed `sys` (including `section_name`, `execution`, `section_count`), H1-seeded `var`, `store`, `tasks`, `execute`, `jump`, and previous `reply`.
+3. Walk `blocks` in order.
+4. Lua blocks run on the live VM. Scalar return ends the run or the `execute` subroutine. `jump` stops the section and transfers.
+5. Before the first prose, close tool/model scope, seed `tools.calls`, enrich `sys.model`, and prepare effective tool schemas.
+6. Non-empty prose substitutes, then runs single-shot or full loop per `loop_capable`. Empty or whitespace prose skips the model. Bind non-empty final text to `reply`; publish `sys.reply_finish_reason`.
+7. Teardown the VM. On jump: clear `reply`, jump to the target index. On scalar return: end the run. Else fall through.
 
 ## Observation
 
@@ -119,7 +128,7 @@ Every `Tool` exposes stable `ToolId`, wire name, description, parameter schema, 
 
 ## Failures and non-goals
 
-Malformed frontmatter or Markdown, unsupported engine version, Lua failure, invalid log arguments, replay mismatch, invalid alias, tool/model binding abstention or ambiguity, identity collision, missing scoped alias, near-duplicate effective scope, substitution failure, model/tool/store failure, empty model product, tool-loop exhaustion, unknown jump target, execute depth overflow, and jump-inside-execute are returned through the crate error surface.
+Malformed frontmatter or Markdown, invalid `lua shared` placement or multiplicity, unsupported engine version, Lua failure, invalid log arguments, invalid alias, live tool/model resolution abstention or ambiguity, identity collision, missing scoped alias, near-duplicate effective scope, substitution failure, model/tool/store failure, empty model product, tool-loop exhaustion, unknown jump target, execute depth overflow, and jump-inside-execute are returned through the crate error surface.
 
 Persistent bytecode, cross-section Lua memory, child execution by fall-through, nested/dynamic fanout, reranking, and model-generated authoritative progress labels remain non-goals. OverlayStore, Lua-as-tool, model file tools, `tools.remove`, and store list/grep are out of scope for this design revision.
 

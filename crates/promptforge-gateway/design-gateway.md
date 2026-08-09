@@ -128,7 +128,7 @@ n_predict = 8192
 chat_template_file = "..."  # optional; passed as --chat-template-file when GGUF template lacks tools
 ```
 
-On start (and after switch-profile), each local model becomes a catalog entry: `description` appears in `GET /v1/models` so semantic bind works the same as for remote models. Each local endpoint uses `LocalUpstream`, which owns the child and respawns it on send after a post-ready death so catalog `upstream_name` and port stay stable. Dropping `LocalRuntime` (process exit or profile replace) drops those upstreams and kills every child.
+On start (and after switch-profile), each local model becomes a catalog entry: `description` appears in `GET /v1/models` so live H1 semantic resolution works the same as for remote models. Each local endpoint uses `LocalUpstream`, which owns the child and respawns it on send after a post-ready death so catalog `upstream_name` and port stay stable. Dropping `LocalRuntime` (process exit or profile replace) drops those upstreams and kills every child.
 
 After a local child is healthy, the gateway GETs llama `/props`, builds `DialectEvidence`, and resolves a `tool_dialect` through `promptforge-core`'s `ToolDialectRegistry` (hard-fail on none or tie). The catalog advertises `tool_dialect` and `tools_mode` (`native` or `emulated`). Remote OpenAI-compat models default to `openai` / `native`. When `/props` omits `chat_template`, a sibling `<stem>.md` beside the GGUF (written at HF provision with frontmatter plus a fenced Jinja `chat_template`) supplies fallback evidence; live props always win over a conflicting sidecar.
 
