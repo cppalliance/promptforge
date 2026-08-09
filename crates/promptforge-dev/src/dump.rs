@@ -161,6 +161,10 @@ impl Store for MirrorStore {
     fn glob(&self, pattern: &str) -> Result<Vec<String>, StoreError> {
         self.inner.glob(pattern)
     }
+
+    fn exists(&self, path: &str) -> bool {
+        self.inner.exists(path)
+    }
 }
 
 /// Writes raw model-turn payloads under `<prompt-stem>.store/.trace/` as each

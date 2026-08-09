@@ -1056,6 +1056,8 @@ pub struct SectionVm {
     counts_slot: Arc<Mutex<Option<ToolCallCounts>>>,
     /// Set by Lua `goto` before it aborts the current chunk.
     goto_slot: Arc<Mutex<Option<String>>>,
+    /// Live sealed `sys` JSON shared with `model:infer` for finish-reason updates.
+    sys_live: Arc<Mutex<Option<Json>>>,
     store: Option<StoreRef>,
     host_injected: bool,
 }
@@ -1122,6 +1124,7 @@ impl SectionVm {
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new_replay())),
             counts_slot: Arc::new(Mutex::new(None)),
             goto_slot: Arc::new(Mutex::new(None)),
+            sys_live: Arc::new(Mutex::new(None)),
             store: None,
             host_injected: false,
         };
@@ -1235,6 +1238,7 @@ impl SectionVm {
             model_runtime: Arc::clone(&model_runtime),
             counts_slot: Arc::new(Mutex::new(None)),
             goto_slot: Arc::new(Mutex::new(None)),
+            sys_live: Arc::new(Mutex::new(None)),
             store: None,
             host_injected: false,
         };
@@ -1344,6 +1348,13 @@ impl SectionVm {
         globals
             .raw_set("sys", sys_table)
             .map_err(|error| Error::Lua(error.to_string()))?;
+        {
+            let mut live = self
+                .sys_live
+                .lock()
+                .map_err(|_| Error::Lua("sys live slot was poisoned".to_owned()))?;
+            *live = Some(sys.clone());
+        }
         let var = self
             .lua
             .create_table()
@@ -1384,7 +1395,26 @@ impl SectionVm {
         globals
             .raw_set("sys", sys_table)
             .map_err(|error| Error::Lua(error.to_string()))?;
+        let mut live = self
+            .sys_live
+            .lock()
+            .map_err(|_| Error::Lua("sys live slot was poisoned".to_owned()))?;
+        *live = Some(sys.clone());
         Ok(())
+    }
+
+    /// Shared live `sys` JSON for `model:infer` finish-reason updates.
+    pub(crate) fn sys_live_handle(&self) -> Arc<Mutex<Option<Json>>> {
+        Arc::clone(&self.sys_live)
+    }
+
+    /// Snapshot of the live sealed `sys` JSON, or `fallback` when unset.
+    pub(crate) fn current_sys(&self, fallback: &Json) -> Json {
+        self.sys_live
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+            .unwrap_or_else(|| fallback.clone())
     }
 
     /// Executes a compiled prologue in this VM's persistent environment.
@@ -2914,6 +2944,14 @@ fn install_store_table<'scope, 'env: 'scope>(
         .set("glob", glob)
         .map_err(|e| Error::Lua(e.to_string()))?;
 
+    let handle = store.clone();
+    let exists = scope
+        .create_function(move |_, path: String| Ok(handle.exists(&path)))
+        .map_err(|e| Error::Lua(e.to_string()))?;
+    table
+        .set("exists", exists)
+        .map_err(|e| Error::Lua(e.to_string()))?;
+
     globals
         .raw_set("store", table)
         .map_err(|e| Error::Lua(e.to_string()))?;
@@ -2935,22 +2973,35 @@ pub(crate) fn enrich_sys_model(sys: &Json, binding: &ModelBinding) -> Json {
     }
 }
 
+/// Returns a copy of `sys` with `reply_finish_reason` set from the last inference.
+pub(crate) fn enrich_sys_reply_finish_reason(sys: &Json, reason: Option<&str>) -> Json {
+    match sys {
+        Json::Object(map) => {
+            let mut out = map.clone();
+            out.insert(
+                "reply_finish_reason".to_owned(),
+                match reason {
+                    Some(value) => Json::String(value.to_owned()),
+                    None => Json::Null,
+                },
+            );
+            Json::Object(out)
+        }
+        other => other.clone(),
+    }
+}
+
 /// Builds a sealed Lua `sys` table from runtime metadata.
 ///
-/// The proxy is empty; reads go through `__index` against the real data table
-/// and raise when the field is absent. `__newindex` rejects every write.
-/// `__metatable` is set so author code cannot replace the seal.
-fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
-    let data = match lua
-        .to_value(sys)
-        .map_err(|error| Error::Lua(error.to_string()))?
-    {
-        Value::Table(table) => table,
+/// The proxy is empty; reads go through `__index` against the JSON object and
+/// raise when the field is absent. Present `null` values surface as Lua nil.
+/// `__newindex` rejects every write. `__metatable` is set so author code cannot
+/// replace the seal.
+pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
+    let data = match sys {
+        Json::Object(map) => map.clone(),
         other => {
-            return Err(Error::Lua(format!(
-                "sys must be a table, got {}",
-                other.type_name()
-            )));
+            return Err(Error::Lua(format!("sys must be a table, got {other}")));
         }
     };
 
@@ -2962,16 +3013,17 @@ fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
         .map_err(|error| Error::Lua(error.to_string()))?;
 
     let index = lua
-        .create_function(move |_lua, (_table, key): (Value, Value)| {
+        .create_function(move |lua, (_table, key): (Value, Value)| {
             let Value::String(name) = key else {
                 return Err(mlua::Error::runtime(
                     "sys fields must be accessed by string key".to_owned(),
                 ));
             };
             let field = name.to_string_lossy();
-            match data.get::<Value>(field.as_str())? {
-                Value::Nil => Err(mlua::Error::runtime(format!("unknown sys field '{field}'"))),
-                value => Ok(value),
+            match data.get(field.as_str()) {
+                None => Err(mlua::Error::runtime(format!("unknown sys field '{field}'"))),
+                Some(Json::Null) => Ok(Value::Nil),
+                Some(value) => lua.to_value(value),
             }
         })
         .map_err(|error| Error::Lua(error.to_string()))?;
@@ -4941,6 +4993,36 @@ stack traceback:
     }
 
     // --- The always-on `store` table ---
+
+    #[test]
+    fn store_exists_returns_boolean() {
+        let store = StoreRef::memory();
+        assert_eq!(
+            run_with("return tostring(store.exists('missing.txt'))", &store)
+                .unwrap()
+                .returned
+                .as_deref(),
+            Some("false")
+        );
+        store.write("a.txt", "hi").expect("write");
+        assert_eq!(
+            run_with("return tostring(store.exists('a.txt'))", &store)
+                .unwrap()
+                .returned
+                .as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            run_with(
+                "store.delete('a.txt')\nreturn tostring(store.exists('a.txt'))",
+                &store,
+            )
+            .unwrap()
+            .returned
+            .as_deref(),
+            Some("false")
+        );
+    }
 
     #[test]
     fn store_write_then_read_lines_returns_numbered_content() {
