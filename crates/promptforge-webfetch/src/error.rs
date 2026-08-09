@@ -196,9 +196,10 @@ impl FetchError {
     /// returned as tool text rather than aborting the tool call.
     ///
     /// Recoverable: the target server/network failed, the content cannot be
-    /// processed, or a redirect hop was refused (downgrade, hop cap, or
-    /// redirect-target policy). The unsafe hop is still not followed; the model
-    /// can try a different URL.
+    /// processed, a redirect hop was refused (downgrade, hop cap, or
+    /// redirect-target policy), or the URL scheme is not permitted. The unsafe
+    /// request is still not sent; the model can try a different URL (for
+    /// example `https` instead of `http`).
     /// Hard (not recoverable): the requested URL itself violates admission
     /// policy or SSRF defenses before any useful retry shape exists.
     #[must_use]
@@ -213,6 +214,7 @@ impl FetchError {
                 | FetchError::Undecodable { .. }
                 | FetchError::Dns { .. }
                 | FetchError::RedirectRefused { .. }
+                | FetchError::BlockedScheme(_)
         )
     }
 }
@@ -308,9 +310,9 @@ mod tests {
             }
             .is_recoverable()
         );
+        assert!(FetchError::BlockedScheme("http".into()).is_recoverable());
         // Hard
         assert!(!FetchError::InvalidUrl("u".into()).is_recoverable());
-        assert!(!FetchError::BlockedScheme("http".into()).is_recoverable());
         assert!(!FetchError::Userinfo.is_recoverable());
         assert!(!FetchError::BlockedPort(22).is_recoverable());
         assert!(!FetchError::IpLiteral("1.2.3.4".into()).is_recoverable());
