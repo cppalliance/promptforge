@@ -102,6 +102,52 @@ impl BoundedCapture {
 
 type SharedCapture = Arc<Mutex<BoundedCapture>>;
 
+type SpawnFn = Box<dyn FnMut(&SpawnRequest<'_>) -> Result<Child> + Send>;
+
+/// Shared spawn callback used for the first start and later same-port respawns.
+#[derive(Clone)]
+struct ChildSpawner {
+    inner: Arc<Mutex<SpawnFn>>,
+}
+
+impl ChildSpawner {
+    fn new(spawn: impl FnMut(&SpawnRequest<'_>) -> Result<Child> + Send + 'static) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Box::new(spawn))),
+        }
+    }
+
+    fn production() -> Self {
+        Self::new(|request: &SpawnRequest<'_>| {
+            Command::new(request.executable)
+                .args(request.args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|source| {
+                    LocalError::Server(format!(
+                        "start llama-server at {}: {source}",
+                        request.executable.display()
+                    ))
+                })
+        })
+    }
+
+    fn spawn(&self, request: &SpawnRequest<'_>) -> Result<Child> {
+        (self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))(request)
+    }
+}
+
+impl std::fmt::Debug for ChildSpawner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ChildSpawner")
+    }
+}
+
 /// Launch knobs for one gateway-owned `llama-server` child.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LaunchOptions {
@@ -133,6 +179,8 @@ pub(crate) struct ServerGuard {
     stdout: SharedCapture,
     stderr: SharedCapture,
     readers: Vec<JoinHandle<()>>,
+    spawner: ChildSpawner,
+    policy: StartupPolicy,
 }
 
 impl ServerGuard {
@@ -148,20 +196,6 @@ impl ServerGuard {
     ) -> Result<Self> {
         let mut select_port = free_port;
         let mut make_identity = random_identity;
-        let mut spawn = |request: &SpawnRequest<'_>| {
-            Command::new(request.executable)
-                .args(request.args)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .map_err(|source| {
-                    LocalError::Server(format!(
-                        "start llama-server at {}: {source}",
-                        request.executable.display()
-                    ))
-                })
-        };
         Self::start_with(
             executable,
             model,
@@ -170,7 +204,7 @@ impl ServerGuard {
             PRODUCTION_POLICY,
             &mut select_port,
             &mut make_identity,
-            &mut spawn,
+            &ChildSpawner::production(),
         )
     }
 
@@ -186,7 +220,7 @@ impl ServerGuard {
         policy: StartupPolicy,
         select_port: &mut dyn FnMut() -> Result<u16>,
         make_identity: &mut dyn FnMut() -> AttemptIdentity,
-        spawn: &mut dyn FnMut(&SpawnRequest<'_>) -> Result<Child>,
+        spawner: &ChildSpawner,
     ) -> Result<Self> {
         let mut collisions = Vec::new();
         for attempt in 1..=policy.attempts {
@@ -209,7 +243,7 @@ impl ServerGuard {
                 #[cfg(test)]
                 api_key: &identity.api_key,
             };
-            let child = spawn(&request)?;
+            let child = spawner.spawn(&request)?;
             let stdout = Arc::new(Mutex::new(BoundedCapture::new(CAPTURE_LIMIT)));
             let stderr = Arc::new(Mutex::new(BoundedCapture::new(CAPTURE_LIMIT)));
             let mut guard = Self {
@@ -220,6 +254,8 @@ impl ServerGuard {
                 stdout,
                 stderr,
                 readers: Vec::with_capacity(2),
+                spawner: spawner.clone(),
+                policy,
             };
             guard.start_capture()?;
 
@@ -369,6 +405,71 @@ impl ServerGuard {
         self.child.try_wait().map_err(|source| {
             LocalError::Server(format!("inspect llama-server during readiness: {source}"))
         })
+    }
+
+    /// Returns whether the child process is still running.
+    ///
+    /// When the child has already exited, joins capture threads so a later
+    /// [`Self::respawn`] can attach fresh readers.
+    pub(crate) fn is_running(&mut self) -> Result<bool> {
+        if self.child_status()?.is_none() {
+            Ok(true)
+        } else {
+            self.join_readers();
+            Ok(false)
+        }
+    }
+
+    /// Kills the current child (if any) and starts a new one on the same port,
+    /// alias, and API key, then waits until authenticated readiness succeeds.
+    ///
+    /// # Errors
+    /// Returns [`LocalError::Server`] when kill, spawn, or readiness fails.
+    pub(crate) fn respawn(
+        &mut self,
+        executable: &Path,
+        model: &Path,
+        options: &LaunchOptions,
+    ) -> Result<()> {
+        let _ignored = self.child.kill();
+        let _ignored = self.child.wait();
+        self.join_readers();
+
+        let args = server_args(
+            model,
+            self.port,
+            &self.model_alias,
+            self.api_key.expose(),
+            options,
+        );
+        let request = SpawnRequest {
+            executable,
+            args: &args,
+            #[cfg(test)]
+            port: self.port,
+            #[cfg(test)]
+            model_alias: &self.model_alias,
+            #[cfg(test)]
+            api_key: self.api_key.expose(),
+        };
+        let child = self.spawner.spawn(&request)?;
+        self.child = child;
+        self.stdout = Arc::new(Mutex::new(BoundedCapture::new(CAPTURE_LIMIT)));
+        self.stderr = Arc::new(Mutex::new(BoundedCapture::new(CAPTURE_LIMIT)));
+        self.readers = Vec::with_capacity(2);
+        self.start_capture()?;
+
+        let interrupted = AtomicBool::new(false);
+        let policy = self.policy;
+        match self.wait_until_ready(&interrupted, policy)? {
+            WaitOutcome::Ready => Ok(()),
+            WaitOutcome::PortCollision(status) => Err(LocalError::Server(format!(
+                "llama-server respawn hit a port collision on {} with {status}\n{}\n{}",
+                self.port,
+                display_invocation(executable, &args),
+                self.diagnostics()
+            ))),
+        }
     }
 
     fn classify_early_exit(
@@ -569,6 +670,7 @@ where
 mod tests {
     use std::io::{Read as _, Write as _};
     use std::net::TcpStream;
+    use std::path::PathBuf;
 
     use super::*;
 
@@ -670,6 +772,15 @@ mod tests {
             (
                 "200 OK",
                 format!(r#"{{"data":[{{"id":"{model_alias}"}}]}}"#),
+            )
+        } else if request.starts_with("POST /v1/chat/completions ")
+            || request.starts_with("POST /chat/completions ")
+        {
+            (
+                "200 OK",
+                format!(
+                    r#"{{"model":"{model_alias}","choices":[{{"index":0,"message":{{"role":"assistant","content":"ok"}}}}]}}"#
+                ),
             )
         } else {
             ("404 Not Found", r#"{"error":"not found"}"#.to_owned())
@@ -827,7 +938,6 @@ mod tests {
                 .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
         };
         let mut make_identity = || deterministic_identity(0);
-        let mut spawn = |request: &SpawnRequest<'_>| spawn_fake_child(request);
         let interrupted = AtomicBool::new(false);
         let guard = ServerGuard::start_with(
             Path::new("fake-llama-server"),
@@ -837,7 +947,7 @@ mod tests {
             TEST_POLICY,
             &mut select_port,
             &mut make_identity,
-            &mut spawn,
+            &ChildSpawner::new(spawn_fake_child),
         )
         .expect("fake child should become ready");
         let key = guard.api_key().to_owned();
@@ -864,13 +974,6 @@ mod tests {
         };
         let attempted_ports = Arc::new(Mutex::new(Vec::new()));
         let recorded_ports = Arc::clone(&attempted_ports);
-        let mut spawn = move |request: &SpawnRequest<'_>| {
-            recorded_ports
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(request.port);
-            spawn_fake_child(request)
-        };
         let interrupted = AtomicBool::new(false);
 
         let guard = ServerGuard::start_with(
@@ -881,7 +984,13 @@ mod tests {
             TEST_POLICY,
             &mut select_port,
             &mut make_identity,
-            &mut spawn,
+            &ChildSpawner::new(move |request: &SpawnRequest<'_>| {
+                recorded_ports
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(request.port);
+                spawn_fake_child(request)
+            }),
         )
         .expect("retry should reach the spawned fake server");
 
@@ -908,13 +1017,6 @@ mod tests {
         let mut make_identity = || deterministic_identity(0);
         let child_id = Arc::new(Mutex::new(None));
         let recorded_id = Arc::clone(&child_id);
-        let mut spawn = move |request: &SpawnRequest<'_>| {
-            let child = spawn_fake_child(request)?;
-            *recorded_id
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(child.id());
-            Ok(child)
-        };
         let interrupted = AtomicBool::new(false);
 
         let guard = ServerGuard::start_with(
@@ -925,7 +1027,13 @@ mod tests {
             TEST_POLICY,
             &mut select_port,
             &mut make_identity,
-            &mut spawn,
+            &ChildSpawner::new(move |request: &SpawnRequest<'_>| {
+                let child = spawn_fake_child(request)?;
+                *recorded_id
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(child.id());
+                Ok(child)
+            }),
         )
         .expect("fake child should become ready");
         assert!(listener_is_present(port, Duration::from_millis(100)));
@@ -940,6 +1048,158 @@ mod tests {
             "ServerGuard Drop must kill the llama-server child"
         );
         assert!(!listener_is_present(port, Duration::from_millis(100)));
+    }
+
+    #[test]
+    fn respawn_reuses_port_and_identity_after_child_death() {
+        let port = free_port().expect("select free port");
+        let mut ports = VecDeque::from([port]);
+        let mut select_port = || {
+            ports
+                .pop_front()
+                .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
+        };
+        let mut make_identity = || deterministic_identity(0);
+        let spawn_log = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&spawn_log);
+        let interrupted = AtomicBool::new(false);
+
+        let mut guard = ServerGuard::start_with(
+            Path::new("fake-llama-server"),
+            Path::new("pinned-model.gguf"),
+            &options(false),
+            &interrupted,
+            TEST_POLICY,
+            &mut select_port,
+            &mut make_identity,
+            &ChildSpawner::new(move |request: &SpawnRequest<'_>| {
+                recorded
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push((
+                        request.port,
+                        request.model_alias.to_owned(),
+                        request.api_key.to_owned(),
+                    ));
+                spawn_fake_child(request)
+            }),
+        )
+        .expect("fake child should become ready");
+
+        let alias = guard.model_alias().to_owned();
+        let key = guard.api_key().to_owned();
+        let _ignored = guard.child.kill();
+        let _ignored = guard.child.wait();
+        assert!(!guard.is_running().expect("inspect dead child"));
+
+        guard
+            .respawn(
+                Path::new("fake-llama-server"),
+                Path::new("pinned-model.gguf"),
+                &options(false),
+            )
+            .expect("respawn should become ready on the same port");
+
+        assert_eq!(guard.port(), port);
+        assert_eq!(guard.model_alias(), alias);
+        assert_eq!(guard.api_key(), key);
+        assert!(guard.is_running().expect("inspect respawned child"));
+        let log = spawn_log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0], (port, alias.clone(), key.clone()));
+        assert_eq!(log[1], (port, alias, key));
+    }
+
+    #[test]
+    fn local_upstream_send_respawns_dead_child_once() {
+        use crate::local::upstream::LocalUpstream;
+        use crate::upstream::Upstream;
+        use crate::wire::ChatRequest;
+        use serde_json::Map;
+
+        let port = free_port().expect("select free port");
+        let mut ports = VecDeque::from([port]);
+        let mut select_port = || {
+            ports
+                .pop_front()
+                .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
+        };
+        let mut make_identity = || deterministic_identity(0);
+        let spawn_count = Arc::new(Mutex::new(0_usize));
+        let counted = Arc::clone(&spawn_count);
+        let spawn_log = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&spawn_log);
+        let interrupted = AtomicBool::new(false);
+
+        // Blocking readiness must run outside a Tokio async context.
+        let mut guard = ServerGuard::start_with(
+            Path::new("fake-llama-server"),
+            Path::new("pinned-model.gguf"),
+            &options(false),
+            &interrupted,
+            TEST_POLICY,
+            &mut select_port,
+            &mut make_identity,
+            &ChildSpawner::new(move |request: &SpawnRequest<'_>| {
+                *counted
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+                recorded
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push((
+                        request.port,
+                        request.model_alias.to_owned(),
+                        request.api_key.to_owned(),
+                    ));
+                spawn_fake_child(request)
+            }),
+        )
+        .expect("fake child should become ready");
+
+        let alias = guard.model_alias().to_owned();
+        let key = guard.api_key().to_owned();
+        let _ignored = guard.child.kill();
+        let _ignored = guard.child.wait();
+        assert!(!guard.is_running().expect("inspect dead child"));
+
+        let upstream = LocalUpstream::new(
+            guard,
+            PathBuf::from("fake-llama-server"),
+            PathBuf::from("pinned-model.gguf"),
+            options(false),
+            "qwen-local".to_owned(),
+        );
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build test runtime");
+        let response = runtime
+            .block_on(upstream.send(
+                ChatRequest {
+                    model: "qwen-local".to_owned(),
+                    messages: Vec::new(),
+                    rest: Map::new(),
+                },
+                &alias,
+            ))
+            .expect("send should respawn and succeed");
+
+        assert_eq!(response.model, "qwen-local");
+        assert_eq!(
+            *spawn_count
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            2
+        );
+        let log = spawn_log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(log[0], (port, alias.clone(), key.clone()));
+        assert_eq!(log[1], (port, alias, key));
     }
 
     fn process_is_alive(pid: u32) -> bool {
