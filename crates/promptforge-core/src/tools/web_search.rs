@@ -61,7 +61,9 @@ impl Tool for WebSearch {
         reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn description(&self) -> &str {
-        "Search the web and return a list of results (title, url, description, age, site_name, extra_snippets)."
+        // Keep this sentence aligned with shipped prompts/picker fixtures; knobs
+        // live in parameters_schema so capability bind stays stable.
+        "Search the web and return a list of results (title, url, description)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -166,7 +168,7 @@ mod tests {
         assert_eq!(tool.wire_name(), "web_search");
         assert_eq!(
             tool.description(),
-            "Search the web and return a list of results (title, url, description, age, site_name, extra_snippets)."
+            "Search the web and return a list of results (title, url, description)."
         );
         assert_eq!(
             tool.parameters_schema(),
