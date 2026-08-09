@@ -595,7 +595,10 @@ async fn spawn_mock_gateway() -> SocketAddr {
 /// Progress that reports nowhere, for the loop tests that assert on the
 /// reply rather than on the events. The caller owns the turn counter, so
 /// the borrow ends with the call.
-fn silent_progress<'a>(turns: &'a AtomicU32, options: &'a CompletionOptions) -> SectionProgress<'a> {
+fn silent_progress<'a>(
+    turns: &'a AtomicU32,
+    options: &'a CompletionOptions,
+) -> SectionProgress<'a> {
     SectionProgress {
         execution: EXECUTION,
         observer: &NullObserver,
@@ -655,7 +658,11 @@ async fn tool_loop_dispatches_then_returns_text() {
     .await
     .unwrap();
     assert_eq!(out, "final answer");
-    assert_eq!(turns.load(Ordering::Relaxed), 2, "one tool-call reply, then the final text");
+    assert_eq!(
+        turns.load(Ordering::Relaxed),
+        2,
+        "one tool-call reply, then the final text"
+    );
 }
 
 /// A mock gateway that always asks for a tool call, never converging. The
@@ -2457,7 +2464,11 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
 #[tokio::test]
 async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_id() {
     let (addr, bodies, _) = spawn_aliased_tool_gateway("local_alias").await;
-    let tool = Arc::new(ScopedFixtureTool::new("concrete", "canonical_wire", "Concrete description."));
+    let tool = Arc::new(ScopedFixtureTool::new(
+        "concrete",
+        "canonical_wire",
+        "Concrete description.",
+    ));
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua\n\
@@ -2504,7 +2515,11 @@ models.always('writer', 'A general model for tests')\n```\n\n\
 #[tokio::test]
 async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     let (addr, bodies, _) = spawn_aliased_tool_gateway("section_tool").await;
-    let tool = Arc::new(ScopedFixtureTool::new("concrete", "canonical_wire", "Section concrete."));
+    let tool = Arc::new(ScopedFixtureTool::new(
+        "concrete",
+        "canonical_wire",
+        "Section concrete.",
+    ));
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua\n\
@@ -2583,7 +2598,10 @@ models.always('writer', 'A general model for tests')\n```\n\n\
     let out = run(
         &prompt,
         "",
-        &[Arc::new(first) as Arc<dyn Tool>, Arc::new(second) as Arc<dyn Tool>],
+        &[
+            Arc::new(first) as Arc<dyn Tool>,
+            Arc::new(second) as Arc<dyn Tool>,
+        ],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -2625,7 +2643,10 @@ models.always('writer', 'A general model for tests')\n```\n\n\
     let error = run(
         &prompt,
         "",
-        &[Arc::new(first) as Arc<dyn Tool>, Arc::new(second) as Arc<dyn Tool>],
+        &[
+            Arc::new(first) as Arc<dyn Tool>,
+            Arc::new(second) as Arc<dyn Tool>,
+        ],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -2778,7 +2799,11 @@ async fn debug_capture_none_changes_nothing() {
 #[tokio::test]
 async fn tool_calls_count_increments_on_successful_dispatch() {
     let (addr, _, _) = spawn_aliased_tool_gateway("echo").await;
-    let tool = Arc::new(ScopedFixtureTool::new("echo", "canonical_echo", "Echo a test value."));
+    let tool = Arc::new(ScopedFixtureTool::new(
+        "echo",
+        "canonical_echo",
+        "Echo a test value.",
+    ));
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua\n\
         tools.need('echo', 'echo tool')\n\
@@ -2920,7 +2945,10 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
     let error = run(
         &prompt,
         "",
-        &[Arc::new(scoped) as Arc<dyn Tool>, Arc::new(global) as Arc<dyn Tool>],
+        &[
+            Arc::new(scoped) as Arc<dyn Tool>,
+            Arc::new(global) as Arc<dyn Tool>,
+        ],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
