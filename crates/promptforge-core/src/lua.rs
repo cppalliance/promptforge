@@ -35,6 +35,7 @@ use mlua::{
 use serde_json::Value as Json;
 use serde_json::json;
 
+pub use crate::lua_models::LuaModelHandle;
 use crate::lua_models::{
     ModelBindingState, ModelRuntime, close_model_scope, finish_model_replay, install_bind_models,
     install_h2_models, install_replay_models,

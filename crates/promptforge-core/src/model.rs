@@ -220,13 +220,14 @@ pub struct ModelBinding {
     id: ModelId,
     invocation: ModelInvocation,
     tool_dialect: ToolDialectId,
+    context: u32,
 }
 
 impl ModelBinding {
     /// Builds a binding from its parts (tests and resolvers).
     ///
-    /// Defaults `tool_dialect` to [`ToolDialectId::OpenAi`]. Use
-    /// [`Self::with_dialect`] to override after construction.
+    /// Defaults `tool_dialect` to [`ToolDialectId::OpenAi`] and `context` to
+    /// `0`. Use [`Self::with_dialect`] and [`Self::with_context`] to override.
     #[must_use]
     pub fn new(
         alias: impl Into<String>,
@@ -240,6 +241,7 @@ impl ModelBinding {
             id,
             invocation,
             tool_dialect: ToolDialectId::OpenAi,
+            context: 0,
         }
     }
 
@@ -247,6 +249,13 @@ impl ModelBinding {
     #[must_use]
     pub fn with_dialect(mut self, dialect: ToolDialectId) -> Self {
         self.tool_dialect = dialect;
+        self
+    }
+
+    /// Sets the catalog context window size on this binding.
+    #[must_use]
+    pub fn with_context(mut self, context: u32) -> Self {
+        self.context = context;
         self
     }
 
@@ -278,6 +287,12 @@ impl ModelBinding {
     #[must_use]
     pub fn tool_dialect(&self) -> ToolDialectId {
         self.tool_dialect
+    }
+
+    /// Returns the catalog context window size in tokens.
+    #[must_use]
+    pub fn context(&self) -> u32 {
+        self.context
     }
 
     /// Builds [`CompletionOptions`] for every complete under this binding.
@@ -519,6 +534,8 @@ pub struct ResolvedModel {
     pub invocation: ModelInvocation,
     /// The tool dialect from the catalog entry.
     pub tool_dialect: ToolDialectId,
+    /// The catalog context window size in tokens.
+    pub context: u32,
 }
 
 /// Wire shape of one entry from gateway `GET /v1/models`.
@@ -638,13 +655,15 @@ impl ModelResolver for PickerModelResolver<'_> {
         match picker.resolve(description) {
             Ok(promptforge_tool_picker::Outcome::Bind(tool)) => {
                 let id = model_from_picker_id(&tool.id);
-                let dialect = filtered
-                    .get(&id)
-                    .map_or(ToolDialectId::OpenAi, ModelDescriptor::tool_dialect);
+                let descriptor = filtered.get(&id);
+                let dialect =
+                    descriptor.map_or(ToolDialectId::OpenAi, ModelDescriptor::tool_dialect);
+                let context = descriptor.map_or(0, ModelDescriptor::context);
                 Ok(ResolvedModel {
                     id,
                     invocation: ModelInvocation::from(opts),
                     tool_dialect: dialect,
+                    context,
                 })
             }
             Ok(promptforge_tool_picker::Outcome::Absent) => Err(Error::ModelAbsent {
@@ -754,6 +773,7 @@ mod tests {
             id: hit.id().clone(),
             invocation: ModelInvocation::from(opts),
             tool_dialect: hit.tool_dialect(),
+            context: hit.context(),
         })
     }
 
@@ -1002,6 +1022,62 @@ mod tests {
         )
         .unwrap();
         assert_eq!(models.always(), Some("writer"));
+    }
+
+    #[test]
+    fn models_always_returns_inspectable_object() {
+        let shared = crate::lua::LuaProgram::compile(
+            r#"local needed = models.need("writer", "A tiny model", {
+                   thinking = false, temperature = 0, max_tokens = 256
+               })
+               assert(needed.name == "writer")
+               assert(needed.model_id == "small")
+               assert(needed.description == "A tiny model")
+               assert(needed.context == 8192)
+               assert(needed.thinking == false)
+               assert(needed.temperature == 0)
+               assert(needed.max_tokens == 256)
+               assert(needed.dialect == "openai")
+               local model = models.always("writer")
+               assert(model.name == "writer")
+               assert(model.model_id == "small")
+               assert(model.description == "A tiny model")
+               assert(model.context == 8192)
+               assert(model.thinking == false)
+               assert(model.temperature == 0)
+               assert(model.max_tokens == 256)
+               assert(model.dialect == "openai")"#,
+            "shared",
+            1,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .unwrap();
+        let tool_resolver =
+            |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
+        let (tools, models) = bind_shared_declarations(
+            &shared,
+            &tool_resolver,
+            &fixture_resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .expect("models.need/always must return an inspectable Model object");
+        assert_eq!(models.always(), Some("writer"));
+        assert_eq!(models.bindings()[0].context(), 8_192);
+
+        let vm = SectionVm::new_with_shared_bindings(
+            &shared,
+            &tools,
+            &models,
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .expect("replay must return the same inspectable Model object");
+        vm.teardown(&NullObserver, "Section");
     }
 
     #[test]
