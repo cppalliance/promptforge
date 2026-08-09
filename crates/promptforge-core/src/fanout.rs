@@ -2,23 +2,27 @@
 //!
 //! A parent section's Lua epilog calls `fanout("### Worker", "### List")` to
 //! run the worker template once per item parsed from the list section. Arms
-//! execute sequentially in v1; each gets a fresh [`SectionVm`] with `item`
-//! and `sys.taskid` injected. The invoker receives an ordered Lua table of
-//! arm replies.
+//! execute concurrently on a [`tokio::task::JoinSet`]; each gets a fresh
+//! [`SectionVm`] with `item` and `sys.taskid` injected. The invoker receives an
+//! ordered Lua table of arm replies. The first arm error aborts siblings.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 
 use serde_json::json;
+use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 
 use crate::bind::BoundPrompt;
 use crate::client::GatewayClient;
-use crate::debug::DebugCapture;
-use crate::lua::{SectionVm, ToolBindings};
+use crate::debug::{DebugCapture, DebugEvent};
+use crate::lua::{LuaProgram, SectionVm, ToolBindings};
 use crate::model::ModelBindings;
 use crate::observe::{Observer, detail};
 use crate::parser::Section;
 use crate::store::StoreRef;
-use crate::tools::ToolRegistry;
+use crate::tools::SharedTools;
 use crate::{Error, Result, subst};
 
 /// Resolves a heading string like `"### Name"` against a list of sibling
@@ -64,13 +68,13 @@ pub(crate) struct FanoutContext<'a> {
     pub store: &'a StoreRef,
     pub execution: &'a str,
     pub observer: &'a dyn Observer,
-    pub client: &'a Option<GatewayClient>, // owned option; arms clone as needed
+    pub client: &'a Option<GatewayClient>,
     pub debug: Option<&'a dyn DebugCapture>,
-    pub shared: Option<&'a crate::lua::LuaProgram>,
+    pub shared: Option<&'a LuaProgram>,
     pub bindings: &'a ToolBindings,
     pub models: &'a ModelBindings,
     pub bound: Option<&'a BoundPrompt>,
-    pub registry: &'a ToolRegistry<'a>,
+    pub shared_tools: &'a SharedTools,
     pub max_tool_iterations: usize,
     pub last_reply: Option<&'a str>,
     pub when: &'a str,
@@ -78,218 +82,391 @@ pub(crate) struct FanoutContext<'a> {
     pub parent_id: usize,
 }
 
-/// Runs the worker section template once per item, sequentially.
+/// Runs the worker section template once per item, concurrently.
 ///
-/// Returns the ordered reply strings from each arm.
+/// Returns the ordered reply strings from each arm (list order, not finish
+/// order).
 ///
 /// # Errors
-/// Fails fast: the first arm error aborts the fanout.
-#[expect(
-    clippy::too_many_lines,
-    reason = "the arm lifecycle is a linear sequence of fallible steps with per-step cleanup"
-)]
+/// Fails fast: the first arm error aborts sibling tasks and propagates.
 pub(crate) async fn run_fanout_arms(
     worker: &Section,
     items: &[String],
     ctx: &FanoutContext<'_>,
 ) -> Result<Vec<String>> {
-    let mut replies = Vec::with_capacity(items.len());
-    let mut turns: u32 = 0;
+    let turns = Arc::new(AtomicU32::new(0));
+    let (observe_tx, mut observe_rx) = mpsc::unbounded_channel::<(String, String)>();
+    let (debug_tx, mut debug_rx) = mpsc::unbounded_channel::<DebugMsg>();
+    let proxy_observer = Arc::new(ProxyObserver {
+        tx: observe_tx,
+    });
+    let proxy_debug = ctx.debug.map(|_| {
+        Arc::new(ProxyDebugCapture {
+            tx: debug_tx.clone(),
+        }) as Arc<dyn DebugCapture>
+    });
+
+    let mut join_set = JoinSet::new();
+    let mut replies: Vec<Option<String>> = vec![None; items.len()];
 
     for (index, item_text) in items.iter().enumerate() {
-        let taskid = (index + 1).to_string();
-        ctx.observer
-            .observe(ctx.execution, &worker.name, detail::FANOUT_ARM_STARTED);
-
-        let mut vm = match ctx.shared {
-            Some(shared) => SectionVm::new_with_shared_bindings(
-                shared,
-                ctx.bindings,
-                ctx.models,
-                ctx.execution,
-                ctx.observer,
-                &worker.name,
-            )?,
-            None => SectionVm::new(None, ctx.execution, ctx.observer, &worker.name)?,
+        let payload = ArmPayload {
+            worker: worker.clone(),
+            item_text: item_text.clone(),
+            index,
+            store: ctx.store.clone(),
+            client: ctx.client.clone(),
+            args: ctx.args.to_owned(),
+            execution: ctx.execution.to_owned(),
+            when: ctx.when.to_owned(),
+            last_reply: ctx.last_reply.map(str::to_owned),
+            shared: ctx.shared.cloned(),
+            bindings: ctx.bindings.clone(),
+            models: ctx.models.clone(),
+            bound: ctx.bound.cloned(),
+            shared_tools: ctx.shared_tools.clone(),
+            max_tool_iterations: ctx.max_tool_iterations,
+            parent_id: ctx.parent_id,
+            turns: Arc::clone(&turns),
+            observer: Arc::clone(&proxy_observer),
+            debug: proxy_debug.clone(),
         };
-
-        let sys = json!({
-            "when": ctx.when,
-            "now": crate::execute::now_rfc3339(),
-            "id": ctx.parent_id,
-            "taskid": taskid,
-        });
-
-        if let Err(error) = vm.inject_host(ctx.args, &sys, ctx.store, ctx.last_reply) {
-            vm.teardown(ctx.observer, &worker.name);
-            return Err(error);
-        }
-
-        // Inject `item` as a Lua global for preamble/epilog access.
-        if let Err(error) = vm.set_global_string("item", item_text) {
-            vm.teardown(ctx.observer, &worker.name);
-            return Err(error);
-        }
-
-        // Preamble
-        let preamble_return = if let Some(program) = &worker.preamble {
-            match vm.run_preamble(program, ctx.observer, &worker.name) {
-                Ok(returned) => returned,
-                Err(error) => {
-                    vm.teardown(ctx.observer, &worker.name);
-                    return Err(error);
-                }
-            }
-        } else {
-            None
-        };
-
-        if let Some(value) = preamble_return {
-            vm.teardown(ctx.observer, &worker.name);
-            ctx.observer
-                .observe(ctx.execution, &worker.name, detail::FANOUT_ARM_FINISHED);
-            replies.push(value);
-            continue;
-        }
-
-        // Close scopes
-        let scopes = match vm.close_scopes(ctx.observer, &worker.name) {
-            Ok(scopes) => scopes,
-            Err(error) => {
-                vm.teardown(ctx.observer, &worker.name);
-                return Err(error);
-            }
-        };
-        let scope = scopes.tools;
-        let counts = match vm.install_tool_call_counts(&scope) {
-            Ok(c) => Some(c),
-            Err(error) => {
-                vm.teardown(ctx.observer, &worker.name);
-                return Err(error);
-            }
-        };
-
-        let sys = if let Some(model_binding) = scopes.model.as_ref() {
-            let enriched = crate::lua::enrich_sys_model(&sys, model_binding);
-            if let Err(error) = vm.re_seal_sys(&enriched) {
-                vm.teardown(ctx.observer, &worker.name);
-                return Err(error);
-            }
-            enriched
-        } else {
-            sys
-        };
-
-        // Substitution with item
-        let var = match vm.var() {
-            Ok(var) => var,
-            Err(error) => {
-                vm.teardown(ctx.observer, &worker.name);
-                return Err(error);
-            }
-        };
-        let prose = match subst::substitute(
-            &worker.prose,
-            ctx.args,
-            ctx.last_reply,
-            Some(item_text),
-            &var,
-            &sys,
-        ) {
-            Ok(prose) => prose,
-            Err(error) => {
-                vm.teardown(ctx.observer, &worker.name);
-                return Err(error);
-            }
-        };
-
-        // Model turn (if prose is non-empty)
-        let mut arm_reply: Option<String> = None;
-        if !prose.trim().is_empty() {
-            let Some(model_binding) = scopes.model else {
-                vm.teardown(ctx.observer, &worker.name);
-                return Err(crate::Error::ModelRequired {
-                    section: worker.name.clone(),
-                });
-            };
-            let completion_options = model_binding.completion_options();
-            let (schemas, dispatch) = match ctx.bound {
-                Some(bound) => {
-                    match crate::execute::prepare_effective_scope(
-                        bound,
-                        &scope,
-                        ctx.registry,
-                        ctx.execution,
-                        ctx.observer,
-                        &worker.name,
-                    ) {
-                        Ok(prepared) => prepared,
-                        Err(error) => {
-                            vm.teardown(ctx.observer, &worker.name);
-                            return Err(error);
-                        }
-                    }
-                }
-                None => (Vec::new(), BTreeMap::new()),
-            };
-            if let Some(client) = ctx.client {
-                let global_aliases = ctx.bound.map(super::bind::BoundPrompt::alias_to_id);
-                let text = match crate::execute::run_tool_loop(
-                    client,
-                    &schemas,
-                    &dispatch,
-                    ctx.registry,
-                    prose,
-                    ctx.max_tool_iterations,
-                    crate::execute::SectionProgress {
-                        execution: ctx.execution,
-                        observer: ctx.observer,
-                        section: &worker.name,
-                        turns: &mut turns,
-                        debug: ctx.debug,
-                        completion_options: &completion_options,
-                    },
-                    counts.as_ref(),
-                    global_aliases,
-                )
-                .await
-                {
-                    Ok(text) => text,
-                    Err(error) => {
-                        vm.teardown(ctx.observer, &worker.name);
-                        return Err(error);
-                    }
-                };
-                if let Err(error) = vm.bind_reply(&text, ctx.observer, &worker.name) {
-                    vm.teardown(ctx.observer, &worker.name);
-                    return Err(error);
-                }
-                arm_reply = Some(text);
-            }
-        }
-
-        // Epilog
-        let epilog_return = if let Some(program) = &worker.epilog {
-            match vm.run_epilog(program, ctx.observer, &worker.name) {
-                Ok(returned) => returned,
-                Err(error) => {
-                    vm.teardown(ctx.observer, &worker.name);
-                    return Err(error);
-                }
-            }
-        } else {
-            None
-        };
-
-        vm.teardown(ctx.observer, &worker.name);
-        ctx.observer
-            .observe(ctx.execution, &worker.name, detail::FANOUT_ARM_FINISHED);
-
-        let reply = epilog_return.or(arm_reply).unwrap_or_default();
-        replies.push(reply);
+        join_set.spawn(async move { run_one_arm(payload).await });
     }
 
-    Ok(replies)
+    // Drop the unused sender clone so the debug channel can close when arms finish.
+    drop(debug_tx);
+
+    loop {
+        tokio::select! {
+            biased;
+            Some((section, detail)) = observe_rx.recv() => {
+                ctx.observer.observe(ctx.execution, &section, &detail);
+            }
+            Some(msg) = debug_rx.recv() => {
+                if let Some(capture) = ctx.debug {
+                    capture.on_event(ctx.execution, &msg.section, msg.turn_index, msg.event);
+                }
+            }
+            joined = join_set.join_next() => {
+                match joined {
+                    None => break,
+                    Some(Ok(Ok((index, reply)))) => {
+                        replies[index] = Some(reply);
+                    }
+                    Some(Ok(Err(error))) => {
+                        join_set.abort_all();
+                        while join_set.join_next().await.is_some() {}
+                        drain_side_channels(
+                            ctx,
+                            &mut observe_rx,
+                            &mut debug_rx,
+                        );
+                        return Err(error);
+                    }
+                    Some(Err(join_error)) if join_error.is_cancelled() => {}
+                    Some(Err(join_error)) => {
+                        join_set.abort_all();
+                        while join_set.join_next().await.is_some() {}
+                        drain_side_channels(
+                            ctx,
+                            &mut observe_rx,
+                            &mut debug_rx,
+                        );
+                        return Err(Error::Lua(format!(
+                            "fanout arm join failed: {join_error}"
+                        )));
+                    }
+                }
+            }
+        }
+    }
+
+    drain_side_channels(ctx, &mut observe_rx, &mut debug_rx);
+
+    Ok(replies
+        .into_iter()
+        .map(|reply| reply.unwrap_or_default())
+        .collect())
+}
+
+fn drain_side_channels(
+    ctx: &FanoutContext<'_>,
+    observe_rx: &mut mpsc::UnboundedReceiver<(String, String)>,
+    debug_rx: &mut mpsc::UnboundedReceiver<DebugMsg>,
+) {
+    while let Ok((section, detail)) = observe_rx.try_recv() {
+        ctx.observer.observe(ctx.execution, &section, &detail);
+    }
+    while let Ok(msg) = debug_rx.try_recv() {
+        if let Some(capture) = ctx.debug {
+            capture.on_event(ctx.execution, &msg.section, msg.turn_index, msg.event);
+        }
+    }
+}
+
+struct ArmPayload {
+    worker: Section,
+    item_text: String,
+    index: usize,
+    store: StoreRef,
+    client: Option<GatewayClient>,
+    args: String,
+    execution: String,
+    when: String,
+    last_reply: Option<String>,
+    shared: Option<LuaProgram>,
+    bindings: ToolBindings,
+    models: ModelBindings,
+    bound: Option<BoundPrompt>,
+    shared_tools: SharedTools,
+    max_tool_iterations: usize,
+    parent_id: usize,
+    turns: Arc<AtomicU32>,
+    observer: Arc<ProxyObserver>,
+    debug: Option<Arc<dyn DebugCapture>>,
+}
+
+struct ProxyObserver {
+    tx: mpsc::UnboundedSender<(String, String)>,
+}
+
+impl Observer for ProxyObserver {
+    fn observe(&self, _execution: &str, section: &str, detail: &str) {
+        let _ = self.tx.send((section.to_owned(), detail.to_owned()));
+    }
+}
+
+struct DebugMsg {
+    section: String,
+    turn_index: u32,
+    event: DebugEvent,
+}
+
+struct ProxyDebugCapture {
+    tx: mpsc::UnboundedSender<DebugMsg>,
+}
+
+impl DebugCapture for ProxyDebugCapture {
+    fn on_event(&self, _execution: &str, section: &str, turn_index: u32, event: DebugEvent) {
+        let _ = self.tx.send(DebugMsg {
+            section: section.to_owned(),
+            turn_index,
+            event,
+        });
+    }
+}
+
+/// Runs one fanout arm to completion.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the arm lifecycle is a linear sequence of fallible steps with per-step cleanup"
+)]
+async fn run_one_arm(payload: ArmPayload) -> Result<(usize, String)> {
+    let ArmPayload {
+        worker,
+        item_text,
+        index,
+        store,
+        client,
+        args,
+        execution,
+        when,
+        last_reply,
+        shared,
+        bindings,
+        models,
+        bound,
+        shared_tools,
+        max_tool_iterations,
+        parent_id,
+        turns,
+        observer,
+        debug,
+    } = payload;
+
+    let taskid = (index + 1).to_string();
+    let observer = observer.as_ref() as &dyn Observer;
+    observer.observe(&execution, &worker.name, detail::FANOUT_ARM_STARTED);
+
+    let mut vm = match shared.as_ref() {
+        Some(program) => SectionVm::new_with_shared_bindings(
+            program,
+            &bindings,
+            &models,
+            &execution,
+            observer,
+            &worker.name,
+        )?,
+        None => SectionVm::new(None, &execution, observer, &worker.name)?,
+    };
+
+    let sys = json!({
+        "when": when,
+        "now": crate::execute::now_rfc3339(),
+        "id": parent_id,
+        "taskid": taskid,
+    });
+
+    if let Err(error) = vm.inject_host(&args, &sys, &store, last_reply.as_deref()) {
+        vm.teardown(observer, &worker.name);
+        return Err(error);
+    }
+
+    if let Err(error) = vm.set_global_string("item", &item_text) {
+        vm.teardown(observer, &worker.name);
+        return Err(error);
+    }
+
+    let preamble_return = if let Some(program) = &worker.preamble {
+        match vm.run_preamble(program, observer, &worker.name) {
+            Ok(returned) => returned,
+            Err(error) => {
+                vm.teardown(observer, &worker.name);
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
+
+    if let Some(value) = preamble_return {
+        vm.teardown(observer, &worker.name);
+        observer.observe(&execution, &worker.name, detail::FANOUT_ARM_FINISHED);
+        return Ok((index, value));
+    }
+
+    let scopes = match vm.close_scopes(observer, &worker.name) {
+        Ok(scopes) => scopes,
+        Err(error) => {
+            vm.teardown(observer, &worker.name);
+            return Err(error);
+        }
+    };
+    let scope = scopes.tools;
+    let counts = match vm.install_tool_call_counts(&scope) {
+        Ok(c) => Some(c),
+        Err(error) => {
+            vm.teardown(observer, &worker.name);
+            return Err(error);
+        }
+    };
+
+    let sys = if let Some(model_binding) = scopes.model.as_ref() {
+        let enriched = crate::lua::enrich_sys_model(&sys, model_binding);
+        if let Err(error) = vm.re_seal_sys(&enriched) {
+            vm.teardown(observer, &worker.name);
+            return Err(error);
+        }
+        enriched
+    } else {
+        sys
+    };
+
+    let var = match vm.var() {
+        Ok(var) => var,
+        Err(error) => {
+            vm.teardown(observer, &worker.name);
+            return Err(error);
+        }
+    };
+    let prose = match subst::substitute(
+        &worker.prose,
+        &args,
+        last_reply.as_deref(),
+        Some(&item_text),
+        &var,
+        &sys,
+    ) {
+        Ok(prose) => prose,
+        Err(error) => {
+            vm.teardown(observer, &worker.name);
+            return Err(error);
+        }
+    };
+
+    let mut arm_reply: Option<String> = None;
+    if !prose.trim().is_empty() {
+        let Some(model_binding) = scopes.model else {
+            vm.teardown(observer, &worker.name);
+            return Err(Error::ModelRequired {
+                section: worker.name.clone(),
+            });
+        };
+        let completion_options = model_binding.completion_options();
+        let registry = shared_tools.registry();
+        let (schemas, dispatch) = match bound.as_ref() {
+            Some(bound_prompt) => {
+                match crate::execute::prepare_effective_scope(
+                    bound_prompt,
+                    &scope,
+                    &registry,
+                    &execution,
+                    observer,
+                    &worker.name,
+                ) {
+                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        vm.teardown(observer, &worker.name);
+                        return Err(error);
+                    }
+                }
+            }
+            None => (Vec::new(), BTreeMap::new()),
+        };
+        if let Some(client) = client.as_ref() {
+            let global_aliases = bound.as_ref().map(BoundPrompt::alias_to_id);
+            let debug_ref = debug.as_deref();
+            let text = match crate::execute::run_tool_loop(
+                client,
+                &schemas,
+                &dispatch,
+                &registry,
+                prose,
+                max_tool_iterations,
+                crate::execute::SectionProgress {
+                    execution: &execution,
+                    observer,
+                    section: &worker.name,
+                    turns: turns.as_ref(),
+                    debug: debug_ref,
+                    completion_options: &completion_options,
+                },
+                counts.as_ref(),
+                global_aliases,
+            )
+            .await
+            {
+                Ok(text) => text,
+                Err(error) => {
+                    vm.teardown(observer, &worker.name);
+                    return Err(error);
+                }
+            };
+            if let Err(error) = vm.bind_reply(&text, observer, &worker.name) {
+                vm.teardown(observer, &worker.name);
+                return Err(error);
+            }
+            arm_reply = Some(text);
+        }
+    }
+
+    let epilog_return = if let Some(program) = &worker.epilog {
+        match vm.run_epilog(program, observer, &worker.name) {
+            Ok(returned) => returned,
+            Err(error) => {
+                vm.teardown(observer, &worker.name);
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
+
+    vm.teardown(observer, &worker.name);
+    observer.observe(&execution, &worker.name, detail::FANOUT_ARM_FINISHED);
+
+    Ok((index, epilog_return.or(arm_reply).unwrap_or_default()))
 }
 
 #[cfg(test)]
@@ -354,7 +531,7 @@ mod tests {
         assert!(err.to_string().contains("### markers"), "error was: {err}");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn model_required_when_arm_prose_has_no_binding() {
         use crate::Error;
         use crate::client::GatewayClient;
@@ -362,7 +539,6 @@ mod tests {
         use crate::observe::NullObserver;
         use crate::parser::Section;
         use crate::store::StoreRef;
-        use crate::tools::ToolRegistry;
 
         let worker = Section {
             name: "Worker".to_string(),
@@ -377,7 +553,7 @@ mod tests {
         let store = StoreRef::memory();
         let bindings = ToolBindings::default();
         let models = ModelBindings::default();
-        let registry = ToolRegistry::new(std::iter::empty());
+        let shared_tools = SharedTools::default();
         let client: Option<GatewayClient> = None;
         let observer = NullObserver;
         let ctx = FanoutContext {
@@ -391,7 +567,7 @@ mod tests {
             bindings: &bindings,
             models: &models,
             bound: None,
-            registry: &registry,
+            shared_tools: &shared_tools,
             max_tool_iterations: 24,
             last_reply: None,
             when: "2026-08-08",

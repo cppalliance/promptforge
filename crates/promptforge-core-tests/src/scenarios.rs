@@ -1,6 +1,6 @@
 //! Real-model PromptForge text and aliased tool-call scenarios.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, ensure};
 use promptforge_core::Error;
@@ -177,7 +177,7 @@ async fn run_text(base_url: &str, api_key: &str) -> Result<()> {
 
 async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
     let observer = Recorder::default();
-    let tool = StringFixtureTool::default();
+    let tool = Arc::new(StringFixtureTool::default());
     let prompt = Prompt::parse(REAL_TOOL_CALL, TOOL_EXECUTION, &observer)
         .context("parse execution/real-tool-call.md")?;
     let schema = tool.parameters_schema();
@@ -194,8 +194,8 @@ async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
         },
     )
     .context("build deterministic one-tool fixture picker")?;
-    let tools: [&dyn Tool; 1] = [&tool];
-    let registry = ToolRegistry::new(tools);
+    let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];
+    let registry = ToolRegistry::new(tools.iter().map(AsRef::as_ref));
     let bound = bind_prompt(
         prompt,
         &picker,

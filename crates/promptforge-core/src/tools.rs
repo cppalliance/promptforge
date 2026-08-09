@@ -6,11 +6,49 @@
 //! can dispatch them uniformly. Stable identity is separate from the wire name
 //! used by the current model transport.
 
+use std::sync::Arc;
+
 use crate::Result;
 
 pub mod web_search;
 
 pub use web_search::WebSearch;
+
+/// Cloneable tool set for concurrent fanout arms.
+///
+/// Each arm builds a short-lived [`ToolRegistry`] that borrows these `Arc`s.
+#[derive(Clone, Default)]
+pub(crate) struct SharedTools {
+    tools: Arc<[Arc<dyn Tool>]>,
+}
+
+impl std::fmt::Debug for SharedTools {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SharedTools")
+            .field(
+                "ids",
+                &self.tools.iter().map(|tool| tool.id()).collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
+impl SharedTools {
+    /// Builds a shared set from caller-owned tool arcs.
+    #[must_use]
+    pub(crate) fn new(tools: &[Arc<dyn Tool>]) -> Self {
+        Self {
+            tools: Arc::from(tools.to_vec()),
+        }
+    }
+
+    /// Borrowing registry over the shared arcs.
+    #[must_use]
+    pub(crate) fn registry(&self) -> ToolRegistry<'_> {
+        ToolRegistry::new(self.tools.iter().map(AsRef::as_ref))
+    }
+}
 
 /// The stable identity of a live tool.
 ///

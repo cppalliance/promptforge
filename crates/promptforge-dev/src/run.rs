@@ -189,7 +189,7 @@ pub(crate) async fn run_once_with(
         client: Some(client),
         debug: Some(&capture),
     };
-    let result = run(&bound, input, registry.tools(), &store, options)
+    let result = run(&bound, input, available.tools(), &store, options)
         .await
         .with_context(|| format!("run {}", prompt_path.display()));
     // Reconcile on success and failure alike: a failed run's partial store is
