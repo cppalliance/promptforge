@@ -451,6 +451,15 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, String)> {
             .await
             {
                 Ok(text) => text,
+                // One stuck arm must not kill sibling evidence facets.
+                Err(Error::ToolLoopExhausted) => {
+                    vm.teardown(observer, &worker.name);
+                    let stub = format!(
+                        "## {item_text}\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)"
+                    );
+                    observer.observe(&execution, &worker.name, detail::FANOUT_ARM_FINISHED);
+                    return Ok((index, stub));
+                }
                 Err(error) => {
                     vm.teardown(observer, &worker.name);
                     return Err(error);
