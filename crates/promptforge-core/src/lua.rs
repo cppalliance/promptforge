@@ -161,7 +161,9 @@ impl ToolCallCounts {
     pub fn increment(&self, alias: &str) -> Result<()> {
         let mut map = self.lock()?;
         let count = map.get_mut(alias).ok_or_else(|| {
-            Error::Lua(format!("tool call counts: alias {alias:?} was not pre-seeded"))
+            Error::Lua(format!(
+                "tool call counts: alias {alias:?} was not pre-seeded"
+            ))
         })?;
         *count += 1;
         Ok(())
@@ -1517,6 +1519,9 @@ impl SectionVm {
     ///
     /// Returns the `ToolCallCounts` handle so the executor's tool loop can
     /// increment it.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] when installing the `tools.calls` index fails.
     pub fn install_tool_call_counts(&mut self, scope: &ToolScope) -> Result<ToolCallCounts> {
         let counts = ToolCallCounts::new(scope.bindings().iter().map(|b| b.alias().to_owned()));
         self.tool_call_counts = Some(counts.clone());
@@ -1872,11 +1877,7 @@ fn finish_replay(vm: &SectionVm) -> Result<()> {
 /// unknown key raises a hard Lua error naming the bad key and listing the VM's
 /// in-scope aliases. `declared` is the prompt-wide `tools.need` set used to
 /// distinguish pure unknowns from declared-but-unscoped aliases.
-fn install_lua_tool_calls(
-    lua: &Lua,
-    counts: &ToolCallCounts,
-    declared: &[String],
-) -> Result<()> {
+fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, declared: &[String]) -> Result<()> {
     let globals = lua.globals();
     let tools: mlua::Table = globals
         .raw_get("tools")
@@ -1896,25 +1897,24 @@ fn install_lua_tool_calls(
             let value = counts_for_index
                 .get(&key)
                 .map_err(|e| mlua::Error::external(e.to_string()))?;
-            match value {
-                Some(count) => Ok(count),
-                None => {
-                    let in_scope = counts_for_index
-                        .aliases()
-                        .map_err(|e| mlua::Error::external(e.to_string()))?;
-                    let declared_unscoped = declared.iter().any(|alias| alias == &key);
-                    Err(mlua::Error::external(format!(
-                        "tools.calls: {key:?} is not in this section's tool scope; \
-                         in-scope aliases: {in_scope:?}{}",
-                        if declared_unscoped {
-                            " (alias was declared by tools.need but not added to this section's scope)"
-                        } else if in_scope.is_empty() {
-                            ""
-                        } else {
-                            " - check for typos or add it via tools.add"
-                        }
-                    )))
-                }
+            if let Some(count) = value {
+                Ok(count)
+            } else {
+                let in_scope = counts_for_index
+                    .aliases()
+                    .map_err(|e| mlua::Error::external(e.to_string()))?;
+                let declared_unscoped = declared.iter().any(|alias| alias == &key);
+                Err(mlua::Error::external(format!(
+                    "tools.calls: {key:?} is not in this section's tool scope; \
+                     in-scope aliases: {in_scope:?}{}",
+                    if declared_unscoped {
+                        " (alias was declared by tools.need but not added to this section's scope)"
+                    } else if in_scope.is_empty() {
+                        ""
+                    } else {
+                        " - check for typos or add it via tools.add"
+                    }
+                )))
             }
         })
         .map_err(|error| Error::Lua(error.to_string()))?;
@@ -3983,8 +3983,15 @@ stack traceback:
         );
 
         let recorder = Recorder::default();
-        LuaProgram::compile("local private =", location, 1, EXECUTION, &recorder, "Gather")
-            .expect_err("malformed Lua must fail");
+        LuaProgram::compile(
+            "local private =",
+            location,
+            1,
+            EXECUTION,
+            &recorder,
+            "Gather",
+        )
+        .expect_err("malformed Lua must fail");
         let observations = recorder.observations();
         assert_eq!(
             observations,

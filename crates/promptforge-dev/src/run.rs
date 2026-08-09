@@ -236,11 +236,7 @@ fn format_record(execution: &str, section: &str, detail: &str) -> String {
 
 /// Mints a fresh per-invocation execution id: `dev-` plus 128 random bits.
 fn new_execution_id() -> String {
-    format!(
-        "dev-{:016x}{:016x}",
-        fastrand::u64(..),
-        fastrand::u64(..)
-    )
+    format!("dev-{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..))
 }
 
 #[cfg(test)]
@@ -256,8 +252,7 @@ mod tests {
 
     use super::{
         GatewayEnv, VerboseObserver, first_mapped_prompt_line, format_dev_failure, format_record,
-        new_execution_id,
-        require_gateway_env_from, run_once_with,
+        new_execution_id, require_gateway_env_from, run_once_with,
     };
 
     #[derive(Clone, Debug, Default)]

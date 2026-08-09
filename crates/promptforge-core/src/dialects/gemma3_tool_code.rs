@@ -187,11 +187,7 @@ fn parse_content_tool_dialect(content: &str) -> Option<Vec<ToolCall>> {
         }
         return None;
     }
-    if calls.is_empty() {
-        None
-    } else {
-        Some(calls)
-    }
+    if calls.is_empty() { None } else { Some(calls) }
 }
 
 /// Peel one leading ` ```tool_code ` fence into Python-style `name(k=v)` calls.
@@ -212,8 +208,7 @@ fn peel_tool_code_fence(input: &str) -> Option<(Vec<ToolCall>, &str)> {
 
 /// Peel one leading ` ```json ` / ` ``` ` fence that holds OpenAI `tool_calls`.
 fn peel_json_tool_calls_fence(input: &str) -> Option<(Vec<ToolCall>, &str)> {
-    let rest = strip_fence_open(input, "json")
-        .or_else(|| strip_fence_open(input, ""))?;
+    let rest = strip_fence_open(input, "json").or_else(|| strip_fence_open(input, ""))?;
     let (body, after) = split_fence_close(rest)?;
     let value: Value = serde_json::from_str(body.trim()).ok()?;
     let raw_calls = value
@@ -250,11 +245,7 @@ fn parse_tool_code_call(line: &str, index: usize) -> Option<ToolCall> {
         return None;
     }
     let name = line[..open].trim();
-    if name.is_empty()
-        || !name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return None;
     }
     let args_src = line[open + 1..close].trim();
@@ -302,7 +293,7 @@ fn parse_tool_code_args(tool_name: &str, src: &str) -> Option<Value> {
     }
     let keys = positional_arg_keys(tool_name, values.len())?;
     let mut map = Map::new();
-    for (key, value) in keys.into_iter().zip(values) {
+    for (key, value) in keys.iter().zip(values) {
         map.insert(key.to_string(), value);
     }
     Some(Value::Object(map))
@@ -758,9 +749,11 @@ mod tests {
         assert!(conversation[0].content.contains("```tool_code"));
         assert!(conversation[0].content.contains("search("));
         assert_eq!(conversation[1].role, "user");
-        assert!(conversation[1]
-            .content
-            .contains("TOOL RESULT search (call_tool_code_0):"));
+        assert!(
+            conversation[1]
+                .content
+                .contains("TOOL RESULT search (call_tool_code_0):")
+        );
         assert!(conversation[1].content.contains("result text"));
         assert!(conversation[1].content.contains("Continue the protocol"));
     }

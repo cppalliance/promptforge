@@ -8,9 +8,7 @@ use std::sync::Mutex;
 
 use mlua::{Lua, MultiValue, Scope, Table, Value};
 
-use crate::model::{
-    ModelBinding, ModelBindings, ModelDeclaration, ModelNeedOpts, ModelResolver,
-};
+use crate::model::{ModelBinding, ModelBindings, ModelDeclaration, ModelNeedOpts, ModelResolver};
 use crate::observe::{Observer, detail};
 use crate::{Error, Result};
 

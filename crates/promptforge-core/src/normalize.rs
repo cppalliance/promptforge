@@ -145,7 +145,6 @@ fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCall>> {
     Ok(calls)
 }
 
-
 /// First non-empty string among the known reasoning field synonyms.
 fn extract_reasoning(message: &Value) -> Option<String> {
     for key in ["reasoning_content", "reasoning", "thinking"] {
