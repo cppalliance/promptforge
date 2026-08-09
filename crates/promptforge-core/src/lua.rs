@@ -83,6 +83,12 @@ pub struct ToolBinding {
     alias: String,
     description: String,
     id: ToolId,
+    /// Author override for the model-facing schema description.
+    ///
+    /// Capability text in [`Self::description`] stays the bind-time need
+    /// string. When set, [`crate::execute`] advertises this instead of the
+    /// registry tool's default description.
+    model_description: Option<String>,
 }
 
 impl ToolBinding {
@@ -103,16 +109,25 @@ impl ToolBinding {
     pub fn id(&self) -> &ToolId {
         &self.id
     }
+
+    /// Returns the author override for the model-facing description, if any.
+    #[must_use]
+    pub fn model_description(&self) -> Option<&str> {
+        self.model_description.as_deref()
+    }
 }
 
 /// Inspectable Tool object returned by Lua `tools.need`.
 ///
 /// Authors read `.name`, `.description`, `.parameters`, `.wire_name`, and
-/// `.untrusted`. Existing callers that ignore the return value keep working.
+/// `.untrusted`. `.description` is mutable: assigning it before `tools.add`
+/// overrides the model-facing schema text. Existing callers that ignore the
+/// return value keep working.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LuaToolHandle {
     name: String,
     description: String,
+    description_overridden: bool,
     parameters: Json,
     wire_name: String,
     untrusted: bool,
@@ -132,6 +147,7 @@ impl LuaToolHandle {
         Self {
             name: alias.into(),
             description: description.into(),
+            description_overridden: false,
             parameters: json!({}),
             wire_name: id.name().to_owned(),
             untrusted: false,
@@ -144,10 +160,18 @@ impl LuaToolHandle {
         &self.name
     }
 
-    /// Returns the capability description supplied to `tools.need`.
+    /// Returns the current description (need capability, or author override).
     #[must_use]
     pub fn description(&self) -> &str {
         &self.description
+    }
+
+    /// Returns the model-facing description override when the author assigned
+    /// `.description` on this handle.
+    #[must_use]
+    pub fn model_description_override(&self) -> Option<&str> {
+        self.description_overridden
+            .then_some(self.description.as_str())
     }
 
     /// Returns the JSON Schema for the tool's parameters.
@@ -173,6 +197,11 @@ impl UserData for LuaToolHandle {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         fields.add_field_method_get("name", |_, this| Ok(this.name.clone()));
         fields.add_field_method_get("description", |_, this| Ok(this.description.clone()));
+        fields.add_field_method_set("description", |_, this, value: String| {
+            this.description = value;
+            this.description_overridden = true;
+            Ok(())
+        });
         fields.add_field_method_get("parameters", |lua, this| lua.to_value(&this.parameters));
         fields.add_field_method_get("wire_name", |_, this| Ok(this.wire_name.clone()));
         fields.add_field_method_get("untrusted", |_, this| Ok(this.untrusted));
@@ -329,6 +358,8 @@ pub(crate) struct ToolRuntime {
     phase: ToolPhase,
     declaration_index: usize,
     added: Vec<String>,
+    /// Per-alias author overrides for model-facing schema descriptions.
+    description_overrides: BTreeMap<String, String>,
     /// Monotonic counter bumped when the effective H2 tool set changes.
     ///
     /// [`crate::execute::ToolBag`] caches schemas/dispatch against this value
@@ -715,6 +746,7 @@ fn bind_shared_declarations_inner(
                     alias: alias.clone(),
                     description: description.clone(),
                     id,
+                    model_description: None,
                 });
                 declarations
                     .declarations
@@ -931,6 +963,7 @@ impl SectionVm {
                 phase: ToolPhase::Replay,
                 declaration_index: 0,
                 added: Vec::new(),
+                description_overrides: BTreeMap::new(),
                 generation: 0,
             })),
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new_replay())),
@@ -1035,6 +1068,7 @@ impl SectionVm {
             phase: ToolPhase::Replay,
             declaration_index: 0,
             added: Vec::new(),
+            description_overrides: BTreeMap::new(),
             generation: 0,
         }));
         let model_runtime = Arc::new(Mutex::new(ModelRuntime::new_replay()));
@@ -1604,11 +1638,7 @@ impl SectionVm {
             .collect::<Vec<_>>();
         let effective = aliases
             .iter()
-            .map(|alias| {
-                bindings.binding(alias).cloned().ok_or_else(|| {
-                    Error::Lua(format!("tool alias {alias:?} has no frozen binding"))
-                })
-            })
+            .map(|alias| binding_for_scope(bindings, &runtime, alias))
             .collect::<Result<Vec<_>>>()?;
         Ok(ToolScope {
             bindings: effective,
@@ -2051,16 +2081,27 @@ pub(crate) fn snapshot_tool_scope(
         .collect::<Vec<_>>();
     let effective = aliases
         .iter()
-        .map(|alias| {
-            bindings
-                .binding(alias)
-                .cloned()
-                .ok_or_else(|| Error::Lua(format!("tool alias {alias:?} has no frozen binding")))
-        })
+        .map(|alias| binding_for_scope(bindings, &runtime, alias))
         .collect::<Result<Vec<_>>>()?;
     Ok(ToolScope {
         bindings: effective,
     })
+}
+
+/// Clones a frozen binding and applies any author model-description override.
+fn binding_for_scope(
+    bindings: &ToolBindings,
+    runtime: &ToolRuntime,
+    alias: &str,
+) -> Result<ToolBinding> {
+    let mut binding = bindings
+        .binding(alias)
+        .cloned()
+        .ok_or_else(|| Error::Lua(format!("tool alias {alias:?} has no frozen binding")))?;
+    if let Some(description) = runtime.description_overrides.get(alias) {
+        binding.model_description = Some(description.clone());
+    }
+    Ok(binding)
 }
 
 pub(crate) fn install_lua_tool_calls(
@@ -2127,27 +2168,49 @@ pub(crate) fn install_lua_tool_calls(
     Ok(())
 }
 
-/// Collects alias strings from one `tools.add` argument.
+/// One flattened `tools.add` entry: alias plus optional model-description override.
+struct ToolsAddEntry {
+    alias: String,
+    description_override: Option<String>,
+}
+
+/// Collects add entries from one `tools.add` argument.
 ///
 /// Accepts a UTF-8 string, a [`LuaToolHandle`], or a sequence table of either.
-fn push_tools_add_alias(aliases: &mut Vec<String>, value: Value) -> mlua::Result<()> {
+/// A Tool handle contributes a description override only when the author
+/// assigned `.description` on that object.
+fn push_tools_add_entry(entries: &mut Vec<ToolsAddEntry>, value: Value) -> mlua::Result<()> {
     match value {
         Value::String(s) => {
-            aliases.push(s.to_string_lossy());
+            entries.push(ToolsAddEntry {
+                alias: s.to_string_lossy(),
+                description_override: None,
+            });
             Ok(())
         }
         Value::UserData(ud) => {
             let handle = ud.borrow::<LuaToolHandle>()?;
-            aliases.push(handle.name().to_owned());
+            entries.push(ToolsAddEntry {
+                alias: handle.name().to_owned(),
+                description_override: handle.model_description_override().map(str::to_owned),
+            });
             Ok(())
         }
         Value::Table(table) => {
             for item in table.sequence_values::<Value>() {
                 match item? {
-                    Value::String(s) => aliases.push(s.to_string_lossy()),
+                    Value::String(s) => entries.push(ToolsAddEntry {
+                        alias: s.to_string_lossy(),
+                        description_override: None,
+                    }),
                     Value::UserData(ud) => {
                         let handle = ud.borrow::<LuaToolHandle>()?;
-                        aliases.push(handle.name().to_owned());
+                        entries.push(ToolsAddEntry {
+                            alias: handle.name().to_owned(),
+                            description_override: handle
+                                .model_description_override()
+                                .map(str::to_owned),
+                        });
                     }
                     _ => {
                         return Err(mlua::Error::external(
@@ -2164,13 +2227,13 @@ fn push_tools_add_alias(aliases: &mut Vec<String>, value: Value) -> mlua::Result
     }
 }
 
-/// Flattens a `tools.add` variadic into alias strings for validation and scope.
-fn collect_tools_add_aliases(args: Variadic<Value>) -> mlua::Result<Vec<String>> {
-    let mut aliases = Vec::new();
+/// Flattens a `tools.add` variadic into alias/override entries for scope.
+fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<Vec<ToolsAddEntry>> {
+    let mut entries = Vec::new();
     for value in args {
-        push_tools_add_alias(&mut aliases, value)?;
+        push_tools_add_entry(&mut entries, value)?;
     }
-    Ok(aliases)
+    Ok(entries)
 }
 
 fn install_h2_tools(
@@ -2212,7 +2275,7 @@ fn install_h2_tools(
     let state = Arc::clone(runtime);
     let add = lua
         .create_function(move |_, args: Variadic<Value>| {
-            let aliases = collect_tools_add_aliases(args)?;
+            let entries = collect_tools_add_entries(args)?;
             let mut state = state
                 .lock()
                 .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
@@ -2221,21 +2284,39 @@ fn install_h2_tools(
                     "tools.add is only available before the H2 tool scope closes",
                 ));
             }
-            for alias in &aliases {
-                validate_alias(alias).map_err(|error| mlua::Error::external(error.to_string()))?;
-                if frozen.binding(alias).is_none() {
+            for entry in &entries {
+                validate_alias(&entry.alias)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+                if frozen.binding(&entry.alias).is_none() {
                     return Err(mlua::Error::external(format!(
-                        "tools.add alias {alias:?} was not declared by tools.need"
+                        "tools.add alias {:?} was not declared by tools.need",
+                        entry.alias
                     )));
                 }
             }
             let mut changed = false;
-            for alias in aliases {
-                if frozen.always.iter().any(|existing| existing == &alias) {
+            for entry in entries {
+                if let Some(description) = entry.description_override {
+                    let override_changed = match state.description_overrides.get(&entry.alias) {
+                        Some(existing) => existing != &description,
+                        None => true,
+                    };
+                    if override_changed {
+                        state
+                            .description_overrides
+                            .insert(entry.alias.clone(), description);
+                        changed = true;
+                    }
+                }
+                if frozen
+                    .always
+                    .iter()
+                    .any(|existing| existing == &entry.alias)
+                {
                     continue;
                 }
-                if !state.added.iter().any(|existing| existing == &alias) {
-                    state.added.push(alias);
+                if !state.added.iter().any(|existing| existing == &entry.alias) {
+                    state.added.push(entry.alias);
                     changed = true;
                 }
             }
