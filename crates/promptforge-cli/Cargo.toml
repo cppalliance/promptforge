@@ -16,7 +16,7 @@ fastrand.workspace = true
 promptforge-core.workspace = true
 promptforge-webfetch.workspace = true
 promptforge-tool-picker.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["signal"] }
 
 [lints]
 workspace = true

@@ -37,13 +37,11 @@ pub(crate) fn dump_store(
     status: &mut dyn Write,
 ) -> Result<()> {
     let directory = dump_directory(prompt_path);
-    if directory.symlink_metadata().is_ok() {
-        if !directory.is_dir() {
-            bail!(
-                "{} exists and is not a directory, refusing to replace it",
-                directory.display()
-            );
-        }
+    if directory.symlink_metadata().is_ok() && !directory.is_dir() {
+        bail!(
+            "{} exists and is not a directory, refusing to replace it",
+            directory.display()
+        );
     }
 
     let paths = store

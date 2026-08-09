@@ -18,6 +18,7 @@
 //! the runtime refuses a source that lacks a supported version.
 
 pub mod bind;
+pub mod cancel;
 pub mod client;
 pub mod debug;
 pub mod dialects;
@@ -35,5 +36,6 @@ pub mod subst;
 pub mod tools;
 pub mod untrusted;
 
+pub use crate::cancel::CancelHandle;
 pub use crate::error::{Error, NearDuplicateDiagnostic, Result};
 pub use crate::parser::promptforge_version;
