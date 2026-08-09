@@ -4,7 +4,8 @@
 //! run the worker template once per item parsed from the list section. Arms
 //! execute concurrently on a [`tokio::task::JoinSet`]; each gets a fresh
 //! [`SectionVm`] with `item` and `sys.taskid` injected. The invoker receives an
-//! ordered Lua table of arm replies. Fatal arm errors abort siblings;
+//! ordered Lua table of structured arm results (`.text`, `.ok`, `.item`,
+//! `.exhausted`). Fatal arm errors abort siblings;
 //! [`Error::ToolLoopExhausted`] soft-degrades to an incomplete stub.
 
 use std::collections::BTreeMap;
@@ -19,7 +20,7 @@ use crate::bind::BoundPrompt;
 use crate::cancel;
 use crate::client::GatewayClient;
 use crate::debug::{DebugCapture, DebugEvent};
-use crate::lua::{LuaProgram, SectionVm, ToolBindings};
+use crate::lua::{LuaFanoutResult, LuaProgram, SectionVm, ToolBindings};
 use crate::model::ModelBindings;
 use crate::observe::{Observer, detail};
 use crate::parser::Section;
@@ -86,8 +87,8 @@ pub(crate) struct FanoutContext<'a> {
 
 /// Runs the worker section template once per item, concurrently.
 ///
-/// Returns the ordered reply strings from each arm (list order, not finish
-/// order).
+/// Returns the ordered structured results from each arm (list order, not
+/// finish order).
 ///
 /// # Errors
 /// Fatal arm errors abort siblings; tool-loop exhaustion soft-degrades.
@@ -95,7 +96,7 @@ pub(crate) async fn run_fanout_arms(
     worker: &Section,
     items: &[String],
     ctx: &FanoutContext<'_>,
-) -> Result<Vec<String>> {
+) -> Result<Vec<LuaFanoutResult>> {
     let turns = Arc::new(AtomicU32::new(0));
     let (observe_tx, mut observe_rx) = mpsc::unbounded_channel::<(String, String)>();
     let (debug_tx, mut debug_rx) = mpsc::unbounded_channel::<DebugMsg>();
@@ -107,7 +108,7 @@ pub(crate) async fn run_fanout_arms(
     });
 
     let mut join_set = JoinSet::new();
-    let mut replies: Vec<Option<String>> = vec![None; items.len()];
+    let mut replies: Vec<Option<LuaFanoutResult>> = vec![None; items.len()];
 
     for (index, item_text) in items.iter().enumerate() {
         let payload = ArmPayload {
@@ -179,7 +180,7 @@ pub(crate) async fn run_fanout_arms(
     let mut ordered = Vec::with_capacity(replies.len());
     for (index, reply) in replies.into_iter().enumerate() {
         match reply {
-            Some(text) => ordered.push(text),
+            Some(result) => ordered.push(result),
             None => {
                 return Err(Error::Lua(format!(
                     "fanout arm {} finished without a reply",
@@ -192,7 +193,7 @@ pub(crate) async fn run_fanout_arms(
 }
 
 async fn abort_fanout_arms(
-    join_set: &mut JoinSet<Result<(usize, String)>>,
+    join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>,
     ctx: &FanoutContext<'_>,
     observe_rx: &mut mpsc::UnboundedReceiver<(String, String)>,
     debug_rx: &mut mpsc::UnboundedReceiver<DebugMsg>,
@@ -276,7 +277,7 @@ impl DebugCapture for ProxyDebugCapture {
     clippy::too_many_lines,
     reason = "the arm lifecycle is a linear sequence of fallible steps with per-step cleanup"
 )]
-async fn run_one_arm(payload: ArmPayload) -> Result<(usize, String)> {
+async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
     let ArmPayload {
         worker,
         item_text,
@@ -347,7 +348,7 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, String)> {
     if let Some(value) = prologue_return {
         vm.teardown(observer, &worker.name);
         observer.observe(&execution, &worker.name, detail::FANOUT_ARM_FINISHED);
-        return Ok((index, value));
+        return Ok((index, LuaFanoutResult::success(&item_text, value)));
     }
 
     let scopes = match vm.close_scopes(observer, &worker.name) {
@@ -459,7 +460,7 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, String)> {
                         "## {item_text}\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)"
                     );
                     observer.observe(&execution, &worker.name, detail::FANOUT_ARM_FINISHED);
-                    return Ok((index, stub));
+                    return Ok((index, LuaFanoutResult::exhausted_stub(&item_text, stub)));
                 }
                 Err(error) => {
                     vm.teardown(observer, &worker.name);
@@ -489,7 +490,8 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, String)> {
     vm.teardown(observer, &worker.name);
     observer.observe(&execution, &worker.name, detail::FANOUT_ARM_FINISHED);
 
-    Ok((index, epilog_return.or(arm_reply).unwrap_or_default()))
+    let text = epilog_return.or(arm_reply).unwrap_or_default();
+    Ok((index, LuaFanoutResult::success(item_text, text)))
 }
 
 #[cfg(test)]
