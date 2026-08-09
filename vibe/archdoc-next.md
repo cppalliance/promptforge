@@ -38,3 +38,5 @@
 - [2026-08-09-1-gateway-web-search-upgrade] deterministic result shaping: Validate, sanitize, filter, and diversify results before exposing them to a model.
 - [2026-08-09-1-gateway-web-search-upgrade] cache remains absent: Add search-result caching only after repeat workloads justify a coherency policy.
 - [2026-08-09-2-promptforge-user-guide] reference parity: Record availability, signatures, return values, and examples for every public prompt-language surface.
+- [2026-08-09-3-readme-and-ci-overhaul] documentation layering: Keep the landing page concise and move verified internals to development documentation.
+- [2026-08-09-3-readme-and-ci-overhaul] visuals carry no contract: Presentation assets may frame documentation but cannot be the only architecture record.
