@@ -7,7 +7,7 @@
 
 use promptforge_core::client::GatewayClient;
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
-use promptforge_core::tools::{Tool, ToolRegistry, WebSearch};
+use promptforge_core::tools::{Tool, WebSearch};
 use promptforge_tool_picker::{
     Catalog, Config as PickerConfig, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
@@ -40,8 +40,8 @@ impl PreparedTools {
     /// Builds the complete MCP live registry, picker, and gateway model catalog.
     ///
     /// When `GET /v1/models` is unreachable the catalog is empty: prompts without
-    /// `models.need` keep working, and a prompt that declares models fails at
-    /// bind with [`promptforge_core::Error::ModelAbsent`].
+    /// `models.need` keep working, and a prompt that declares models fails during
+    /// live H1 execution with [`promptforge_core::Error::ModelAbsent`].
     ///
     /// # Errors
     /// Returns a boxed error when the tool picker cannot load.
@@ -94,12 +94,6 @@ impl PreparedTools {
         })
     }
 
-    /// Returns a registry borrowing every concrete live tool.
-    #[must_use]
-    pub(crate) fn registry(&self) -> ToolRegistry<'_> {
-        ToolRegistry::new(self.live.iter().map(AsRef::as_ref))
-    }
-
     /// Returns the shared tool arcs for [`promptforge_core::execute::run`].
     #[must_use]
     pub(crate) fn tools(&self) -> &[std::sync::Arc<dyn Tool>] {
@@ -112,7 +106,7 @@ impl PreparedTools {
         &self.picker
     }
 
-    /// Returns the gateway model catalog used for `models.need` binding.
+    /// Returns the gateway model catalog used for live `models.need` resolution.
     #[must_use]
     pub(crate) fn models(&self) -> &ModelCatalog {
         &self.models
@@ -153,10 +147,12 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use promptforge_core::bind::bind_prompt;
+    use promptforge_core::execute::{self, ResolutionContext, RunOptions};
     use promptforge_core::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
     use promptforge_core::observe::NullObserver;
-    use promptforge_core::parser::Prompt;
+    use promptforge_core::parser::{Block, Prompt};
+    use promptforge_core::store::StoreRef;
+    use promptforge_tool_picker::Outcome;
 
     use super::{PreparedTools, gateway_client};
     use crate::config::Config;
@@ -188,7 +184,6 @@ mod tests {
         )
         .expect("prepare fixture tools");
         let registry_ids = tools
-            .registry()
             .tools()
             .iter()
             .map(|tool| {
@@ -213,32 +208,15 @@ mod tests {
             promptforge_core::model::ModelCatalog::empty(),
         )
         .expect("prepare fixture tools");
-        let prompt = Prompt::parse(
-            "---\nname: fixture\ndescription: Binding fixture\npromptforge: 1\n---\n# Fixture\n\n```lua shared\ntools.need(\"fetch\", \"Fetch a web page and return its main content as markdown.\")\n```\n\n## Run\n\n```lua\nreturn \"done\"\n```\n",
-            "test-run",
-            &NullObserver,
-        )
-        .expect("parse fixture prompt");
-        let registry = tools.registry();
-
-        let bound = bind_prompt(
-            prompt,
-            tools.picker(),
-            &registry,
-            &promptforge_core::model::ModelCatalog::empty(),
-            "test-run",
-            &NullObserver,
-        )
-        .expect("bind available capability");
-
-        assert_eq!(
-            bound.alias_to_id()["fetch"],
-            promptforge_core::tools::ToolId::new("promptforge", "web_fetch")
-        );
+        let outcome = tools
+            .picker()
+            .resolve("Fetch a web page and return its main content as markdown.")
+            .expect("resolve available capability");
+        assert!(matches!(outcome, Outcome::Bind(tool) if tool.name() == "web_fetch"));
     }
 
-    #[test]
-    fn every_repository_prompt_parses_and_binds() {
+    #[tokio::test]
+    async fn every_repository_prompt_parses_and_resolves_live_h1() {
         let config = gateway("");
         let models = ModelCatalog::new([ModelDescriptor::new(
             ModelId::gateway("claude-sonnet-4-6"),
@@ -246,9 +224,7 @@ mod tests {
             200_000,
             ThinkingMode::Never,
         )]);
-        let tools =
-            PreparedTools::new(&config.gateway, models.clone()).expect("prepare repository tools");
-        let registry = tools.registry();
+        let tools = PreparedTools::new(&config.gateway, models).expect("prepare repository tools");
         let prompts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts");
         let mut files = Vec::new();
         collect_markdown(&prompts, &mut files);
@@ -262,74 +238,49 @@ mod tests {
                 "{} must not depend on concrete tool names",
                 path.display()
             );
-            let prompt =
-                Prompt::parse(&source, "test-run", &NullObserver).unwrap_or_else(|error| {
+            let first_section = source
+                .find(
+                    "
+## ",
+                )
+                .unwrap_or_else(|| panic!("{} must have a section", path.display()));
+            let mut probe = source[..first_section].to_owned();
+            probe.push_str(
+                "
+
+## Resolution Probe
+
+```lua
+return 'resolved'
+```
+",
+            );
+            let mut prompt =
+                Prompt::parse(&probe, "test-run", &NullObserver).unwrap_or_else(|error| {
                     panic!("{} must parse: {error}", path.display());
                 });
-            let name = prompt.frontmatter.name.clone();
-            let bound = bind_prompt(
-                prompt,
-                tools.picker(),
-                &registry,
-                &models,
-                "test-run",
-                &NullObserver,
+            prompt
+                .h1_blocks
+                .retain(|block| matches!(block, Block::Lua(_)));
+            let result = execute::run(
+                &prompt,
+                "",
+                ResolutionContext {
+                    picker: tools.picker(),
+                    models: tools.models(),
+                },
+                tools.tools(),
+                &StoreRef::memory(),
+                RunOptions {
+                    execution: "test-run",
+                    observer: &NullObserver,
+                    client: None,
+                    debug: None,
+                },
             )
-            .unwrap_or_else(|error| panic!("{} must bind: {error}", path.display()));
-
-            if name == "research_person" {
-                assert_eq!(
-                    bound.alias_to_id().get("search"),
-                    Some(&promptforge_core::tools::ToolId::new(
-                        "promptforge",
-                        "web_search"
-                    ))
-                );
-                assert_eq!(
-                    bound.alias_to_id().get("fetch"),
-                    Some(&promptforge_core::tools::ToolId::new(
-                        "promptforge",
-                        "web_fetch"
-                    ))
-                );
-                let model_bindings = bound.models().bindings();
-                assert_eq!(model_bindings.len(), 1);
-                assert_eq!(model_bindings[0].alias(), "researcher");
-                assert_eq!(
-                    model_bindings[0].id(),
-                    &ModelId::gateway("claude-sonnet-4-6")
-                );
-            } else if name == "analyst_example" {
-                assert!(
-                    bound.alias_to_id().is_empty(),
-                    "{name} declares no tool capabilities"
-                );
-                let model_bindings = bound.models().bindings();
-                assert_eq!(model_bindings.len(), 1);
-                assert_eq!(model_bindings[0].alias(), "analyst");
-                assert_eq!(
-                    model_bindings[0].id(),
-                    &ModelId::gateway("claude-sonnet-4-6")
-                );
-            } else if name == "hello" || name == "greet" {
-                assert!(
-                    bound.alias_to_id().is_empty(),
-                    "{name} declares no tool capabilities"
-                );
-                let model_bindings = bound.models().bindings();
-                assert_eq!(model_bindings.len(), 1);
-                assert_eq!(model_bindings[0].alias(), "writer");
-                assert_eq!(
-                    model_bindings[0].id(),
-                    &ModelId::gateway("claude-sonnet-4-6")
-                );
-            } else {
-                assert!(
-                    bound.alias_to_id().is_empty(),
-                    "{name} declares no capabilities"
-                );
-                assert!(bound.models().is_empty(), "{name} declares no models");
-            }
+            .await
+            .unwrap_or_else(|error| panic!("{} must resolve live H1: {error}", path.display()));
+            assert_eq!(result, "resolved");
         }
     }
 

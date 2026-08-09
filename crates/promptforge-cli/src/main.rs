@@ -9,9 +9,8 @@
 use std::process::ExitCode;
 
 use promptforge_core::CancelHandle;
-use promptforge_core::bind::bind_prompt;
 use promptforge_core::cancel;
-use promptforge_core::execute::RunOptions;
+use promptforge_core::execute::{ResolutionContext, RunOptions};
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::observe::{NullObserver, Observer};
 use promptforge_core::store::StoreRef;
@@ -110,15 +109,6 @@ async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
         },
         None => ModelCatalog::empty(),
     };
-    let registry = available.registry();
-    let bound = match bind_prompt(prompt, &picker, &registry, &models, &execution, observer) {
-        Ok(bound) => bound,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
     // One run-scoped store, created once and shared by every section. The CLI
     // uses the in-memory sandbox backend by default.
     let store = StoreRef::memory();
@@ -133,7 +123,19 @@ async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
         debug: None,
     };
 
-    match execute::run(&bound, input, available.tools(), &store, options).await {
+    match execute::run(
+        &prompt,
+        input,
+        ResolutionContext {
+            picker: &picker,
+            models: &models,
+        },
+        available.tools(),
+        &store,
+        options,
+    )
+    .await
+    {
         Ok(result) => {
             println!("{result}");
             ExitCode::SUCCESS
@@ -166,7 +168,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_reuses_one_generated_execution_id_for_parse_bind_and_execution() {
+    async fn run_reuses_one_generated_execution_id_for_parse_and_execution() {
         let path = std::env::temp_dir().join(format!(
             "promptforge-cli-execution-{:016x}.md",
             fastrand::u64(..)
@@ -204,7 +206,7 @@ mod tests {
             records
                 .iter()
                 .all(|(record_execution, _, _)| record_execution == execution),
-            "parse, bind, and execution must reuse one id: {records:#?}"
+            "parse and execution must reuse one id: {records:#?}"
         );
         let details = records
             .iter()
@@ -213,8 +215,6 @@ mod tests {
         for expected in [
             detail::PARSE_STARTED,
             detail::PARSE_SUCCEEDED,
-            detail::TOOL_BINDING_STARTED,
-            detail::TOOL_BINDING_SUCCEEDED,
             detail::RUN_STARTED,
             detail::RUN_SUCCEEDED,
         ] {

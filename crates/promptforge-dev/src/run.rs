@@ -2,7 +2,7 @@
 //!
 //! [`run_once`] mirrors the CLI pipeline: require gateway credentials, read
 //! the file, require a `promptforge:` version, parse, fetch the live model
-//! catalog, build the live tool registry, bind, and execute with a
+//! catalog, build the live tool registry, and execute with a
 //! [`GatewayClient`]. Every `(execution, section, detail)` observer record
 //! streams to stderr; the returned result string is the caller's to print on
 //! stdout. After every executed run, success or failure, the run's store is
@@ -13,9 +13,8 @@ use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
 use anyhow::{Context as _, Result, bail};
-use promptforge_core::bind::bind_prompt;
 use promptforge_core::client::GatewayClient;
-use promptforge_core::execute::{RunOptions, run};
+use promptforge_core::execute::{ResolutionContext, RunOptions, run};
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::observe::Observer;
 use promptforge_core::parser::Prompt;
@@ -128,7 +127,7 @@ pub(crate) fn require_gateway_env_from(
 ///
 /// Returns an error when gateway credentials are missing, the file cannot be
 /// read, the file declares no `promptforge:` version, the catalog cannot be
-/// fetched, the prompt fails to parse or bind, or execution fails.
+/// fetched, the prompt fails to parse, or execution fails.
 pub(crate) async fn run_once(prompt_path: &Path, input: &str) -> Result<String> {
     let gateway = require_gateway_env()?;
     let observer = VerboseObserver::new(std::io::stderr());
@@ -166,10 +165,6 @@ pub(crate) async fn run_once_with(
     let available = tools::available_tools(&gateway.base_url, Some(gateway.key.as_str()));
     let picker = ToolPicker::build(available.catalog().clone(), PickerConfig::default())
         .context("build the live tool picker")?;
-    let registry = available.registry();
-    let bound = bind_prompt(prompt, &picker, &registry, models, &execution, observer)
-        .with_context(|| format!("bind {}", prompt_path.display()))?;
-
     let client = GatewayClient::new(&gateway.base_url, gateway.key.as_str());
     let capture = dump::TraceCapture::new(prompt_path);
 
@@ -189,9 +184,19 @@ pub(crate) async fn run_once_with(
         client: Some(client),
         debug: Some(&capture),
     };
-    let result = run(&bound, input, available.tools(), &store, options)
-        .await
-        .with_context(|| format!("run {}", prompt_path.display()));
+    let result = run(
+        &prompt,
+        input,
+        ResolutionContext {
+            picker: &picker,
+            models,
+        },
+        available.tools(),
+        &store,
+        options,
+    )
+    .await
+    .with_context(|| format!("run {}", prompt_path.display()));
     // Reconcile on success and failure alike: a failed run's partial store is
     // exactly what a debugging author needs, and orphans from deletes land
     // here if MirrorStore skipped them. Status lines go to stderr.
@@ -452,7 +457,7 @@ mod tests {
             records
                 .iter()
                 .all(|(record_execution, _, _)| record_execution == execution),
-            "parse, bind, and execution must reuse one id: {records:#?}"
+            "parse and execution must reuse one id: {records:#?}"
         );
         let details = records
             .iter()
@@ -461,8 +466,6 @@ mod tests {
         for expected in [
             detail::PARSE_STARTED,
             detail::PARSE_SUCCEEDED,
-            detail::TOOL_BINDING_STARTED,
-            detail::TOOL_BINDING_SUCCEEDED,
             detail::RUN_STARTED,
             detail::RUN_SUCCEEDED,
         ] {

@@ -4,12 +4,13 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use promptforge_core::Error;
-use promptforge_core::execute::{RunOptions, run};
-use promptforge_core::lua::{LuaProgram, ToolResolver, bind_tool_declarations};
+use promptforge_core::execute::{ResolutionContext, RunOptions, run as run_core};
+use promptforge_core::lua::LuaProgram;
+use promptforge_core::model::ModelCatalog;
 use promptforge_core::observe::{NullObserver, Observer};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
-use promptforge_core::tools::ToolId;
+use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 
 type Record = (String, String, String);
 
@@ -38,6 +39,29 @@ const FANOUT_STORE_WRITES: &str = include_str!("../prompts/execution/fanout-stor
 const FANOUT_ARM_FAILURE: &str = include_str!("../prompts/execution/fanout-arm-failure.md");
 const ITEM_OUTSIDE_FANOUT: &str = include_str!("../prompts/invalid/item-outside-fanout.md");
 const LIST_H3_NON_LIST: &str = include_str!("../prompts/invalid/list-h3-non-list-content.md");
+
+async fn run(
+    prompt: &Prompt,
+    args: &str,
+    tools: &[Arc<dyn promptforge_core::tools::Tool>],
+    store: &StoreRef,
+    options: RunOptions<'_>,
+) -> promptforge_core::Result<String> {
+    let picker = ToolPicker::build(Catalog::default(), Config::default())
+        .expect("empty fixture picker must build");
+    run_core(
+        prompt,
+        args,
+        ResolutionContext {
+            picker: &picker,
+            models: &ModelCatalog::empty(),
+        },
+        tools,
+        store,
+        options,
+    )
+    .await
+}
 
 struct ValidFixture {
     name: &'static str,
@@ -155,15 +179,6 @@ impl Recorder {
     }
 }
 
-#[derive(Debug)]
-struct NoTools;
-
-impl ToolResolver for NoTools {
-    fn resolve(&self, capability: &str) -> promptforge_core::Result<ToolId> {
-        panic!("tool-free fixture unexpectedly requested capability {capability:?}")
-    }
-}
-
 fn parse_execution_fixture(
     source: &str,
     name: &str,
@@ -172,16 +187,6 @@ fn parse_execution_fixture(
 ) -> Prompt {
     let prompt = Prompt::parse(source, execution, observer)
         .unwrap_or_else(|error| panic!("fixture {name} failed to parse: {error}"));
-    if let Some(shared) = &prompt.replay {
-        let bindings = bind_tool_declarations(shared, &NoTools, execution, observer, &prompt.title)
-            .unwrap_or_else(|error| {
-                panic!("fixture {name} failed deterministic declaration binding: {error}")
-            });
-        assert!(
-            bindings.bindings().is_empty(),
-            "fixture {name} must remain tool-free"
-        );
-    }
     prompt
 }
 
@@ -381,22 +386,12 @@ async fn log_fixture_reports_exact_author_checkpoints() {
             (
                 LOG_EXECUTION.to_owned(),
                 "Prepare".to_owned(),
-                "Lua: shared loaded".to_owned(),
-            ),
-            (
-                LOG_EXECUTION.to_owned(),
-                "Prepare".to_owned(),
                 "Lua: prepare started".to_owned(),
             ),
             (
                 LOG_EXECUTION.to_owned(),
                 "Prepare".to_owned(),
                 "Lua: prepare finished".to_owned(),
-            ),
-            (
-                LOG_EXECUTION.to_owned(),
-                "Finish".to_owned(),
-                "Lua: shared loaded".to_owned(),
             ),
             (
                 LOG_EXECUTION.to_owned(),

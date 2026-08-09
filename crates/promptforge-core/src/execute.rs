@@ -22,10 +22,10 @@
 //! a decision, so passing [`crate::observe::NullObserver`] changes nothing but
 //! the silence.
 //!
-//! Bound tool declarations replay into each section VM. Prompt-wide aliases
-//! and H2 additions form the effective model-visible scope, which is checked
-//! for semantic near-duplicates before concrete tools are advertised under
-//! their local aliases and dispatched by stable identity.
+//! Rust installs tool bindings captured from live H1 into each section VM.
+//! Prompt-wide aliases and H2 additions form the effective model-visible scope,
+//! which is checked for semantic near-duplicates before concrete tools are
+//! advertised under their local aliases and dispatched by stable identity.
 //!
 //! Lua `execute()` runs a named top-level section as a subroutine (fresh VM,
 //! fresh conversation, recursion capped at 8) and returns that section's reply.
@@ -39,9 +39,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
-use promptforge_tool_picker::ToolPicker;
+use promptforge_tool_picker::{NearDuplicate, ToolId as PickerToolId, ToolPicker};
 
-use crate::bind::{BoundPrompt, RuntimeResolution};
 use crate::cancel;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::debug::{DebugCapture, DebugEvent};
@@ -55,6 +54,7 @@ use crate::lua::{
 use crate::model::{CompletionOptions, ModelBinding, ModelBindings, ModelCatalog};
 use crate::observe::{NullObserver, Observer, detail};
 use crate::parser::{Block, Prompt, Section};
+use crate::resolve::RuntimeResolution;
 use crate::store::StoreRef;
 use crate::subst;
 use crate::tools::{SharedTools, Tool, ToolId, ToolRegistry};
@@ -89,14 +89,8 @@ pub(crate) struct PreparedTools {
     pub(crate) schemas: Vec<ToolSchema>,
     /// Alias-to-identity dispatch map for this infer.
     pub(crate) dispatch: BTreeMap<String, ToolId>,
-    /// Whether schemas/dispatch were served from the generation cache.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "asserted by tool_bag_caches_on_unchanged_generation"
-        )
-    )]
+    /// Whether schemas and dispatch came from the generation cache.
+    #[cfg_attr(not(test), allow(dead_code, reason = "cache diagnostic for tests"))]
     pub(crate) reused: bool,
 }
 
@@ -133,14 +127,7 @@ impl ToolBag {
     ///
     /// # Errors
     /// Returns tool-scope or registry errors from snapshot/validation/schema build.
-    pub(crate) fn prepare(
-        &mut self,
-        bound: Option<&BoundPrompt>,
-        registry: &ToolRegistry<'_>,
-        execution: &str,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<PreparedTools> {
+    pub(crate) fn prepare(&mut self, registry: &ToolRegistry<'_>) -> Result<PreparedTools> {
         let generation = {
             let runtime = self
                 .runtime
@@ -160,12 +147,7 @@ impl ToolBag {
         }
 
         let scope = snapshot_tool_scope(&self.bindings, &self.runtime)?;
-        let (schemas, dispatch) = match bound {
-            Some(bound) => {
-                prepare_effective_scope(bound, &scope, registry, execution, observer, section)?
-            }
-            None => prepare_scoped_tools(&scope, registry)?,
-        };
+        let (schemas, dispatch) = prepare_scoped_tools(&scope, registry)?;
         self.cached = Some(CachedToolState {
             generation,
             scope: scope.clone(),
@@ -195,7 +177,7 @@ pub(crate) struct InferContext {
     section: String,
     max_tool_iterations: usize,
     turns: Arc<AtomicU32>,
-    bound: Option<BoundPrompt>,
+    analysis: Option<ToolAnalysis>,
     live_bindings: Option<LiveBindingProducer>,
     tool_bag: Mutex<ToolBag>,
     counts_slot: Arc<Mutex<Option<ToolCallCounts>>>,
@@ -249,14 +231,12 @@ impl InferContext {
             .lock()
             .map_err(|_| mlua::Error::external("tool bag mutex was poisoned"))?;
         let prepared = bag
-            .prepare(
-                self.bound.as_ref(),
-                registry,
-                &self.execution,
-                self.observer.as_ref(),
-                &self.section,
-            )
+            .prepare(registry)
             .map_err(|error| mlua::Error::external(error.to_string()))?;
+        if let Some(analysis) = &self.analysis {
+            validate_effective_scope_inner(analysis, &prepared.scope)
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+        }
         let declared = bag
             .bindings()
             .bindings()
@@ -321,7 +301,7 @@ impl InferContext {
                     completion_options: &completion_options,
                 },
                 Some(&counts),
-                self.bound.as_ref().map(BoundPrompt::alias_to_id),
+                Some(&prepared.dispatch),
             ))
         })
         .map_err(|error| mlua::Error::external(error.to_string()))?;
@@ -360,7 +340,7 @@ fn attach_infer_hook(
     section: &str,
     max_tool_iterations: usize,
     turns: &Arc<AtomicU32>,
-    bound: Option<&BoundPrompt>,
+    analysis: Option<&ToolAnalysis>,
     live_bindings: Option<LiveBindingProducer>,
 ) {
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
@@ -376,7 +356,7 @@ fn attach_infer_hook(
         section: section.to_owned(),
         max_tool_iterations,
         turns: Arc::clone(turns),
-        bound: bound.cloned(),
+        analysis: analysis.cloned(),
         live_bindings,
         tool_bag: Mutex::new(ToolBag::new(tool_bindings, tool_runtime)),
         counts_slot: vm.counts_slot(),
@@ -429,38 +409,6 @@ pub struct ResolutionContext<'a> {
     pub models: &'a ModelCatalog,
 }
 
-/// A prompt accepted by [`run`].
-///
-/// A [`BoundPrompt`] supplies frozen H1 declaration replay data. A parsed
-/// [`Prompt`] remains accepted as a temporary input for tool-free hosts that
-/// have not yet adopted the separate binding phase; it executes on the same
-/// validated path as a bound prompt with empty frozen bindings, so any
-/// `tools.need` or `tools.add` in it fails loudly, and its shared Lua runs
-/// under full replay rules, where a scalar return is an error.
-#[derive(Debug, Clone, Copy)]
-pub struct RunPrompt<'a> {
-    prompt: &'a Prompt,
-    bound: Option<&'a BoundPrompt>,
-}
-
-impl<'a> From<&'a BoundPrompt> for RunPrompt<'a> {
-    fn from(bound: &'a BoundPrompt) -> Self {
-        Self {
-            prompt: bound.prompt(),
-            bound: Some(bound),
-        }
-    }
-}
-
-impl<'a> From<&'a Prompt> for RunPrompt<'a> {
-    fn from(prompt: &'a Prompt) -> Self {
-        Self {
-            prompt,
-            bound: None,
-        }
-    }
-}
-
 impl fmt::Debug for RunOptions<'_> {
     /// Formats the options without the observer or debug capture, which are
     /// trait objects and carry no `Debug`; their presence is reported instead.
@@ -481,115 +429,6 @@ impl fmt::Debug for RunOptions<'_> {
     }
 }
 
-/// Execute a prompt and return the run's result.
-///
-/// `args` is the single raw input string, exposed to Lua and to `{{ args }}`.
-///
-/// `prompt` normally receives a [`BoundPrompt`], whose frozen H1 declarations
-/// replay in each section VM. Parsed [`Prompt`] values remain accepted so
-/// existing tool-free hosts keep compiling until they adopt the separate
-/// binding phase; they run through the same validated VM with empty frozen
-/// bindings, so declaring or scoping any tool fails loudly and shared Lua
-/// replays under the same rules as a bound prompt.
-///
-/// `tools` is the complete callable pool for this run. A bound section exposes
-/// only aliases in its effective `tools.always` plus `tools.add` scope, and
-/// dispatches a returned alias through its frozen [`crate::tools::ToolId`].
-///
-/// `store` is the run's virtual-file handle. Create it once (typically with
-/// [`StoreRef::memory`]) and pass it in; the same handle is given to every
-/// section's Lua prologue, so files persist across sections even though each
-/// section's context is cleared on entry. It is a shared handle, so passing
-/// `&store` (not a fresh store per section) is what makes the state durable.
-///
-/// `opts` carries the run's [`Observer`] and, optionally, the
-/// [`GatewayClient`] to use. A run that clears the version gate reports
-/// [`detail::RUN_STARTED`] before its first section and either
-/// [`detail::RUN_SUCCEEDED`] or [`detail::RUN_FAILED`] however it ends. A run
-/// refused by the gate reports nothing because it never started.
-///
-/// # Errors
-/// Returns [`crate::Error::UnsupportedVersion`] if the prompt declares a
-/// `promptforge:` major this build does not support,
-/// [`crate::Error::Parse`] if the file has no `promptforge:` version (it is not
-/// a promptforge prompt), [`crate::Error::Lua`] if a Lua prologue fails,
-/// [`crate::Error::Substitution`] if a `{{ }}` path cannot be resolved,
-/// [`crate::Error::MissingEnv`] if the gateway client cannot be built when a
-/// model call is needed, [`crate::Error::UnknownScopedTool`] if a section
-/// scopes a tool name absent from `tools`, [`crate::Error::UnknownTool`] if the
-/// model calls an alias absent from its effective scope,
-/// [`crate::Error::NearDuplicateTools`] if two effective tools meet the picker's
-/// duplicate threshold, [`crate::Error::ToolLoopExhausted`] if a section's
-/// tool-call loop does not converge within its iteration cap, or any
-/// transport/backend error from a model call.
-pub async fn run<'a>(
-    prompt: impl Into<RunPrompt<'a>>,
-    args: &str,
-    tools: &[Arc<dyn Tool>],
-    store: &StoreRef,
-    opts: RunOptions<'_>,
-) -> Result<String> {
-    let run_prompt = prompt.into();
-    let prompt = run_prompt.prompt;
-    // Gate on the declared engine major before doing any work: promptforge runs
-    // only its own prompts, and refuses an unsupported major rather than
-    // silently degrading. A file with no `promptforge:` version is not a
-    // promptforge prompt at all, which is the caller's concern, not ours.
-    match prompt.frontmatter.promptforge {
-        Some(SUPPORTED_MAJOR) => {}
-        Some(other) => return Err(Error::UnsupportedVersion(other)),
-        None => {
-            return Err(Error::Parse(
-                "not a promptforge prompt: no promptforge version".into(),
-            ));
-        }
-    }
-
-    let RunOptions {
-        execution,
-        observer,
-        client,
-        debug,
-    } = opts;
-    let shared_tools = SharedTools::new(tools);
-    let registry = shared_tools.registry();
-    let prompt_section = prompt.title.as_str();
-    observer.observe(execution, prompt_section, detail::RUN_STARTED);
-
-    // The turn count is threaded through the whole run so `RunFinished` can
-    // report the total even when a section fails part way through it.
-    let turns = Arc::new(AtomicU32::new(0));
-    let result = run_sections(
-        prompt,
-        run_prompt.bound,
-        run_prompt.bound.map(BoundPrompt::bindings),
-        run_prompt.bound.map(BoundPrompt::models),
-        None,
-        false,
-        args,
-        &registry,
-        &shared_tools,
-        store,
-        execution,
-        observer,
-        client,
-        debug,
-        Arc::clone(&turns),
-    )
-    .await;
-
-    observer.observe(
-        execution,
-        prompt_section,
-        if result.is_ok() {
-            detail::RUN_SUCCEEDED
-        } else {
-            detail::RUN_FAILED
-        },
-    );
-    result
-}
-
 /// Execute a parsed prompt through the single-pass live H1 path.
 ///
 /// H1 Lua and prose blocks run once in source order with full host access.
@@ -599,7 +438,7 @@ pub async fn run<'a>(
 /// # Errors
 /// Returns the same lifecycle errors as [`run`], plus live tool or model
 /// resolution failures raised by executed H1 code.
-pub async fn run_prompt(
+pub async fn run(
     prompt: &Prompt,
     args: &str,
     resolution: ResolutionContext<'_>,
@@ -646,13 +485,13 @@ pub async fn run_prompt(
         if let Some(value) = h1.returned {
             return Ok(value);
         }
+        let analysis = ToolAnalysis::new(&h1.bindings, resolution.picker)?;
         run_sections(
             prompt,
-            None,
-            Some(&h1.bindings),
-            Some(&h1.models),
+            &h1.bindings,
+            &h1.models,
+            &analysis,
             Some(&h1.var),
-            true,
             args,
             &registry,
             &shared_tools,
@@ -684,6 +523,44 @@ struct LiveH1State {
     models: ModelBindings,
     var: serde_json::Value,
     returned: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ToolAnalysis {
+    pub(crate) alias_to_id: BTreeMap<String, ToolId>,
+    id_to_alias: BTreeMap<ToolId, String>,
+    near_duplicates: Vec<NearDuplicate>,
+}
+
+impl ToolAnalysis {
+    fn new(bindings: &ToolBindings, picker: &ToolPicker) -> Result<Self> {
+        let alias_to_id = bindings
+            .bindings()
+            .iter()
+            .map(|binding| (binding.alias().to_owned(), binding.id().clone()))
+            .collect();
+        let id_to_alias = bindings
+            .bindings()
+            .iter()
+            .map(|binding| (binding.id().clone(), binding.alias().to_owned()))
+            .collect();
+        let ids = bindings
+            .bindings()
+            .iter()
+            .map(|binding| PickerToolId::new(binding.id().server(), binding.id().name()))
+            .collect::<Vec<_>>();
+        let near_duplicates =
+            picker
+                .near_duplicates(&ids)
+                .map_err(|error| Error::ToolScopeAnalysis {
+                    detail: error.to_string(),
+                })?;
+        Ok(Self {
+            alias_to_id,
+            id_to_alias,
+            near_duplicates,
+        })
+    }
 }
 
 #[expect(
@@ -881,11 +758,10 @@ async fn execute_live_h1(
 )]
 async fn run_sections(
     prompt: &Prompt,
-    bound: Option<&BoundPrompt>,
-    live_bindings: Option<&ToolBindings>,
-    live_models: Option<&ModelBindings>,
+    bindings: &ToolBindings,
+    models: &ModelBindings,
+    analysis: &ToolAnalysis,
     initial_var: Option<&serde_json::Value>,
-    live_path: bool,
     args: &str,
     registry: &ToolRegistry<'_>,
     shared_tools: &SharedTools,
@@ -898,15 +774,6 @@ async fn run_sections(
 ) -> Result<String> {
     let when = now_rfc3339();
     let mut last_reply: Option<String> = None;
-
-    // A parsed prompt without a binding pass runs with empty frozen bindings,
-    // on the same validated VM path as a bound prompt: there is exactly one
-    // `tools.add`, and it rejects every undeclared alias.
-    let empty_bindings = ToolBindings::default();
-    let empty_models = ModelBindings::default();
-    let bindings =
-        live_bindings.unwrap_or_else(|| bound.map_or(&empty_bindings, BoundPrompt::bindings));
-    let models = live_models.unwrap_or_else(|| bound.map_or(&empty_models, BoundPrompt::models));
 
     // Resolve the tool-loop cap once: the prompt's declared budget, or the
     // runtime default when it declares none.
@@ -932,28 +799,14 @@ async fn run_sections(
         // grows, which is what the progress contract requires.
         observer.observe(execution, &section.name, detail::SECTION_STARTED);
 
-        let mut vm = if live_path {
-            SectionVm::new_for_section(
-                prompt.replay.as_ref(),
-                bindings,
-                models,
-                execution,
-                observer,
-                &section.name,
-            )?
-        } else {
-            match prompt.replay.as_ref() {
-                Some(shared) => SectionVm::new_with_shared_bindings(
-                    shared,
-                    bindings,
-                    models,
-                    execution,
-                    observer,
-                    &section.name,
-                )?,
-                None => SectionVm::new(None, execution, observer, &section.name)?,
-            }
-        };
+        let mut vm = SectionVm::new_for_section(
+            prompt.replay.as_ref(),
+            bindings,
+            models,
+            execution,
+            observer,
+            &section.name,
+        )?;
         if let Err(error) =
             vm.inject_host_with_var(args, &sys, store, last_reply.as_deref(), initial_var)
         {
@@ -979,7 +832,7 @@ async fn run_sections(
                 &section.name,
                 max_tool_iterations,
                 &turns,
-                bound,
+                Some(analysis),
                 None,
             );
         }
@@ -1013,7 +866,7 @@ async fn run_sections(
                         prompt.replay.as_ref(),
                         bindings,
                         models,
-                        bound,
+                        analysis,
                         shared_tools,
                         client.as_ref(),
                         max_tool_iterations,
@@ -1068,24 +921,19 @@ async fn run_sections(
                             completion_options = Some(binding.completion_options());
                         }
                         model_binding = scopes.model;
-                        let (prepared_schemas, prepared_dispatch) = match bound {
-                            Some(bound_prompt) => {
-                                match prepare_effective_scope(
-                                    bound_prompt,
-                                    &scopes.tools,
-                                    registry,
-                                    execution,
-                                    observer,
-                                    &section.name,
-                                ) {
-                                    Ok(prepared) => prepared,
-                                    Err(error) => {
-                                        vm.teardown(observer, &section.name);
-                                        return Err(error);
-                                    }
-                                }
+                        let (prepared_schemas, prepared_dispatch) = match prepare_effective_scope(
+                            analysis,
+                            &scopes.tools,
+                            registry,
+                            execution,
+                            observer,
+                            &section.name,
+                        ) {
+                            Ok(prepared) => prepared,
+                            Err(error) => {
+                                vm.teardown(observer, &section.name);
+                                return Err(error);
                             }
-                            None => (Vec::new(), BTreeMap::new()),
                         };
                         schemas = prepared_schemas;
                         dispatch = prepared_dispatch;
@@ -1141,7 +989,7 @@ async fn run_sections(
                             section: section.name.clone(),
                         });
                     };
-                    let global_aliases = bound.map(BoundPrompt::alias_to_id);
+                    let global_aliases = Some(&analysis.alias_to_id);
                     let mode = if *loop_capable {
                         ProseMode::Loop {
                             max_tool_iterations,
@@ -1252,7 +1100,7 @@ fn run_section_lua(
     shared: Option<&crate::lua::LuaProgram>,
     bindings: &ToolBindings,
     models: &ModelBindings,
-    bound: Option<&BoundPrompt>,
+    analysis: &ToolAnalysis,
     shared_tools: &SharedTools,
     client: Option<&GatewayClient>,
     max_tool_iterations: usize,
@@ -1290,7 +1138,7 @@ fn run_section_lua(
                 fanout_shared.as_ref(),
                 &fanout_bindings,
                 &fanout_models,
-                bound,
+                analysis,
                 &fanout_tools,
                 max_tool_iterations,
                 fanout_last_reply.as_deref(),
@@ -1315,7 +1163,7 @@ fn run_section_lua(
     let exec_tools = shared_tools.clone();
     let exec_sections = top_sections.to_vec();
     let exec_turns = Arc::clone(turns);
-    let exec_bound = bound.cloned();
+    let exec_analysis = analysis.clone();
     let execute_callback =
         move |target: LuaValue, input: Option<String>| -> std::result::Result<String, String> {
             let heading = resolve_section_target(target).map_err(|e| e.to_string())?;
@@ -1339,7 +1187,7 @@ fn run_section_lua(
                     exec_shared.as_ref(),
                     &exec_bindings,
                     &exec_models,
-                    exec_bound.as_ref(),
+                    &exec_analysis,
                     &exec_tools,
                     exec_client.as_ref(),
                     max_tool_iterations,
@@ -1440,7 +1288,7 @@ async fn run_execute_section(
     shared: Option<&crate::lua::LuaProgram>,
     bindings: &ToolBindings,
     models: &ModelBindings,
-    bound: Option<&BoundPrompt>,
+    analysis: &ToolAnalysis,
     shared_tools: &SharedTools,
     client: Option<&GatewayClient>,
     max_tool_iterations: usize,
@@ -1462,21 +1310,8 @@ async fn run_execute_section(
     });
     observer.observe(execution, &section.name, detail::SECTION_STARTED);
 
-    let mut vm = if bound.is_none() {
-        SectionVm::new_for_section(shared, bindings, models, execution, observer, &section.name)?
-    } else {
-        match shared {
-            Some(program) => SectionVm::new_with_shared_bindings(
-                program,
-                bindings,
-                models,
-                execution,
-                observer,
-                &section.name,
-            )?,
-            None => SectionVm::new(None, execution, observer, &section.name)?,
-        }
-    };
+    let mut vm =
+        SectionVm::new_for_section(shared, bindings, models, execution, observer, &section.name)?;
     if let Err(error) = vm.inject_host(args, &sys, store, last_reply) {
         vm.teardown(observer, &section.name);
         return Err(error);
@@ -1498,7 +1333,7 @@ async fn run_execute_section(
             &section.name,
             max_tool_iterations,
             turns,
-            bound,
+            Some(analysis),
             None,
         );
     }
@@ -1532,7 +1367,7 @@ async fn run_execute_section(
                     shared,
                     bindings,
                     models,
-                    bound,
+                    analysis,
                     shared_tools,
                     client.as_ref(),
                     max_tool_iterations,
@@ -1588,24 +1423,19 @@ async fn run_execute_section(
                         completion_options = Some(binding.completion_options());
                     }
                     model_binding = scopes.model;
-                    let (prepared_schemas, prepared_dispatch) = match bound {
-                        Some(bound_prompt) => {
-                            match prepare_effective_scope(
-                                bound_prompt,
-                                &scopes.tools,
-                                &registry,
-                                execution,
-                                observer,
-                                &section.name,
-                            ) {
-                                Ok(prepared) => prepared,
-                                Err(error) => {
-                                    vm.teardown(observer, &section.name);
-                                    return Err(error);
-                                }
-                            }
+                    let (prepared_schemas, prepared_dispatch) = match prepare_effective_scope(
+                        analysis,
+                        &scopes.tools,
+                        &registry,
+                        execution,
+                        observer,
+                        &section.name,
+                    ) {
+                        Ok(prepared) => prepared,
+                        Err(error) => {
+                            vm.teardown(observer, &section.name);
+                            return Err(error);
                         }
-                        None => (Vec::new(), BTreeMap::new()),
                     };
                     schemas = prepared_schemas;
                     dispatch = prepared_dispatch;
@@ -1654,7 +1484,7 @@ async fn run_execute_section(
                         section: section.name.clone(),
                     });
                 };
-                let global_aliases = bound.map(BoundPrompt::alias_to_id);
+                let global_aliases = Some(&analysis.alias_to_id);
                 let mode = if *loop_capable {
                     ProseMode::Loop {
                         max_tool_iterations,
@@ -1738,7 +1568,7 @@ fn make_fanout_callback(
     shared: Option<&crate::lua::LuaProgram>,
     bindings: &ToolBindings,
     models: &ModelBindings,
-    bound: Option<&BoundPrompt>,
+    analysis: &ToolAnalysis,
     shared_tools: &SharedTools,
     max_tool_iterations: usize,
     last_reply: Option<&str>,
@@ -1769,7 +1599,7 @@ fn make_fanout_callback(
         shared,
         bindings,
         models,
-        bound,
+        analysis,
         shared_tools,
         max_tool_iterations,
         last_reply,
@@ -1786,7 +1616,7 @@ fn make_fanout_callback(
 }
 
 pub(crate) fn prepare_effective_scope(
-    bound: &BoundPrompt,
+    analysis: &ToolAnalysis,
     scope: &ToolScope,
     registry: &ToolRegistry<'_>,
     execution: &str,
@@ -1794,7 +1624,7 @@ pub(crate) fn prepare_effective_scope(
     section: &str,
 ) -> Result<(Vec<ToolSchema>, BTreeMap<String, ToolId>)> {
     observer.observe(execution, section, detail::TOOL_SCOPE_VALIDATION_STARTED);
-    let result = validate_effective_scope_inner(bound, scope)
+    let result = validate_effective_scope_inner(analysis, scope)
         .and_then(|()| prepare_scoped_tools(scope, registry));
     observer.observe(
         execution,
@@ -1808,25 +1638,27 @@ pub(crate) fn prepare_effective_scope(
     result
 }
 
-fn validate_effective_scope_inner(bound: &BoundPrompt, scope: &ToolScope) -> Result<()> {
+fn validate_effective_scope_inner(analysis: &ToolAnalysis, scope: &ToolScope) -> Result<()> {
     let effective = scope
         .bindings()
         .iter()
         .map(crate::lua::ToolBinding::id)
         .collect::<BTreeSet<_>>();
-    for pair in bound.near_duplicates() {
+    for pair in &analysis.near_duplicates {
         let first_id = ToolId::new(pair.first.id.server(), pair.first.id.name());
         let second_id = ToolId::new(pair.second.id.server(), pair.second.id.name());
         if !effective.contains(&first_id) || !effective.contains(&second_id) {
             continue;
         }
-        let first_alias = bound.id_to_alias().get(&first_id).cloned().ok_or_else(|| {
-            Error::ToolScopeAnalysis {
+        let first_alias = analysis
+            .id_to_alias
+            .get(&first_id)
+            .cloned()
+            .ok_or_else(|| Error::ToolScopeAnalysis {
                 detail: "selected identity has no frozen alias".to_owned(),
-            }
-        })?;
-        let second_alias = bound
-            .id_to_alias()
+            })?;
+        let second_alias = analysis
+            .id_to_alias
             .get(&second_id)
             .cloned()
             .ok_or_else(|| Error::ToolScopeAnalysis {

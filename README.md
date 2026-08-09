@@ -29,7 +29,7 @@ promptforge: 1
 
 # Greet
 
-```lua shared
+```lua
 models.always("writer", "A model suited for careful analysis, coding, and general assistance")
 ```
 

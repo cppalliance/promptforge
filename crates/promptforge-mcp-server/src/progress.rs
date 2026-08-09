@@ -321,10 +321,12 @@ mod tests {
 
     use super::{Frame, McpObserver, ProgressPump, Receiver};
     use crate::levels::Levels;
-    use promptforge_core::execute::{self, RunOptions};
+    use promptforge_core::execute::{self, ResolutionContext, RunOptions};
+    use promptforge_core::model::ModelCatalog;
     use promptforge_core::observe::{NullObserver, Observer, detail};
     use promptforge_core::parser::Prompt;
     use promptforge_core::store::StoreRef;
+    use promptforge_tool_picker::{Catalog, Config, ToolPicker};
     use tracing::Level;
     use tracing_subscriber::layer::SubscriberExt;
 
@@ -427,9 +429,21 @@ mod tests {
             client: None,
             debug: None,
         };
-        let value = execute::run(&prompt, "", &[], &store, options)
-            .await
-            .expect("a Lua-only run reaches no model and finishes");
+        let picker = ToolPicker::build(Catalog::default(), Config::default())
+            .expect("empty picker must build");
+        let value = execute::run(
+            &prompt,
+            "",
+            ResolutionContext {
+                picker: &picker,
+                models: &ModelCatalog::empty(),
+            },
+            &[],
+            &store,
+            options,
+        )
+        .await
+        .expect("a Lua-only run reaches no model and finishes");
 
         assert_eq!(value, "long done");
         assert!(
@@ -483,12 +497,9 @@ mod tests {
     }
 
     #[test]
-    fn binding_and_unknown_details_are_tolerated_without_frames_or_counters() {
+    fn unknown_details_are_tolerated_without_frames_or_counters() {
         let (observer, mut frames) = McpObserver::queued();
         for report in [
-            detail::TOOL_BINDING_STARTED,
-            detail::TOOL_BINDING_SUCCEEDED,
-            detail::TOOL_BINDING_FAILED,
             detail::TOOL_REGISTRY_VALIDATION_STARTED,
             detail::TOOL_REGISTRY_VALIDATION_SUCCEEDED,
             detail::TOOL_REGISTRY_VALIDATION_FAILED,

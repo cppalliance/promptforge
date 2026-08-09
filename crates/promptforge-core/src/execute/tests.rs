@@ -16,12 +16,9 @@ use promptforge_tool_picker::{
 use serde_json::Value;
 
 use super::*;
-use crate::lua::{
-    LuaProgram, SectionVm, ToolCallCounts, bind_shared_declarations, bind_tool_declarations,
-};
+use crate::lua::{LuaProgram, SectionVm, ToolCallCounts};
 use crate::model::{
-    CompletionOptions, ModelBindings, ModelCatalog, ModelDescriptor, ModelId, ModelInvocation,
-    ModelNeedOpts, ResolvedModel, ThinkingMode,
+    CompletionOptions, ModelBindings, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode,
 };
 use crate::observe::{NullObserver, detail};
 use crate::tools::{Tool, ToolId, ToolRegistry};
@@ -30,8 +27,6 @@ const EXECUTION: &str = "execute-test";
 
 const MODEL_ALWAYS_SHARED: &str =
     "```lua shared\nmodels.always('writer', 'A general model for tests')\n```\n\n";
-
-const MODEL_ALWAYS_LINE: &str = "models.always('writer', 'A general model for tests')\n";
 
 /// Lua-only prompts never build the gateway client, so these run offline.
 fn parse(md: &str) -> Prompt {
@@ -43,9 +38,25 @@ fn parse(md: &str) -> Prompt {
     Prompt::parse(&source, EXECUTION, &NullObserver).unwrap()
 }
 
-/// Build the tool-free bound form consumed by the complete lifecycle path.
-fn bound(md: &str) -> BoundPrompt {
-    BoundPrompt::without_tools(parse(md))
+struct TestPrompt {
+    prompt: Prompt,
+    models: ModelCatalog,
+    picker_catalog: Option<Catalog>,
+}
+
+impl TestPrompt {
+    fn prompt(&self) -> &Prompt {
+        &self.prompt
+    }
+}
+
+/// Build the tool-free parsed form consumed by the complete lifecycle path.
+fn bound(md: &str) -> TestPrompt {
+    TestPrompt {
+        prompt: parse(md),
+        models: ModelCatalog::empty(),
+        picker_catalog: None,
+    }
 }
 
 fn test_model_catalog() -> ModelCatalog {
@@ -67,122 +78,81 @@ fn test_completion_options() -> CompletionOptions {
     }
 }
 
-#[expect(clippy::unnecessary_wraps, reason = "ModelResolver requires Result")]
-fn fixture_model_resolver(
-    _description: &str,
-    opts: &ModelNeedOpts,
-) -> crate::Result<ResolvedModel> {
-    Ok(ResolvedModel {
-        id: ModelId::gateway("claude-sonnet-4-6"),
-        invocation: ModelInvocation::from(opts),
-        tool_dialect: crate::dialects::ToolDialectId::OpenAi,
-        context: 200_000,
-    })
-}
-
-fn ensure_model_shared(md: &str) -> String {
+fn ensure_model_h1(md: &str) -> String {
     let first_section = md.find("\n\n## ");
     let mut source = md.to_string();
+    if source.contains("models.always") || source.contains("models.need") {
+        source = source
+            .replace("```lua shared\nmodels.", "```lua\nmodels.")
+            .replace("```lua shared\n  models.", "```lua\n  models.");
+        return source;
+    }
     if let Some(marker) = source.find("```lua\n")
         && first_section.is_none_or(|section| marker < section)
     {
         source.replace_range(marker..marker + "```lua".len(), "```lua shared");
-    }
-    if source.contains("models.always") || source.contains("models.need") {
-        return source;
-    }
-    if let Some(marker) = source.find("```lua shared\n")
-        && first_section.is_none_or(|section| marker < section)
-    {
-        source.insert_str(marker + "```lua shared\n".len(), MODEL_ALWAYS_LINE);
+        if let Some(pos) = source.find("\n\n## ") {
+            source.insert_str(pos + 2, &MODEL_ALWAYS_SHARED.replace("lua shared", "lua"));
+        }
         return source;
     }
     if let Some(pos) = first_section {
         let mut out = source;
-        out.insert_str(pos + 2, MODEL_ALWAYS_SHARED);
+        out.insert_str(pos + 2, &MODEL_ALWAYS_SHARED.replace("lua shared", "lua"));
         return out;
     }
     source.replacen(
         "---\n\n",
-        &format!("---\n\n# Test prompt\n\n{MODEL_ALWAYS_SHARED}"),
+        &format!(
+            "---\n\n# Test prompt\n\n{}",
+            MODEL_ALWAYS_SHARED.replace("lua shared", "lua")
+        ),
         1,
     )
 }
 
-fn bound_for_model(md: &str) -> BoundPrompt {
-    let source = ensure_model_shared(md);
-    let prompt = parse(&source);
-    let no_tools = |_: &str| -> Result<ToolId> {
-        Err(Error::Absent {
-            capability: "unexpected tool need in model-only fixture".to_owned(),
-        })
-    };
-    let (bindings, models) = if let Some(shared) = &prompt.replay {
-        bind_shared_declarations(
-            shared,
-            &no_tools,
-            &fixture_model_resolver,
-            EXECUTION,
-            &NullObserver,
-            &prompt.title,
-        )
-        .expect("model fixture must bind")
-    } else {
-        (
-            crate::lua::ToolBindings::default(),
-            ModelBindings::default(),
-        )
-    };
-    BoundPrompt::with_test_tools(
-        prompt,
-        bindings,
-        BTreeMap::new(),
-        BTreeMap::new(),
-        Vec::new(),
-        models,
-    )
+fn bound_for_model(md: &str) -> TestPrompt {
+    TestPrompt {
+        prompt: parse(&ensure_model_h1(md)),
+        models: test_model_catalog(),
+        picker_catalog: None,
+    }
 }
 
 fn bound_with_tools(
     md: &str,
     resolver: &dyn crate::lua::ToolResolver,
     near_duplicates: Vec<NearDuplicate>,
-) -> BoundPrompt {
-    let prompt = parse(md);
-    let shared = prompt
-        .replay
-        .as_ref()
-        .expect("a tool fixture must declare shared Lua");
-    let (bindings, models) = if shared.source().contains("models.") {
-        bind_shared_declarations(
-            shared,
-            resolver,
-            &fixture_model_resolver,
-            EXECUTION,
-            &NullObserver,
-            &prompt.title,
-        )
-        .expect("tool and model fixture must bind")
+) -> TestPrompt {
+    let _ = resolver;
+    let mut live_source = md.to_owned();
+    if let Some(marker) = live_source.find("```lua shared\n")
+        && live_source
+            .find("\n\n## ")
+            .is_none_or(|section| marker < section)
+    {
+        live_source.replace_range(marker..marker + "```lua shared".len(), "```lua");
+    }
+    let source = ensure_model_h1(&live_source);
+    let picker_catalog = if near_duplicates.is_empty() {
+        None
     } else {
-        (
-            bind_tool_declarations(shared, resolver, EXECUTION, &NullObserver, &prompt.title)
-                .unwrap(),
-            ModelBindings::default(),
-        )
+        Some(Catalog::new(
+            near_duplicates
+                .into_iter()
+                .flat_map(|pair| [pair.first, pair.second])
+                .collect(),
+        ))
     };
-    let alias_to_id: BTreeMap<String, ToolId> = bindings
-        .bindings()
-        .iter()
-        .map(|binding| (binding.alias().to_owned(), binding.id().clone()))
-        .collect();
-    BoundPrompt::with_test_tools(
-        prompt,
-        bindings,
-        BTreeMap::new(),
-        alias_to_id,
-        near_duplicates,
-        models,
-    )
+    TestPrompt {
+        prompt: parse(&source),
+        models: if source.contains("models.") {
+            test_model_catalog()
+        } else {
+            ModelCatalog::empty()
+        },
+        picker_catalog,
+    }
 }
 
 /// Options that report nowhere and build no client - what a Lua-only,
@@ -201,6 +171,51 @@ fn silent() -> RunOptions<'static> {
 /// Lua-only tests that do not care about the store's contents.
 async fn run_offline(md: &str) -> Result<String> {
     run(&bound(md), "", &[], &StoreRef::memory(), silent()).await
+}
+
+async fn run(
+    test: &TestPrompt,
+    args: &str,
+    tools: &[Arc<dyn Tool>],
+    store: &StoreRef,
+    opts: RunOptions<'_>,
+) -> Result<String> {
+    let catalog = test.picker_catalog.clone().unwrap_or_else(|| {
+        Catalog::new(
+            tools
+                .iter()
+                .map(|tool| {
+                    let id = tool.id();
+                    ToolDescriptor::new(
+                        PickerToolId::new(id.server(), id.name()),
+                        tool.description(),
+                        tool.parameters_schema(),
+                    )
+                })
+                .collect(),
+        )
+    });
+    let picker = ToolPicker::build(
+        catalog,
+        PickerConfig {
+            similarity_floor: 0.0,
+            margin: 0.0,
+            ..PickerConfig::default()
+        },
+    )
+    .expect("test picker must build");
+    super::run(
+        &test.prompt,
+        args,
+        ResolutionContext {
+            picker: &picker,
+            models: &test.models,
+        },
+        tools,
+        store,
+        opts,
+    )
+    .await
 }
 
 /// An [`Observer`] that keeps every observation it is handed, in order, so a test
@@ -1376,6 +1391,14 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
         events(&records),
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_TEARDOWN_STARTED.to_string(),
+            ),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
+            ),
             ("First".to_string(), detail::SECTION_STARTED.to_string()),
             (
                 "First".to_string(),
@@ -1510,6 +1533,14 @@ async fn a_failing_run_still_reports_run_finished() {
         events(&records),
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_TEARDOWN_STARTED.to_string(),
+            ),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
+            ),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
             ("Only".to_string(), detail::LUA_PROLOGUE_STARTED.to_string()),
             ("Only".to_string(), detail::LUA_PROLOGUE_FAILED.to_string()),
@@ -1525,7 +1556,7 @@ async fn a_failing_run_still_reports_run_finished() {
 }
 
 #[tokio::test]
-async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() {
+async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     let (addr, _, _) = spawn_aliased_tool_gateway("echo").await;
     let tool = Arc::new(ScopedFixtureTool::new(
         "echo",
@@ -1541,7 +1572,7 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
         serde_json::to_string(&descriptor.enriched_text()).expect("serialize fixture capability");
     let source = format!(
         "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 1\n---\n\n\
-         # Lifecycle\n\n```lua shared\n\
+         # Lifecycle\n\n```lua\n\
          tools.need('echo', {capability})\n\
          tools.always('echo')\n\
          models.always('writer', 'A general model for tests')\n```\n\n\
@@ -1552,19 +1583,17 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
     let recorder = Recorder::default();
     let prompt =
         Prompt::parse(&source, EXECUTION, &recorder).expect("the lifecycle fixture must parse");
-    let picker = ToolPicker::build(Catalog::new(vec![descriptor]), PickerConfig::default())
-        .expect("the lifecycle picker must build");
-    let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];
-    let registry = ToolRegistry::new(tools.iter().map(AsRef::as_ref));
-    let prompt = crate::bind::bind_prompt(
-        prompt,
-        &picker,
-        &registry,
-        &test_model_catalog(),
-        EXECUTION,
-        &recorder,
+    let _picker = ToolPicker::build(
+        Catalog::new(vec![descriptor.clone()]),
+        PickerConfig::default(),
     )
-    .expect("the lifecycle fixture must bind");
+    .expect("the lifecycle picker must build");
+    let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];
+    let prompt = TestPrompt {
+        prompt,
+        models: test_model_catalog(),
+        picker_catalog: Some(Catalog::new(vec![descriptor])),
+    };
     let store = StoreRef::memory();
 
     let result = run(
@@ -1602,7 +1631,6 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
         .collect::<Vec<_>>();
     for expected in [
         detail::PARSE_STARTED,
-        detail::TOOL_BINDING_STARTED,
         detail::RUN_STARTED,
         detail::SECTION_STARTED,
         detail::LUA_PROLOGUE_STARTED,
@@ -1731,7 +1759,7 @@ async fn live_h1_infer_runs_once() {
     let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
         .expect("empty tool picker must build");
     let models = test_model_catalog();
-    let out = run_prompt(
+    let out = super::run(
         &prompt,
         "",
         ResolutionContext {
@@ -1767,7 +1795,7 @@ async fn shared_library_loads_before_host_and_resolves_host_when_called() {
     let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
         .expect("empty tool picker must build");
     let models = test_model_catalog();
-    let out = run_prompt(
+    let out = super::run(
         &prompt,
         "later host value",
         ResolutionContext {
@@ -1803,7 +1831,7 @@ async fn shared_library_cannot_call_host_at_load_time() {
              ```lua\nreturn 'unreachable'\n```\n"
         );
         let prompt = parse(&source);
-        let error = run_prompt(
+        let error = super::run(
             &prompt,
             "",
             ResolutionContext {
@@ -1864,7 +1892,7 @@ async fn captured_bindings_reach_section_execute_and_fanout_vms() {
         .expect("tool picker must build");
     let models = test_model_catalog();
     let tools: [Arc<dyn Tool>; 1] = [echo];
-    let out = run_prompt(
+    let out = super::run(
         &prompt,
         "",
         ResolutionContext {
@@ -1913,7 +1941,7 @@ async fn live_h1_infer_sees_tools_resolved_in_the_same_block() {
     let models = test_model_catalog();
     let tools: [Arc<dyn Tool>; 1] = [echo];
 
-    let out = run_prompt(
+    let out = super::run(
         &prompt,
         "",
         ResolutionContext {
@@ -1976,7 +2004,7 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
     let models = test_model_catalog();
     let tools: [Arc<dyn Tool>; 1] = [echo];
 
-    let out = run_prompt(
+    let out = super::run(
         &prompt,
         "",
         ResolutionContext {
@@ -2037,28 +2065,21 @@ async fn models_use_forwards_binding_completion_options_to_the_gateway() {
     )]);
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # T\n\n\
-```lua shared\n\
+```lua\n\
 models.need('analyst', 'careful analysis', { temperature = 0.25, max_tokens = 64, thinking = false })\n\
 ```\n\n\
 ## Only\n\n\
 ```lua\nmodels.use('analyst')\n```\n\n\
 Ask the model.\n";
     let prompt = Prompt::parse(md, EXECUTION, &NullObserver).expect("fixture must parse");
-    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
-        .expect("empty tool picker must build");
-    let registry = ToolRegistry::new(std::iter::empty());
-    let bound = crate::bind::bind_prompt(
+    let prompt = TestPrompt {
         prompt,
-        &picker,
-        &registry,
-        &catalog,
-        EXECUTION,
-        &NullObserver,
-    )
-    .expect("fixture must bind");
+        models: catalog,
+        picker_catalog: None,
+    };
 
     let out = run(
-        &bound,
+        &prompt,
         "",
         &[],
         &StoreRef::memory(),
@@ -2113,25 +2134,23 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         recorder.events(),
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_PROLOGUE_STARTED.to_string(),
+            ),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
+            ),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_TEARDOWN_STARTED.to_string(),
+            ),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
+            ),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
-            (
-                "Only".to_string(),
-                detail::LUA_SHARED_LOAD_STARTED.to_string()
-            ),
-            ("Only".to_string(), detail::TOOL_REPLAY_STARTED.to_string()),
-            ("Only".to_string(), detail::MODEL_REPLAY_STARTED.to_string()),
-            (
-                "Only".to_string(),
-                detail::TOOL_REPLAY_SUCCEEDED.to_string()
-            ),
-            (
-                "Only".to_string(),
-                detail::MODEL_REPLAY_SUCCEEDED.to_string()
-            ),
-            (
-                "Only".to_string(),
-                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string()
-            ),
             ("Only".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
             ("Only".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
             ("Only".to_string(), detail::MODEL_SCOPE_CLOSING.to_string()),
@@ -2196,25 +2215,23 @@ async fn epilog_runs_after_reply_and_can_return() {
         recorder.events(),
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_PROLOGUE_STARTED.to_string(),
+            ),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
+            ),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_TEARDOWN_STARTED.to_string(),
+            ),
+            (
+                "Test prompt".to_string(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
+            ),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
-            (
-                "Only".to_string(),
-                detail::LUA_SHARED_LOAD_STARTED.to_string()
-            ),
-            ("Only".to_string(), detail::TOOL_REPLAY_STARTED.to_string()),
-            ("Only".to_string(), detail::MODEL_REPLAY_STARTED.to_string()),
-            (
-                "Only".to_string(),
-                detail::TOOL_REPLAY_SUCCEEDED.to_string()
-            ),
-            (
-                "Only".to_string(),
-                detail::MODEL_REPLAY_SUCCEEDED.to_string()
-            ),
-            (
-                "Only".to_string(),
-                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string()
-            ),
             ("Only".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
             ("Only".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
             ("Only".to_string(), detail::MODEL_SCOPE_CLOSING.to_string()),
@@ -2260,7 +2277,7 @@ async fn add_in_an_unbound_prompt_without_declarations_fails_the_run_loudly() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
-    let prompt = parse(md);
+    let prompt = bound(md);
     let error = run(&prompt, "", &[], &StoreRef::memory(), silent())
         .await
         .expect_err("an undeclared alias must fail the run");
@@ -2331,15 +2348,27 @@ Ask using {{ var.question }}.\n\n\
         recorder.events(),
         [
             ("Test prompt".to_owned(), detail::RUN_STARTED.to_owned()),
+            (
+                "Test prompt".to_owned(),
+                detail::LUA_PROLOGUE_STARTED.to_owned(),
+            ),
+            (
+                "Test prompt".to_owned(),
+                detail::LUA_PROLOGUE_SUCCEEDED.to_owned(),
+            ),
+            (
+                "Test prompt".to_owned(),
+                detail::LUA_TEARDOWN_STARTED.to_owned(),
+            ),
+            (
+                "Test prompt".to_owned(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_owned(),
+            ),
             ("Only".to_owned(), detail::SECTION_STARTED.to_owned()),
             (
                 "Only".to_owned(),
                 detail::LUA_SHARED_LOAD_STARTED.to_owned(),
             ),
-            ("Only".to_owned(), detail::TOOL_REPLAY_STARTED.to_owned()),
-            ("Only".to_owned(), detail::MODEL_REPLAY_STARTED.to_owned()),
-            ("Only".to_owned(), detail::TOOL_REPLAY_SUCCEEDED.to_owned(),),
-            ("Only".to_owned(), detail::MODEL_REPLAY_SUCCEEDED.to_owned()),
             (
                 "Only".to_owned(),
                 detail::LUA_SHARED_LOAD_SUCCEEDED.to_owned(),
@@ -2425,14 +2454,15 @@ async fn model_required_when_non_empty_prose_has_no_binding() {
 }
 
 #[tokio::test]
-async fn prologue_sys_model_unknown_during_shared_replay() {
+async fn shared_function_sees_sys_model_unknown_before_scope_close() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
-```lua\nfunction read_sys_model()\n  return sys.model\nend\nmodels.always('writer', 'A general model for tests')\n```\n\n\
+```lua\nmodels.always('writer', 'A general model for tests')\n```\n\n\
+```lua shared\nfunction read_sys_model()\n  return sys.model\nend\n```\n\n\
 ## Only\n\n```lua\nreturn read_sys_model()\n```\n\nprose\n";
     let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
         .await
-        .expect_err("H1 shared Lua must not read sys.model before scope close");
+        .expect_err("shared function must not read sys.model before scope close");
     assert!(
         error.to_string().contains("unknown sys field 'model'"),
         "error must name the missing field: {error}"
@@ -2930,46 +2960,38 @@ models.always('writer', 'A general model for tests')\n```\n\n\
     assert_eq!(requests.load(Ordering::SeqCst), 2);
 }
 
-#[tokio::test]
-async fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports() {
-    let (addr, _bodies, requests) = spawn_aliased_tool_gateway("first_local").await;
+#[test]
+fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports() {
     let first = ScopedFixtureTool::new("first", "first_wire", "First concrete.");
     let second = ScopedFixtureTool::new("second", "second_wire", "Second concrete.");
     let first_descriptor = picker_descriptor("first", "Private similar description one.");
     let second_descriptor = picker_descriptor("second", "Private similar description two.");
-    let prompt = bound_with_tools(
-        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua shared\n\
-tools.need('first_local', 'first')\n\
-tools.need('second_local', 'second')\n\
-models.always('writer', 'A general model for tests')\n```\n\n\
-## Only\n\n```lua\ntools.add('first_local', 'second_local')\n```\n\nDo not reach the model.\n",
-        &|capability: &str| Ok(ToolId::new("tests", capability)),
-        vec![NearDuplicate {
+    let first_id = ToolId::new("tests", "first");
+    let second_id = ToolId::new("tests", "second");
+    let scope = crate::lua::ToolScope::from_bindings(vec![
+        crate::lua::ToolBinding::for_test("first_local", "first", first_id.clone()),
+        crate::lua::ToolBinding::for_test("second_local", "second", second_id.clone()),
+    ]);
+    let analysis = ToolAnalysis {
+        alias_to_id: BTreeMap::from([
+            ("first_local".to_owned(), first_id.clone()),
+            ("second_local".to_owned(), second_id.clone()),
+        ]),
+        id_to_alias: BTreeMap::from([
+            (first_id.clone(), "first_local".to_owned()),
+            (second_id.clone(), "second_local".to_owned()),
+        ]),
+        near_duplicates: vec![NearDuplicate {
             first: first_descriptor,
             second: second_descriptor,
             similarity: 0.98,
         }],
-    );
+    };
+    let registry = ToolRegistry::new([&first as &dyn Tool, &second as &dyn Tool]);
     let recorder = Recorder::default();
 
-    let error = run(
-        &prompt,
-        "",
-        &[
-            Arc::new(first) as Arc<dyn Tool>,
-            Arc::new(second) as Arc<dyn Tool>,
-        ],
-        &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: &recorder,
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
-            debug: None,
-        },
-    )
-    .await
-    .unwrap_err();
+    let error = prepare_effective_scope(&analysis, &scope, &registry, EXECUTION, &recorder, "Only")
+        .unwrap_err();
 
     assert!(matches!(
         error,
@@ -2985,7 +3007,6 @@ models.always('writer', 'A general model for tests')\n```\n\n\
             && diagnostic.second_annotations.idempotent == Some(true)
             && (diagnostic.similarity - 0.98).abs() < f32::EPSILON
     ));
-    assert_eq!(requests.load(Ordering::SeqCst), 0);
     let events = recorder.events();
     assert!(
         events
@@ -2996,12 +3017,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
         detail == detail::MODEL_TURN_COMPLETED || detail == detail::MODEL_TURN_FAILED
     }));
     let trace = format!("{events:?}");
-    for payload in [
-        "first_local",
-        "second_local",
-        "Private similar description",
-        "Do not reach the model",
-    ] {
+    for payload in ["first_local", "second_local", "Private similar description"] {
         assert!(!trace.contains(payload), "observation leaked {payload:?}");
     }
 }
@@ -3428,31 +3444,22 @@ impl Tool for FetchTool {
     reason = "covers cache hit, generation bump rebuild, and count persistence in one bag lifecycle"
 )]
 fn tool_bag_caches_on_unchanged_generation() {
-    let shared = LuaProgram::compile(
-        "tools.need('echo', 'echo tool')\ntools.need('fetch', 'fetch tool')",
-        "shared",
-        1,
+    let bindings = crate::lua::ToolBindings::for_test(
+        vec![
+            crate::lua::ToolBinding::for_test("echo", "echo tool", ToolId::new("tests", "echo")),
+            crate::lua::ToolBinding::for_test("fetch", "fetch tool", ToolId::new("tests", "fetch")),
+        ],
+        Vec::new(),
+    );
+    let mut vm = SectionVm::new_for_section(
+        None,
+        &bindings,
+        &ModelBindings::default(),
         EXECUTION,
         &NullObserver,
         "Bag",
     )
-    .expect("shared Lua must compile");
-    let bindings = bind_tool_declarations(
-        &shared,
-        &|description: &str| {
-            if description.contains("echo") {
-                Ok(ToolId::new("tests", "echo"))
-            } else {
-                Ok(ToolId::new("tests", "fetch"))
-            }
-        },
-        EXECUTION,
-        &NullObserver,
-        "Bag",
-    )
-    .expect("declarations must bind");
-    let mut vm = SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Bag")
-        .expect("declarations must replay");
+    .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
     let add_echo = LuaProgram::compile(
@@ -3482,14 +3489,14 @@ fn tool_bag_caches_on_unchanged_generation() {
     let registry = ToolRegistry::new([&echo as &dyn Tool, &fetch as &dyn Tool]);
 
     let first = bag
-        .prepare(None, &registry, EXECUTION, &NullObserver, "Bag")
+        .prepare(&registry)
         .expect("first prepare must build schemas");
     assert!(!first.reused, "first prepare must rebuild");
     assert_eq!(first.schemas.len(), 1);
     assert_eq!(first.schemas[0].name, "echo");
 
     let second = bag
-        .prepare(None, &registry, EXECUTION, &NullObserver, "Bag")
+        .prepare(&registry)
         .expect("second prepare must reuse cache");
     assert!(second.reused, "unchanged generation must reuse cache");
     assert_eq!(
@@ -3527,7 +3534,7 @@ fn tool_bag_caches_on_unchanged_generation() {
     }
 
     let third = bag
-        .prepare(None, &registry, EXECUTION, &NullObserver, "Bag")
+        .prepare(&registry)
         .expect("prepare after mutation must rebuild");
     assert!(!third.reused, "generation mismatch must rebuild");
     assert_eq!(third.schemas.len(), 2);
@@ -3557,30 +3564,27 @@ fn tool_bag_caches_on_unchanged_generation() {
 
 #[test]
 fn tool_description_override_appears_in_model_schema() {
-    let shared = LuaProgram::compile(
-        "echo = tools.need('echo', 'echo capability for bind matching')",
-        "shared",
-        1,
-        EXECUTION,
-        &NullObserver,
-        "Override",
-    )
-    .expect("shared Lua must compile");
-    let bindings = bind_tool_declarations(
-        &shared,
-        &|_: &str| Ok(ToolId::new("tests", "echo")),
-        EXECUTION,
-        &NullObserver,
-        "Override",
-    )
-    .expect("declarations must bind");
+    let bindings = crate::lua::ToolBindings::for_test(
+        vec![crate::lua::ToolBinding::for_test(
+            "echo",
+            "echo capability for live matching",
+            ToolId::new("tests", "echo"),
+        )],
+        Vec::new(),
+    );
     let echo = EchoTool;
     let registry = ToolRegistry::new([&echo as &dyn Tool]);
 
     // tools.add(Tool) without mutating .description keeps the registry text.
-    let mut default_vm =
-        SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Override")
-            .expect("declarations must replay");
+    let mut default_vm = SectionVm::new_for_section(
+        None,
+        &bindings,
+        &ModelBindings::default(),
+        EXECUTION,
+        &NullObserver,
+        "Override",
+    )
+    .expect("captured bindings must install");
     default_vm
         .inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
@@ -3599,7 +3603,7 @@ fn tool_description_override_appears_in_model_schema() {
     let (default_bindings, default_runtime) = default_vm.tool_bag_handles();
     let mut default_bag = ToolBag::new(default_bindings, Arc::clone(&default_runtime));
     let default_prepared = default_bag
-        .prepare(None, &registry, EXECUTION, &NullObserver, "Override")
+        .prepare(&registry)
         .expect("default prepare must build schemas");
     assert_eq!(default_prepared.schemas.len(), 1);
     assert_eq!(
@@ -3609,8 +3613,8 @@ fn tool_description_override_appears_in_model_schema() {
     );
     assert_eq!(
         default_prepared.scope.bindings()[0].description(),
-        "echo capability for bind matching",
-        "bind capability text must stay on the binding"
+        "echo capability for live matching",
+        "live capability text must stay on the binding"
     );
     assert_eq!(
         default_prepared.scope.bindings()[0].model_description(),
@@ -3619,9 +3623,15 @@ fn tool_description_override_appears_in_model_schema() {
     default_vm.teardown(&NullObserver, "Override");
 
     // Mutating .description before tools.add overrides the model-facing schema.
-    let mut vm =
-        SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Override")
-            .expect("declarations must replay");
+    let mut vm = SectionVm::new_for_section(
+        None,
+        &bindings,
+        &ModelBindings::default(),
+        EXECUTION,
+        &NullObserver,
+        "Override",
+    )
+    .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
     let add_override = LuaProgram::compile(
@@ -3640,7 +3650,7 @@ fn tool_description_override_appears_in_model_schema() {
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
     let mut bag = ToolBag::new(tool_bindings, Arc::clone(&tool_runtime));
     let prepared = bag
-        .prepare(None, &registry, EXECUTION, &NullObserver, "Override")
+        .prepare(&registry)
         .expect("override prepare must build schemas");
     assert_eq!(prepared.schemas.len(), 1);
     assert_eq!(
@@ -3649,8 +3659,8 @@ fn tool_description_override_appears_in_model_schema() {
     );
     assert_eq!(
         prepared.scope.bindings()[0].description(),
-        "echo capability for bind matching",
-        "override must not rewrite the bind capability description"
+        "echo capability for live matching",
+        "override must not rewrite the live capability description"
     );
     assert_eq!(
         prepared.scope.bindings()[0].model_description(),
