@@ -97,9 +97,7 @@ pub(crate) async fn run_fanout_arms(
     let turns = Arc::new(AtomicU32::new(0));
     let (observe_tx, mut observe_rx) = mpsc::unbounded_channel::<(String, String)>();
     let (debug_tx, mut debug_rx) = mpsc::unbounded_channel::<DebugMsg>();
-    let proxy_observer = Arc::new(ProxyObserver {
-        tx: observe_tx,
-    });
+    let proxy_observer = Arc::new(ProxyObserver { tx: observe_tx });
     let proxy_debug = ctx.debug.map(|_| {
         Arc::new(ProxyDebugCapture {
             tx: debug_tx.clone(),
