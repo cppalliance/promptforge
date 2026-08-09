@@ -263,8 +263,7 @@ mod tests {
         let evidence = DialectEvidence {
             supports_tool_calls: Some(false),
             chat_template: Some(
-                "<|im_start|>system\n{%- if tools %}<tool_call>{%- endif %}<|im_end|>"
-                    .to_string(),
+                "<|im_start|>system\n{%- if tools %}<tool_call>{%- endif %}<|im_end|>".to_string(),
             ),
             model_id: Some("qwen3.5-9b".to_string()),
             source: None,
