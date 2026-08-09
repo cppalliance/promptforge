@@ -126,8 +126,13 @@ impl Prompt {
         }
         let title = h1.title.clone();
         let h1_content_abs_line = frontmatter_lines + h1.content_start_line;
-        let (shared, description_text) =
-            split_shared(&h1.content, &title, h1_content_abs_line, execution, observer)?;
+        let (shared, description_text) = split_shared(
+            &h1.content,
+            &title,
+            h1_content_abs_line,
+            execution,
+            observer,
+        )?;
 
         // Everything before the H1 is preface and has no prompt semantics.
         // Sections are headings after the H1 at level 2 or deeper.
@@ -246,12 +251,12 @@ pub fn promptforge_version(source: &str) -> Option<u32> {
 
 /// Counts the number of `\n` characters in `text[..byte_offset]`.
 fn newlines_before(text: &str, byte_offset: usize) -> u32 {
-    text[..byte_offset].matches('\n').count() as u32
+    u32::try_from(text[..byte_offset].matches('\n').count()).unwrap_or(u32::MAX)
 }
 
 /// Counts the number of lines in `text` (number of `\n` characters).
 fn count_lines(text: &str) -> u32 {
-    text.matches('\n').count() as u32
+    u32::try_from(text.matches('\n').count()).unwrap_or(u32::MAX)
 }
 
 /// Convert a `HeadingLevel` to its numeric level.
@@ -469,8 +474,7 @@ fn split_section_phases(content: &str, section: &str) -> Result<SectionPhases> {
                 } else {
                     0
                 };
-                epilog_line_offset =
-                    preamble_consumed + newlines_before(remainder, opening) + 1;
+                epilog_line_offset = preamble_consumed + newlines_before(remainder, opening) + 1;
                 epilog = Some(source);
                 prose = &remainder[..opening];
             }
@@ -1379,7 +1383,11 @@ Prose for the second section.\n";
         // 14: Do the work.
         let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Work\n\n```lua\nassert(false)\n```\n\nDo the work.\n";
         let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
-        let preamble = prompt.entry().preamble.as_ref().expect("preamble must exist");
+        let preamble = prompt
+            .entry()
+            .preamble
+            .as_ref()
+            .expect("preamble must exist");
 
         assert_eq!(preamble.source_line(), 11, "preamble Lua starts on line 11");
 

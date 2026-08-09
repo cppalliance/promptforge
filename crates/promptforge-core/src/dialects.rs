@@ -6,10 +6,10 @@
 //! builtin set and resolves evidence into a single dialect, hard-failing on
 //! ties or no-match so the runtime never silently guesses.
 
-#[path = "dialects/openai.rs"]
-mod openai;
 #[path = "dialects/gemma3_tool_code.rs"]
 mod gemma3_tool_code;
+#[path = "dialects/openai.rs"]
+mod openai;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -187,10 +187,7 @@ impl ToolDialectRegistry {
     #[must_use]
     pub fn builtin() -> ToolDialectRegistry {
         ToolDialectRegistry {
-            dialects: vec![
-                Box::new(OpenAiDialect),
-                Box::new(Gemma3ToolCodeDialect),
-            ],
+            dialects: vec![Box::new(OpenAiDialect), Box::new(Gemma3ToolCodeDialect)],
         }
     }
 

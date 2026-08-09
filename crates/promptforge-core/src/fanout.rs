@@ -233,7 +233,7 @@ pub(crate) async fn run_fanout_arms(
                 None => (Vec::new(), BTreeMap::new()),
             };
             if let Some(client) = ctx.client {
-                let global_aliases = ctx.bound.map(|b| b.alias_to_id());
+                let global_aliases = ctx.bound.map(super::bind::BoundPrompt::alias_to_id);
                 let text = match crate::execute::run_tool_loop(
                     client,
                     &schemas,

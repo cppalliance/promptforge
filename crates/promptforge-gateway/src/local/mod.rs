@@ -8,8 +8,8 @@
 
 pub(crate) mod artifacts;
 mod error;
-pub(crate) mod sidecar;
 mod server;
+pub(crate) mod sidecar;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -92,7 +92,11 @@ impl LocalRuntime {
             let concurrency = config
                 .local_model_concurrency(local_model)
                 .map_err(|e| LocalError::Server(e.to_string()))?;
-            let parallel = u32::try_from(concurrency).expect("lane concurrency fits in u32");
+            let parallel = u32::try_from(concurrency).map_err(|_| {
+                LocalError::Server(format!(
+                    "lane concurrency {concurrency} does not fit in u32"
+                ))
+            })?;
             let options = launch_options(local_model, parallel);
             let guard =
                 ServerGuard::start(&llama_server, &model_path, &options, interrupted.as_ref())?;
@@ -107,11 +111,8 @@ impl LocalRuntime {
                 upstream,
                 lane,
             });
-            let (tool_dialect, tools_mode) = resolve_local_dialect(
-                &guard,
-                &local_model.name,
-                &model_path,
-            )?;
+            let (tool_dialect, tools_mode) =
+                resolve_local_dialect(&guard, &local_model.name, &model_path)?;
             models.push(Arc::new(Model {
                 name: local_model.name.clone(),
                 description: local_model.description.clone(),
@@ -195,16 +196,15 @@ fn resolve_local_dialect(
 ) -> Result<(String, String), LocalError> {
     let mut evidence = fetch_props_evidence(guard)?;
 
-    if evidence.chat_template.is_none() {
-        if let Some(sidecar_meta) = read_sidecar_quietly(model_path) {
-            if let Some(template) = sidecar_meta.chat_template {
-                tracing::debug!(
-                    model = %model_name,
-                    "supplementing chat_template from sidecar"
-                );
-                evidence.chat_template = Some(template);
-            }
-        }
+    if evidence.chat_template.is_none()
+        && let Some(sidecar_meta) = read_sidecar_quietly(model_path)
+        && let Some(template) = sidecar_meta.chat_template
+    {
+        tracing::debug!(
+            model = %model_name,
+            "supplementing chat_template from sidecar"
+        );
+        evidence.chat_template = Some(template);
     }
 
     tracing::debug!(
@@ -266,11 +266,7 @@ fn maybe_write_sidecar(_store: &ArtifactStore, source: &str, model_path: &Path) 
     };
 
     let bearer = artifacts::hub_bearer_token_from_env();
-    let chat_template = sidecar::fetch_hf_chat_template(
-        &client,
-        source,
-        bearer.as_deref(),
-    );
+    let chat_template = sidecar::fetch_hf_chat_template(&client, source, bearer.as_deref());
 
     if chat_template.is_none() {
         tracing::debug!(source = %source, "no chat_template from HF metadata");
@@ -410,7 +406,9 @@ mod tests {
         fs::write(&gguf, b"fake").expect("write gguf");
 
         let meta = sidecar::SidecarMeta {
-            source: Some("https://huggingface.co/google/gemma/resolve/main/gemma-3-27b.gguf".to_owned()),
+            source: Some(
+                "https://huggingface.co/google/gemma/resolve/main/gemma-3-27b.gguf".to_owned(),
+            ),
             fetched: Some("2026-08-08T00:00:00Z".to_owned()),
             chat_template: Some("<start_of_turn>user\n{{ content }}".to_owned()),
             card: None,
@@ -425,15 +423,17 @@ mod tests {
         );
 
         // Simulate the merge: sidecar fills in missing chat_template
-        if evidence.chat_template.is_none() {
-            if let Some(sc) = read_sidecar_quietly(&gguf) {
-                evidence.chat_template = sc.chat_template;
-            }
+        if evidence.chat_template.is_none()
+            && let Some(sc) = read_sidecar_quietly(&gguf)
+        {
+            evidence.chat_template = sc.chat_template;
         }
 
         assert!(evidence.chat_template.is_some());
         let registry = ToolDialectRegistry::builtin();
-        let id = registry.resolve(&evidence).expect("should resolve with sidecar");
+        let id = registry
+            .resolve(&evidence)
+            .expect("should resolve with sidecar");
         assert_eq!(id.to_string(), "gemma3_tool_code");
     }
 
@@ -452,7 +452,7 @@ mod tests {
         sidecar::write_sidecar(&gguf, &meta).expect("write sidecar");
 
         let evidence = DialectEvidence::new(
-            Some(true), // props says native tools
+            Some(true),                             // props says native tools
             Some("props-template-wins".to_owned()), // props has its own template
             None,
             None,
@@ -460,7 +460,10 @@ mod tests {
 
         // Props already has chat_template, so sidecar should NOT be consulted.
         // The merge logic only reads sidecar when evidence.chat_template is None.
-        assert_eq!(evidence.chat_template.as_deref(), Some("props-template-wins"));
+        assert_eq!(
+            evidence.chat_template.as_deref(),
+            Some("props-template-wins")
+        );
         let registry = ToolDialectRegistry::builtin();
         let id = registry.resolve(&evidence).expect("should resolve");
         assert_eq!(id.to_string(), "openai");
