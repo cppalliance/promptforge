@@ -31,3 +31,10 @@ endpoints = ["anthropic"]
 [tools.web_search]
 provider = "brave"
 api_key = "${BRAVE_API_KEY}"
+# base_url = "https://api.search.brave.com/res/v1"
+# default_count = 10
+# max_count = 20
+# max_per_host = 2
+# default_freshness = ""
+# default_safesearch = ""
+# strip_tracking = true
