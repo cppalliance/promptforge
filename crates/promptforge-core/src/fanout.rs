@@ -83,6 +83,8 @@ pub(crate) struct FanoutContext<'a> {
     pub when: &'a str,
     /// The 1-based id of the parent section that initiated the fanout.
     pub parent_id: usize,
+    /// Total H2 section count in the top-level prompt.
+    pub section_count: usize,
 }
 
 /// Runs the worker section template once per item, concurrently.
@@ -128,6 +130,7 @@ pub(crate) async fn run_fanout_arms(
             shared_tools: ctx.shared_tools.clone(),
             max_tool_iterations: ctx.max_tool_iterations,
             parent_id: ctx.parent_id,
+            section_count: ctx.section_count,
             turns: Arc::clone(&turns),
             observer: Arc::clone(&proxy_observer),
             debug: proxy_debug.clone(),
@@ -235,6 +238,7 @@ struct ArmPayload {
     shared_tools: SharedTools,
     max_tool_iterations: usize,
     parent_id: usize,
+    section_count: usize,
     turns: Arc<AtomicU32>,
     observer: Arc<ProxyObserver>,
     debug: Option<Arc<dyn DebugCapture>>,
@@ -295,6 +299,7 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
         shared_tools,
         max_tool_iterations,
         parent_id,
+        section_count,
         turns,
         observer,
         debug,
@@ -321,6 +326,9 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
         "now": crate::execute::now_rfc3339(),
         "id": parent_id,
         "taskid": taskid,
+        "section_name": worker.name,
+        "execution": execution,
+        "section_count": section_count,
     });
 
     if let Err(error) = vm.inject_host(&args, &sys, &store, last_reply.as_deref()) {
@@ -368,7 +376,7 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
     };
 
     let sys = if let Some(model_binding) = scopes.model.as_ref() {
-        let enriched = crate::lua::enrich_sys_model(&sys, model_binding);
+        let enriched = crate::lua::enrich_sys_model(&vm.current_sys(&sys), model_binding);
         if let Err(error) = vm.re_seal_sys(&enriched) {
             vm.teardown(observer, &worker.name);
             return Err(error);
@@ -452,7 +460,17 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
             )
             .await
             {
-                Ok(text) => text,
+                Ok((text, finish_reason)) => {
+                    let enriched = crate::lua::enrich_sys_reply_finish_reason(
+                        &vm.current_sys(&sys),
+                        finish_reason.as_deref(),
+                    );
+                    if let Err(error) = vm.re_seal_sys(&enriched) {
+                        vm.teardown(observer, &worker.name);
+                        return Err(error);
+                    }
+                    text
+                }
                 // One stuck arm must not kill sibling evidence facets.
                 Err(Error::ToolLoopExhausted) => {
                     vm.teardown(observer, &worker.name);
@@ -611,6 +629,7 @@ mod tests {
             last_reply: None,
             when: "2026-08-08",
             parent_id: 1,
+            section_count: 1,
         };
 
         let cancel = CancelHandle::new();
@@ -666,6 +685,7 @@ mod tests {
             last_reply: None,
             when: "2026-08-08",
             parent_id: 1,
+            section_count: 1,
         };
 
         let error = run_fanout_arms(&worker, &items, &ctx)

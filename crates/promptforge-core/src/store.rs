@@ -223,6 +223,24 @@ pub trait Store {
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     fn glob(&self, pattern: &str) -> Result<Vec<String>, StoreError>;
+
+    /// Returns whether a file exists at `path`.
+    ///
+    /// Missing paths return `false`; this never raises [`StoreError::NotFound`].
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::store::{Store, MemStore};
+    ///
+    /// let mut fs = MemStore::new();
+    /// assert!(!fs.exists("a.txt"));
+    /// fs.write("a.txt", "hi")?;
+    /// assert!(fs.exists("a.txt"));
+    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// ```
+    fn exists(&self, path: &str) -> bool {
+        self.read(path).is_ok()
+    }
 }
 
 /// An in-memory [`Store`] backend.
@@ -333,6 +351,10 @@ impl Store for MemStore {
             .filter(|key| glob_match(pattern.as_bytes(), key.as_bytes()))
             .cloned()
             .collect())
+    }
+
+    fn exists(&self, path: &str) -> bool {
+        self.files.contains_key(path)
     }
 }
 
@@ -559,6 +581,25 @@ impl StoreRef {
     /// ```
     pub fn glob(&self, pattern: &str) -> Result<Vec<String>, StoreError> {
         self.lock().glob(pattern)
+    }
+
+    /// Returns whether a file exists at `path`. See [`Store::exists`].
+    ///
+    /// Missing paths return `false` with no error.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// assert!(!store.exists("a.txt"));
+    /// store.write("a.txt", "hi")?;
+    /// assert!(store.exists("a.txt"));
+    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// ```
+    #[must_use]
+    pub fn exists(&self, path: &str) -> bool {
+        self.lock().exists(path)
     }
 }
 

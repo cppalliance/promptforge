@@ -647,7 +647,7 @@ async fn tool_loop_dispatches_then_returns_text() {
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
-    let out = run_tool_loop(
+    let (out, _) = run_tool_loop(
         &client,
         &schemas,
         &dispatch,
@@ -1007,7 +1007,8 @@ async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(Strin
         None,
         None,
     )
-    .await;
+    .await
+    .map(|(text, _)| text);
     (out, recorder.events(), turns.load(Ordering::Relaxed))
 }
 
@@ -1153,7 +1154,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
-    let out = run_tool_loop(
+    let (out, _) = run_tool_loop(
         &client,
         &schemas,
         &dispatch,
@@ -1196,7 +1197,7 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
-    let out = run_tool_loop(
+    let (out, _) = run_tool_loop(
         &client,
         &schemas,
         &dispatch,
@@ -1294,7 +1295,7 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
         thinking: None,
         tool_dialect: crate::dialects::ToolDialectId::Gemma3ToolCode,
     };
-    let out = run_tool_loop(
+    let (out, _) = run_tool_loop(
         &client,
         &schemas,
         &dispatch,
@@ -1628,7 +1629,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     let recorder = Recorder::default();
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
-    let out = run_tool_loop(
+    let (out, _) = run_tool_loop(
         &client,
         &schemas,
         &dispatch,
@@ -2210,9 +2211,10 @@ async fn fanout_arm_epilog_sees_sys_model_catalog_id() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ## Parent\n\n```lua\nlocal r = fanout('### Worker', '### Items')\nreturn table.concat(r, ',')\n```\n\n\
-### Worker\n\n```lua\n-- prologue\n```\n\nAsk about {{ item }}.\n\n```lua\nreturn sys.model .. ':' .. item\n```\n\n\
+### Worker\n\n```lua\n-- prologue\n```\n\nAsk about {{ item }}.\n\n\
+```lua\nreturn sys.model .. ':' .. tostring(sys.reply_finish_reason) .. ':' .. item\n```\n\n\
 ### Items\n\n- a\n";
-    let addr = spawn_text_gateway().await;
+    let addr = spawn_text_finish_gateway("hello from the mock", "stop").await;
     let out = run(
         &bound_for_model(md),
         "",
@@ -2227,7 +2229,7 @@ async fn fanout_arm_epilog_sees_sys_model_catalog_id() {
     )
     .await
     .unwrap();
-    assert_eq!(out, "claude-sonnet-4-6:a");
+    assert_eq!(out, "claude-sonnet-4-6:stop:a");
 }
 
 #[tokio::test]
@@ -3583,4 +3585,45 @@ Loop forever on {{ item }}.\n\n\
     .await
     .expect("soft-degraded fanout must still return structured results");
     assert_eq!(out, "ok");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sys_exposes_section_metadata() {
+    let addr = spawn_text_finish_gateway("alpha-answer", "stop").await;
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Alpha\n\n\
+```lua\n\
+assert(sys.section_name == 'Alpha')\n\
+assert(sys.execution == 'execute-test')\n\
+assert(sys.section_count == 2)\n\
+local ok = pcall(function() return sys.reply_finish_reason end)\n\
+assert(not ok, 'reply_finish_reason must be absent before prose')\n\
+```\n\n\
+Write one fact.\n\n\
+```lua\n\
+assert(sys.reply_finish_reason == 'stop')\n\
+assert(reply == 'alpha-answer')\n\
+```\n\n\
+## Beta\n\n\
+```lua\n\
+assert(sys.section_name == 'Beta')\n\
+assert(sys.section_count == 2)\n\
+assert(sys.execution == 'execute-test')\n\
+return 'done'\n\
+```\n";
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .expect("sys must expose section metadata");
+    assert_eq!(out, "done");
 }

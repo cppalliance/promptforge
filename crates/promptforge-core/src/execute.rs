@@ -195,6 +195,8 @@ pub(crate) struct InferContext {
     bound: Option<BoundPrompt>,
     tool_bag: Mutex<ToolBag>,
     counts_slot: Arc<Mutex<Option<ToolCallCounts>>>,
+    /// Live sealed `sys` JSON so infer can publish `reply_finish_reason`.
+    sys_live: Arc<Mutex<Option<serde_json::Value>>>,
 }
 
 impl InferContext {
@@ -257,7 +259,7 @@ impl InferContext {
 
         let completion_options = binding.completion_options();
         let handle = tokio::runtime::Handle::current();
-        let text = tokio::task::block_in_place(|| {
+        let (text, finish_reason) = tokio::task::block_in_place(|| {
             handle.block_on(run_tool_loop(
                 &self.client,
                 &prepared.schemas,
@@ -282,6 +284,20 @@ impl InferContext {
         lua.globals()
             .raw_set("reply", text.as_str())
             .map_err(|error| mlua::Error::external(error.to_string()))?;
+        {
+            let mut live = self
+                .sys_live
+                .lock()
+                .map_err(|_| mlua::Error::external("sys live slot was poisoned"))?;
+            if let Some(sys) = live.as_mut() {
+                *sys = crate::lua::enrich_sys_reply_finish_reason(sys, finish_reason.as_deref());
+                let table = crate::lua::seal_sys(lua, sys)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+                lua.globals()
+                    .raw_set("sys", table)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+            }
+        }
         Ok(text)
     }
 }
@@ -317,6 +333,7 @@ fn attach_infer_hook(
         bound: bound.cloned(),
         tool_bag: Mutex::new(ToolBag::new(tool_bindings, tool_runtime)),
         counts_slot: vm.counts_slot(),
+        sys_live: vm.sys_live_handle(),
     });
     let hook: ModelInferHook =
         Arc::new(move |lua, binding, prompt| ctx.infer(lua, binding, prompt));
@@ -562,7 +579,14 @@ async fn run_sections(
     let mut index = 0usize;
     while index < prompt.sections.len() {
         let section = &prompt.sections[index];
-        let sys = json!({ "when": when, "now": now_rfc3339(), "id": index + 1 });
+        let sys = json!({
+            "when": when,
+            "now": now_rfc3339(),
+            "id": index + 1,
+            "section_name": section.name,
+            "execution": execution,
+            "section_count": prompt.sections.len(),
+        });
 
         // `completed` counts sections entered, so the first is 1. It only ever
         // grows, which is what the progress contract requires.
@@ -680,7 +704,8 @@ async fn run_sections(
                             }
                         };
                         if let Some(binding) = scopes.model.as_ref() {
-                            let enriched = crate::lua::enrich_sys_model(&sys, binding);
+                            let enriched =
+                                crate::lua::enrich_sys_model(&vm.current_sys(&sys), binding);
                             if let Err(error) = vm.re_seal_sys(&enriched) {
                                 vm.teardown(observer, &section.name);
                                 return Err(error);
@@ -770,7 +795,7 @@ async fn run_sections(
                     } else {
                         ProseMode::SingleShot
                     };
-                    let text = match run_prose_inference(
+                    let outcome = match run_prose_inference(
                         active_client,
                         &schemas,
                         &dispatch,
@@ -791,13 +816,21 @@ async fn run_sections(
                     )
                     .await
                     {
-                        Ok(text) => text,
+                        Ok(outcome) => outcome,
                         Err(error) => {
                             vm.teardown(observer, &section.name);
                             return Err(error);
                         }
                     };
-                    if let Some(text) = text {
+                    sys = crate::lua::enrich_sys_reply_finish_reason(
+                        &sys,
+                        outcome.finish_reason.as_deref(),
+                    );
+                    if let Err(error) = vm.re_seal_sys(&sys) {
+                        vm.teardown(observer, &section.name);
+                        return Err(error);
+                    }
+                    if let Some(text) = outcome.text {
                         if let Err(error) = vm.bind_reply(&text, observer, &section.name) {
                             vm.teardown(observer, &section.name);
                             return Err(error);
@@ -909,6 +942,7 @@ fn run_section_lua(
                 fanout_last_reply.as_deref(),
                 &fanout_when,
                 parent_id,
+                top_sections.len(),
             )
         })
     } else {
@@ -1064,7 +1098,14 @@ async fn run_execute_section(
 ) -> Result<String> {
     let registry = shared_tools.registry();
     let task_handles = section_handles(top_sections);
-    let sys = json!({ "when": when, "now": now_rfc3339(), "id": 0 });
+    let sys = json!({
+        "when": when,
+        "now": now_rfc3339(),
+        "id": 0,
+        "section_name": section.name,
+        "execution": execution,
+        "section_count": top_sections.len(),
+    });
     observer.observe(execution, &section.name, detail::SECTION_STARTED);
 
     let mut vm = match shared {
@@ -1179,7 +1220,7 @@ async fn run_execute_section(
                         }
                     };
                     if let Some(binding) = scopes.model.as_ref() {
-                        let enriched = crate::lua::enrich_sys_model(&sys, binding);
+                        let enriched = crate::lua::enrich_sys_model(&vm.current_sys(&sys), binding);
                         if let Err(error) = vm.re_seal_sys(&enriched) {
                             vm.teardown(observer, &section.name);
                             return Err(error);
@@ -1262,7 +1303,7 @@ async fn run_execute_section(
                 } else {
                     ProseMode::SingleShot
                 };
-                let text = match run_prose_inference(
+                let outcome = match run_prose_inference(
                     active_client,
                     &schemas,
                     &dispatch,
@@ -1283,13 +1324,21 @@ async fn run_execute_section(
                 )
                 .await
                 {
-                    Ok(text) => text,
+                    Ok(outcome) => outcome,
                     Err(error) => {
                         vm.teardown(observer, &section.name);
                         return Err(error);
                     }
                 };
-                if let Some(text) = text {
+                sys = crate::lua::enrich_sys_reply_finish_reason(
+                    &sys,
+                    outcome.finish_reason.as_deref(),
+                );
+                if let Err(error) = vm.re_seal_sys(&sys) {
+                    vm.teardown(observer, &section.name);
+                    return Err(error);
+                }
+                if let Some(text) = outcome.text {
                     if let Err(error) = vm.bind_reply(&text, observer, &section.name) {
                         vm.teardown(observer, &section.name);
                         return Err(error);
@@ -1336,6 +1385,7 @@ fn make_fanout_callback(
     last_reply: Option<&str>,
     when: &str,
     parent_id: usize,
+    section_count: usize,
 ) -> std::result::Result<Vec<crate::lua::LuaFanoutResult>, String> {
     let worker = fanout::resolve_sibling(worker_heading, children).map_err(|e| e.to_string())?;
     let list = fanout::resolve_sibling(list_heading, children).map_err(|e| e.to_string())?;
@@ -1366,6 +1416,7 @@ fn make_fanout_callback(
         last_reply,
         when,
         parent_id,
+        section_count,
     };
 
     let handle = tokio::runtime::Handle::current();
@@ -1497,11 +1548,20 @@ pub(crate) enum ProseMode {
     Loop { max_tool_iterations: usize },
 }
 
+/// Text and finish reason from one prose or tool-loop inference.
+#[derive(Debug, Clone)]
+pub(crate) struct ProseInferenceResult {
+    /// Model text when the round produced a reply; `None` for single-shot tool rounds.
+    pub text: Option<String>,
+    /// Backend `finish_reason` from the last completed model round, when present.
+    pub finish_reason: Option<String>,
+}
+
 /// Drive one section's model call to a final text reply, dispatching any tool
 /// calls the model requests along the way.
 ///
 /// Starts a fresh conversation with `prose` as the user turn and runs the full
-/// tool loop.
+/// tool loop. Returns the final text and the last round's finish reason.
 ///
 /// # Errors
 /// Returns [`Error::UnknownTool`] if the model calls an alias absent from
@@ -1522,9 +1582,9 @@ pub(crate) async fn run_tool_loop(
     progress: SectionProgress<'_>,
     counts: Option<&ToolCallCounts>,
     global_aliases: Option<&BTreeMap<String, ToolId>>,
-) -> Result<String> {
+) -> Result<(String, Option<String>)> {
     let mut conversation = Vec::new();
-    match run_prose_inference(
+    let outcome = run_prose_inference(
         client,
         schemas,
         dispatch,
@@ -1538,18 +1598,18 @@ pub(crate) async fn run_tool_loop(
         counts,
         global_aliases,
     )
-    .await?
-    {
-        Some(text) => Ok(text),
+    .await?;
+    match outcome.text {
+        Some(text) => Ok((text, outcome.finish_reason)),
         None => Err(Error::ToolLoopExhausted),
     }
 }
 
 /// Append `prose` to `conversation` and run model inference under `mode`.
 ///
-/// Returns `Some(text)` when the model produces text. For
-/// [`ProseMode::SingleShot`], returns `None` after one round that only issued
-/// tool calls. Conversation history accumulates for later prose blocks.
+/// Returns text when the model produces it. For [`ProseMode::SingleShot`],
+/// text may be `None` after one round that only issued tool calls.
+/// Conversation history accumulates for later prose blocks.
 ///
 /// # Errors
 /// Same failure modes as [`run_tool_loop`], except single-shot does not report
@@ -1570,7 +1630,7 @@ pub(crate) async fn run_prose_inference(
     progress: SectionProgress<'_>,
     counts: Option<&ToolCallCounts>,
     global_aliases: Option<&BTreeMap<String, ToolId>>,
-) -> Result<Option<String>> {
+) -> Result<ProseInferenceResult> {
     let SectionProgress {
         execution,
         observer,
@@ -1647,9 +1707,13 @@ pub(crate) async fn run_prose_inference(
                 if completion.finish_reason.as_deref() == Some("length") {
                     observer.observe(execution, section, detail::MODEL_TURN_TRUNCATED);
                 }
-                return Ok(Some(text));
+                return Ok(ProseInferenceResult {
+                    text: Some(text),
+                    finish_reason: completion.finish_reason,
+                });
             }
             CompletionResult::ToolCalls(calls) => {
+                let finish_reason = completion.finish_reason.clone();
                 // Dispatch each requested tool and collect results.
                 let mut results: Vec<(String, String)> = Vec::with_capacity(calls.len());
                 for call in &calls {
@@ -1691,12 +1755,21 @@ pub(crate) async fn run_prose_inference(
                 }
 
                 dialect.echo_tool_results(conversation, &calls, &results);
+                if matches!(mode, ProseMode::SingleShot) {
+                    return Ok(ProseInferenceResult {
+                        text: None,
+                        finish_reason,
+                    });
+                }
             }
         }
     }
 
     match mode {
-        ProseMode::SingleShot => Ok(None),
+        ProseMode::SingleShot => Ok(ProseInferenceResult {
+            text: None,
+            finish_reason: None,
+        }),
         ProseMode::Loop { .. } => Err(Error::ToolLoopExhausted),
     }
 }
