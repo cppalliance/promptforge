@@ -46,7 +46,11 @@ async fn main() -> ExitCode {
 /// Parse the file, execute its sections with `input` as `args`, and print the
 /// result.
 async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
-    let execution = format!("cli-{:016x}", fastrand::u64(..));
+    let execution = format!(
+        "cli-{:016x}{:016x}",
+        fastrand::u64(..),
+        fastrand::u64(..)
+    );
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -184,7 +188,7 @@ mod tests {
             .map(|(execution, _, _)| execution.as_str())
             .expect("the CLI run must emit observations");
         assert!(
-            execution.starts_with("cli-") && execution.len() == 20,
+            execution.starts_with("cli-") && execution.len() == 36,
             "the CLI must generate its documented execution id: {execution}"
         );
         assert!(
