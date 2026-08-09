@@ -59,9 +59,9 @@ Rules:
 What to fill by Section name:
 - Subject Profile - legal or canonical name, founder/origin, founded/operational dates, legal/entity status, identifying numbers if sources give them, headquarters or home base, mission/charter (verbatim if available), key personnel, headcount/scale, structure/governance. Labeled fields. UNKNOWN if missing.
 - Domain Primer - three to five numbered structural facts about this Subject's domain (not slogans). Each sourced.
-- Domain Landscape - sector conditions; peers; ecosystem position; market structure class (monopoly, duopoly, oligopoly, competitive, monopsony, oligopsony, government-controlled, two-sided platform, franchise/licensed; note hybrids); upstream/downstream dependencies; extralegal costs if any; natural disaster exposure for THIS Subject's facilities/workforce/infrastructure only (never a different entity).
+- Domain Landscape - labeled fields: sector conditions; named peers or substitutes (or UNKNOWN); ecosystem position; market structure class (must pick one label or hybrid from: monopoly, duopoly, oligopoly, competitive, monopsony, oligopsony, government-controlled, two-sided platform, franchise/licensed); upstream/downstream dependencies; extralegal costs if any; natural disaster exposure for THIS Subject's own facilities/workforce/infrastructure only (UNKNOWN if sources do not name the Subject's sites - never a lookalike entity).
 - Public Record - press, primary records, controversy, reputation. Prefer primary records and named press over directories and SEO pages.
-- Domain-Specific Vulnerabilities - sector risks for THIS Subject with sources. No generic filler without a Subject link.
+- Domain-Specific Vulnerabilities - organizational/sector risks that attach to THIS Subject (funding concentration, key-person, dependency on specific projects/standards processes, reputational or regulatory exposure named in sources). Not a generic language-CVE list. UNKNOWN beats filler.
 
 Query hints (adapt to the Subject; do not invent answers): official about/mission/leadership pages; Subject + governance OR leadership OR "annual report" OR "corporate filings"; Subject + structure OR history when Profile is thin.
 
