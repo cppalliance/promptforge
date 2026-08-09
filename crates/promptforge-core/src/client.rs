@@ -157,11 +157,17 @@ pub struct Completion {
 /// A chat completions client bound to one gateway URL and shared bearer key.
 #[derive(Clone)]
 pub struct GatewayClient {
-    http: reqwest::Client,
+    transport: GatewayTransport,
     base_url: String,
     key: String,
     normalizer: Arc<dyn CompletionNormalizer>,
     dialect_registry: Arc<ToolDialectRegistry>,
+}
+
+#[derive(Clone)]
+enum GatewayTransport {
+    Http(reqwest::Client),
+    Disabled,
 }
 
 impl fmt::Debug for GatewayClient {
@@ -180,9 +186,24 @@ impl GatewayClient {
     #[must_use]
     pub fn new(base_url: &str, key: impl Into<String>) -> GatewayClient {
         GatewayClient {
-            http: reqwest::Client::new(),
+            transport: GatewayTransport::Http(reqwest::Client::new()),
             base_url: base_url.trim_end_matches('/').to_string(),
             key: key.into(),
+            normalizer: OpenAiChatNormalizer::shared(),
+            dialect_registry: Arc::new(ToolDialectRegistry::builtin()),
+        }
+    }
+
+    /// Build a client that cannot read gateway configuration or send HTTP.
+    ///
+    /// Hosts use this explicit sentinel for hermetic execution paths. Any
+    /// attempted model call fails with [`Error::GatewayDisabled`].
+    #[must_use]
+    pub fn disabled() -> GatewayClient {
+        GatewayClient {
+            transport: GatewayTransport::Disabled,
+            base_url: String::new(),
+            key: String::new(),
             normalizer: OpenAiChatNormalizer::shared(),
             dialect_registry: Arc::new(ToolDialectRegistry::builtin()),
         }
@@ -228,6 +249,9 @@ impl GatewayClient {
         tools: Option<&[ToolSchema]>,
         options: &CompletionOptions,
     ) -> Result<Completion> {
+        let GatewayTransport::Http(http) = &self.transport else {
+            return Err(Error::GatewayDisabled);
+        };
         let mut request_body = serde_json::json!({
             "model": options.model,
             "messages": messages,
@@ -270,8 +294,7 @@ impl GatewayClient {
         };
         dialect.prepare_request(&mut dr)?;
 
-        let response = self
-            .http
+        let response = http
             .post(format!("{}/chat/completions", self.base_url))
             .bearer_auth(&self.key)
             .json(&request_body)

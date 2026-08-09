@@ -41,6 +41,10 @@ pub enum Error {
     #[error("missing environment variable: {0}")]
     MissingEnv(String),
 
+    /// Gateway access was explicitly disabled by the host.
+    #[error("gateway access is disabled")]
+    GatewayDisabled,
+
     /// The HTTP request to the model backend failed at the transport layer.
     #[error("http transport error")]
     Http(#[source] Box<dyn std::error::Error + Send + Sync>),
