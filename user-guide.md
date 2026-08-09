@@ -155,6 +155,8 @@ H1 Lua has `args`, `sys`, `var`, and `store`. `tools.need`, `models.need`, and `
 
 The exact `lua shared` fence is a separate shared library chunk. It may appear anywhere between the H1 and the first section, but it is not part of the live H1 block sequence. Use it for functions that sections need, not for live capability resolution.
 
+Each section, `execute()` subroutine, and fanout arm gets a fresh VM. Promptforge loads the `lua shared` chunk into that VM before injecting `args`, `sys`, `var`, `store`, `reply`, `log`, or capability bindings. A top-level host call in `lua shared`, such as `store.write(...)`, `tools.need(...)`, `model:infer(...)`, or `log(...)`, therefore fails while the library loads. Function definitions may refer to host globals: Lua resolves those names when the function is called later, once Promptforge has installed both the host and the captured Tool and Model objects directly from Rust.
+
 A prompt may contain at most one `lua shared` fence, and it must be in H1. A second `lua shared` fence, or one under an H2 or deeper heading, is a parse error. The opening marker must be the exact, unindented text ` ```lua shared ` with an exact ` ``` ` closing marker.
 
 A plain H1 `lua` fence is not a shared library. It is parsed and executed as an ordinary live H1 Lua block, even when it is the only H1 block. Use the explicit `shared` tag for code that must be loaded into section VMs.
