@@ -195,10 +195,12 @@ impl FetchError {
     /// Whether this failure is a recoverable target failure that should be
     /// returned as tool text rather than aborting the tool call.
     ///
-    /// Recoverable: the target server/network failed or the content cannot be
-    /// processed. The model can try a different URL.
-    /// Hard (not recoverable): the URL itself violates admission policy or SSRF
-    /// defenses, so retrying another URL of the same shape will fail too.
+    /// Recoverable: the target server/network failed, the content cannot be
+    /// processed, or a redirect hop was refused (downgrade, hop cap, or
+    /// redirect-target policy). The unsafe hop is still not followed; the model
+    /// can try a different URL.
+    /// Hard (not recoverable): the requested URL itself violates admission
+    /// policy or SSRF defenses before any useful retry shape exists.
     #[must_use]
     pub fn is_recoverable(&self) -> bool {
         matches!(
@@ -210,6 +212,7 @@ impl FetchError {
                 | FetchError::TooLarge { .. }
                 | FetchError::Undecodable { .. }
                 | FetchError::Dns { .. }
+                | FetchError::RedirectRefused { .. }
         )
     }
 }
@@ -294,6 +297,14 @@ mod tests {
             FetchError::Dns {
                 host: "h".into(),
                 message: "m".into()
+            }
+            .is_recoverable()
+        );
+        assert!(
+            FetchError::RedirectRefused {
+                from: "https://a/".into(),
+                to: "http://a/".into(),
+                reason: "refusing https to http downgrade".into()
             }
             .is_recoverable()
         );
