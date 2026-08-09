@@ -217,12 +217,20 @@ The route is bearer-authed on the same token as `/v1/chat/completions`. Its requ
 #[serde(deny_unknown_fields)]
 pub struct WebSearchRequest {
     pub query: String,
-    /// Defaults to 10 and is clamped to 20.
+    /// Defaults to `settings.default_count`; clamped to `1..=settings.max_count`.
     #[serde(default)] pub count: Option<u8>,
+    #[serde(default)] pub freshness: Option<String>,
+    #[serde(default)] pub country: Option<String>,
+    #[serde(default)] pub search_lang: Option<String>,
+    #[serde(default)] pub safesearch: Option<String>,
+    #[serde(default)] pub include_domains: Vec<String>,
+    #[serde(default)] pub exclude_domains: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct WebSearchResponse {
+    /// Trimmed request query, always present.
+    pub query: String,
     pub results: Vec<SearchResult>,
 }
 
@@ -231,16 +239,21 @@ pub struct SearchResult {
     pub title: String,
     pub url: String,
     pub description: String,
-    /// Omitted from the JSON entirely when the provider reports none.
     #[serde(skip_serializing_if = "Option::is_none")] pub age: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")] pub site_name: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")] pub extra_snippets: Vec<String>,
 }
 ```
 
-A result is four fields and no more. The provider returns a great deal per hit - thumbnails, profiles, ranking metadata, nested clusters - and every byte of it would land in a model's context window at the caller's expense, so the trim is the point of the route rather than a tidiness. The consumer of this JSON is a language model deciding what to read next, and title, URL, description, and age are what that decision needs. `age` disappears rather than serializing as null, because an absent date should cost a model nothing to read.
+`query` is trimmed of ASCII whitespace; empty after trim is `MalformedRequest("web_search: empty query")` (HTTP 400) and Brave is not called. Success with zero hits is still 200 with `{"query":"...","results":[]}`.
 
-`count` is clamped rather than rejected: 1 is the floor, 20 the ceiling, 10 the default when the field is absent. A caller asking for 200 results gets 20 rather than a 400, since the number is a preference about breadth and not a contract, and failing a search over it would be a worse answer than satisfying it approximately.
+The consumer of this JSON is a language model deciding what to read next. Each hit is trimmed to title, URL, description, optional age, optional `site_name` (hostname when parseable), and optional `extra_snippets`. Provider extras (thumbnails, ranking metadata) are dropped so they do not inflate context. `age` and empty `extra_snippets` are omitted rather than null.
 
-The provider is reached as `GET {base_url}/web/search` with the query and count as parameters and the credential in an `X-Subscription-Token` header, and only the `web.results` array of the reply is read. That request shape is part of the contract for anyone setting `base_url`, which exists so a test or a proxy can stand in for Brave. A provider failure is not translated into a search-specific error: a transport failure is `UpstreamTransport` and a non-success status passes through as `UpstreamStatus` with the body truncated, exactly as a backend failure on the chat route does.
+`count` is clamped rather than rejected: floor 1, ceiling `max_count` (default 20), default `default_count` (default 10) when absent. Optional knobs (`freshness`, `country`, `search_lang`, `safesearch`) pass through to Brave when non-empty; config `default_freshness` / `default_safesearch` apply when the request omits them and those defaults are non-empty. `include_domains` / `exclude_domains` filter after Brave (empty or absent means no filter).
+
+Post-process order is deterministic: map hits (including `extra_snippets`), sanitize title/description (control chars, whitespace collapse, a small HTML-entity set, length caps), optionally strip tracking query params (`utm_*`, `fbclid`, `gclid`, `mc_cid`, `mc_eid`), set `site_name`, include then exclude domain filters, then diversify by hostname (`max_per_host`, default 2) while walking Brave order until `count` is filled.
+
+The provider is reached as `GET {base_url}/web/search` with `q`, over-fetched `count` (`min(max_count, requested.saturating_mul(3).max(requested))`), `extra_snippets=true`, optional knobs, and the credential in `X-Subscription-Token`. Only `web.results` is read; missing `web` yields an empty list. Upstream failures keep existing transport/status mapping, with messages prefixed `web_search: `.
 
 Configuration is one optional table, and its absence is the tool's off switch:
 
@@ -249,6 +262,12 @@ Configuration is one optional table, and its absence is the tool's off switch:
 | `provider` | yes | - | The search provider. `brave` is the only value the enum has. |
 | `api_key` | yes | - | The provider credential, a `Secret`, usually `${BRAVE_API_KEY}`. |
 | `base_url` | no | `https://api.search.brave.com/res/v1` | Where the provider lives. Overridden to point at a proxy or a fake. |
+| `default_count` | no | `10` | Used when the request omits `count`. |
+| `max_count` | no | `20` | Clamp and over-fetch ceiling. |
+| `max_per_host` | no | `2` | Diversity cap per hostname group. |
+| `default_freshness` | no | `""` | Applied when the request omits freshness and this is non-empty. |
+| `default_safesearch` | no | `""` | Applied when the request omits safesearch and this is non-empty. |
+| `strip_tracking` | no | `true` | Scrub tracking query params from result URLs. |
 
 A request when no `[tools.web_search]` section was configured is `ToolNotConfigured`, which renders as 404. A 404 rather than a 501 is the deliberate reading: the route is not a capability the gateway is failing to implement, it is a resource this deployment does not have, and a deployment without a search key is an ordinary deployment rather than a broken one. Nothing else is affected by its absence.
 
