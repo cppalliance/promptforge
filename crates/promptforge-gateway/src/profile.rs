@@ -130,9 +130,9 @@ fn load_value(
     for include_name in &includes {
         let include_path = resolve_include(base_dir, include_name)?;
         let parent_doc = load_value(&include_path, depth + 1, stack, visiting)?;
-        merge_docs(&mut merged, parent_doc)?;
+        merge_docs(&mut merged, parent_doc, &include_path)?;
     }
-    merge_docs(&mut merged, doc)?;
+    merge_docs(&mut merged, doc, path)?;
 
     stack.pop();
     visiting.remove(&canonical);
@@ -184,27 +184,36 @@ fn resolve_include(base_dir: &Path, name: &str) -> Result<PathBuf, ConfigError> 
 }
 
 /// Merges `overlay` into `base` (later wins for scalars; arrays merge by id/name).
-fn merge_docs(base: &mut Value, overlay: Value) -> Result<(), ConfigError> {
+///
+/// `path` is the file that produced `overlay`, used in merge error locations.
+fn merge_docs(base: &mut Value, overlay: Value, path: &Path) -> Result<(), ConfigError> {
     let (Value::Table(base_table), Value::Table(overlay_table)) = (base, overlay) else {
-        return Err(ConfigError::Validation(
-            "profile root must be a table".to_string(),
-        ));
+        return Err(ConfigError::Validation(format!(
+            "{}: profile root must be a table",
+            loc(path, None)
+        )));
     };
 
     for (key, overlay_val) in overlay_table {
         match key.as_str() {
-            "endpoint" | "model" | "local_model" | "device" => {
+            "endpoint" | "model" | "local_model" => {
                 let entry = base_table
                     .entry(key.clone())
                     .or_insert_with(|| Value::Array(Vec::new()));
-                merge_keyed_array(entry, overlay_val, identity_key(&key)?)?;
+                merge_keyed_array(entry, overlay_val, identity_key(&key)?, path, &key)?;
+            }
+            "device" => {
+                let entry = base_table
+                    .entry(key.clone())
+                    .or_insert_with(|| Value::Array(Vec::new()));
+                merge_device_overlay(entry, overlay_val, path)?;
             }
             "include" => {
                 // Already consumed by the loader; ignore if somehow present.
             }
             _ => match base_table.get_mut(&key) {
                 Some(base_val) if base_val.is_table() && overlay_val.is_table() => {
-                    merge_tables(base_val, overlay_val)?;
+                    merge_tables(base_val, overlay_val, path)?;
                 }
                 _ => {
                     base_table.insert(key, overlay_val);
@@ -225,11 +234,116 @@ fn identity_key(array_name: &str) -> Result<&'static str, ConfigError> {
     }
 }
 
-fn merge_tables(base: &mut Value, overlay: Value) -> Result<(), ConfigError> {
-    let (Value::Table(base_table), Value::Table(overlay_table)) = (base, overlay) else {
-        return Err(ConfigError::Validation(
-            "expected tables while merging profile scalars".to_string(),
+/// Merge `[[device]]` arrays, or attach orphan `[[device.lane]]` tables.
+///
+/// A leaf file with only `[[device.lane]]` (no `[[device]]` in that file) parses
+/// as a table `{ lane = [...] }` rather than an array. Those lanes attach to the
+/// parent device named by each lane's `device` field.
+fn merge_device_overlay(base: &mut Value, overlay: Value, path: &Path) -> Result<(), ConfigError> {
+    match overlay {
+        Value::Array(_) => merge_keyed_array(base, overlay, "id", path, "device"),
+        Value::Table(table) => {
+            let Some(lanes) = table.get("lane").cloned() else {
+                return Err(merge_type_error(
+                    path,
+                    "device",
+                    "array of tables or [[device.lane]]",
+                    &Value::Table(table),
+                    "[[device]]",
+                ));
+            };
+            if table.keys().any(|k| k != "lane") {
+                return Err(merge_type_error(
+                    path,
+                    "device",
+                    "array of tables or [[device.lane]]",
+                    &Value::Table(table),
+                    "[[device]]",
+                ));
+            }
+            attach_orphan_device_lanes(base, lanes, path)
+        }
+        other => Err(merge_type_error(
+            path,
+            "device",
+            "array of tables or [[device.lane]]",
+            &other,
+            "[[device]]",
+        )),
+    }
+}
+
+fn attach_orphan_device_lanes(
+    base_devices: &mut Value,
+    lanes: Value,
+    path: &Path,
+) -> Result<(), ConfigError> {
+    let Value::Array(lane_items) = lanes else {
+        return Err(merge_type_error(
+            path,
+            "device.lane",
+            "array of tables",
+            &lanes,
+            "[[device.lane]]",
         ));
+    };
+    if !base_devices.is_array() {
+        *base_devices = Value::Array(Vec::new());
+    }
+    let Value::Array(devices) = base_devices else {
+        unreachable!("just ensured array");
+    };
+
+    for lane in lane_items {
+        let device_id = lane
+            .get("device")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                ConfigError::Validation(format!(
+                    "{}: [[device.lane]] without a sibling [[device]] in this file needs device = \"...\" to attach to a parent device",
+                    loc(path, line_of_header(path, "[[device.lane]]"))
+                ))
+            })?
+            .to_owned();
+        let idx = devices
+            .iter()
+            .position(|d| item_key(d, "id").as_deref() == Some(device_id.as_str()))
+            .ok_or_else(|| {
+                ConfigError::Validation(format!(
+                    "{}: [[device.lane]] names undefined device {device_id}",
+                    loc(path, line_of_header(path, "[[device.lane]]"))
+                ))
+            })?;
+        let mut device = devices[idx].clone();
+        {
+            let Value::Table(device_table) = &mut device else {
+                return Err(ConfigError::Validation(format!(
+                    "{}: device {device_id} must be a table",
+                    loc(path, line_of_header(path, "[[device]]"))
+                )));
+            };
+            let lane_array = device_table
+                .entry("lane".to_owned())
+                .or_insert_with(|| Value::Array(Vec::new()));
+            merge_keyed_array(
+                lane_array,
+                Value::Array(vec![lane]),
+                "id",
+                path,
+                "device.lane",
+            )?;
+        }
+        devices[idx] = device;
+    }
+    Ok(())
+}
+
+fn merge_tables(base: &mut Value, overlay: Value, path: &Path) -> Result<(), ConfigError> {
+    let (Value::Table(base_table), Value::Table(overlay_table)) = (base, overlay) else {
+        return Err(ConfigError::Validation(format!(
+            "{}: expected tables while merging profile scalars",
+            loc(path, None)
+        )));
     };
     for (key, overlay_val) in overlay_table {
         // Nested [[device.lane]] lands as device[].lane arrays.
@@ -237,12 +351,12 @@ fn merge_tables(base: &mut Value, overlay: Value) -> Result<(), ConfigError> {
             let entry = base_table
                 .entry(key.clone())
                 .or_insert_with(|| Value::Array(Vec::new()));
-            merge_keyed_array(entry, overlay_val, "id")?;
+            merge_keyed_array(entry, overlay_val, "id", path, "device.lane")?;
             continue;
         }
         match base_table.get_mut(&key) {
             Some(base_val) if base_val.is_table() && overlay_val.is_table() => {
-                merge_tables(base_val, overlay_val)?;
+                merge_tables(base_val, overlay_val, path)?;
             }
             _ => {
                 base_table.insert(key, overlay_val);
@@ -252,11 +366,21 @@ fn merge_tables(base: &mut Value, overlay: Value) -> Result<(), ConfigError> {
     Ok(())
 }
 
-fn merge_keyed_array(base: &mut Value, overlay: Value, key_field: &str) -> Result<(), ConfigError> {
+fn merge_keyed_array(
+    base: &mut Value,
+    overlay: Value,
+    key_field: &str,
+    path: &Path,
+    array_name: &str,
+) -> Result<(), ConfigError> {
     let Value::Array(overlay_items) = overlay else {
-        return Err(ConfigError::Validation(format!(
-            "expected array while merging by {key_field}"
-        )));
+        return Err(merge_type_error(
+            path,
+            array_name,
+            "array of tables",
+            &overlay,
+            &format!("[[{array_name}]]"),
+        ));
     };
     if !base.is_array() {
         *base = Value::Array(Vec::new());
@@ -276,9 +400,9 @@ fn merge_keyed_array(base: &mut Value, overlay: Value, key_field: &str) -> Resul
         // Device entries may carry nested lane arrays; merge those if replacing.
         if let Some(k) = item_key(&item, key_field) {
             if let Some(&idx) = index_by_key.get(&k) {
-                if key_field == "id" && item.get("lane").is_some() {
+                if array_name == "device" && item.get("lane").is_some() {
                     let mut existing = base_items[idx].clone();
-                    merge_device_entry(&mut existing, item)?;
+                    merge_device_entry(&mut existing, item, path)?;
                     base_items[idx] = existing;
                 } else {
                     base_items[idx] = item;
@@ -294,23 +418,76 @@ fn merge_keyed_array(base: &mut Value, overlay: Value, key_field: &str) -> Resul
     Ok(())
 }
 
-fn merge_device_entry(base: &mut Value, overlay: Value) -> Result<(), ConfigError> {
+fn merge_device_entry(base: &mut Value, overlay: Value, path: &Path) -> Result<(), ConfigError> {
     let (Value::Table(base_table), Value::Table(overlay_table)) = (base, overlay) else {
-        return Err(ConfigError::Validation(
-            "device entries must be tables".to_string(),
-        ));
+        return Err(ConfigError::Validation(format!(
+            "{}: device entries must be tables",
+            loc(path, None)
+        )));
     };
     for (key, overlay_val) in overlay_table {
         if key == "lane" {
             let entry = base_table
                 .entry(key.clone())
                 .or_insert_with(|| Value::Array(Vec::new()));
-            merge_keyed_array(entry, overlay_val, "id")?;
+            merge_keyed_array(entry, overlay_val, "id", path, "device.lane")?;
         } else {
             base_table.insert(key, overlay_val);
         }
     }
     Ok(())
+}
+
+fn merge_type_error(
+    path: &Path,
+    key: &str,
+    expected: &str,
+    got: &Value,
+    header_hint: &str,
+) -> ConfigError {
+    let line = line_of_header(path, header_hint)
+        .or_else(|| line_of_header(path, &format!("[[{key}]]")))
+        .or_else(|| line_containing(path, key));
+    ConfigError::Validation(format!(
+        "{}: expected {expected} while merging {key}, got {}",
+        loc(path, line),
+        value_kind(got)
+    ))
+}
+
+fn loc(path: &Path, line: Option<usize>) -> String {
+    match line {
+        Some(n) => format!("{}:{n}", path.display()),
+        None => path.display().to_string(),
+    }
+}
+
+fn line_of_header(path: &Path, header: &str) -> Option<usize> {
+    let raw = fs::read_to_string(path).ok()?;
+    raw.lines()
+        .enumerate()
+        .find(|(_, line)| line.trim_start().starts_with(header))
+        .map(|(i, _)| i + 1)
+}
+
+fn line_containing(path: &Path, needle: &str) -> Option<usize> {
+    let raw = fs::read_to_string(path).ok()?;
+    raw.lines()
+        .enumerate()
+        .find(|(_, line)| line.contains(needle))
+        .map(|(i, _)| i + 1)
+}
+
+fn value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::String(_) => "string",
+        Value::Integer(_) => "integer",
+        Value::Float(_) => "float",
+        Value::Boolean(_) => "boolean",
+        Value::Datetime(_) => "datetime",
+        Value::Array(_) => "array",
+        Value::Table(_) => "table",
+    }
 }
 
 fn item_key(item: &Value, key_field: &str) -> Option<String> {
@@ -630,5 +807,76 @@ concurrency = 1
         let local = config.devices.iter().find(|d| d.id == "local-gpu").unwrap();
         assert_eq!(local.lanes.len(), 1);
         assert_eq!(local.lanes[0].id, "generative");
+    }
+
+    #[test]
+    fn include_attaches_orphan_device_lanes_from_child() {
+        // Leaf-only [[device.lane]] parses as a table; attach by lane.device.
+        let tmp = TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "common.toml",
+            r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[[device]]
+id = "local-gpu"
+type = "local"
+"#,
+        );
+        write(
+            tmp.path(),
+            "gemma.toml",
+            r#"
+include = ["common.toml"]
+
+[[device.lane]]
+device = "local-gpu"
+id = "generative"
+concurrency = 3
+
+[[local_model]]
+name = "gemma"
+description = "prose"
+source = "https://example.com/a.gguf"
+context = 1024
+device = "local-gpu"
+lane = "generative"
+"#,
+        );
+        let config = load_path(&tmp.path().join("gemma.toml")).unwrap();
+        assert_eq!(config.devices.len(), 1);
+        assert_eq!(config.devices[0].lanes.len(), 1);
+        assert_eq!(config.devices[0].lanes[0].id, "generative");
+        assert_eq!(config.devices[0].lanes[0].concurrency, 3);
+        assert_eq!(
+            config
+                .local_model_concurrency(&config.local_models[0])
+                .unwrap(),
+            3
+        );
+    }
+
+    #[test]
+    fn merge_type_error_includes_path_and_line() {
+        let tmp = TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "broken.toml",
+            r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[device]
+id = "not-an-array"
+"#,
+        );
+        let err = load_path(&tmp.path().join("broken.toml")).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("broken.toml:"), "expected path:line in {msg}");
+        assert!(msg.contains("expected"), "expected type hint in {msg}");
     }
 }
