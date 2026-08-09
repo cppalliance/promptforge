@@ -274,6 +274,22 @@ mod tests {
     }
 
     #[test]
+    fn openai_scores_mistral_tools_template_without_native_flag() {
+        let registry = ToolDialectRegistry::builtin();
+        let evidence = DialectEvidence {
+            supports_tool_calls: Some(false),
+            chat_template: Some(
+                "[SYSTEM_PROMPT]x[/SYSTEM_PROMPT][AVAILABLE_TOOLS][][/AVAILABLE_TOOLS][INST]"
+                    .to_string(),
+            ),
+            model_id: Some("mistral-small".to_string()),
+            source: None,
+        };
+        let id = registry.resolve(&evidence).expect("should resolve");
+        assert_eq!(id, ToolDialectId::OpenAi);
+    }
+
+    #[test]
     fn gemma_scores_when_no_native_tools_and_template() {
         let registry = ToolDialectRegistry::builtin();
         let evidence = DialectEvidence {

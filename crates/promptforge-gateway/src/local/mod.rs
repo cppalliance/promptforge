@@ -177,6 +177,7 @@ fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
         cache_type_k: model.cache_type_k.clone(),
         cache_type_v: model.cache_type_v.clone(),
         think: !matches!(model.thinking, ThinkingMode::Never),
+        chat_template_file: model.chat_template_file.as_ref().map(PathBuf::from),
     }
 }
 

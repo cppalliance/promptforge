@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -167,6 +167,8 @@ pub(crate) struct LaunchOptions {
     pub(crate) cache_type_v: String,
     /// When `true`, leave thinking enabled; when `false`, pass `--reasoning off`.
     pub(crate) think: bool,
+    /// Optional Jinja override passed as `--chat-template-file`.
+    pub(crate) chat_template_file: Option<PathBuf>,
 }
 
 /// A running local server that is killed and reaped whenever its owner exits.
@@ -599,6 +601,12 @@ fn server_args(
         OsString::from(options.gpu_layers.to_string()),
         OsString::from("--jinja"),
     ];
+    if let Some(template) = &options.chat_template_file {
+        args.extend([
+            OsString::from("--chat-template-file"),
+            template.as_os_str().to_owned(),
+        ]);
+    }
     if options.flash_attention {
         args.extend([OsString::from("--flash-attn"), OsString::from("on")]);
     }
@@ -694,6 +702,7 @@ mod tests {
             cache_type_k: "q8_0".to_owned(),
             cache_type_v: "q4_0".to_owned(),
             think,
+            chat_template_file: None,
         }
     }
 
@@ -899,6 +908,16 @@ mod tests {
         let rendered = display_invocation(Path::new("llama-server"), &args);
         assert!(rendered.contains("--api-key <per-attempt-secret>"));
         assert!(!rendered.contains("private-key"));
+    }
+
+    #[test]
+    fn launch_args_emit_chat_template_file() {
+        let mut opts = options(false);
+        opts.chat_template_file = Some(PathBuf::from("mistral-tools.jinja"));
+        let args = server_args(Path::new("model.gguf"), 1, "alias", "key", &opts);
+        let rendered = display_invocation(Path::new("llama-server"), &args);
+        assert!(rendered.contains("--chat-template-file"));
+        assert!(rendered.contains("mistral-tools.jinja"));
     }
 
     #[test]
