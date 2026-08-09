@@ -156,16 +156,17 @@ use crate::rank::{Candidate, Vectors, comparable};
 /// [`Outcome::Duplicate`] - a server's twin tools are a fault to report even
 /// when one of them is the safer of the two.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Outcome {
+#[non_exhaustive]
+pub enum Outcome<'a> {
     /// One tool matched clearly enough to be used without asking.
-    Bind(ToolDescriptor),
+    Bind(&'a ToolDescriptor),
     /// One server publishes tools that are copies of each other.
     ///
     /// A fault in that server's catalog rather than an answer to the need, and
     /// reported so it can be fixed. The list holds the leader and its twins on
     /// the same server, best first. Twin-ness is measured between the tools'
     /// own vectors, not between their scores for this need.
-    Duplicate(Vec<ToolDescriptor>),
+    Duplicate(CandidateGroup<'a>),
     /// Several tools match well enough that the margin could not separate them.
     ///
     /// The list holds the candidates the margin failed to separate from the
@@ -176,10 +177,101 @@ pub enum Outcome {
     /// too. A same-server subset that is indistinguishable in the stronger
     /// sense - copies of one another - is reported as [`Outcome::Duplicate`]
     /// instead, since that is a fault somebody can fix.
-    Ambiguous(Vec<ToolDescriptor>),
+    Ambiguous(CandidateGroup<'a>),
     /// Nothing in the catalog matched the need well enough to offer.
     Absent,
 }
+
+/// A best-first group containing at least two candidates.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CandidateGroup<'a> {
+    pub(crate) tools: &'a [ToolDescriptor],
+    pub(crate) indices: Box<[usize]>,
+}
+
+impl<'a> CandidateGroup<'a> {
+    /// Returns the number of candidates.
+    #[expect(
+        clippy::len_without_is_empty,
+        reason = "a candidate group structurally contains at least two entries"
+    )]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.indices.len()
+    }
+    /// Returns the leading candidate.
+    #[must_use]
+    pub fn first(&self) -> &'a ToolDescriptor {
+        match self.get(0) {
+            Some(tool) => tool,
+            None => unreachable!("candidate groups contain at least two entries"),
+        }
+    }
+    /// Returns the runner-up.
+    #[must_use]
+    pub fn second(&self) -> &'a ToolDescriptor {
+        match self.get(1) {
+            Some(tool) => tool,
+            None => unreachable!("candidate groups contain at least two entries"),
+        }
+    }
+    /// Returns one candidate by group position.
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<&'a ToolDescriptor> {
+        self.indices
+            .get(index)
+            .and_then(|position| self.tools.get(*position))
+    }
+    /// Iterates over candidates.
+    #[must_use = "iterators are lazy and visit nothing unless consumed"]
+    pub fn iter(&self) -> CandidateIter<'a, '_> {
+        CandidateIter {
+            group: self,
+            position: 0,
+            end: self.indices.len(),
+        }
+    }
+}
+
+impl<'a, 'group> IntoIterator for &'group CandidateGroup<'a> {
+    type Item = &'a ToolDescriptor;
+    type IntoIter = CandidateIter<'a, 'group>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+/// An iterator over a candidate group or shortlist.
+#[derive(Debug, Clone)]
+pub struct CandidateIter<'a, 'group> {
+    group: &'group CandidateGroup<'a>,
+    position: usize,
+    end: usize,
+}
+impl<'a> Iterator for CandidateIter<'a, '_> {
+    type Item = &'a ToolDescriptor;
+    fn next(&mut self) -> Option<Self::Item> {
+        let value = self.group.get(self.position)?;
+        self.position += 1;
+        Some(value)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.end - self.position;
+        (len, Some(len))
+    }
+}
+impl DoubleEndedIterator for CandidateIter<'_, '_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.position == self.end {
+            return None;
+        }
+        self.end -= 1;
+        self.group.get(self.end)
+    }
+}
+impl ExactSizeIterator for CandidateIter<'_, '_> {}
+impl std::iter::FusedIterator for CandidateIter<'_, '_> {}
 
 /// One ranked candidate resolved back to the tool it names.
 ///
@@ -213,22 +305,24 @@ struct Ranked<'a> {
 /// panicked on, and cannot arise from a ranking taken over this catalog. A
 /// candidate whose row is missing from `vectors` is likewise never a twin,
 /// since the similarity that would make it one cannot be computed.
-pub(crate) fn decide(
+pub(crate) fn decide<'a>(
     candidates: &[Candidate],
-    tools: &[ToolDescriptor],
+    tools: &'a [ToolDescriptor],
     vectors: Vectors<'_>,
     config: &Config,
-) -> Outcome {
+) -> Outcome<'a> {
     let ranked = order(candidates, tools);
     let Some(leader) = ranked.first().copied() else {
         return Outcome::Absent;
     };
 
-    if leader.score < config.similarity_floor {
-        if leader.score >= config.solo_floor {
-            let has_peer = ranked.get(1).is_some_and(|r| r.score >= config.solo_floor);
+    if leader.score < config.similarity_floor() {
+        if leader.score >= config.solo_floor() {
+            let has_peer = ranked
+                .get(1)
+                .is_some_and(|r| r.score >= config.solo_floor());
             if !has_peer {
-                return Outcome::Bind(leader.tool.clone());
+                return Outcome::Bind(leader.tool);
             }
         }
         return Outcome::Absent;
@@ -239,12 +333,12 @@ pub(crate) fn decide(
             candidate.tool.server() == leader.tool.server()
                 && vectors
                     .similarity(leader.index, candidate.index)
-                    .is_some_and(|similarity| similarity >= config.duplicate_threshold)
+                    .is_some_and(|similarity| similarity >= config.duplicate_threshold())
         }))
         .take(shortlist_bound(config))
         .collect();
     if twins.len() >= 2 {
-        return Outcome::Duplicate(descriptors(&twins));
+        return Outcome::Duplicate(group(tools, &twins));
     }
 
     let tied: Vec<Ranked<'_>> = std::iter::once(leader)
@@ -252,18 +346,18 @@ pub(crate) fn decide(
             ranked[1..]
                 .iter()
                 .take_while(|candidate| {
-                    candidate.score >= config.similarity_floor
-                        && leader.score - candidate.score < config.margin
+                    candidate.score >= config.similarity_floor()
+                        && leader.score - candidate.score < config.margin()
                 })
                 .copied(),
         )
         .take(shortlist_bound(config))
         .collect();
     if tied.len() < 2 {
-        return Outcome::Bind(leader.tool.clone());
+        return Outcome::Bind(leader.tool);
     }
 
-    Outcome::Ambiguous(descriptors(&tied))
+    Outcome::Ambiguous(group(tools, &tied))
 }
 
 /// The candidates worth offering, best first, under the deciding order.
@@ -283,28 +377,32 @@ pub(crate) fn decide(
 /// The list is as long as the ranking it is given, less whatever the floor
 /// removed. Cutting it to a length is the caller's business, since the caller
 /// chose how many candidates to rank.
-pub(crate) fn shortlist(
+pub(crate) fn shortlist<'a>(
     candidates: &[Candidate],
-    tools: &[ToolDescriptor],
+    tools: &'a [ToolDescriptor],
     config: &Config,
-) -> Vec<ToolDescriptor> {
+) -> CandidateGroup<'a> {
     let ranked = order(candidates, tools);
-    let above_floor: Vec<ToolDescriptor> = ranked
+    let above_floor: Vec<Ranked<'_>> = ranked
         .iter()
-        .filter(|candidate| candidate.score >= config.similarity_floor)
-        .map(|candidate| candidate.tool.clone())
+        .filter(|candidate| candidate.score >= config.similarity_floor())
+        .copied()
         .collect();
 
     if !above_floor.is_empty() {
-        return above_floor;
+        return group(tools, &above_floor);
     }
 
     let solo = ranked
         .first()
-        .filter(|leader| leader.score >= config.solo_floor)
-        .filter(|_| !ranked.get(1).is_some_and(|r| r.score >= config.solo_floor));
+        .filter(|leader| leader.score >= config.solo_floor())
+        .filter(|_| {
+            !ranked
+                .get(1)
+                .is_some_and(|r| r.score >= config.solo_floor())
+        });
 
-    solo.into_iter().map(|r| r.tool.clone()).collect()
+    group(tools, &solo.into_iter().copied().collect::<Vec<_>>())
 }
 
 /// How many candidates a shortlist may carry.
@@ -316,7 +414,7 @@ pub(crate) fn shortlist(
 /// valid ranking length - so the floor is applied here rather than rejected
 /// there.
 fn shortlist_bound(config: &Config) -> usize {
-    config.top_k.max(2)
+    config.top_k().get().max(2)
 }
 
 /// The candidates paired with their tools, under the deciding order.
@@ -342,7 +440,7 @@ fn order<'a>(candidates: &[Candidate], tools: &'a [ToolDescriptor]) -> Vec<Ranke
     ranked.sort_by(|a, b| {
         comparable(b.score)
             .total_cmp(&comparable(a.score))
-            .then_with(|| hint_key(a.tool.annotations).cmp(&hint_key(b.tool.annotations)))
+            .then_with(|| hint_key(a.tool.annotations()).cmp(&hint_key(b.tool.annotations())))
             .then(a.index.cmp(&b.index))
     });
     ranked
@@ -356,21 +454,21 @@ fn order<'a>(candidates: &[Candidate], tools: &'a [ToolDescriptor]) -> Vec<Ranke
 /// identically and are therefore left in catalog order.
 fn hint_key(annotations: ToolAnnotations) -> (u8, u8, u8) {
     (
-        u8::from(annotations.read_only != Some(true)),
-        u8::from(annotations.destructive != Some(false)),
-        u8::from(annotations.idempotent != Some(true)),
+        u8::from(annotations.read_only() != Some(true)),
+        u8::from(annotations.destructive() != Some(false)),
+        u8::from(annotations.idempotent() != Some(true)),
     )
 }
 
 /// The descriptors of a group of candidates, cloned in their ranked order.
-fn descriptors(group: &[Ranked<'_>]) -> Vec<ToolDescriptor> {
-    group
-        .iter()
-        .map(|candidate| candidate.tool.clone())
-        .collect()
+fn group<'a>(tools: &'a [ToolDescriptor], ranked: &[Ranked<'a>]) -> CandidateGroup<'a> {
+    CandidateGroup {
+        tools,
+        indices: ranked.iter().map(|candidate| candidate.index).collect(),
+    }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(test)))]
 mod tests {
     use super::{Outcome, decide};
     use crate::catalog::{ToolAnnotations, ToolDescriptor, ToolId};

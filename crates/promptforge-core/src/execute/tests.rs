@@ -10,8 +10,8 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
 use promptforge_tool_picker::{
-    Catalog, Config as PickerConfig, NearDuplicate, ToolAnnotations, ToolDescriptor,
-    ToolId as PickerToolId, ToolPicker,
+    Catalog, Config as PickerConfig, ToolAnnotations, ToolDescriptor, ToolId as PickerToolId,
+    ToolPicker,
 };
 use serde_json::Value;
 
@@ -122,7 +122,7 @@ fn bound_for_model(md: &str) -> TestPrompt {
 fn bound_with_tools(
     md: &str,
     resolver: &dyn crate::lua::ToolResolver,
-    near_duplicates: Vec<NearDuplicate>,
+    near_duplicates: Vec<(ToolDescriptor, ToolDescriptor, f32)>,
 ) -> TestPrompt {
     let _ = resolver;
     let mut live_source = md.to_owned();
@@ -140,7 +140,7 @@ fn bound_with_tools(
         Some(Catalog::new(
             near_duplicates
                 .into_iter()
-                .flat_map(|pair| [pair.first, pair.second])
+                .flat_map(|pair| [pair.0, pair.1])
                 .collect(),
         ))
     };
@@ -197,11 +197,11 @@ async fn run(
     });
     let picker = ToolPicker::build(
         catalog,
-        PickerConfig {
-            similarity_floor: 0.0,
-            margin: 0.0,
-            ..PickerConfig::default()
-        },
+        PickerConfig::default()
+            .with_similarity_floor(0.0)
+            .expect("zero is a valid threshold")
+            .with_margin(0.0)
+            .expect("zero is a valid margin"),
     )
     .expect("test picker must build");
     super::run(
@@ -1569,7 +1569,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         tool.parameters_schema(),
     );
     let capability =
-        serde_json::to_string(&descriptor.enriched_text()).expect("serialize fixture capability");
+        serde_json::to_string(descriptor.description()).expect("serialize fixture capability");
     let source = format!(
         "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 1\n---\n\n\
          # Lifecycle\n\n```lua\n\
@@ -1861,7 +1861,7 @@ async fn captured_bindings_reach_section_execute_and_fanout_vms() {
         echo.parameters_schema(),
     );
     let capability =
-        serde_json::to_string(&descriptor.enriched_text()).expect("serialize tool capability");
+        serde_json::to_string(descriptor.description()).expect("serialize tool capability");
     let source = format!(
         "---\nname: captured-bindings\ndescription: d\npromptforge: 1\n---\n\n\
          # Captured Bindings\n\n\
@@ -1922,7 +1922,7 @@ async fn live_h1_infer_sees_tools_resolved_in_the_same_block() {
         echo.parameters_schema(),
     );
     let capability =
-        serde_json::to_string(&descriptor.enriched_text()).expect("serialize tool capability");
+        serde_json::to_string(descriptor.description()).expect("serialize tool capability");
     let source = format!(
         "---\nname: live-h1-tools\ndescription: d\npromptforge: 1\n---\n\n\
          # Live H1 Tools\n\n\
@@ -1973,7 +1973,7 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
         echo.parameters_schema(),
     );
     let capability =
-        serde_json::to_string(&descriptor.enriched_text()).expect("serialize tool capability");
+        serde_json::to_string(descriptor.description()).expect("serialize tool capability");
     let source = format!(
         "---\nname: live-h1-prose\ndescription: d\npromptforge: 1\n---\n\n\
          # Live H1 Prose\n\n\
@@ -2740,11 +2740,12 @@ fn picker_descriptor(name: &str, description: &str) -> ToolDescriptor {
         description,
         json!({"type": "object"}),
     )
-    .with_annotations(ToolAnnotations {
-        read_only: Some(true),
-        destructive: Some(false),
-        idempotent: Some(true),
-    })
+    .with_annotations(
+        ToolAnnotations::new()
+            .with_read_only(true)
+            .with_destructive(false)
+            .with_idempotent(true),
+    )
 }
 
 #[tokio::test]
@@ -2931,11 +2932,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
 ## First\n\n```lua\ntools.add('first_local')\n```\n\nFirst model turn.\n\n\
 ## Second\n\n```lua\ntools.add('second_local')\n```\n\nSecond model turn.\n",
         &|capability: &str| Ok(ToolId::new("tests", capability)),
-        vec![NearDuplicate {
-            first: first_descriptor,
-            second: second_descriptor,
-            similarity: 0.97,
-        }],
+        vec![(first_descriptor, second_descriptor, 0.97)],
     );
 
     let out = run(
@@ -2981,11 +2978,7 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
             (first_id.clone(), "first_local".to_owned()),
             (second_id.clone(), "second_local".to_owned()),
         ]),
-        near_duplicates: vec![NearDuplicate {
-            first: first_descriptor,
-            second: second_descriptor,
-            similarity: 0.98,
-        }],
+        near_duplicates: vec![(first_descriptor, second_descriptor, 0.98)],
     };
     let registry = ToolRegistry::new([&first as &dyn Tool, &second as &dyn Tool]);
     let recorder = Recorder::default();
@@ -3000,11 +2993,11 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
         } if diagnostic.first_alias == "first_local"
             && diagnostic.first_id == ToolId::new("tests", "first")
             && diagnostic.first_description == "Private similar description one."
-            && diagnostic.first_annotations.read_only == Some(true)
+            && diagnostic.first_annotations.read_only() == Some(true)
             && diagnostic.second_alias == "second_local"
             && diagnostic.second_id == ToolId::new("tests", "second")
             && diagnostic.second_description == "Private similar description two."
-            && diagnostic.second_annotations.idempotent == Some(true)
+            && diagnostic.second_annotations.idempotent() == Some(true)
             && (diagnostic.similarity - 0.98).abs() < f32::EPSILON
     ));
     let events = recorder.events();

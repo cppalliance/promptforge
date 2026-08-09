@@ -39,7 +39,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
-use promptforge_tool_picker::{NearDuplicate, ToolId as PickerToolId, ToolPicker};
+use promptforge_tool_picker::{ToolDescriptor, ToolId as PickerToolId, ToolPicker};
 
 use crate::cancel;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
@@ -529,7 +529,7 @@ struct LiveH1State {
 pub(crate) struct ToolAnalysis {
     pub(crate) alias_to_id: BTreeMap<String, ToolId>,
     id_to_alias: BTreeMap<ToolId, String>,
-    near_duplicates: Vec<NearDuplicate>,
+    near_duplicates: Vec<(ToolDescriptor, ToolDescriptor, f32)>,
 }
 
 impl ToolAnalysis {
@@ -549,12 +549,20 @@ impl ToolAnalysis {
             .iter()
             .map(|binding| PickerToolId::new(binding.id().server(), binding.id().name()))
             .collect::<Vec<_>>();
-        let near_duplicates =
-            picker
-                .near_duplicates(&ids)
-                .map_err(|error| Error::ToolScopeAnalysis {
-                    detail: error.to_string(),
-                })?;
+        let near_duplicates = picker
+            .near_duplicates(&ids)
+            .map_err(|error| Error::ToolScopeAnalysis {
+                detail: error.to_string(),
+            })?
+            .iter()
+            .map(|pair| {
+                (
+                    pair.first().clone(),
+                    pair.second().clone(),
+                    pair.similarity(),
+                )
+            })
+            .collect();
         Ok(Self {
             alias_to_id,
             id_to_alias,
@@ -1645,8 +1653,8 @@ fn validate_effective_scope_inner(analysis: &ToolAnalysis, scope: &ToolScope) ->
         .map(crate::lua::ToolBinding::id)
         .collect::<BTreeSet<_>>();
     for pair in &analysis.near_duplicates {
-        let first_id = ToolId::new(pair.first.id.server(), pair.first.id.name());
-        let second_id = ToolId::new(pair.second.id.server(), pair.second.id.name());
+        let first_id = ToolId::new(pair.0.id().server(), pair.0.id().name());
+        let second_id = ToolId::new(pair.1.id().server(), pair.1.id().name());
         if !effective.contains(&first_id) || !effective.contains(&second_id) {
             continue;
         }
@@ -1668,13 +1676,13 @@ fn validate_effective_scope_inner(analysis: &ToolAnalysis, scope: &ToolScope) ->
             diagnostic: Box::new(NearDuplicateDiagnostic {
                 first_alias,
                 first_id,
-                first_description: pair.first.description.clone(),
-                first_annotations: pair.first.annotations,
+                first_description: pair.0.description().to_owned(),
+                first_annotations: pair.0.annotations(),
                 second_alias,
                 second_id,
-                second_description: pair.second.description.clone(),
-                second_annotations: pair.second.annotations,
-                similarity: pair.similarity,
+                second_description: pair.1.description().to_owned(),
+                second_annotations: pair.1.annotations(),
+                similarity: pair.2,
             }),
         });
     }

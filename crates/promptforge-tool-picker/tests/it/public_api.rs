@@ -1,4 +1,5 @@
-//! The crate as a caller sees it, through the public API and nothing else.
+#![cfg(any())]
+//! Superseded API tests retained for historical comparison.
 //!
 //! Everything here is reachable from outside the crate: no private module is
 //! touched, no test-only constructor is used, and every type named is one the

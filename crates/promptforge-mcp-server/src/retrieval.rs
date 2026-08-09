@@ -267,12 +267,8 @@ impl Retrieval {
     /// An instance method rather than a constructor, because a test hands the
     /// index to a server and a reload before it has a catalog to index.
     #[cfg(all(test, feature = "picker"))]
-    pub(crate) fn install_with(
-        &self,
-        embedder: std::sync::Arc<promptforge_tool_picker::Embedder>,
-        catalog: &Catalog,
-    ) {
-        if let Some(index) = index::Index::build_with(embedder, catalog) {
+    pub(crate) fn install_with(&self, model: &promptforge_tool_picker::Model, catalog: &Catalog) {
+        if let Some(index) = index::Index::build_with(model, catalog) {
             self.index.store(Some(std::sync::Arc::new(index)));
         }
     }

@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use mlua::{Lua, Scope};
 #[cfg(test)]
-use promptforge_tool_picker::{NearDuplicate, ToolId as PickerToolId};
+use promptforge_tool_picker::ToolId as PickerToolId;
 use promptforge_tool_picker::{Outcome, ToolDescriptor, ToolPicker};
 
 use crate::lua::{LiveBindingProducer, ToolBindings, ToolResolver};
@@ -113,19 +113,22 @@ enum CachedDecision {
 }
 
 impl CachedDecision {
-    fn from_picker(outcome: std::result::Result<Outcome, promptforge_tool_picker::Error>) -> Self {
+    fn from_picker(
+        outcome: std::result::Result<Outcome<'_>, promptforge_tool_picker::QueryError>,
+    ) -> Self {
         match outcome {
-            Ok(Outcome::Bind(tool)) => Self::Bind(tool),
+            Ok(Outcome::Bind(tool)) => Self::Bind(tool.clone()),
             Ok(Outcome::Absent) => Self::Absent,
-            Ok(Outcome::Duplicate(tools)) => Self::Duplicate(tools),
-            Ok(Outcome::Ambiguous(tools)) => Self::Ambiguous(tools),
+            Ok(Outcome::Duplicate(tools)) => Self::Duplicate(tools.iter().cloned().collect()),
+            Ok(Outcome::Ambiguous(tools)) => Self::Ambiguous(tools.iter().cloned().collect()),
             Err(error) => Self::Failed(error.to_string()),
+            Ok(_) => Self::Failed("unsupported tool-picker outcome".to_owned()),
         }
     }
 
     fn result(&self, capability: &str) -> Result<ToolId> {
         match self {
-            Self::Bind(tool) => Ok(ToolId::new(tool.id.server(), tool.id.name())),
+            Self::Bind(tool) => Ok(ToolId::new(tool.id().server(), tool.id().name())),
             Self::Absent => Err(Error::Absent {
                 capability: capability.to_owned(),
             }),
@@ -133,14 +136,14 @@ impl CachedDecision {
                 capability: capability.to_owned(),
                 candidates: tools
                     .iter()
-                    .map(|tool| ToolId::new(tool.id.server(), tool.id.name()))
+                    .map(|tool| ToolId::new(tool.id().server(), tool.id().name()))
                     .collect(),
             }),
             Self::Ambiguous(tools) => Err(Error::Ambiguous {
                 capability: capability.to_owned(),
                 candidates: tools
                     .iter()
-                    .map(|tool| ToolId::new(tool.id.server(), tool.id.name()))
+                    .map(|tool| ToolId::new(tool.id().server(), tool.id().name()))
                     .collect(),
             }),
             Self::Failed(detail) => Err(Error::Bind {
@@ -158,7 +161,7 @@ trait DecisionSource: Send + Sync {
     fn near_duplicates(
         &self,
         ids: &[PickerToolId],
-    ) -> std::result::Result<Vec<NearDuplicate>, String>;
+    ) -> std::result::Result<Vec<(ToolDescriptor, ToolDescriptor, f32)>, String>;
 }
 
 impl DecisionSource for ToolPicker {
@@ -170,8 +173,21 @@ impl DecisionSource for ToolPicker {
     fn near_duplicates(
         &self,
         ids: &[PickerToolId],
-    ) -> std::result::Result<Vec<NearDuplicate>, String> {
-        ToolPicker::near_duplicates(self, ids).map_err(|error| error.to_string())
+    ) -> std::result::Result<Vec<(ToolDescriptor, ToolDescriptor, f32)>, String> {
+        ToolPicker::near_duplicates(self, ids)
+            .map(|pairs| {
+                pairs
+                    .iter()
+                    .map(|pair| {
+                        (
+                            pair.first().clone(),
+                            pair.second().clone(),
+                            pair.similarity(),
+                        )
+                    })
+                    .collect()
+            })
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -222,9 +238,10 @@ where
             .or_insert_with(|| self.source.decide(capability))
             .clone();
         if let CachedDecision::Bind(tool) = &decision {
-            state
-                .diagnostics
-                .insert(ToolId::new(tool.id.server(), tool.id.name()), tool.clone());
+            state.diagnostics.insert(
+                ToolId::new(tool.id().server(), tool.id().name()),
+                tool.clone(),
+            );
         }
         decision.result(capability)
     }
@@ -272,12 +289,12 @@ mod tests {
         fn near_duplicates(
             &self,
             ids: &[PickerToolId],
-        ) -> std::result::Result<Vec<NearDuplicate>, String> {
-            Ok(vec![NearDuplicate {
-                first: descriptor(ids[0].name()),
-                second: descriptor(ids[1].name()),
-                similarity: 0.97,
-            }])
+        ) -> std::result::Result<Vec<(ToolDescriptor, ToolDescriptor, f32)>, String> {
+            Ok(vec![(
+                descriptor(ids[0].name()),
+                descriptor(ids[1].name()),
+                0.97,
+            )])
         }
     }
 
@@ -460,6 +477,6 @@ mod tests {
             .near_duplicates(&ids)
             .expect("analysis succeeds");
         assert_eq!(pairs.len(), 1);
-        assert!((pairs[0].similarity - 0.97).abs() < f32::EPSILON);
+        assert!((pairs[0].2 - 0.97).abs() < f32::EPSILON);
     }
 }

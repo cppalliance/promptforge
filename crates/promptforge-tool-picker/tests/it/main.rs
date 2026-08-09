@@ -8,5 +8,6 @@
 //! - [`behavior`] drives the four outcomes end to end over a committed fixture.
 //! - [`public_api`] exercises only what a dependent crate can reach.
 
+mod api;
 mod behavior;
 mod public_api;

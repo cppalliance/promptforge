@@ -132,7 +132,6 @@ mod tests {
         assert!(
             available
                 .catalog()
-                .tools()
                 .iter()
                 .any(|tool| tool.name() == "web_search")
         );
@@ -159,7 +158,6 @@ mod tests {
         assert!(
             available
                 .catalog()
-                .tools()
                 .iter()
                 .all(|tool| tool.name() != "web_search")
         );
@@ -188,7 +186,6 @@ mod tests {
                 .collect::<Vec<_>>();
             let picker_ids = available
                 .catalog()
-                .tools()
                 .iter()
                 .map(|tool| (tool.server().to_owned(), tool.name().to_owned()))
                 .collect::<Vec<_>>();

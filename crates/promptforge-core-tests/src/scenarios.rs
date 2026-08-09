@@ -180,11 +180,11 @@ async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
             tool.description(),
             schema,
         )]),
-        Config {
-            similarity_floor: 0.0,
-            margin: 0.0,
-            ..Config::default()
-        },
+        Config::default()
+            .with_similarity_floor(0.0)
+            .expect("zero is a valid threshold")
+            .with_margin(0.0)
+            .expect("zero is a valid margin"),
     )
     .context("build deterministic one-tool fixture picker")?;
     let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];

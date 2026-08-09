@@ -630,7 +630,7 @@ impl ModelResolver for PickerModelResolver<'_> {
             })?;
         match picker.resolve(description) {
             Ok(promptforge_tool_picker::Outcome::Bind(tool)) => {
-                let id = model_from_picker_id(&tool.id);
+                let id = model_from_picker_id(tool.id());
                 let descriptor = filtered.get(&id);
                 let dialect =
                     descriptor.map_or(ToolDialectId::OpenAi, ModelDescriptor::tool_dialect);
@@ -649,19 +649,23 @@ impl ModelResolver for PickerModelResolver<'_> {
                 capability: description.to_owned(),
                 candidates: tools
                     .iter()
-                    .map(|tool| model_from_picker_id(&tool.id))
+                    .map(|tool| model_from_picker_id(tool.id()))
                     .collect(),
             }),
             Ok(promptforge_tool_picker::Outcome::Ambiguous(tools)) => Err(Error::ModelAmbiguous {
                 capability: description.to_owned(),
                 candidates: tools
                     .iter()
-                    .map(|tool| model_from_picker_id(&tool.id))
+                    .map(|tool| model_from_picker_id(tool.id()))
                     .collect(),
             }),
             Err(error) => Err(Error::ModelBind {
                 capability: description.to_owned(),
                 detail: error.to_string(),
+            }),
+            Ok(_) => Err(Error::ModelBind {
+                capability: description.to_owned(),
+                detail: "unsupported tool-picker outcome".to_owned(),
             }),
         }
     }

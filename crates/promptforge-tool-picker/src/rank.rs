@@ -37,6 +37,7 @@
 //! the flat buffer that lets a later stage ask them.
 
 use std::cmp::Ordering;
+use std::num::NonZeroUsize;
 
 /// One scored tool: where it sits in the catalog and how well it matched.
 ///
@@ -76,12 +77,12 @@ pub(crate) struct Vectors<'a> {
     /// The rows, end to end.
     rows: &'a [f32],
     /// How many floats one row occupies.
-    stride: usize,
+    stride: NonZeroUsize,
 }
 
 impl<'a> Vectors<'a> {
     /// A view of `rows` read as records `stride` floats wide.
-    pub(crate) fn new(rows: &'a [f32], stride: usize) -> Self {
+    fn new(rows: &'a [f32], stride: NonZeroUsize) -> Self {
         Self { rows, stride }
     }
 
@@ -90,11 +91,8 @@ impl<'a> Vectors<'a> {
     /// `None` when the row is not wholly present - an index past the end, or a
     /// stride of zero, which describes no row at all.
     pub(crate) fn row(self, index: usize) -> Option<&'a [f32]> {
-        if self.stride == 0 {
-            return None;
-        }
-        let start = index.checked_mul(self.stride)?;
-        let end = start.checked_add(self.stride)?;
+        let start = index.checked_mul(self.stride.get())?;
+        let end = start.checked_add(self.stride.get())?;
         self.rows.get(start..end)
     }
 
@@ -106,6 +104,36 @@ impl<'a> Vectors<'a> {
     /// not cover learns so rather than being handed a number.
     pub(crate) fn similarity(self, a: usize, b: usize) -> Option<f32> {
         Some(dot(self.row(a)?, self.row(b)?))
+    }
+}
+
+/// A validated owned vector index.
+#[derive(Debug)]
+pub(crate) struct VectorIndex {
+    rows: Vec<f32>,
+    stride: NonZeroUsize,
+}
+
+impl VectorIndex {
+    /// Validates and owns exactly `row_count` finite rows.
+    #[must_use]
+    pub(crate) fn new(rows: Vec<f32>, stride: usize, row_count: usize) -> Option<Self> {
+        let stride = NonZeroUsize::new(stride)?;
+        let expected = stride.get().checked_mul(row_count)?;
+        if rows.len() != expected || rows.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        Some(Self { rows, stride })
+    }
+
+    #[must_use]
+    pub(crate) fn view(&self) -> Vectors<'_> {
+        Vectors::new(&self.rows, self.stride)
+    }
+
+    #[must_use]
+    pub(crate) fn top_k(&self, query: &[f32], k: usize) -> Vec<Candidate> {
+        top_k(query, self.view(), k)
     }
 }
 
@@ -152,14 +180,16 @@ impl<'a> Vectors<'a> {
 /// nothing about, but it receives only these `k`: a row that such a re-sort
 /// would have promoted is already discarded if it did not place in the top `k`
 /// here. Asking for a larger `k` is the only way to keep it.
-pub(crate) fn top_k(query: &[f32], vectors: &[f32], k: usize) -> Vec<Candidate> {
+pub(crate) fn top_k(query: &[f32], vectors: Vectors<'_>, k: usize) -> Vec<Candidate> {
     if query.is_empty() || k == 0 {
         return Vec::new();
     }
 
-    // A trailing remainder shorter than one row is skipped rather than scored
-    // against a truncated query; a buffer built by this crate never has one.
+    if query.len() != vectors.stride.get() {
+        return Vec::new();
+    }
     let mut candidates: Vec<Candidate> = vectors
+        .rows
         .chunks_exact(query.len())
         .enumerate()
         .map(|(index, row)| Candidate {
@@ -202,7 +232,7 @@ pub(crate) fn comparable(score: f32) -> f32 {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(test)))]
 mod tests {
     use super::{Candidate, Vectors, top_k};
 
@@ -355,5 +385,32 @@ mod tests {
         let rows = [1.0, 0.0, 0.0, 1.0, 0.5];
         let ranked = top_k(&[1.0, 0.0], &rows, 4);
         assert_eq!(positions(&ranked), vec![0, 1]);
+    }
+}
+
+#[cfg(test)]
+mod invariant_tests {
+    use super::*;
+
+    #[test]
+    fn index_rejects_every_malformed_layout() {
+        assert!(VectorIndex::new(vec![], 0, 0).is_none());
+        assert!(VectorIndex::new(vec![1.0, 0.0, 0.5], 2, 2).is_none());
+        assert!(VectorIndex::new(vec![1.0, f32::NAN], 2, 1).is_none());
+        assert!(VectorIndex::new(vec![1.0, 0.0], 2, 2).is_none());
+        assert!(VectorIndex::new(vec![1.0, 0.0, 0.0, 1.0], 2, 2).is_some());
+    }
+
+    #[test]
+    fn ranking_uses_catalog_position_as_the_final_tie_break() {
+        let index = VectorIndex::new(vec![1.0, 0.0, 1.0, 0.0], 2, 2).unwrap();
+        let ranked = index.top_k(&[1.0, 0.0], 2);
+        assert_eq!(
+            ranked
+                .iter()
+                .map(|candidate| candidate.index)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
     }
 }

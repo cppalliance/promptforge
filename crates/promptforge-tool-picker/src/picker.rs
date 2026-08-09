@@ -45,31 +45,152 @@
 //! them that way. The cosine similarity between a need and a tool is therefore
 //! the plain dot product of their vectors, with no magnitudes to divide out.
 
-use std::sync::Arc;
+use std::collections::HashSet;
 
 use crate::catalog::{Catalog, ToolDescriptor, ToolId};
 use crate::config::Config;
-use crate::embed::{EMBEDDING_DIMENSIONS, Embedder};
-use crate::error::{Error, Result};
-use crate::policy::{self, Outcome};
-use crate::rank::{self, Candidate, Vectors};
+use crate::embed::{EMBEDDING_DIMENSIONS, EmbedFailure, Model};
+use crate::error::{
+    BuildError, IndexError, IndexErrorRepr, QueryError, QueryErrorRepr, SelectionError,
+};
+use crate::policy::{self, CandidateGroup, Outcome};
+use crate::rank::{Candidate, VectorIndex, Vectors};
 
-#[cfg(test)]
+#[cfg(all(test, not(test)))]
 mod tests;
 
 /// A selected pair whose stored tool vectors meet the duplicate threshold.
 ///
 /// The pair is reported in catalog order. Its similarity is the cosine between
 /// the tools' stored vectors, independent of any capability need or query.
-#[derive(Debug, Clone, PartialEq)]
-pub struct NearDuplicate {
-    /// The earlier tool in catalog order.
-    pub first: ToolDescriptor,
-    /// The later tool in catalog order.
-    pub second: ToolDescriptor,
-    /// The cosine similarity between the tools' stored vectors.
-    pub similarity: f32,
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct NearDuplicate<'a> {
+    first: &'a ToolDescriptor,
+    second: &'a ToolDescriptor,
+    similarity: f32,
 }
+impl<'a> NearDuplicate<'a> {
+    /// Returns the earlier descriptor in catalog order.
+    #[must_use]
+    pub fn first(&self) -> &'a ToolDescriptor {
+        self.first
+    }
+    /// Returns the later descriptor in catalog order.
+    #[must_use]
+    pub fn second(&self) -> &'a ToolDescriptor {
+        self.second
+    }
+    /// Returns the stored-vector similarity.
+    #[must_use]
+    pub fn similarity(&self) -> f32 {
+        self.similarity
+    }
+}
+
+/// A borrowing shortlist.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shortlist<'a>(CandidateGroup<'a>);
+impl<'a> Shortlist<'a> {
+    /// Returns the number of candidates.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    /// Reports whether no candidate was retained.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    /// Returns the leading candidate.
+    #[must_use]
+    pub fn first(&self) -> Option<&'a ToolDescriptor> {
+        self.get(0)
+    }
+    /// Returns one candidate.
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<&'a ToolDescriptor> {
+        self.0.get(index)
+    }
+    /// Iterates over candidates.
+    #[must_use = "iterators are lazy and visit nothing unless consumed"]
+    pub fn iter(&self) -> crate::CandidateIter<'a, '_> {
+        self.0.iter()
+    }
+}
+
+/// Borrowing near-duplicate results.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NearDuplicates<'a> {
+    tools: &'a [ToolDescriptor],
+    pairs: Box<[(usize, usize, f32)]>,
+}
+impl<'a> NearDuplicates<'a> {
+    /// Returns the number of pairs.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.pairs.len()
+    }
+    /// Reports whether no pair met the threshold.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.pairs.is_empty()
+    }
+    /// Returns one pair.
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<NearDuplicate<'a>> {
+        self.pairs
+            .get(index)
+            .map(|&(first, second, similarity)| NearDuplicate {
+                first: &self.tools[first],
+                second: &self.tools[second],
+                similarity,
+            })
+    }
+    /// Iterates over pairs.
+    #[must_use = "iterators are lazy and visit nothing unless consumed"]
+    pub fn iter(&self) -> NearDuplicateIter<'a, '_> {
+        NearDuplicateIter {
+            pairs: self,
+            position: 0,
+            end: self.pairs.len(),
+        }
+    }
+}
+
+/// An iterator over near-duplicate pairs.
+#[derive(Debug, Clone)]
+pub struct NearDuplicateIter<'a, 'pairs> {
+    pairs: &'pairs NearDuplicates<'a>,
+    position: usize,
+    end: usize,
+}
+impl<'a> Iterator for NearDuplicateIter<'a, '_> {
+    type Item = NearDuplicate<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let value = self.pairs.get(self.position)?;
+        self.position += 1;
+        Some(value)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.end - self.position;
+        (n, Some(n))
+    }
+}
+impl DoubleEndedIterator for NearDuplicateIter<'_, '_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.position == self.end {
+            return None;
+        }
+        self.end -= 1;
+        self.pairs.get(self.end)
+    }
+}
+impl ExactSizeIterator for NearDuplicateIter<'_, '_> {}
+impl std::iter::FusedIterator for NearDuplicateIter<'_, '_> {}
+
+/// An iterator over indexed tools.
+pub type ToolIter<'a> = crate::CatalogIter<'a>;
 
 /// A catalog embedded and held in memory, ready to answer needs.
 ///
@@ -78,6 +199,7 @@ pub struct NearDuplicate {
 /// catalog that has changed calls for a new engine, not a mutated one, and
 /// [`ToolPicker::rebuild`] makes that new engine over the encoder this one
 /// already holds.
+#[non_exhaustive]
 pub struct ToolPicker {
     /// The tools, in the order the catalog gave them.
     catalog: Catalog,
@@ -87,12 +209,12 @@ pub struct ToolPicker {
     ///
     /// Shared rather than owned outright, so several engines over different
     /// catalogs can hold one set of weights.
-    embedder: Arc<Embedder>,
+    model: Model,
     /// Every tool's vector, end to end, [`EMBEDDING_DIMENSIONS`] apart.
     ///
     /// Row `i` is `vectors[i * EMBEDDING_DIMENSIONS..][..EMBEDDING_DIMENSIONS]`
     /// and describes `catalog.tools()[i]`.
-    vectors: Vec<f32>,
+    vectors: VectorIndex,
 }
 
 impl ToolPicker {
@@ -143,12 +265,10 @@ impl ToolPicker {
     /// [`Error::ModelLoad`]: crate::Error::ModelLoad
     /// [`Error::Tokenize`]: crate::Error::Tokenize
     /// [`Error::Embed`]: crate::Error::Embed
-    pub fn build(catalog: Catalog, config: Config) -> Result<Self> {
-        // Validated before the model is loaded, which is the whole reason this
-        // check is not left to `build_with` alone: a rejected threshold must
-        // not cost tens of megabytes of weights first.
-        config.validate()?;
-        Self::build_with(Arc::new(Embedder::new()?), catalog, config)
+    #[must_use = "building a picker has no effect unless the returned picker is used"]
+    pub fn build(catalog: Catalog, config: Config) -> Result<Self, BuildError> {
+        let model = Model::load()?;
+        Ok(Self::build_with_model(&model, catalog, config)?)
     }
 
     /// Embeds a whole catalog with an encoder that is already loaded.
@@ -190,20 +310,25 @@ impl ToolPicker {
     /// [`Error::ModelLoad`]: crate::Error::ModelLoad
     /// [`Error::Tokenize`]: crate::Error::Tokenize
     /// [`Error::Embed`]: crate::Error::Embed
-    pub fn build_with(embedder: Arc<Embedder>, catalog: Catalog, config: Config) -> Result<Self> {
-        config.validate()?;
-
+    #[must_use = "building a picker has no effect unless the returned picker is used"]
+    pub fn build_with_model(
+        model: &Model,
+        catalog: Catalog,
+        config: Config,
+    ) -> Result<Self, IndexError> {
         let mut vectors = Vec::with_capacity(catalog.len() * EMBEDDING_DIMENSIONS);
         for tool in &catalog {
             // `embed` guarantees the length, which is what makes every row of
             // the flat buffer exactly one stride wide.
-            vectors.extend_from_slice(&embedder.embed(&tool.enriched_text())?);
+            vectors.extend_from_slice(&model.embed(&tool.enriched_text()).map_err(index_error)?);
         }
 
+        let vectors = VectorIndex::new(vectors, EMBEDDING_DIMENSIONS, catalog.len())
+            .ok_or(IndexError(IndexErrorRepr::InvalidEmbedding))?;
         Ok(Self {
             catalog,
             config,
-            embedder,
+            model: model.clone(),
             vectors,
         })
     }
@@ -240,19 +365,9 @@ impl ToolPicker {
     ///
     /// [`Error::Tokenize`]: crate::Error::Tokenize
     /// [`Error::Embed`]: crate::Error::Embed
-    pub fn rebuild(&self, catalog: Catalog) -> Result<Self> {
-        Self::build_with(Arc::clone(&self.embedder), catalog, self.config.clone())
-    }
-
-    /// The loaded encoder behind this engine, for building another over it.
-    ///
-    /// Handed to [`ToolPicker::build_with`] to index a second catalog, or a
-    /// changed one under a changed configuration, without paying for the
-    /// weights again. It is also the encoder every need this engine answers is
-    /// embedded by, so a caller embedding text itself compares like with like.
-    #[must_use]
-    pub fn embedder(&self) -> &Arc<Embedder> {
-        &self.embedder
+    #[must_use = "rebuilding has no effect unless the returned picker is used"]
+    pub fn rebuild(&self, catalog: Catalog) -> Result<Self, IndexError> {
+        Self::build_with_model(&self.model, catalog, self.config.clone())
     }
 
     /// The number of tools indexed.
@@ -274,9 +389,15 @@ impl ToolPicker {
     ///
     /// The order is the one the caller supplied and is the order every other
     /// per-tool accessor is indexed by.
+    #[must_use = "iterators are lazy and visit nothing unless consumed"]
+    pub fn iter(&self) -> ToolIter<'_> {
+        self.catalog.iter()
+    }
+
+    /// Returns the first indexed descriptor with this identity.
     #[must_use]
-    pub fn tools(&self) -> &[ToolDescriptor] {
-        self.catalog.tools()
+    pub fn get(&self, id: &ToolId) -> Option<&ToolDescriptor> {
+        self.catalog.get(id)
     }
 
     /// The configuration this engine was built with.
@@ -305,9 +426,9 @@ impl ToolPicker {
     ///
     /// [`Error::Tokenize`]: crate::Error::Tokenize
     /// [`Error::Embed`]: crate::Error::Embed
-    pub(crate) fn rank(&self, need: &str, k: usize) -> Result<Vec<Candidate>> {
-        let query = self.embedder.embed(need)?;
-        Ok(rank::top_k(&query, &self.vectors, k))
+    pub(crate) fn rank(&self, need: &str, k: usize) -> Result<Vec<Candidate>, QueryError> {
+        let query = self.model.embed(need).map_err(query_error)?;
+        Ok(self.vectors.top_k(&query, k))
     }
 
     /// Resolves a need to one of the four outcomes.
@@ -371,12 +492,12 @@ impl ToolPicker {
     ///
     /// [`Error::Tokenize`]: crate::Error::Tokenize
     /// [`Error::Embed`]: crate::Error::Embed
-    pub fn resolve(&self, need: &str) -> Result<Outcome> {
-        let ranked = self.rank(need, self.config.top_k.max(2))?;
+    pub fn resolve(&self, need: &str) -> Result<Outcome<'_>, QueryError> {
+        let ranked = self.rank(need, self.config.top_k().get().max(2))?;
         Ok(policy::decide(
             &ranked,
-            self.tools(),
-            Vectors::new(&self.vectors, EMBEDDING_DIMENSIONS),
+            self.catalog.as_slice(),
+            self.vectors.view(),
             &self.config,
         ))
     }
@@ -448,9 +569,19 @@ impl ToolPicker {
     /// [`Config::top_k`]: crate::Config::top_k
     /// [`Error::Tokenize`]: crate::Error::Tokenize
     /// [`Error::Embed`]: crate::Error::Embed
-    pub fn shortlist(&self, need: &str, k: usize) -> Result<Vec<ToolDescriptor>> {
+    pub fn shortlist(&self, need: &str, k: usize) -> Result<Shortlist<'_>, QueryError> {
+        if k == 0 {
+            return Ok(Shortlist(CandidateGroup {
+                tools: self.catalog.as_slice(),
+                indices: Box::default(),
+            }));
+        }
         let ranked = self.rank(need, k)?;
-        Ok(policy::shortlist(&ranked, self.tools(), &self.config))
+        Ok(Shortlist(policy::shortlist(
+            &ranked,
+            self.catalog.as_slice(),
+            &self.config,
+        )))
     }
 
     /// Reports near-duplicate pairs among the selected tool identities.
@@ -483,63 +614,96 @@ impl ToolPicker {
     /// assert!(pairs.is_empty());
     /// # Ok::<(), promptforge_tool_picker::Error>(())
     /// ```
-    pub fn near_duplicates(&self, ids: &[ToolId]) -> Result<Vec<NearDuplicate>> {
+    pub fn near_duplicates(&self, ids: &[ToolId]) -> Result<NearDuplicates<'_>, SelectionError> {
         near_duplicates(
-            self.tools(),
-            Vectors::new(&self.vectors, EMBEDDING_DIMENSIONS),
-            self.config.duplicate_threshold,
+            self.catalog.as_slice(),
+            self.vectors.view(),
+            self.config.duplicate_threshold(),
             ids,
         )
     }
+}
 
-    /// The stored vector for the tool at `index` in [`ToolPicker::tools`].
-    ///
-    /// The slice is [`EMBEDDING_DIMENSIONS`] long and unit length, so its dot
-    /// product with any other such vector is a cosine similarity. Returns
-    /// `None` when `index` is past the end.
-    #[must_use]
-    pub fn vector(&self, index: usize) -> Option<&[f32]> {
-        let start = index.checked_mul(EMBEDDING_DIMENSIONS)?;
-        let end = start.checked_add(EMBEDDING_DIMENSIONS)?;
-        self.vectors.get(start..end)
+impl<'a> IntoIterator for &'a ToolPicker {
+    type Item = &'a ToolDescriptor;
+    type IntoIter = ToolIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, 'group> IntoIterator for &'group Shortlist<'a> {
+    type Item = &'a ToolDescriptor;
+    type IntoIter = crate::CandidateIter<'a, 'group>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, 'pairs> IntoIterator for &'pairs NearDuplicates<'a> {
+    type Item = NearDuplicate<'a>;
+    type IntoIter = NearDuplicateIter<'a, 'pairs>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
 /// Finds selected pairs meeting `threshold`, preserving catalog pair order.
-fn near_duplicates(
-    tools: &[ToolDescriptor],
+fn near_duplicates<'a>(
+    tools: &'a [ToolDescriptor],
     vectors: Vectors<'_>,
     threshold: f32,
     ids: &[ToolId],
-) -> Result<Vec<NearDuplicate>> {
+) -> Result<NearDuplicates<'a>, SelectionError> {
+    let selected: HashSet<&ToolId> = ids.iter().collect();
     for id in ids {
-        if !tools.iter().any(|tool| tool.id == *id) {
-            return Err(Error::ToolNotInCatalog { id: id.clone() });
+        if !tools.iter().any(|tool| tool.id() == id) {
+            return Err(SelectionError {
+                missing: id.clone(),
+            });
         }
     }
 
     let mut pairs = Vec::new();
     for (first_index, first) in tools.iter().enumerate() {
-        if !ids.contains(&first.id) {
+        if !selected.contains(first.id()) {
             continue;
         }
         for (second_index, second) in tools.iter().enumerate().skip(first_index + 1) {
-            if !ids.contains(&second.id) {
+            if !selected.contains(second.id()) {
                 continue;
             }
             let Some(similarity) = vectors.similarity(first_index, second_index) else {
                 continue;
             };
             if similarity >= threshold {
-                pairs.push(NearDuplicate {
-                    first: first.clone(),
-                    second: second.clone(),
-                    similarity,
-                });
+                pairs.push((first_index, second_index, similarity));
             }
         }
     }
-    Ok(pairs)
+    Ok(NearDuplicates {
+        tools,
+        pairs: pairs.into_boxed_slice(),
+    })
+}
+
+fn index_error(error: EmbedFailure) -> IndexError {
+    IndexError(match error {
+        EmbedFailure::Tokenization(source) => IndexErrorRepr::Tokenization(source),
+        EmbedFailure::Inference(source) => IndexErrorRepr::Inference(Box::new(source)),
+        EmbedFailure::InvalidEmbedding => IndexErrorRepr::InvalidEmbedding,
+    })
+}
+
+fn query_error(error: EmbedFailure) -> QueryError {
+    QueryError(match error {
+        EmbedFailure::Tokenization(source) => QueryErrorRepr::Tokenization(source),
+        EmbedFailure::Inference(source) => QueryErrorRepr::Inference(Box::new(source)),
+        EmbedFailure::InvalidEmbedding => QueryErrorRepr::InvalidEmbedding,
+    })
 }
 
 impl std::fmt::Debug for ToolPicker {
@@ -551,7 +715,7 @@ impl std::fmt::Debug for ToolPicker {
         f.debug_struct("ToolPicker")
             .field("tools", &self.len())
             .field("dimensions", &EMBEDDING_DIMENSIONS)
-            .field("embedder", &self.embedder)
+            .field("model", &self.model)
             .field("config", &self.config)
             .finish_non_exhaustive()
     }

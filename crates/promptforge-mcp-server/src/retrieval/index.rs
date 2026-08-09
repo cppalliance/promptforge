@@ -60,10 +60,10 @@ impl Index {
     /// Indexes `catalog` with a model somebody else already loaded.
     #[cfg(test)]
     pub(super) fn build_with(
-        embedder: std::sync::Arc<promptforge_tool_picker::Embedder>,
+        model: &promptforge_tool_picker::Model,
         catalog: &Catalog,
     ) -> Option<Index> {
-        match ToolPicker::build_with(embedder, descriptors(catalog), config()) {
+        match ToolPicker::build_with_model(model, descriptors(catalog), config()) {
             Ok(picker) => Some(Index { picker }),
             Err(error) => {
                 tracing::error!("the shared retrieval model could not index the catalog: {error}");
@@ -94,17 +94,17 @@ impl Index {
     /// The best `k` prompts for `capability`, best first.
     pub(super) fn shortlist(&self, capability: &str, k: usize) -> Shortlist {
         match self.picker.shortlist(capability, k) {
-            Ok(tools) => Shortlist::Candidates(tools.into_iter().map(candidate).collect()),
+            Ok(tools) => Shortlist::Candidates(tools.iter().map(candidate).collect()),
             Err(error) => Shortlist::Failed(error.to_string()),
         }
     }
 }
 
 /// A ranked descriptor as the caller reads it.
-fn candidate(tool: ToolDescriptor) -> Candidate {
+fn candidate(tool: &ToolDescriptor) -> Candidate {
     Candidate {
         name: tool.name().to_owned(),
-        description: tool.description,
+        description: tool.description().to_owned(),
     }
 }
 
@@ -148,9 +148,9 @@ fn args_schema() -> serde_json::Value {
 
 /// The engine's configuration for this use: its defaults, with the floor at zero.
 fn config() -> Config {
-    Config {
-        similarity_floor: SIMILARITY_FLOOR,
-        top_k: TOP_K,
-        ..Config::default()
-    }
+    Config::default()
+        .with_similarity_floor(SIMILARITY_FLOOR)
+        .expect("zero is a valid similarity floor")
+        .with_top_k(TOP_K)
+        .expect("the retrieval shortlist is nonzero")
 }

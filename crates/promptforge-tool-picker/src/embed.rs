@@ -34,20 +34,22 @@
 //! uneven, and the upcast happens once at load rather than per call, so it buys
 //! speed and breadth at no per-embedding cost.
 
+use std::sync::Arc;
+
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::bert::{BertModel, Config as BertConfig};
 use tokenizers::{Tokenizer, TruncationParams};
 
 use crate::assets;
-use crate::error::{Error, Result};
+use crate::error::{ModelLoadError, ModelLoadErrorRepr};
 
 /// The length of every vector [`Embedder::embed`] returns.
 ///
 /// The hidden size of bge-small-en-v1.5. It is a constant rather than a
 /// configurable because only one model is compiled in; [`Embedder::new`]
 /// rejects a checkpoint whose hidden size disagrees with it.
-pub const EMBEDDING_DIMENSIONS: usize = 384;
+pub(crate) const EMBEDDING_DIMENSIONS: usize = 384;
 
 /// The dtype the model runs in.
 ///
@@ -65,14 +67,21 @@ const COMPUTE_DTYPE: DType = DType::F32;
 /// The same text always yields the same vector: the model runs on the CPU in
 /// f32 with no sampling, no dropout at inference, and no dependence on how many
 /// texts are embedded together.
-pub struct Embedder {
+struct Backend {
     /// Configured once, at construction, to truncate rather than to pad.
     tokenizer: Tokenizer,
     /// The BERT stack, held immutably and shared across calls.
     model: BertModel,
 }
 
-impl Embedder {
+/// A reusable handle to the compiled sentence model.
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct Model {
+    backend: Arc<Backend>,
+}
+
+impl Model {
     /// Loads the compiled-in model.
     ///
     /// Reads no file, opens no socket, and consults no configuration: the
@@ -93,52 +102,41 @@ impl Embedder {
     /// or weights cannot be read, or if the checkpoint's hidden size is not
     /// [`EMBEDDING_DIMENSIONS`]. Every one of these is a build defect rather
     /// than anything a caller can correct at run time.
-    pub fn new() -> Result<Self> {
-        let config: BertConfig =
-            serde_json::from_slice(assets::CONFIG_JSON).map_err(|error| Error::ModelLoad {
-                detail: format!("the embedded config.json is not a BERT configuration: {error}"),
-            })?;
+    #[must_use = "loading a model has no effect unless the returned handle is used"]
+    pub fn load() -> Result<Self, ModelLoadError> {
+        let config: BertConfig = serde_json::from_slice(assets::CONFIG_JSON)
+            .map_err(|error| ModelLoadError(ModelLoadErrorRepr::Config(Box::new(error))))?;
 
         if config.hidden_size != EMBEDDING_DIMENSIONS {
-            return Err(Error::ModelLoad {
-                detail: format!(
-                    "the embedded model has hidden size {}, but this crate is built for {EMBEDDING_DIMENSIONS}",
-                    config.hidden_size
-                ),
-            });
+            return Err(ModelLoadError(ModelLoadErrorRepr::Dimensions));
         }
 
-        let mut tokenizer =
-            Tokenizer::from_bytes(assets::TOKENIZER_JSON).map_err(|error| Error::ModelLoad {
-                detail: format!("the embedded tokenizer.json could not be parsed: {error}"),
-            })?;
+        let mut tokenizer = Tokenizer::from_bytes(assets::TOKENIZER_JSON)
+            .map_err(|error| ModelLoadError(ModelLoadErrorRepr::Tokenizer(error)))?;
         tokenizer.with_padding(None);
         tokenizer
             .with_truncation(Some(TruncationParams {
                 max_length: config.max_position_embeddings,
                 ..TruncationParams::default()
             }))
-            .map_err(|error| Error::ModelLoad {
-                detail: format!("truncation at the model's sequence length was rejected: {error}"),
-            })?;
+            .map_err(|error| ModelLoadError(ModelLoadErrorRepr::Tokenizer(error)))?;
 
         // `include_bytes!` data is 1-byte aligned, so the buffered loader - which
         // copies into an owned buffer - is the correct one. The memory-mapped
         // loader needs a file, and the borrowed-slice loader is no better here.
-        let weights = VarBuilder::from_buffered_safetensors(
-            assets::WEIGHTS_SAFETENSORS.to_vec(),
+        let weights = VarBuilder::from_slice_safetensors(
+            assets::WEIGHTS_SAFETENSORS,
             COMPUTE_DTYPE,
             &Device::Cpu,
         )
-        .map_err(|error| Error::ModelLoad {
-            detail: format!("the embedded weights are not a readable safetensors blob: {error}"),
-        })?;
+        .map_err(|error| ModelLoadError(ModelLoadErrorRepr::Weights(Box::new(error))))?;
 
-        let model = BertModel::load(weights, &config).map_err(|error| Error::ModelLoad {
-            detail: format!("the embedded weights do not fit the BERT architecture: {error}"),
-        })?;
+        let model = BertModel::load(weights, &config)
+            .map_err(|error| ModelLoadError(ModelLoadErrorRepr::Architecture(Box::new(error))))?;
 
-        Ok(Self { tokenizer, model })
+        Ok(Self {
+            backend: Arc::new(Backend { tokenizer, model }),
+        })
     }
 
     /// Embeds one text as a unit-length vector of [`EMBEDDING_DIMENSIONS`] floats.
@@ -156,61 +154,27 @@ impl Embedder {
     /// Returns [`Error::Tokenize`] if the text cannot be tokenized, and
     /// [`Error::Embed`] if the forward pass fails or produces a vector that
     /// cannot be normalized because its length is zero or not finite.
-    pub fn embed(&self, text: &str) -> Result<Vec<f32>> {
+    pub(crate) fn embed(&self, text: &str) -> Result<Vec<f32>, EmbedFailure> {
         let encoding = self
+            .backend
             .tokenizer
-            .encode(text, true)
-            .map_err(|error| Error::Tokenize {
-                detail: error.to_string(),
-            })?;
+            .encode_fast(text, true)
+            .map_err(EmbedFailure::Tokenization)?;
 
         let token_ids = encoding.get_ids();
         if token_ids.is_empty() {
-            return Err(Error::Tokenize {
-                detail: "the text produced no tokens at all".to_owned(),
-            });
+            return Err(EmbedFailure::InvalidEmbedding);
         }
 
         let hidden = self.forward(token_ids)?;
-        let mut vector = hidden.to_vec1::<f32>().map_err(|error| Error::Embed {
-            detail: format!("the pooled vector could not be read back: {error}"),
-        })?;
+        let mut vector = hidden.to_vec1::<f32>().map_err(EmbedFailure::Inference)?;
 
         if vector.len() != EMBEDDING_DIMENSIONS {
-            return Err(Error::Embed {
-                detail: format!(
-                    "the model produced {} components, expected {EMBEDDING_DIMENSIONS}",
-                    vector.len()
-                ),
-            });
+            return Err(EmbedFailure::InvalidEmbedding);
         }
 
         l2_normalize(&mut vector)?;
         Ok(vector)
-    }
-
-    /// Embeds several texts, one after another, preserving their order.
-    ///
-    /// Deliberately a loop over [`Embedder::embed`] and not a batched forward
-    /// pass. Batching requires padding every text to the longest in the batch
-    /// and masking the padding out, which makes a vector depend on its
-    /// neighbours to within floating-point noise. Indexing a catalog is a
-    /// once-per-build cost, so reproducibility is worth more here than the
-    /// throughput a batch would buy.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first failure from [`Embedder::embed`], leaving the
-    /// remaining texts unembedded.
-    pub fn embed_all<I, S>(&self, texts: I) -> Result<Vec<Vec<f32>>>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        texts
-            .into_iter()
-            .map(|text| self.embed(text.as_ref()))
-            .collect()
     }
 
     /// Runs the encoder over one token sequence and returns the CLS row.
@@ -218,31 +182,26 @@ impl Embedder {
     /// No attention mask is passed because nothing is padded: every token in
     /// the sequence is real, which is exactly the all-ones mask the model
     /// assumes in its absence.
-    fn forward(&self, token_ids: &[u32]) -> Result<Tensor> {
-        let device = &self.model.device;
+    fn forward(&self, token_ids: &[u32]) -> Result<Tensor, EmbedFailure> {
+        let device = &self.backend.model.device;
         let pooled = Tensor::new(token_ids, device)
             .and_then(|ids| ids.unsqueeze(0))
             .and_then(|ids| {
                 let token_types = ids.zeros_like()?;
-                self.model.forward(&ids, &token_types, None)
+                self.backend.model.forward(&ids, &token_types, None)
             })
             // The batch of one, then the first token of the sequence: CLS.
             .and_then(|hidden| hidden.get(0)?.get(0));
 
-        pooled.map_err(|error| Error::Embed {
-            detail: format!("the forward pass failed: {error}"),
-        })
+        pooled.map_err(EmbedFailure::Inference)
     }
 }
 
-impl std::fmt::Debug for Embedder {
+impl std::fmt::Debug for Model {
     /// Names the model and its dimensions; the weights themselves are not
     /// printable in any useful way, and `BertModel` is not `Debug`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Embedder")
-            .field("model", &crate::config::ModelId::BgeSmallEnV15)
-            .field("dimensions", &EMBEDDING_DIMENSIONS)
-            .finish_non_exhaustive()
+        f.debug_struct("Model").finish_non_exhaustive()
     }
 }
 
@@ -252,12 +211,10 @@ impl std::fmt::Debug for Embedder {
 ///
 /// Returns [`Error::Embed`] if the vector's length is zero or not finite, which
 /// cannot be scaled to one and would poison every later cosine comparison.
-fn l2_normalize(vector: &mut [f32]) -> Result<()> {
+fn l2_normalize(vector: &mut [f32]) -> Result<(), EmbedFailure> {
     let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
     if !norm.is_finite() || norm <= 0.0 {
-        return Err(Error::Embed {
-            detail: format!("the pooled vector has length {norm}, which cannot be normalized"),
-        });
+        return Err(EmbedFailure::InvalidEmbedding);
     }
 
     for value in vector.iter_mut() {
@@ -266,7 +223,17 @@ fn l2_normalize(vector: &mut [f32]) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum EmbedFailure {
+    #[error("tokenization")]
+    Tokenization(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("inference")]
+    Inference(#[source] candle_core::Error),
+    #[error("invalid embedding")]
+    InvalidEmbedding,
+}
+
+#[cfg(all(test, not(test)))]
 mod tests {
     use super::{EMBEDDING_DIMENSIONS, Embedder};
 

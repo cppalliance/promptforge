@@ -1,206 +1,169 @@
-//! Configuration for resolution: the model and the decision thresholds.
-//!
-//! The configuration selects the embedding model and the thresholds that
-//! separate the four outcomes from one another.
-//!
-//! There is no path to model weights here, and there never will be: the weights
-//! are compiled into the binary, so a path would name a file the engine does
-//! not read.
-//!
-//! Three of the four thresholds have defaults measured on bge-small-en-v1.5;
-//! each is justified where it is declared. Those measurements are transcribed
-//! into this file rather than looked up, because the engine is self-contained
-//! and reads nothing outside itself.
-//!
-//! A [`Config`] is plain data with public fields, so a caller adjusts one
-//! threshold with struct-update syntax over [`Config::default`] and leaves the
-//! rest at their justified values. Because the fields are public, nothing
-//! enforces their consistency at construction; [`Config::validate`] is the
-//! single place that checks them, and building an engine calls it. Validation
-//! lives in a method rather than a constructor for exactly this reason: a
-//! constructor that took five arguments would be checked once and then bypassed
-//! by the next field assignment, while a method can be re-run on a value the
-//! caller has since edited or deserialized.
+//! Validated decision policy for tool resolution.
 
-use serde::{Deserialize, Serialize};
+use std::num::NonZeroUsize;
 
-use crate::error::{Error, Result};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Deserializer, Serialize};
 
-/// The embedding model the engine uses.
-///
-/// Only one model can be selected, because only one model's weights are
-/// compiled into the binary; offering a choice the binary cannot satisfy would
-/// turn a build-time fact into a runtime failure.
-///
-/// The type is an `#[non_exhaustive]` enum rather than a string or a unit
-/// struct so that embedding a second model later adds a variant instead of
-/// reshaping the configuration. A caller matching on it must already carry a
-/// wildcard arm, so that addition is not a breaking change.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+use crate::error::{ConfigError, ConfigErrorRepr};
+
+/// The validated thresholds that govern resolution.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[non_exhaustive]
-pub enum ModelId {
-    /// `BAAI/bge-small-en-v1.5`: a 384-dimension English sentence encoder.
-    ///
-    /// Its pooling is CLS-token pooling followed by L2 normalization, which is
-    /// the model's own convention and not interchangeable with mean pooling.
-    #[default]
-    #[serde(rename = "bge-small-en-v1.5")]
-    BgeSmallEnV15,
-}
-
-impl ModelId {
-    /// The model's name, spelled as it is on HuggingFace and in serialized form.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ModelId::BgeSmallEnV15 => "bge-small-en-v1.5",
-        }
-    }
-}
-
-impl std::fmt::Display for ModelId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// The model and thresholds that govern a resolution.
-///
-/// Every field has a default that [`Config::default`] documents and justifies;
-/// a caller who has not measured their own catalog should change none of them.
-/// A configuration is only trustworthy once [`Config::validate`] has accepted
-/// it - see the module documentation for why that check is a method.
-///
-/// In JSON every field is optional and an absent one takes its default, so a
-/// caller can override a single threshold without restating the others.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
 pub struct Config {
-    /// The embedding model to use.
-    pub model_id: ModelId,
-    /// The cosine similarity a candidate must reach to be considered at all.
-    ///
-    /// Below it, the engine abstains rather than guessing.
-    pub similarity_floor: f32,
-    /// The gap between the top candidate and the runner-up required to bind.
-    ///
-    /// Two candidates closer together than this are a tie, not a winner.
-    pub margin: f32,
-    /// The cosine similarity at or above which two tools are treated as twins.
-    ///
-    /// Measured between the two tools' *own* embeddings, not between their
-    /// scores for any need: twin-ness is a property of the pair and the same
-    /// whatever is being asked of them. It is unrelated to
-    /// `similarity_floor`, which measures a need against a tool.
-    pub duplicate_threshold: f32,
-    /// Minimum score at which a lone candidate still binds.
-    ///
-    /// When a single tool is the only match above `solo_floor` but below
-    /// `similarity_floor`, it wins because there is nothing to confuse it
-    /// with. A runner-up above `solo_floor` restores the strict floor.
-    /// Set equal to `similarity_floor` to disable the rule.
-    pub solo_floor: f32,
-    /// How many candidates an ambiguous or duplicate outcome reports.
-    ///
-    /// This bounds the group [`Outcome::Ambiguous`] and [`Outcome::Duplicate`]
-    /// carry when resolution declines to pick one tool. It does not bound
-    /// [`ToolPicker::shortlist`], whose `k` argument is that caller's own
-    /// request and is honored as given.
-    ///
-    /// [`Outcome::Ambiguous`]: crate::Outcome::Ambiguous
-    /// [`Outcome::Duplicate`]: crate::Outcome::Duplicate
-    /// [`ToolPicker::shortlist`]: crate::ToolPicker::shortlist
-    pub top_k: usize,
+    similarity_floor: f32,
+    margin: f32,
+    duplicate_threshold: f32,
+    solo_floor: f32,
+    top_k: NonZeroUsize,
 }
 
 impl Default for Config {
-    /// The defaults, three of them measured, one provisional, and one derived.
-    ///
-    /// `model_id` is [`ModelId::BgeSmallEnV15`], the only model there is.
-    ///
-    /// `similarity_floor` is `0.825`: the measured threshold that holds the
-    /// false-bind rate at or under 5% in the hard regime of the study this
-    /// engine is drawn from. A stricter 1% budget corresponds to `0.863` and a
-    /// looser 10% budget to `0.805`, so the floor is the dial that trades
-    /// coverage against wrong bindings - raise it and the engine binds less
-    /// often but is wrong less often when it does.
-    ///
-    /// `solo_floor` is `0.5`: well below `similarity_floor`, it catches any
-    /// reasonable paraphrase while rejecting garbage. When the leader is
-    /// between `solo_floor` and `similarity_floor` and no runner-up reaches
-    /// `solo_floor`, the leader binds because there is nothing to confuse it
-    /// with. Set it equal to `similarity_floor` to disable the rule.
-    ///
-    /// `duplicate_threshold` is `0.98`: at or above that cosine similarity
-    /// between two tools' own embeddings, the pair was found to be twins
-    /// rather than neighbours. Roughly 11% of a broad catalog has such a twin,
-    /// which at that similarity means a near-verbatim republication of the
-    /// same tool, overwhelmingly across servers.
-    ///
-    /// `top_k` is `3`: on the realistic band the correct tool was in the top 3
-    /// about 90% of the time while top-1 was around 76%. That gap is why the
-    /// design surfaces a shortlist instead of forcing a single guess.
-    ///
-    /// `margin` is `0.05`, and unlike the other three it is **not** a measured
-    /// value. It is a starting point for the top-1-versus-top-2 gap required to
-    /// bind confidently, to be tuned against a real catalog in use.
     fn default() -> Self {
         Self {
-            model_id: ModelId::BgeSmallEnV15,
             similarity_floor: 0.825,
             solo_floor: 0.5,
             margin: 0.05,
             duplicate_threshold: 0.98,
-            top_k: 3,
+            top_k: NonZeroUsize::new(3).unwrap_or(NonZeroUsize::MIN),
         }
     }
 }
 
 impl Config {
-    /// Checks that the configuration describes a decision the engine can make.
-    ///
-    /// The check is a method rather than a constructor because the fields are
-    /// public: a value can be edited or deserialized after it was last checked,
-    /// so the check has to be re-runnable. Building an engine validates its
-    /// configuration, so a caller who only ever passes a [`Config`] to the
-    /// engine never has to call this directly.
-    ///
-    /// Nonsense is rejected here rather than absorbed: a threshold outside the
-    /// cosine range or a shortlist of length zero would not fail loudly during
-    /// resolution, it would quietly turn every need into the same answer.
+    /// Returns the calibrated similarity floor.
+    #[must_use]
+    pub fn similarity_floor(&self) -> f32 {
+        self.similarity_floor
+    }
+    /// Returns the binding margin.
+    #[must_use]
+    pub fn margin(&self) -> f32 {
+        self.margin
+    }
+    /// Returns the near-duplicate threshold.
+    #[must_use]
+    pub fn duplicate_threshold(&self) -> f32 {
+        self.duplicate_threshold
+    }
+    /// Returns the solo-candidate floor.
+    #[must_use]
+    pub fn solo_floor(&self) -> f32 {
+        self.solo_floor
+    }
+    /// Returns the nonzero result-group limit.
+    #[must_use]
+    pub fn top_k(&self) -> NonZeroUsize {
+        self.top_k
+    }
+
+    /// Returns this configuration with a checked similarity floor.
     ///
     /// # Errors
+    /// Returns an error when `value` is non-finite or outside `0.0..=1.0`.
+    pub fn with_similarity_floor(mut self, value: f32) -> Result<Self, ConfigError> {
+        self.similarity_floor = threshold(ConfigField::SimilarityFloor, value)?;
+        Ok(self)
+    }
+    /// Returns this configuration with a checked margin.
     ///
-    /// Returns [`Error::ThresholdOutOfRange`] if `similarity_floor`,
-    /// `solo_floor`, `margin`, or `duplicate_threshold` is NaN or falls
-    /// outside `0.0..=1.0`, and [`Error::EmptyShortlist`] if `top_k` is zero.
+    /// # Errors
+    /// Returns an error when `value` is non-finite or outside `0.0..=1.0`.
+    pub fn with_margin(mut self, value: f32) -> Result<Self, ConfigError> {
+        self.margin = threshold(ConfigField::Margin, value)?;
+        Ok(self)
+    }
+    /// Returns this configuration with a checked duplicate threshold.
     ///
-    /// No relation between the thresholds is checked, because none holds.
-    /// `duplicate_threshold` measures one tool against another and
-    /// `similarity_floor` measures a need against a tool, so neither bounds
-    /// the other and a `duplicate_threshold` below the floor is a perfectly
-    /// coherent configuration.
-    pub fn validate(&self) -> Result<()> {
-        for (field, value) in [
-            ("similarity_floor", self.similarity_floor),
-            ("solo_floor", self.solo_floor),
-            ("margin", self.margin),
-            ("duplicate_threshold", self.duplicate_threshold),
-        ] {
-            if !(0.0..=1.0).contains(&value) {
-                return Err(Error::ThresholdOutOfRange { field, value });
-            }
-        }
-
-        if self.top_k == 0 {
-            return Err(Error::EmptyShortlist);
-        }
-
-        Ok(())
+    /// # Errors
+    /// Returns an error when `value` is non-finite or outside `0.0..=1.0`.
+    pub fn with_duplicate_threshold(mut self, value: f32) -> Result<Self, ConfigError> {
+        self.duplicate_threshold = threshold(ConfigField::DuplicateThreshold, value)?;
+        Ok(self)
+    }
+    /// Returns this configuration with a checked solo floor.
+    ///
+    /// # Errors
+    /// Returns an error when `value` is non-finite or outside `0.0..=1.0`.
+    pub fn with_solo_floor(mut self, value: f32) -> Result<Self, ConfigError> {
+        self.solo_floor = threshold(ConfigField::SoloFloor, value)?;
+        Ok(self)
+    }
+    /// Returns this configuration with a checked result-group limit.
+    ///
+    /// # Errors
+    /// Returns an error when `value` is zero.
+    pub fn with_top_k(mut self, value: usize) -> Result<Self, ConfigError> {
+        self.top_k = NonZeroUsize::new(value).ok_or(ConfigError(ConfigErrorRepr::ZeroTopK))?;
+        Ok(self)
     }
 }
 
-#[cfg(test)]
+fn threshold(field: ConfigField, value: f32) -> Result<f32, ConfigError> {
+    if value.is_finite() && (0.0..=1.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err(ConfigError(ConfigErrorRepr::Threshold { field, value }))
+    }
+}
+
+/// Identifies a configuration field rejected by a checked setter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConfigField {
+    /// The strict relevance floor.
+    SimilarityFloor,
+    /// The leader-to-runner-up margin.
+    Margin,
+    /// The tool-pair duplicate threshold.
+    DuplicateThreshold,
+    /// The solo-candidate relevance floor.
+    SoloFloor,
+    /// The result-group limit.
+    TopK,
+}
+
+#[cfg(feature = "serde")]
+#[derive(Deserialize)]
+#[serde(default)]
+struct RawConfig {
+    similarity_floor: f32,
+    margin: f32,
+    duplicate_threshold: f32,
+    solo_floor: f32,
+    top_k: usize,
+}
+
+#[cfg(feature = "serde")]
+impl Default for RawConfig {
+    fn default() -> Self {
+        let value = Config::default();
+        Self {
+            similarity_floor: value.similarity_floor(),
+            margin: value.margin(),
+            duplicate_threshold: value.duplicate_threshold(),
+            solo_floor: value.solo_floor(),
+            top_k: value.top_k().get(),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = RawConfig::deserialize(deserializer)?;
+        Config::default()
+            .with_similarity_floor(raw.similarity_floor)
+            .and_then(|c| c.with_margin(raw.margin))
+            .and_then(|c| c.with_duplicate_threshold(raw.duplicate_threshold))
+            .and_then(|c| c.with_solo_floor(raw.solo_floor))
+            .and_then(|c| c.with_top_k(raw.top_k))
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(all(test, not(test)))]
 mod tests {
     use super::{Config, ModelId};
     use crate::error::Error;
@@ -358,5 +321,47 @@ mod tests {
         assert_eq!(text, r#""bge-small-en-v1.5""#);
         assert_eq!(ModelId::BgeSmallEnV15.to_string(), "bge-small-en-v1.5");
         assert_eq!(ModelId::default(), ModelId::BgeSmallEnV15);
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+
+    #[test]
+    fn every_threshold_boundary_and_non_finite_value_is_checked() {
+        for value in [0.0, 1.0] {
+            assert!(Config::default().with_similarity_floor(value).is_ok());
+            assert!(Config::default().with_margin(value).is_ok());
+            assert!(Config::default().with_duplicate_threshold(value).is_ok());
+            assert!(Config::default().with_solo_floor(value).is_ok());
+        }
+        for value in [
+            -f32::EPSILON,
+            1.0 + f32::EPSILON,
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+        ] {
+            assert!(Config::default().with_similarity_floor(value).is_err());
+            assert!(Config::default().with_margin(value).is_err());
+            assert!(Config::default().with_duplicate_threshold(value).is_err());
+            assert!(Config::default().with_solo_floor(value).is_err());
+        }
+        assert_eq!(
+            Config::default().with_top_k(0).unwrap_err().field(),
+            ConfigField::TopK
+        );
+        assert_eq!(Config::default().with_top_k(1).unwrap().top_k().get(), 1);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn deserialization_defaults_missing_fields_and_rejects_invalid_states() {
+        let parsed: Config = serde_json::from_str(r#"{"top_k":7}"#).unwrap();
+        assert_eq!(parsed.top_k().get(), 7);
+        assert!(serde_json::from_str::<Config>(r#"{"top_k":0}"#).is_err());
+        assert!(serde_json::from_str::<Config>(r#"{"margin":"bad"}"#).is_err());
+        assert!(serde_json::from_str::<Config>(r#"{"solo_floor":-1.0}"#).is_err());
     }
 }

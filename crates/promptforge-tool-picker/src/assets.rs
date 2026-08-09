@@ -1,19 +1,19 @@
 //! The embedding model, compiled into this library.
 //!
-//! The build script fetches `BAAI/bge-small-en-v1.5` from the Hugging Face Hub
-//! at one pinned commit, verifies each file against a hardcoded SHA-256 digest,
-//! downcasts the weights to fp16, and stages the result in `OUT_DIR`. The
+//! The build script consumes a locally provisioned `BAAI/bge-small-en-v1.5`
+//! snapshot at one pinned commit, verifies every input against a hardcoded
+//! SHA-256 digest, downcasts fp32 weights to fp16, and stages the result in
+//! `OUT_DIR`. The
 //! statics below embed those bytes, so a binary linking this crate carries
 //! the model outright: no weights file to ship, no download at run time, and no
 //! configuration naming a path.
 //!
 //! # Build requirements
 //!
-//! The *first* build needs network access to the Hugging Face Hub and pulls
-//! roughly 130MB. Later builds read the Hugging Face cache
-//! (`HF_HUB_CACHE`, or `HF_HOME`, default `~/.cache/huggingface`) and do not
-//! touch the network. If the Hub is unreachable and the cache is cold, the
-//! build fails loudly rather than producing a library with no model.
+//! Set `PROMPTFORGE_MODEL_DIR` to an immutable provisioned directory containing
+//! the pinned `model.safetensors`, `tokenizer.json`, and `config.json`. Cargo
+//! never contacts an external service. Generated outputs carry strong digests
+//! in an atomically committed stamp and are revalidated before reuse.
 //!
 //! # Precision
 //!
@@ -29,21 +29,23 @@
 ///
 /// A `static` rather than a `const`: a `const` of this size is materialized
 /// afresh at every use site, which would undo the downcast's whole purpose.
-pub static WEIGHTS_SAFETENSORS: &[u8] =
+pub(crate) static WEIGHTS_SAFETENSORS: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/model-fp16.safetensors"));
 
 /// The tokenizer, as a Hugging Face `tokenizer.json` document.
 ///
 /// Byte-identical to the upstream file at [`SOURCE_REVISION`].
-pub static TOKENIZER_JSON: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/tokenizer.json"));
+pub(crate) static TOKENIZER_JSON: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/tokenizer.json"));
 
 /// The model architecture configuration, as a `config.json` document.
 ///
 /// Byte-identical to the upstream file at [`SOURCE_REVISION`].
-pub static CONFIG_JSON: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/config.json"));
+pub(crate) static CONFIG_JSON: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/config.json"));
 
 /// The Hugging Face repository the embedded assets came from.
-pub const SOURCE_REPO: &str = "BAAI/bge-small-en-v1.5";
+#[cfg(test)]
+const SOURCE_REPO: &str = "BAAI/bge-small-en-v1.5";
 
 /// The immutable commit the embedded assets were taken from.
 ///
@@ -52,7 +54,8 @@ pub const SOURCE_REPO: &str = "BAAI/bge-small-en-v1.5";
 ///
 /// Embedded from `OUT_DIR` rather than written here, so the build script that
 /// fetched the bytes is the only place the pin appears and the two cannot drift.
-pub const SOURCE_REVISION: &str = include_str!(concat!(env!("OUT_DIR"), "/revision.txt"));
+#[cfg(test)]
+const SOURCE_REVISION: &str = include_str!(concat!(env!("OUT_DIR"), "/revision.txt"));
 
 #[cfg(test)]
 mod tests {
@@ -113,6 +116,7 @@ mod tests {
 
     #[test]
     fn provenance_is_a_pinned_commit() {
+        assert_eq!(SOURCE_REPO, "BAAI/bge-small-en-v1.5");
         assert_eq!(SOURCE_REVISION.len(), 40);
         assert!(SOURCE_REVISION.chars().all(|c| c.is_ascii_hexdigit()));
     }

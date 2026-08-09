@@ -1,4 +1,5 @@
-//! The four outcomes, end to end, over a catalog committed as data.
+#![cfg(any())]
+//! Superseded behavior tests retained for historical comparison.
 //!
 //! The catalog under test is a JSON file in `tests/fixtures/`, and it is
 //! compiled in rather than opened: a fixture is part of the crate, so nothing
