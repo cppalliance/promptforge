@@ -61,7 +61,7 @@ impl Tool for WebSearch {
         reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn description(&self) -> &str {
-        "Search the web and return a list of results (title, url, description)."
+        "Search the web and return a list of results (title, url, description, age, site_name, extra_snippets)."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -75,6 +75,32 @@ impl Tool for WebSearch {
                 "count": {
                     "type": "integer",
                     "description": "Max number of results."
+                },
+                "freshness": {
+                    "type": "string",
+                    "description": "Freshness filter (for example pd, pw, pm, py)."
+                },
+                "country": {
+                    "type": "string",
+                    "description": "Country code for the search."
+                },
+                "search_lang": {
+                    "type": "string",
+                    "description": "Search language code."
+                },
+                "safesearch": {
+                    "type": "string",
+                    "description": "SafeSearch level (for example off, moderate, strict)."
+                },
+                "include_domains": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Only keep results from these hostnames."
+                },
+                "exclude_domains": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Drop results from these hostnames."
                 }
             },
             "required": ["query"]
@@ -140,7 +166,7 @@ mod tests {
         assert_eq!(tool.wire_name(), "web_search");
         assert_eq!(
             tool.description(),
-            "Search the web and return a list of results (title, url, description)."
+            "Search the web and return a list of results (title, url, description, age, site_name, extra_snippets)."
         );
         assert_eq!(
             tool.parameters_schema(),
@@ -154,6 +180,32 @@ mod tests {
                     "count": {
                         "type": "integer",
                         "description": "Max number of results."
+                    },
+                    "freshness": {
+                        "type": "string",
+                        "description": "Freshness filter (for example pd, pw, pm, py)."
+                    },
+                    "country": {
+                        "type": "string",
+                        "description": "Country code for the search."
+                    },
+                    "search_lang": {
+                        "type": "string",
+                        "description": "Search language code."
+                    },
+                    "safesearch": {
+                        "type": "string",
+                        "description": "SafeSearch level (for example off, moderate, strict)."
+                    },
+                    "include_domains": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Only keep results from these hostnames."
+                    },
+                    "exclude_domains": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Drop results from these hostnames."
                     }
                 },
                 "required": ["query"]
