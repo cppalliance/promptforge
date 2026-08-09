@@ -35,6 +35,7 @@ use mlua::{
 use serde_json::Value as Json;
 use serde_json::json;
 
+use crate::bind::RuntimeResolution;
 pub use crate::lua_models::{LuaModelHandle, ModelInferHook};
 use crate::lua_models::{
     ModelBindingState, ModelRuntime, close_model_scope, finish_model_replay, install_bind_models,
@@ -154,13 +155,6 @@ impl LuaToolHandle {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the live H1 runtime seam is wired into execution in step 3"
-        )
-    )]
     fn from_live_binding(
         alias: impl Into<String>,
         description: impl Into<String>,
@@ -496,6 +490,12 @@ pub struct ToolScope {
 }
 
 impl ToolScope {
+    /// Builds a scope from already resolved bindings.
+    #[must_use]
+    pub(crate) fn from_bindings(bindings: Vec<ToolBinding>) -> Self {
+        Self { bindings }
+    }
+
     /// Returns the effective bindings in model-advertisement order.
     #[must_use]
     pub fn bindings(&self) -> &[ToolBinding] {
@@ -756,26 +756,12 @@ struct BindingState {
 /// The producer is installed into one H1 VM. Every executed `tools.need`,
 /// `models.need`, and `models.always` call resolves immediately, while skipped
 /// Lua branches produce no binding.
-#[derive(Debug, Default)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the live H1 runtime seam is wired into execution in step 3"
-    )
-)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct LiveBindingProducer {
     tools: Arc<Mutex<BindingState>>,
     models: Arc<Mutex<ModelBindingState>>,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the live H1 runtime seam is wired into execution in step 3"
-    )
-)]
 impl LiveBindingProducer {
     /// Installs live tool and model tables into `lua` for the lifetime of
     /// `scope`.
@@ -853,13 +839,6 @@ impl LiveBindingProducer {
 #[expect(
     clippy::too_many_lines,
     reason = "one scoped table keeps its callbacks and shared recorder together"
-)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the live H1 runtime seam is wired into execution in step 3"
-    )
 )]
 fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
     lua: &'env Lua,
@@ -1608,6 +1587,22 @@ impl SectionVm {
         store: &StoreRef,
         last_reply: Option<&str>,
     ) -> Result<()> {
+        self.inject_host_with_var(args, sys, store, last_reply, None)
+    }
+
+    /// Installs host values while seeding `var` from an earlier VM.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if host values cannot be bridged or were already
+    /// injected.
+    pub(crate) fn inject_host_with_var(
+        &mut self,
+        args: &str,
+        sys: &Json,
+        store: &StoreRef,
+        last_reply: Option<&str>,
+        initial_var: Option<&Json>,
+    ) -> Result<()> {
         if self.host_injected {
             return Err(Error::Lua(
                 "section VM host values were already injected".to_owned(),
@@ -1629,10 +1624,17 @@ impl SectionVm {
                 .map_err(|_| Error::Lua("sys live slot was poisoned".to_owned()))?;
             *live = Some(sys.clone());
         }
-        let var = self
-            .lua
-            .create_table()
-            .map_err(|error| Error::Lua(error.to_string()))?;
+        let var = match initial_var {
+            Some(value) => self
+                .lua
+                .to_value(value)
+                .map_err(|error| Error::Lua(error.to_string()))?,
+            None => Value::Table(
+                self.lua
+                    .create_table()
+                    .map_err(|error| Error::Lua(error.to_string()))?,
+            ),
+        };
         globals
             .raw_set("var", var)
             .map_err(|error| Error::Lua(error.to_string()))?;
@@ -1652,6 +1654,38 @@ impl SectionVm {
         self.store = Some(store.clone());
         self.host_injected = true;
         Ok(())
+    }
+
+    /// Executes one live H1 Lua block with call-time capability resolution.
+    ///
+    /// Resolver callbacks are scoped to this block and reinstalled for each
+    /// later H1 Lua block. Resolved Tool and Model objects remain ordinary Lua
+    /// values in the VM.
+    ///
+    /// # Errors
+    /// Returns typed capability errors captured by the runtime resolver, or the
+    /// underlying Lua execution error.
+    pub(crate) fn run_live_h1_block(
+        &self,
+        program: &LuaProgram,
+        resolution: &RuntimeResolution<'_, '_>,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<Option<String>> {
+        let result = self.lua.scope(|scope| {
+            resolution
+                .install(&self.lua, scope)
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            self.run_prologue(program, observer, section)
+                .map_err(|error| mlua::Error::external(error.to_string()))
+        });
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) => match resolution.take_callback_error()? {
+                Some(error) => Err(error),
+                None => Err(Error::Lua(error.to_string())),
+            },
+        }
     }
 
     /// Replaces the sealed Lua `sys` global after scope close.
