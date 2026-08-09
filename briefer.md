@@ -2,7 +2,7 @@
 name: briefer
 description: Generate a report on an entity analyzed through the lens of Great Founder Theory.
 promptforge: 1
-max_tool_iterations: 12
+max_tool_iterations: 18
 ---
 
 # Briefer
@@ -41,7 +41,7 @@ Section: {{ item }}
 You are writing ONE section of an evidence packet about the Subject. Emit heading `## {{ item }}` as the first line, then fill that facet.
 
 Turn budget (HARD):
-1. Turn 1: your entire first response MUST be one `search` tool call (no prose, no headings). Query must include the Subject's exact name plus keywords for this Section.
+1. Turn 1: your entire first response MUST be one `search` tool call (no prose, no headings). Query must include the Subject's exact name plus keywords for this Section. For Subject Profile, include filing keywords (EIN OR ProPublica OR "Form 990" OR registry OR "about us" OR leadership) so Profile can fill legal status and identifiers, not only the marketing homepage.
 2. Turn 2: after search returns, `fetch` 1-2 best **https** URLs (prefer the Subject's own site, corporate filings or other primary records, and named press). If a hit is `http://`, fetch the `https://` form of the same host/path instead. Prefer one fetch when a single page is enough. Do not write the section yet.
 3. Turn 3: only after at least one fetch attempt, output finished section markdown. No more tools unless every fetch failed - then one recovery search, then write. Keep the written section short enough to stay within a modest context budget.
 
@@ -59,11 +59,11 @@ Rules:
 - Do not assume the Subject is a nonprofit, company, government body, or project. Infer entity type from sources; use identifiers and filings that fit that type.
 
 What to fill by Section name:
-- Subject Profile - legal or canonical name, founder/origin, founded/operational dates, legal/entity status, identifying numbers if sources give them, headquarters or home base, mission/charter (verbatim if available), key personnel, headcount/scale, structure/governance. Labeled fields. UNKNOWN if missing. Supporting nonprofits/foundations/sponsors are not the Subject: put their facts under structure/governance with their own names; do not use their staff counts as the Subject's headcount.
+- Subject Profile - legal or canonical name, founder/origin, founded/operational dates, legal/entity status, identifying numbers if sources give them, headquarters or home base, mission/charter (verbatim if available), key personnel, headcount/scale, structure/governance. Labeled fields. UNKNOWN if missing. When search surfaces an IRS/ProPublica/Charity Navigator or equivalent registry hit for the Subject, fetch it and copy EIN/legal status/officers into Profile (same facts may also appear in Public Record). Supporting nonprofits/foundations/sponsors are not the Subject: put their facts under structure/governance with their own names; do not use their staff counts as the Subject's headcount.
 - Domain Primer - three to five numbered structural facts about this Subject's domain (not slogans). Each sourced.
 - Domain Landscape - labeled fields: sector conditions; named peers or substitutes (external competing organizations only - not the Subject's own product codes, taxonomies, or subsidiaries; list names+URLs when fetched pages name them - Wikipedia "See also", comparisons, or "used with" lists count; UNKNOWN only if silent); ecosystem position; market structure class (must pick one label or hybrid from: monopoly, duopoly, oligopoly, competitive, monopsony, oligopsony, government-controlled, two-sided platform, franchise/licensed); upstream/downstream dependencies; extralegal costs if any; natural disaster exposure for THIS Subject's own facilities/workforce/infrastructure only (UNKNOWN if sources do not name the Subject's sites - never a lookalike entity). If the Subject is a project/library collection, do not treat a supporting foundation as the same legal entity unless sources equate them - label each distinctly. For this section, if search returns a Wikipedia page about the Subject, fetch that page (https) before writing - it is often the peer list source.
 - Public Record - press, primary records, controversy, reputation about the Subject entity. Prefer primary records and named press over directories and SEO pages. If a founder/principal has separate personal political history, mention only when sources tie it to the Subject entity; otherwise leave it out of this section.
-- Domain-Specific Vulnerabilities - organizational/sector risks that attach to THIS Subject (funding concentration, key-person, dependency on specific projects/standards processes, reputational or regulatory exposure named in sources). Prefer Subject-named security audits, vulnerability disclosure gaps, and supply-chain findings when fetched (not a generic language-CVE list). UNKNOWN beats filler.
+- Domain-Specific Vulnerabilities - organizational/sector risks that attach to THIS Subject (funding concentration, key-person, dependency on specific projects/standards processes, reputational or regulatory exposure named in sources). Prefer Subject-named security audits, vulnerability disclosure gaps, and supply-chain findings when fetched. Subject-named operational challenges from the Subject's own about/mission/news pages (resource gaps, volunteer maintenance risk, memory-safety exposure of dependents) count as sourced risks when quoted with URL - do not emit a bare UNKNOWN if those pages were fetched. Do not paste generic language-wide CVE scanner marketing (e.g. industry-wide "70% of vulnerabilities" pages that never name the Subject). UNKNOWN beats invented CVE filler.
 
 Query hints (adapt to the Subject; do not invent answers): official about/mission/leadership pages; Subject + governance OR leadership OR "annual report" OR "corporate filings"; Subject + structure OR history when Profile is thin; for Landscape peers use Subject + (alternatives OR "compared to" OR vs OR competitors OR "similar libraries" OR "similar projects" OR FactSet OR Refinitiv OR "S&P Global" as fits the domain); for Vulnerabilities add Subject + (security audit OR OSTIF OR CVE OR "vulnerability disclosure" OR supply chain OR Talos OR NVD).
 
