@@ -389,8 +389,13 @@ impl Tool for WebFetch {
         // `raw` forces whole-page rendering of an HTML response.
         let raw = parse_raw(&args)?;
 
-        // Enforce the URL-admission policy before any network access.
-        let url = check_url(url, &self.config)?;
+        // Enforce the URL-admission policy before any network access. Scheme
+        // refusals (plain http when disallowed) are soft so a fanout arm can
+        // retry https; SSRF/userinfo/port/literal refusals stay hard.
+        let url = match check_url(url, &self.config) {
+            Ok(u) => u,
+            Err(err) => return soft_or_hard(err),
+        };
 
         let response = match self.http.get(url.clone()).send().await {
             Ok(resp) => resp,
@@ -1189,20 +1194,19 @@ mod tests {
         // Error::Parse, the policy-rejection channel, not Error::Http) proves
         // the URL was refused by policy before any network access: a network
         // timeout would surface as Error::Http and carry none of these strings.
-        let cases = [
+        let hard_cases = [
             (
                 "https://user:pass@example.com/",
                 "url must not contain userinfo",
             ),
             ("https://example.com:8080/", "port not allowed: 8080"),
-            ("http://example.com/", "scheme not allowed: http"),
             ("https://0177.0.0.1/", "ip literal host not allowed"),
             ("https://2130706433/", "ip literal host not allowed"),
             ("https://[::1]/", "ip literal host not allowed"),
             ("https://127.1/", "ip literal host not allowed"),
         ];
 
-        for (raw, reason) in cases {
+        for (raw, reason) in hard_cases {
             let err = tool
                 .call(serde_json::json!({ "url": raw }))
                 .await
@@ -1216,6 +1220,17 @@ mod tests {
                 "expected policy reason {reason:?} for {raw}, got: {err}"
             );
         }
+
+        // Plain http is refused without a network hop, but as soft tool text so
+        // the model can retry https without aborting a fanout arm.
+        let soft = tool
+            .call(serde_json::json!({ "url": "http://example.com/" }))
+            .await
+            .expect("blocked http scheme must be soft tool text");
+        assert!(
+            soft.contains("scheme not allowed: http"),
+            "expected soft scheme refusal, got: {soft}"
+        );
     }
 
     /// Splits a `web_fetch` return into its provenance header and its body.
