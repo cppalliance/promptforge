@@ -32,7 +32,16 @@ impl ToolDialect for OpenAiDialect {
 
     fn detect(&self, evidence: &DialectEvidence) -> Option<DetectScore> {
         if evidence.supports_tool_calls == Some(true) {
-            Some(DetectScore(80))
+            return Some(DetectScore(80));
+        }
+        // Some GGUFs (notably Qwen ChatML) ship tool_call templates while
+        // llama `/props` omits or denies native tool_calls. Prefer this over
+        // DialectNone so those models still route.
+        let template = evidence.chat_template.as_deref().unwrap_or("");
+        let chatml_tools = template.contains("<|im_start|>")
+            && (template.contains("<tool_call>") || template.contains("tool_call"));
+        if chatml_tools {
+            Some(DetectScore(70))
         } else {
             None
         }
