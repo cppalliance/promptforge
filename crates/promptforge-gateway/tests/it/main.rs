@@ -492,6 +492,59 @@ async fn concurrency_one_allows_only_one_in_flight_at_backend() {
 }
 
 #[tokio::test]
+async fn concurrency_two_admits_two_in_flight_at_backend() {
+    // With concurrency=2, two held requests must both reach the backend.
+    let release = Arc::new(Notify::new());
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let backend = slow_fake_backend(Arc::clone(&release), Arc::clone(&in_flight)).await;
+    let gateway = gateway_with_queue(backend, 2, 10).await;
+
+    let client = reqwest::Client::new();
+    let url = format!("http://{gateway}/v1/chat/completions");
+
+    let first = tokio::spawn({
+        let client = client.clone();
+        let url = url.clone();
+        async move {
+            client
+                .post(url)
+                .bearer_auth("test-token")
+                .json(&chat_body())
+                .send()
+                .await
+        }
+    });
+    let second = tokio::spawn({
+        let client = client.clone();
+        let url = url.clone();
+        async move {
+            client
+                .post(url)
+                .bearer_auth("test-token")
+                .json(&chat_body())
+                .send()
+                .await
+        }
+    });
+
+    for _ in 0..50 {
+        if in_flight.load(Ordering::SeqCst) == 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        in_flight.load(Ordering::SeqCst),
+        2,
+        "concurrency=2 must admit two requests to the backend at once"
+    );
+
+    release.notify_waiters();
+    assert_eq!(first.await.unwrap().unwrap().status().as_u16(), 200);
+    assert_eq!(second.await.unwrap().unwrap().status().as_u16(), 200);
+}
+
+#[tokio::test]
 async fn queue_full_returns_503_when_waiting_slots_exhausted() {
     // concurrency=1, max_depth=1: one in-flight + one waiting; a third gets 503.
     // max_depth counts waiting requests only, not in-flight.
