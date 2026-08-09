@@ -691,10 +691,10 @@ fn satisfies_constraints(model: &ModelDescriptor, opts: &ModelNeedOpts) -> bool 
     }
 }
 
-/// Dev-runner catalog entry for the pinned Qwen3.5 analysis model.
+/// Catalog entry used by core-tests scenario fixtures for model binding.
 ///
-/// Context matches the llama-server profile default (`131072`). Thinking is
-/// switchable so `models.need` can request it on or off.
+/// Context is a large switchable window so `models.need` can filter and
+/// request thinking without depending on a live `/v1/models` fetch.
 #[must_use]
 pub fn pinned_qwen_dev_catalog(model_alias: &str) -> ModelCatalog {
     ModelCatalog::new([ModelDescriptor::new(

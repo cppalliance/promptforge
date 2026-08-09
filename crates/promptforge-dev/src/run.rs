@@ -156,7 +156,10 @@ pub(crate) async fn run_once_with(
         );
     }
 
-    let execution = format!("dev-{:016x}", fastrand::u64(..));
+    let execution = new_execution_id();
+    // Banner before observer traffic so a fresh process is obvious in scrollback
+    // even when an earlier run's lines are still on screen.
+    eprintln!("run id: {execution}");
     let prompt = Prompt::parse(&source, &execution, observer)
         .with_context(|| format!("parse {}", prompt_path.display()))?;
 
@@ -234,6 +237,15 @@ fn format_record(execution: &str, section: &str, detail: &str) -> String {
     format!("[{execution}] {section}: {detail}")
 }
 
+/// Mints a fresh per-invocation execution id: `dev-` plus 128 random bits.
+fn new_execution_id() -> String {
+    format!(
+        "dev-{:016x}{:016x}",
+        fastrand::u64(..),
+        fastrand::u64(..)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -247,6 +259,7 @@ mod tests {
 
     use super::{
         GatewayEnv, VerboseObserver, first_mapped_prompt_line, format_dev_failure, format_record,
+        new_execution_id,
         require_gateway_env_from, run_once_with,
     };
 
@@ -395,6 +408,18 @@ mod tests {
         assert_eq!(gateway.key, "dev-secret");
     }
 
+    #[test]
+    fn successive_execution_ids_differ() {
+        let first = new_execution_id();
+        let second = new_execution_id();
+        assert_ne!(first, second, "each mint must be unique");
+        for id in [&first, &second] {
+            let nonce = id.strip_prefix("dev-").expect("dev- prefix");
+            assert_eq!(nonce.len(), 32);
+            assert!(nonce.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+    }
+
     #[tokio::test]
     async fn run_reuses_one_generated_execution_id_for_parse_bind_and_execution() {
         let directory = tempfile::tempdir().expect("create lifecycle fixture directory");
@@ -428,8 +453,8 @@ mod tests {
             .strip_prefix("dev-")
             .expect("the runner must generate its documented execution id prefix");
         assert!(
-            nonce.len() == 16 && nonce.chars().all(|c| c.is_ascii_hexdigit()),
-            "the execution id must carry a 16-hex-digit nonce: {execution}"
+            nonce.len() == 32 && nonce.chars().all(|c| c.is_ascii_hexdigit()),
+            "the execution id must carry a 32-hex-digit nonce: {execution}"
         );
         assert!(
             records
