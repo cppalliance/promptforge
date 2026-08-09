@@ -130,6 +130,12 @@ returns a 404.
 provider = "brave"                   # v0 supports only "brave"
 api_key = "${BRAVE_API_KEY}"         # the Brave Search subscription token; only the gateway sees it
 base_url = "https://api.search.brave.com/res/v1"  # optional; override for a proxy or a test server
+# default_count = 10                 # when the request omits count
+# max_count = 20                     # clamp and over-fetch ceiling
+# max_per_host = 2                   # host diversity cap
+# default_freshness = ""             # e.g. "pw"; omitted when empty
+# default_safesearch = ""            # e.g. "moderate"; omitted when empty
+# strip_tracking = true              # drop utm_*/fbclid/gclid/mc_* query params
 ```
 
 - `provider` - the search backend. Only `brave` is supported in v0.
@@ -137,6 +143,10 @@ base_url = "https://api.search.brave.com/res/v1"  # optional; override for a pro
   in the gateway and is redacted from logs.
 - `base_url` - optional; defaults to the Brave endpoint above. Override it to
   point at a mirror or a test server.
+- Optional knobs above default as shown; omit them to keep current `gateway.toml` valid.
+  The route echoes `query`, returns trimmed hits (`title`, `url`, `description`,
+  optional `age` / `site_name` / `extra_snippets`), rejects empty query with 400,
+  and applies host diversity plus optional domain filters after Brave.
 
 With this configured, the gateway exposes `POST /v1/tools/web_search` (bearer-authed
 with the same shared token as `/v1/chat/completions`).
@@ -766,9 +776,10 @@ while a section runs. Two tools ship built in:
   it needs no credential; it extracts the article body with a readability pass
   and falls back to a whole-page conversion for pages that are not
   article-shaped.
-- `web_search` - search the web and get back a list of results (title, URL,
-  description). It proxies through the gateway, which holds the Brave API key,
-  so the credential never reaches the process running the prompt.
+- `web_search` - search the web and get back trimmed results (title, URL,
+  description, optional age / site_name / extra_snippets). It proxies through
+  the gateway, which holds the Brave API key, so the credential never reaches
+  the process running the prompt.
 
 Concrete tool names no longer belong in YAML frontmatter or prompt code. The parser accepts a compiled H1 shared library, and `bind::bind_prompt` executes that source once to resolve `tools.need(alias, description)` through a `ToolPicker`, record `tools.always(alias)`, and validate the result against a complete live `ToolRegistry`. Its immutable `BoundPrompt` carries matching forward and reverse maps plus picker overlap analysis. `execute::run` combines explicit prompt-wide and H2 scopes, advertises concrete descriptions and schemas under local aliases, and dispatches aliases by stable identity. Declared tools are never injected automatically. The CLI and MCP server both use this complete path; the MCP server builds the complete live registry and matching picker catalog at boot, binds each run on Tokio's blocking pool, and executes the resulting `BoundPrompt`.
 
