@@ -10,11 +10,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
+use mlua::{Lua, Scope};
 use promptforge_tool_picker::{
     NearDuplicate, Outcome, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
 
-use crate::lua::{ToolBindings, ToolResolver, bind_shared_declarations};
+use crate::lua::{LiveBindingProducer, ToolBindings, ToolResolver, bind_shared_declarations};
 use crate::model::{
     ModelBindings, ModelCatalog, ModelNeedOpts, ModelRegistry, ModelResolver, PickerModelResolver,
     ResolvedModel, model_picker_from,
@@ -23,6 +24,107 @@ use crate::observe::{Observer, detail};
 use crate::parser::Prompt;
 use crate::tools::{ToolId, ToolRegistry};
 use crate::{Error, Result};
+
+/// Run-scoped capability resolver and live H1 binding producer.
+///
+/// This is the dependency-safe runtime seam beside [`bind_prompt`]. It owns the
+/// model picker rebuilt for this run, resolves each capability when Lua executes
+/// the corresponding call, and accumulates frozen bindings for later section
+/// VMs.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the live H1 runtime seam is wired into execution in step 3"
+    )
+)]
+pub(crate) struct RuntimeResolution<'a, 'tools: 'a> {
+    tool_resolver: PickerResolver<'a, ToolPicker>,
+    registry: &'a ToolRegistry<'tools>,
+    models: &'a ModelCatalog,
+    model_picker: Option<ToolPicker>,
+    producer: LiveBindingProducer,
+}
+
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the live H1 runtime seam is wired into execution in step 3"
+    )
+)]
+impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
+    /// Creates one run-scoped resolver over live tool and model catalogs.
+    ///
+    /// # Errors
+    /// Returns [`Error::DuplicateLiveToolId`] when the registry repeats an
+    /// identity, or [`Error::ModelBind`] when the model picker cannot be built.
+    pub(crate) fn new(
+        picker: &'a ToolPicker,
+        registry: &'a ToolRegistry<'tools>,
+        models: &'a ModelCatalog,
+    ) -> Result<Self> {
+        let mut live_ids = BTreeSet::new();
+        for tool in registry.tools() {
+            let id = tool.id();
+            if !live_ids.insert(id.clone()) {
+                return Err(Error::DuplicateLiveToolId { id });
+            }
+        }
+        let model_picker = if models.is_empty() {
+            None
+        } else {
+            Some(model_picker_from(picker, models)?)
+        };
+        Ok(Self {
+            tool_resolver: PickerResolver::new(picker),
+            registry,
+            models,
+            model_picker,
+            producer: LiveBindingProducer::default(),
+        })
+    }
+
+    /// Installs call-time tool and model resolution into an H1 Lua scope.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] when the resolver tables cannot be installed.
+    pub(crate) fn install<'scope, 'env: 'scope>(
+        &'env self,
+        lua: &'env Lua,
+        scope: &'scope Scope<'scope, 'env>,
+    ) -> Result<()> {
+        self.producer
+            .install(lua, scope, &self.tool_resolver, self.registry, self)
+    }
+
+    /// Returns the first typed error captured by a resolver callback.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if a binding recorder mutex is poisoned.
+    pub(crate) fn take_callback_error(&self) -> Result<Option<Error>> {
+        self.producer.take_callback_error()
+    }
+
+    /// Snapshots the tool and model bindings resolved by executed H1 code.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if a binding recorder mutex is poisoned.
+    pub(crate) fn bindings(&self) -> Result<(ToolBindings, ModelBindings)> {
+        self.producer.bindings()
+    }
+}
+
+impl ModelResolver for RuntimeResolution<'_, '_> {
+    fn resolve(&self, description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel> {
+        let Some(picker) = self.model_picker.as_ref() else {
+            return Err(Error::ModelAbsent {
+                capability: description.to_owned(),
+            });
+        };
+        PickerModelResolver::new(self.models, picker).resolve(description, opts)
+    }
+}
 
 /// A parsed prompt with one frozen H1 capability-binding result.
 ///
@@ -626,6 +728,90 @@ mod tests {
             description_text: String::new(),
             sections: Vec::new(),
         }
+    }
+
+    #[test]
+    fn runtime_resolution_resolves_only_executed_h1_calls() {
+        let live = FixtureLiveTool::new("server", "search");
+        let registry = ToolRegistry::new([&live as &dyn Tool]);
+        let picker = ToolPicker::build(
+            Catalog::new(vec![ToolDescriptor::new(
+                PickerToolId::new("server", "search"),
+                "Search the web",
+                json!({"type": "object"}),
+            )]),
+            PickerConfig::default(),
+        )
+        .expect("tool picker must build");
+        let models = ModelCatalog::new([ModelDescriptor::new(
+            ModelId::gateway("analyst"),
+            "Careful analysis",
+            131_072,
+            ThinkingMode::Never,
+        )]);
+        let runtime = RuntimeResolution::new(&picker, &registry, &models)
+            .expect("runtime resolver must build");
+        let lua = Lua::new();
+
+        lua.scope(|scope| {
+            runtime
+                .install(&lua, scope)
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            lua.load(
+                r#"
+                if false then
+                    tools.need("skipped", "Search the web")
+                end
+                local search = tools.need("search", "Search the web")
+                assert(search.wire_name == "fixture")
+                assert(search.parameters.type == "object")
+                tools.always("search")
+                local writer = models.always("writer", "Careful analysis")
+                assert(writer.model_id == "analyst")
+                "#,
+            )
+            .exec()
+        })
+        .expect("live H1 calls must resolve");
+
+        assert!(runtime.take_callback_error().unwrap().is_none());
+        let (tools, model_bindings) = runtime.bindings().expect("bindings must snapshot");
+        assert_eq!(tools.bindings().len(), 1);
+        assert_eq!(tools.bindings()[0].alias(), "search");
+        assert_eq!(tools.always(), &["search"]);
+        assert_eq!(model_bindings.bindings().len(), 1);
+        assert_eq!(model_bindings.bindings()[0].alias(), "writer");
+        assert_eq!(model_bindings.always(), Some("writer"));
+    }
+
+    #[test]
+    fn runtime_resolution_preserves_typed_picker_errors() {
+        let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
+            .expect("empty tool picker must build");
+        let registry = ToolRegistry::new(std::iter::empty());
+        let models = ModelCatalog::empty();
+        let runtime = RuntimeResolution::new(&picker, &registry, &models)
+            .expect("runtime resolver must build");
+        let lua = Lua::new();
+
+        let error = lua
+            .scope(|scope| {
+                runtime
+                    .install(&lua, scope)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+                lua.load(r#"tools.need("search", "Search the web")"#).exec()
+            })
+            .expect_err("missing capability must fail at the executed call");
+        assert!(
+            error
+                .to_string()
+                .contains("tool capability resolution failed")
+        );
+        assert!(matches!(
+            runtime.take_callback_error().unwrap(),
+            Some(Error::Absent { capability }) if capability == "Search the web"
+        ));
+        assert!(runtime.bindings().unwrap().0.bindings().is_empty());
     }
 
     #[test]
