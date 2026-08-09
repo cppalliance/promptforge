@@ -4,15 +4,15 @@
 
 # PromptForge
 
-A runtime that executes analysis pipelines defined in a single markdown file. The markdown is the program. The model is the CPU. Lua binds tools and models, the store carries artifacts between sections, and a credential-holding gateway keeps vendor keys off the prompt process.
+A runtime that executes analysis pipelines defined in a single markdown file. The markdown is the program. The model is the CPU. Live H1 Lua resolves tools and models, the store carries artifacts between sections, and a credential-holding gateway keeps vendor keys off the prompt process.
 
 ![Workbench](images/banner-01.png)
 
 ## What you get
 
 - 📄 **Markdown prompts** - frontmatter, one H1, H2 sections that run top to bottom
-- 🔧 **Lua control** - bind tools and models, compute values, write the store, fan out work
-- 🌐 **Tools that ship** - local `web_fetch`, gateway-backed `web_search`, semantic capability binding
+- 🔧 **Lua control** - resolve tools and models live, compute values, write the store, fan out work
+- 🌐 **Tools that ship** - local `web_fetch`, gateway-backed `web_search`, semantic capability resolution
 - 🔌 **Inference gateway** - OpenAI-shaped chat, bearer auth, catalog at `GET /v1/models`
 - 🛰️ **MCP server** - run prompts from an agentic harness over streamable HTTP or stdio
 
@@ -79,12 +79,13 @@ cargo run -p promptforge-dev -- prompts/greet.md "world" --watch
 
 ## How it works
 
-Parse a promptforge markdown file, bind the tools and models it needs, then execute each H2 section in order. Section Lua prepares state; prose becomes a model turn (with a tool loop when tools are in scope); results land in the store or become the run output.
+Parse a promptforge markdown file, run H1 once with live tool and model resolution, then execute each H2 section in order. Section Lua prepares state; prose becomes a model turn (with a tool loop when tools are in scope); results land in the store or become the run output.
 
 ```mermaid
 flowchart LR
-  MD[Markdown prompt] --> Parse[Parse and bind]
-  Parse --> Sec[H2 sections]
+  MD[Markdown prompt] --> Parse[Parse]
+  Parse --> H1[Run H1 once]
+  H1 --> Sec[H2 sections]
   Sec --> Lua[Lua prologue]
   Lua --> Model[Model turn]
   Model --> Tools[Tools via gateway or local]
@@ -103,7 +104,7 @@ flowchart LR
 | `promptforge-gateway` | Inference gateway and model catalog |
 | `promptforge-mcp-server` | MCP server for agentic harnesses |
 | `promptforge-webfetch` | In-process `web_fetch` tool |
-| `promptforge-tool-picker` | Semantic tool capability binding |
+| `promptforge-tool-picker` | Semantic tool capability resolution |
 | `promptforge-dev` | Interactive prompt development (unpublished) |
 | `promptforge-core-tests` | Offline tests and opt-in real-model scenarios (unpublished) |
 

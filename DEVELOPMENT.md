@@ -8,7 +8,7 @@ Workspace crates (see root `Cargo.toml`):
 
 | Crate | Role |
 |---|---|
-| `promptforge-core` | Library: prompt parser, gateway client, section execution, source-retaining `LuaProgram` compilation to process-local Lua 5.4 bytecode, synchronous four-outcome picker binding for tools and models (`tools.need` / `models.need`) with atomic one-to-one alias and stable-identity maps validated against the complete live registries, sendable persistent `SectionVm` lifecycle, deterministic Lua declaration binding and exact per-section replay with immutable H2 scope closure (`tools.add` / `models.use`), stable live-tool identity (`ToolId`, `ToolRegistry`, transport-only wire names), model catalog types (`ModelId`, `ModelCatalog`, `ModelBindings`), opt-in `DebugCapture` for raw turn JSON, and `observe` (`Observer`, `NullObserver`) for report-only progress |
+| `promptforge-core` | Library: prompt parser, gateway client, live single-pass H1 execution, picker-backed tool and model resolution (`tools.need` / `models.need`), `Prompt.replay` library loading before section host injection, captured capability installation from Rust, alternating section execution in sendable persistent `SectionVm` values, stable live-tool identity (`ToolId`, `ToolRegistry`, transport-only wire names), model catalog types (`ModelId`, `ModelCatalog`, `ModelBindings`), opt-in `DebugCapture` for raw turn JSON, and `observe` (`Observer`, `NullObserver`) for report-only progress |
 | `promptforge-core-tests` | Unpublished binary and test harness: author-shaped valid/invalid/offline fixtures plus opt-in real-model scenarios against a temporary gateway |
 | `promptforge-dev` | Unpublished binary for interactive prompt development against an already-running gateway. Never starts the gateway or `llama-server` |
 | `promptforge-webfetch` | Library: in-process `web_fetch` (no credential; runs wherever the prompt runs) |
@@ -17,14 +17,14 @@ Workspace crates (see root `Cargo.toml`):
 | `promptforge-mcp-server` | Binary `promptforge-mcp-server`: MCP surface over streamable HTTP or stdio (`run_prompt`, `list_prompts`, `need_prompt`, `check_run`) |
 | `promptforge-tool-picker` | Library: plain-English capability need to tool (or model catalog entry) via embedding; four outcomes `Bind` / `Duplicate` / `Ambiguous` / `Absent`. No Lua, no MCP, no network |
 
-Relationship in one line: hosts (`cli`, `dev`, `mcp-server`, `core-tests`) parse and bind through `promptforge-core`, pick capabilities with `promptforge-tool-picker`, call models through `promptforge-gateway`, and run `web_fetch` locally via `promptforge-webfetch`.
+Relationship in one line: hosts (`cli`, `dev`, `mcp-server`, `core-tests`) parse and execute through `promptforge-core`, which resolves live H1 capabilities with `promptforge-tool-picker`, calls models through `promptforge-gateway`, and runs `web_fetch` locally via `promptforge-webfetch`.
 
 Built-in tools:
 
 - `web_fetch` - URL to main content as markdown (readability, whole-page fallback). Always local.
 - `web_search` - trimmed search hits via gateway `POST /v1/tools/web_search` (Brave key stays in the gateway).
 
-Concrete tool names do not belong in YAML frontmatter. `bind::bind_prompt` resolves `tools.need` / `models.need` against a complete live registry and catalog; `execute::run` advertises under local aliases and dispatches by stable `ToolId`. Declared tools are never injected automatically. Binding has no reranker stage.
+Concrete tool names do not belong in YAML frontmatter. During `execute::run`, live H1 `tools.need` / `models.need` calls resolve against a complete registry and catalog. Sections advertise under local aliases and dispatch by stable `ToolId`. Resolved tools are never exposed to a model automatically; section code must call `tools.add`.
 
 Default tool-call loop cap is 24 round trips per section when frontmatter omits `max_tool_iterations`.
 
@@ -144,11 +144,11 @@ Three distinct namespaces, on purpose:
 
 Each `[[model]]` also carries catalog metadata for bearer-authed `GET /v1/models`:
 
-- `description` - required prose for the catalog and semantic bind
+- `description` - required prose for the catalog and semantic resolution
 - `context` - required context window size in tokens
 - `thinking` - `never`, `always`, or `switchable` (default `never`)
 
-Chat still passes `temperature`, `max_tokens`, and `chat_template_kwargs` through the request body's catch-all; the catalog only advertises what a binding may ask for. Several models can share one endpoint (same `base_url` + `api_key`).
+Chat still passes `temperature`, `max_tokens`, and `chat_template_kwargs` through the request body's catch-all; the catalog only advertises constraints that live H1 resolution may request. Several models can share one endpoint (same `base_url` + `api_key`).
 
 ### Env interpolation
 
@@ -221,16 +221,16 @@ base_url = "https://api.search.brave.com/res/v1"  # optional override
 
 Exposes bearer-authed `POST /v1/tools/web_search`. The route echoes `query`, returns trimmed hits (`title`, `url`, `description`, optional `age` / `site_name` / `extra_snippets`), rejects empty query with 400, and applies host diversity plus optional domain filters after Brave.
 
-## Model catalog and binding flow
+## Model catalog and live resolution flow
 
 1. Host fetches `GET /v1/models` (CLI hard-fails when `PROMPTFORGE_GATEWAY_KEY` is set; MCP soft-fails to empty with a warning) and builds `ModelCatalog`.
 2. Host builds a complete live `ToolRegistry` and a picker `Catalog` from the same concrete tool instances (`web_fetch` always; `web_search` when gateway credentials exist).
-3. `bind::bind_prompt` runs shared H1 Lua once:
+3. `execute::run` runs ordinary H1 blocks live exactly once:
    - Tools: `tools.need(alias, description)` then optional `tools.always(alias)` for prompt-wide scope.
-   - Models: `models.need(alias, description, opts?)` filters the catalog by hard constraints (`context`, `thinking`) then resolves the description semantically with the same picker stack rebuilt over the filtered catalog. Optional `opts` fields: `context`, `thinking`, `temperature`, `max_tokens`. Invocation params freeze on the binding; same weights under different params may be distinct aliases.
+   - Models: `models.need(alias, description, opts?)` filters the catalog by hard constraints (`context`, `thinking`) then resolves the description semantically with the same picker stack rebuilt over the filtered catalog. Optional `opts` fields: `context`, `thinking`, `temperature`, `max_tokens`. Invocation params freeze on the returned Model object; same weights under different params may be distinct aliases.
    - `models.always(alias)` or combined `models.always(alias, description, opts?)` sets the prompt-wide default. At most one `models.always` per prompt.
 4. Outcomes `Absent`, `Duplicate`, and `Ambiguous` map to distinct core errors for tools and models. Tool identity collisions and near-duplicate pairs are rejected or precomputed; model aliases are not rejected for sharing weights. Prompts with no `models.need` keep working with an empty catalog.
-5. Result is an immutable `BoundPrompt`. `SectionVm` replays frozen declarations without resolving again. H2 `tools.add(alias)` and at most one `models.use(alias)` close section scope. Non-empty model-facing prose without `models.use` or `models.always` fails with `Error::ModelRequired`.
+5. Rust captures the returned Tool and Model objects and serialized H1 `var`. Each `SectionVm` first loads the optional `Prompt.replay` library while host APIs are unavailable, then installs captured objects directly without resolving again. H2 `tools.add(alias)` and at most one `models.use(alias)` close section scope. Non-empty model-facing prose without `models.use` or `models.always` fails with `Error::ModelRequired`.
 
 Identity: v0 `ModelId` uses namespace `"gateway"` plus the caller-facing `[[model]].name`. Completions pass through `CompletionNormalizer` (default `OpenAiChatNormalizer`) before the tool loop.
 
@@ -257,7 +257,7 @@ Over HTTP the MCP endpoint is `/mcp` and every request must present the shared b
 
 Over stdio nothing is bound and no token is read. `[server].bind` is logged as ignored; `[server].token` may be omitted. `[gateway].key` is required on both transports. Logs go to stdout on HTTP and to stderr on stdio.
 
-Boot resolves the whole prompt catalog first and refuses an incomplete one. It builds the complete live tool registry and matching picker catalog, and fetches `GET /v1/models` (soft-fail to empty). Every `run_prompt` reuses its run id as the observer execution id, binds H1 needs on Tokio's blocking pool, then executes the `BoundPrompt` with the same observer.
+Boot resolves the whole prompt catalog first and refuses an incomplete one. It builds the complete live tool registry and matching picker catalog, and fetches `GET /v1/models` (soft-fail to empty). Every `run_prompt` reuses its run id as the observer execution id and executes the parsed `Prompt` with live H1 resolution under the same observer.
 
 Shipped `prompts.toml` at the repository root (run from the repository root so relative paths resolve):
 
@@ -334,7 +334,7 @@ With `watch = true`, save re-resolves the catalog; validation failures become br
 
 `run_prompt` returns structured `RunResult` (`run_id`, `prompt`, `status` of `running` / `completed` / `failed`, `value`, `turns`, `elapsed_ms`, `error`). Past `reply_deadline` the call returns `status: running` with a collectable `run_id`; use `check_run`. Admission waits up to `admission_timeout` for a `max_concurrent_runs` slot. Finished runs stay collectable for `retain_completed`. The registry is in-memory; restart forgets every run.
 
-`need_prompt` embeds name + description and returns up to three closest prompts. Broken prompts are never candidates. `--no-default-features` drops the retrieval `picker` feature and `need_prompt`, but keeps embedding weights required for execution-time capability binding.
+`need_prompt` embeds name + description and returns up to three closest prompts. Broken prompts are never candidates. `--no-default-features` drops the retrieval `picker` feature and `need_prompt`, but keeps embedding weights required for live H1 capability resolution.
 
 Progress (`notifications/progress` when the call carries a `progressToken`):
 
@@ -385,20 +385,21 @@ Use absolute paths for the config argument and `[paths].prompts` under stdio: th
 `execute::run` takes `RunOptions`:
 
 ```rust
-use promptforge_core::execute::{self, RunOptions};
+use promptforge_core::execute::{self, ResolutionContext, RunOptions};
 use promptforge_core::observe::NullObserver;
 
 let opts = RunOptions {
-    execution: "example-run", // one caller-owned id for parse, bind, and run
+    execution: "example-run", // one caller-owned id for parse and run
     observer: &NullObserver,   // or your own Observer
     client: None,              // None builds the gateway client from the environment
     debug: None,               // None skips raw request/response capture
 };
-let result = execute::run(&prompt, input, &tools, &store, opts).await?;
+let resolution = ResolutionContext::new(&picker, &registry, &models);
+let result = execute::run(&prompt, input, resolution, &tools, &store, opts).await?;
 ```
 
-- `execution` - caller-owned stable id. Pass the same value to `Prompt::parse`, `bind_prompt`, and `RunOptions`. CLI generates one per invocation; MCP reuses its run id.
-- `observer` - receives borrowed `(execution, section, detail)` strings for parse/bind, run start/end, section boundaries, model turns, tool calls, harness store ops, and accepted Lua `log(message)` checkpoints. Synchronous and on the caller's path: forward by copying into a queue, do not block. Observations are reports, never decisions (`NullObserver` is what the CLI passes).
+- `execution` - caller-owned stable id. Pass the same value to `Prompt::parse` and `RunOptions`. CLI generates one per invocation; MCP reuses its run id.
+- `observer` - receives borrowed `(execution, section, detail)` strings for parse, run start/end, live H1, section boundaries, model turns, tool calls, harness store ops, and accepted Lua `log(message)` checkpoints. Synchronous and on the caller's path: forward by copying into a queue, do not block. Observations are reports, never decisions (`NullObserver` is what the CLI passes).
 - Fixed details are stable exact strings from `promptforge_core::observe::detail`. They contain no prompt prose, model I/O, tool payloads, store paths/contents, credentials, or fetched content. The sole payload-bearing exception is a validated `Lua: <message>` author checkpoint (max 256 UTF-8 chars, no newline or control character) - keep it a short static label.
 - Empty model product fails as `Error::EmptyModelReply` (observed as `Model turn failed`). `observe::detail::MODEL_REPLY_EMPTY` remains for host compatibility but is not emitted on that path. A successful turn whose `finish_reason` is `length` also reports `Model turn truncated`.
 - The MCP adapter recognizes `Run started` and `Section started` for cosmetic numeric progress and tolerates unknown details.
