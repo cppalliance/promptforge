@@ -141,17 +141,43 @@ async fn wrong_token_is_401() {
     assert_eq!(response.status().as_u16(), 401);
 }
 
-/// A fake Brave Search backend returning one canned result.
+/// A fake Brave Search backend returning five hits on two hosts (with optional `extra_snippets`).
 async fn fake_brave() -> SocketAddr {
     async fn search() -> Json<Value> {
+        // Five hits on two hosts so diversity (`max_per_host` default 2) is exercised.
         Json(serde_json::json!({
             "web": {
-                "results": [{
-                    "title": "T",
-                    "url": "https://e.com",
-                    "description": "D",
-                    "age": "2026-01-01"
-                }]
+                "results": [
+                    {
+                        "title": "A1",
+                        "url": "https://a.com/1",
+                        "description": "first a",
+                        "age": "1 day ago",
+                        "extra_snippets": ["snippet a1"]
+                    },
+                    {
+                        "title": "A2",
+                        "url": "https://a.com/2",
+                        "description": "second a",
+                        "extra_snippets": ["snippet a2"]
+                    },
+                    {
+                        "title": "A3",
+                        "url": "https://a.com/3",
+                        "description": "third a"
+                    },
+                    {
+                        "title": "B1",
+                        "url": "https://b.com/1",
+                        "description": "first b",
+                        "extra_snippets": ["snippet b1"]
+                    },
+                    {
+                        "title": "B2",
+                        "url": "https://b.com/2",
+                        "description": "second b"
+                    }
+                ]
             }
         }))
     }
@@ -218,12 +244,52 @@ async fn web_search_returns_results() {
     let body: Value = response.json().await.unwrap();
     assert_eq!(body.get("query").and_then(Value::as_str), Some("hi"));
     let results = body.get("results").and_then(Value::as_array).unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].get("title").and_then(Value::as_str), Some("T"));
+    // Default max_per_host=2: keep A1,A2,B1,B2; drop A3.
+    assert_eq!(results.len(), 4);
+    assert_eq!(results[0].get("title").and_then(Value::as_str), Some("A1"));
     assert_eq!(
         results[0].get("url").and_then(Value::as_str),
-        Some("https://e.com")
+        Some("https://a.com/1")
     );
+    assert_eq!(
+        results[0].get("site_name").and_then(Value::as_str),
+        Some("a.com")
+    );
+    assert_eq!(
+        results[0]
+            .get("extra_snippets")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+
+    let mut host_counts = std::collections::HashMap::<String, usize>::new();
+    for hit in results {
+        let site = hit
+            .get("site_name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        *host_counts.entry(site).or_default() += 1;
+    }
+    for count in host_counts.values() {
+        assert!(*count <= 2, "default max_per_host is 2");
+    }
+}
+
+#[tokio::test]
+async fn web_search_empty_query_is_400() {
+    let brave = fake_brave().await;
+    let gateway = gateway_with_web_search(brave).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{gateway}/v1/tools/web_search"))
+        .bearer_auth("test-token")
+        .json(&serde_json::json!({ "query": "   " }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 400);
 }
 
 #[tokio::test]
