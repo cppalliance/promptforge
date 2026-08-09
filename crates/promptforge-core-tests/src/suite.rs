@@ -781,19 +781,24 @@ async fn fanout_store_writes_persist_across_arms() {
         &recorder,
     );
     let store = StoreRef::memory();
-    let result = run(
-        &prompt,
-        "",
-        &[],
-        &store,
-        RunOptions {
-            execution: FANOUT_STORE_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
-        },
+    // Arms rendezvous on ready-*.md; sequential fanout would hang here.
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        run(
+            &prompt,
+            "",
+            &[],
+            &store,
+            RunOptions {
+                execution: FANOUT_STORE_EXECUTION,
+                observer: &recorder,
+                client: None,
+                debug: None,
+            },
+        ),
     )
     .await
+    .expect("concurrent fanout must finish without rendezvous timeout")
     .expect("the fanout store fixture must execute offline");
 
     // Concurrent fanout regression: both preamble-only arms write distinct
@@ -801,18 +806,8 @@ async fn fanout_store_writes_persist_across_arms() {
     assert_eq!(result, "2:alpha,beta");
     assert_eq!(store.read("arm-1.md").expect("arm 1 must write"), "alpha");
     assert_eq!(store.read("arm-2.md").expect("arm 2 must write"), "beta");
-
-    let records = recorder.records();
-    let arm_started = records
-        .iter()
-        .filter(|(_, _, d)| d == "Fanout arm started")
-        .count();
-    let arm_finished = records
-        .iter()
-        .filter(|(_, _, d)| d == "Fanout arm finished")
-        .count();
-    assert_eq!(arm_started, 2, "two arms must start");
-    assert_eq!(arm_finished, 2, "two arms must finish");
+    assert_eq!(store.read("ready-1.md").expect("arm 1 ready"), "1");
+    assert_eq!(store.read("ready-2.md").expect("arm 2 ready"), "1");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

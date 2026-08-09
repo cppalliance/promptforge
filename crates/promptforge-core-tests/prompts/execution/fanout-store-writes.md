@@ -17,6 +17,11 @@ return tostring(#files) .. ":" .. table.concat(replies, ",")
 ### Worker
 
 ```lua
+-- Rendezvous: both arms must be live before either writes its reply path.
+-- Sequential fanout never reaches two ready files and hangs until the test times out.
+store.write("ready-" .. sys.taskid .. ".md", "1")
+while #store.glob("ready-*.md") < 2 do
+end
 store.write("arm-" .. sys.taskid .. ".md", item)
 return item
 ```
