@@ -61,6 +61,8 @@ include = ["base.toml"]
 - Paths are relative to the including file
 - Resolution is depth-first; max depth 16; cycles are `ConfigError`
 - Arrays (`endpoint` / `model` / `local_model` / `device`) merge by append; same `id` or `name` is replaced by the later (child) definition
+- A leaf file with only `[[device.lane]]` (no `[[device]]` in that file) parses as a table; those lanes attach to the parent device named by `lane.device`
+- Merge type errors include `path:line` when the header can be located in the overlay file
 - Scalars (`server.*`, `queue.*`, `local.cache_dir`) - later wins
 
 Admin routes (same bearer token as `/v1`):
