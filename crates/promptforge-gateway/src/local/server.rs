@@ -109,6 +109,8 @@ pub(crate) struct LaunchOptions {
     pub(crate) ctx_size: u32,
     /// Generation ceiling passed as `--n-predict`.
     pub(crate) n_predict: u32,
+    /// Concurrent slots passed as `--parallel` (lane admit limit).
+    pub(crate) parallel: u32,
     /// GPU layers passed as `-ngl`.
     pub(crate) gpu_layers: u32,
     /// When `true`, pass `--flash-attn on`.
@@ -487,7 +489,7 @@ fn server_args(
         OsString::from("--n-predict"),
         OsString::from(options.n_predict.to_string()),
         OsString::from("--parallel"),
-        OsString::from("1"),
+        OsString::from(options.parallel.to_string()),
         OsString::from("--cache-type-k"),
         OsString::from(&options.cache_type_k),
         OsString::from("--cache-type-v"),
@@ -584,6 +586,7 @@ mod tests {
         LaunchOptions {
             ctx_size: 65_536,
             n_predict: 8192,
+            parallel: 1,
             gpu_layers: 99,
             flash_attention: true,
             cache_type_k: "q8_0".to_owned(),
@@ -785,6 +788,16 @@ mod tests {
         let rendered = display_invocation(Path::new("llama-server"), &args);
         assert!(rendered.contains("--api-key <per-attempt-secret>"));
         assert!(!rendered.contains("private-key"));
+    }
+
+    #[test]
+    fn launch_args_emit_lane_parallel() {
+        let mut opts = options(false);
+        opts.parallel = 3;
+        let args = server_args(Path::new("model.gguf"), 1, "alias", "key", &opts);
+        let rendered = display_invocation(Path::new("llama-server"), &args);
+        assert!(rendered.contains("--parallel 3"));
+        assert!(!rendered.contains("--parallel 1"));
     }
 
     #[test]

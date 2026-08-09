@@ -89,7 +89,11 @@ impl LocalRuntime {
 
             maybe_write_sidecar(&store, &local_model.source, &model_path);
 
-            let options = launch_options(local_model);
+            let concurrency = config
+                .local_model_concurrency(local_model)
+                .map_err(|e| LocalError::Server(e.to_string()))?;
+            let parallel = u32::try_from(concurrency).expect("lane concurrency fits in u32");
+            let options = launch_options(local_model, parallel);
             let guard =
                 ServerGuard::start(&llama_server, &model_path, &options, interrupted.as_ref())?;
             let endpoint_id = format!("local-{}", local_model.name);
@@ -97,9 +101,6 @@ impl LocalRuntime {
                 &guard.base_url(),
                 crate::config::Secret::from(guard.api_key().to_owned()),
             ));
-            let concurrency = config
-                .local_model_concurrency(local_model)
-                .map_err(|e| LocalError::Server(e.to_string()))?;
             let lane = EndpointLane::new(concurrency, &config.queue);
             let endpoint = Arc::new(Endpoint {
                 id: endpoint_id,
@@ -165,10 +166,11 @@ fn expand_configured_path(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-fn launch_options(model: &LocalModelConfig) -> LaunchOptions {
+fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
     LaunchOptions {
         ctx_size: model.context,
         n_predict: model.n_predict,
+        parallel,
         gpu_layers: model.gpu_layers,
         flash_attention: model.flash_attention,
         cache_type_k: model.cache_type_k.clone(),
