@@ -34,3 +34,4 @@
 - [2026-08-08-10-fanout-gateway-concurrency] gateway-owned backpressure: Let the gateway queue throttle model work unless non-model arm work proves it needs a host cap.
 - [2026-08-08-11-briefer-evidence-thickening] shallow parallel research: Prefer focused bounded arms over deeper exploratory tool loops.
 - [2026-08-08-11-briefer-evidence-thickening] concurrent source aggregation: Defer merged append logs until their write ordering is defined.
+- [2026-08-08-12-supervise-local-llama-server] no background watchdog: Prefer bounded request-time supervision while continuous health selection is unnecessary.
