@@ -32,3 +32,5 @@
 
 ## 2026-08-08 Parse positional tool_code args and inject a tool guide
 
+## 2026-08-08 Detect the OpenAI dialect from ChatML tool templates
+
