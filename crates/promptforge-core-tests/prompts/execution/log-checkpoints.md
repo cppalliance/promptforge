@@ -1,6 +1,6 @@
 ---
 name: log_checkpoints
-description: Record deterministic checkpoints across shared, preamble, and epilog phases
+description: Record deterministic checkpoints across shared, prologue, and epilog phases
 promptforge: 1
 ---
 

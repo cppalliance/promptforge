@@ -14,7 +14,7 @@ use promptforge_core::tools::ToolId;
 type Record = (String, String, String);
 
 const LOG_EXECUTION: &str = "fixture-log-checkpoints";
-const PREAMBLE_EXECUTION: &str = "fixture-preamble-return";
+const PROLOGUE_EXECUTION: &str = "fixture-prologue-return";
 const STORE_EXECUTION: &str = "fixture-store-fallthrough";
 const REPLY_NIL_EXECUTION: &str = "fixture-reply-nil";
 const STORE_TRIAD_EXECUTION: &str = "fixture-store-triad";
@@ -27,7 +27,7 @@ const ITEM_OUTSIDE_EXECUTION: &str = "fixture-item-outside";
 const SHIPPED_PARSE: &str = "fixture-shipped-prompts";
 
 const LOG_CHECKPOINTS: &str = include_str!("../prompts/execution/log-checkpoints.md");
-const PREAMBLE_RETURN: &str = include_str!("../prompts/execution/preamble-return.md");
+const PROLOGUE_RETURN: &str = include_str!("../prompts/execution/prologue-return.md");
 const STORE_FALLTHROUGH: &str = include_str!("../prompts/execution/store-fallthrough.md");
 const REPLY_NIL_SECTION_ONE: &str = include_str!("../prompts/execution/reply-nil-section-one.md");
 const STORE_TRIAD: &str = include_str!("../prompts/execution/store-triad.md");
@@ -57,9 +57,9 @@ const VALID_FIXTURES: &[ValidFixture] = &[
         verify: verify_shared_library,
     },
     ValidFixture {
-        name: "valid/preamble-prose-epilog.md",
-        source: include_str!("../prompts/valid/preamble-prose-epilog.md"),
-        verify: verify_preamble_prose_epilog,
+        name: "valid/prologue-prose-epilog.md",
+        source: include_str!("../prompts/valid/prologue-prose-epilog.md"),
+        verify: verify_prologue_prose_epilog,
     },
 ];
 
@@ -258,7 +258,7 @@ fn verify_minimal(prompt: &Prompt) {
     assert_eq!(prompt.entry().name, "Run");
     assert_eq!(prompt.entry().level, 2);
     assert_eq!(prompt.entry().prose, "Done.");
-    assert!(prompt.entry().preamble.is_none());
+    assert!(prompt.entry().prologue.is_none());
     assert!(prompt.entry().epilog.is_none());
 }
 
@@ -284,7 +284,7 @@ fn verify_shared_library(prompt: &Prompt) {
     assert_eq!(prepare.name, "Prepare");
     assert_eq!(prepare.level, 2);
     assert_eq!(prepare.prose, "Normalize the supplied subject.");
-    assert!(prepare.preamble.is_none());
+    assert!(prepare.prologue.is_none());
     assert!(prepare.epilog.is_none());
     assert_eq!(prepare.children.len(), 1);
     assert_eq!(prepare.children[0].name, "Author note");
@@ -300,11 +300,11 @@ fn verify_shared_library(prompt: &Prompt) {
     assert!(finish.children.is_empty());
 }
 
-fn verify_preamble_prose_epilog(prompt: &Prompt) {
+fn verify_prologue_prose_epilog(prompt: &Prompt) {
     assert_eq!(prompt.frontmatter.name, "phase_boundaries");
     assert_eq!(
         prompt.frontmatter.description,
-        "Exercise an author-shaped preamble, prose, and epilog"
+        "Exercise an author-shaped prologue, prose, and epilog"
     );
     assert_eq!(prompt.frontmatter.promptforge, Some(1));
     assert_eq!(
@@ -320,7 +320,7 @@ fn verify_preamble_prose_epilog(prompt: &Prompt) {
     let transform = prompt.entry();
     assert_eq!(transform.name, "Transform");
     assert_eq!(
-        transform.preamble.as_ref().map(LuaProgram::source),
+        transform.prologue.as_ref().map(LuaProgram::source),
         Some("var.subject = args")
     );
     assert_eq!(transform.prose, "Write about {{ var.subject }}.");
@@ -333,7 +333,7 @@ fn verify_preamble_prose_epilog(prompt: &Prompt) {
     let fallback = &prompt.sections[1];
     assert_eq!(fallback.name, "Fallback");
     assert_eq!(fallback.prose, "This section has prose only.");
-    assert!(fallback.preamble.is_none());
+    assert!(fallback.prologue.is_none());
     assert!(fallback.epilog.is_none());
 }
 
@@ -407,12 +407,12 @@ async fn log_fixture_reports_exact_author_checkpoints() {
 }
 
 #[tokio::test]
-async fn preamble_return_fixture_skips_model_and_epilog() {
+async fn prologue_return_fixture_skips_model_and_epilog() {
     let recorder = Recorder::default();
     let prompt = parse_execution_fixture(
-        PREAMBLE_RETURN,
-        "execution/preamble-return.md",
-        PREAMBLE_EXECUTION,
+        PROLOGUE_RETURN,
+        "execution/prologue-return.md",
+        PROLOGUE_EXECUTION,
         &recorder,
     );
     let store = StoreRef::memory();
@@ -422,24 +422,24 @@ async fn preamble_return_fixture_skips_model_and_epilog() {
         &[],
         &store,
         RunOptions {
-            execution: PREAMBLE_EXECUTION,
+            execution: PROLOGUE_EXECUTION,
             observer: &recorder,
             client: None,
             debug: None,
         },
     )
     .await
-    .expect("the preamble return fixture must execute without a model");
+    .expect("the prologue return fixture must execute without a model");
 
     assert_eq!(result, "early result");
     assert!(
         store.read_lines("unreachable.txt").is_err(),
-        "the epilog after a scalar preamble return must not run"
+        "the epilog after a scalar prologue return must not run"
     );
     assert_eq!(
-        checkpoints(&recorder.records(), PREAMBLE_EXECUTION),
+        checkpoints(&recorder.records(), PROLOGUE_EXECUTION),
         [(
-            PREAMBLE_EXECUTION.to_owned(),
+            PROLOGUE_EXECUTION.to_owned(),
             "Stop Early".to_owned(),
             "Lua: returning early".to_owned(),
         )]
@@ -503,14 +503,14 @@ async fn concurrent_runs_keep_execution_ids_separate() {
     let recorder = Arc::new(Recorder::default());
     let barrier = Arc::new(tokio::sync::Barrier::new(2));
     let first_prompt = Arc::new(parse_execution_fixture(
-        PREAMBLE_RETURN,
-        "execution/preamble-return.md",
+        PROLOGUE_RETURN,
+        "execution/prologue-return.md",
         FIRST,
         recorder.as_ref(),
     ));
     let second_prompt = Arc::new(parse_execution_fixture(
-        PREAMBLE_RETURN,
-        "execution/preamble-return.md",
+        PROLOGUE_RETURN,
+        "execution/prologue-return.md",
         SECOND,
         recorder.as_ref(),
     ));
@@ -591,7 +591,7 @@ async fn concurrent_runs_keep_execution_ids_separate() {
                 .iter()
                 .filter(|(record_execution, _, _)| record_execution == execution)
                 .any(|(_, section, detail)| {
-                    section == "Preamble Return" && detail == "Run succeeded"
+                    section == "Prologue Return" && detail == "Run succeeded"
                 }),
             "{execution} must retain its own terminal run record"
         );
@@ -692,7 +692,7 @@ async fn reply_substitution_nil_errors() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_basic_two_items_preamble_return() {
+async fn fanout_basic_two_items_prologue_return() {
     let recorder = Recorder::default();
     let prompt = parse_execution_fixture(
         FANOUT_BASIC,
@@ -801,7 +801,7 @@ async fn fanout_store_writes_persist_across_arms() {
     .expect("concurrent fanout must finish without rendezvous timeout")
     .expect("the fanout store fixture must execute offline");
 
-    // Concurrent fanout regression: both preamble-only arms write distinct
+    // Concurrent fanout regression: both prologue-only arms write distinct
     // paths, and the parent reply vector stays list-ordered.
     assert_eq!(result, "2:alpha,beta");
     assert_eq!(store.read("arm-1.md").expect("arm 1 must write"), "alpha");

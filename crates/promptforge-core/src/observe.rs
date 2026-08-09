@@ -59,12 +59,12 @@ pub mod detail {
     pub const LUA_SHARED_LOAD_SUCCEEDED: &str = "Lua shared load succeeded";
     /// A section VM failed to load or execute its shared program.
     pub const LUA_SHARED_LOAD_FAILED: &str = "Lua shared load failed";
-    /// A section VM began executing its preamble.
-    pub const LUA_PREAMBLE_STARTED: &str = "Lua preamble started";
-    /// A section VM executed its preamble successfully.
-    pub const LUA_PREAMBLE_SUCCEEDED: &str = "Lua preamble succeeded";
-    /// A section VM failed to execute its preamble.
-    pub const LUA_PREAMBLE_FAILED: &str = "Lua preamble failed";
+    /// A section VM began executing its prologue.
+    pub const LUA_PROLOGUE_STARTED: &str = "Lua prologue started";
+    /// A section VM executed its prologue successfully.
+    pub const LUA_PROLOGUE_SUCCEEDED: &str = "Lua prologue succeeded";
+    /// A section VM failed to execute its prologue.
+    pub const LUA_PROLOGUE_FAILED: &str = "Lua prologue failed";
     /// A section VM began binding a model reply.
     pub const LUA_REPLY_BINDING_STARTED: &str = "Lua reply binding started";
     /// A section VM bound a model reply successfully.

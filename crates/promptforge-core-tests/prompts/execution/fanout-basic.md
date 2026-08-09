@@ -1,6 +1,6 @@
 ---
 name: fanout_basic
-description: Two-item fanout with preamble-return arms
+description: Two-item fanout with prologue-return arms
 promptforge: 1
 ---
 

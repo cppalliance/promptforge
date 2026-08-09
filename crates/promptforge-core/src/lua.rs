@@ -287,7 +287,7 @@ impl LuaProgram {
     ///
     /// let program = LuaProgram::compile(
     ///     "return 40 + 2",
-    ///     "example preamble",
+    ///     "example prologue",
     ///     1,
     ///     "example-run",
     ///     &NullObserver,
@@ -397,7 +397,7 @@ impl LuaProgram {
 /// prompt-source lines.
 ///
 /// Only `[string "{location}"]:N:` occurrences are rewritten, so a parent
-/// preamble that surfaces a fanout child's already-mapped error does not
+/// prologue that surfaces a fanout child's already-mapped error does not
 /// corrupt the child's absolute line. When `source_line` is 0 or the pattern
 /// is absent, the message passes through unchanged except for a leading
 /// `{location}:` tag when an absolute line can still be inferred.
@@ -737,8 +737,8 @@ fn validate_alias(alias: &str) -> Result<()> {
 /// One hardened, isolated Lua VM for a section's complete lifecycle.
 ///
 /// The VM owns one Lua environment from construction until drop. An optional
-/// shared program runs before host values are installed, then preamble and
-/// epilog programs loaded with [`run_preamble`](Self::run_preamble) and
+/// shared program runs before host values are installed, then prologue and
+/// epilog programs loaded with [`run_prologue`](Self::run_prologue) and
 /// [`run_epilog`](Self::run_epilog) see that same environment.
 /// [`bind_reply`](Self::bind_reply) inserts the model reply into it between
 /// those phases. A single instruction counter covers every program run by this
@@ -1012,7 +1012,7 @@ impl SectionVm {
     /// This operation may be called exactly once. The store callbacks own a
     /// clone of the run-scoped store. StoreRef functions are installed with
     /// phase-local borrowed observation context by
-    /// [`run_preamble`](Self::run_preamble) and [`run_epilog`](Self::run_epilog),
+    /// [`run_prologue`](Self::run_prologue) and [`run_epilog`](Self::run_epilog),
     /// so no observer reference is retained while the VM waits for a model reply.
     ///
     /// # Errors
@@ -1094,7 +1094,7 @@ impl SectionVm {
         Ok(())
     }
 
-    /// Executes a compiled preamble in this VM's persistent environment.
+    /// Executes a compiled prologue in this VM's persistent environment.
     ///
     /// StoreRef-operation reports recorded by host callbacks are delivered in
     /// operation order before this method returns, including when execution
@@ -1114,9 +1114,9 @@ impl SectionVm {
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
     ///
-    /// let preamble = LuaProgram::compile(
+    /// let prologue = LuaProgram::compile(
     ///     "var.answer = 42",
-    ///     "preamble",
+    ///     "prologue",
     ///     1,
     ///     "example-run",
     ///     &NullObserver,
@@ -1124,20 +1124,20 @@ impl SectionVm {
     /// )?;
     /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// assert_eq!(vm.run_preamble(&preamble, &NullObserver, "Example")?, None);
+    /// assert_eq!(vm.run_prologue(&prologue, &NullObserver, "Example")?, None);
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
-    pub fn run_preamble(
+    pub fn run_prologue(
         &self,
         program: &LuaProgram,
         observer: &dyn Observer,
         section: &str,
     ) -> Result<Option<String>> {
-        observer.observe(&self.execution, section, detail::LUA_PREAMBLE_STARTED);
+        observer.observe(&self.execution, section, detail::LUA_PROLOGUE_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(&self.execution, section, detail::LUA_PREAMBLE_FAILED);
+            observer.observe(&self.execution, section, detail::LUA_PROLOGUE_FAILED);
             return Err(error);
         }
         let result = self.run_loaded_with_host(program, observer, section);
@@ -1145,15 +1145,15 @@ impl SectionVm {
             &self.execution,
             section,
             if result.is_ok() {
-                detail::LUA_PREAMBLE_SUCCEEDED
+                detail::LUA_PROLOGUE_SUCCEEDED
             } else {
-                detail::LUA_PREAMBLE_FAILED
+                detail::LUA_PROLOGUE_FAILED
             },
         );
         result
     }
 
-    /// Executes a compiled preamble with a scoped `fanout` Lua function.
+    /// Executes a compiled prologue with a scoped `fanout` Lua function.
     ///
     /// See [`run_epilog_with_fanout`](Self::run_epilog_with_fanout) for the
     /// callback contract.
@@ -1161,7 +1161,7 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected or
     /// execution fails.
-    pub fn run_preamble_with_fanout<F>(
+    pub fn run_prologue_with_fanout<F>(
         &self,
         program: &LuaProgram,
         observer: &dyn Observer,
@@ -1171,10 +1171,10 @@ impl SectionVm {
     where
         F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
     {
-        observer.observe(&self.execution, section, detail::LUA_PREAMBLE_STARTED);
+        observer.observe(&self.execution, section, detail::LUA_PROLOGUE_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(&self.execution, section, detail::LUA_PREAMBLE_FAILED);
+            observer.observe(&self.execution, section, detail::LUA_PROLOGUE_FAILED);
             return Err(error);
         }
         let result = self.run_loaded_with_fanout(program, observer, section, fanout_callback);
@@ -1182,9 +1182,9 @@ impl SectionVm {
             &self.execution,
             section,
             if result.is_ok() {
-                detail::LUA_PREAMBLE_SUCCEEDED
+                detail::LUA_PROLOGUE_SUCCEEDED
             } else {
-                detail::LUA_PREAMBLE_FAILED
+                detail::LUA_PROLOGUE_FAILED
             },
         );
         result
@@ -1394,7 +1394,7 @@ impl SectionVm {
     /// Closes and returns this section's effective tool scope.
     ///
     /// Prompt-wide `tools.always` aliases come first, followed by first-seen
-    /// `tools.add` aliases from the H2 preamble. Closing is one-way: retained
+    /// `tools.add` aliases from the H2 prologue. Closing is one-way: retained
     /// function references cannot add tools during an epilog.
     ///
     /// # Errors
@@ -1426,15 +1426,15 @@ impl SectionVm {
     ///         &shared, &bindings, "example-run", &NullObserver, "Example"
     ///     )?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// let preamble = LuaProgram::compile(
+    /// let prologue = LuaProgram::compile(
     ///     "tools.add('search')",
-    ///     "preamble",
+    ///     "prologue",
     ///     1,
     ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
     /// )?;
-    /// vm.run_preamble(&preamble, &NullObserver, "Example")?;
+    /// vm.run_prologue(&prologue, &NullObserver, "Example")?;
     /// let scope = vm.close_tool_scope(&NullObserver, "Example")?;
     /// assert_eq!(scope.bindings()[0].alias(), "search");
     /// vm.teardown(&NullObserver, "Example");
@@ -2604,12 +2604,12 @@ mod tests {
                 .expect("replay VM must not expose direct output");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
-        vm.run_preamble(
+        vm.run_prologue(
             &program("assert(print == nil); assert(warn == nil)"),
             &NullObserver,
             "Section",
         )
-        .expect("preamble must not expose direct output");
+        .expect("prologue must not expose direct output");
         vm.close_tool_scope(&NullObserver, "Section")
             .expect("scope must close");
         vm.run_epilog(
@@ -2648,8 +2648,8 @@ mod tests {
                 .expect("replay log must succeed");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
-        vm.run_preamble(&program("log('preamble checkpoint')"), &recorder, "Gather")
-            .expect("preamble log must succeed");
+        vm.run_prologue(&program("log('prologue checkpoint')"), &recorder, "Gather")
+            .expect("prologue log must succeed");
         vm.close_tool_scope(&recorder, "Gather")
             .expect("scope must close");
         vm.run_epilog(&program("log('epilog checkpoint')"), &recorder, "Gather")
@@ -2722,17 +2722,17 @@ mod tests {
                 (
                     EXECUTION.to_owned(),
                     "Gather".to_owned(),
-                    detail::LUA_PREAMBLE_STARTED.to_owned(),
+                    detail::LUA_PROLOGUE_STARTED.to_owned(),
                 ),
                 (
                     EXECUTION.to_owned(),
                     "Gather".to_owned(),
-                    "Lua: preamble checkpoint".to_owned(),
+                    "Lua: prologue checkpoint".to_owned(),
                 ),
                 (
                     EXECUTION.to_owned(),
                     "Gather".to_owned(),
-                    detail::LUA_PREAMBLE_SUCCEEDED.to_owned(),
+                    detail::LUA_PROLOGUE_SUCCEEDED.to_owned(),
                 ),
                 (
                     EXECUTION.to_owned(),
@@ -2979,7 +2979,7 @@ mod tests {
             SectionVm::new(None, EXECUTION, &NullObserver, "Section").expect("VM must construct");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
-        vm.run_preamble(
+        vm.run_prologue(
             &program("saved_log = log; log('first phase')"),
             &first,
             "Section",
@@ -3014,7 +3014,7 @@ mod tests {
                 (
                     EXECUTION.to_owned(),
                     "Section".to_owned(),
-                    detail::LUA_PREAMBLE_STARTED.to_owned(),
+                    detail::LUA_PROLOGUE_STARTED.to_owned(),
                 ),
                 (
                     EXECUTION.to_owned(),
@@ -3024,7 +3024,7 @@ mod tests {
                 (
                     EXECUTION.to_owned(),
                     "Section".to_owned(),
-                    detail::LUA_PREAMBLE_SUCCEEDED.to_owned(),
+                    detail::LUA_PROLOGUE_SUCCEEDED.to_owned(),
                 ),
             ]
         );
@@ -3216,13 +3216,13 @@ mod tests {
              tools.need('fetch', 'fetch a page'); \
              tools.always('search')",
         );
-        let preamble = program("tools.add('fetch', 'search', 'fetch')");
+        let prologue = program("tools.add('fetch', 'search', 'fetch')");
         let mut vm =
             SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
                 .expect("declarations must replay");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
-        vm.run_preamble(&preamble, &NullObserver, "Section")
+        vm.run_prologue(&prologue, &NullObserver, "Section")
             .expect("H2 additions must record");
         let scope = vm
             .close_tool_scope(&NullObserver, "Section")
@@ -3252,7 +3252,7 @@ mod tests {
             "tools.need('search', 'search the web'); \
              tools.need('fetch', 'fetch a page')",
         );
-        let preamble = program(
+        let prologue = program(
             "tools.add(); \
              local ok = pcall(tools.add, 'search', 'missing'); \
              if ok then error('invalid add unexpectedly succeeded') end; \
@@ -3263,7 +3263,7 @@ mod tests {
                 .expect("declarations must replay");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
-        vm.run_preamble(&preamble, &NullObserver, "Section")
+        vm.run_prologue(&prologue, &NullObserver, "Section")
             .expect("caught failed add must not poison recording");
         let scope = vm
             .close_tool_scope(&NullObserver, "Section")
@@ -3322,7 +3322,7 @@ mod tests {
             .expect("host must inject");
 
         let error = vm
-            .run_preamble(
+            .run_prologue(
                 &program("saved_need('other', 'fetch a page')"),
                 &NullObserver,
                 "Section",
@@ -3331,7 +3331,7 @@ mod tests {
         assert!(error.to_string().contains("H1 binding or replay"));
 
         let error = vm
-            .run_preamble(
+            .run_prologue(
                 &program("tools.need('other', 'fetch a page')"),
                 &NullObserver,
                 "Section",
@@ -3349,7 +3349,7 @@ mod tests {
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
         let error = vm
-            .run_preamble(&program("tools.add('missing')"), &NullObserver, "Section")
+            .run_prologue(&program("tools.add('missing')"), &NullObserver, "Section")
             .expect_err("only declared aliases may enter H2 scope");
         assert!(error.to_string().contains("not declared"));
     }
@@ -3438,7 +3438,7 @@ mod tests {
             "shared_saw_args = args\n\
              function decorate(value) return '<' .. value .. '>' end",
         );
-        let preamble = program(
+        let prologue = program(
             "var.from_shared = decorate(args)\n\
              store.write('phase.txt', var.from_shared)",
         );
@@ -3451,8 +3451,8 @@ mod tests {
             .expect("host values must inject");
 
         assert_eq!(
-            vm.run_preamble(&preamble, &NullObserver, "Test")
-                .expect("preamble must run"),
+            vm.run_prologue(&prologue, &NullObserver, "Test")
+                .expect("prologue must run"),
             None
         );
         assert_eq!(
@@ -3488,7 +3488,7 @@ mod tests {
         let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
 
         let error = vm
-            .run_preamble(&no_op, &NullObserver, "Test")
+            .run_prologue(&no_op, &NullObserver, "Test")
             .expect_err("programs cannot run before host injection");
         assert!(error.to_string().contains("not been injected"));
 
@@ -3515,7 +3515,7 @@ mod tests {
             .expect("raw host injection must bypass the shared metatable");
 
         assert_eq!(
-            vm.run_preamble(&inspect, &NullObserver, "Test")
+            vm.run_prologue(&inspect, &NullObserver, "Test")
                 .expect("inspection must run")
                 .as_deref(),
             Some("nil,nil,private input")
@@ -3532,8 +3532,8 @@ mod tests {
         vm.inject_host("private input", &json!({}), &StoreRef::memory(), None)
             .expect("host values must inject");
 
-        vm.run_preamble(&write, &recorder, "Gather")
-            .expect("preamble write must run");
+        vm.run_prologue(&write, &recorder, "Gather")
+            .expect("prologue write must run");
         vm.close_tool_scope(&recorder, "Gather")
             .expect("scope must close");
         vm.bind_reply("private reply", &recorder, "Gather")
@@ -3545,14 +3545,14 @@ mod tests {
         assert_eq!(
             recorder.observations(),
             vec![
-                ("Gather".to_owned(), detail::LUA_PREAMBLE_STARTED.to_owned(),),
+                ("Gather".to_owned(), detail::LUA_PROLOGUE_STARTED.to_owned(),),
                 (
                     "Gather".to_owned(),
                     detail::STORE_WRITE_SUCCEEDED.to_owned(),
                 ),
                 (
                     "Gather".to_owned(),
-                    detail::LUA_PREAMBLE_SUCCEEDED.to_owned(),
+                    detail::LUA_PROLOGUE_SUCCEEDED.to_owned(),
                 ),
                 ("Gather".to_owned(), detail::TOOL_SCOPE_CLOSING.to_owned(),),
                 ("Gather".to_owned(), detail::TOOL_SCOPE_CLOSED.to_owned(),),
@@ -3600,7 +3600,7 @@ mod tests {
             vm.inject_host("", &json!({}), &store, None)
                 .expect("host values must inject");
             assert_eq!(
-                vm.run_preamble(&program(source), &NullObserver, "Test")
+                vm.run_prologue(&program(source), &NullObserver, "Test")
                     .expect("scalar return must work")
                     .as_deref(),
                 expected
@@ -3611,7 +3611,7 @@ mod tests {
         vm.inject_host("", &json!({}), &store, None)
             .expect("host values must inject");
         let error = vm
-            .run_preamble(&program("return {}"), &NullObserver, "Test")
+            .run_prologue(&program("return {}"), &NullObserver, "Test")
             .expect_err("table returns must be refused");
         assert!(error.to_string().contains("cannot return a table"));
     }
@@ -3634,7 +3634,7 @@ mod tests {
 
         assert_eq!(
             first
-                .run_preamble(&increment, &NullObserver, "First")
+                .run_prologue(&increment, &NullObserver, "First")
                 .expect("first increment must run")
                 .as_deref(),
             Some("1")
@@ -3651,7 +3651,7 @@ mod tests {
         );
         assert_eq!(
             second
-                .run_preamble(&increment, &NullObserver, "Second")
+                .run_prologue(&increment, &NullObserver, "Second")
                 .expect("second VM increment must run")
                 .as_deref(),
             Some("1")
@@ -3667,23 +3667,23 @@ mod tests {
             .expect("host values must inject");
 
         let error = vm
-            .run_preamble(&work, &NullObserver, "Test")
-            .expect_err("the preamble must exhaust the budget left by shared execution");
+            .run_prologue(&work, &NullObserver, "Test")
+            .expect_err("the prologue must exhaust the budget left by shared execution");
         assert!(error.to_string().contains("instruction budget exceeded"));
     }
 
     #[test]
     fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
         let shared = program("private_global = 'shared secret'");
-        let preamble = program("var.value = args");
+        let prologue = program("var.value = args");
         let epilog = program("return reply");
         let recorder = Recorder::default();
         let mut vm = SectionVm::new(Some(&shared), EXECUTION, &recorder, "Gather")
             .expect("shared program must run");
         vm.inject_host("private input", &json!({}), &StoreRef::memory(), None)
             .expect("host values must inject");
-        vm.run_preamble(&preamble, &recorder, "Gather")
-            .expect("preamble must run");
+        vm.run_prologue(&prologue, &recorder, "Gather")
+            .expect("prologue must run");
         vm.close_tool_scope(&recorder, "Gather")
             .expect("scope must close");
         vm.bind_reply("private reply", &recorder, "Gather")
@@ -3698,8 +3698,8 @@ mod tests {
             [
                 detail::LUA_SHARED_LOAD_STARTED,
                 detail::LUA_SHARED_LOAD_SUCCEEDED,
-                detail::LUA_PREAMBLE_STARTED,
-                detail::LUA_PREAMBLE_SUCCEEDED,
+                detail::LUA_PROLOGUE_STARTED,
+                detail::LUA_PROLOGUE_SUCCEEDED,
                 detail::TOOL_SCOPE_CLOSING,
                 detail::TOOL_SCOPE_CLOSED,
                 detail::MODEL_SCOPE_CLOSING,
@@ -3768,7 +3768,7 @@ mod tests {
         );
 
         for (section, expected, operation) in [
-            ("Preamble", detail::LUA_PREAMBLE_FAILED, 0_u8),
+            ("Prologue", detail::LUA_PROLOGUE_FAILED, 0_u8),
             ("Reply", detail::LUA_REPLY_BINDING_FAILED, 1_u8),
             ("Epilog", detail::LUA_EPILOG_FAILED, 2_u8),
         ] {
@@ -3777,8 +3777,8 @@ mod tests {
                 SectionVm::new(None, EXECUTION, &NullObserver, section).expect("VM must build");
             let error = match operation {
                 0 => vm
-                    .run_preamble(&program("return nil"), &recorder, section)
-                    .expect_err("preamble before injection must fail"),
+                    .run_prologue(&program("return nil"), &recorder, section)
+                    .expect_err("prologue before injection must fail"),
                 1 => vm
                     .bind_reply("private reply", &recorder, section)
                     .expect_err("reply before injection must fail"),
@@ -3801,7 +3801,7 @@ mod tests {
         let source = "return greeting .. ' world'";
         let program = LuaProgram::compile(
             source,
-            "section Gather preamble",
+            "section Gather prologue",
             1,
             EXECUTION,
             &NullObserver,
@@ -3868,19 +3868,19 @@ mod tests {
     fn map_chunk_line_to_absolute_only_rewrites_matching_chunk() {
         let msg = r#"[string "section `Web Search` epilog"]:51: assertion failed!
 stack traceback:
-        [string "section `Main` preamble"]:3: in main chunk"#;
-        let result = map_chunk_line_to_absolute(msg, 22, "section `Main` preamble");
+        [string "section `Main` prologue"]:3: in main chunk"#;
+        let result = map_chunk_line_to_absolute(msg, 22, "section `Main` prologue");
         assert!(
             result.contains("[string \"section `Web Search` epilog\"]:51:"),
             "child absolute line must stay intact: {result}"
         );
         assert!(
-            result.contains("[string \"section `Main` preamble\"]:24:")
-                || result.starts_with("section `Main` preamble:24:"),
+            result.contains("[string \"section `Main` prologue\"]:24:")
+                || result.starts_with("section `Main` prologue:24:"),
             "parent chunk line must map with parent source_line: {result}"
         );
         assert!(
-            !result.contains("[string \"section `Main` preamble\"]:3:"),
+            !result.contains("[string \"section `Main` prologue\"]:3:"),
             "parent chunk-relative line must be rewritten: {result}"
         );
     }
@@ -3895,7 +3895,7 @@ stack traceback:
     #[test]
     fn map_chunk_line_to_absolute_no_match_passthrough() {
         let msg = "some other error without chunk info";
-        let result = map_chunk_line_to_absolute(msg, 10, "section `Main` preamble");
+        let result = map_chunk_line_to_absolute(msg, 10, "section `Main` prologue");
         assert_eq!(result, msg);
     }
 
@@ -3935,7 +3935,7 @@ stack traceback:
     #[test]
     fn malformed_lua_reports_location_and_retains_source_diagnostic() {
         let source = "local secret =\nreturn secret";
-        let location = "section Gather preamble";
+        let location = "section Gather prologue";
         let error = LuaProgram::compile(source, location, 1, EXECUTION, &NullObserver, "Gather")
             .expect_err("malformed Lua must not compile");
 
@@ -4113,12 +4113,12 @@ stack traceback:
     }
 
     #[test]
-    fn add_without_declarations_fails_in_a_preamble_without_a_shared_library() {
+    fn add_without_declarations_fails_in_a_prologue_without_a_shared_library() {
         let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host values must inject");
         let error = vm
-            .run_preamble(&program("tools.add('web_search')"), &NullObserver, "Test")
+            .run_prologue(&program("tools.add('web_search')"), &NullObserver, "Test")
             .expect_err("an undeclared alias must fail loudly");
         assert!(
             error.to_string().contains("not declared by tools.need"),
@@ -4143,7 +4143,7 @@ stack traceback:
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host values must inject");
         let error = vm
-            .run_preamble(&program("tools.add('web_search')"), &NullObserver, "Test")
+            .run_prologue(&program("tools.add('web_search')"), &NullObserver, "Test")
             .expect_err("an undeclared alias must fail loudly");
         assert!(
             error.to_string().contains("not declared by tools.need"),
@@ -4161,7 +4161,7 @@ stack traceback:
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host values must inject");
         let error = vm
-            .run_preamble(
+            .run_prologue(
                 &program("tools.add('search', 'Search the web for pages matching a query.')"),
                 &NullObserver,
                 "Test",
