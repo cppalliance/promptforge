@@ -3244,3 +3244,108 @@ fn tool_bag_caches_on_unchanged_generation() {
 
     vm.teardown(&NullObserver, "Bag");
 }
+
+#[test]
+fn tool_description_override_appears_in_model_schema() {
+    let shared = LuaProgram::compile(
+        "echo = tools.need('echo', 'echo capability for bind matching')",
+        "shared",
+        1,
+        EXECUTION,
+        &NullObserver,
+        "Override",
+    )
+    .expect("shared Lua must compile");
+    let bindings = bind_tool_declarations(
+        &shared,
+        &|_: &str| Ok(ToolId::new("tests", "echo")),
+        EXECUTION,
+        &NullObserver,
+        "Override",
+    )
+    .expect("declarations must bind");
+    let echo = EchoTool;
+    let registry = ToolRegistry::new([&echo as &dyn Tool]);
+
+    // tools.add(Tool) without mutating .description keeps the registry text.
+    let mut default_vm =
+        SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Override")
+            .expect("declarations must replay");
+    default_vm
+        .inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host must inject");
+    let add_default = LuaProgram::compile(
+        "tools.add(echo)",
+        "prologue",
+        1,
+        EXECUTION,
+        &NullObserver,
+        "Override",
+    )
+    .expect("prologue must compile");
+    default_vm
+        .run_prologue(&add_default, &NullObserver, "Override")
+        .expect("tools.add(echo) without override must succeed");
+    let (default_bindings, default_runtime) = default_vm.tool_bag_handles();
+    let mut default_bag = ToolBag::new(default_bindings, Arc::clone(&default_runtime));
+    let default_prepared = default_bag
+        .prepare(None, &registry, EXECUTION, &NullObserver, "Override")
+        .expect("default prepare must build schemas");
+    assert_eq!(default_prepared.schemas.len(), 1);
+    assert_eq!(
+        default_prepared.schemas[0].description,
+        echo.description(),
+        "unmutated Tool object must still advertise the registry description"
+    );
+    assert_eq!(
+        default_prepared.scope.bindings()[0].description(),
+        "echo capability for bind matching",
+        "bind capability text must stay on the binding"
+    );
+    assert_eq!(
+        default_prepared.scope.bindings()[0].model_description(),
+        None
+    );
+    default_vm.teardown(&NullObserver, "Override");
+
+    // Mutating .description before tools.add overrides the model-facing schema.
+    let mut vm =
+        SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Override")
+            .expect("declarations must replay");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host must inject");
+    let add_override = LuaProgram::compile(
+        "echo.description = 'Author override for the model'\n\
+         assert(echo.description == 'Author override for the model')\n\
+         tools.add(echo)",
+        "prologue",
+        1,
+        EXECUTION,
+        &NullObserver,
+        "Override",
+    )
+    .expect("prologue must compile");
+    vm.run_prologue(&add_override, &NullObserver, "Override")
+        .expect("description override before tools.add must succeed");
+    let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
+    let mut bag = ToolBag::new(tool_bindings, Arc::clone(&tool_runtime));
+    let prepared = bag
+        .prepare(None, &registry, EXECUTION, &NullObserver, "Override")
+        .expect("override prepare must build schemas");
+    assert_eq!(prepared.schemas.len(), 1);
+    assert_eq!(
+        prepared.schemas[0].description,
+        "Author override for the model"
+    );
+    assert_eq!(
+        prepared.scope.bindings()[0].description(),
+        "echo capability for bind matching",
+        "override must not rewrite the bind capability description"
+    );
+    assert_eq!(
+        prepared.scope.bindings()[0].model_description(),
+        Some("Author override for the model")
+    );
+
+    vm.teardown(&NullObserver, "Override");
+}
