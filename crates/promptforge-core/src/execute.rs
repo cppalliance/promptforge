@@ -1336,7 +1336,7 @@ fn make_fanout_callback(
     last_reply: Option<&str>,
     when: &str,
     parent_id: usize,
-) -> std::result::Result<Vec<String>, String> {
+) -> std::result::Result<Vec<crate::lua::LuaFanoutResult>, String> {
     let worker = fanout::resolve_sibling(worker_heading, children).map_err(|e| e.to_string())?;
     let list = fanout::resolve_sibling(list_heading, children).map_err(|e| e.to_string())?;
     if list.items.is_empty() {

@@ -29,8 +29,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mlua::{
-    Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, MultiValue, Scope, StdLib, UserData,
-    UserDataFields, Value, Variadic, VmState,
+    Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, MetaMethod, MultiValue, Scope, StdLib,
+    UserData, UserDataFields, UserDataMethods, Value, Variadic, VmState,
 };
 use serde_json::Value as Json;
 use serde_json::json;
@@ -256,6 +256,79 @@ impl UserData for LuaSectionHandle {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         fields.add_field_method_get("name", |_, this| Ok(this.name.clone()));
         fields.add_field_method_get("has_prose", |_, this| Ok(this.has_prose));
+    }
+}
+
+/// One fanout arm result exposed to Lua as a structured object.
+///
+/// Authors read `.text`, `.ok`, `.item`, and `.exhausted`. `__tostring` returns
+/// `.text` so `tostring` and a tostring-coercing `table.concat` keep working.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LuaFanoutResult {
+    text: String,
+    ok: bool,
+    item: String,
+    exhausted: bool,
+}
+
+impl LuaFanoutResult {
+    /// Builds a successful arm result.
+    #[must_use]
+    pub fn success(item: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            ok: true,
+            item: item.into(),
+            exhausted: false,
+        }
+    }
+
+    /// Builds a soft-degraded arm result after tool-loop exhaustion.
+    #[must_use]
+    pub fn exhausted_stub(item: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            ok: false,
+            item: item.into(),
+            exhausted: true,
+        }
+    }
+
+    /// Returns the reply text (or soft-degrade stub).
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Returns whether the arm completed successfully.
+    #[must_use]
+    pub fn ok(&self) -> bool {
+        self.ok
+    }
+
+    /// Returns the input item for this arm.
+    #[must_use]
+    pub fn item(&self) -> &str {
+        &self.item
+    }
+
+    /// Returns whether the arm soft-degraded after tool-loop exhaustion.
+    #[must_use]
+    pub fn exhausted(&self) -> bool {
+        self.exhausted
+    }
+}
+
+impl UserData for LuaFanoutResult {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("text", |_, this| Ok(this.text.clone()));
+        fields.add_field_method_get("ok", |_, this| Ok(this.ok));
+        fields.add_field_method_get("item", |_, this| Ok(this.item.clone()));
+        fields.add_field_method_get("exhausted", |_, this| Ok(this.exhausted));
+    }
+
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method(MetaMethod::ToString, |_, this, ()| Ok(this.text.clone()));
     }
 }
 
@@ -1389,7 +1462,7 @@ impl SectionVm {
         fanout_callback: F,
     ) -> Result<Option<String>>
     where
-        F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
+        F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, String>,
     {
         match self.run_prologue_with_control(
             program,
@@ -1422,7 +1495,7 @@ impl SectionVm {
     ) -> Result<LuaBlockResult>
     where
         E: Fn(Value, Option<String>) -> std::result::Result<String, String>,
-        F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
+        F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, String>,
     {
         observer.observe(&self.execution, section, detail::LUA_PROLOGUE_STARTED);
         if !self.host_injected {
@@ -1615,7 +1688,7 @@ impl SectionVm {
     /// `fanout(worker, list)` Lua function installed.
     ///
     /// The fanout callback receives two heading strings and returns either an
-    /// ordered vec of arm reply strings or an error message.
+    /// ordered vec of structured arm results or an error message.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected, if the
@@ -1628,7 +1701,7 @@ impl SectionVm {
         fanout_callback: F,
     ) -> Result<Option<String>>
     where
-        F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
+        F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, String>,
     {
         match self.run_epilog_with_control(
             program,
@@ -1661,7 +1734,7 @@ impl SectionVm {
     ) -> Result<LuaBlockResult>
     where
         E: Fn(Value, Option<String>) -> std::result::Result<String, String>,
-        F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
+        F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, String>,
     {
         observer.observe(&self.execution, section, detail::LUA_EPILOG_STARTED);
         if !self.host_injected {
@@ -1994,7 +2067,7 @@ impl SectionVm {
     ) -> Result<LuaBlockResult>
     where
         E: Fn(Value, Option<String>) -> std::result::Result<String, String>,
-        F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
+        F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, String>,
     {
         let store = self.store.as_ref().ok_or_else(|| {
             Error::Lua("section VM host values have not been injected".to_owned())
@@ -2933,6 +3006,11 @@ fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
 /// Remove code-loading, direct output, and reflection globals the base library
 /// provides. The `io`, `os`, `package`, `coroutine`, and `debug` libraries are
 /// never loaded.
+///
+/// Also wraps `table.concat` so userdata with `__tostring` (fanout result
+/// objects) coerce like `tostring`, keeping existing `table.concat(results)`
+/// callers working after fanout returns structured objects. Tables and
+/// booleans still error as stock Lua would.
 fn harden(lua: &Lua) -> Result<()> {
     let globals = lua.globals();
     for name in [
@@ -2955,6 +3033,34 @@ fn harden(lua: &Lua) -> Result<()> {
             .set(name, Value::Nil)
             .map_err(|e| Error::Lua(e.to_string()))?;
     }
+    lua.load(
+        r#"
+local orig = table.concat
+function table.concat(list, sep, i, j)
+  i = i or 1
+  j = j or #list
+  local parts = {}
+  for k = i, j do
+    local v = list[k]
+    local ty = type(v)
+    if ty == "string" or ty == "number" then
+      parts[#parts + 1] = v
+    elseif ty == "userdata" then
+      -- Fanout result objects (and any other userdata with __tostring).
+      -- mlua metatables are not readable via getmetatable, so type-gate here.
+      parts[#parts + 1] = tostring(v)
+    elseif v == nil then
+      error("invalid value (nil) at index " .. k .. " in table for 'concat'")
+    else
+      error("invalid value (" .. ty .. ") at index " .. k .. " in table for 'concat'")
+    end
+  end
+  return orig(parts, sep)
+end
+"#,
+    )
+    .exec()
+    .map_err(|e| Error::Lua(e.to_string()))?;
     Ok(())
 }
 
