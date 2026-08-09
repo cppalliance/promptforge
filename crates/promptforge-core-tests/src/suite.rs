@@ -257,9 +257,9 @@ fn verify_minimal(prompt: &Prompt) {
     assert_eq!(prompt.sections.len(), 1);
     assert_eq!(prompt.entry().name, "Run");
     assert_eq!(prompt.entry().level, 2);
-    assert_eq!(prompt.entry().prose, "Done.");
-    assert!(prompt.entry().prologue.is_none());
-    assert!(prompt.entry().epilog.is_none());
+    assert_eq!(prompt.entry().prose(), "Done.");
+    assert!(prompt.entry().prologue().is_none());
+    assert!(prompt.entry().epilog().is_none());
 }
 
 fn verify_shared_library(prompt: &Prompt) {
@@ -283,20 +283,20 @@ fn verify_shared_library(prompt: &Prompt) {
     let prepare = &prompt.sections[0];
     assert_eq!(prepare.name, "Prepare");
     assert_eq!(prepare.level, 2);
-    assert_eq!(prepare.prose, "Normalize the supplied subject.");
-    assert!(prepare.prologue.is_none());
-    assert!(prepare.epilog.is_none());
+    assert_eq!(prepare.prose(), "Normalize the supplied subject.");
+    assert!(prepare.prologue().is_none());
+    assert!(prepare.epilog().is_none());
     assert_eq!(prepare.children.len(), 1);
     assert_eq!(prepare.children[0].name, "Author note");
     assert_eq!(prepare.children[0].level, 3);
     assert_eq!(
-        prepare.children[0].prose,
+        prepare.children[0].prose(),
         "This nested prose remains attached to Prepare."
     );
 
     let finish = &prompt.sections[1];
     assert_eq!(finish.name, "Finish");
-    assert_eq!(finish.prose, "Return the normalized subject.");
+    assert_eq!(finish.prose(), "Return the normalized subject.");
     assert!(finish.children.is_empty());
 }
 
@@ -320,21 +320,21 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
     let transform = prompt.entry();
     assert_eq!(transform.name, "Transform");
     assert_eq!(
-        transform.prologue.as_ref().map(LuaProgram::source),
+        transform.prologue().map(LuaProgram::source),
         Some("var.subject = args")
     );
-    assert_eq!(transform.prose, "Write about {{ var.subject }}.");
+    assert_eq!(transform.prose(), "Write about {{ var.subject }}.");
     assert_eq!(
-        transform.epilog.as_ref().map(LuaProgram::source),
+        transform.epilog().map(LuaProgram::source),
         Some("return reply")
     );
     assert!(transform.children.is_empty());
 
     let fallback = &prompt.sections[1];
     assert_eq!(fallback.name, "Fallback");
-    assert_eq!(fallback.prose, "This section has prose only.");
-    assert!(fallback.prologue.is_none());
-    assert!(fallback.epilog.is_none());
+    assert_eq!(fallback.prose(), "This section has prose only.");
+    assert!(fallback.prologue().is_none());
+    assert!(fallback.epilog().is_none());
 }
 
 #[tokio::test]

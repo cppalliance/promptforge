@@ -1861,8 +1861,8 @@ async fn epilog_runs_after_reply_and_can_return() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\nSay something.\n\n```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'epilog result'\n```\n";
     let prompt = bound_for_model(md);
-    assert!(prompt.prompt().entry().prologue.is_none());
-    assert!(prompt.prompt().entry().epilog.is_some());
+    assert!(prompt.prompt().entry().prologue().is_none());
+    assert!(prompt.prompt().entry().epilog().is_some());
 
     let recorder = Recorder::default();
     let store = StoreRef::memory();
@@ -3348,4 +3348,81 @@ fn tool_description_override_appears_in_model_schema() {
     );
 
     vm.teardown(&NullObserver, "Override");
+}
+
+/// Alternating lua/prose blocks run in order; non-final prose is single-shot,
+/// final prose loops, and trailing lua sees the last reply.
+#[tokio::test]
+async fn section_with_alternating_blocks_executes_in_order() {
+    async fn completions(
+        State(calls): State<Arc<AtomicU32>>,
+        Json(_body): Json<Value>,
+    ) -> Json<Value> {
+        let n = calls.fetch_add(1, Ordering::Relaxed) + 1;
+        Json(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": format!("reply-{n}")
+                }
+            }]
+        }))
+    }
+
+    let calls = Arc::new(AtomicU32::new(0));
+    let router = Router::new()
+        .route("/v1/chat/completions", post(completions))
+        .with_state(Arc::clone(&calls));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n\
+```lua\nstore.append('order.txt', 'lua1\\n')\n```\n\n\
+First ask.\n\n\
+```lua\nstore.append('order.txt', 'lua2\\n')\n```\n\n\
+Final ask.\n\n\
+```lua\nstore.append('order.txt', 'lua3\\n')\nreturn reply\n```\n";
+    let store = StoreRef::memory();
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &store,
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .expect("alternating blocks must execute");
+
+    assert_eq!(out, "reply-2");
+    assert_eq!(calls.load(Ordering::Relaxed), 2);
+    assert_eq!(
+        store.read_lines("order.txt").expect("order log"),
+        "1| lua1\n2| lua2\n3| lua3"
+    );
+
+    let section = parse(md).entry().clone();
+    assert_eq!(section.blocks.len(), 5);
+    assert!(matches!(
+        &section.blocks[1],
+        crate::parser::Block::Prose {
+            loop_capable: false,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &section.blocks[3],
+        crate::parser::Block::Prose {
+            loop_capable: true,
+            ..
+        }
+    ));
 }
