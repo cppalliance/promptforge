@@ -10,6 +10,7 @@ use std::process::ExitCode;
 
 use promptforge_core::CancelHandle;
 use promptforge_core::cancel;
+use promptforge_core::client::GatewayClient;
 use promptforge_core::execute::{ResolutionContext, RunOptions};
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::observe::{NullObserver, Observer};
@@ -58,6 +59,35 @@ async fn main() -> ExitCode {
 /// Parse the file, execute its sections with `input` as `args`, and print the
 /// result.
 async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
+    let gateway_key = std::env::var("PROMPTFORGE_GATEWAY_KEY").ok();
+    let gateway_url = std::env::var("PROMPTFORGE_GATEWAY_URL").ok();
+    run_with_gateway(
+        path,
+        input,
+        observer,
+        Gateway::Environment {
+            url: gateway_url.as_deref(),
+            key: gateway_key.as_deref(),
+        },
+    )
+    .await
+}
+
+enum Gateway<'a> {
+    Environment {
+        url: Option<&'a str>,
+        key: Option<&'a str>,
+    },
+    #[cfg(test)]
+    Disabled,
+}
+
+async fn run_with_gateway(
+    path: &str,
+    input: &str,
+    observer: &dyn Observer,
+    gateway: Gateway<'_>,
+) -> ExitCode {
     let execution = format!("cli-{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..));
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
@@ -82,55 +112,102 @@ async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
         }
     };
 
-    let key = std::env::var("PROMPTFORGE_GATEWAY_KEY").ok();
-    let base_url = match std::env::var("PROMPTFORGE_GATEWAY_URL") {
-        Ok(url) => url,
-        Err(_) if key.is_some() => {
-            eprintln!("error: missing environment variable PROMPTFORGE_GATEWAY_URL");
-            return ExitCode::FAILURE;
+    match gateway {
+        Gateway::Environment { url, key } => {
+            let base_url = match url {
+                Some(url) => url,
+                None if key.is_some() => {
+                    eprintln!("error: missing environment variable PROMPTFORGE_GATEWAY_URL");
+                    return ExitCode::FAILURE;
+                }
+                None => "",
+            };
+            let available = tools::available_tools(base_url, key);
+            let picker =
+                match ToolPicker::build(available.catalog().clone(), PickerConfig::default()) {
+                    Ok(picker) => picker,
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                };
+            let models = match key {
+                Some(key) => match fetch_model_catalog(base_url, key).await {
+                    Ok(catalog) => catalog,
+                    Err(error) => {
+                        eprintln!("error: fetch model catalog: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                },
+                None => ModelCatalog::empty(),
+            };
+            execute_prompt(
+                &prompt,
+                input,
+                observer,
+                &execution,
+                &picker,
+                &models,
+                available.tools(),
+                None,
+            )
+            .await
         }
-        Err(_) => String::new(),
-    };
-    let available = tools::available_tools(&base_url, key.as_deref());
-    let picker = match ToolPicker::build(available.catalog().clone(), PickerConfig::default()) {
-        Ok(picker) => picker,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
+        #[cfg(test)]
+        Gateway::Disabled => {
+            let picker = match ToolPicker::build(
+                promptforge_tool_picker::Catalog::default(),
+                PickerConfig::default(),
+            ) {
+                Ok(picker) => picker,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            execute_prompt(
+                &prompt,
+                input,
+                observer,
+                &execution,
+                &picker,
+                &ModelCatalog::empty(),
+                &[],
+                Some(GatewayClient::disabled()),
+            )
+            .await
         }
-    };
-    let models = match &key {
-        Some(key) => match fetch_model_catalog(&base_url, key).await {
-            Ok(catalog) => catalog,
-            Err(error) => {
-                eprintln!("error: fetch model catalog: {error}");
-                return ExitCode::FAILURE;
-            }
-        },
-        None => ModelCatalog::empty(),
-    };
-    // One run-scoped store, created once and shared by every section. The CLI
-    // uses the in-memory sandbox backend by default.
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the CLI passes one explicit execution environment to the core runner"
+)]
+async fn execute_prompt(
+    prompt: &Prompt,
+    input: &str,
+    observer: &dyn Observer,
+    execution: &str,
+    picker: &ToolPicker,
+    models: &ModelCatalog,
+    tools: &[std::sync::Arc<dyn promptforge_core::tools::Tool>],
+    client: Option<GatewayClient>,
+) -> ExitCode {
     let store = StoreRef::memory();
 
-    // The CLI prints the run's result and nothing else, so it discards
-    // progress; its gateway client comes from the environment, which is what
-    // `client: None` selects.
     let options = RunOptions {
-        execution: &execution,
+        execution,
         observer,
-        client: None,
+        client,
         debug: None,
     };
 
     match execute::run(
-        &prompt,
+        prompt,
         input,
-        ResolutionContext {
-            picker: &picker,
-            models: &models,
-        },
-        available.tools(),
+        ResolutionContext { picker, models },
+        tools,
         &store,
         options,
     )
@@ -153,7 +230,7 @@ mod tests {
 
     use promptforge_core::observe::{Observer, detail};
 
-    use super::run;
+    use super::{Gateway, run_with_gateway};
 
     #[derive(Default)]
     struct Recorder(Mutex<Vec<(String, String, String)>>);
@@ -168,7 +245,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_reuses_one_generated_execution_id_for_parse_and_execution() {
+    async fn injected_no_gateway_run_is_hermetic_and_reuses_one_execution_id() {
         let path = std::env::temp_dir().join(format!(
             "promptforge-cli-execution-{:016x}.md",
             fastrand::u64(..)
@@ -181,10 +258,11 @@ mod tests {
         .expect("write the CLI lifecycle fixture");
         let recorder = Recorder::default();
 
-        let status = run(
+        let status = run_with_gateway(
             path.to_str().expect("the fixture path must be UTF-8"),
             "",
             &recorder,
+            Gateway::Disabled,
         )
         .await;
         std::fs::remove_file(&path).expect("remove the CLI lifecycle fixture");
