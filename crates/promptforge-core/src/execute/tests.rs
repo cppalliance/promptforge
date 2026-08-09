@@ -74,6 +74,7 @@ fn fixture_model_resolver(
         id: ModelId::gateway("claude-sonnet-4-6"),
         invocation: ModelInvocation::from(opts),
         tool_dialect: crate::dialects::ToolDialectId::OpenAi,
+        context: 200_000,
     })
 }
 
