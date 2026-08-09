@@ -3035,3 +3035,39 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
         "pure unknown must not hint declared-but-unscoped: {msg}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn model_infer_single_shot_returns_text() {
+    let addr = spawn_mock_gateway().await;
+    let echo = Arc::new(EchoTool);
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Test prompt\n\n```lua\n\
+        tools.need('echo', 'echo tool')\n\
+        tools.always('echo')\n\
+        writer = models.always('writer', 'A general model for tests')\n```\n\n\
+        ## Only\n\n\
+        ```lua\n\
+        local text = writer:infer('say hello')\n\
+        assert(type(text) == 'string', 'infer must return text')\n\
+        assert(text == 'final answer')\n\
+        assert(reply == text, 'infer must set reply')\n\
+        assert(tools.calls['echo'] == 1, 'infer tool loop must increment tools.calls')\n\
+        return text\n\
+        ```\n";
+    let prompt = bound_with_tools(md, &|_: &str| Ok(ToolId::new("tests", "echo")), Vec::new());
+    let out = run(
+        &prompt,
+        "",
+        &[Arc::clone(&echo) as Arc<dyn Tool>],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .expect("model:infer single-shot must return text");
+    assert_eq!(out, "final answer");
+}

@@ -41,9 +41,12 @@ use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::dialects::{ToolDialect, ToolDialectRegistry};
 use crate::fanout;
-use crate::lua::{SectionVm, ToolBindings, ToolCallCounts, ToolScope};
-use crate::model::{CompletionOptions, ModelBindings};
-use crate::observe::{Observer, detail};
+use crate::lua::{
+    ModelInferHook, SectionVm, ToolBindings, ToolCallCounts, ToolRuntime, ToolScope,
+    install_lua_tool_calls, snapshot_tool_scope,
+};
+use crate::model::{CompletionOptions, ModelBinding, ModelBindings};
+use crate::observe::{NullObserver, Observer, detail};
 use crate::parser::Prompt;
 use crate::store::StoreRef;
 use crate::subst;
@@ -58,6 +61,148 @@ const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 
 /// The prompt language major this executor implements.
 const SUPPORTED_MAJOR: u32 = 1;
+
+/// Shared context for `model:infer` from Lua.
+///
+/// Carries the gateway client, tool pool, store, observer, and the live tool-bag
+/// handles so each infer call can snapshot-read the current effective set.
+pub(crate) struct InferContext {
+    client: GatewayClient,
+    shared_tools: SharedTools,
+    #[allow(dead_code, reason = "reserved for store-backed tools in later steps")]
+    store: StoreRef,
+    observer: Arc<dyn Observer>,
+    execution: String,
+    section: String,
+    max_tool_iterations: usize,
+    turns: Arc<AtomicU32>,
+    bound: Option<BoundPrompt>,
+    tool_bindings: ToolBindings,
+    tool_runtime: Arc<std::sync::Mutex<ToolRuntime>>,
+    counts_slot: Arc<std::sync::Mutex<Option<ToolCallCounts>>>,
+}
+
+impl InferContext {
+    /// Snapshot-reads the tool bag, runs the tool loop, sets `reply`, returns text.
+    fn infer(
+        self: &Arc<Self>,
+        lua: &mlua::Lua,
+        binding: &ModelBinding,
+        prompt: &str,
+    ) -> mlua::Result<String> {
+        let scope = snapshot_tool_scope(&self.tool_bindings, &self.tool_runtime)
+            .map_err(|error| mlua::Error::external(error.to_string()))?;
+        let counts = {
+            let mut slot = self
+                .counts_slot
+                .lock()
+                .map_err(|_| mlua::Error::external("tool call counts mutex was poisoned"))?;
+            if let Some(existing) = slot.as_ref() {
+                for tool in scope.bindings() {
+                    existing
+                        .ensure(tool.alias())
+                        .map_err(|error| mlua::Error::external(error.to_string()))?;
+                }
+                existing.clone()
+            } else {
+                let created =
+                    ToolCallCounts::new(scope.bindings().iter().map(|b| b.alias().to_owned()));
+                *slot = Some(created.clone());
+                created
+            }
+        };
+        let declared: Vec<String> = self
+            .tool_bindings
+            .bindings()
+            .iter()
+            .map(|binding| binding.alias().to_owned())
+            .collect();
+        install_lua_tool_calls(lua, &counts, &declared)
+            .map_err(|error| mlua::Error::external(error.to_string()))?;
+
+        let registry = self.shared_tools.registry();
+        let (schemas, dispatch) = match &self.bound {
+            Some(bound) => prepare_effective_scope(
+                bound,
+                &scope,
+                &registry,
+                &self.execution,
+                self.observer.as_ref(),
+                &self.section,
+            )
+            .map_err(|error| mlua::Error::external(error.to_string()))?,
+            None => prepare_scoped_tools(&scope, &registry)
+                .map_err(|error| mlua::Error::external(error.to_string()))?,
+        };
+
+        let completion_options = binding.completion_options();
+        let handle = tokio::runtime::Handle::current();
+        let text = tokio::task::block_in_place(|| {
+            handle.block_on(run_tool_loop(
+                &self.client,
+                &schemas,
+                &dispatch,
+                &registry,
+                prompt.to_owned(),
+                self.max_tool_iterations,
+                SectionProgress {
+                    execution: &self.execution,
+                    observer: self.observer.as_ref(),
+                    section: &self.section,
+                    turns: self.turns.as_ref(),
+                    debug: None,
+                    completion_options: &completion_options,
+                },
+                Some(&counts),
+                self.bound.as_ref().map(BoundPrompt::alias_to_id),
+            ))
+        })
+        .map_err(|error| mlua::Error::external(error.to_string()))?;
+
+        lua.globals()
+            .raw_set("reply", text.as_str())
+            .map_err(|error| mlua::Error::external(error.to_string()))?;
+        Ok(text)
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "infer hook installation threads the same borrowed run context fanout already carries"
+)]
+fn attach_infer_hook(
+    vm: &SectionVm,
+    client: &GatewayClient,
+    shared_tools: &SharedTools,
+    store: &StoreRef,
+    execution: &str,
+    section: &str,
+    max_tool_iterations: usize,
+    turns: &Arc<AtomicU32>,
+    bound: Option<&BoundPrompt>,
+) {
+    let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
+    let ctx = Arc::new(InferContext {
+        client: client.clone(),
+        shared_tools: shared_tools.clone(),
+        store: store.clone(),
+        // Section lifecycle still uses the borrowed observer; infer reports
+        // through a shared handle. Null keeps the seam Send+'static without
+        // changing RunOptions.
+        observer: Arc::new(NullObserver),
+        execution: execution.to_owned(),
+        section: section.to_owned(),
+        max_tool_iterations,
+        turns: Arc::clone(turns),
+        bound: bound.cloned(),
+        tool_bindings,
+        tool_runtime,
+        counts_slot: vm.counts_slot(),
+    });
+    let hook: ModelInferHook =
+        Arc::new(move |lua, binding, prompt| ctx.infer(lua, binding, prompt));
+    vm.set_infer_hook(hook);
+}
 
 /// Everything a run needs beyond the prompt, its input, its tools, and its
 /// store: where progress is reported, and which gateway it talks to.
@@ -221,7 +366,7 @@ pub async fn run<'a>(
 
     // The turn count is threaded through the whole run so `RunFinished` can
     // report the total even when a section fails part way through it.
-    let turns = AtomicU32::new(0);
+    let turns = Arc::new(AtomicU32::new(0));
     let result = run_sections(
         prompt,
         run_prompt.bound,
@@ -233,7 +378,7 @@ pub async fn run<'a>(
         observer,
         client,
         debug,
-        &turns,
+        Arc::clone(&turns),
     )
     .await;
 
@@ -274,7 +419,7 @@ async fn run_sections(
     observer: &dyn Observer,
     mut client: Option<GatewayClient>,
     debug: Option<&dyn DebugCapture>,
-    turns: &AtomicU32,
+    turns: Arc<AtomicU32>,
 ) -> Result<String> {
     let when = now_rfc3339();
     let mut last_reply: Option<String> = None;
@@ -315,6 +460,28 @@ async fn run_sections(
         if let Err(error) = vm.inject_host(args, &sys, store, last_reply.as_deref()) {
             vm.teardown(observer, &section.name);
             return Err(error);
+        }
+
+        // Ensure a gateway client exists before Lua may call model:infer.
+        // Offline Lua-only prompts declare no models and skip this.
+        if client.is_none()
+            && !models.bindings().is_empty()
+            && let Ok(new_client) = GatewayClient::from_env()
+        {
+            client = Some(new_client);
+        }
+        if let Some(infer_client) = client.as_ref() {
+            attach_infer_hook(
+                &vm,
+                infer_client,
+                shared_tools,
+                store,
+                execution,
+                &section.name,
+                max_tool_iterations,
+                &turns,
+                bound,
+            );
         }
 
         let has_children = !section.children.is_empty();
@@ -482,7 +649,7 @@ async fn run_sections(
                         execution,
                         observer,
                         section: &section.name,
-                        turns,
+                        turns: turns.as_ref(),
                         debug,
                         completion_options: &completion_options,
                     },
