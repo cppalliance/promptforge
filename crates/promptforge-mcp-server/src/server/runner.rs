@@ -159,8 +159,8 @@ async fn run_observed(
         return Ok(text_error(refused(registry.admission_timeout())));
     };
 
-    // The clock starts here, past binding and admission, so a run's reported
-    // duration is execution time and carries neither wait.
+    // The clock starts after admission, so a run's reported duration includes
+    // live H1 resolution and execution but not the admission wait.
     let started = Instant::now();
 
     registry.started(&run_id, entry.name());

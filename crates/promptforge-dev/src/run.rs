@@ -418,7 +418,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_reuses_one_generated_execution_id_for_parse_bind_and_execution() {
+    async fn run_reuses_one_generated_execution_id_for_parse_and_execution() {
         let directory = tempfile::tempdir().expect("create lifecycle fixture directory");
         let path = directory.path().join("lifecycle.md");
         std::fs::write(

@@ -142,7 +142,7 @@ impl ModelRuntime {
     }
 }
 
-/// Accumulator for one H1 model declaration pass.
+/// Accumulator populated by model needs executed during live H1.
 #[derive(Debug, Default)]
 pub(crate) struct ModelBindingState {
     pub(crate) bindings: Vec<ModelBinding>,

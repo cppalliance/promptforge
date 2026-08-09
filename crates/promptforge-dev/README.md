@@ -23,7 +23,7 @@ cargo run -p promptforge-dev -- <prompt.md> [input] [--watch]
 ```
 
 - `input` is optional and defaults to empty; it becomes the prompt's `args`.
-- `--watch` re-reads, re-parses, re-binds, and re-executes after every save (300 ms debounce).
+- `--watch` re-reads, re-parses, and re-executes after every save (300 ms debounce).
 - There is no `--context`, `--max-tokens`, or `--no-think`. Declare those on the prompt under `models.need` / `models.always`.
 
 ## What happens on each run
