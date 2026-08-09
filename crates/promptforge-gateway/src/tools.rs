@@ -5,8 +5,6 @@
 //! `POST /v1/tools/web_search` that proxies a query to the Brave Search API and
 //! returns a trimmed result set.
 
-use std::collections::HashMap;
-
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
@@ -16,13 +14,12 @@ use crate::AppState;
 use crate::check_auth;
 use crate::config::{Secret, WebSearchConfig};
 use crate::error::GatewayError;
+use crate::web_search_process::post_process_results;
 
-/// Max characters kept for a result title after sanitisation.
-pub const TITLE_MAX_CHARS: usize = 512;
-/// Max characters kept for a result description after sanitisation.
-pub const DESCRIPTION_MAX_CHARS: usize = 4096;
-/// Max characters kept for a result URL after tracking strip.
-pub const URL_MAX_CHARS: usize = 2048;
+pub use crate::web_search_process::{
+    DESCRIPTION_MAX_CHARS, TITLE_MAX_CHARS, URL_MAX_CHARS, diversify_hosts, filter_domains,
+    host_from_url, sanitize_text, site_name_from_host, strip_tracking_params,
+};
 
 /// Cloneable runtime settings for `web_search`, filled from [`WebSearchConfig`].
 #[derive(Debug, Clone)]
@@ -171,6 +168,23 @@ struct BraveResult {
     extra_snippets: Vec<String>,
 }
 
+/// Parameters for a Brave Search API request.
+#[derive(Debug, Clone)]
+struct BraveSearchParams<'a> {
+    /// The trimmed search query (`q`).
+    query: &'a str,
+    /// Over-fetched result count sent to Brave (`count`).
+    count: u8,
+    /// Optional freshness filter.
+    freshness: Option<&'a str>,
+    /// Optional country code.
+    country: Option<&'a str>,
+    /// Optional search language.
+    search_lang: Option<&'a str>,
+    /// Optional SafeSearch level.
+    safesearch: Option<&'a str>,
+}
+
 /// Trim ASCII whitespace from `query` and reject empty values.
 ///
 /// # Errors
@@ -188,254 +202,135 @@ fn trim_web_search_query(query: &str) -> Result<String, GatewayError> {
     Ok(trimmed)
 }
 
-/// Sanitize free text: drop most controls, collapse whitespace, trim, decode a
-/// fixed entity set, then cap by Unicode scalar count.
+/// Clamp the requested count into `1..=max_count`.
 #[must_use]
-pub fn sanitize_text(text: &str, max_chars: usize) -> String {
-    let mut cleaned = String::with_capacity(text.len());
-    for c in text.chars() {
-        if c == '\n' || c == '\t' {
-            cleaned.push(' ');
-        } else if !c.is_control() {
-            cleaned.push(c);
-        }
-    }
-    let collapsed = collapse_whitespace(&cleaned);
-    let trimmed = collapsed.trim();
-    let decoded = decode_entities(trimmed);
-    truncate_chars(&decoded, max_chars)
+fn clamp_count(requested: u8, max_count: u8) -> u8 {
+    let max_count = max_count.max(1);
+    requested.clamp(1, max_count)
 }
 
-/// Drop known tracking query parameters from `url`. Removes a trailing empty `?`.
+/// Compute the Brave over-fetch count from a clamped requested count.
 ///
-/// Params removed when the name equals `fbclid`, `gclid`, `mc_cid`, `mc_eid`,
-/// or starts with `utm_`.
+/// `brave_count = min(max_count, requested_count.saturating_mul(3).max(requested_count))`
 #[must_use]
-pub fn strip_tracking_params(url: &str) -> String {
-    let Some((base, query)) = url.split_once('?') else {
-        return truncate_chars(url, URL_MAX_CHARS);
-    };
-    let (query, fragment) = match query.split_once('#') {
-        Some((q, f)) => (q, Some(f)),
-        None => (query, None),
-    };
-    let mut kept: Vec<&str> = Vec::new();
-    for pair in query.split('&') {
-        if pair.is_empty() {
-            continue;
-        }
-        let name = pair.split('=').next().unwrap_or(pair);
-        if is_tracking_param(name) {
-            continue;
-        }
-        kept.push(pair);
-    }
-    let mut out = String::from(base);
-    if !kept.is_empty() {
-        out.push('?');
-        out.push_str(&kept.join("&"));
-    }
-    if let Some(fragment) = fragment {
-        out.push('#');
-        out.push_str(fragment);
-    }
-    truncate_chars(&out, URL_MAX_CHARS)
+fn brave_overfetch_count(requested_count: u8, max_count: u8) -> u8 {
+    let max_count = max_count.max(1);
+    let over = requested_count.saturating_mul(3).max(requested_count);
+    over.min(max_count)
 }
 
-/// Extract the hostname from `url` without a URL crate.
+/// Resolve an optional string knob: `Some` and non-empty after trim, else `None`.
+fn non_empty_opt(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// Resolve freshness: request value, else non-empty settings default, else omit.
+fn resolve_freshness<'a>(request: Option<&'a str>, default_freshness: &'a str) -> Option<&'a str> {
+    non_empty_opt(request).or_else(|| non_empty_opt(Some(default_freshness)))
+}
+
+/// Resolve safesearch: request value, else non-empty settings default, else omit.
+fn resolve_safesearch<'a>(
+    request: Option<&'a str>,
+    default_safesearch: &'a str,
+) -> Option<&'a str> {
+    non_empty_opt(request).or_else(|| non_empty_opt(Some(default_safesearch)))
+}
+
+/// Prefix Brave upstream errors with `web_search: `.
+fn prefix_web_search_upstream(err: GatewayError) -> GatewayError {
+    match err {
+        GatewayError::UpstreamStatus { status, body } => GatewayError::UpstreamStatus {
+            status,
+            body: if body.starts_with("web_search: ") {
+                body
+            } else {
+                format!("web_search: {body}")
+            },
+        },
+        GatewayError::UpstreamTransport(source) => GatewayError::UpstreamTransport(Box::new(
+            WebSearchUpstream(format!("web_search: {source}")),
+        )),
+        other => other,
+    }
+}
+
+/// Transport error wrapper so the source chain carries the `web_search: ` prefix.
+#[derive(Debug)]
+struct WebSearchUpstream(String);
+
+impl std::fmt::Display for WebSearchUpstream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for WebSearchUpstream {}
+
+/// Build Brave `/web/search` query pairs from [`BraveSearchParams`].
 ///
-/// Handles optional scheme, `userinfo@`, and strips a trailing port. Returns
-/// lowercase host text, or `None` when no host can be parsed.
+/// Always includes `extra_snippets=true`. Optional knobs are omitted when `None`.
 #[must_use]
-pub fn host_from_url(url: &str) -> Option<String> {
-    let rest = match url.split_once("://") {
-        Some((_, after)) => after,
-        None => url.strip_prefix("//").unwrap_or(url),
-    };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if authority.is_empty() {
-        return None;
+fn brave_search_query(params: &BraveSearchParams<'_>) -> Vec<(&'static str, String)> {
+    let mut query = vec![
+        ("q", params.query.to_string()),
+        ("count", params.count.to_string()),
+        ("extra_snippets", "true".to_string()),
+    ];
+    if let Some(freshness) = params.freshness {
+        query.push(("freshness", freshness.to_string()));
     }
-    let host_port = match authority.rsplit_once('@') {
-        Some((_, host_port)) => host_port,
-        None => authority,
-    };
-    if host_port.is_empty() {
-        return None;
+    if let Some(country) = params.country {
+        query.push(("country", country.to_string()));
     }
-    // Bracketed IPv6: keep inside brackets; otherwise strip :port.
-    let host = if let Some(inner) = host_port.strip_prefix('[') {
-        let end = inner.find(']')?;
-        &inner[..end]
-    } else {
-        host_port.split(':').next().unwrap_or(host_port)
-    };
-    if host.is_empty() {
-        return None;
+    if let Some(search_lang) = params.search_lang {
+        query.push(("search_lang", search_lang.to_string()));
     }
-    Some(host.to_ascii_lowercase())
+    if let Some(safesearch) = params.safesearch {
+        query.push(("safesearch", safesearch.to_string()));
+    }
+    query
 }
 
-/// Hostname group / display name: lowercase host with one leading `www.` removed.
-#[must_use]
-pub fn site_name_from_host(host: &str) -> String {
-    let lower = host.to_ascii_lowercase();
-    lower
-        .strip_prefix("www.")
-        .unwrap_or(lower.as_str())
-        .to_string()
-}
-
-/// Apply include then exclude domain filters.
+/// Call the Brave Search API and map `web.results` to [`SearchResult`] values.
 ///
-/// Empty `include_domains` means no include filter. Empty `exclude_domains`
-/// means no exclude filter. A hostname matches a listed domain when they are
-/// equal (ASCII lowercase) or the hostname ends with `.` + domain.
-#[must_use]
-pub fn filter_domains(
-    results: Vec<SearchResult>,
-    include_domains: &[String],
-    exclude_domains: &[String],
-) -> Vec<SearchResult> {
-    let include: Vec<String> = include_domains
-        .iter()
-        .map(|d| d.to_ascii_lowercase())
-        .filter(|d| !d.is_empty())
-        .collect();
-    let exclude: Vec<String> = exclude_domains
-        .iter()
-        .map(|d| d.to_ascii_lowercase())
-        .filter(|d| !d.is_empty())
-        .collect();
-
-    results
-        .into_iter()
-        .filter(|r| {
-            let host = host_from_url(&r.url).unwrap_or_default();
-            if !include.is_empty() && !include.iter().any(|d| host_matches_domain(&host, d)) {
-                return false;
-            }
-            if !exclude.is_empty() && exclude.iter().any(|d| host_matches_domain(&host, d)) {
-                return false;
-            }
-            true
-        })
-        .collect()
-}
-
-/// Keep results in order while each host group stays under `max_per_host`,
-/// stopping once `count` results are kept.
-///
-/// Host groups use full hostname, lowercase, with one leading `www.` stripped.
-#[must_use]
-pub fn diversify_hosts(
-    results: Vec<SearchResult>,
-    max_per_host: u8,
-    count: u8,
-) -> Vec<SearchResult> {
-    let mut kept = Vec::new();
-    let mut per_host: HashMap<String, u8> = HashMap::new();
-    let max_per_host = max_per_host.max(1);
-    let count = count as usize;
-
-    for result in results {
-        if kept.len() >= count {
-            break;
-        }
-        let group = host_from_url(&result.url)
-            .map(|h| site_name_from_host(&h))
-            .unwrap_or_default();
-        let n = per_host.entry(group).or_insert(0);
-        if *n >= max_per_host {
-            continue;
-        }
-        *n += 1;
-        kept.push(result);
-    }
-    kept
-}
-
-fn collapse_whitespace(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut prev_space = false;
-    for c in text.chars() {
-        if c.is_whitespace() {
-            if !prev_space {
-                out.push(' ');
-                prev_space = true;
-            }
-        } else {
-            out.push(c);
-            prev_space = false;
-        }
-    }
-    out
-}
-
-fn decode_entities(text: &str) -> String {
-    // Decode `&amp;` first so double-encoded forms like `&amp;lt;` resolve.
-    let mut s = text.replace("&amp;", "&");
-    s = s.replace("&lt;", "<");
-    s = s.replace("&gt;", ">");
-    s = s.replace("&quot;", "\"");
-    s = s.replace("&#39;", "'");
-    s = s.replace("&apos;", "'");
-    s
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-    text.chars().take(max_chars).collect()
-}
-
-fn is_tracking_param(name: &str) -> bool {
-    matches!(name, "fbclid" | "gclid" | "mc_cid" | "mc_eid") || name.starts_with("utm_")
-}
-
-fn host_matches_domain(host: &str, domain: &str) -> bool {
-    let host = host.to_ascii_lowercase();
-    host == *domain || host.ends_with(&format!(".{domain}"))
-}
-
-/// Call the Brave Search API and return a trimmed result set.
+/// Always sends `extra_snippets=true`. Optional knobs are omitted when `None`.
 ///
 /// # Errors
 /// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
-/// [`GatewayError::UpstreamStatus`] on a non-success provider status.
+/// [`GatewayError::UpstreamStatus`] on a non-success provider status. Both are
+/// prefixed with `web_search: ` on the body or source message.
 async fn brave_search(
     http: &reqwest::Client,
     base_url: &str,
     api_key: &str,
-    query: &str,
-    count: u8,
-    max_count: u8,
-) -> Result<WebSearchResponse, GatewayError> {
-    let count = count.clamp(1, max_count);
+    params: &BraveSearchParams<'_>,
+) -> Result<Vec<SearchResult>, GatewayError> {
+    let query = brave_search_query(params);
+
     let response = http
         .get(format!("{base_url}/web/search"))
-        .query(&[("q", query), ("count", &count.to_string())])
+        .query(&query)
         .header("X-Subscription-Token", api_key)
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(GatewayError::upstream_transport)?;
+        .map_err(|e| prefix_web_search_upstream(GatewayError::upstream_transport(e)))?;
 
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         let body: String = body.chars().take(2000).collect();
-        return Err(GatewayError::UpstreamStatus {
+        return Err(prefix_web_search_upstream(GatewayError::UpstreamStatus {
             status: status.as_u16(),
             body,
-        });
+        }));
     }
 
     let parsed: BraveResponse = response
         .json()
         .await
-        .map_err(GatewayError::upstream_transport)?;
+        .map_err(|e| prefix_web_search_upstream(GatewayError::upstream_transport(e)))?;
 
     let results = parsed
         .web
@@ -452,10 +347,7 @@ async fn brave_search(
         })
         .collect();
 
-    Ok(WebSearchResponse {
-        query: query.to_string(),
-        results,
-    })
+    Ok(results)
 }
 
 /// The `POST /v1/tools/web_search` route: bearer-authed, proxies to Brave.
@@ -476,34 +368,47 @@ pub async fn web_search(
         .await
         .ok_or(GatewayError::ToolNotConfigured("web_search"))?;
     let query = trim_web_search_query(&request.query)?;
-    let count = request.count.unwrap_or(web_search.settings.default_count);
-    let response = brave_search(
+    let count = clamp_count(
+        request.count.unwrap_or(web_search.settings.default_count),
+        web_search.settings.max_count,
+    );
+    let brave_count = brave_overfetch_count(count, web_search.settings.max_count);
+    let params = BraveSearchParams {
+        query: &query,
+        count: brave_count,
+        freshness: resolve_freshness(
+            request.freshness.as_deref(),
+            &web_search.settings.default_freshness,
+        ),
+        country: non_empty_opt(request.country.as_deref()),
+        search_lang: non_empty_opt(request.search_lang.as_deref()),
+        safesearch: resolve_safesearch(
+            request.safesearch.as_deref(),
+            &web_search.settings.default_safesearch,
+        ),
+    };
+    let mapped = brave_search(
         &web_search.http,
         &web_search.base_url,
         web_search.api_key.expose(),
-        &query,
-        count,
-        web_search.settings.max_count,
+        &params,
     )
     .await?;
-    Ok(Json(response))
+    let results = post_process_results(
+        mapped,
+        web_search.settings.strip_tracking,
+        &request.include_domains,
+        &request.exclude_domains,
+        web_search.settings.max_per_host,
+        count,
+    );
+    Ok(Json(WebSearchResponse { query, results }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::error::GatewayError;
-
-    fn hit(title: &str, url: &str) -> SearchResult {
-        SearchResult {
-            title: title.to_string(),
-            url: url.to_string(),
-            description: String::new(),
-            age: None,
-            site_name: None,
-            extra_snippets: Vec::new(),
-        }
-    }
 
     #[test]
     fn empty_query_is_malformed_request() {
@@ -527,127 +432,91 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_text_strips_controls_collapses_and_decodes() {
-        let input = "A\u{0001}B\nC\tD   &amp; &lt;x&gt; &quot;q&#39; &apos;z";
-        let out = sanitize_text(input, TITLE_MAX_CHARS);
-        assert_eq!(out, "AB C D & <x> \"q' 'z");
+    fn brave_overfetch_uses_triple_capped_by_max() {
+        assert_eq!(brave_overfetch_count(5, 20), 15);
+        assert_eq!(brave_overfetch_count(10, 20), 20);
+        assert_eq!(brave_overfetch_count(1, 20), 3);
+        assert_eq!(brave_overfetch_count(20, 20), 20);
     }
 
     #[test]
-    fn sanitize_text_caps_title_description_and_url_limits() {
-        let title = "t".repeat(TITLE_MAX_CHARS + 10);
+    fn clamp_count_bounds_to_one_through_max() {
+        assert_eq!(clamp_count(0, 20), 1);
+        assert_eq!(clamp_count(5, 20), 5);
+        assert_eq!(clamp_count(50, 20), 20);
+    }
+
+    #[test]
+    fn resolve_knobs_prefer_request_then_defaults() {
+        assert_eq!(resolve_freshness(Some("pd"), "pw"), Some("pd"));
+        assert_eq!(resolve_freshness(Some(""), "pw"), Some("pw"));
+        assert_eq!(resolve_freshness(None, ""), None);
+        assert_eq!(resolve_safesearch(None, "moderate"), Some("moderate"));
+        assert_eq!(non_empty_opt(Some("us")), Some("us"));
+        assert_eq!(non_empty_opt(Some("  ")), None);
+    }
+
+    #[test]
+    fn prefix_web_search_upstream_prefixes_status_body() {
+        let err = prefix_web_search_upstream(GatewayError::UpstreamStatus {
+            status: 429,
+            body: "rate limited".to_string(),
+        });
+        match err {
+            GatewayError::UpstreamStatus { body, .. } => {
+                assert_eq!(body, "web_search: rate limited");
+            }
+            other => panic!("expected UpstreamStatus, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn brave_search_query_always_sets_extra_snippets_and_optional_knobs() {
+        let base = BraveSearchParams {
+            query: "C++ Alliance",
+            count: 15,
+            freshness: None,
+            country: None,
+            search_lang: None,
+            safesearch: None,
+        };
+        let pairs = brave_search_query(&base);
         assert_eq!(
-            sanitize_text(&title, TITLE_MAX_CHARS).chars().count(),
-            TITLE_MAX_CHARS
-        );
-
-        let desc = "d".repeat(DESCRIPTION_MAX_CHARS + 3);
-        assert_eq!(
-            sanitize_text(&desc, DESCRIPTION_MAX_CHARS).chars().count(),
-            DESCRIPTION_MAX_CHARS
-        );
-
-        let url = format!("https://example.com/{}", "u".repeat(URL_MAX_CHARS));
-        assert_eq!(strip_tracking_params(&url).chars().count(), URL_MAX_CHARS);
-    }
-
-    #[test]
-    fn strip_tracking_removes_utm_and_fbclid() {
-        let url = "https://a.com/x?utm_source=1&keep=yes&fbclid=abc&gclid=1&mc_cid=2&mc_eid=3&utm_medium=x";
-        assert_eq!(strip_tracking_params(url), "https://a.com/x?keep=yes");
-
-        let only_track = "https://a.com/x?utm_source=1";
-        assert_eq!(strip_tracking_params(only_track), "https://a.com/x");
-    }
-
-    #[test]
-    fn host_and_site_name_helpers() {
-        assert_eq!(
-            host_from_url("https://WWW.Example.COM:443/path"),
-            Some("www.example.com".to_string())
-        );
-        assert_eq!(site_name_from_host("www.example.com"), "example.com");
-        assert_eq!(site_name_from_host("example.com"), "example.com");
-        assert_eq!(host_from_url("not-a-url"), Some("not-a-url".to_string()));
-        assert_eq!(host_from_url("https:///"), None);
-    }
-
-    #[test]
-    fn filter_domains_include_then_exclude() {
-        let results = vec![
-            hit("A", "https://a.com/1"),
-            hit("B", "https://b.com/1"),
-            hit("Sub", "https://sub.a.com/1"),
-            hit("C", "https://c.com/1"),
-        ];
-        let include = vec!["a.com".to_string()];
-        let included = filter_domains(results, &include, &[]);
-        assert_eq!(included.len(), 2);
-        assert_eq!(included[0].url, "https://a.com/1");
-        assert_eq!(included[1].url, "https://sub.a.com/1");
-
-        let exclude = vec!["sub.a.com".to_string()];
-        let after = filter_domains(
+            pairs,
             vec![
-                hit("A", "https://a.com/1"),
-                hit("Sub", "https://sub.a.com/1"),
-            ],
-            &include,
-            &exclude,
+                ("q", "C++ Alliance".to_string()),
+                ("count", "15".to_string()),
+                ("extra_snippets", "true".to_string()),
+            ]
         );
-        assert_eq!(after.len(), 1);
-        assert_eq!(after[0].url, "https://a.com/1");
-    }
 
-    #[test]
-    fn diversify_hosts_worked_example_count_3() {
-        let results = vec![
-            hit("A1", "https://a.com/x?utm_source=1"),
-            hit("A2", "https://a.com/y"),
-            hit("A3", "https://a.com/z"),
-            hit("B1", "https://b.com/1"),
-        ];
-        let stripped: Vec<SearchResult> = results
-            .into_iter()
-            .map(|mut r| {
-                r.url = strip_tracking_params(&r.url);
-                r.site_name = host_from_url(&r.url).map(|h| site_name_from_host(&h));
-                r
-            })
-            .collect();
-        let out = diversify_hosts(stripped, 2, 3);
-        assert_eq!(out.len(), 3);
-        assert_eq!(out[0].url, "https://a.com/x");
-        assert_eq!(out[0].title, "A1");
-        assert_eq!(out[0].site_name.as_deref(), Some("a.com"));
-        assert_eq!(out[1].url, "https://a.com/y");
-        assert_eq!(out[1].title, "A2");
-        assert_eq!(out[2].url, "https://b.com/1");
-        assert_eq!(out[2].title, "B1");
-        assert_eq!(out[2].site_name.as_deref(), Some("b.com"));
-    }
-
-    #[test]
-    fn diversify_hosts_three_plus_two_keeps_two_and_two_at_count_4() {
-        let results = vec![
-            hit("A1", "https://a.com/1"),
-            hit("A2", "https://a.com/2"),
-            hit("A3", "https://a.com/3"),
-            hit("B1", "https://b.com/1"),
-            hit("B2", "https://b.com/2"),
-        ];
-        let out = diversify_hosts(results, 2, 4);
-        assert_eq!(out.len(), 4);
-        assert_eq!(out[0].title, "A1");
-        assert_eq!(out[1].title, "A2");
-        assert_eq!(out[2].title, "B1");
-        assert_eq!(out[3].title, "B2");
+        let full = BraveSearchParams {
+            query: "boost",
+            count: 9,
+            freshness: Some("pd"),
+            country: Some("us"),
+            search_lang: Some("en"),
+            safesearch: Some("moderate"),
+        };
+        let pairs = brave_search_query(&full);
+        assert_eq!(
+            pairs,
+            vec![
+                ("q", "boost".to_string()),
+                ("count", "9".to_string()),
+                ("extra_snippets", "true".to_string()),
+                ("freshness", "pd".to_string()),
+                ("country", "us".to_string()),
+                ("search_lang", "en".to_string()),
+                ("safesearch", "moderate".to_string()),
+            ]
+        );
     }
 }
 
 #[cfg(test)]
 mod live_tests {
-    use super::brave_search;
+    use super::{BraveSearchParams, brave_search};
 
     /// Hits the real Brave Search API to validate the request shape and the
     /// `web.results` parsing against Brave's actual JSON.
@@ -661,31 +530,36 @@ mod live_tests {
         let api_key =
             std::env::var("BRAVE_API_KEY").expect("set BRAVE_API_KEY to run this live test");
         let http = reqwest::Client::new();
+        let params = BraveSearchParams {
+            query: "rust programming language",
+            count: 5,
+            freshness: None,
+            country: None,
+            search_lang: None,
+            safesearch: None,
+        };
 
-        let response = brave_search(
+        let results = brave_search(
             &http,
             "https://api.search.brave.com/res/v1",
             &api_key,
-            "rust programming language",
-            5,
-            20,
+            &params,
         )
         .await
         .expect("brave search should succeed");
 
-        assert_eq!(response.query, "rust programming language");
         assert!(
-            !response.results.is_empty(),
+            !results.is_empty(),
             "expected at least one result from Brave"
         );
         assert!(
-            response.results[0].url.starts_with("http"),
+            results[0].url.starts_with("http"),
             "expected a real URL, got: {}",
-            response.results[0].url
+            results[0].url
         );
 
         // Printed for eyeballing when run manually with --nocapture.
-        for result in &response.results {
+        for result in &results {
             println!("- {} :: {}", result.title, result.url);
         }
     }
