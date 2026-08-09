@@ -39,17 +39,20 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
-use crate::bind::BoundPrompt;
+use promptforge_tool_picker::ToolPicker;
+
+use crate::bind::{BoundPrompt, RuntimeResolution};
 use crate::cancel;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::dialects::{ToolDialect, ToolDialectRegistry};
 use crate::fanout;
 use crate::lua::{
-    LuaBlockResult, LuaSectionHandle, ModelInferHook, SectionVm, ToolBindings, ToolCallCounts,
-    ToolRuntime, ToolScope, install_lua_tool_calls, resolve_section_target, snapshot_tool_scope,
+    LiveBindingProducer, LuaBlockResult, LuaSectionHandle, ModelInferHook, SectionVm, ToolBindings,
+    ToolCallCounts, ToolRuntime, ToolScope, install_lua_tool_calls, resolve_section_target,
+    snapshot_tool_scope,
 };
-use crate::model::{CompletionOptions, ModelBinding, ModelBindings};
+use crate::model::{CompletionOptions, ModelBinding, ModelBindings, ModelCatalog};
 use crate::observe::{NullObserver, Observer, detail};
 use crate::parser::{Block, Prompt, Section};
 use crate::store::StoreRef;
@@ -193,6 +196,7 @@ pub(crate) struct InferContext {
     max_tool_iterations: usize,
     turns: Arc<AtomicU32>,
     bound: Option<BoundPrompt>,
+    live_bindings: Option<LiveBindingProducer>,
     tool_bag: Mutex<ToolBag>,
     counts_slot: Arc<Mutex<Option<ToolCallCounts>>>,
     /// Live sealed `sys` JSON so infer can publish `reply_finish_reason`.
@@ -200,6 +204,68 @@ pub(crate) struct InferContext {
 }
 
 impl InferContext {
+    fn prepare_tools(
+        &self,
+        registry: &ToolRegistry<'_>,
+    ) -> mlua::Result<(PreparedTools, Vec<String>)> {
+        if let Some(live) = &self.live_bindings {
+            let bindings = live
+                .bindings()
+                .map_err(|error| mlua::Error::external(error.to_string()))?
+                .0;
+            let scope = ToolScope::from_bindings(
+                bindings
+                    .always()
+                    .iter()
+                    .filter_map(|alias| {
+                        bindings
+                            .bindings()
+                            .iter()
+                            .find(|binding| binding.alias() == alias)
+                            .cloned()
+                    })
+                    .collect(),
+            );
+            let (schemas, dispatch) = prepare_scoped_tools(&scope, registry)
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            let declared = bindings
+                .bindings()
+                .iter()
+                .map(|binding| binding.alias().to_owned())
+                .collect();
+            return Ok((
+                PreparedTools {
+                    scope,
+                    schemas,
+                    dispatch,
+                    reused: false,
+                },
+                declared,
+            ));
+        }
+
+        let mut bag = self
+            .tool_bag
+            .lock()
+            .map_err(|_| mlua::Error::external("tool bag mutex was poisoned"))?;
+        let prepared = bag
+            .prepare(
+                self.bound.as_ref(),
+                registry,
+                &self.execution,
+                self.observer.as_ref(),
+                &self.section,
+            )
+            .map_err(|error| mlua::Error::external(error.to_string()))?;
+        let declared = bag
+            .bindings()
+            .bindings()
+            .iter()
+            .map(|binding| binding.alias().to_owned())
+            .collect();
+        Ok((prepared, declared))
+    }
+
     /// Snapshot-reads the tool bag, runs the tool loop, sets `reply`, returns text.
     fn infer(
         self: &Arc<Self>,
@@ -208,28 +274,7 @@ impl InferContext {
         prompt: &str,
     ) -> mlua::Result<String> {
         let registry = self.shared_tools.registry();
-        let (prepared, declared) = {
-            let mut bag = self
-                .tool_bag
-                .lock()
-                .map_err(|_| mlua::Error::external("tool bag mutex was poisoned"))?;
-            let prepared = bag
-                .prepare(
-                    self.bound.as_ref(),
-                    &registry,
-                    &self.execution,
-                    self.observer.as_ref(),
-                    &self.section,
-                )
-                .map_err(|error| mlua::Error::external(error.to_string()))?;
-            let declared: Vec<String> = bag
-                .bindings()
-                .bindings()
-                .iter()
-                .map(|binding| binding.alias().to_owned())
-                .collect();
-            (prepared, declared)
-        };
+        let (prepared, declared) = self.prepare_tools(&registry)?;
         let counts = {
             let mut slot = self
                 .counts_slot
@@ -316,6 +361,7 @@ fn attach_infer_hook(
     max_tool_iterations: usize,
     turns: &Arc<AtomicU32>,
     bound: Option<&BoundPrompt>,
+    live_bindings: Option<LiveBindingProducer>,
 ) {
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
     let ctx = Arc::new(InferContext {
@@ -331,6 +377,7 @@ fn attach_infer_hook(
         max_tool_iterations,
         turns: Arc::clone(turns),
         bound: bound.cloned(),
+        live_bindings,
         tool_bag: Mutex::new(ToolBag::new(tool_bindings, tool_runtime)),
         counts_slot: vm.counts_slot(),
         sys_live: vm.sys_live_handle(),
@@ -371,6 +418,15 @@ pub struct RunOptions<'a> {
     /// Opt-in raw request/response capture for model turns. `None` (the
     /// production default) skips the seam entirely so hosts pay nothing.
     pub debug: Option<&'a dyn DebugCapture>,
+}
+
+/// Live capability inputs for the parse-to-run execution path.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolutionContext<'a> {
+    /// Semantic picker used by executed H1 capability calls.
+    pub picker: &'a ToolPicker,
+    /// Live model catalog used by executed H1 model calls.
+    pub models: &'a ModelCatalog,
 }
 
 /// A prompt accepted by [`run`].
@@ -506,6 +562,10 @@ pub async fn run<'a>(
     let result = run_sections(
         prompt,
         run_prompt.bound,
+        run_prompt.bound.map(BoundPrompt::bindings),
+        run_prompt.bound.map(BoundPrompt::models),
+        None,
+        false,
         args,
         &registry,
         &shared_tools,
@@ -530,6 +590,281 @@ pub async fn run<'a>(
     result
 }
 
+/// Execute a parsed prompt through the single-pass live H1 path.
+///
+/// H1 Lua and prose blocks run once in source order with full host access.
+/// Capability calls resolve when executed, and the resulting bindings plus the
+/// final H1 `var` snapshot are captured for the section walk.
+///
+/// # Errors
+/// Returns the same lifecycle errors as [`run`], plus live tool or model
+/// resolution failures raised by executed H1 code.
+pub async fn run_prompt(
+    prompt: &Prompt,
+    args: &str,
+    resolution: ResolutionContext<'_>,
+    tools: &[Arc<dyn Tool>],
+    store: &StoreRef,
+    opts: RunOptions<'_>,
+) -> Result<String> {
+    match prompt.frontmatter.promptforge {
+        Some(SUPPORTED_MAJOR) => {}
+        Some(other) => return Err(Error::UnsupportedVersion(other)),
+        None => {
+            return Err(Error::Parse(
+                "not a promptforge prompt: no promptforge version".into(),
+            ));
+        }
+    }
+
+    let RunOptions {
+        execution,
+        observer,
+        client,
+        debug,
+    } = opts;
+    let shared_tools = SharedTools::new(tools);
+    let registry = shared_tools.registry();
+    observer.observe(execution, &prompt.title, detail::RUN_STARTED);
+    let turns = Arc::new(AtomicU32::new(0));
+
+    let result = async {
+        let h1 = execute_live_h1(
+            prompt,
+            args,
+            resolution,
+            &registry,
+            &shared_tools,
+            store,
+            execution,
+            observer,
+            client.as_ref(),
+            debug,
+            Arc::clone(&turns),
+        )
+        .await?;
+        if let Some(value) = h1.returned {
+            return Ok(value);
+        }
+        run_sections(
+            prompt,
+            None,
+            Some(&h1.bindings),
+            Some(&h1.models),
+            Some(&h1.var),
+            true,
+            args,
+            &registry,
+            &shared_tools,
+            store,
+            execution,
+            observer,
+            client,
+            debug,
+            Arc::clone(&turns),
+        )
+        .await
+    }
+    .await;
+
+    observer.observe(
+        execution,
+        &prompt.title,
+        if result.is_ok() {
+            detail::RUN_SUCCEEDED
+        } else {
+            detail::RUN_FAILED
+        },
+    );
+    result
+}
+
+struct LiveH1State {
+    bindings: ToolBindings,
+    models: ModelBindings,
+    var: serde_json::Value,
+    returned: Option<String>,
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "H1 mirrors the ordered section block walk over explicit run context"
+)]
+async fn execute_live_h1(
+    prompt: &Prompt,
+    args: &str,
+    resolution: ResolutionContext<'_>,
+    registry: &ToolRegistry<'_>,
+    shared_tools: &SharedTools,
+    store: &StoreRef,
+    execution: &str,
+    observer: &dyn Observer,
+    client: Option<&GatewayClient>,
+    debug: Option<&dyn DebugCapture>,
+    turns: Arc<AtomicU32>,
+) -> Result<LiveH1State> {
+    let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models)?;
+    let sys = json!({
+        "when": now_rfc3339(),
+        "now": now_rfc3339(),
+        "id": 0,
+        "section_name": prompt.title,
+        "execution": execution,
+        "section_count": prompt.sections.len(),
+    });
+    let mut vm = SectionVm::new(None, execution, observer, &prompt.title)?;
+    vm.inject_host(args, &sys, store, None)?;
+    macro_rules! h1_try {
+        ($expression:expr) => {
+            match $expression {
+                Ok(value) => value,
+                Err(error) => {
+                    vm.teardown(observer, &prompt.title);
+                    return Err(error);
+                }
+            }
+        };
+    }
+    let mut active_client = client.cloned();
+    if active_client.is_none() {
+        active_client = GatewayClient::from_env().ok();
+    }
+    if let Some(infer_client) = active_client.as_ref() {
+        attach_infer_hook(
+            &vm,
+            infer_client,
+            shared_tools,
+            store,
+            execution,
+            &prompt.title,
+            prompt
+                .frontmatter
+                .max_tool_iterations
+                .unwrap_or(DEFAULT_MAX_TOOL_ITERATIONS),
+            &turns,
+            None,
+            Some(runtime.producer()),
+        );
+    }
+
+    let mut conversation = Vec::new();
+    let mut reply: Option<String> = None;
+    let mut returned = None;
+    for block in &prompt.h1_blocks {
+        match block {
+            Block::Lua(program) => {
+                if let Some(value) =
+                    h1_try!(vm.run_live_h1_block(program, &runtime, observer, &prompt.title))
+                {
+                    returned = Some(value);
+                    break;
+                }
+            }
+            Block::Prose { text, loop_capable } => {
+                let (tool_bindings, model_bindings) = h1_try!(runtime.bindings());
+                let Some(alias) = model_bindings.always() else {
+                    vm.teardown(observer, &prompt.title);
+                    return Err(Error::ModelRequired {
+                        section: prompt.title.clone(),
+                    });
+                };
+                let Some(model) = model_bindings.binding(alias) else {
+                    vm.teardown(observer, &prompt.title);
+                    return Err(Error::ModelRequired {
+                        section: prompt.title.clone(),
+                    });
+                };
+                let mut scope = Vec::new();
+                for alias in tool_bindings.always() {
+                    if let Some(binding) = tool_bindings
+                        .bindings()
+                        .iter()
+                        .find(|binding| binding.alias() == alias)
+                    {
+                        scope.push(binding.clone());
+                    }
+                }
+                let scope = ToolScope::from_bindings(scope);
+                let (schemas, dispatch) = h1_try!(prepare_scoped_tools(&scope, registry));
+                let var = h1_try!(vm.var());
+                let prose = h1_try!(subst::substitute(
+                    text,
+                    args,
+                    reply.as_deref(),
+                    None,
+                    &var,
+                    &sys
+                ));
+                if prose.trim().is_empty() {
+                    continue;
+                }
+                if active_client.is_none() {
+                    active_client = Some(h1_try!(GatewayClient::from_env()));
+                }
+                let Some(active_client) = active_client.as_ref() else {
+                    vm.teardown(observer, &prompt.title);
+                    return Err(Error::Lua(
+                        "gateway client was not initialized for H1 prose".to_owned(),
+                    ));
+                };
+                let counts = ToolCallCounts::new(
+                    scope
+                        .bindings()
+                        .iter()
+                        .map(|binding| binding.alias().to_owned()),
+                );
+                let mode = if *loop_capable {
+                    ProseMode::Loop {
+                        max_tool_iterations: prompt
+                            .frontmatter
+                            .max_tool_iterations
+                            .unwrap_or(DEFAULT_MAX_TOOL_ITERATIONS),
+                    }
+                } else {
+                    ProseMode::SingleShot
+                };
+                let completion_options = model.completion_options();
+                let outcome = h1_try!(
+                    run_prose_inference(
+                        active_client,
+                        &schemas,
+                        &dispatch,
+                        registry,
+                        &mut conversation,
+                        prose,
+                        mode,
+                        SectionProgress {
+                            execution,
+                            observer,
+                            section: &prompt.title,
+                            turns: turns.as_ref(),
+                            debug,
+                            completion_options: &completion_options,
+                        },
+                        Some(&counts),
+                        None,
+                    )
+                    .await
+                );
+                if let Some(text) = outcome.text {
+                    h1_try!(vm.set_global_string("reply", &text));
+                    reply = Some(text);
+                }
+            }
+        }
+    }
+    let var = h1_try!(vm.var());
+    let (bindings, models) = h1_try!(runtime.bindings());
+    vm.teardown(observer, &prompt.title);
+    Ok(LiveH1State {
+        bindings,
+        models,
+        var,
+        returned,
+    })
+}
+
 /// Walk the prompt's top-level sections, reporting each boundary, and return
 /// the run's result.
 ///
@@ -547,6 +882,10 @@ pub async fn run<'a>(
 async fn run_sections(
     prompt: &Prompt,
     bound: Option<&BoundPrompt>,
+    live_bindings: Option<&ToolBindings>,
+    live_models: Option<&ModelBindings>,
+    initial_var: Option<&serde_json::Value>,
+    live_path: bool,
     args: &str,
     registry: &ToolRegistry<'_>,
     shared_tools: &SharedTools,
@@ -565,8 +904,9 @@ async fn run_sections(
     // `tools.add`, and it rejects every undeclared alias.
     let empty_bindings = ToolBindings::default();
     let empty_models = ModelBindings::default();
-    let bindings = bound.map_or(&empty_bindings, BoundPrompt::bindings);
-    let models = bound.map_or(&empty_models, BoundPrompt::models);
+    let bindings =
+        live_bindings.unwrap_or_else(|| bound.map_or(&empty_bindings, BoundPrompt::bindings));
+    let models = live_models.unwrap_or_else(|| bound.map_or(&empty_models, BoundPrompt::models));
 
     // Resolve the tool-loop cap once: the prompt's declared budget, or the
     // runtime default when it declares none.
@@ -592,8 +932,9 @@ async fn run_sections(
         // grows, which is what the progress contract requires.
         observer.observe(execution, &section.name, detail::SECTION_STARTED);
 
-        let mut vm = match prompt.replay.as_ref() {
-            Some(shared) => SectionVm::new_with_shared_bindings(
+        let mut vm = match (live_path, prompt.replay.as_ref()) {
+            (true, replay) => SectionVm::new(replay, execution, observer, &section.name)?,
+            (false, Some(shared)) => SectionVm::new_with_shared_bindings(
                 shared,
                 bindings,
                 models,
@@ -601,9 +942,11 @@ async fn run_sections(
                 observer,
                 &section.name,
             )?,
-            None => SectionVm::new(None, execution, observer, &section.name)?,
+            (false, None) => SectionVm::new(None, execution, observer, &section.name)?,
         };
-        if let Err(error) = vm.inject_host(args, &sys, store, last_reply.as_deref()) {
+        if let Err(error) =
+            vm.inject_host_with_var(args, &sys, store, last_reply.as_deref(), initial_var)
+        {
             vm.teardown(observer, &section.name);
             return Err(error);
         }
@@ -627,6 +970,7 @@ async fn run_sections(
                 max_tool_iterations,
                 &turns,
                 bound,
+                None,
             );
         }
 
@@ -1141,6 +1485,7 @@ async fn run_execute_section(
             max_tool_iterations,
             turns,
             bound,
+            None,
         );
     }
 
