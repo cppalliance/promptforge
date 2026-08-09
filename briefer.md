@@ -15,7 +15,7 @@ tools.need("search", "Search the web and return a list of results.")
 tools.need("fetch", "Fetch a URL and return its main content as markdown.")
 ```
 
-Evidence-only recon port of the Briefer Step 2 packet (Report restored later).
+Briefer Step 2: fanout evidence packet, then a packet-bound Report.
 
 ## Main
 
@@ -86,8 +86,36 @@ return text
 * Public Record
 * Domain-Specific Vulnerabilities
 
+## Report
+
+```lua
+models.use("writer")
+var.evidence = store.inject("evidence.md")
+```
+
+Evidence packet:
+
+{{ var.evidence }}
+
+You are a research analyst describing the Subject using ONLY the evidence packet above. NEVER invent or fabricate facts. If a field is missing or marked UNKNOWN in the packet, write UNKNOWN - do not fill gaps from memory.
+
+Write a structured report with these sections (same names as the packet facets):
+
+- Subject Profile - founding, leadership, structure, stated mission, identifiers/HQ/scale when present
+- Domain Primer - three to five structural facts a reader needs for this domain
+- Domain Landscape - sector conditions, named external peers, ecosystem position, market structure class, upstream/downstream dependencies, extralegal costs, natural disaster exposure for the Subject only
+- Public Record - press, filings, controversy, reputation about the Subject entity
+- Domain-Specific Vulnerabilities - Subject-linked organizational or product risks with sources
+
+Plain markdown. No process commentary. No claims absent from the packet.
+
+```lua
+store.write("report.md", (reply:gsub("%s+$", "")) .. "\n\n*" .. sys.when .. " - " .. sys.model .. "*")
+return "Report complete."
+```
+
 ## Epilog
 
 ```lua
-return "Evidence complete."
+return "Report complete."
 ```
