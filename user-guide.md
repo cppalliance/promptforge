@@ -145,13 +145,13 @@ tools.add("fetch")
 Fetch {{ args }} and summarize its content in three bullet points.
 ````
 
-PromptForge parses the file and runs it directly. There is no separate bind phase. H1 is a live, single-pass program whose ordinary Lua and prose blocks run once in source order before any H2 section:
+PromptForge parses the file and runs it directly. H1 is a live, single-pass program whose ordinary Lua and prose blocks run once in source order before any H2 section:
 
 ```
 [lua] [prose] [lua] [prose] ... [lua]
 ```
 
-H1 Lua has `args`, `sys`, `var`, and `store`. `tools.need`, `models.need`, and `models.always` resolve immediately when execution reaches the call, so conditional declarations are natural and skipped branches resolve nothing. Model objects can call `model:infer()` in H1, H1 prose uses the model selected by `models.always`, and the final H1 `var` value seeds the sections. Non-final H1 prose makes one model round, dispatches any tool calls from that round, and then continues to the next Lua block. The final H1 prose runs the full tool loop until text is produced. A text response becomes `reply`; a tool-only non-final response leaves `reply` unchanged. H1 blocks are never replayed.
+H1 Lua has `args`, `sys`, `var`, and `store`. `tools.need`, `models.need`, and `models.always` resolve immediately when execution reaches the call, so conditional needs are natural and skipped branches resolve nothing. Model objects can call `model:infer()` in H1, H1 prose uses the model selected by `models.always`, and the final H1 `var` value seeds the sections. Non-final H1 prose makes one model round, dispatches any tool calls from that round, and then continues to the next Lua block. The final H1 prose runs the full tool loop until text is produced. A text response becomes `reply`; a tool-only non-final response leaves `reply` unchanged.
 
 The exact `lua shared` fence is a separate shared library chunk. It may appear anywhere between the H1 and the first section, but it is not part of the live H1 block sequence. Use it for functions that sections need, not for live capability resolution.
 
@@ -1665,7 +1665,7 @@ H1 and section block order is:
 [lua] [prose] [lua] [prose] ... [lua]
 ```
 
-Live H1 runs this sequence exactly once. There is no bind phase and its blocks are never replayed. The optional H1-only `lua shared` library is compiled as `Prompt.replay` and loaded into each fresh section VM before host injection. Host APIs and captured capability objects are unavailable while that library loads, so top-level host calls fail. Functions defined there can use host APIs later, when called from section code.
+Live H1 runs this sequence exactly once. The optional H1-only `lua shared` library is compiled as `Prompt.replay` and loaded into each fresh section VM before host injection. Host APIs and captured capability objects are unavailable while that library loads, so top-level host calls fail. Functions defined there can use host APIs later, when called from section code.
 
 ### Quick Reference Table
 

@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-`promptforge-core` turns one PromptForge Markdown source into a validated run result. A host creates one execution id, parses the source into `Prompt`, then supplies that prompt, one raw input string, a prepared tool picker, a complete live tool registry, a model catalog, a run-scoped virtual file store, and an observer to `execute::run` under the same id. There is no bind phase.
+`promptforge-core` turns one PromptForge Markdown source into a validated run result. A host creates one execution id, parses the source into `Prompt`, then supplies that prompt, one raw input string, a prepared tool picker, a complete live tool registry, a model catalog, a run-scoped virtual file store, and an observer to `execute::run` under the same id.
 
 The language requires one H1 and executes top-level H2 sections in file order. Ordinary H1 blocks alternate exactly like section blocks:
 
@@ -10,7 +10,7 @@ The language requires one H1 and executes top-level H2 sections in file order. O
 [lua] [prose] [lua] [prose] ... [lua]
 ```
 
-Those H1 blocks run live exactly once, in source order. `tools.need`, `models.need`, and `models.always` resolve when reached, H1 may call `model:infer`, and H1 `var` and store effects become run state. One exact `lua shared` fence may appear anywhere in H1. The parser compiles that separate library chunk as `Prompt.replay`; each section VM loads it before any host APIs or frozen capability objects are installed. The live H1 blocks are never replayed.
+Those H1 blocks run live exactly once, in source order. `tools.need`, `models.need`, and `models.always` resolve when reached, H1 may call `model:infer`, and H1 `var` and store effects become run state. One exact `lua shared` fence may appear anywhere in H1. The parser compiles that separate library chunk as `Prompt.replay`; each section VM loads it before any host APIs or frozen capability objects are installed.
 
 Each section is an ordered sequence of alternating `lua` and prose blocks sharing one isolated Lua 5.4 VM and one accumulating conversation. Non-final prose is single-shot; the final prose block runs the full tool loop. Lua may call `model:infer`, `execute`, or `jump` for explicit inference and control flow. No Lua memory crosses sections; captured H1 `var`, `StoreRef`, and the previous section's `reply` text are the intentional mutable channels.
 
@@ -28,7 +28,7 @@ A prompt declares tools, models, context, thinking, and temperature. The host su
 
 ## Key design choices
 
-1. **A run is a free function over caller-owned resources.** Parse, then `execute::run`. No bind phase, executor object, or process-global run state. The caller owns the execution id, prompt, picker, live tools, model catalog, store, observer, optional gateway client, and optional `DebugCapture`.
+1. **A run is a free function over caller-owned resources.** Parse, then `execute::run`. The caller owns the execution id, prompt, picker, live tools, model catalog, store, observer, optional gateway client, and optional `DebugCapture`; there is no executor object or process-global run state.
 
 2. **One required H1 is the semantic prompt boundary and a live program.** Frontmatter is followed by exactly one non-empty H1. Its ordinary Lua and prose blocks execute exactly once before the first H2. Capability resolution, inference, store access, and serializable `var` mutation are available there.
 
@@ -64,7 +64,7 @@ A prompt declares tools, models, context, thinking, and temperature. The host su
 
 16. **Prompts resolve semantic needs live under local aliases.** H1 `tools.need(alias, description)` and `models.need(alias, description, opts?)` use case-sensitive aliases matching `[A-Za-z][A-Za-z0-9_-]{0,63}`. Each call immediately asks the prepared picker and returns a frozen Tool or Model object. Optional model `opts`: `context`, `thinking`, `temperature`, `max_tokens`. A need exposes nothing and selects no model. H2 `tools.add` scopes tools; H1 `tools.always` is for every model-facing section. H2 `models.use` selects at most one captured model; H1 `models.always` is the prompt-wide default. Non-empty model-facing prose without either fails with `Error::ModelRequired`.
 
-17. **Live H1 resolution captures one-to-one maps during execution.** Conditional needs resolve only when their branch runs. Duplicate live IDs, duplicate aliases, two aliases selecting one tool ID, and selected IDs absent from the registry fail at the resolving call. Rust installs the captured handles directly into every section VM, with no declaration replay or embedding work. Effective-scope near-duplicates fail before a model sees tools.
+17. **Live H1 resolution captures one-to-one maps during execution.** Conditional needs resolve only when their branch runs. Duplicate live IDs, duplicate aliases, two aliases selecting one tool ID, and selected IDs absent from the registry fail at the resolving call. Rust installs the captured handles directly into every section VM. Effective-scope near-duplicates fail before a model sees tools.
 
 18. **Per-VM `tools.calls` counts measure model behaviour.** Seeded at 0 for every in-scope alias. Incremented when dispatch is attempted. Unknown keys are hard errors. Out-of-scope model tool calls are `Error::OutOfScopeToolCall`. Counts are not rolled up across fanout arms.
 

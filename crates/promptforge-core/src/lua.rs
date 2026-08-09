@@ -85,7 +85,7 @@ pub struct ToolBinding {
     id: ToolId,
     /// Author override for the model-facing schema description.
     ///
-    /// Capability text in [`Self::description`] stays the bind-time need
+    /// Capability text in [`Self::description`] stays the live H1 need
     /// string. When set, [`crate::execute`] advertises this instead of the
     /// registry tool's default description.
     model_description: Option<String>,
@@ -3115,7 +3115,7 @@ mod tests {
         }
     }
 
-    fn resolve_live_tool_declarations(
+    fn execute_live_tool_needs(
         source: &LuaProgram,
         resolver: &dyn ToolResolver,
         _execution: &str,
@@ -3178,18 +3178,17 @@ mod tests {
             ))
         };
         let bindings =
-            resolve_live_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
-                .expect("fixture declarations must resolve");
+            execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+                .expect("fixture needs must resolve");
         (shared, bindings)
     }
 
     #[test]
     fn direct_output_is_absent_in_every_executable_lua_vm() {
-        let unbound_shared =
-            program("assert(print == nil); assert(warn == nil); log('unbound shared')");
-        let unbound = SectionVm::new(Some(&unbound_shared), EXECUTION, &NullObserver, "Section")
-            .expect("unbound shared VM must not expose direct output");
-        unbound.teardown(&NullObserver, "Section");
+        let library = program("assert(print == nil); assert(warn == nil); log('library load')");
+        let library_vm = SectionVm::new(Some(&library), EXECUTION, &NullObserver, "Section")
+            .expect("library VM must not expose direct output");
+        library_vm.teardown(&NullObserver, "Section");
 
         let shared = program(
             "assert(print == nil)\n\
@@ -3198,11 +3197,11 @@ mod tests {
         );
         let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
         let bindings =
-            resolve_live_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
-                .expect("binding VM must not expose direct output");
+            execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+                .expect("live H1 VM must not expose direct output");
         let mut vm =
             section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
-                .expect("replay VM must not expose direct output");
+                .expect("section VM must not expose direct output");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
         vm.run_prologue(
@@ -3597,12 +3596,12 @@ mod tests {
         );
         let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
         let bindings =
-            resolve_live_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+            execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
                 .expect("tools.need must return an inspectable Tool object");
         assert_eq!(bindings.bindings()[0].alias(), "search");
 
         let vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
-            .expect("replay must return the same inspectable Tool object");
+            .expect("section install must expose the same inspectable Tool object");
         vm.teardown(&NullObserver, "Section");
     }
 
@@ -3617,15 +3616,10 @@ mod tests {
             "nonasciié",
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-a",
         ] {
-            let declaration = program(&format!("tools.need({alias:?}, 'capability')"));
-            let error = resolve_live_tool_declarations(
-                &declaration,
-                &resolver,
-                EXECUTION,
-                &NullObserver,
-                "Prompt",
-            )
-            .expect_err("invalid aliases must be rejected");
+            let need = program(&format!("tools.need({alias:?}, 'capability')"));
+            let error =
+                execute_live_tool_needs(&need, &resolver, EXECUTION, &NullObserver, "Prompt")
+                    .expect_err("invalid aliases must be rejected");
             assert!(
                 error.to_string().contains("invalid tool alias"),
                 "wrong error for {alias:?}: {error}"
@@ -3633,22 +3627,16 @@ mod tests {
         }
 
         for valid in ["Upper", "has-dash", &format!("A{}", "2".repeat(63))] {
-            let declaration = program(&format!("tools.need({valid:?}, 'capability')"));
-            resolve_live_tool_declarations(
-                &declaration,
-                &resolver,
-                EXECUTION,
-                &NullObserver,
-                "Prompt",
-            )
-            .expect("planned alias forms must be valid");
+            let need = program(&format!("tools.need({valid:?}, 'capability')"));
+            execute_live_tool_needs(&need, &resolver, EXECUTION, &NullObserver, "Prompt")
+                .expect("planned alias forms must be valid");
         }
     }
 
     #[test]
-    fn binding_rejects_duplicate_aliases() {
+    fn live_h1_rejects_duplicate_aliases() {
         let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
-        let error = resolve_live_tool_declarations(
+        let error = execute_live_tool_needs(
             &program("tools.need('search', 'one'); tools.need('search', 'two')"),
             &resolver,
             EXECUTION,
@@ -3665,7 +3653,7 @@ mod tests {
     #[test]
     fn duplicate_alias_error_cannot_be_suppressed_with_lua_pcall() {
         let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
-        let error = resolve_live_tool_declarations(
+        let error = execute_live_tool_needs(
             &program("tools.need('search', 'one'); pcall(tools.need, 'search', 'two')"),
             &resolver,
             EXECUTION,
@@ -3686,7 +3674,7 @@ mod tests {
             "tools.always('missing')",
             "tools.need('search', 'one'); tools.always('search'); tools.always('search')",
         ] {
-            let error = resolve_live_tool_declarations(
+            let error = execute_live_tool_needs(
                 &program(source),
                 &resolver,
                 EXECUTION,
@@ -3772,7 +3760,7 @@ mod tests {
                 },
             ))
         };
-        let h1_error = resolve_live_tool_declarations(
+        let h1_error = execute_live_tool_needs(
             &program(
                 "local search = tools.need('search', 'search the web'); \
                  tools.add(search)",
@@ -4642,8 +4630,8 @@ stack traceback:
             panic!("a declaration-free program must not resolve {description:?}")
         };
         let bindings =
-            resolve_live_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
-                .expect("a declaration-free shared program must bind");
+            execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+                .expect("a need-free H1 program must execute");
         assert!(bindings.bindings().is_empty());
         let mut vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Test")
             .expect("empty captured bindings must install");
