@@ -4,13 +4,12 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, ensure};
 use promptforge_core::Error;
-use promptforge_core::bind::bind_prompt;
 use promptforge_core::client::GatewayClient;
-use promptforge_core::execute::{RunOptions, run};
+use promptforge_core::execute::{ResolutionContext, RunOptions, run};
 use promptforge_core::observe::{Observer, detail};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
-use promptforge_core::tools::{Tool, ToolId, ToolRegistry};
+use promptforge_core::tools::{Tool, ToolId};
 use promptforge_tool_picker::{
     Catalog, Config, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
@@ -18,7 +17,6 @@ use serde_json::{Value, json};
 
 const TEXT_EXECUTION: &str = "real-model-text";
 const TOOL_EXECUTION: &str = "real-model-tool-call";
-const TOOL_ALIAS: &str = "ask_fixture";
 const TOOL_CAPABILITY: &str = "Return one deterministic fixture value for one supplied string.";
 const TOOL_INPUT: &str = "promptforge-probe";
 const TOOL_RESULT_MARKER: &str = "PF_TOOL_RESULT_42";
@@ -133,20 +131,15 @@ async fn run_text(base_url: &str, api_key: &str) -> Result<()> {
         .context("parse execution/real-text.md")?;
     let picker = ToolPicker::build(Catalog::default(), Config::default())
         .context("build empty tool picker")?;
-    let registry = ToolRegistry::new(std::iter::empty());
-    let bound = bind_prompt(
-        prompt,
-        &picker,
-        &registry,
-        &promptforge_core::model::pinned_qwen_dev_catalog("writer"),
-        TEXT_EXECUTION,
-        &observer,
-    )
-    .context("bind execution/real-text.md")?;
+    let models = promptforge_core::model::pinned_qwen_dev_catalog("writer");
     let client = GatewayClient::new(base_url, api_key);
     let result = run(
-        &bound,
+        &prompt,
         "",
+        ResolutionContext {
+            picker: &picker,
+            models: &models,
+        },
         &[],
         &StoreRef::memory(),
         RunOptions {
@@ -195,28 +188,16 @@ async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
     )
     .context("build deterministic one-tool fixture picker")?;
     let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];
-    let registry = ToolRegistry::new(tools.iter().map(AsRef::as_ref));
-    let bound = bind_prompt(
-        prompt,
-        &picker,
-        &registry,
-        &promptforge_core::model::pinned_qwen_dev_catalog("writer"),
-        TOOL_EXECUTION,
-        &observer,
-    )
-    .context("bind execution/real-tool-call.md")?;
-    ensure!(
-        bound
-            .alias_to_id()
-            .get(TOOL_ALIAS)
-            .is_some_and(|id| id == &tool.id()),
-        "fixture alias did not bind to the live string tool"
-    );
+    let models = promptforge_core::model::pinned_qwen_dev_catalog("writer");
 
     let client = GatewayClient::new(base_url, api_key);
     let result = run(
-        &bound,
+        &prompt,
         "",
+        ResolutionContext {
+            picker: &picker,
+            models: &models,
+        },
         &tools,
         &StoreRef::memory(),
         RunOptions {

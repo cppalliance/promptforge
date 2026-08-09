@@ -70,8 +70,8 @@ fn failing_lua_prompt(name: &str) -> String {
 
 fn capability_prompt(name: &str, capability: &str) -> String {
     format!(
-        "---\nname: {name}\ndescription: Capability binding fixture\npromptforge: 1\n---\n\n\
-         # Capability prompt\n\n```lua shared\ntools.need(\"fetch\", \"{capability}\")\n```\n\n\
+        "---\nname: {name}\ndescription: Live capability fixture\npromptforge: 1\n---\n\n\
+         # Capability prompt\n\n```lua\ntools.need(\"fetch\", \"{capability}\")\n```\n\n\
          ## Main\n\n```lua\ntools.add(\"fetch\")\n```\n\n```lua\nreturn \"bound\"\n```\n"
     )
 }
@@ -179,7 +179,7 @@ async fn the_runner_runs_the_named_prompt_and_reports_the_value_twice() {
 }
 
 #[tokio::test]
-async fn the_runner_reuses_its_returned_run_id_for_parse_bind_and_execution() {
+async fn the_runner_reuses_its_returned_run_id_for_parse_and_execution() {
     let (_dir, server) = server();
     let catalog = server.catalog.load();
     let entry = catalog
@@ -206,7 +206,7 @@ async fn the_runner_reuses_its_returned_run_id_for_parse_bind_and_execution() {
     assert!(!records.is_empty());
     assert!(
         records.iter().all(|(execution, _, _)| execution == run_id),
-        "parse, bind, and execution must reuse the returned run id: {records:#?}"
+        "parse and execution must reuse the returned run id: {records:#?}"
     );
     let details = records
         .iter()
@@ -215,8 +215,6 @@ async fn the_runner_reuses_its_returned_run_id_for_parse_bind_and_execution() {
     for expected in [
         detail::PARSE_STARTED,
         detail::PARSE_SUCCEEDED,
-        detail::TOOL_BINDING_STARTED,
-        detail::TOOL_BINDING_SUCCEEDED,
         detail::RUN_STARTED,
         detail::RUN_SUCCEEDED,
     ] {
@@ -228,7 +226,7 @@ async fn the_runner_reuses_its_returned_run_id_for_parse_bind_and_execution() {
 }
 
 #[tokio::test]
-async fn the_runner_binds_and_executes_a_bound_prompt_against_the_shared_registry() {
+async fn the_runner_resolves_and_executes_against_the_shared_registry() {
     let dir = tempfile::tempdir().expect("create a temporary prompts directory");
     write(
         dir.path(),
@@ -258,7 +256,7 @@ async fn the_runner_binds_and_executes_a_bound_prompt_against_the_shared_registr
     let result = server
         .dispatch(call("run_prompt", json!({ "prompt": "bound" })))
         .await
-        .expect("binding and running are not protocol errors");
+        .expect("resolution and running are not protocol errors");
 
     assert_eq!(result.is_error, Some(false));
     assert_eq!(text_of(&result), "bound");
@@ -266,7 +264,7 @@ async fn the_runner_binds_and_executes_a_bound_prompt_against_the_shared_registr
 }
 
 #[tokio::test]
-async fn an_unbindable_capability_fails_before_admission_and_execution() {
+async fn an_unresolvable_capability_fails_during_execution() {
     let dir = tempfile::tempdir().expect("create a temporary prompts directory");
     write(
         dir.path(),
@@ -292,17 +290,6 @@ async fn an_unbindable_capability_fails_before_admission_and_execution() {
         Arc::new(Retrieval::idle()),
         tools,
     );
-    let mut slots = Vec::new();
-    for _ in 0..4 {
-        slots.push(
-            server
-                .registry
-                .admit()
-                .await
-                .expect("all fixture run slots start free"),
-        );
-    }
-
     let result = server
         .dispatch(call("run_prompt", json!({ "prompt": "absent" })))
         .await
@@ -315,7 +302,6 @@ async fn an_unbindable_capability_fails_before_admission_and_execution() {
         "{}",
         text_of(&result)
     );
-    drop(slots);
 }
 
 #[tokio::test]

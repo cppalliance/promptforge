@@ -145,7 +145,7 @@ tools.add("fetch")
 Fetch {{ args }} and summarize its content in three bullet points.
 ````
 
-H1 is a live, single-pass program. Its ordinary Lua and prose blocks run once in source order before any H2 section:
+PromptForge parses the file and runs it directly. There is no separate bind phase. H1 is a live, single-pass program whose ordinary Lua and prose blocks run once in source order before any H2 section:
 
 ```
 [lua] [prose] [lua] [prose] ... [lua]

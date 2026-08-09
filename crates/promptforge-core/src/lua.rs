@@ -35,14 +35,13 @@ use mlua::{
 use serde_json::Value as Json;
 use serde_json::json;
 
-use crate::bind::RuntimeResolution;
 pub use crate::lua_models::{LuaModelHandle, ModelInferHook};
 use crate::lua_models::{
-    ModelBindingState, ModelRuntime, close_model_scope, finish_model_replay, install_bind_models,
-    install_h2_models, install_live_models, install_replay_models,
+    ModelBindingState, ModelRuntime, close_model_scope, install_h2_models, install_live_models,
 };
 use crate::model::{ModelBinding, ModelBindings, ModelResolver};
 use crate::observe::{Observer, detail};
+use crate::resolve::RuntimeResolution;
 use crate::store::StoreRef;
 use crate::tools::{ToolId, ToolRegistry};
 use crate::{Error, Result};
@@ -58,9 +57,9 @@ const LUA_LOG_CHARACTER_LIMIT: usize = 256;
 
 /// Resolves one plain-English capability description to one stable live tool.
 ///
-/// This is the deterministic seam used by Lua declaration binding. It keeps
-/// core independent of any concrete picker implementation while allowing a
-/// caller to supply a fixed resolver in tests or adapt a picker later.
+/// This is the deterministic seam used by live H1 resolution. It keeps core
+/// independent of any concrete picker implementation while allowing a caller
+/// to supply a fixed resolver in tests.
 pub trait ToolResolver: Send + Sync {
     /// Resolves `description` to a stable tool identity.
     ///
@@ -93,6 +92,16 @@ pub struct ToolBinding {
 }
 
 impl ToolBinding {
+    #[cfg(test)]
+    pub(crate) fn for_test(alias: &str, description: &str, id: ToolId) -> Self {
+        Self {
+            alias: alias.to_owned(),
+            description: description.to_owned(),
+            id,
+            model_description: None,
+        }
+    }
+
     /// Returns the exact prompt-local alias.
     #[must_use]
     pub fn alias(&self) -> &str {
@@ -374,15 +383,19 @@ pub(crate) fn resolve_section_target(value: Value) -> mlua::Result<String> {
     }
 }
 
-/// Immutable prompt-level tool bindings produced by one H1 declaration pass.
+/// Immutable prompt-level tool bindings produced by live H1 execution.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolBindings {
     bindings: Vec<ToolBinding>,
     always: Vec<String>,
-    declarations: Vec<ToolDeclaration>,
 }
 
 impl ToolBindings {
+    #[cfg(test)]
+    pub(crate) fn for_test(bindings: Vec<ToolBinding>, always: Vec<String>) -> Self {
+        Self { bindings, always }
+    }
+
     /// Returns bindings in declaration order.
     #[must_use]
     pub fn bindings(&self) -> &[ToolBinding] {
@@ -514,21 +527,13 @@ pub struct ClosedScopes {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolPhase {
-    Replay,
     H2,
     Closed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ToolDeclaration {
-    Need { alias: String, description: String },
-    Always(String),
 }
 
 #[derive(Debug)]
 pub(crate) struct ToolRuntime {
     phase: ToolPhase,
-    declaration_index: usize,
     added: Vec<String>,
     /// Per-alias author overrides for model-facing schema descriptions.
     description_overrides: BTreeMap<String, String>,
@@ -747,7 +752,6 @@ fn map_chunk_line_to_absolute(message: &str, source_line: u32, location: &str) -
 struct BindingState {
     bindings: Vec<ToolBinding>,
     always: Vec<String>,
-    declarations: Vec<ToolDeclaration>,
     callback_error: Option<Error>,
 }
 
@@ -817,13 +821,8 @@ impl LiveBindingProducer {
             ToolBindings {
                 bindings: tools.bindings.clone(),
                 always: tools.always.clone(),
-                declarations: tools.declarations.clone(),
             },
-            ModelBindings::from_parts(
-                models.bindings.clone(),
-                models.declarations.clone(),
-                models.always.clone(),
-            ),
+            ModelBindings::from_parts(models.bindings.clone(), models.always.clone()),
         ))
     }
 }
@@ -927,9 +926,6 @@ fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                     id,
                     model_description: None,
                 });
-                bindings
-                    .declarations
-                    .push(ToolDeclaration::Need { alias, description });
                 Ok(handle)
             },
         )
@@ -959,8 +955,7 @@ fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                     "tools.always alias {alias:?} was recorded more than once"
                 )));
             }
-            bindings.always.push(alias.clone());
-            bindings.declarations.push(ToolDeclaration::Always(alias));
+            bindings.always.push(alias);
             Ok(())
         })
         .map_err(|error| Error::Lua(error.to_string()))?;
@@ -981,277 +976,6 @@ fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
     lua.globals()
         .raw_set("tools", tools)
         .map_err(|error| Error::Lua(error.to_string()))
-}
-
-/// Executes an H1 shared program and freezes tool declarations only.
-///
-/// Prefer [`bind_shared_declarations`] when the program may also call
-/// `models.need`. This wrapper installs a model table that reports
-/// [`Error::ModelAbsent`] if `models.need` is invoked.
-///
-/// # Errors
-/// Returns any error from [`ToolResolver::resolve`] unchanged and
-/// [`Error::DuplicateAlias`] for a repeated `tools.need` alias. Returns
-/// [`Error::Lua`] for invalid aliases, out-of-order or duplicate
-/// `tools.always` calls, Lua failures, or a non-nil top-level return.
-///
-/// # Examples
-/// ```
-/// use promptforge_core::lua::{LuaProgram, bind_tool_declarations};
-/// use promptforge_core::observe::NullObserver;
-/// use promptforge_core::tools::ToolId;
-///
-/// let shared = LuaProgram::compile(
-///     "tools.need('Web-Search', 'search the web'); tools.always('Web-Search')",
-///     "shared",
-///     1,
-///     "example-run",
-///     &NullObserver,
-///     "Example",
-/// )?;
-/// let resolver = |_: &str| Ok(ToolId::new("example", "search"));
-/// let bindings =
-///     bind_tool_declarations(&shared, &resolver, "example-run", &NullObserver, "Example")?;
-/// assert_eq!(bindings.bindings()[0].alias(), "Web-Search");
-/// assert_eq!(bindings.always(), ["Web-Search"]);
-/// # Ok::<(), promptforge_core::Error>(())
-/// ```
-pub fn bind_tool_declarations(
-    program: &LuaProgram,
-    resolver: &dyn ToolResolver,
-    execution: &str,
-    observer: &dyn Observer,
-    section: &str,
-) -> Result<ToolBindings> {
-    let model_resolver = |description: &str, _: &crate::model::ModelNeedOpts| {
-        Err(Error::ModelAbsent {
-            capability: description.to_owned(),
-        })
-    };
-    let (tools, _) = bind_shared_declarations(
-        program,
-        resolver,
-        &model_resolver,
-        execution,
-        observer,
-        section,
-    )?;
-    Ok(tools)
-}
-
-/// Executes an H1 shared program and freezes tool and model declarations.
-///
-/// In binding mode `tools.need` / `tools.always` and `models.need(alias,
-/// description, opts?)` resolve capabilities. `tools.add` and `models.use` are
-/// unavailable. Aliases are case-sensitive ASCII identifiers matching
-/// `[A-Za-z][A-Za-z0-9_-]{0,63}`.
-///
-/// # Errors
-/// Returns resolver errors unchanged, [`Error::DuplicateAlias`] /
-/// [`Error::DuplicateModelAlias`] for repeated aliases, and [`Error::Lua`] for
-/// invalid aliases, Lua failures, or a non-nil top-level return.
-pub fn bind_shared_declarations(
-    program: &LuaProgram,
-    tool_resolver: &dyn ToolResolver,
-    model_resolver: &dyn ModelResolver,
-    execution: &str,
-    observer: &dyn Observer,
-    section: &str,
-) -> Result<(ToolBindings, ModelBindings)> {
-    observer.observe(execution, section, detail::TOOL_BINDING_STARTED);
-    observer.observe(execution, section, detail::MODEL_BINDING_STARTED);
-    let result = bind_shared_declarations_inner(
-        program,
-        tool_resolver,
-        model_resolver,
-        execution,
-        observer,
-        section,
-    );
-    let ok = result.is_ok();
-    observer.observe(
-        execution,
-        section,
-        if ok {
-            detail::TOOL_BINDING_SUCCEEDED
-        } else {
-            detail::TOOL_BINDING_FAILED
-        },
-    );
-    observer.observe(
-        execution,
-        section,
-        if ok {
-            detail::MODEL_BINDING_SUCCEEDED
-        } else {
-            detail::MODEL_BINDING_FAILED
-        },
-    );
-    result
-}
-
-#[expect(
-    clippy::too_many_lines,
-    reason = "one scoped Lua table installs the declaration-mode tool and model operations and freezes their shared state"
-)]
-fn bind_shared_declarations_inner(
-    program: &LuaProgram,
-    resolver: &dyn ToolResolver,
-    model_resolver: &dyn ModelResolver,
-    execution: &str,
-    observer: &dyn Observer,
-    section: &str,
-) -> Result<(ToolBindings, ModelBindings)> {
-    let lua = Lua::new_with(
-        StdLib::STRING | StdLib::TABLE | StdLib::MATH,
-        LuaOptions::default(),
-    )
-    .map_err(|error| Error::Lua(error.to_string()))?;
-    harden(&lua)?;
-    install_instruction_budget(&lua);
-    let state = Arc::new(Mutex::new(BindingState::default()));
-    let model_state = Arc::new(Mutex::new(ModelBindingState::default()));
-
-    let returned = lua.scope(|scope| {
-        install_log(&lua, scope, execution, observer, section)
-            .map_err(|error| mlua::Error::external(error.to_string()))?;
-        let tools = lua.create_table()?;
-
-        let needs = Arc::clone(&state);
-        let need = scope.create_function(
-            move |_, (alias, description): (String, String)| -> mlua::Result<LuaToolHandle> {
-                validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
-                let mut declarations = needs
-                    .lock()
-                    .map_err(|_| mlua::Error::external("tool binding recorder was poisoned"))?;
-                if declarations
-                    .bindings
-                    .iter()
-                    .any(|binding| binding.alias == alias)
-                {
-                    if declarations.callback_error.is_none() {
-                        declarations.callback_error = Some(Error::DuplicateAlias {
-                            alias: alias.clone(),
-                        });
-                    }
-                    return Err(mlua::Error::external("duplicate tool alias"));
-                }
-                let id = match resolver.resolve(&description) {
-                    Ok(id) => id,
-                    Err(error) => {
-                        if declarations.callback_error.is_none() {
-                            declarations.callback_error = Some(error);
-                        }
-                        return Err(mlua::Error::external("tool capability resolution failed"));
-                    }
-                };
-                let handle = LuaToolHandle::from_binding(&alias, &description, &id);
-                declarations.bindings.push(ToolBinding {
-                    alias: alias.clone(),
-                    description: description.clone(),
-                    id,
-                    model_description: None,
-                });
-                declarations
-                    .declarations
-                    .push(ToolDeclaration::Need { alias, description });
-                Ok(handle)
-            },
-        )?;
-        tools.set("need", need)?;
-
-        let prompt_wide = Arc::clone(&state);
-        let always = scope.create_function(move |_, alias: String| -> mlua::Result<()> {
-            validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
-            let mut declarations = prompt_wide
-                .lock()
-                .map_err(|_| mlua::Error::external("tool binding recorder was poisoned"))?;
-            if !declarations
-                .bindings
-                .iter()
-                .any(|binding| binding.alias == alias)
-            {
-                return Err(mlua::Error::external(format!(
-                    "tools.always alias {alias:?} was not declared by tools.need"
-                )));
-            }
-            if declarations
-                .always
-                .iter()
-                .any(|existing| existing == &alias)
-            {
-                return Err(mlua::Error::external(format!(
-                    "tools.always alias {alias:?} was recorded more than once"
-                )));
-            }
-            declarations.always.push(alias.clone());
-            declarations
-                .declarations
-                .push(ToolDeclaration::Always(alias));
-            Ok(())
-        })?;
-        tools.set("always", always)?;
-        let add = scope.create_function(|_, _: MultiValue| -> mlua::Result<()> {
-            Err(mlua::Error::external(
-                "tools.add is only available during H2 recording",
-            ))
-        })?;
-        tools.set("add", add)?;
-        lua.globals().raw_set("tools", tools)?;
-        install_bind_models(&lua, scope, model_resolver, &model_state)
-            .map_err(|error| mlua::Error::external(error.to_string()))?;
-        let result = program
-            .load(&lua)
-            .map_err(|error| mlua::Error::external(error.to_string()))?
-            .call(());
-        finish_log_phase(&lua, result)
-    });
-    let returned = match returned {
-        Ok(returned) => returned,
-        Err(lua_error) => {
-            let tool_error = state
-                .lock()
-                .map_err(|_| Error::Lua("tool binding recorder was poisoned".to_owned()))?
-                .callback_error
-                .take();
-            let model_error = model_state
-                .lock()
-                .map_err(|_| Error::Lua("model binding recorder was poisoned".to_owned()))?
-                .callback_error
-                .take();
-            return Err(tool_error
-                .or(model_error)
-                .unwrap_or_else(|| Error::Lua(lua_error.to_string())));
-        }
-    };
-    let state = Arc::try_unwrap(state)
-        .map_err(|_| Error::Lua("tool binding recorder remained shared".to_owned()))?
-        .into_inner()
-        .map_err(|_| Error::Lua("tool binding recorder was poisoned".to_owned()))?;
-    let model_state = Arc::try_unwrap(model_state)
-        .map_err(|_| Error::Lua("model binding recorder remained shared".to_owned()))?
-        .into_inner()
-        .map_err(|_| Error::Lua("model binding recorder was poisoned".to_owned()))?;
-    if let Some(error) = state.callback_error.or(model_state.callback_error) {
-        return Err(error);
-    }
-    if scalar_return(returned)?.is_some() {
-        return Err(Error::Lua(
-            "H1 tool declaration program must not return a value".to_owned(),
-        ));
-    }
-    Ok((
-        ToolBindings {
-            bindings: state.bindings,
-            always: state.always,
-            declarations: state.declarations,
-        },
-        ModelBindings::from_parts(
-            model_state.bindings,
-            model_state.declarations,
-            model_state.always,
-        ),
-    ))
 }
 
 fn validate_alias(alias: &str) -> Result<()> {
@@ -1284,7 +1008,7 @@ fn validate_alias(alias: &str) -> Result<()> {
 /// hardening, host injection, instruction accounting, and report delivery on
 /// the one owned path. Each section must receive a new instance; dropping it
 /// destroys all Lua memory belonging to that section. Once Lua allocation
-/// succeeds, construction, shared-load, and declaration-replay failures cross
+/// succeeds, construction, shared-load, and captured-binding failures cross
 /// the same explicit observed teardown boundary as later lifecycle failures.
 ///
 /// # Examples
@@ -1368,13 +1092,12 @@ impl SectionVm {
             bound_tools: ToolBindings::default(),
             bound_models: ModelBindings::default(),
             tool_runtime: Arc::new(Mutex::new(ToolRuntime {
-                phase: ToolPhase::Replay,
-                declaration_index: 0,
+                phase: ToolPhase::H2,
                 added: Vec::new(),
                 description_overrides: BTreeMap::new(),
                 generation: 0,
             })),
-            model_runtime: Arc::new(Mutex::new(ModelRuntime::new_replay())),
+            model_runtime: Arc::new(Mutex::new(ModelRuntime::new())),
             counts_slot: Arc::new(Mutex::new(None)),
             jump_slot: Arc::new(Mutex::new(None)),
             sys_live: Arc::new(Mutex::new(None)),
@@ -1459,165 +1182,6 @@ impl SectionVm {
                 .map_err(|error| Error::Lua(error.to_string()))?;
         }
         Ok(())
-    }
-
-    /// Creates a section VM and replays frozen H1 tool declarations exactly.
-    ///
-    /// Model declarations are empty; use [`Self::new_with_shared_bindings`] when
-    /// the prompt also declares `models.need`.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the VM cannot be built, shared execution fails,
-    /// a declaration differs from `bindings`, or shared code returns a value.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge_core::lua::{
-    ///     LuaProgram, SectionVm, bind_tool_declarations,
-    /// };
-    /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::tools::ToolId;
-    ///
-    /// let shared = LuaProgram::compile(
-    ///     "tools.need('search', 'search the web')",
-    ///     "shared",
-    ///     1,
-    ///     "example-run",
-    ///     &NullObserver,
-    ///     "Example",
-    /// )?;
-    /// let resolver = |_: &str| Ok(ToolId::new("example", "search"));
-    /// let bindings =
-    ///     bind_tool_declarations(&shared, &resolver, "example-run", &NullObserver, "Example")?;
-    /// let vm =
-    ///     SectionVm::new_with_bindings(
-    ///         &shared, &bindings, "example-run", &NullObserver, "Example"
-    ///     )?;
-    /// vm.teardown(&NullObserver, "Example");
-    /// # Ok::<(), promptforge_core::Error>(())
-    /// ```
-    pub fn new_with_bindings(
-        shared: &LuaProgram,
-        bindings: &ToolBindings,
-        execution: &str,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<Self> {
-        Self::new_with_shared_bindings(
-            shared,
-            bindings,
-            &ModelBindings::default(),
-            execution,
-            observer,
-            section,
-        )
-    }
-
-    /// Creates a section VM and replays frozen H1 tool and model declarations.
-    ///
-    /// The shared program runs again so its library definitions populate this
-    /// section's isolated environment. During that run, `tools.need`,
-    /// `tools.always`, and `models.need` must reproduce the binding pass
-    /// call-for-call. No resolver is consulted.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the VM cannot be built, shared execution fails,
-    /// a declaration differs from the frozen bindings, or shared code returns a
-    /// value.
-    pub fn new_with_shared_bindings(
-        shared: &LuaProgram,
-        tools: &ToolBindings,
-        models: &ModelBindings,
-        execution: &str,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<Self> {
-        let lua = Lua::new_with(
-            StdLib::STRING | StdLib::TABLE | StdLib::MATH,
-            LuaOptions::default(),
-        )
-        .map_err(|error| Error::Lua(error.to_string()))?;
-        let runtime = Arc::new(Mutex::new(ToolRuntime {
-            phase: ToolPhase::Replay,
-            declaration_index: 0,
-            added: Vec::new(),
-            description_overrides: BTreeMap::new(),
-            generation: 0,
-        }));
-        let model_runtime = Arc::new(Mutex::new(ModelRuntime::new_replay()));
-        let vm = Self {
-            execution: execution.to_owned(),
-            lua,
-            bound_tools: tools.clone(),
-            bound_models: models.clone(),
-            tool_runtime: Arc::clone(&runtime),
-            model_runtime: Arc::clone(&model_runtime),
-            counts_slot: Arc::new(Mutex::new(None)),
-            jump_slot: Arc::new(Mutex::new(None)),
-            sys_live: Arc::new(Mutex::new(None)),
-            store: None,
-            host_injected: false,
-        };
-        if let Err(error) = harden(&vm.lua) {
-            return vm.construction_failed(error, observer, section);
-        }
-        install_instruction_budget(&vm.lua);
-        if let Err(error) = install_replay_tools(&vm.lua, tools, &runtime) {
-            return vm.construction_failed(error, observer, section);
-        }
-        if let Err(error) = install_replay_models(&vm.lua, models, &model_runtime) {
-            return vm.construction_failed(error, observer, section);
-        }
-        observer.observe(execution, section, detail::LUA_SHARED_LOAD_STARTED);
-        observer.observe(execution, section, detail::TOOL_REPLAY_STARTED);
-        observer.observe(execution, section, detail::MODEL_REPLAY_STARTED);
-        let result = vm
-            .run_loaded_with_log(shared, observer, section)
-            .and_then(|returned| {
-                if returned.is_some() {
-                    Err(Error::Lua(
-                        "H1 tool declaration program must not return a value".to_owned(),
-                    ))
-                } else {
-                    finish_replay(&vm)?;
-                    let model_runtime = vm.model_runtime.lock().map_err(|_| {
-                        Error::Lua("model declaration runtime was poisoned".to_owned())
-                    })?;
-                    finish_model_replay(&vm.bound_models, &model_runtime)
-                }
-            });
-        let ok = result.is_ok();
-        observer.observe(
-            execution,
-            section,
-            if ok {
-                detail::TOOL_REPLAY_SUCCEEDED
-            } else {
-                detail::TOOL_REPLAY_FAILED
-            },
-        );
-        observer.observe(
-            execution,
-            section,
-            if ok {
-                detail::MODEL_REPLAY_SUCCEEDED
-            } else {
-                detail::MODEL_REPLAY_FAILED
-            },
-        );
-        observer.observe(
-            execution,
-            section,
-            if ok {
-                detail::LUA_SHARED_LOAD_SUCCEEDED
-            } else {
-                detail::LUA_SHARED_LOAD_FAILED
-            },
-        );
-        match result {
-            Ok(()) => Ok(vm),
-            Err(error) => vm.construction_failed(error, observer, section),
-        }
     }
 
     /// Installs the section's host values after the shared program has run.
@@ -2181,40 +1745,21 @@ impl SectionVm {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::lua::{
-    ///     LuaProgram, SectionVm, bind_tool_declarations,
-    /// };
+    /// use promptforge_core::lua::{SectionVm, ToolBindings};
+    /// use promptforge_core::model::ModelBindings;
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
-    /// use promptforge_core::tools::ToolId;
-    ///
-    /// let shared = LuaProgram::compile(
-    ///     "tools.need('search', 'search the web')",
-    ///     "shared",
-    ///     1,
+    /// let mut vm = SectionVm::new_for_section(
+    ///     None,
+    ///     &ToolBindings::default(),
+    ///     &ModelBindings::default(),
     ///     "example-run",
     ///     &NullObserver,
     ///     "Example",
     /// )?;
-    /// let resolver = |_: &str| Ok(ToolId::new("example", "search"));
-    /// let bindings =
-    ///     bind_tool_declarations(&shared, &resolver, "example-run", &NullObserver, "Example")?;
-    /// let mut vm =
-    ///     SectionVm::new_with_bindings(
-    ///         &shared, &bindings, "example-run", &NullObserver, "Example"
-    ///     )?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// let prologue = LuaProgram::compile(
-    ///     "tools.add('search')",
-    ///     "prologue",
-    ///     1,
-    ///     "example-run",
-    ///     &NullObserver,
-    ///     "Example",
-    /// )?;
-    /// vm.run_prologue(&prologue, &NullObserver, "Example")?;
     /// let scope = vm.close_tool_scope(&NullObserver, "Example")?;
-    /// assert_eq!(scope.bindings()[0].alias(), "search");
+    /// assert!(scope.bindings().is_empty());
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
@@ -2644,120 +2189,6 @@ pub fn run_chunk(
     Ok(LuaOutcome { returned, var })
 }
 
-fn install_replay_tools(
-    lua: &Lua,
-    bindings: &ToolBindings,
-    runtime: &Arc<Mutex<ToolRuntime>>,
-) -> Result<()> {
-    let tools = lua
-        .create_table()
-        .map_err(|error| Error::Lua(error.to_string()))?;
-
-    let expected = bindings.clone();
-    let state = Arc::clone(runtime);
-    let need = lua
-        .create_function(move |_, (alias, description): (String, String)| {
-            validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
-            let mut state = state
-                .lock()
-                .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
-            if state.phase != ToolPhase::Replay {
-                return Err(mlua::Error::external(
-                    "tools.need is only available during H1 binding or replay",
-                ));
-            }
-            let Some(declaration) = expected.declarations.get(state.declaration_index) else {
-                return Err(mlua::Error::external(
-                    "tools.need call has no matching bound declaration; bind the prompt before executing",
-                ));
-            };
-            let expected_need = ToolDeclaration::Need {
-                alias: alias.clone(),
-                description: description.clone(),
-            };
-            if declaration != &expected_need {
-                return Err(mlua::Error::external(format!(
-                    "tool declaration replay mismatch at declaration {}",
-                    state.declaration_index + 1
-                )));
-            }
-            let Some(binding) = expected.binding(&alias) else {
-                return Err(mlua::Error::external(format!(
-                    "tools.need alias {alias:?} has no frozen binding"
-                )));
-            };
-            let handle = LuaToolHandle::from_binding(alias, description, binding.id());
-            state.declaration_index += 1;
-            Ok(handle)
-        })
-        .map_err(|error| Error::Lua(error.to_string()))?;
-    tools
-        .set("need", need)
-        .map_err(|error| Error::Lua(error.to_string()))?;
-
-    let expected = bindings.clone();
-    let state = Arc::clone(runtime);
-    let always = lua
-        .create_function(move |_, alias: String| {
-            validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
-            let mut state = state
-                .lock()
-                .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
-            if state.phase != ToolPhase::Replay {
-                return Err(mlua::Error::external(
-                    "tools.always is only available during H1 binding or replay",
-                ));
-            }
-            let Some(declaration) = expected.declarations.get(state.declaration_index) else {
-                return Err(mlua::Error::external(
-                    "tools.always call has no matching bound declaration; bind the prompt before executing",
-                ));
-            };
-            if declaration != &ToolDeclaration::Always(alias) {
-                return Err(mlua::Error::external(format!(
-                    "tool declaration replay mismatch at declaration {}",
-                    state.declaration_index + 1
-                )));
-            }
-            state.declaration_index += 1;
-            Ok(())
-        })
-        .map_err(|error| Error::Lua(error.to_string()))?;
-    tools
-        .set("always", always)
-        .map_err(|error| Error::Lua(error.to_string()))?;
-
-    let add = lua
-        .create_function(|_, _: MultiValue| -> mlua::Result<()> {
-            Err(mlua::Error::external(
-                "tools.add is only available during H2 recording",
-            ))
-        })
-        .map_err(|error| Error::Lua(error.to_string()))?;
-    tools
-        .set("add", add)
-        .map_err(|error| Error::Lua(error.to_string()))?;
-    lua.globals()
-        .raw_set("tools", tools)
-        .map_err(|error| Error::Lua(error.to_string()))
-}
-
-fn finish_replay(vm: &SectionVm) -> Result<()> {
-    let bindings = &vm.bound_tools;
-    let runtime = vm
-        .tool_runtime
-        .lock()
-        .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
-    if runtime.declaration_index != bindings.declarations.len() {
-        return Err(Error::Lua(format!(
-            "tool declaration replay ended after {}/{} declarations",
-            runtime.declaration_index,
-            bindings.declarations.len()
-        )));
-    }
-    Ok(())
-}
-
 /// Installs `tools.calls` on the existing `tools` global as a read-only table.
 ///
 /// Reading a known alias returns its current count from `counts`. Indexing an
@@ -2772,11 +2203,6 @@ pub(crate) fn snapshot_tool_scope(
     let runtime = runtime
         .lock()
         .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
-    if runtime.phase == ToolPhase::Replay {
-        return Err(Error::Lua(
-            "tool bag is not available during declaration replay".to_owned(),
-        ));
-    }
     let aliases = bindings
         .always
         .iter()
@@ -2947,15 +2373,14 @@ fn install_h2_tools(
     runtime: &Arc<Mutex<ToolRuntime>>,
 ) -> Result<()> {
     {
-        let mut state = runtime
+        let state = runtime
             .lock()
             .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
-        if state.phase != ToolPhase::Replay {
+        if state.phase != ToolPhase::H2 {
             return Err(Error::Lua(
-                "tool declaration runtime did not finish replay".to_owned(),
+                "tool scope is not open for H2 recording".to_owned(),
             ));
         }
-        state.phase = ToolPhase::H2;
     }
 
     let tools = lua
@@ -2966,7 +2391,7 @@ fn install_h2_tools(
         let forbidden = lua
             .create_function(move |_, _: MultiValue| -> mlua::Result<()> {
                 Err(mlua::Error::external(format!(
-                    "tools.{operation} is only available during H1 binding or replay"
+                    "tools.{operation} is only available during live H1 execution"
                 )))
             })
             .map_err(|error| Error::Lua(error.to_string()))?;
@@ -3538,6 +2963,7 @@ mod tests {
     use super::*;
     use crate::observe::NullObserver;
     use crate::store::{Store, StoreError};
+    use crate::tools::Tool;
     use serde_json::json;
 
     const EXECUTION: &str = "lua-test";
@@ -3663,6 +3089,82 @@ mod tests {
             .expect("test Lua must compile")
     }
 
+    #[derive(Debug)]
+    struct FixtureTool(&'static str);
+
+    #[async_trait::async_trait]
+    impl Tool for FixtureTool {
+        fn id(&self) -> ToolId {
+            ToolId::new("fixtures", self.0)
+        }
+
+        fn wire_name(&self) -> &'static str {
+            self.0
+        }
+
+        fn description(&self) -> &'static str {
+            "fixture"
+        }
+
+        fn parameters_schema(&self) -> Json {
+            json!({})
+        }
+
+        async fn call(&self, _arguments: Json) -> Result<String> {
+            Ok(String::new())
+        }
+    }
+
+    fn resolve_live_tool_declarations(
+        source: &LuaProgram,
+        resolver: &dyn ToolResolver,
+        _execution: &str,
+        _observer: &dyn Observer,
+        _section: &str,
+    ) -> Result<ToolBindings> {
+        let tools: Vec<Arc<dyn Tool>> = vec![
+            Arc::new(FixtureTool("search")),
+            Arc::new(FixtureTool("fetch")),
+        ];
+        let registry = ToolRegistry::new(tools.iter().map(AsRef::as_ref));
+        let models = |description: &str, _: &crate::model::ModelNeedOpts| {
+            Err(Error::ModelAbsent {
+                capability: description.to_owned(),
+            })
+        };
+        let producer = LiveBindingProducer::default();
+        let lua = Lua::new();
+        harden(&lua)?;
+        let result = lua.scope(|scope| {
+            producer
+                .install(&lua, scope, resolver, &registry, &models)
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            lua.load(source.bytecode.as_slice()).exec()
+        });
+        if let Some(error) = producer.take_callback_error()? {
+            return Err(error);
+        }
+        result.map_err(|error| Error::Lua(error.to_string()))?;
+        producer.bindings().map(|(tools, _)| tools)
+    }
+
+    fn section_vm_with_bindings(
+        _source: &LuaProgram,
+        bindings: &ToolBindings,
+        execution: &str,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<SectionVm> {
+        SectionVm::new_for_section(
+            None,
+            bindings,
+            &ModelBindings::default(),
+            execution,
+            observer,
+            section,
+        )
+    }
+
     fn fixture_bindings(source: &str) -> (LuaProgram, ToolBindings) {
         let shared = program(source);
         let resolver = |description: &str| {
@@ -3676,8 +3178,8 @@ mod tests {
             ))
         };
         let bindings =
-            bind_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
-                .expect("fixture declarations must bind");
+            resolve_live_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+                .expect("fixture declarations must resolve");
         (shared, bindings)
     }
 
@@ -3696,10 +3198,10 @@ mod tests {
         );
         let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
         let bindings =
-            bind_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+            resolve_live_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
                 .expect("binding VM must not expose direct output");
         let mut vm =
-            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+            section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
                 .expect("replay VM must not expose direct output");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
@@ -3729,22 +3231,19 @@ mod tests {
     }
 
     #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the regression spells out every H1 and H2 checkpoint to prove exact phase ordering"
-    )]
-    fn logs_are_correlated_and_ordered_across_h1_and_h2_phases() {
-        let shared = program(
-            "log('shared checkpoint')\n\
-             tools.need('search', 'search the web')",
-        );
-        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
+    fn logs_are_correlated_and_ordered_across_h2_phases() {
         let recorder = Recorder::default();
-        let bindings = bind_tool_declarations(&shared, &resolver, EXECUTION, &recorder, "Prompt")
-            .expect("binding log must succeed");
+        let bindings = ToolBindings::for_test(
+            vec![ToolBinding::for_test(
+                "search",
+                "search the web",
+                ToolId::new("fixtures", "search"),
+            )],
+            Vec::new(),
+        );
         let mut vm =
-            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &recorder, "Gather")
-                .expect("replay log must succeed");
+            section_vm_with_bindings(&program(""), &bindings, EXECUTION, &recorder, "Gather")
+                .expect("section VM must install captured bindings");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
         vm.run_prologue(&program("log('prologue checkpoint')"), &recorder, "Gather")
@@ -3755,130 +3254,17 @@ mod tests {
             .expect("epilog log must succeed");
         vm.teardown(&recorder, "Gather");
 
-        assert_eq!(
-            recorder.records(),
-            [
-                (
-                    EXECUTION.to_owned(),
-                    "Prompt".to_owned(),
-                    detail::TOOL_BINDING_STARTED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Prompt".to_owned(),
-                    detail::MODEL_BINDING_STARTED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Prompt".to_owned(),
-                    "Lua: shared checkpoint".to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Prompt".to_owned(),
-                    detail::TOOL_BINDING_SUCCEEDED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Prompt".to_owned(),
-                    detail::MODEL_BINDING_SUCCEEDED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::LUA_SHARED_LOAD_STARTED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::TOOL_REPLAY_STARTED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::MODEL_REPLAY_STARTED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    "Lua: shared checkpoint".to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::TOOL_REPLAY_SUCCEEDED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::MODEL_REPLAY_SUCCEEDED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::LUA_SHARED_LOAD_SUCCEEDED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::LUA_PROLOGUE_STARTED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    "Lua: prologue checkpoint".to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::LUA_PROLOGUE_SUCCEEDED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::TOOL_SCOPE_CLOSING.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::TOOL_SCOPE_CLOSED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::MODEL_SCOPE_CLOSING.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::MODEL_SCOPE_CLOSED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::LUA_EPILOG_STARTED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    "Lua: epilog checkpoint".to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::LUA_EPILOG_SUCCEEDED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::LUA_TEARDOWN_STARTED.to_owned(),
-                ),
-                (
-                    EXECUTION.to_owned(),
-                    "Gather".to_owned(),
-                    detail::LUA_TEARDOWN_SUCCEEDED.to_owned(),
-                ),
-            ]
+        let details = recorder
+            .records()
+            .into_iter()
+            .map(|(_, _, detail)| detail)
+            .collect::<Vec<_>>();
+        assert!(details.contains(&"Lua: prologue checkpoint".to_owned()));
+        assert!(details.contains(&"Lua: epilog checkpoint".to_owned()));
+        assert!(
+            !details
+                .iter()
+                .any(|detail| detail.contains("binding") || detail.contains("replay"))
         );
     }
 
@@ -4211,13 +3597,12 @@ mod tests {
         );
         let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
         let bindings =
-            bind_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+            resolve_live_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
                 .expect("tools.need must return an inspectable Tool object");
         assert_eq!(bindings.bindings()[0].alias(), "search");
 
-        let vm =
-            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
-                .expect("replay must return the same inspectable Tool object");
+        let vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+            .expect("replay must return the same inspectable Tool object");
         vm.teardown(&NullObserver, "Section");
     }
 
@@ -4233,9 +3618,14 @@ mod tests {
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-a",
         ] {
             let declaration = program(&format!("tools.need({alias:?}, 'capability')"));
-            let error =
-                bind_tool_declarations(&declaration, &resolver, EXECUTION, &NullObserver, "Prompt")
-                    .expect_err("invalid aliases must be rejected");
+            let error = resolve_live_tool_declarations(
+                &declaration,
+                &resolver,
+                EXECUTION,
+                &NullObserver,
+                "Prompt",
+            )
+            .expect_err("invalid aliases must be rejected");
             assert!(
                 error.to_string().contains("invalid tool alias"),
                 "wrong error for {alias:?}: {error}"
@@ -4244,15 +3634,21 @@ mod tests {
 
         for valid in ["Upper", "has-dash", &format!("A{}", "2".repeat(63))] {
             let declaration = program(&format!("tools.need({valid:?}, 'capability')"));
-            bind_tool_declarations(&declaration, &resolver, EXECUTION, &NullObserver, "Prompt")
-                .expect("planned alias forms must be valid");
+            resolve_live_tool_declarations(
+                &declaration,
+                &resolver,
+                EXECUTION,
+                &NullObserver,
+                "Prompt",
+            )
+            .expect("planned alias forms must be valid");
         }
     }
 
     #[test]
     fn binding_rejects_duplicate_aliases() {
         let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
-        let error = bind_tool_declarations(
+        let error = resolve_live_tool_declarations(
             &program("tools.need('search', 'one'); tools.need('search', 'two')"),
             &resolver,
             EXECUTION,
@@ -4269,7 +3665,7 @@ mod tests {
     #[test]
     fn duplicate_alias_error_cannot_be_suppressed_with_lua_pcall() {
         let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
-        let error = bind_tool_declarations(
+        let error = resolve_live_tool_declarations(
             &program("tools.need('search', 'one'); pcall(tools.need, 'search', 'two')"),
             &resolver,
             EXECUTION,
@@ -4290,7 +3686,7 @@ mod tests {
             "tools.always('missing')",
             "tools.need('search', 'one'); tools.always('search'); tools.always('search')",
         ] {
-            let error = bind_tool_declarations(
+            let error = resolve_live_tool_declarations(
                 &program(source),
                 &resolver,
                 EXECUTION,
@@ -4306,29 +3702,25 @@ mod tests {
     }
 
     #[test]
-    fn replay_is_exact_and_never_calls_a_resolver() {
+    fn captured_bindings_do_not_execute_h1_source() {
         let (_, bindings) =
             fixture_bindings("tools.need('search', 'search the web'); tools.always('search')");
-        for source in [
-            "tools.need('search', 'changed'); tools.always('search')",
-            "tools.always('search'); tools.need('search', 'search the web')",
-            "tools.need('search', 'search the web')",
-            "tools.need('search', 'search the web'); tools.always('search'); tools.always('search')",
-        ] {
-            let error = SectionVm::new_with_bindings(
-                &program(source),
-                &bindings,
-                EXECUTION,
-                &NullObserver,
-                "Section",
-            )
-            .expect_err("changed declarations must fail replay");
-            let message = error.to_string();
-            assert!(
-                message.contains("replay") || message.contains("no matching bound declaration"),
-                "unexpected replay failure message: {message}"
-            );
-        }
+        let mut vm = section_vm_with_bindings(
+            &program("h1_was_executed = true"),
+            &bindings,
+            EXECUTION,
+            &NullObserver,
+            "Section",
+        )
+        .expect("captured bindings must install without executing H1");
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .expect("host must inject");
+        vm.run_prologue(
+            &program("assert(h1_was_executed == nil); tools.add('search')"),
+            &NullObserver,
+            "Section",
+        )
+        .expect("captured binding must be available without H1 execution");
     }
 
     #[test]
@@ -4340,8 +3732,8 @@ mod tests {
         );
         let prologue = program("tools.add('fetch', 'search', 'fetch')");
         let mut vm =
-            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
-                .expect("declarations must replay");
+            section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("captured bindings must install");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
         vm.run_prologue(&prologue, &NullObserver, "Section")
@@ -4380,7 +3772,7 @@ mod tests {
                 },
             ))
         };
-        let h1_error = bind_tool_declarations(
+        let h1_error = resolve_live_tool_declarations(
             &program(
                 "local search = tools.need('search', 'search the web'); \
                  tools.add(search)",
@@ -4408,8 +3800,8 @@ mod tests {
              tools.add(search, 'fetch', {search, fetch})",
         );
         let mut vm =
-            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
-                .expect("declarations must replay");
+            section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("captured bindings must install");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
         vm.run_prologue(&prologue, &NullObserver, "Section")
@@ -4442,8 +3834,8 @@ mod tests {
              tools.add('fetch')",
         );
         let mut vm =
-            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
-                .expect("declarations must replay");
+            section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("captured bindings must install");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
         vm.run_prologue(&prologue, &NullObserver, "Section")
@@ -4467,8 +3859,8 @@ mod tests {
     fn bound_reply_and_epilog_require_closed_scope() {
         let (shared, bindings) = fixture_bindings("tools.need('search', 'search the web')");
         let mut vm =
-            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
-                .expect("declarations must replay");
+            section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("captured bindings must install");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
 
@@ -4495,23 +3887,12 @@ mod tests {
 
     #[test]
     fn tool_operations_enforce_their_lifecycle_phase_even_when_captured() {
-        let source = "saved_need = tools.need\n\
-                      tools.need('search', 'search the web')";
-        let (shared, bindings) = fixture_bindings(source);
+        let (shared, bindings) = fixture_bindings("tools.need('search', 'search the web')");
         let mut vm =
-            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
-                .expect("declarations must replay");
+            section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("captured bindings must install");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
-
-        let error = vm
-            .run_prologue(
-                &program("saved_need('other', 'fetch a page')"),
-                &NullObserver,
-                "Section",
-            )
-            .expect_err("captured H1 functions must not run in H2");
-        assert!(error.to_string().contains("H1 binding or replay"));
 
         let error = vm
             .run_prologue(
@@ -4520,15 +3901,19 @@ mod tests {
                 "Section",
             )
             .expect_err("current H2 table must reject need");
-        assert!(error.to_string().contains("H1 binding or replay"));
+        assert!(
+            error
+                .to_string()
+                .contains("only available during live H1 execution")
+        );
     }
 
     #[test]
     fn unknown_h2_alias_fails_before_scope_closure() {
         let (shared, bindings) = fixture_bindings("tools.need('search', 'search the web')");
         let mut vm =
-            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
-                .expect("declarations must replay");
+            section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("captured bindings must install");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
         let error = vm
@@ -4538,61 +3923,37 @@ mod tests {
     }
 
     #[test]
-    fn declaration_reports_are_exact_ordered_and_payload_free() {
-        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
-        let shared = program("tools.need('private_alias', 'private capability')");
+    fn captured_bindings_are_installed_without_payload_reports() {
+        let bindings = ToolBindings::for_test(
+            vec![ToolBinding::for_test(
+                "private_alias",
+                "private capability",
+                ToolId::new("fixtures", "search"),
+            )],
+            Vec::new(),
+        );
         let recorder = Recorder::default();
-        let bindings = bind_tool_declarations(&shared, &resolver, EXECUTION, &recorder, "Prompt")
-            .expect("binding must succeed");
         let mut vm =
-            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &recorder, "Section")
-                .expect("replay must succeed");
+            section_vm_with_bindings(&program(""), &bindings, EXECUTION, &recorder, "Section")
+                .expect("captured binding installation must succeed");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host must inject");
         vm.close_tool_scope(&recorder, "Section")
             .expect("empty H2 scope must close");
-
-        let observations = recorder.observations();
-        assert!(
-            recorder
-                .records()
-                .iter()
-                .all(|(execution, _, _)| execution == EXECUTION)
-        );
-        assert_eq!(
-            observations
-                .iter()
-                .map(|(_, detail)| detail.as_str())
-                .collect::<Vec<_>>(),
-            [
-                detail::TOOL_BINDING_STARTED,
-                detail::MODEL_BINDING_STARTED,
-                detail::TOOL_BINDING_SUCCEEDED,
-                detail::MODEL_BINDING_SUCCEEDED,
-                detail::LUA_SHARED_LOAD_STARTED,
-                detail::TOOL_REPLAY_STARTED,
-                detail::MODEL_REPLAY_STARTED,
-                detail::TOOL_REPLAY_SUCCEEDED,
-                detail::MODEL_REPLAY_SUCCEEDED,
-                detail::LUA_SHARED_LOAD_SUCCEEDED,
-                detail::TOOL_SCOPE_CLOSING,
-                detail::TOOL_SCOPE_CLOSED,
-                detail::MODEL_SCOPE_CLOSING,
-                detail::MODEL_SCOPE_CLOSED,
-            ]
-        );
-        let trace = format!("{observations:?}");
+        let trace = format!("{:?}", recorder.observations());
         assert!(!trace.contains("private_alias"));
         assert!(!trace.contains("private capability"));
     }
 
     #[test]
-    fn scope_closure_failure_reports_exact_payload_free_sequence() {
+    fn scope_closure_reports_exact_payload_free_sequence() {
         let recorder = Recorder::default();
         let vm = SectionVm::new(None, EXECUTION, &recorder, "private section")
             .expect("VM must construct");
-        vm.close_tool_scope(&recorder, "private section")
-            .expect_err("scope closure before host injection must fail");
+        let scope = vm
+            .close_tool_scope(&recorder, "private section")
+            .expect("empty scope may close before host injection");
+        assert!(scope.bindings().is_empty());
 
         assert_eq!(
             recorder.observations(),
@@ -4603,7 +3964,15 @@ mod tests {
                 ),
                 (
                     "private section".to_owned(),
-                    detail::TOOL_SCOPE_FAILED.to_owned(),
+                    detail::TOOL_SCOPE_CLOSED.to_owned(),
+                ),
+                (
+                    "private section".to_owned(),
+                    detail::MODEL_SCOPE_CLOSING.to_owned(),
+                ),
+                (
+                    "private section".to_owned(),
+                    detail::MODEL_SCOPE_CLOSED.to_owned(),
                 ),
             ]
         );
@@ -4923,60 +4292,16 @@ mod tests {
             .collect::<Vec<_>>()
         );
 
-        let (_, bindings) = fixture_bindings("tools.need('search', 'private capability')");
         let recorder = Recorder::default();
-        SectionVm::new_with_bindings(
-            &program("tools.need('search', 'changed capability')"),
-            &bindings,
-            EXECUTION,
-            &recorder,
-            "Replay",
-        )
-        .expect_err("changed declarations must fail replay");
-        assert_eq!(
-            recorder.observations(),
-            [
-                detail::LUA_SHARED_LOAD_STARTED,
-                detail::TOOL_REPLAY_STARTED,
-                detail::MODEL_REPLAY_STARTED,
-                detail::TOOL_REPLAY_FAILED,
-                detail::MODEL_REPLAY_FAILED,
-                detail::LUA_SHARED_LOAD_FAILED,
-                detail::LUA_TEARDOWN_STARTED,
-                detail::LUA_TEARDOWN_SUCCEEDED,
-            ]
-            .into_iter()
-            .map(|detail| ("Replay".to_owned(), detail.to_owned()))
-            .collect::<Vec<_>>()
+        let vm = SectionVm::new(None, EXECUTION, &NullObserver, "Prologue").expect("VM must build");
+        vm.run_prologue(&program("return nil"), &recorder, "Prologue")
+            .expect_err("prologue before injection must fail");
+        assert!(
+            recorder
+                .observations()
+                .iter()
+                .any(|(_, event)| event == detail::LUA_PROLOGUE_FAILED)
         );
-
-        for (section, expected, operation) in [
-            ("Prologue", detail::LUA_PROLOGUE_FAILED, 0_u8),
-            ("Reply", detail::LUA_REPLY_BINDING_FAILED, 1_u8),
-            ("Epilog", detail::LUA_EPILOG_FAILED, 2_u8),
-        ] {
-            let recorder = Recorder::default();
-            let vm =
-                SectionVm::new(None, EXECUTION, &NullObserver, section).expect("VM must build");
-            let error = match operation {
-                0 => vm
-                    .run_prologue(&program("return nil"), &recorder, section)
-                    .expect_err("prologue before injection must fail"),
-                1 => vm
-                    .bind_reply("private reply", &recorder, section)
-                    .expect_err("reply before injection must fail"),
-                _ => vm
-                    .run_epilog(&program("return nil"), &recorder, section)
-                    .expect_err("epilog before injection must fail"),
-            };
-            assert!(error.to_string().contains("not been injected"));
-            let observations = recorder.observations();
-            assert_eq!(
-                observations.last().map(|(_, detail)| detail.as_str()),
-                Some(expected)
-            );
-            assert!(!format!("{observations:?}").contains("private reply"));
-        }
     }
 
     #[test]
@@ -5317,12 +4642,11 @@ stack traceback:
             panic!("a declaration-free program must not resolve {description:?}")
         };
         let bindings =
-            bind_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+            resolve_live_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
                 .expect("a declaration-free shared program must bind");
         assert!(bindings.bindings().is_empty());
-        let mut vm =
-            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Test")
-                .expect("replay of no declarations must succeed");
+        let mut vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Test")
+            .expect("empty captured bindings must install");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host values must inject");
         let error = vm
@@ -5338,9 +4662,8 @@ stack traceback:
     #[test]
     fn add_with_a_description_argument_fails_alias_validation() {
         let (shared, bindings) = fixture_bindings("tools.need('search', 'search the web')");
-        let mut vm =
-            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Test")
-                .expect("replay must succeed");
+        let mut vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Test")
+            .expect("captured bindings must install");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host values must inject");
         let error = vm

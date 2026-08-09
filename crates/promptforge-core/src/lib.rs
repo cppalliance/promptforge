@@ -1,10 +1,10 @@
 //! PromptForge runtime core.
 //!
 //! This crate holds the pieces that turn a prompt markdown file into a model
-//! call: the [`parser`] that reads the file into a [`parser::Prompt`], [`bind`]
-//! that freezes its H1 capability declarations through the concrete picker, the
+//! call: the [`parser`] that reads the file into a [`parser::Prompt`], the
 //! [`client`] that talks to an `OpenAI`-compatible chat completions endpoint, and
-//! [`execute`] that walks a prompt's sections top to bottom (fall-through) and
+//! [`execute`] that runs H1 once with live resolution before walking sections
+//! top to bottom (fall-through) and
 //! returns the run's result. [`observe`] is the seam through which a run
 //! reports its progress, for a caller that wants to watch a long run in
 //! flight; [`execute::run`] takes an [`execute::RunOptions`] carrying the
@@ -17,7 +17,6 @@
 //! `promptforge:` version; [`promptforge_version`] reports it (or `None`), and
 //! the runtime refuses a source that lacks a supported version.
 
-pub mod bind;
 pub mod cancel;
 pub mod client;
 pub mod debug;
@@ -31,6 +30,7 @@ pub mod model;
 pub mod normalize;
 pub mod observe;
 pub mod parser;
+mod resolve;
 pub mod store;
 pub mod subst;
 pub mod tools;
