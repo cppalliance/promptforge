@@ -102,7 +102,7 @@ lane = "generative"
 # ...
 ```
 
-Remote endpoints may still set `concurrency` directly (Layer 1). Local models default to concurrency 1 when device/lane are omitted.
+Remote endpoints may still set `concurrency` directly (Layer 1). Local models default to concurrency 1 when device/lane are omitted. For a local model, that resolved lane concurrency is one knob: it is both the gateway admit limit and `llama-server --parallel`.
 
 ## Local generative models (`[[local_model]]`)
 
