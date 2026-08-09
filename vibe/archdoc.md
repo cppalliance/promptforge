@@ -28,11 +28,12 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A17. Shared Lua executes in a fresh VM for each section; mutable Lua state never crosses section boundaries.
 - A19. Runtime metadata is sealed: unknown reads and all author writes fail, and every field has an explicit refresh boundary.
 - A20. Payload-bearing diagnostics use an opt-in capture channel separate from payload-free operational observation.
-- A24. Each run binds against one coherent catalog snapshot; catalog changes affect subsequent runs, not in-flight runs.
 - A25. Every model-facing section uses a prompt-declared model binding; hosts never choose a model implicitly.
 - A26. Artifact credentials are read from process secrets at request time and are never persisted or logged.
 - A27. Model tool-wire dialects are resolved from runtime evidence and applied at one normalization boundary; prompts remain dialect-agnostic.
 - A28. Tool-call accounting is scoped to one VM and prompt alias; unscoped tool names fail instead of dispatching.
+- A29. Local lane concurrency is the single authority for gateway admission and backend parallel slots.
+- A30. Fan-out arms run concurrently, return in input order, and abort siblings on the first error.
 
 ## Principles
 

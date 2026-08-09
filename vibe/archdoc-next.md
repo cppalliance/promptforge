@@ -31,3 +31,4 @@
 - [2026-08-08-7-gateway-download-progress] progress observation seam: Artifact transfer reports through a replaceable observer independent of the download loop.
 - [2026-08-08-8-tool-dialect-plugins] dialect ambiguity is admission failure: A local tie or no match must fail visibly instead of silently choosing a protocol.
 - [2026-08-08-9-write-through-store-traces] mirror without core coupling: Keep live developer dumps behind the existing Store and observation contracts.
+- [2026-08-08-10-fanout-gateway-concurrency] gateway-owned backpressure: Let the gateway queue throttle model work unless non-model arm work proves it needs a host cap.
