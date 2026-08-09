@@ -34,12 +34,12 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A29. Local lane concurrency is the single authority for gateway admission and backend parallel slots.
 - A30. Fan-out arms run concurrently, return in input order, and abort siblings on the first error.
 - A31. A failed local inference child is respawned with stable routing identity and at most one request retry.
+- A32. Search yields sanitized, source-diverse leads; fetch remains the boundary for page content.
 
 ## Principles
 
 - Before adding configuration, public API, or resolution machinery, prefer sandboxed Lua, the run-scoped store, or the catalog when one already carries the work.
 - Keep ordinary tests deterministic and offline; run network, process, download, and live-model checks only through explicit scenario commands.
-- Keep branching and fan-out explicit in sandboxed Lua; never infer control flow from model prose.
 - Long provisioning operations report interactive progress on stderr and coarse progress through structured logs.
 - Write developer traces and store mirrors as events occur so failed or long runs remain inspectable.
 

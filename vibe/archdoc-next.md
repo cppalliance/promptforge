@@ -35,3 +35,5 @@
 - [2026-08-08-11-briefer-evidence-thickening] shallow parallel research: Prefer focused bounded arms over deeper exploratory tool loops.
 - [2026-08-08-11-briefer-evidence-thickening] concurrent source aggregation: Defer merged append logs until their write ordering is defined.
 - [2026-08-08-12-supervise-local-llama-server] no background watchdog: Prefer bounded request-time supervision while continuous health selection is unnecessary.
+- [2026-08-09-1-gateway-web-search-upgrade] deterministic result shaping: Validate, sanitize, filter, and diversify results before exposing them to a model.
+- [2026-08-09-1-gateway-web-search-upgrade] cache remains absent: Add search-result caching only after repeat workloads justify a coherency policy.
