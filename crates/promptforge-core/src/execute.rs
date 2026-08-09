@@ -29,8 +29,8 @@
 //!
 //! Lua `execute()` runs a named top-level section as a subroutine (fresh VM,
 //! fresh conversation, recursion capped at 8) and returns that section's reply.
-//! Lua `_G["goto"](target)` transfers control to a named section and clears
-//! cross-section reply context (Lua 5.4 reserves bare `goto` as a keyword).
+//! Lua `jump(target)` transfers control to a named section and clears
+//! cross-section reply context.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -640,7 +640,7 @@ async fn run_sections(
         let mut completion_options: Option<CompletionOptions> = None;
         let mut sys = sys;
         let mut early_return: Option<String> = None;
-        let mut goto_heading: Option<String> = None;
+        let mut jump_heading: Option<String> = None;
 
         for block in &section.blocks {
             match block {
@@ -677,8 +677,8 @@ async fn run_sections(
                             break;
                         }
                         Ok(LuaBlockResult::Returned(None)) => {}
-                        Ok(LuaBlockResult::Goto(heading)) => {
-                            goto_heading = Some(heading);
+                        Ok(LuaBlockResult::Jump(heading)) => {
+                            jump_heading = Some(heading);
                             break;
                         }
                         Err(error) => {
@@ -841,11 +841,11 @@ async fn run_sections(
             }
         }
 
-        // Classic prologue-only early return / goto tears down without closing
+        // Classic prologue-only early return / jump tears down without closing
         // scope. A lua-only section that falls through still closes, matching today.
         if !scopes_ready
             && early_return.is_none()
-            && goto_heading.is_none()
+            && jump_heading.is_none()
             && let Err(error) = vm.close_scopes(observer, &section.name)
         {
             vm.teardown(observer, &section.name);
@@ -854,7 +854,7 @@ async fn run_sections(
 
         vm.teardown(observer, &section.name);
         observer.observe(execution, &section.name, detail::SECTION_FINISHED);
-        if let Some(heading) = goto_heading {
+        if let Some(heading) = jump_heading {
             let target = resolve_h2_index(&heading, &prompt.sections)?;
             last_reply = None;
             index = target;
@@ -875,7 +875,7 @@ async fn run_sections(
         .unwrap_or_else(|| "done".to_string()))
 }
 
-/// Runs one section Lua block with tasks/execute/goto and optional fanout.
+/// Runs one section Lua block with tasks/execute/jump and optional fanout.
 #[expect(
     clippy::too_many_arguments,
     reason = "mirrors make_fanout_callback's borrowed run context"
@@ -1191,10 +1191,10 @@ async fn run_execute_section(
                         break;
                     }
                     Ok(LuaBlockResult::Returned(None)) => {}
-                    Ok(LuaBlockResult::Goto(heading)) => {
+                    Ok(LuaBlockResult::Jump(heading)) => {
                         vm.teardown(observer, &section.name);
                         return Err(Error::Lua(format!(
-                            "goto({heading}) is not allowed inside execute()"
+                            "jump({heading}) is not allowed inside execute()"
                         )));
                     }
                     Err(error) => {

@@ -211,8 +211,7 @@ impl UserData for LuaToolHandle {
 /// Inspectable Section object from the Lua `tasks` table.
 ///
 /// Authors read `.name` and `.has_prose`, and pass the object to `execute` or
-/// `_G["goto"]` in place of a heading string. Lua 5.4 reserves `goto` as a
-/// keyword, so the transfer API is only callable through that global index.
+/// `jump` in place of a heading string.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LuaSectionHandle {
     name: String,
@@ -239,7 +238,7 @@ impl LuaSectionHandle {
         &self.name
     }
 
-    /// Returns the canonical `"## Name"` heading used by `execute` / `goto`.
+    /// Returns the canonical `"## Name"` heading used by `execute` / `jump`.
     #[must_use]
     pub fn heading(&self) -> &str {
         &self.heading
@@ -332,16 +331,16 @@ impl UserData for LuaFanoutResult {
     }
 }
 
-/// Outcome of a Lua block that may invoke `goto`.
+/// Outcome of a Lua block that may invoke `jump`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LuaBlockResult {
     /// Normal completion with an optional scalar return.
     Returned(Option<String>),
-    /// `goto` transferred control to this heading (`## Name`).
-    Goto(String),
+    /// `jump` transferred control to this heading (`## Name`).
+    Jump(String),
 }
 
-/// Resolves an `execute` / `goto` target from a heading string or Section object.
+/// Resolves an `execute` / `jump` target from a heading string or Section object.
 ///
 /// # Errors
 /// Returns a Lua error when the value is neither a string nor a Section handle.
@@ -1054,8 +1053,8 @@ pub struct SectionVm {
     /// Shared with [`crate::execute::InferContext`] so `model:infer` and the
     /// prose tool loop increment the same `tools.calls` counters.
     counts_slot: Arc<Mutex<Option<ToolCallCounts>>>,
-    /// Set by Lua `goto` before it aborts the current chunk.
-    goto_slot: Arc<Mutex<Option<String>>>,
+    /// Set by Lua `jump` before it aborts the current chunk.
+    jump_slot: Arc<Mutex<Option<String>>>,
     /// Live sealed `sys` JSON shared with `model:infer` for finish-reason updates.
     sys_live: Arc<Mutex<Option<Json>>>,
     store: Option<StoreRef>,
@@ -1123,7 +1122,7 @@ impl SectionVm {
             })),
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new_replay())),
             counts_slot: Arc::new(Mutex::new(None)),
-            goto_slot: Arc::new(Mutex::new(None)),
+            jump_slot: Arc::new(Mutex::new(None)),
             sys_live: Arc::new(Mutex::new(None)),
             store: None,
             host_injected: false,
@@ -1237,7 +1236,7 @@ impl SectionVm {
             tool_runtime: Arc::clone(&runtime),
             model_runtime: Arc::clone(&model_runtime),
             counts_slot: Arc::new(Mutex::new(None)),
-            goto_slot: Arc::new(Mutex::new(None)),
+            jump_slot: Arc::new(Mutex::new(None)),
             sys_live: Arc::new(Mutex::new(None)),
             store: None,
             host_injected: false,
@@ -1503,13 +1502,13 @@ impl SectionVm {
             Some(&fanout_callback),
         )? {
             LuaBlockResult::Returned(value) => Ok(value),
-            LuaBlockResult::Goto(heading) => Err(Error::Lua(format!(
-                "goto({heading}) is not available in this Lua phase"
+            LuaBlockResult::Jump(heading) => Err(Error::Lua(format!(
+                "jump({heading}) is not available in this Lua phase"
             ))),
         }
     }
 
-    /// Executes a compiled prologue with `tasks`, `execute`, `goto`, and optional `fanout`.
+    /// Executes a compiled prologue with `tasks`, `execute`, `jump`, and optional `fanout`.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected or
@@ -1742,13 +1741,13 @@ impl SectionVm {
             Some(&fanout_callback),
         )? {
             LuaBlockResult::Returned(value) => Ok(value),
-            LuaBlockResult::Goto(heading) => Err(Error::Lua(format!(
-                "goto({heading}) is not available in this Lua phase"
+            LuaBlockResult::Jump(heading) => Err(Error::Lua(format!(
+                "jump({heading}) is not available in this Lua phase"
             ))),
         }
     }
 
-    /// Executes a compiled epilog with `tasks`, `execute`, `goto`, and optional `fanout`.
+    /// Executes a compiled epilog with `tasks`, `execute`, `jump`, and optional `fanout`.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected, the tool
@@ -2077,8 +2076,8 @@ impl SectionVm {
         scalar_return(returned)
     }
 
-    fn take_goto(&self) -> Option<String> {
-        self.goto_slot.lock().ok().and_then(|mut slot| slot.take())
+    fn take_jump(&self) -> Option<String> {
+        self.jump_slot.lock().ok().and_then(|mut slot| slot.take())
     }
 
     #[expect(
@@ -2093,7 +2092,7 @@ impl SectionVm {
         tasks: &[LuaSectionHandle],
         execute_callback: Option<&E>,
         fanout_callback: Option<&F>,
-        goto_enabled: bool,
+        jump_enabled: bool,
     ) -> Result<LuaBlockResult>
     where
         E: Fn(Value, Option<String>) -> std::result::Result<String, String>,
@@ -2102,10 +2101,10 @@ impl SectionVm {
         let store = self.store.as_ref().ok_or_else(|| {
             Error::Lua("section VM host values have not been injected".to_owned())
         })?;
-        if let Ok(mut slot) = self.goto_slot.lock() {
+        if let Ok(mut slot) = self.jump_slot.lock() {
             *slot = None;
         }
-        let goto_slot = Arc::clone(&self.goto_slot);
+        let jump_slot = Arc::clone(&self.jump_slot);
         let result = self.lua.scope(|scope| {
             install_log(&self.lua, scope, &self.execution, observer, section)
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
@@ -2132,22 +2131,20 @@ impl SectionVm {
                     .raw_set("execute", execute_fn)
                     .map_err(|error| mlua::Error::external(error.to_string()))?;
             }
-            if goto_enabled {
-                // Lua 5.4 reserves `goto` as a keyword. Install under _G["goto"]
-                // via raw_set so authors call `_G["goto"](target)`, not bare goto().
-                let goto_fn = scope
+            if jump_enabled {
+                let jump_fn = scope
                     .create_function(move |_, target: Value| -> mlua::Result<()> {
                         let heading = resolve_section_target(target)?;
-                        let mut slot = goto_slot
+                        let mut slot = jump_slot
                             .lock()
-                            .map_err(|_| mlua::Error::external("goto slot poisoned"))?;
+                            .map_err(|_| mlua::Error::external("jump slot poisoned"))?;
                         *slot = Some(heading);
-                        Err(mlua::Error::external("goto transfer"))
+                        Err(mlua::Error::external("jump transfer"))
                     })
                     .map_err(|error| mlua::Error::external(error.to_string()))?;
                 self.lua
                     .globals()
-                    .raw_set("goto", goto_fn)
+                    .raw_set("jump", jump_fn)
                     .map_err(|error| mlua::Error::external(error.to_string()))?;
             }
             if let Some(fanout_callback) = fanout_callback {
@@ -2173,15 +2170,15 @@ impl SectionVm {
                 .call(());
             finish_log_phase(&self.lua, result)
         });
-        if let Some(heading) = self.take_goto() {
-            let _ = self.lua.globals().raw_set("goto", Value::Nil);
+        if let Some(heading) = self.take_jump() {
+            let _ = self.lua.globals().raw_set("jump", Value::Nil);
             let _ = self.lua.globals().raw_set("execute", Value::Nil);
             let _ = self.lua.globals().raw_set("fanout", Value::Nil);
             let _ = self.lua.globals().raw_set("tasks", Value::Nil);
-            return Ok(LuaBlockResult::Goto(heading));
+            return Ok(LuaBlockResult::Jump(heading));
         }
         let returned: MultiValue = result.map_err(|error| program.map_runtime_error(&error))?;
-        let _ = self.lua.globals().raw_set("goto", Value::Nil);
+        let _ = self.lua.globals().raw_set("jump", Value::Nil);
         let _ = self.lua.globals().raw_set("execute", Value::Nil);
         let _ = self.lua.globals().raw_set("fanout", Value::Nil);
         let _ = self.lua.globals().raw_set("tasks", Value::Nil);
