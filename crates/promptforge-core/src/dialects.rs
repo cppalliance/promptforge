@@ -258,6 +258,22 @@ mod tests {
     }
 
     #[test]
+    fn openai_scores_chatml_tool_template_without_native_flag() {
+        let registry = ToolDialectRegistry::builtin();
+        let evidence = DialectEvidence {
+            supports_tool_calls: Some(false),
+            chat_template: Some(
+                "<|im_start|>system\n{%- if tools %}<tool_call>{%- endif %}<|im_end|>"
+                    .to_string(),
+            ),
+            model_id: Some("qwen3.5-9b".to_string()),
+            source: None,
+        };
+        let id = registry.resolve(&evidence).expect("should resolve");
+        assert_eq!(id, ToolDialectId::OpenAi);
+    }
+
+    #[test]
     fn gemma_scores_when_no_native_tools_and_template() {
         let registry = ToolDialectRegistry::builtin();
         let evidence = DialectEvidence {
