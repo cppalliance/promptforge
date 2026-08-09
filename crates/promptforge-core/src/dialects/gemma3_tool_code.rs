@@ -21,8 +21,8 @@ use super::{DetectScore, DialectEvidence, DialectRequest, ToolDialect, ToolDiale
 ///
 /// - `detect`: scores when `supports_tool_calls == Some(false)` combined with
 ///   Gemma template or model-id fingerprints.
-/// - `prepare_request`: strips `tools` and `tool_choice` from the request body
-///   because Gemma does not use the native OpenAI tool array.
+/// - `prepare_request`: copies tool schemas into a system guide, then strips
+///   `tools` / `tool_choice` (Gemma rejects the native OpenAI tool array).
 /// - `parse_turn`: recognizes sole `tool_code` fences and fenced JSON
 ///   `tool_calls` blobs; mixed prose stays text.
 /// - `echo_tool_results`: pushes the assistant's rendered `tool_code` fence
@@ -77,12 +77,16 @@ impl ToolDialect for Gemma3ToolCodeDialect {
         Some(DetectScore(score))
     }
 
-    /// Strip `tools` and `tool_choice` from the request - Gemma does not use
-    /// the native OpenAI tool declaration array.
+    /// Emulate tools: copy schemas into a leading system guide, then strip the
+    /// native OpenAI `tools` / `tool_choice` fields Gemma rejects.
     fn prepare_request(&self, request: &mut DialectRequest<'_>) -> Result<()> {
-        if let Some(obj) = request.body.as_object_mut() {
-            obj.remove("tools");
-            obj.remove("tool_choice");
+        let Some(obj) = request.body.as_object_mut() else {
+            return Ok(());
+        };
+        let tools = obj.remove("tools");
+        obj.remove("tool_choice");
+        if let Some(tools) = tools.as_ref() {
+            inject_tool_guide(obj, tools);
         }
         Ok(())
     }
@@ -254,7 +258,7 @@ fn parse_tool_code_call(line: &str, index: usize) -> Option<ToolCall> {
         return None;
     }
     let args_src = line[open + 1..close].trim();
-    let arguments = parse_tool_code_args(args_src)?;
+    let arguments = parse_tool_code_args(name, args_src)?;
     Some(ToolCall {
         id: format!("call_tool_code_{index}"),
         name: name.to_string(),
@@ -262,25 +266,145 @@ fn parse_tool_code_call(line: &str, index: usize) -> Option<ToolCall> {
     })
 }
 
-fn parse_tool_code_args(src: &str) -> Option<Value> {
+fn parse_tool_code_args(tool_name: &str, src: &str) -> Option<Value> {
     if src.is_empty() {
         return Some(Value::Object(Map::new()));
     }
-    let mut map = Map::new();
-    for part in split_top_level_commas(src) {
+    // Keyword form `query="..."` wins when any part contains `=`.
+    let parts = split_top_level_commas(src);
+    let keyword = parts.iter().any(|part| part.contains('='));
+    if keyword {
+        let mut map = Map::new();
+        for part in parts {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let eq = part.find('=')?;
+            let key = part[..eq].trim();
+            if key.is_empty() {
+                return None;
+            }
+            let raw = part[eq + 1..].trim();
+            map.insert(key.to_string(), parse_tool_code_value(raw)?);
+        }
+        return Some(Value::Object(map));
+    }
+
+    // Gemma often emits positionals: `search("C++ Alliance")`.
+    let mut values = Vec::new();
+    for part in parts {
         let part = part.trim();
         if part.is_empty() {
             continue;
         }
-        let eq = part.find('=')?;
-        let key = part[..eq].trim();
-        if key.is_empty() {
-            return None;
-        }
-        let raw = part[eq + 1..].trim();
-        map.insert(key.to_string(), parse_tool_code_value(raw)?);
+        values.push(parse_tool_code_value(part)?);
+    }
+    let keys = positional_arg_keys(tool_name, values.len())?;
+    let mut map = Map::new();
+    for (key, value) in keys.into_iter().zip(values) {
+        map.insert(key.to_string(), value);
     }
     Some(Value::Object(map))
+}
+
+/// Map positional `tool_code` args onto schema-ish parameter names.
+///
+/// Gemma IT frequently emits `search("...")` / `fetch("https://...")` instead
+/// of keyword form. Keep this table aligned with shipped tool aliases.
+fn positional_arg_keys(tool_name: &str, count: usize) -> Option<&'static [&'static str]> {
+    match (tool_name, count) {
+        ("search" | "web_search", 1) => Some(&["query"]),
+        ("fetch" | "web_fetch", 1) => Some(&["url"]),
+        ("echo", 1) => Some(&["value"]),
+        _ => None,
+    }
+}
+
+/// Build a system guide from OpenAI-shaped `tools` and prepend it to messages.
+fn inject_tool_guide(body: &mut Map<String, Value>, tools: &Value) {
+    let Some(guide) = render_tool_guide(tools) else {
+        return;
+    };
+    let messages = body
+        .entry("messages")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let Some(list) = messages.as_array_mut() else {
+        return;
+    };
+    list.insert(
+        0,
+        serde_json::json!({
+            "role": "system",
+            "content": guide,
+        }),
+    );
+}
+
+fn render_tool_guide(tools: &Value) -> Option<String> {
+    let list = tools.as_array().filter(|list| !list.is_empty())?;
+    let mut lines = Vec::new();
+    lines.push(
+        "You call tools by emitting a sole ```tool_code fence (no other prose) \
+         with one call per line. Prefer keyword arguments."
+            .to_owned(),
+    );
+    lines.push("Available tools:".to_owned());
+    let mut listed = 0usize;
+    for tool in list {
+        let Some(function) = tool.get("function") else {
+            continue;
+        };
+        let Some(name) = function.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let description = function
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let params = function
+            .get("parameters")
+            .and_then(|value| value.get("properties"))
+            .and_then(Value::as_object);
+        let required = function
+            .get("parameters")
+            .and_then(|value| value.get("required"))
+            .and_then(Value::as_array)
+            .map(|required| {
+                required
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let mut arg_bits = Vec::new();
+        if let Some(params) = params {
+            let keys: Vec<&str> = if required.is_empty() {
+                params.keys().map(String::as_str).collect()
+            } else {
+                required.clone()
+            };
+            for key in keys {
+                arg_bits.push(format!("{key}=..."));
+            }
+        }
+        let sig = if arg_bits.is_empty() {
+            format!("{name}()")
+        } else {
+            format!("{name}({})", arg_bits.join(", "))
+        };
+        if description.is_empty() {
+            lines.push(format!("- {sig}"));
+        } else {
+            lines.push(format!("- {sig}: {description}"));
+        }
+        listed += 1;
+    }
+    if listed == 0 {
+        return None;
+    }
+    lines.push("Example: ```tool_code\nsearch(query=\"example\")\n```".to_owned());
+    Some(lines.join("\n"))
 }
 
 fn parse_tool_code_value(raw: &str) -> Option<Value> {
@@ -459,6 +583,54 @@ mod tests {
     }
 
     #[test]
+    fn positional_search_maps_to_query() {
+        let dialect = Gemma3ToolCodeDialect;
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "```tool_code\nsearch(\"C++ Alliance organization\")\n```"
+                }
+            }]
+        });
+        let turn = dialect.parse_turn(&body).unwrap();
+        match turn.outcome {
+            CompletionResult::ToolCalls(calls) => {
+                assert_eq!(calls[0].name, "search");
+                assert_eq!(
+                    calls[0].arguments,
+                    serde_json::json!({ "query": "C++ Alliance organization" })
+                );
+            }
+            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
+        }
+    }
+
+    #[test]
+    fn positional_fetch_maps_to_url() {
+        let dialect = Gemma3ToolCodeDialect;
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "```tool_code\nfetch(\"https://cppalliance.org\")\n```"
+                }
+            }]
+        });
+        let turn = dialect.parse_turn(&body).unwrap();
+        match turn.outcome {
+            CompletionResult::ToolCalls(calls) => {
+                assert_eq!(calls[0].name, "fetch");
+                assert_eq!(
+                    calls[0].arguments,
+                    serde_json::json!({ "url": "https://cppalliance.org" })
+                );
+            }
+            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
+        }
+    }
+
+    #[test]
     fn mixed_prose_stays_text() {
         let dialect = Gemma3ToolCodeDialect;
         let content = "Here is evidence.\n\n```tool_code\nsearch(query=\"x\")\n```\n";
@@ -499,12 +671,23 @@ mod tests {
     }
 
     #[test]
-    fn prepare_request_strips_tools() {
+    fn prepare_request_strips_tools_and_injects_guide() {
         let dialect = Gemma3ToolCodeDialect;
         let mut body = serde_json::json!({
             "model": "gemma-3",
-            "messages": [],
-            "tools": [{"type": "function", "function": {"name": "search"}}],
+            "messages": [{"role": "user", "content": "brief me"}],
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "search",
+                    "description": "Web search",
+                    "parameters": {
+                        "type": "object",
+                        "properties": { "query": { "type": "string" } },
+                        "required": ["query"]
+                    }
+                }
+            }],
             "tool_choice": "auto"
         });
         let mut req = DialectRequest { body: &mut body };
@@ -512,6 +695,13 @@ mod tests {
         assert!(body.get("tools").is_none());
         assert!(body.get("tool_choice").is_none());
         assert_eq!(body["model"], "gemma-3");
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "system");
+        let guide = messages[0]["content"].as_str().unwrap();
+        assert!(guide.contains("search(query=...)"));
+        assert!(guide.contains("```tool_code"));
+        assert_eq!(messages[1]["role"], "user");
     }
 
     #[test]
