@@ -85,11 +85,31 @@ pub struct WebSearchRequest {
     /// [`WebSearchSettings::max_count`].
     #[serde(default)]
     pub count: Option<u8>,
+    /// Freshness filter; empty or absent means omit from the provider query.
+    #[serde(default)]
+    pub freshness: Option<String>,
+    /// Country code; empty or absent means omit from the provider query.
+    #[serde(default)]
+    pub country: Option<String>,
+    /// Search language; empty or absent means omit from the provider query.
+    #[serde(default)]
+    pub search_lang: Option<String>,
+    /// SafeSearch level; falls back to settings when omitted or empty.
+    #[serde(default)]
+    pub safesearch: Option<String>,
+    /// Hostname include filter; empty means no include filter.
+    #[serde(default)]
+    pub include_domains: Vec<String>,
+    /// Hostname exclude filter; empty means no exclude filter.
+    #[serde(default)]
+    pub exclude_domains: Vec<String>,
 }
 
 /// The response body for `POST /v1/tools/web_search`.
 #[derive(Debug, Serialize)]
 pub struct WebSearchResponse {
+    /// The trimmed request query that produced these results.
+    pub query: String,
     /// The trimmed search results.
     pub results: Vec<SearchResult>,
 }
@@ -106,6 +126,12 @@ pub struct SearchResult {
     /// The result's age, when the provider reports one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub age: Option<String>,
+    /// Hostname derived from `url`, when parsing succeeds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
+    /// Extra snippets from the provider, when present.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extra_snippets: Vec<String>,
 }
 
 /// The Brave response envelope, narrowed to the `web.results` array.
@@ -132,6 +158,25 @@ struct BraveResult {
     description: String,
     #[serde(default)]
     age: Option<String>,
+    #[serde(default)]
+    extra_snippets: Vec<String>,
+}
+
+/// Trim ASCII whitespace from `query` and reject empty values.
+///
+/// # Errors
+/// Returns [`GatewayError::MalformedRequest`] with
+/// `"web_search: empty query"` when the trimmed query is empty.
+fn trim_web_search_query(query: &str) -> Result<String, GatewayError> {
+    let trimmed = query
+        .trim_matches(|c: char| c.is_ascii_whitespace())
+        .to_string();
+    if trimmed.is_empty() {
+        return Err(GatewayError::MalformedRequest(
+            "web_search: empty query".to_string(),
+        ));
+    }
+    Ok(trimmed)
 }
 
 /// Call the Brave Search API and return a trimmed result set.
@@ -182,10 +227,15 @@ async fn brave_search(
             url: r.url,
             description: r.description,
             age: r.age,
+            site_name: None,
+            extra_snippets: r.extra_snippets,
         })
         .collect();
 
-    Ok(WebSearchResponse { results })
+    Ok(WebSearchResponse {
+        query: query.to_string(),
+        results,
+    })
 }
 
 /// The `POST /v1/tools/web_search` route: bearer-authed, proxies to Brave.
@@ -193,7 +243,8 @@ async fn brave_search(
 /// # Errors
 /// Returns [`GatewayError::Unauthorized`] when the bearer token is absent or
 /// wrong, [`GatewayError::ToolNotConfigured`] when no `[tools.web_search]`
-/// section is present, and the upstream variants on a provider failure.
+/// section is present, [`GatewayError::MalformedRequest`] when `query` is empty
+/// after trimming, and the upstream variants on a provider failure.
 pub async fn web_search(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -204,17 +255,45 @@ pub async fn web_search(
         .web_search()
         .await
         .ok_or(GatewayError::ToolNotConfigured("web_search"))?;
+    let query = trim_web_search_query(&request.query)?;
     let count = request.count.unwrap_or(web_search.settings.default_count);
     let response = brave_search(
         &web_search.http,
         &web_search.base_url,
         web_search.api_key.expose(),
-        &request.query,
+        &query,
         count,
         web_search.settings.max_count,
     )
     .await?;
     Ok(Json(response))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::trim_web_search_query;
+    use crate::error::GatewayError;
+
+    #[test]
+    fn empty_query_is_malformed_request() {
+        for query in ["", "   ", "\t\n"] {
+            let err = trim_web_search_query(query).expect_err("empty query");
+            match err {
+                GatewayError::MalformedRequest(message) => {
+                    assert_eq!(message, "web_search: empty query");
+                }
+                other => panic!("expected MalformedRequest, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn non_empty_query_is_trimmed() {
+        assert_eq!(
+            trim_web_search_query("  C++ Alliance  ").expect("ok"),
+            "C++ Alliance"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -245,6 +324,7 @@ mod live_tests {
         .await
         .expect("brave search should succeed");
 
+        assert_eq!(response.query, "rust programming language");
         assert!(
             !response.results.is_empty(),
             "expected at least one result from Brave"

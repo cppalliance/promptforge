@@ -216,6 +216,7 @@ async fn web_search_returns_results() {
     assert_eq!(response.status().as_u16(), 200);
 
     let body: Value = response.json().await.unwrap();
+    assert_eq!(body.get("query").and_then(Value::as_str), Some("hi"));
     let results = body.get("results").and_then(Value::as_array).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].get("title").and_then(Value::as_str), Some("T"));
