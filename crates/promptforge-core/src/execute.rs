@@ -994,9 +994,16 @@ fn prepare_scoped_tools(
         let tool = registry
             .get(binding.id())
             .ok_or_else(|| Error::UnknownScopedTool(binding.alias().to_owned()))?;
+        // Default model-facing text stays the registry description so bind
+        // capability strings never leak into schemas unless the author
+        // overrode `.description` on the Tool object before tools.add.
+        let description = binding
+            .model_description()
+            .unwrap_or_else(|| tool.description())
+            .to_owned();
         schemas.push(ToolSchema {
             name: binding.alias().to_owned(),
-            description: tool.description().to_owned(),
+            description,
             parameters: tool.parameters_schema(),
         });
         dispatch.insert(binding.alias().to_owned(), binding.id().clone());
