@@ -15,11 +15,37 @@ use crate::check_auth;
 use crate::config::{Secret, WebSearchConfig};
 use crate::error::GatewayError;
 
-/// The default result count when the request omits one.
-const DEFAULT_COUNT: u8 = 10;
+/// Cloneable runtime settings for `web_search`, filled from [`WebSearchConfig`].
+#[derive(Debug, Clone)]
+pub struct WebSearchSettings {
+    /// Used when the request omits `count`.
+    pub default_count: u8,
+    /// Clamp and over-fetch ceiling for result counts.
+    pub max_count: u8,
+    /// Diversity cap per hostname group.
+    pub max_per_host: u8,
+    /// Applied when the request omits `freshness` and this is non-empty.
+    pub default_freshness: String,
+    /// Applied when the request omits `safesearch` and this is non-empty.
+    pub default_safesearch: String,
+    /// When true, scrub known tracking query params from result URLs.
+    pub strip_tracking: bool,
+}
 
-/// The largest result count the gateway will request from the provider.
-const MAX_COUNT: u8 = 20;
+impl WebSearchSettings {
+    /// Build settings from the tool configuration.
+    #[must_use]
+    pub fn from_config(cfg: &WebSearchConfig) -> WebSearchSettings {
+        WebSearchSettings {
+            default_count: cfg.default_count,
+            max_count: cfg.max_count,
+            max_per_host: cfg.max_per_host,
+            default_freshness: cfg.default_freshness.clone(),
+            default_safesearch: cfg.default_safesearch.clone(),
+            strip_tracking: cfg.strip_tracking,
+        }
+    }
+}
 
 /// The web-search runtime state: the provider credential, the base URL, and a
 /// shared HTTP client.
@@ -29,6 +55,8 @@ pub struct WebSearchState {
     api_key: Secret,
     /// The search API base URL.
     base_url: String,
+    /// Cloneable tool settings derived from config.
+    pub settings: WebSearchSettings,
     /// The shared HTTP client used for provider calls.
     http: reqwest::Client,
 }
@@ -40,6 +68,7 @@ impl WebSearchState {
         WebSearchState {
             api_key: cfg.api_key.clone(),
             base_url: cfg.base_url.trim_end_matches('/').to_string(),
+            settings: WebSearchSettings::from_config(cfg),
             http: reqwest::Client::new(),
         }
     }
@@ -51,7 +80,9 @@ impl WebSearchState {
 pub struct WebSearchRequest {
     /// The search query.
     pub query: String,
-    /// The desired number of results. Defaults to 10 and is clamped to 20.
+    /// The desired number of results. Defaults to
+    /// [`WebSearchSettings::default_count`] and is clamped to
+    /// [`WebSearchSettings::max_count`].
     #[serde(default)]
     pub count: Option<u8>,
 }
@@ -114,8 +145,9 @@ async fn brave_search(
     api_key: &str,
     query: &str,
     count: u8,
+    max_count: u8,
 ) -> Result<WebSearchResponse, GatewayError> {
-    let count = count.clamp(1, MAX_COUNT);
+    let count = count.clamp(1, max_count);
     let response = http
         .get(format!("{base_url}/web/search"))
         .query(&[("q", query), ("count", &count.to_string())])
@@ -172,13 +204,14 @@ pub async fn web_search(
         .web_search()
         .await
         .ok_or(GatewayError::ToolNotConfigured("web_search"))?;
-    let count = request.count.unwrap_or(DEFAULT_COUNT);
+    let count = request.count.unwrap_or(web_search.settings.default_count);
     let response = brave_search(
         &web_search.http,
         &web_search.base_url,
         web_search.api_key.expose(),
         &request.query,
         count,
+        web_search.settings.max_count,
     )
     .await?;
     Ok(Json(response))
@@ -207,6 +240,7 @@ mod live_tests {
             &api_key,
             "rust programming language",
             5,
+            20,
         )
         .await
         .expect("brave search should succeed");
