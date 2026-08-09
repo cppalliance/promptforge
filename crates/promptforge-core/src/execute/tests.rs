@@ -3426,3 +3426,91 @@ Final ask.\n\n\
         }
     ));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn execute_runs_named_section_as_subroutine() {
+    async fn completions(Json(_body): Json<Value>) -> Json<Value> {
+        Json(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "research-reply"
+                }
+            }]
+        }))
+    }
+
+    let router = Router::new().route("/v1/chat/completions", post(completions));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Research\n\n\
+```lua\n\
+local step = tasks['## Research']\n\
+assert(step.name == 'Research')\n\
+assert(step.has_prose == true)\n\
+```\n\n\
+Research {{ args }}.\n\n\
+```lua\nstore.write('evidence.md', reply)\n```\n\n\
+## Main\n\n\
+```lua\n\
+local research = tasks['## Research']\n\
+assert(research.name == 'Research')\n\
+assert(research.has_prose == true)\n\
+local by_name = execute('## Research')\n\
+local by_obj = execute(research)\n\
+assert(by_name == 'research-reply')\n\
+assert(by_obj == 'research-reply')\n\
+assert(store.read('evidence.md') == 'research-reply')\n\
+return by_name\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(
+        &bound_for_model(md),
+        "topic",
+        &[],
+        &store,
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .expect("execute must run named section as subroutine");
+    assert_eq!(out, "research-reply");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn goto_transfers_control_and_clears_context() {
+    // Lua 5.4 reserves `goto` as a keyword, so the host installs the transfer
+    // function under _G["goto"] and authors call it through that index.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Check\n\n\
+```lua\n\
+store.write('seen.txt', 'check')\n\
+local help = tasks['## Help']\n\
+assert(help.name == 'Help')\n\
+assert(help.has_prose == false)\n\
+_G['goto'](help)\n\
+store.write('seen.txt', 'should-not-run')\n\
+```\n\n\
+## Accept\n\n\
+```lua\nreturn 'accepted'\n```\n\n\
+## Help\n\n\
+```lua\n\
+assert(reply == nil, 'goto must clear prior reply context')\n\
+return 'helped:' .. store.read('seen.txt')\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&bound(md), "", &[], &store, silent())
+        .await
+        .expect("goto must transfer control");
+    assert_eq!(out, "helped:check");
+    assert_eq!(store.read("seen.txt").expect("seen"), "check");
+}

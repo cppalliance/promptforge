@@ -208,6 +208,84 @@ impl UserData for LuaToolHandle {
     }
 }
 
+/// Inspectable Section object from the Lua `tasks` table.
+///
+/// Authors read `.name` and `.has_prose`, and pass the object to `execute` or
+/// `_G["goto"]` in place of a heading string. Lua 5.4 reserves `goto` as a
+/// keyword, so the transfer API is only callable through that global index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LuaSectionHandle {
+    name: String,
+    heading: String,
+    has_prose: bool,
+}
+
+impl LuaSectionHandle {
+    /// Builds a handle for a top-level H2 section.
+    #[must_use]
+    pub fn new(name: impl Into<String>, has_prose: bool) -> Self {
+        let name = name.into();
+        let heading = format!("## {name}");
+        Self {
+            name,
+            heading,
+            has_prose,
+        }
+    }
+
+    /// Returns the section heading text without markers.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the canonical `"## Name"` heading used by `execute` / `goto`.
+    #[must_use]
+    pub fn heading(&self) -> &str {
+        &self.heading
+    }
+
+    /// Returns whether the section contains any prose block.
+    #[must_use]
+    pub fn has_prose(&self) -> bool {
+        self.has_prose
+    }
+}
+
+impl UserData for LuaSectionHandle {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("name", |_, this| Ok(this.name.clone()));
+        fields.add_field_method_get("has_prose", |_, this| Ok(this.has_prose));
+    }
+}
+
+/// Outcome of a Lua block that may invoke `goto`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LuaBlockResult {
+    /// Normal completion with an optional scalar return.
+    Returned(Option<String>),
+    /// `goto` transferred control to this heading (`## Name`).
+    Goto(String),
+}
+
+/// Resolves an `execute` / `goto` target from a heading string or Section object.
+///
+/// # Errors
+/// Returns a Lua error when the value is neither a string nor a Section handle.
+pub(crate) fn resolve_section_target(value: Value) -> mlua::Result<String> {
+    match value {
+        Value::String(s) => Ok(s.to_str()?.to_owned()),
+        Value::UserData(ud) => {
+            let handle = ud.borrow::<LuaSectionHandle>()?;
+            Ok(handle.heading().to_owned())
+        }
+        other => Err(mlua::Error::external(format!(
+            "section target must be a string or Section object, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
 /// Immutable prompt-level tool bindings produced by one H1 declaration pass.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolBindings {
@@ -903,6 +981,8 @@ pub struct SectionVm {
     /// Shared with [`crate::execute::InferContext`] so `model:infer` and the
     /// prose tool loop increment the same `tools.calls` counters.
     counts_slot: Arc<Mutex<Option<ToolCallCounts>>>,
+    /// Set by Lua `goto` before it aborts the current chunk.
+    goto_slot: Arc<Mutex<Option<String>>>,
     store: Option<StoreRef>,
     host_injected: bool,
 }
@@ -968,6 +1048,7 @@ impl SectionVm {
             })),
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new_replay())),
             counts_slot: Arc::new(Mutex::new(None)),
+            goto_slot: Arc::new(Mutex::new(None)),
             store: None,
             host_injected: false,
         };
@@ -1080,6 +1161,7 @@ impl SectionVm {
             tool_runtime: Arc::clone(&runtime),
             model_runtime: Arc::clone(&model_runtime),
             counts_slot: Arc::new(Mutex::new(None)),
+            goto_slot: Arc::new(Mutex::new(None)),
             store: None,
             host_injected: false,
         };
@@ -1309,17 +1391,59 @@ impl SectionVm {
     where
         F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
     {
+        match self.run_prologue_with_control(
+            program,
+            observer,
+            section,
+            &[],
+            None::<&fn(Value, Option<String>) -> std::result::Result<String, String>>,
+            Some(&fanout_callback),
+        )? {
+            LuaBlockResult::Returned(value) => Ok(value),
+            LuaBlockResult::Goto(heading) => Err(Error::Lua(format!(
+                "goto({heading}) is not available in this Lua phase"
+            ))),
+        }
+    }
+
+    /// Executes a compiled prologue with `tasks`, `execute`, `goto`, and optional `fanout`.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if host values have not been injected or
+    /// execution fails.
+    pub(crate) fn run_prologue_with_control<E, F>(
+        &self,
+        program: &LuaProgram,
+        observer: &dyn Observer,
+        section: &str,
+        tasks: &[LuaSectionHandle],
+        execute_callback: Option<&E>,
+        fanout_callback: Option<&F>,
+    ) -> Result<LuaBlockResult>
+    where
+        E: Fn(Value, Option<String>) -> std::result::Result<String, String>,
+        F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
+    {
         observer.observe(&self.execution, section, detail::LUA_PROLOGUE_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
             observer.observe(&self.execution, section, detail::LUA_PROLOGUE_FAILED);
             return Err(error);
         }
-        let result = self.run_loaded_with_fanout(program, observer, section, fanout_callback);
+        let result = self.run_loaded_with_control(
+            program,
+            observer,
+            section,
+            tasks,
+            execute_callback,
+            fanout_callback,
+            true,
+        );
+        let ok = result.is_ok();
         observer.observe(
             &self.execution,
             section,
-            if result.is_ok() {
+            if ok {
                 detail::LUA_PROLOGUE_SUCCEEDED
             } else {
                 detail::LUA_PROLOGUE_FAILED
@@ -1506,6 +1630,39 @@ impl SectionVm {
     where
         F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
     {
+        match self.run_epilog_with_control(
+            program,
+            observer,
+            section,
+            &[],
+            None::<&fn(Value, Option<String>) -> std::result::Result<String, String>>,
+            Some(&fanout_callback),
+        )? {
+            LuaBlockResult::Returned(value) => Ok(value),
+            LuaBlockResult::Goto(heading) => Err(Error::Lua(format!(
+                "goto({heading}) is not available in this Lua phase"
+            ))),
+        }
+    }
+
+    /// Executes a compiled epilog with `tasks`, `execute`, `goto`, and optional `fanout`.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if host values have not been injected, the tool
+    /// scope is open, or execution fails.
+    pub(crate) fn run_epilog_with_control<E, F>(
+        &self,
+        program: &LuaProgram,
+        observer: &dyn Observer,
+        section: &str,
+        tasks: &[LuaSectionHandle],
+        execute_callback: Option<&E>,
+        fanout_callback: Option<&F>,
+    ) -> Result<LuaBlockResult>
+    where
+        E: Fn(Value, Option<String>) -> std::result::Result<String, String>,
+        F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
+    {
         observer.observe(&self.execution, section, detail::LUA_EPILOG_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
@@ -1516,11 +1673,20 @@ impl SectionVm {
             observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
             return Err(error);
         }
-        let result = self.run_loaded_with_fanout(program, observer, section, fanout_callback);
+        let result = self.run_loaded_with_control(
+            program,
+            observer,
+            section,
+            tasks,
+            execute_callback,
+            fanout_callback,
+            true,
+        );
+        let ok = result.is_ok();
         observer.observe(
             &self.execution,
             section,
-            if result.is_ok() {
+            if ok {
                 detail::LUA_EPILOG_SUCCEEDED
             } else {
                 detail::LUA_EPILOG_FAILED
@@ -1808,34 +1974,80 @@ impl SectionVm {
         scalar_return(returned)
     }
 
-    fn run_loaded_with_fanout<F>(
+    fn take_goto(&self) -> Option<String> {
+        self.goto_slot.lock().ok().and_then(|mut slot| slot.take())
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "control-flow host fns are installed together for one Lua phase"
+    )]
+    fn run_loaded_with_control<E, F>(
         &self,
         program: &LuaProgram,
         observer: &dyn Observer,
         section: &str,
-        fanout_callback: F,
-    ) -> Result<Option<String>>
+        tasks: &[LuaSectionHandle],
+        execute_callback: Option<&E>,
+        fanout_callback: Option<&F>,
+        goto_enabled: bool,
+    ) -> Result<LuaBlockResult>
     where
+        E: Fn(Value, Option<String>) -> std::result::Result<String, String>,
         F: Fn(String, String) -> std::result::Result<Vec<String>, String>,
     {
         let store = self.store.as_ref().ok_or_else(|| {
             Error::Lua("section VM host values have not been injected".to_owned())
         })?;
-        let returned: MultiValue = self
-            .lua
-            .scope(|scope| {
-                install_log(&self.lua, scope, &self.execution, observer, section)
-                    .map_err(|error| mlua::Error::external(error.to_string()))?;
-                install_store_table(
-                    &self.lua,
-                    scope,
-                    &self.lua.globals(),
-                    store,
-                    &self.execution,
-                    observer,
-                    section,
-                )
+        if let Ok(mut slot) = self.goto_slot.lock() {
+            *slot = None;
+        }
+        let goto_slot = Arc::clone(&self.goto_slot);
+        let result = self.lua.scope(|scope| {
+            install_log(&self.lua, scope, &self.execution, observer, section)
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
+            install_store_table(
+                &self.lua,
+                scope,
+                &self.lua.globals(),
+                store,
+                &self.execution,
+                observer,
+                section,
+            )
+            .map_err(|error| mlua::Error::external(error.to_string()))?;
+            install_tasks_table(&self.lua, tasks)
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            if let Some(execute_callback) = execute_callback {
+                let execute_fn = scope
+                    .create_function(|_, (target, input): (Value, Option<String>)| {
+                        execute_callback(target, input).map_err(mlua::Error::external)
+                    })
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+                self.lua
+                    .globals()
+                    .raw_set("execute", execute_fn)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+            }
+            if goto_enabled {
+                // Lua 5.4 reserves `goto` as a keyword. Install under _G["goto"]
+                // via raw_set so authors call `_G["goto"](target)`, not bare goto().
+                let goto_fn = scope
+                    .create_function(move |_, target: Value| -> mlua::Result<()> {
+                        let heading = resolve_section_target(target)?;
+                        let mut slot = goto_slot
+                            .lock()
+                            .map_err(|_| mlua::Error::external("goto slot poisoned"))?;
+                        *slot = Some(heading);
+                        Err(mlua::Error::external("goto transfer"))
+                    })
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+                self.lua
+                    .globals()
+                    .raw_set("goto", goto_fn)
+                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+            }
+            if let Some(fanout_callback) = fanout_callback {
                 let fanout_fn = scope
                     .create_function(|lua, (worker, list): (String, String)| {
                         let replies =
@@ -1851,14 +2063,26 @@ impl SectionVm {
                     .globals()
                     .raw_set("fanout", fanout_fn)
                     .map_err(|error| mlua::Error::external(error.to_string()))?;
-                let result = program
-                    .load(&self.lua)
-                    .map_err(|error| mlua::Error::external(error.to_string()))?
-                    .call(());
-                finish_log_phase(&self.lua, result)
-            })
-            .map_err(|error| program.map_runtime_error(&error))?;
-        scalar_return(returned)
+            }
+            let result = program
+                .load(&self.lua)
+                .map_err(|error| mlua::Error::external(error.to_string()))?
+                .call(());
+            finish_log_phase(&self.lua, result)
+        });
+        if let Some(heading) = self.take_goto() {
+            let _ = self.lua.globals().raw_set("goto", Value::Nil);
+            let _ = self.lua.globals().raw_set("execute", Value::Nil);
+            let _ = self.lua.globals().raw_set("fanout", Value::Nil);
+            let _ = self.lua.globals().raw_set("tasks", Value::Nil);
+            return Ok(LuaBlockResult::Goto(heading));
+        }
+        let returned: MultiValue = result.map_err(|error| program.map_runtime_error(&error))?;
+        let _ = self.lua.globals().raw_set("goto", Value::Nil);
+        let _ = self.lua.globals().raw_set("execute", Value::Nil);
+        let _ = self.lua.globals().raw_set("fanout", Value::Nil);
+        let _ = self.lua.globals().raw_set("tasks", Value::Nil);
+        Ok(LuaBlockResult::Returned(scalar_return(returned)?))
     }
 
     fn run_source(
@@ -2339,6 +2563,23 @@ fn install_h2_tools(
 /// The callback borrows its observer through [`Scope`], so neither the callback
 /// nor any Lua reference copied from it can retain that observer after the
 /// current H1 or H2 phase returns.
+fn install_tasks_table(lua: &Lua, tasks: &[LuaSectionHandle]) -> Result<()> {
+    let table = lua
+        .create_table_with_capacity(0, tasks.len())
+        .map_err(|error| Error::Lua(error.to_string()))?;
+    for handle in tasks {
+        let userdata = lua
+            .create_userdata(handle.clone())
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        table
+            .raw_set(handle.heading(), userdata)
+            .map_err(|error| Error::Lua(error.to_string()))?;
+    }
+    lua.globals()
+        .raw_set("tasks", table)
+        .map_err(|error| Error::Lua(error.to_string()))
+}
+
 fn install_log<'scope, 'env: 'scope>(
     lua: &Lua,
     scope: &'scope Scope<'scope, 'env>,
