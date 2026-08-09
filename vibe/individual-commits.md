@@ -30,3 +30,5 @@
 
 ## 2026-08-08 core: map Lua runtime errors to prompt source lines
 
+## 2026-08-08 Parse positional tool_code args and inject a tool guide
+
