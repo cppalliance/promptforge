@@ -37,3 +37,4 @@
 - [2026-08-08-12-supervise-local-llama-server] no background watchdog: Prefer bounded request-time supervision while continuous health selection is unnecessary.
 - [2026-08-09-1-gateway-web-search-upgrade] deterministic result shaping: Validate, sanitize, filter, and diversify results before exposing them to a model.
 - [2026-08-09-1-gateway-web-search-upgrade] cache remains absent: Add search-result caching only after repeat workloads justify a coherency policy.
+- [2026-08-09-2-promptforge-user-guide] reference parity: Record availability, signatures, return values, and examples for every public prompt-language surface.

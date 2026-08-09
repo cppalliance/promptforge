@@ -42,7 +42,4 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - Keep ordinary tests deterministic and offline; run network, process, download, and live-model checks only through explicit scenario commands.
 - Long provisioning operations report interactive progress on stderr and coarse progress through structured logs.
 - Write developer traces and store mirrors as events occur so failed or long runs remain inspectable.
-
-## Thresholds
-
-- Keep prompt-quality changes only when sourced evidence improves without disproportionate model-turn growth.
+- Keep user documentation executable and synchronized with the runtime grammar.
