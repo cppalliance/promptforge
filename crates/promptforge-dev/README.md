@@ -29,7 +29,7 @@ cargo run -p promptforge-dev -- <prompt.md> [input] [--watch]
 ## What happens on each run
 
 1. Fetch the live model catalog from the gateway.
-2. Bind tools (`web_fetch` always; `web_search` when the same gateway credentials are present) and models from the prompt declarations.
+2. Prepare tools (`web_fetch` always; `web_search` when the same gateway credentials are present), the picker, and the model catalog for live H1 resolution.
 3. Clear `<prompt-stem>.store/` beside the prompt, then execute.
 4. During the run, store writes land under `<prompt-stem>.store/` immediately and each model turn writes `.trace/turn-N-*.json`. End-of-run reconcile removes orphans without wiping `.trace/`. Observer lines go to stderr; the result goes to stdout.
 
