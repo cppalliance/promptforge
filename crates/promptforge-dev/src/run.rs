@@ -170,17 +170,18 @@ pub(crate) async fn run_once_with(
     let bound = bind_prompt(prompt, &picker, &registry, models, &execution, observer)
         .with_context(|| format!("bind {}", prompt_path.display()))?;
 
-    let store = StoreRef::memory();
     let client = GatewayClient::new(&gateway.base_url, gateway.key.as_str());
     let capture = dump::TraceCapture::new(prompt_path);
 
-    // Clear the previous run's dump before starting so stale trace files
-    // are never visible while a new run is in flight. Best-effort only:
-    // dump_store clears again after the run and reports a hard failure there.
+    // Clear the previous run's dump before starting so stale store files and
+    // traces never masquerade as the current run. Mid-run writes go through
+    // MirrorStore and TraceCapture; end-of-run reconcile never wipes `.trace/`.
     let dump_dir = dump::dump_directory(prompt_path);
     if dump_dir.is_dir() {
         let _ignored = std::fs::remove_dir_all(&dump_dir);
     }
+
+    let store = StoreRef::new(Box::new(dump::MirrorStore::new(dump_dir)));
 
     let options = RunOptions {
         execution: &execution,
@@ -191,16 +192,12 @@ pub(crate) async fn run_once_with(
     let result = run(&bound, input, registry.tools(), &store, options)
         .await
         .with_context(|| format!("run {}", prompt_path.display()));
-    // The dump runs on success and failure alike: a failed run's partial
-    // store is exactly what a debugging author needs. Status lines go to
-    // stderr, keeping stdout for the result alone, and a dump failure is
-    // reported there rather than displacing the run's own outcome.
+    // Reconcile on success and failure alike: a failed run's partial store is
+    // exactly what a debugging author needs, and orphans from deletes land
+    // here if MirrorStore skipped them. Status lines go to stderr.
     if let Err(error) = dump::dump_store(&store, prompt_path, &mut std::io::stderr()) {
         eprintln!("store dump failed: {error:#}");
     }
-    // Trace files are flushed after the store dump so clearing `<stem>.store`
-    // cannot erase the turn JSON from the run that just finished.
-    capture.flush(&mut std::io::stderr());
     result
 }
 
