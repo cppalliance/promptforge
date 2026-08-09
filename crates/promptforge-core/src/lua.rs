@@ -329,6 +329,19 @@ pub(crate) struct ToolRuntime {
     phase: ToolPhase,
     declaration_index: usize,
     added: Vec<String>,
+    /// Monotonic counter bumped when the effective H2 tool set changes.
+    ///
+    /// [`crate::execute::ToolBag`] caches schemas/dispatch against this value
+    /// so `model:infer` rebuilds only after a real mutation.
+    generation: u64,
+}
+
+impl ToolRuntime {
+    /// Returns the current tool-set generation.
+    #[must_use]
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
 }
 
 /// Compiled Lua 5.4 source that can be loaded into multiple process-local VMs.
@@ -918,6 +931,7 @@ impl SectionVm {
                 phase: ToolPhase::Replay,
                 declaration_index: 0,
                 added: Vec::new(),
+                generation: 0,
             })),
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new_replay())),
             counts_slot: Arc::new(Mutex::new(None)),
@@ -1021,6 +1035,7 @@ impl SectionVm {
             phase: ToolPhase::Replay,
             declaration_index: 0,
             added: Vec::new(),
+            generation: 0,
         }));
         let model_runtime = Arc::new(Mutex::new(ModelRuntime::new_replay()));
         let vm = Self {
@@ -2214,13 +2229,18 @@ fn install_h2_tools(
                     )));
                 }
             }
+            let mut changed = false;
             for alias in aliases {
                 if frozen.always.iter().any(|existing| existing == &alias) {
                     continue;
                 }
                 if !state.added.iter().any(|existing| existing == &alias) {
                     state.added.push(alias);
+                    changed = true;
                 }
+            }
+            if changed {
+                state.generation = state.generation.saturating_add(1);
             }
             Ok(())
         })

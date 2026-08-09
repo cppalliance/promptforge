@@ -30,8 +30,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
@@ -62,10 +62,118 @@ const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 /// The prompt language major this executor implements.
 const SUPPORTED_MAJOR: u32 = 1;
 
+/// Cached schemas/dispatch for one tool-bag generation.
+struct CachedToolState {
+    generation: u64,
+    scope: ToolScope,
+    schemas: Vec<ToolSchema>,
+    dispatch: BTreeMap<String, ToolId>,
+}
+
+/// Result of preparing the model-visible tool set for one `model:infer` call.
+pub(crate) struct PreparedTools {
+    /// Effective bindings in model-advertisement order.
+    pub(crate) scope: ToolScope,
+    /// Schemas advertised to the model for this infer.
+    pub(crate) schemas: Vec<ToolSchema>,
+    /// Alias-to-identity dispatch map for this infer.
+    pub(crate) dispatch: BTreeMap<String, ToolId>,
+    /// Whether schemas/dispatch were served from the generation cache.
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "asserted by tool_bag_caches_on_unchanged_generation"
+        )
+    )]
+    pub(crate) reused: bool,
+}
+
+/// Effective tool set with a generation-tracked schema/dispatch cache.
+///
+/// Mutations via `tools.add` bump [`ToolRuntime::generation`]. Each
+/// [`Self::prepare`] call rebuilds schemas and dispatch only when that
+/// generation no longer matches the cache. Used by `model:infer`; the
+/// implicit prose path still builds scope through `prepare_effective_scope`.
+pub(crate) struct ToolBag {
+    bindings: ToolBindings,
+    runtime: Arc<Mutex<ToolRuntime>>,
+    cached: Option<CachedToolState>,
+}
+
+impl ToolBag {
+    /// Creates a bag over frozen bindings and the live H2 addition runtime.
+    #[must_use]
+    pub(crate) fn new(bindings: ToolBindings, runtime: Arc<Mutex<ToolRuntime>>) -> Self {
+        Self {
+            bindings,
+            runtime,
+            cached: None,
+        }
+    }
+
+    /// Returns frozen prompt-level bindings for diagnostics and `tools.calls`.
+    #[must_use]
+    pub(crate) fn bindings(&self) -> &ToolBindings {
+        &self.bindings
+    }
+
+    /// Snapshot-reads the live bag; rebuilds schemas/dispatch on generation mismatch.
+    ///
+    /// # Errors
+    /// Returns tool-scope or registry errors from snapshot/validation/schema build.
+    pub(crate) fn prepare(
+        &mut self,
+        bound: Option<&BoundPrompt>,
+        registry: &ToolRegistry<'_>,
+        execution: &str,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<PreparedTools> {
+        let generation = {
+            let runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
+            runtime.generation()
+        };
+        if let Some(cached) = &self.cached
+            && cached.generation == generation
+        {
+            return Ok(PreparedTools {
+                scope: cached.scope.clone(),
+                schemas: cached.schemas.clone(),
+                dispatch: cached.dispatch.clone(),
+                reused: true,
+            });
+        }
+
+        let scope = snapshot_tool_scope(&self.bindings, &self.runtime)?;
+        let (schemas, dispatch) = match bound {
+            Some(bound) => {
+                prepare_effective_scope(bound, &scope, registry, execution, observer, section)?
+            }
+            None => prepare_scoped_tools(&scope, registry)?,
+        };
+        self.cached = Some(CachedToolState {
+            generation,
+            scope: scope.clone(),
+            schemas: schemas.clone(),
+            dispatch: dispatch.clone(),
+        });
+        Ok(PreparedTools {
+            scope,
+            schemas,
+            dispatch,
+            reused: false,
+        })
+    }
+}
+
 /// Shared context for `model:infer` from Lua.
 ///
-/// Carries the gateway client, tool pool, store, observer, and the live tool-bag
-/// handles so each infer call can snapshot-read the current effective set.
+/// Carries the gateway client, tool pool, store, observer, and the live tool bag
+/// so each infer call can snapshot-read the current effective set.
 pub(crate) struct InferContext {
     client: GatewayClient,
     shared_tools: SharedTools,
@@ -77,9 +185,8 @@ pub(crate) struct InferContext {
     max_tool_iterations: usize,
     turns: Arc<AtomicU32>,
     bound: Option<BoundPrompt>,
-    tool_bindings: ToolBindings,
-    tool_runtime: Arc<std::sync::Mutex<ToolRuntime>>,
-    counts_slot: Arc<std::sync::Mutex<Option<ToolCallCounts>>>,
+    tool_bag: Mutex<ToolBag>,
+    counts_slot: Arc<Mutex<Option<ToolCallCounts>>>,
 }
 
 impl InferContext {
@@ -90,58 +197,63 @@ impl InferContext {
         binding: &ModelBinding,
         prompt: &str,
     ) -> mlua::Result<String> {
-        let scope = snapshot_tool_scope(&self.tool_bindings, &self.tool_runtime)
-            .map_err(|error| mlua::Error::external(error.to_string()))?;
+        let registry = self.shared_tools.registry();
+        let (prepared, declared) = {
+            let mut bag = self
+                .tool_bag
+                .lock()
+                .map_err(|_| mlua::Error::external("tool bag mutex was poisoned"))?;
+            let prepared = bag
+                .prepare(
+                    self.bound.as_ref(),
+                    &registry,
+                    &self.execution,
+                    self.observer.as_ref(),
+                    &self.section,
+                )
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            let declared: Vec<String> = bag
+                .bindings()
+                .bindings()
+                .iter()
+                .map(|binding| binding.alias().to_owned())
+                .collect();
+            (prepared, declared)
+        };
         let counts = {
             let mut slot = self
                 .counts_slot
                 .lock()
                 .map_err(|_| mlua::Error::external("tool call counts mutex was poisoned"))?;
             if let Some(existing) = slot.as_ref() {
-                for tool in scope.bindings() {
+                for tool in prepared.scope.bindings() {
                     existing
                         .ensure(tool.alias())
                         .map_err(|error| mlua::Error::external(error.to_string()))?;
                 }
                 existing.clone()
             } else {
-                let created =
-                    ToolCallCounts::new(scope.bindings().iter().map(|b| b.alias().to_owned()));
+                let created = ToolCallCounts::new(
+                    prepared
+                        .scope
+                        .bindings()
+                        .iter()
+                        .map(|b| b.alias().to_owned()),
+                );
                 *slot = Some(created.clone());
                 created
             }
         };
-        let declared: Vec<String> = self
-            .tool_bindings
-            .bindings()
-            .iter()
-            .map(|binding| binding.alias().to_owned())
-            .collect();
         install_lua_tool_calls(lua, &counts, &declared)
             .map_err(|error| mlua::Error::external(error.to_string()))?;
-
-        let registry = self.shared_tools.registry();
-        let (schemas, dispatch) = match &self.bound {
-            Some(bound) => prepare_effective_scope(
-                bound,
-                &scope,
-                &registry,
-                &self.execution,
-                self.observer.as_ref(),
-                &self.section,
-            )
-            .map_err(|error| mlua::Error::external(error.to_string()))?,
-            None => prepare_scoped_tools(&scope, &registry)
-                .map_err(|error| mlua::Error::external(error.to_string()))?,
-        };
 
         let completion_options = binding.completion_options();
         let handle = tokio::runtime::Handle::current();
         let text = tokio::task::block_in_place(|| {
             handle.block_on(run_tool_loop(
                 &self.client,
-                &schemas,
-                &dispatch,
+                &prepared.schemas,
+                &prepared.dispatch,
                 &registry,
                 prompt.to_owned(),
                 self.max_tool_iterations,
@@ -195,8 +307,7 @@ fn attach_infer_hook(
         max_tool_iterations,
         turns: Arc::clone(turns),
         bound: bound.cloned(),
-        tool_bindings,
-        tool_runtime,
+        tool_bag: Mutex::new(ToolBag::new(tool_bindings, tool_runtime)),
         counts_slot: vm.counts_slot(),
     });
     let hook: ModelInferHook =

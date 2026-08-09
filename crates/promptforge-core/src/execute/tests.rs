@@ -16,7 +16,9 @@ use promptforge_tool_picker::{
 use serde_json::Value;
 
 use super::*;
-use crate::lua::{bind_shared_declarations, bind_tool_declarations};
+use crate::lua::{
+    LuaProgram, SectionVm, ToolCallCounts, bind_shared_declarations, bind_tool_declarations,
+};
 use crate::model::{
     CompletionOptions, ModelBindings, ModelCatalog, ModelDescriptor, ModelId, ModelInvocation,
     ModelNeedOpts, ResolvedModel, ThinkingMode,
@@ -3070,4 +3072,175 @@ async fn model_infer_single_shot_returns_text() {
     .await
     .expect("model:infer single-shot must return text");
     assert_eq!(out, "final answer");
+}
+
+/// A second fixture tool so the bag can grow from one alias to two.
+struct FetchTool;
+
+#[async_trait::async_trait]
+impl Tool for FetchTool {
+    fn id(&self) -> ToolId {
+        ToolId::new("tests", "fetch")
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+    )]
+    fn wire_name(&self) -> &str {
+        "fetch"
+    }
+
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
+    )]
+    fn description(&self) -> &str {
+        "Fetch a URL."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": { "url": { "type": "string" } },
+            "required": ["url"]
+        })
+    }
+
+    async fn call(&self, _args: Value) -> Result<String> {
+        Ok("fetched".to_owned())
+    }
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "covers cache hit, generation bump rebuild, and count persistence in one bag lifecycle"
+)]
+fn tool_bag_caches_on_unchanged_generation() {
+    let shared = LuaProgram::compile(
+        "tools.need('echo', 'echo tool')\ntools.need('fetch', 'fetch tool')",
+        "shared",
+        1,
+        EXECUTION,
+        &NullObserver,
+        "Bag",
+    )
+    .expect("shared Lua must compile");
+    let bindings = bind_tool_declarations(
+        &shared,
+        &|description: &str| {
+            if description.contains("echo") {
+                Ok(ToolId::new("tests", "echo"))
+            } else {
+                Ok(ToolId::new("tests", "fetch"))
+            }
+        },
+        EXECUTION,
+        &NullObserver,
+        "Bag",
+    )
+    .expect("declarations must bind");
+    let mut vm = SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Bag")
+        .expect("declarations must replay");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host must inject");
+    let add_echo = LuaProgram::compile(
+        "tools.add('echo')",
+        "prologue",
+        1,
+        EXECUTION,
+        &NullObserver,
+        "Bag",
+    )
+    .expect("prologue must compile");
+    vm.run_prologue(&add_echo, &NullObserver, "Bag")
+        .expect("tools.add(echo) must succeed");
+
+    let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
+    {
+        let runtime = tool_runtime.lock().expect("runtime mutex");
+        assert_eq!(
+            runtime.generation(),
+            1,
+            "first tools.add must bump generation"
+        );
+    }
+    let mut bag = ToolBag::new(tool_bindings, Arc::clone(&tool_runtime));
+    let echo = EchoTool;
+    let fetch = FetchTool;
+    let registry = ToolRegistry::new([&echo as &dyn Tool, &fetch as &dyn Tool]);
+
+    let first = bag
+        .prepare(None, &registry, EXECUTION, &NullObserver, "Bag")
+        .expect("first prepare must build schemas");
+    assert!(!first.reused, "first prepare must rebuild");
+    assert_eq!(first.schemas.len(), 1);
+    assert_eq!(first.schemas[0].name, "echo");
+
+    let second = bag
+        .prepare(None, &registry, EXECUTION, &NullObserver, "Bag")
+        .expect("second prepare must reuse cache");
+    assert!(second.reused, "unchanged generation must reuse cache");
+    assert_eq!(
+        second
+            .schemas
+            .iter()
+            .map(|schema| schema.name.as_str())
+            .collect::<Vec<_>>(),
+        first
+            .schemas
+            .iter()
+            .map(|schema| schema.name.as_str())
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(second.dispatch, first.dispatch);
+
+    let add_fetch = LuaProgram::compile(
+        "tools.add('fetch')",
+        "prologue-2",
+        1,
+        EXECUTION,
+        &NullObserver,
+        "Bag",
+    )
+    .expect("second prologue must compile");
+    vm.run_prologue(&add_fetch, &NullObserver, "Bag")
+        .expect("tools.add(fetch) must succeed");
+    {
+        let runtime = tool_runtime.lock().expect("runtime mutex");
+        assert_eq!(
+            runtime.generation(),
+            2,
+            "second tools.add must bump generation"
+        );
+    }
+
+    let third = bag
+        .prepare(None, &registry, EXECUTION, &NullObserver, "Bag")
+        .expect("prepare after mutation must rebuild");
+    assert!(!third.reused, "generation mismatch must rebuild");
+    assert_eq!(third.schemas.len(), 2);
+    assert_eq!(
+        third
+            .schemas
+            .iter()
+            .map(|schema| schema.name.as_str())
+            .collect::<Vec<_>>(),
+        ["echo", "fetch"]
+    );
+
+    // Counts persist across prepare/infer; new tools seed at 0.
+    let counts = ToolCallCounts::new(first.scope.bindings().iter().map(|b| b.alias().to_owned()));
+    counts.increment("echo").expect("echo must be seeded");
+    assert_eq!(counts.get("echo").unwrap(), Some(1));
+    counts.ensure("fetch").expect("new tool seeds at 0");
+    assert_eq!(counts.get("fetch").unwrap(), Some(0));
+    assert_eq!(
+        counts.get("echo").unwrap(),
+        Some(1),
+        "existing counts must persist when new tools are seeded"
+    );
+
+    vm.teardown(&NullObserver, "Bag");
 }
