@@ -6,11 +6,102 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use mlua::{Lua, MultiValue, Scope, Table, Value};
+use mlua::{Lua, MultiValue, Scope, Table, UserData, UserDataFields, Value};
 
 use crate::model::{ModelBinding, ModelBindings, ModelDeclaration, ModelNeedOpts, ModelResolver};
 use crate::observe::{Observer, detail};
 use crate::{Error, Result};
+
+/// Inspectable Lua userdata returned by `models.need` / `models.always`.
+#[derive(Debug, Clone)]
+pub struct LuaModelHandle {
+    name: String,
+    model_id: String,
+    description: String,
+    context: u32,
+    thinking: Option<bool>,
+    temperature: Option<f64>,
+    max_tokens: Option<u32>,
+    dialect: String,
+}
+
+impl LuaModelHandle {
+    /// Builds a handle from a frozen [`ModelBinding`].
+    #[must_use]
+    pub fn from_binding(binding: &ModelBinding) -> Self {
+        Self {
+            name: binding.alias().to_owned(),
+            model_id: binding.id().name().to_owned(),
+            description: binding.description().to_owned(),
+            context: binding.context(),
+            thinking: binding.invocation().thinking,
+            temperature: binding.invocation().temperature,
+            max_tokens: binding.invocation().max_tokens,
+            dialect: binding.tool_dialect().to_string(),
+        }
+    }
+
+    /// Returns the prompt-local alias.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the caller-facing catalog model id.
+    #[must_use]
+    pub fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
+    /// Returns the capability description supplied to `models.need`.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the catalog context window size in tokens.
+    #[must_use]
+    pub fn context(&self) -> u32 {
+        self.context
+    }
+
+    /// Returns the frozen thinking switch, when the need declared one.
+    #[must_use]
+    pub fn thinking(&self) -> Option<bool> {
+        self.thinking
+    }
+
+    /// Returns the frozen sampling temperature, when the need declared one.
+    #[must_use]
+    pub fn temperature(&self) -> Option<f64> {
+        self.temperature
+    }
+
+    /// Returns the frozen max generation tokens, when the need declared one.
+    #[must_use]
+    pub fn max_tokens(&self) -> Option<u32> {
+        self.max_tokens
+    }
+
+    /// Returns the tool-calling dialect id string.
+    #[must_use]
+    pub fn dialect(&self) -> &str {
+        &self.dialect
+    }
+}
+
+impl UserData for LuaModelHandle {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("name", |_, this| Ok(this.name.clone()));
+        fields.add_field_method_get("model_id", |_, this| Ok(this.model_id.clone()));
+        fields.add_field_method_get("description", |_, this| Ok(this.description.clone()));
+        fields.add_field_method_get("context", |_, this| Ok(this.context));
+        fields.add_field_method_get("thinking", |_, this| Ok(this.thinking));
+        fields.add_field_method_get("temperature", |_, this| Ok(this.temperature));
+        fields.add_field_method_get("max_tokens", |_, this| Ok(this.max_tokens));
+        fields.add_field_method_get("dialect", |_, this| Ok(this.dialect.clone()));
+    }
+}
 
 /// Phase of the section-local models table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,7 +146,7 @@ fn record_need_binding(
     alias: String,
     description: String,
     opts: ModelNeedOpts,
-) -> mlua::Result<()> {
+) -> mlua::Result<ModelBinding> {
     if state.bindings.iter().any(|b| b.alias() == alias) {
         if state.callback_error.is_none() {
             state.callback_error = Some(Error::DuplicateModelAlias {
@@ -73,21 +164,21 @@ fn record_need_binding(
             return Err(mlua::Error::external("model capability resolution failed"));
         }
     };
-    state.bindings.push(
-        ModelBinding::new(
-            alias.clone(),
-            description.clone(),
-            selection.id,
-            selection.invocation,
-        )
-        .with_dialect(selection.tool_dialect),
-    );
+    let binding = ModelBinding::new(
+        alias.clone(),
+        description.clone(),
+        selection.id,
+        selection.invocation,
+    )
+    .with_dialect(selection.tool_dialect)
+    .with_context(selection.context);
+    state.bindings.push(binding.clone());
     state.declarations.push(ModelDeclaration::Need {
         alias,
         description,
         opts,
     });
-    Ok(())
+    Ok(binding)
 }
 
 /// Records a `models.always` selection, enforcing at-most-once.
@@ -150,13 +241,14 @@ pub(crate) fn install_bind_models<'scope, 'env: 'scope>(
 
     let needs = Arc::clone(state);
     let need = scope
-        .create_function(move |_, args: MultiValue| -> mlua::Result<()> {
+        .create_function(move |_, args: MultiValue| -> mlua::Result<LuaModelHandle> {
             let (alias, description, opts) = parse_need_args(args)?;
             validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
             let mut guard = needs
                 .lock()
                 .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
-            record_need_binding(&mut guard, resolver, alias, description, opts)
+            let binding = record_need_binding(&mut guard, resolver, alias, description, opts)?;
+            Ok(LuaModelHandle::from_binding(&binding))
         })
         .map_err(|error| Error::Lua(error.to_string()))?;
     models
@@ -165,27 +257,35 @@ pub(crate) fn install_bind_models<'scope, 'env: 'scope>(
 
     let always_state = Arc::clone(state);
     let always = scope
-        .create_function(move |_, args: MultiValue| -> mlua::Result<()> {
+        .create_function(move |_, args: MultiValue| -> mlua::Result<LuaModelHandle> {
             if args.len() >= 2 {
                 let (alias, description, opts) = parse_need_args(args)?;
                 validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
                 let mut guard = always_state
                     .lock()
                     .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
-                record_need_binding(&mut guard, resolver, alias.clone(), description, opts)?;
-                record_always_selection(&mut guard, alias)
+                let binding =
+                    record_need_binding(&mut guard, resolver, alias.clone(), description, opts)?;
+                record_always_selection(&mut guard, alias)?;
+                Ok(LuaModelHandle::from_binding(&binding))
             } else {
                 let alias = parse_single_alias(&args, "models.always")?;
                 validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
                 let mut guard = always_state
                     .lock()
                     .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
-                if !guard.bindings.iter().any(|b| b.alias() == alias) {
-                    return Err(mlua::Error::external(format!(
-                        "models.always alias {alias:?} was not declared by models.need"
-                    )));
-                }
-                record_always_selection(&mut guard, alias)
+                let binding = guard
+                    .bindings
+                    .iter()
+                    .find(|b| b.alias() == alias)
+                    .cloned()
+                    .ok_or_else(|| {
+                        mlua::Error::external(format!(
+                            "models.always alias {alias:?} was not declared by models.need"
+                        ))
+                    })?;
+                record_always_selection(&mut guard, alias)?;
+                Ok(LuaModelHandle::from_binding(&binding))
             }
         })
         .map_err(|error| Error::Lua(error.to_string()))?;
@@ -222,7 +322,7 @@ pub(crate) fn install_replay_models(
     let expected = bindings.clone();
     let state = Arc::clone(runtime);
     let need = lua
-        .create_function(move |_, args: MultiValue| {
+        .create_function(move |_, args: MultiValue| -> mlua::Result<LuaModelHandle> {
             let (alias, description, opts) = parse_need_args(args)?;
             validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
             let mut state = state
@@ -234,11 +334,15 @@ pub(crate) fn install_replay_models(
                 ));
             }
             let expected_decl = ModelDeclaration::Need {
-                alias,
+                alias: alias.clone(),
                 description,
                 opts,
             };
-            replay_declaration(&expected, &mut state, &expected_decl, "models.need")
+            replay_declaration(&expected, &mut state, &expected_decl, "models.need")?;
+            let binding = expected.binding(&alias).ok_or_else(|| {
+                mlua::Error::external(format!("models.need alias {alias:?} has no frozen binding"))
+            })?;
+            Ok(LuaModelHandle::from_binding(binding))
         })
         .map_err(|error| Error::Lua(error.to_string()))?;
     models
@@ -248,7 +352,7 @@ pub(crate) fn install_replay_models(
     let expected_always = bindings.clone();
     let always_state = Arc::clone(runtime);
     let always = lua
-        .create_function(move |_, args: MultiValue| {
+        .create_function(move |_, args: MultiValue| -> mlua::Result<LuaModelHandle> {
             let mut state = always_state
                 .lock()
                 .map_err(|_| mlua::Error::external("model declaration runtime was poisoned"))?;
@@ -266,13 +370,25 @@ pub(crate) fn install_replay_models(
                     opts,
                 };
                 replay_declaration(&expected_always, &mut state, &need_decl, "models.always")?;
-                let always_decl = ModelDeclaration::Always(alias);
-                replay_declaration(&expected_always, &mut state, &always_decl, "models.always")
+                let always_decl = ModelDeclaration::Always(alias.clone());
+                replay_declaration(&expected_always, &mut state, &always_decl, "models.always")?;
+                let binding = expected_always.binding(&alias).ok_or_else(|| {
+                    mlua::Error::external(format!(
+                        "models.always alias {alias:?} has no frozen binding"
+                    ))
+                })?;
+                Ok(LuaModelHandle::from_binding(binding))
             } else {
                 let alias = parse_single_alias(&args, "models.always")?;
                 validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
-                let always_decl = ModelDeclaration::Always(alias);
-                replay_declaration(&expected_always, &mut state, &always_decl, "models.always")
+                let always_decl = ModelDeclaration::Always(alias.clone());
+                replay_declaration(&expected_always, &mut state, &always_decl, "models.always")?;
+                let binding = expected_always.binding(&alias).ok_or_else(|| {
+                    mlua::Error::external(format!(
+                        "models.always alias {alias:?} has no frozen binding"
+                    ))
+                })?;
+                Ok(LuaModelHandle::from_binding(binding))
             }
         })
         .map_err(|error| Error::Lua(error.to_string()))?;
