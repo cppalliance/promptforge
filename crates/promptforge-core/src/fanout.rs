@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use crate::bind::BoundPrompt;
+use crate::cancel;
 use crate::client::GatewayClient;
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::lua::{LuaProgram, SectionVm, ToolBindings};
@@ -138,6 +139,10 @@ pub(crate) async fn run_fanout_arms(
     loop {
         tokio::select! {
             biased;
+            () = cancel::wait_cancelled() => {
+                abort_fanout_arms(&mut join_set, ctx, &mut observe_rx, &mut debug_rx).await;
+                return Err(Error::Interrupted);
+            }
             Some((section, detail)) = observe_rx.recv() => {
                 ctx.observer.observe(ctx.execution, &section, &detail);
             }
@@ -153,24 +158,12 @@ pub(crate) async fn run_fanout_arms(
                         replies[index] = Some(reply);
                     }
                     Some(Ok(Err(error))) => {
-                        join_set.abort_all();
-                        while join_set.join_next().await.is_some() {}
-                        drain_side_channels(
-                            ctx,
-                            &mut observe_rx,
-                            &mut debug_rx,
-                        );
+                        abort_fanout_arms(&mut join_set, ctx, &mut observe_rx, &mut debug_rx).await;
                         return Err(error);
                     }
                     Some(Err(join_error)) if join_error.is_cancelled() => {}
                     Some(Err(join_error)) => {
-                        join_set.abort_all();
-                        while join_set.join_next().await.is_some() {}
-                        drain_side_channels(
-                            ctx,
-                            &mut observe_rx,
-                            &mut debug_rx,
-                        );
+                        abort_fanout_arms(&mut join_set, ctx, &mut observe_rx, &mut debug_rx).await;
                         return Err(Error::Lua(format!(
                             "fanout arm join failed: {join_error}"
                         )));
@@ -195,6 +188,17 @@ pub(crate) async fn run_fanout_arms(
         }
     }
     Ok(ordered)
+}
+
+async fn abort_fanout_arms(
+    join_set: &mut JoinSet<Result<(usize, String)>>,
+    ctx: &FanoutContext<'_>,
+    observe_rx: &mut mpsc::UnboundedReceiver<(String, String)>,
+    debug_rx: &mut mpsc::UnboundedReceiver<DebugMsg>,
+) {
+    join_set.abort_all();
+    while join_set.join_next().await.is_some() {}
+    drain_side_channels(ctx, observe_rx, debug_rx);
 }
 
 fn drain_side_channels(
@@ -538,6 +542,71 @@ mod tests {
         let err =
             resolve_sibling("Worker", &sections).expect_err("bare name without ### must error");
         assert!(err.to_string().contains("### markers"), "error was: {err}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn pre_cancelled_fanout_returns_interrupted() {
+        use crate::Error;
+        use crate::cancel::{self, CancelHandle};
+        use crate::client::GatewayClient;
+        use crate::lua::LuaProgram;
+        use crate::model::ModelBindings;
+        use crate::observe::NullObserver;
+        use crate::parser::Section;
+        use crate::store::StoreRef;
+
+        let preamble = LuaProgram::compile(
+            "return item",
+            "test preamble",
+            1,
+            "fanout-cancel-test",
+            &NullObserver,
+            "Worker",
+        )
+        .expect("test Lua must compile");
+        let worker = Section {
+            name: "Worker".to_string(),
+            level: 3,
+            preamble: Some(preamble),
+            prose: String::new(),
+            epilog: None,
+            children: Vec::new(),
+            items: Vec::new(),
+        };
+        let items = vec!["alpha".to_string(), "beta".to_string()];
+        let store = StoreRef::memory();
+        let bindings = ToolBindings::default();
+        let models = ModelBindings::default();
+        let shared_tools = SharedTools::default();
+        let client: Option<GatewayClient> = None;
+        let observer = NullObserver;
+        let ctx = FanoutContext {
+            args: "",
+            store: &store,
+            execution: "fanout-cancel-test",
+            observer: &observer,
+            client: &client,
+            debug: None,
+            shared: None,
+            bindings: &bindings,
+            models: &models,
+            bound: None,
+            shared_tools: &shared_tools,
+            max_tool_iterations: 24,
+            last_reply: None,
+            when: "2026-08-08",
+            parent_id: 1,
+        };
+
+        let cancel = CancelHandle::new();
+        cancel.cancel();
+        let error = cancel::scope(cancel, run_fanout_arms(&worker, &items, &ctx))
+            .await
+            .expect_err("pre-cancelled fanout must fail");
+        assert!(
+            matches!(error, Error::Interrupted),
+            "expected Interrupted, got {error}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

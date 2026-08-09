@@ -8,7 +8,9 @@
 
 use std::process::ExitCode;
 
+use promptforge_core::CancelHandle;
 use promptforge_core::bind::bind_prompt;
+use promptforge_core::cancel;
 use promptforge_core::execute::RunOptions;
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::observe::{NullObserver, Observer};
@@ -21,26 +23,37 @@ mod tools;
 /// Entry point. Dispatches subcommands and maps errors to a non-zero exit.
 #[tokio::main]
 async fn main() -> ExitCode {
+    let cancel = CancelHandle::new();
+    let signal_cancel = cancel.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            signal_cancel.cancel();
+        }
+    });
+
     let mut args = std::env::args().skip(1);
     let command = args.next();
-    match command.as_deref() {
-        Some("run") => {
-            let Some(path) = args.next() else {
+    cancel::scope(cancel, async {
+        match command.as_deref() {
+            Some("run") => {
+                let Some(path) = args.next() else {
+                    eprintln!("usage: promptforge run <file.md> [input]");
+                    return ExitCode::FAILURE;
+                };
+                let input = args.next().unwrap_or_default();
+                run(&path, &input, &NullObserver).await
+            }
+            Some(other) => {
+                eprintln!("unknown command: {other}\nusage: promptforge run <file.md> [input]");
+                ExitCode::FAILURE
+            }
+            None => {
                 eprintln!("usage: promptforge run <file.md> [input]");
-                return ExitCode::FAILURE;
-            };
-            let input = args.next().unwrap_or_default();
-            run(&path, &input, &NullObserver).await
+                ExitCode::FAILURE
+            }
         }
-        Some(other) => {
-            eprintln!("unknown command: {other}\nusage: promptforge run <file.md> [input]");
-            ExitCode::FAILURE
-        }
-        None => {
-            eprintln!("usage: promptforge run <file.md> [input]");
-            ExitCode::FAILURE
-        }
-    }
+    })
+    .await
 }
 
 /// Parse the file, execute its sections with `input` as `args`, and print the

@@ -13,7 +13,9 @@ mod watch;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
+use promptforge_core::CancelHandle;
+use promptforge_core::cancel;
 
 use crate::run::require_gateway_env;
 
@@ -61,15 +63,17 @@ async fn main() -> ExitCode {
     };
     let prompt_path = args.prompt.clone();
 
-    let result = tokio::select! {
-        result = dispatch(args) => result,
-        signal = tokio::signal::ctrl_c() => {
-            match signal {
-                Ok(()) => Err(anyhow::anyhow!("interrupted by Ctrl-C")),
-                Err(error) => Err(error).context("install Ctrl-C handler"),
-            }
+    // Fanout runs under block_in_place; dropping a select! branch on Ctrl-C
+    // does not stop arms. Cancel cooperatively so the join loop can abort.
+    let cancel = CancelHandle::new();
+    let signal_cancel = cancel.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            signal_cancel.cancel();
         }
-    };
+    });
+
+    let result = cancel::scope(cancel, dispatch(args)).await;
 
     match result {
         Ok(()) => ExitCode::SUCCESS,
