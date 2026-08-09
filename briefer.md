@@ -25,7 +25,7 @@ models.use("writer")
 local results = fanout("### Web Search", "### Topics")
 
 store.write("evidence.md", table.concat(results, "\n\n"))
-return "Evidence complete."
+-- no return: scalar preamble return stops fall-through into Report
 ```
 
 ### Web Search
