@@ -38,8 +38,11 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 ## Principles
 
 - Before adding configuration, public API, or resolution machinery, prefer sandboxed Lua, the run-scoped store, or the catalog when one already carries the work.
-- Treat each binary as a product boundary and reserve build features for real toolchain or native-build constraints.
 - Keep ordinary tests deterministic and offline; run network, process, download, and live-model checks only through explicit scenario commands.
 - Keep branching and fan-out explicit in sandboxed Lua; never infer control flow from model prose.
 - Long provisioning operations report interactive progress on stderr and coarse progress through structured logs.
 - Write developer traces and store mirrors as events occur so failed or long runs remain inspectable.
+
+## Thresholds
+
+- Keep prompt-quality changes only when sourced evidence improves without disproportionate model-turn growth.
