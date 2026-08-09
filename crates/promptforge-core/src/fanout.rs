@@ -184,10 +184,19 @@ pub(crate) async fn run_fanout_arms(
 
     drain_side_channels(ctx, &mut observe_rx, &mut debug_rx);
 
-    Ok(replies
-        .into_iter()
-        .map(|reply| reply.unwrap_or_default())
-        .collect())
+    let mut ordered = Vec::with_capacity(replies.len());
+    for (index, reply) in replies.into_iter().enumerate() {
+        match reply {
+            Some(text) => ordered.push(text),
+            None => {
+                return Err(Error::Lua(format!(
+                    "fanout arm {} finished without a reply",
+                    index + 1
+                )));
+            }
+        }
+    }
+    Ok(ordered)
 }
 
 fn drain_side_channels(
@@ -233,6 +242,7 @@ struct ProxyObserver {
 
 impl Observer for ProxyObserver {
     fn observe(&self, _execution: &str, section: &str, detail: &str) {
+        // Parent may already have returned after fail-fast drain/drop.
         let _ = self.tx.send((section.to_owned(), detail.to_owned()));
     }
 }
@@ -249,6 +259,7 @@ struct ProxyDebugCapture {
 
 impl DebugCapture for ProxyDebugCapture {
     fn on_event(&self, _execution: &str, section: &str, turn_index: u32, event: DebugEvent) {
+        // Parent may already have returned after fail-fast drain/drop.
         let _ = self.tx.send(DebugMsg {
             section: section.to_owned(),
             turn_index,
