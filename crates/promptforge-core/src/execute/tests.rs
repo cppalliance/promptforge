@@ -3489,9 +3489,7 @@ return by_name\n\
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn goto_transfers_control_and_clears_context() {
-    // Lua 5.4 reserves `goto` as a keyword, so the host installs the transfer
-    // function under _G["goto"] and authors call it through that index.
+async fn jump_transfers_control_and_clears_context() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Check\n\n\
 ```lua\n\
@@ -3499,20 +3497,20 @@ store.write('seen.txt', 'check')\n\
 local help = tasks['## Help']\n\
 assert(help.name == 'Help')\n\
 assert(help.has_prose == false)\n\
-_G['goto'](help)\n\
+jump(help)\n\
 store.write('seen.txt', 'should-not-run')\n\
 ```\n\n\
 ## Accept\n\n\
 ```lua\nreturn 'accepted'\n```\n\n\
 ## Help\n\n\
 ```lua\n\
-assert(reply == nil, 'goto must clear prior reply context')\n\
+assert(reply == nil, 'jump must clear prior reply context')\n\
 return 'helped:' .. store.read('seen.txt')\n\
 ```\n";
     let store = StoreRef::memory();
     let out = run(&bound(md), "", &[], &store, silent())
         .await
-        .expect("goto must transfer control");
+        .expect("jump must transfer control");
     assert_eq!(out, "helped:check");
     assert_eq!(store.read("seen.txt").expect("seen"), "check");
 }

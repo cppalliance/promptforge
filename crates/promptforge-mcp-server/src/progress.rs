@@ -44,7 +44,7 @@
 //!
 //! [`RunResult`]: crate::RunResult
 //!
-//! `total` is never sent. A `goto` or an early return means the number of
+//! `total` is never sent. A `jump` or an early return means the number of
 //! sections a run will visit is unknown when it starts, so a denominator would
 //! be a guess wearing a measurement's clothes; the client shows a changing
 //! caption rather than a filling bar. `progress` is latched with a maximum, so
