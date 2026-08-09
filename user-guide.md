@@ -24,7 +24,7 @@ Say hello and tell the user something interesting about the number 42.
 
 A prompt file is Markdown with three parts:
 
-- **Frontmatter** - YAML between `---` fences. `name`, `description`, and `promptforge: 1` are required. The name must match `^[a-z][a-z0-9_]{0,47}$`.
+- **Frontmatter** - YAML between `---` fences. `name` and `description` are required at parse time. `promptforge: 1` is required when you run the prompt (engine major must be `1`).
 - **H1 heading** - exactly one. This is the prompt's title.
 - **H2 sections** - executable units. They run top to bottom.
 
@@ -135,15 +135,25 @@ tools.add("fetch")
 Fetch {{ args }} and summarize its content in three bullet points.
 ````
 
-The fenced `lua` block directly under the H1 is the **preamble**. It runs once at startup. Declarations made here are available to every section.
+The fenced `lua` block directly under the H1 is the **preamble** (shared Lua). Binding runs it once to resolve `tools.need` / `models.need` into frozen bindings. Each section then creates a fresh VM and **replays** that same shared program so declarations match call-for-call and global helpers are loaded into that VM. Host values (`args`, `var`, `store`, `reply`, section `tools` / `models` APIs) are injected only after that replay.
 
-`models.always` does three things in one call: declares a model need, resolves it against the gateway catalog, and sets it as the default for all sections. Sections that call `models.use` override this default. The combined form takes an alias, a capability description, and an optional table of constraints.
+`models.always` does three things in one call: declares a model need, resolves it against the gateway catalog, and sets it as the default for all sections. Sections that call `models.use` override this default. The combined form takes an alias, a capability description, and an optional table of constraints. Both forms return a Model object.
 
-`tools.need` declares a semantic capability need. The alias `"fetch"` is your local name. The description tells the tool picker what you need - it resolves this against the live tool registry. Declaring a need does not expose the tool to the model. That requires `tools.add` in a section prologue.
+`tools.need` declares a semantic capability need and returns a Tool object. The alias is your local name. The description tells the tool picker what you need. Declaring a need does not expose the tool to the model. That requires `tools.add` in a section Lua block before tool scope closes.
 
-The preamble also accepts `models.need` (declare without selecting as default) and `tools.always` (expose a tool in every section). Shared functions defined in the preamble are available in every section's prologue and epilog.
+The preamble also accepts `models.need` (declare without selecting as default) and `tools.always` (expose a tool in every section).
 
-The preamble declares tools and models once, making them available to every section.
+**Globals vs locals.** Shared `function foo()` definitions and assignments to globals survive into the section's Lua blocks after replay. `local` names from the preamble chunk do not. If a later section must see a Tool or Model handle, assign it globally:
+
+```lua
+search = tools.need("search", "Search the web and return a list of results.")
+```
+
+not `local search = ...`.
+
+`args`, `var`, and `store` are not available during the preamble. Use them in section Lua after host injection.
+
+The preamble declares tools and models; aliases (and global handles) are then available to every section.
 
 ## 5. The Epilog
 
@@ -173,16 +183,16 @@ return string.upper(reply)
 
 The fenced `lua` block after the prose is the **epilog**. It runs after the model finishes responding. The model's response text is available as the global `reply`.
 
-The epilog shares the same VM as the prologue - variables set in the prologue are still accessible. You can:
+The epilog shares the same VM as earlier Lua in that section - variables set in the prologue are still accessible. You can:
 
 - Inspect and transform `reply`
 - Write to the store
 - Check `tools.calls` counts
 - Return a value to end the run
 
-A `return` from the epilog ends the entire run with that value. If you do not return, execution falls through to the next section.
+A scalar `return` from **any** section Lua block ends the entire run with that value. If you do not return, execution falls through to the next section (or the next block in an alternating section).
 
-A section's three phases are: prologue (setup), prose (model turn), epilog (post-processing). All three are optional.
+A classic section's three phases are: prologue (setup), prose (model turn), epilog (post-processing). All three are optional. Alternating blocks generalize this pattern (section 13).
 
 The epilog runs after the model responds, in the same VM as the prologue, and can inspect or transform the reply.
 
@@ -217,7 +227,7 @@ Facts:
 
 Sections execute in file order. Each section gets:
 
-- A fresh Lua VM (no Lua state carries over)
+- A fresh Lua VM (no Lua state carries over from the previous section)
 - A fresh model conversation (no message history carries over)
 - The previous section's `reply` as a global and as `{{ reply }}` in prose
 
@@ -272,7 +282,7 @@ return reply
 ```
 ````
 
-The store is a run-scoped virtual filesystem. Files exist only for the duration of the run and are shared across all sections.
+The store is a run-scoped virtual filesystem. Files exist only for the duration of the run and are shared across all sections. Store methods are available in section Lua blocks (after host injection), not in the H1 preamble.
 
 | Operation | What it does |
 |---|---|
@@ -323,17 +333,21 @@ Tags: {{ var.tags }}
 Write {{ var.count }} facts about {{ var.topic }}.
 ````
 
-Five namespaces are available in prose substitution:
+Namespaces available in prose substitution:
 
 | Placeholder | Source |
 |---|---|
 | `{{ args }}` | The raw input string |
 | `{{ reply }}` | Previous section's model reply (nil in section 1) |
-| `{{ var.x }}` | Values set in the prologue's `var` table |
+| `{{ var.x }}` | Values set in the section's `var` table |
 | `{{ sys.when }}` | Run launch timestamp |
 | `{{ sys.now }}` | Current section start time |
 | `{{ sys.id }}` | 1-based section index |
+| `{{ sys.section_name }}` | Current section heading name |
+| `{{ sys.execution }}` | Run execution id |
+| `{{ sys.section_count }}` | Number of top-level H2 sections |
 | `{{ sys.model }}` | Bound model catalog id (after scope close) |
+| `{{ sys.reply_finish_reason }}` | Last inference finish reason (after a model turn) |
 | `{{ sys.taskid }}` | 1-based arm index (fanout only) |
 | `{{ item }}` | Current fanout item text (fanout only) |
 
@@ -390,9 +404,9 @@ The tool loop works like this:
 4. The model is called again
 5. This repeats until the model responds with text (not a tool call)
 
-The loop is capped at `max_tool_iterations` (default 24) per section to prevent runaway loops. Set it in frontmatter to change the cap.
+The loop is capped at `max_tool_iterations` (default 24) per section (or per `model:infer` call) to prevent runaway loops. Set it in frontmatter to change the cap.
 
-`tools.add` in the prologue takes one or more alias strings. Only tools added in the current section's prologue (plus any `tools.always` from the preamble) are visible to the model.
+`tools.add` accepts alias strings, Tool objects, and arrays of either. Only tools added in Lua before the section's tool scope closes (plus any `tools.always` from the preamble) are visible to the model. Scope closes on the first prose block.
 
 Tools give the model the ability to search and fetch during a section's model turn.
 
@@ -411,9 +425,9 @@ promptforge: 1
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
-local search = tools.need("search",
+search = tools.need("search",
     "Search the web and return a list of results.")
-local fetch = tools.need("fetch",
+fetch = tools.need("fetch",
     "Fetch a URL and return its main content as markdown.")
 ```
 
@@ -430,23 +444,23 @@ tools.add(search, fetch)
 Search for information about {{ args }} and summarize what you find.
 ````
 
-`tools.need` returns a Tool object. You can inspect its properties:
+`tools.need` returns a Tool object. Assign it to a **global** in the preamble if a section must use the handle (locals from the shared chunk are not visible later).
 
 | Property | Type | Description |
 |---|---|---|
-| `.name` | string | The resolved tool name |
+| `.name` | string | The alias you declared |
 | `.description` | string | Model-facing description (mutable) |
-| `.parameters` | table | JSON schema of accepted parameters |
-| `.wire_name` | string | Transport-level name |
-| `.untrusted` | boolean | Whether results are marked untrusted |
+| `.parameters` | table | Parameter schema (currently an empty object until registry enrichment) |
+| `.wire_name` | string | Stable identity name used on the wire |
+| `.untrusted` | boolean | Whether results are marked untrusted (currently always `false` on handles from `tools.need`) |
 
-The `.description` property is mutable. Changing it before `tools.add` controls what the model sees. This lets you customize the tool's description per section or per input.
+The `.description` property is mutable. Changing it before `tools.add` overrides what the model sees for that add.
 
 `tools.add` accepts Tool objects, strings, and arrays of either:
 
 ```lua
 tools.add(search)                    -- single object
-tools.add("search", "fetch")        -- strings (as before)
+tools.add("search", "fetch")        -- strings
 tools.add({search, fetch})          -- array of objects
 tools.add(search, "fetch")          -- mixed
 ```
@@ -465,10 +479,10 @@ promptforge: 1
 # Model Inspect
 
 ```lua
-local writer = models.need("writer",
+writer = models.need("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 32768 })
-local fast = models.need("fast",
+fast = models.need("fast",
     "A fast general model",
     { thinking = false, temperature = 0, context = 8192 })
 models.always("writer")
@@ -486,7 +500,7 @@ log("fast model: " .. fast.name)
 Tell me one fact about {{ args }}.
 ````
 
-`models.need` and `models.always` return a Model object. Properties:
+`models.need` and both forms of `models.always` return a Model object. Use globals when section Lua must see the handle.
 
 | Property | Type | Description |
 |---|---|---|
@@ -494,9 +508,9 @@ Tell me one fact about {{ args }}.
 | `.model_id` | string | Resolved catalog model id |
 | `.description` | string | Capability description |
 | `.context` | number | Context window size in tokens |
-| `.thinking` | string | `"never"`, `"always"`, or `"switchable"` |
-| `.temperature` | number | Frozen temperature value |
-| `.max_tokens` | number | Frozen max tokens value |
+| `.thinking` | boolean or nil | Frozen thinking preference (`true` / `false` / unset) |
+| `.temperature` | number or nil | Frozen temperature, if set |
+| `.max_tokens` | number or nil | Frozen max tokens, if set |
 | `.dialect` | string | Tool dialect name |
 
 All properties are read-only. The Model object represents a frozen binding - its parameters were locked at bind time and cannot change during execution.
@@ -517,7 +531,7 @@ promptforge: 1
 # Gated Research
 
 ```lua
-local writer = models.always("writer",
+writer = models.always("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 32768 })
 tools.need("search", "Search the web and return a list of results.")
@@ -528,8 +542,8 @@ tools.need("fetch", "Fetch a URL and return its main content as markdown.")
 
 ```lua
 tools.add("search")
-writer:infer("Search for: " .. args .. ". Return the best URL.")
-local url = reply
+writer:infer("Search for: " .. args .. ". Return only the best URL, nothing else.")
+var.url = reply
 
 tools.add("fetch")
 ```
@@ -542,31 +556,19 @@ return reply
 ```
 ````
 
-Wait - there is an error in that example. Let me fix the pattern. The prologue calls `writer:infer()`, which runs a full tool loop, sets `reply`, and returns the text. Then it scopes fetch and falls through to prose.
-
-Corrected prologue:
-
-```lua
-tools.add("search")
-writer:infer("Search for: " .. args .. ". Return only the best URL, nothing else.")
-var.url = reply
-
-tools.add("fetch")
-```
-
 `model:infer(prompt)` calls the model from Lua. It:
 
-- Takes the current tool scope (whatever `tools.add` has been called with)
-- Runs the full tool loop (model calls tools, gets results, continues)
+- Snapshots the current tool bag (whatever `tools.add` has been called with so far)
+- Runs the full tool loop
 - Blocks until the model produces a final text response
 - Sets the `reply` global
 - Returns the response text
 
-This enables **turn-gating**: scope search, infer to get URLs, then scope fetch, and let the final prose do the detailed work. Without `infer`, the model would see both tools at once and might interleave them unpredictably.
+An optional second argument table is accepted today but ignored.
 
-`model:infer()` snapshots the current tool bag. Calls to `tools.add` after an infer affect the next infer or the final prose, not the one in progress.
+This enables **turn-gating** inside one open tool scope: add search, infer, add fetch, then fall through to final prose. `tools.add` remains legal until the first prose block closes tool scope. After the first prose, further `tools.add` calls fail.
 
-`model:infer()` gives you explicit control over when inference happens, enabling turn-gated tool use.
+`model:infer()` gives you explicit control over when inference happens, enabling turn-gated tool use before prose closes the scope.
 
 ## 13. Alternating Blocks
 
@@ -580,7 +582,7 @@ promptforge: 1
 # Alternating
 
 ```lua
-local writer = models.always("writer",
+writer = models.always("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 32768 })
 tools.need("search", "Search the web and return a list of results.")
@@ -590,14 +592,14 @@ tools.need("fetch", "Fetch a URL and return its main content as markdown.")
 ## Main
 
 ```lua
-tools.add("search")
+tools.add("search", "fetch")
 ```
 
 Search for information about {{ args }}. Return the three most
 relevant URLs, one per line, nothing else.
 
 ```lua
-tools.add("fetch")
+log("urls ready; continuing with fetch-capable tools already in scope")
 ```
 
 Now fetch those URLs and write a comprehensive summary.
@@ -617,15 +619,16 @@ A section can contain any number of alternating lua and prose blocks:
 
 The rules:
 
-- **Non-final prose** - single-shot. One model round (may include tool calls for that round), then control moves to the next lua block. The conversation accumulates.
-- **Final prose** - full tool loop. The model keeps calling tools until it produces text. This text becomes `reply`. Same behavior as sections with a single prose block.
-- **Lua blocks** - run sequentially. Can mutate tool scope, write to store, inspect `reply` from a previous prose block or `infer()`, call `execute()` or `jump()`.
+- **Non-final prose** - single-shot. One model round (may include tool calls in that turn), then control moves to the next lua block. The conversation accumulates.
+- **Final prose** - full tool loop. The model keeps calling tools until it produces text. This text becomes `reply`.
+- **Lua before the first prose** - may call `tools.add` / `models.use` / `model:infer`. Tool and model scope close on the first prose.
+- **Lua after the first prose** - may inspect `reply`, write the store, `execute`, `jump`, `fanout`, and return. It may not call `tools.add` or `models.use`.
 
-The conversation accumulates within the section. Each prose block's response is added to the history, so the model in later blocks sees everything that came before.
+To change the tool bag between model turns, use `model:infer` in a single pre-prose Lua block (section 12), not `tools.add` between prose blocks.
 
-Backward compatibility: the traditional prologue/prose/epilog pattern is exactly `[lua][prose][lua]` - one lua, one final prose, one lua. It parses and runs identically.
+Backward compatibility: the traditional prologue/prose/epilog pattern is exactly `[lua][prose][lua]`. It parses and runs identically.
 
-Alternating blocks let you build multi-turn conversations within a single section, with Lua control between each turn.
+Alternating blocks let you build multi-turn conversations within a single section, with Lua between turns under the scope rules above.
 
 ## 14. Composable Tool Sets
 
@@ -639,25 +642,25 @@ promptforge: 1
 # Composable Tools
 
 ```lua
-local writer = models.always("writer",
+models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 16384 })
-local search = tools.need("search",
+search = tools.need("search",
     "Search the web and return a list of results.")
-local fetch = tools.need("fetch",
+fetch = tools.need("fetch",
     "Fetch a URL and return its main content as markdown.")
 
-var.research_tools = { search, fetch }
-var.fetch_only = { fetch }
+research_tools = { search, fetch }
+fetch_only = { fetch }
 ```
 
 ## Main
 
 ```lua
 if args:find("^http") then
-    tools.add(var.fetch_only)
+    tools.add(fetch_only)
 else
-    tools.add(var.research_tools)
+    tools.add(research_tools)
 end
 ```
 
@@ -667,13 +670,10 @@ Otherwise, search for it, fetch the best result, and summarize.
 
 Because Tool objects are first-class Lua values, you can:
 
-- Store them in arrays
-- Store them in the `var` table
+- Store them in arrays on **globals** in the preamble (not `var` - `var` does not exist during shared Lua)
 - Pass arrays to `tools.add`
-- Build conditional tool sets based on `args` or other state
+- Build conditional tool sets in the prologue based on `args` or other state
 - Override `.description` on individual tools before adding them
-
-Tool objects compose with standard Lua data structures. Build tool sets in the preamble and select them conditionally in the prologue.
 
 Composable tool sets let you build, store, and conditionally select groups of tools as ordinary Lua values.
 
@@ -689,7 +689,7 @@ promptforge: 1
 # Pipeline
 
 ```lua
-local writer = models.always("writer",
+models.always("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 16384 })
 tools.need("search", "Search the web and return a list of results.")
@@ -722,24 +722,25 @@ Using only the evidence below, write a one-page briefing.
 ## Main
 
 ```lua
-local evidence = execute("## Research")
+local research = tasks["## Research"]
+local evidence = execute(research)
 local briefing = execute("## Synthesize")
 return briefing
 ```
 ````
 
-`execute("## Section Name")` runs a named section as a subroutine. It:
+`execute(target, input?)` runs a named section as a subroutine. `target` is either a heading string with the `##` marker or a Section object from `tasks["## Name"]`. It:
 
 - Creates a fresh VM (no Lua state from the caller)
 - Creates a fresh conversation (no message history from the caller)
-- Runs the full section lifecycle (prologue, prose with tool loop, epilog)
+- Runs the full section lifecycle
 - Returns the section's reply as a string
 
-The called section shares the run's store, observer, execution id, gateway client, and tool registry. It gets fresh `var`, a fresh conversation, and a fresh VM.
+The called section shares the run's store, observer, execution id, gateway client, and tool registry. It gets fresh `var`, a fresh conversation, and a fresh VM. Optional `input` overrides `args` for the callee; omit it to inherit the caller's input.
 
-The heading argument must include the `##` marker: `execute("## Research")`, not `execute("Research")`.
+`tasks["## Name"]` returns a Section object with `.name` and `.has_prose`. Missing headings are a hard error.
 
-Recursion is capped at 8 levels to prevent infinite loops.
+Recursion is capped at 8 levels. `jump` is not allowed inside `execute`.
 
 `execute()` lets you call any section as a subroutine, with a fresh context, and get its reply back as a string.
 
@@ -755,7 +756,7 @@ promptforge: 1
 # Branching
 
 ```lua
-local writer = models.always("writer",
+models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
 ```
@@ -801,15 +802,15 @@ return "Usage: provide a research topic as input."
 ```
 ````
 
-`jump("## Section Name")` transfers control to a named section. It:
+`jump(target)` transfers control to a named section. `target` is a `##` heading string or a Section from `tasks`. It:
 
-- Stops the current section immediately (no epilog runs after jump)
-- Clears the conversation context
+- Stops the current section immediately (later blocks in that section do not run)
+- Clears the cross-section `reply` context
 - Runs the named section next
 
-Unlike `execute()`, `jump` does not return. The current section ends. The named section becomes the next section in the execution sequence. Normal fall-through resumes from that point.
+Unlike `execute()`, `jump` does not return. Normal fall-through resumes from the jumped-to section.
 
-The heading argument must include the `##` marker. A jump to a nonexistent section is a hard error.
+A jump to a nonexistent section is a hard error.
 
 `jump()` provides context-clearing transfer of control to another section, with no return to the caller.
 
@@ -866,7 +867,7 @@ end
 
 `fanout("### Worker", "### List")` runs the worker section once per item in the list, in parallel. Both heading arguments must include their `###` markers.
 
-The **list section** is a list-only H3 with no prologue or epilog. Its prose contains only bullet items (unordered `- ` or `* `, or ordered `N. ` or `N) `). Markers are stripped. An empty list is a parse error.
+The **list section** is a list-only H3 with no Lua fences. Its prose contains only bullet items (unordered `- ` or `* `, or ordered `N. ` or `N) `). Markers are stripped. An empty list is a parse error.
 
 The **worker section** is a normal template section. Each arm gets:
 
@@ -875,11 +876,22 @@ The **worker section** is a normal template section. Each arm gets:
 - `sys.taskid` - the 1-based arm index ("1", "2", ...)
 - Access to the shared store
 
-Arms execute concurrently and share the run's store. The first arm error aborts all siblings. `fanout` returns an ordered Lua table of arm replies (list order, not finish order).
+Arms execute concurrently and share the run's store. The first arm error aborts all siblings.
+
+`fanout` returns an ordered table of FanoutResult objects (list order, not finish order). Each result has:
+
+| Field | Type | Description |
+|---|---|---|
+| `.text` | string | Arm reply text (or soft-degrade stub) |
+| `.ok` | boolean | Whether the arm completed successfully |
+| `.item` | string | The list item for this arm |
+| `.exhausted` | boolean | True if the arm soft-degraded after tool-loop exhaustion |
+
+`tostring(result)` returns `.text`. PromptForge wraps `table.concat` so concatenating a results table still works.
 
 Children never execute by fall-through. Only an explicit `fanout()` call triggers child execution.
 
-Fanout runs a worker section once per item in a list, in parallel, and returns an ordered table of replies.
+Fanout runs a worker section once per item in a list, in parallel, and returns ordered FanoutResult objects.
 
 ## 18. The sys Table
 
@@ -914,17 +926,21 @@ The `sys` table provides runtime metadata. It is sealed: reading an unknown key 
 
 | Field | Type | Available | Description |
 |---|---|---|---|
-| `sys.when` | string | Always | Run launch timestamp |
-| `sys.now` | string | Always | Current section start time |
-| `sys.id` | string | Always | 1-based section index |
+| `sys.when` | string | Always (after host inject) | Run launch timestamp |
+| `sys.now` | string | Always (after host inject) | Current section start time |
+| `sys.id` | string | Always (after host inject) | 1-based section index |
+| `sys.section_name` | string | Always (after host inject) | Current section name |
+| `sys.execution` | string | Always (after host inject) | Run execution id |
+| `sys.section_count` | string/number | Always (after host inject) | Top-level H2 count |
 | `sys.model` | string | After scope close | Bound catalog model id |
+| `sys.reply_finish_reason` | string | After a model turn | Last finish reason (for example `stop`) |
 | `sys.taskid` | string | Fanout arms only | 1-based arm index |
 
-`sys.model` is not available in the preamble or in H1 shared Lua because the model binding has not been selected yet. It becomes available after the section's scope closes (in prose substitution and the epilog).
+`sys.model` is not available in the preamble or in Lua before the first prose closes scope. It becomes available in later Lua blocks and in prose substitution after scope close.
 
 `sys.when` is useful for report footers and provenance stamps. `sys.model` identifies which model produced the output.
 
-The `sys` table provides sealed, read-only access to runtime metadata like timestamps, section index, and model identity.
+The `sys` table provides sealed, read-only access to runtime metadata.
 
 ## 19. Error Handling and Validation
 
@@ -972,7 +988,7 @@ return reply
 ```
 ````
 
-The epilog is your quality gate. Common validation patterns:
+Post-prose Lua is your quality gate. Common validation patterns:
 
 **Check that tools were called:**
 
@@ -980,7 +996,7 @@ The epilog is your quality gate. Common validation patterns:
 assert(tools.calls["search"] > 0, "search was not called")
 ```
 
-`tools.calls["alias"]` returns the count of model dispatches for that alias in this section. It counts intent - the tool is counted even if it errored. Indexing an alias not in scope is a hard error.
+`tools.calls["alias"]` returns the count of model dispatches for that alias in this section. It counts intent - the tool is counted even if it errored. Indexing an alias not in scope is a hard error. Counts are installed after tool scope closes (first prose) and after `model:infer` installs them for that path.
 
 **Check reply content:**
 
@@ -992,18 +1008,19 @@ end
 
 **Return early on failure:**
 
-A scalar return from the epilog ends the entire run. Use this to stop the pipeline when a section produces bad output rather than feeding garbage to the next section.
+A scalar return from any section Lua block ends the entire run. Use this to stop the pipeline when a section produces bad output rather than feeding garbage onward.
 
 **Common error sources:**
 
 - `{{ reply }}` in section 1 - hard error (nil)
 - `{{ item }}` outside a fanout arm - hard error (nil)
 - `tools.calls["unknown"]` - hard error naming the bad alias
+- `tools.add` after the first prose - scope already closed
 - Model called a tool not in scope - `Error::OutOfScopeToolCall`
 - Non-empty prose without `models.use` or `models.always` - `Error::ModelRequired`
 - Duplicate near-similar tools in effective scope - rejected before the model sees them
 
-The epilog is your quality gate for validating tool usage, reply content, and pipeline integrity.
+Post-prose Lua is your quality gate for validating tool usage, reply content, and pipeline integrity.
 
 ## 20. Capstone: A Complete Pipeline Prompt
 
@@ -1018,12 +1035,12 @@ max_tool_iterations: 24
 # Briefer
 
 ```lua
-local writer = models.always("writer",
+writer = models.always("writer",
     "A careful analysis model suited to structured reasoning",
     { thinking = false, temperature = 0, context = 32768 })
-local search = tools.need("search",
+search = tools.need("search",
     "Search the web and return a list of results.")
-local fetch = tools.need("fetch",
+fetch = tools.need("fetch",
     "Fetch a URL and return its main content as markdown.")
 ```
 
@@ -1035,7 +1052,7 @@ then synthesizing a report.
 ```lua
 local results = fanout("### Gather", "### Topics")
 store.write("evidence.md", table.concat(results, "\n\n"))
-local report = execute("## Report")
+local report = execute(tasks["## Report"])
 return report
 ```
 
@@ -1092,30 +1109,31 @@ This prompt uses every major feature:
 
 | Feature | Where |
 |---|---|
-| Preamble | H1 shared Lua declares model and tools |
-| Tool objects | `search` and `fetch` stored as variables, passed to `tools.add` |
+| Preamble | H1 shared Lua declares model and tools as globals |
+| Tool objects | `search` and `fetch` globals passed to `tools.add` |
 | Model object | `writer` returned by `models.always` |
 | Fanout | `## Main` fans out `### Gather` over `### Topics` |
+| FanoutResult | `table.concat` uses each result's text |
 | `{{ item }}` | Each gather arm works on one topic |
-| `tools.calls` | Epilog validates that search and fetch were called |
+| `tools.calls` | Gather epilog validates search and fetch |
 | Store | Evidence written by fanout, read by Report |
 | `store.inject` | Evidence injected with untrusted envelope |
-| `execute()` | Main calls `## Report` as a subroutine |
+| `execute()` / `tasks` | Main calls `## Report` as a subroutine |
 | Template substitution | `{{ args }}`, `{{ item }}`, `{{ var.evidence }}` |
 | `sys.when` / `sys.model` | Report footer with timestamp and model provenance |
-| Epilog return | Report returns the final briefing |
+| Scalar return | Report (and Main) return the final briefing |
 
 The execution flow:
 
-1. Preamble runs once, declares writer/search/fetch
-2. `## Main` prologue calls `fanout` - three gather arms run in parallel
+1. Bind runs the preamble once; each section VM replays it and loads globals
+2. `## Main` Lua calls `fanout` - three gather arms run in parallel
 3. Each arm searches, fetches, validates with `tools.calls`, returns evidence
-4. `## Main` prologue writes concatenated evidence to store
-5. `## Main` prologue calls `execute("## Report")`
+4. `## Main` writes concatenated evidence to the store
+5. `## Main` calls `execute(tasks["## Report"])`
 6. `## Report` injects evidence, model writes briefing, epilog stamps and returns
-7. `## Main` prologue returns the report
+7. `## Main` returns the report
 
-A complete pipeline prompt combines preamble, tool objects, model objects, fanout, store, execute, substitution, epilog validation, and sys metadata.
+A complete pipeline prompt combines preamble globals, tool objects, fanout, store, execute, substitution, validation, and sys metadata.
 
 ## 21. API Reference
 
@@ -1124,7 +1142,7 @@ A complete pipeline prompt combines preamble, tool objects, model objects, fanou
 #### `args`
 
 - **Type:** string
-- **Available:** Always (prologue, epilog, prose substitution)
+- **Available:** Section Lua and prose substitution (after host inject; not in H1 preamble)
 - **Description:** The raw input string passed to `promptforge run <file> [input]`. Empty string if omitted.
 
 ```lua
@@ -1134,8 +1152,8 @@ var.subject = args
 #### `reply`
 
 - **Type:** string or nil
-- **Available:** Epilog (current section's model reply); prologue of sections 2+ (previous section's reply); prose substitution as `{{ reply }}`
-- **Description:** The model's response text. Set after a model turn completes (from prose or `model:infer()`). Nil in section 1's prologue. Using `{{ reply }}` when nil is a hard error.
+- **Available:** After a model turn in the current section; prologue of sections 2+ (previous section's reply); prose substitution as `{{ reply }}`
+- **Description:** The model's response text. Set after prose or `model:infer()`. Nil in section 1 before the first model turn. Using `{{ reply }}` when nil is a hard error.
 
 ```lua
 store.write("output.md", reply)
@@ -1144,8 +1162,8 @@ store.write("output.md", reply)
 #### `item`
 
 - **Type:** string or nil
-- **Available:** Fanout worker sections only (prologue, epilog, prose substitution as `{{ item }}`)
-- **Description:** The current fanout arm's item text. Nil outside fanout arms. Using `{{ item }}` outside a fanout arm is a hard error.
+- **Available:** Fanout worker sections only
+- **Description:** The current fanout arm's item text. Using `{{ item }}` outside a fanout arm is a hard error.
 
 ```lua
 log("Processing: " .. item)
@@ -1154,8 +1172,8 @@ log("Processing: " .. item)
 #### `var`
 
 - **Type:** table
-- **Available:** Always (prologue, epilog, prose substitution as `{{ var.x }}`)
-- **Description:** Section-local variable table. Values set here are accessible in prose substitution and the epilog. Fresh per section and per fanout arm. Scalars render as strings in substitution, tables render as JSON.
+- **Available:** Section Lua and prose substitution (not in H1 preamble)
+- **Description:** Section-local variable table. Fresh per section and per fanout arm. Scalars render as strings in substitution, tables render as JSON.
 
 ```lua
 var.count = 5
@@ -1165,19 +1183,22 @@ var.tags = { "alpha", "beta" }
 #### `sys`
 
 - **Type:** sealed table
-- **Available:** Always (read-only; unknown reads and any writes raise)
+- **Available:** Section Lua after host inject (read-only)
 - **Description:** Runtime metadata. See section 18 for all fields.
-
-| Field | Type | Available | Value |
-|---|---|---|---|
-| `sys.when` | string | Always | Run launch timestamp |
-| `sys.now` | string | Always | Current section start time |
-| `sys.id` | string | Always | 1-based section index |
-| `sys.model` | string | After scope close | Bound catalog model id |
-| `sys.taskid` | string | Fanout arms | 1-based arm index |
 
 ```lua
 log("Section " .. sys.id .. " at " .. sys.now)
+```
+
+#### `tasks`
+
+- **Type:** table
+- **Available:** Section Lua
+- **Description:** Lookup of top-level H2 sections by heading string. `tasks["## Name"]` returns a Section object (`.name`, `.has_prose`) usable with `execute` and `jump`.
+
+```lua
+local step = tasks["## Research"]
+local out = execute(step)
 ```
 
 #### `log`
@@ -1185,7 +1206,7 @@ log("Section " .. sys.id .. " at " .. sys.now)
 - **Type:** function
 - **Signature:** `log(message: string)`
 - **Returns:** nil
-- **Available:** Preamble, prologue, epilog (a fresh callback is installed per phase)
+- **Available:** Preamble and section Lua (a fresh callback is installed per phase)
 - **Description:** Emits an observer checkpoint. The message must be a valid UTF-8 string, at most 256 characters, with no newlines or control characters. Use short static labels. Never log args, replies, tool data, credentials, paths, or store contents.
 
 ```lua
@@ -1196,7 +1217,7 @@ log("Research phase complete")
 
 ### Store Methods
 
-All store methods are available in prologue, epilog, and preamble.
+All store methods are available in section Lua after host injection. They are not available in the H1 preamble.
 
 #### `store.write`
 
@@ -1242,7 +1263,7 @@ local numbered = store.read_lines("draft.md")
 
 - **Signature:** `store.inject(path: string) -> string`
 - **Returns:** Contents wrapped in an untrusted nonce-framed envelope
-- **Description:** Read a file for model-facing re-injection. The envelope marks the content as untrusted data, preventing prompt injection from stored content.
+- **Description:** Read a file for model-facing re-injection. The envelope marks the content as untrusted data.
 
 ```lua
 var.evidence = store.inject("evidence.md")
@@ -1298,25 +1319,25 @@ end
 
 - **Signature:** `tools.need(alias: string, description: string) -> Tool`
 - **Returns:** Tool object
-- **Available:** Preamble only
-- **Description:** Declare a semantic tool capability need. The alias is your local name (case-sensitive, `[A-Za-z][A-Za-z0-9_-]{0,63}`). The description tells the picker what you need. The picker resolves this against the live tool registry at bind time. Returns a Tool object you can inspect and pass to `tools.add`.
+- **Available:** Preamble only (bind and per-section replay)
+- **Description:** Declare a semantic tool capability need. The alias is case-sensitive (`[A-Za-z][A-Za-z0-9_-]{0,63}`). Returns a Tool object. Assign to a global if section Lua must keep the handle.
 
 ```lua
-local search = tools.need("search",
+search = tools.need("search",
     "Search the web and return a list of results.")
 ```
 
 #### `tools.add`
 
-- **Signature:** `tools.add(aliases_or_objects: ...)`
+- **Signature:** `tools.add(...)`
 - **Returns:** nil
-- **Available:** Prologue only
-- **Description:** Expose tools to the model for this section. Accepts strings, Tool objects, and arrays of either. Only tools added here (plus `tools.always` from the preamble) are visible to the model.
+- **Available:** Section Lua before the first prose closes tool scope
+- **Description:** Expose tools to the model. Accepts strings, Tool objects, and arrays of either. Only tools added here (plus `tools.always`) are visible to the model.
 
 ```lua
 tools.add("search", "fetch")
-tools.add(search_tool)
-tools.add({search_tool, fetch_tool})
+tools.add(search)
+tools.add({search, fetch})
 ```
 
 #### `tools.always`
@@ -1324,7 +1345,7 @@ tools.add({search_tool, fetch_tool})
 - **Signature:** `tools.always(alias: string)`
 - **Returns:** nil
 - **Available:** Preamble only
-- **Description:** Expose a declared tool in every model-facing section. Use only when every section genuinely needs this tool. The alias must have been declared with `tools.need` first.
+- **Description:** Expose a declared tool in every model-facing section. The alias must have been declared with `tools.need` first.
 
 ```lua
 tools.always("fetch")
@@ -1333,8 +1354,8 @@ tools.always("fetch")
 #### `tools.calls`
 
 - **Type:** table (read-only)
-- **Available:** Prologue and epilog (after model turns)
-- **Description:** Per-section count of model tool dispatches by alias. Pre-seeded at 0 for every in-scope alias. Indexing an out-of-scope alias is a hard error that names the bad alias and lists valid ones.
+- **Available:** After tool counts are installed (`model:infer`, or after first prose closes scope)
+- **Description:** Per-section count of model tool dispatches by alias. Indexing an out-of-scope alias is a hard error.
 
 ```lua
 assert(tools.calls["search"] > 0, "search was never called")
@@ -1349,26 +1370,25 @@ assert(tools.calls["search"] > 0, "search was never called")
 - **Signature:** `models.need(alias: string, description: string, opts?: table) -> Model`
 - **Returns:** Model object
 - **Available:** Preamble only
-- **Description:** Declare a model capability need. The description is matched against the gateway catalog. Optional `opts` table: `context` (minimum window, filters catalog), `thinking` (boolean, filters and freezes), `temperature` (frozen onto binding), `max_tokens` (frozen onto binding). Returns a Model object.
+- **Description:** Declare a model capability need. Optional `opts`: `context` (minimum window), `thinking` (boolean), `temperature`, `max_tokens`.
 
 ```lua
-local writer = models.need("writer",
+writer = models.need("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 32768 })
 ```
 
 #### `models.always`
 
-- **Signature:** `models.always(alias: string)` or `models.always(alias: string, description: string, opts?: table) -> Model`
-- **Returns:** Model object (combined form) or nil (selection-only form)
+- **Signature:** `models.always(alias: string) -> Model` or `models.always(alias: string, description: string, opts?: table) -> Model`
+- **Returns:** Model object (both forms)
 - **Available:** Preamble only
-- **Description:** Set the prompt-wide default model. The single-argument form selects an already-declared alias. The three-argument combined form declares and selects in one call (sugar for `models.need` + `models.always`). At most one `models.always` per prompt.
+- **Description:** Set the prompt-wide default model. The single-argument form selects an already-declared alias. The three-argument form declares and selects. At most one `models.always` per prompt.
 
 ```lua
 models.always("writer")
 
--- or combined form:
-local writer = models.always("writer",
+writer = models.always("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 32768 })
 ```
@@ -1377,8 +1397,8 @@ local writer = models.always("writer",
 
 - **Signature:** `models.use(alias: string)`
 - **Returns:** nil
-- **Available:** Prologue only
-- **Description:** Select a declared model for this section. Overrides the `models.always` default. At most one `models.use` per section.
+- **Available:** Section Lua before model scope closes (first prose)
+- **Description:** Select a declared model for this section. Overrides `models.always`. At most one `models.use` per section.
 
 ```lua
 models.use("fast")
@@ -1388,8 +1408,8 @@ models.use("fast")
 
 - **Signature:** `model:infer(prompt: string, opts?: table) -> string`
 - **Returns:** Model response text
-- **Available:** Prologue (any lua block in a section)
-- **Description:** Explicitly call the model from Lua. Snapshots the current tool bag, runs the full tool loop, blocks until the model produces text, sets `reply`, and returns the response. Use for turn-gating (scope tools, infer, scope different tools, infer again or fall through to prose).
+- **Available:** Section Lua (requires an execution infer hook)
+- **Description:** Explicit model call from Lua. Snapshots the current tool bag, runs the full tool loop, sets `reply`, returns the text. An optional `opts` table is accepted but currently ignored.
 
 ```lua
 tools.add("search")
@@ -1406,22 +1426,22 @@ writer:infer("Fetch the best URL from: " .. search_results)
 
 #### `execute()`
 
-- **Signature:** `execute(section_name: string, input?: string) -> string`
+- **Signature:** `execute(target: string|Section, input?: string) -> string`
 - **Returns:** The called section's reply
-- **Available:** Prologue, epilog (any lua block)
-- **Description:** Run a named H2 section as a subroutine. Fresh VM, fresh conversation, full tool loop. Shares the run's store, observer, and tool registry. The heading argument must include the `##` marker. Recursion capped at 8 levels.
+- **Available:** Section Lua
+- **Description:** Run a named H2 section as a subroutine. Fresh VM and conversation. Shares store/observer/tools. Target is `## Name` or a Section from `tasks`. Recursion capped at 8. `jump` inside execute is rejected.
 
 ```lua
 local analysis = execute("## Analyze")
-store.write("analysis.md", analysis)
+local report = execute(tasks["## Report"])
 ```
 
 #### `jump()`
 
-- **Signature:** `jump(section_name: string)`
+- **Signature:** `jump(target: string|Section)`
 - **Returns:** Does not return
-- **Available:** Prologue, epilog (any lua block)
-- **Description:** Transfer control to a named section. The current section stops immediately (no epilog runs after jump). Context clears, conversation resets. The heading argument must include the `##` marker. Jump to a nonexistent section is a hard error.
+- **Available:** Section Lua
+- **Description:** Transfer control to a named section. Current section stops. Cross-section `reply` clears. Target is `## Name` or a Section from `tasks`.
 
 ```lua
 if args == "" then
@@ -1432,13 +1452,16 @@ end
 #### `fanout()`
 
 - **Signature:** `fanout(worker: string, list: string) -> table`
-- **Returns:** Ordered Lua table of arm reply strings (list order)
-- **Available:** Prologue, epilog of a parent section
-- **Description:** Run the worker section once per item in the list section, in parallel. Both arguments must include their heading markers (`###`). The list section must be a list-only H3 sibling (no prologue, no epilog). Arms get `item` and `sys.taskid`. First arm error aborts siblings.
+- **Returns:** Ordered table of FanoutResult objects
+- **Available:** Section Lua of a parent section
+- **Description:** Run the worker once per list item in parallel. Both arguments need `###` markers. List H3 must be list-only. Arms get `item` and `sys.taskid`. First arm error aborts siblings. `table.concat` coerces `.text`.
 
 ```lua
 local results = fanout("### Worker", "### Topics")
 store.write("all.md", table.concat(results, "\n\n"))
+if not results[1].ok then
+    log("arm soft-degraded")
+end
 ```
 
 ---
@@ -1451,44 +1474,68 @@ Returned by `tools.need()`.
 
 | Property | Type | Mutable | Description |
 |---|---|---|---|
-| `.name` | string | No | Resolved tool name |
+| `.name` | string | No | Declared alias |
 | `.description` | string | **Yes** | Model-facing description |
-| `.parameters` | table | No | JSON schema of parameters |
-| `.wire_name` | string | No | Transport-level name |
-| `.untrusted` | boolean | No | Whether results are untrusted |
+| `.parameters` | table | No | Parameter schema (empty object today) |
+| `.wire_name` | string | No | Stable identity name |
+| `.untrusted` | boolean | No | Untrusted flag (false on need handles today) |
 
 ```lua
-local fetch = tools.need("fetch", "Fetch a web page.")
+fetch = tools.need("fetch", "Fetch a web page.")
 fetch.description = "Fetch " .. args .. " and return markdown"
 tools.add(fetch)
 ```
 
 #### Model
 
-Returned by `models.need()` or `models.always()` (combined form).
+Returned by `models.need()` or `models.always()`.
 
 | Property | Type | Description |
 |---|---|---|
-| `.name` | string | The alias declared |
+| `.name` | string | Declared alias |
 | `.model_id` | string | Resolved catalog model id |
 | `.description` | string | Capability description |
 | `.context` | number | Context window (tokens) |
-| `.thinking` | string | `"never"`, `"always"`, or `"switchable"` |
-| `.temperature` | number | Frozen temperature |
-| `.max_tokens` | number | Frozen max tokens |
+| `.thinking` | boolean or nil | Frozen thinking preference |
+| `.temperature` | number or nil | Frozen temperature |
+| `.max_tokens` | number or nil | Frozen max tokens |
 | `.dialect` | string | Tool dialect name |
 
 All properties are read-only.
 
 | Method | Signature | Description |
 |---|---|---|
-| `:infer()` | `model:infer(prompt, opts?) -> string` | Explicit inference from Lua |
+| `:infer()` | `model:infer(prompt, opts?) -> string` | Explicit inference from Lua (`opts` ignored today) |
 
 ```lua
-local writer = models.need("writer", "Analysis model",
+writer = models.need("writer", "Analysis model",
     { temperature = 0, context = 32768 })
 local result = writer:infer("Summarize: " .. args)
 ```
+
+#### Section
+
+Returned by `tasks["## Name"]`.
+
+| Property | Type | Description |
+|---|---|---|
+| `.name` | string | Section heading name |
+| `.has_prose` | boolean | Whether the section has model-facing prose |
+
+Pass to `execute` or `jump` in place of a heading string.
+
+#### FanoutResult
+
+Returned as each element of a `fanout()` results table.
+
+| Property | Type | Description |
+|---|---|---|
+| `.text` | string | Arm reply text |
+| `.ok` | boolean | Success flag |
+| `.item` | string | Source list item |
+| `.exhausted` | boolean | Soft-degrade after tool-loop exhaustion |
+
+`tostring(result)` equals `.text`.
 
 ---
 
@@ -1496,11 +1543,11 @@ local result = writer:infer("Summarize: " .. args)
 
 | Field | Required | Type | Description |
 |---|---|---|---|
-| `name` | Yes | string | Prompt identity (`^[a-z][a-z0-9_]{0,47}$`) |
-| `description` | Yes | string | Human-readable description |
-| `promptforge` | Yes | integer | Engine major version (must be `1`) |
+| `name` | Yes (parse) | string | Prompt identity |
+| `description` | Yes (parse) | string | Human-readable description |
+| `promptforge` | Yes (run) | integer | Engine major version (must be `1`) |
 | `default_return` | No | string | Value returned when falling off the last section |
-| `max_tool_iterations` | No | integer | Tool loop cap per section (default 24) |
+| `max_tool_iterations` | No | integer | Tool loop cap per section / infer (default 24) |
 
 ```yaml
 ---
@@ -1524,9 +1571,9 @@ frontmatter (YAML)
 # Title (exactly one)
 
 ```lua
--- Preamble: shared Lua (runs once)
+-- Preamble: shared Lua (bound once, replayed per section VM)
 -- tools.need, tools.always, models.need, models.always
--- Shared functions available to all sections
+-- Use globals for handles sections must see
 ```
 
 Description text (not executed)
@@ -1534,33 +1581,28 @@ Description text (not executed)
 ## Section (H2, runs top-to-bottom)
 
 ```lua
--- Prologue: section setup
--- models.use, tools.add, var assignments
+-- Lua before first prose: models.use, tools.add, infer, var
 ```
 
-Prose with {{ substitution }} (sent to model)
+Prose with {{ substitution }} (sent to model; closes tool/model scope)
 
 ```lua
--- Epilog: post-processing
--- inspect reply, validate, store.write, return
+-- Lua after first prose: inspect reply, validate, store, return
 ```
 
 ## Another Section
 
 -- Alternating blocks allowed:
 -- [lua] [prose] [lua] [prose] ... [lua]
+-- tools.add only before the first prose
 
 ### Child (H3, only for fanout)
 
 ```lua
--- Worker prologue
+-- Worker Lua
 ```
 
 Worker prose with {{ item }}
-
-```lua
--- Worker epilog
-```
 
 ### List (H3, list-only, for fanout)
 
@@ -1575,29 +1617,22 @@ Worker prose with {{ item }}
 
 | Name | Kind | Available | Signature | Returns |
 |---|---|---|---|---|
-| `args` | global | Always | - | string |
-| `reply` | global | Epilog, section 2+ prologue | - | string or nil |
+| `args` | global | Section Lua / prose | - | string |
+| `reply` | global | After model turn; section 2+ prologue | - | string or nil |
 | `item` | global | Fanout arms | - | string or nil |
-| `var` | global | Always | - | table |
-| `sys` | global | Always (sealed) | - | table |
-| `log` | function | Preamble, prologue, epilog | `log(msg)` | nil |
+| `var` | global | Section Lua / prose | - | table |
+| `sys` | global | Section Lua (sealed) | - | table |
+| `tasks` | global | Section Lua | `tasks["## Name"]` | Section |
+| `log` | function | Preamble, section Lua | `log(msg)` | nil |
 | `tools.need` | function | Preamble | `tools.need(alias, desc)` | Tool |
-| `tools.add` | function | Prologue | `tools.add(...)` | nil |
+| `tools.add` | function | Before first prose | `tools.add(...)` | nil |
 | `tools.always` | function | Preamble | `tools.always(alias)` | nil |
-| `tools.calls` | table | Prologue, epilog | `tools.calls[alias]` | number |
+| `tools.calls` | table | After counts install | `tools.calls[alias]` | number |
 | `models.need` | function | Preamble | `models.need(alias, desc, opts?)` | Model |
-| `models.always` | function | Preamble | `models.always(alias, ...)` | Model or nil |
-| `models.use` | function | Prologue | `models.use(alias)` | nil |
-| `model:infer` | method | Lua blocks | `model:infer(prompt, opts?)` | string |
-| `execute` | function | Lua blocks | `execute(name, input?)` | string |
-| `jump` | function | Lua blocks | `jump(name)` | never |
-| `fanout` | function | Prologue, epilog | `fanout(worker, list)` | table |
-| `store.write` | function | Always | `store.write(path, text)` | nil |
-| `store.append` | function | Always | `store.append(path, text)` | nil |
-| `store.read` | function | Always | `store.read(path)` | string |
-| `store.read_lines` | function | Always | `store.read_lines(path)` | string |
-| `store.inject` | function | Always | `store.inject(path)` | string |
-| `store.str_replace` | function | Always | `store.str_replace(path, old, new)` | nil |
-| `store.delete` | function | Always | `store.delete(path)` | nil |
-| `store.glob` | function | Always | `store.glob(pattern)` | table |
-| `store.exists` | function | Always | `store.exists(path)` | boolean |
+| `models.always` | function | Preamble | `models.always(...)` | Model |
+| `models.use` | function | Before first prose | `models.use(alias)` | nil |
+| `model:infer` | method | Section Lua | `model:infer(prompt, opts?)` | string |
+| `execute` | function | Section Lua | `execute(target, input?)` | string |
+| `jump` | function | Section Lua | `jump(target)` | never |
+| `fanout` | function | Section Lua | `fanout(worker, list)` | FanoutResult[] |
+| `store.*` | functions | Section Lua | see Store Methods | varies |
