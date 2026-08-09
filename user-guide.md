@@ -619,7 +619,7 @@ The rules:
 
 - **Non-final prose** - single-shot. One model round (may include tool calls for that round), then control moves to the next lua block. The conversation accumulates.
 - **Final prose** - full tool loop. The model keeps calling tools until it produces text. This text becomes `reply`. Same behavior as sections with a single prose block.
-- **Lua blocks** - run sequentially. Can mutate tool scope, write to store, inspect `reply` from a previous prose block or `infer()`, call `execute()` or `goto()`.
+- **Lua blocks** - run sequentially. Can mutate tool scope, write to store, inspect `reply` from a previous prose block or `infer()`, call `execute()` or `jump()`.
 
 The conversation accumulates within the section. Each prose block's response is added to the history, so the model in later blocks sees everything that came before.
 
@@ -743,7 +743,7 @@ Recursion is capped at 8 levels to prevent infinite loops.
 
 `execute()` lets you call any section as a subroutine, with a fresh context, and get its reply back as a string.
 
-## 16. Control Flow: goto()
+## 16. Control Flow: jump()
 
 ````markdown
 ---
@@ -764,7 +764,7 @@ local writer = models.always("writer",
 
 ```lua
 if args == "" then
-    goto("## Help")
+    jump("## Help")
 end
 ```
 
@@ -774,9 +774,9 @@ Answer only "yes" or "no".
 ```lua
 if reply:lower():find("no") then
     store.write("reason.md", reply)
-    goto("## Reject")
+    jump("## Reject")
 end
-goto("## Accept")
+jump("## Accept")
 ```
 
 ## Accept
@@ -801,17 +801,17 @@ return "Usage: provide a research topic as input."
 ```
 ````
 
-`goto("## Section Name")` transfers control to a named section. It:
+`jump("## Section Name")` transfers control to a named section. It:
 
-- Stops the current section immediately (no epilog runs after goto)
+- Stops the current section immediately (no epilog runs after jump)
 - Clears the conversation context
 - Runs the named section next
 
-Unlike `execute()`, goto does not return. The current section ends. The named section becomes the next section in the execution sequence. Normal fall-through resumes from that point.
+Unlike `execute()`, `jump` does not return. The current section ends. The named section becomes the next section in the execution sequence. Normal fall-through resumes from that point.
 
-The heading argument must include the `##` marker. A goto to a nonexistent section is a hard error.
+The heading argument must include the `##` marker. A jump to a nonexistent section is a hard error.
 
-`goto()` provides context-clearing transfer of control to another section, with no return to the caller.
+`jump()` provides context-clearing transfer of control to another section, with no return to the caller.
 
 ## 17. Fanout (Parallel Execution)
 
@@ -1416,16 +1416,16 @@ local analysis = execute("## Analyze")
 store.write("analysis.md", analysis)
 ```
 
-#### `goto()`
+#### `jump()`
 
-- **Signature:** `goto(section_name: string)`
+- **Signature:** `jump(section_name: string)`
 - **Returns:** Does not return
 - **Available:** Prologue, epilog (any lua block)
-- **Description:** Transfer control to a named section. The current section stops immediately (no epilog runs after goto). Context clears, conversation resets. The heading argument must include the `##` marker. Goto to a nonexistent section is a hard error.
+- **Description:** Transfer control to a named section. The current section stops immediately (no epilog runs after jump). Context clears, conversation resets. The heading argument must include the `##` marker. Jump to a nonexistent section is a hard error.
 
 ```lua
 if args == "" then
-    goto("## Help")
+    jump("## Help")
 end
 ```
 
@@ -1590,7 +1590,7 @@ Worker prose with {{ item }}
 | `models.use` | function | Prologue | `models.use(alias)` | nil |
 | `model:infer` | method | Lua blocks | `model:infer(prompt, opts?)` | string |
 | `execute` | function | Lua blocks | `execute(name, input?)` | string |
-| `goto` | function | Lua blocks | `goto(name)` | never |
+| `jump` | function | Lua blocks | `jump(name)` | never |
 | `fanout` | function | Prologue, epilog | `fanout(worker, list)` | table |
 | `store.write` | function | Always | `store.write(path, text)` | nil |
 | `store.append` | function | Always | `store.append(path, text)` | nil |
