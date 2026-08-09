@@ -30,6 +30,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde_json::json;
 
@@ -44,7 +46,7 @@ use crate::observe::{Observer, detail};
 use crate::parser::Prompt;
 use crate::store::StoreRef;
 use crate::subst;
-use crate::tools::{Tool, ToolId, ToolRegistry};
+use crate::tools::{SharedTools, Tool, ToolId, ToolRegistry};
 use crate::untrusted;
 use crate::{Error, NearDuplicateDiagnostic, Result};
 
@@ -185,7 +187,7 @@ impl fmt::Debug for RunOptions<'_> {
 pub async fn run<'a>(
     prompt: impl Into<RunPrompt<'a>>,
     args: &str,
-    tools: &[&dyn Tool],
+    tools: &[Arc<dyn Tool>],
     store: &StoreRef,
     opts: RunOptions<'_>,
 ) -> Result<String> {
@@ -211,24 +213,26 @@ pub async fn run<'a>(
         client,
         debug,
     } = opts;
-    let registry = ToolRegistry::new(tools.iter().copied());
+    let shared_tools = SharedTools::new(tools);
+    let registry = shared_tools.registry();
     let prompt_section = prompt.title.as_str();
     observer.observe(execution, prompt_section, detail::RUN_STARTED);
 
     // The turn count is threaded through the whole run so `RunFinished` can
     // report the total even when a section fails part way through it.
-    let mut turns: u32 = 0;
+    let turns = AtomicU32::new(0);
     let result = run_sections(
         prompt,
         run_prompt.bound,
         args,
         &registry,
+        &shared_tools,
         store,
         execution,
         observer,
         client,
         debug,
-        &mut turns,
+        &turns,
     )
     .await;
 
@@ -263,12 +267,13 @@ async fn run_sections(
     bound: Option<&BoundPrompt>,
     args: &str,
     registry: &ToolRegistry<'_>,
+    shared_tools: &SharedTools,
     store: &StoreRef,
     execution: &str,
     observer: &dyn Observer,
     mut client: Option<GatewayClient>,
     debug: Option<&dyn DebugCapture>,
-    turns: &mut u32,
+    turns: &AtomicU32,
 ) -> Result<String> {
     let when = now_rfc3339();
     let mut last_reply: Option<String> = None;
@@ -325,6 +330,7 @@ async fn run_sections(
                 let fanout_models = models.clone();
                 let fanout_client = client.clone();
                 let fanout_max_iters = max_tool_iterations;
+                let fanout_tools = shared_tools.clone();
                 match vm.run_preamble_with_fanout(
                     program,
                     observer,
@@ -344,7 +350,7 @@ async fn run_sections(
                             &fanout_bindings,
                             &fanout_models,
                             bound,
-                            registry,
+                            &fanout_tools,
                             fanout_max_iters,
                             fanout_last_reply.as_deref(),
                             &fanout_when,
@@ -511,6 +517,7 @@ async fn run_sections(
                 let fanout_models = models.clone();
                 let fanout_client = client.clone();
                 let fanout_max_iters = max_tool_iterations;
+                let fanout_tools = shared_tools.clone();
                 match vm.run_epilog_with_fanout(
                     program,
                     observer,
@@ -530,7 +537,7 @@ async fn run_sections(
                             &fanout_bindings,
                             &fanout_models,
                             bound,
-                            registry,
+                            &fanout_tools,
                             fanout_max_iters,
                             fanout_last_reply.as_deref(),
                             &fanout_when,
@@ -590,7 +597,7 @@ fn make_fanout_callback(
     bindings: &ToolBindings,
     models: &ModelBindings,
     bound: Option<&BoundPrompt>,
-    registry: &ToolRegistry<'_>,
+    shared_tools: &SharedTools,
     max_tool_iterations: usize,
     last_reply: Option<&str>,
     when: &str,
@@ -620,7 +627,7 @@ fn make_fanout_callback(
         bindings,
         models,
         bound,
-        registry,
+        shared_tools,
         max_tool_iterations,
         last_reply,
         when,
@@ -732,7 +739,7 @@ pub(crate) struct SectionProgress<'a> {
     /// The heading text every observation from this loop carries.
     pub(crate) section: &'a str,
     /// The run's model-turn total, advanced once per round trip.
-    pub(crate) turns: &'a mut u32,
+    pub(crate) turns: &'a AtomicU32,
     /// Opt-in raw request/response capture for each model turn.
     pub(crate) debug: Option<&'a dyn DebugCapture>,
     /// Per-call model fields from the section's selected binding.
@@ -805,12 +812,12 @@ pub(crate) async fn run_tool_loop(
 
         // A round trip that produced a reply is a turn, whether the reply is
         // the section's final text or a batch of tool calls.
-        *turns = turns.saturating_add(1);
+        let turn = turns.fetch_add(1, Ordering::Relaxed).saturating_add(1);
         if let Some(capture) = debug {
             capture.on_event(
                 execution,
                 section,
-                *turns,
+                turn,
                 DebugEvent::Request {
                     body: completion.request_body,
                 },
@@ -818,7 +825,7 @@ pub(crate) async fn run_tool_loop(
             capture.on_event(
                 execution,
                 section,
-                *turns,
+                turn,
                 DebugEvent::Response {
                     body: completion.response_body.clone(),
                     finish_reason: completion.finish_reason.clone(),

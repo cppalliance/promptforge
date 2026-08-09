@@ -689,7 +689,7 @@ store.write("arm-" .. sys.taskid .. ".md", reply)
 3. the people
 ````
 
-The list section (`### Topics`) is a list-only H3 - no preamble, no epilog - whose prose contains only bullet items parsed at load time. Unordered (`- `, `* `) and ordered (`N. `, `N) `) markers are stripped. The worker section (`### Subagent`) is a normal template section; each arm gets a fresh VM with `item` (the list text) and `sys.taskid` ("1", "2", ...) injected. `{{ item }}` substitution is available in the worker's prose; `item` is also a Lua global in preamble and epilog. Arms execute sequentially and share the run's store, so arm writes are visible to the invoker's reduce. `fanout` returns an ordered Lua table of arm replies.
+The list section (`### Topics`) is a list-only H3 - no preamble, no epilog - whose prose contains only bullet items parsed at load time. Unordered (`- `, `* `) and ordered (`N. `, `N) `) markers are stripped. The worker section (`### Subagent`) is a normal template section; each arm gets a fresh VM with `item` (the list text) and `sys.taskid` ("1", "2", ...) injected. `{{ item }}` substitution is available in the worker's prose; `item` is also a Lua global in preamble and epilog. Arms execute concurrently on a `JoinSet` and share the run's store, so arm writes are visible to the invoker's reduce; the first arm error aborts siblings. `fanout` returns an ordered Lua table of arm replies (list order).
 
 Children never execute by fall-through. Only an explicit `fanout(...)` call triggers child execution.
 

@@ -6,6 +6,8 @@
 //! instances placed in the registry, keeping identity, description, and schema
 //! agreement structural rather than conventional.
 
+use std::sync::Arc;
+
 use promptforge_core::tools::{Tool, ToolRegistry, WebSearch};
 use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId};
 use promptforge_webfetch::WebFetch;
@@ -15,7 +17,7 @@ use promptforge_webfetch::WebFetch;
 /// The picker catalog is built directly from `live`, so no descriptor can be
 /// offered without a callable tool carrying the same stable identity.
 pub(crate) struct AvailableTools {
-    live: Vec<Box<dyn Tool>>,
+    live: Vec<Arc<dyn Tool>>,
     catalog: Catalog,
 }
 
@@ -38,6 +40,12 @@ impl AvailableTools {
         ToolRegistry::new(self.live.iter().map(AsRef::as_ref))
     }
 
+    /// Returns the shared tool arcs for [`promptforge_core::execute::run`].
+    #[must_use]
+    pub(crate) fn tools(&self) -> &[Arc<dyn Tool>] {
+        &self.live
+    }
+
     /// Returns the matching abstract picker catalog.
     pub(crate) fn catalog(&self) -> &Catalog {
         &self.catalog
@@ -50,9 +58,9 @@ impl AvailableTools {
 /// non-empty gateway URL are both present, because that bearer and base URL are
 /// the credentials needed to invoke the gateway.
 pub(crate) fn available_tools(base_url: &str, key: Option<&str>) -> AvailableTools {
-    let mut live: Vec<Box<dyn Tool>> = vec![Box::new(WebFetch::new())];
+    let mut live: Vec<Arc<dyn Tool>> = vec![Arc::new(WebFetch::new())];
     if let Some(key) = key.filter(|_| !base_url.is_empty()) {
-        live.push(Box::new(WebSearch::new(base_url, key)));
+        live.push(Arc::new(WebSearch::new(base_url, key)));
     }
 
     let catalog = Catalog::new(live.iter().map(|tool| descriptor(tool.as_ref())).collect());

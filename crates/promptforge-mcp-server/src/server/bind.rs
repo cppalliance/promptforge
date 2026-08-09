@@ -17,7 +17,7 @@ use crate::config::GatewayConfig;
 
 /// The immutable picker, live tools, and model catalog shared by every server run.
 pub struct PreparedTools {
-    live: Vec<Box<dyn Tool>>,
+    live: Vec<std::sync::Arc<dyn Tool>>,
     picker: ToolPicker,
     models: ModelCatalog,
 }
@@ -100,6 +100,12 @@ impl PreparedTools {
         ToolRegistry::new(self.live.iter().map(AsRef::as_ref))
     }
 
+    /// Returns the shared tool arcs for [`promptforge_core::execute::run`].
+    #[must_use]
+    pub(crate) fn tools(&self) -> &[std::sync::Arc<dyn Tool>] {
+        &self.live
+    }
+
     /// Returns the process-lifetime prepared semantic picker.
     #[must_use]
     pub(crate) fn picker(&self) -> &ToolPicker {
@@ -113,14 +119,14 @@ impl PreparedTools {
     }
 }
 
-fn live_tools(gateway: &GatewayConfig) -> Vec<Box<dyn Tool>> {
+fn live_tools(gateway: &GatewayConfig) -> Vec<std::sync::Arc<dyn Tool>> {
     vec![
-        Box::new(WebFetch::new()),
-        Box::new(WebSearch::new(&gateway.url, gateway.key.expose())),
+        std::sync::Arc::new(WebFetch::new()),
+        std::sync::Arc::new(WebSearch::new(&gateway.url, gateway.key.expose())),
     ]
 }
 
-fn catalog(live: &[Box<dyn Tool>]) -> Catalog {
+fn catalog(live: &[std::sync::Arc<dyn Tool>]) -> Catalog {
     Catalog::new(live.iter().map(|tool| descriptor(tool.as_ref())).collect())
 }
 

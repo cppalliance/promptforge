@@ -271,7 +271,6 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
         slot,
     } = launch;
 
-    let live = tools.registry();
     let store = StoreRef::memory();
     let options = RunOptions {
         execution: &run_id,
@@ -279,7 +278,7 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
         client: Some(client),
         debug: None,
     };
-    let outcome = execute::run(&prompt, &args, live.tools(), &store, options).await;
+    let outcome = execute::run(&prompt, &args, tools.tools(), &store, options).await;
 
     let turns = observer.turns();
     // Timed here rather than after the flush, so the run's duration is the run's
