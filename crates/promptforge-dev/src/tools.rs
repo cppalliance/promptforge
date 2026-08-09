@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use promptforge_core::tools::{Tool, ToolRegistry, WebSearch};
+use promptforge_core::tools::{Tool, WebSearch};
 use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId};
 use promptforge_webfetch::WebFetch;
 
@@ -35,11 +35,6 @@ impl std::fmt::Debug for AvailableTools {
 }
 
 impl AvailableTools {
-    /// Returns a registry borrowing every available concrete tool.
-    pub(crate) fn registry(&self) -> ToolRegistry<'_> {
-        ToolRegistry::new(self.live.iter().map(AsRef::as_ref))
-    }
-
     /// Returns the shared tool arcs for [`promptforge_core::execute::run`].
     #[must_use]
     pub(crate) fn tools(&self) -> &[Arc<dyn Tool>] {
@@ -78,89 +73,58 @@ fn descriptor(tool: &dyn Tool) -> ToolDescriptor {
 
 #[cfg(test)]
 mod tests {
-    use promptforge_core::bind::bind_prompt;
-    use promptforge_core::observe::NullObserver;
-    use promptforge_core::parser::Prompt;
-    use promptforge_tool_picker::{Config, ToolPicker};
+    use promptforge_tool_picker::{Config, Outcome, ToolPicker};
 
     use super::available_tools;
 
     const BASE_URL: &str = "http://127.0.0.1:8081/v1";
+
+    fn selected_name(picker: &ToolPicker, capability: &str) -> String {
+        match picker.resolve(capability).expect("picker should resolve") {
+            Outcome::Bind(tool) => tool.name().to_owned(),
+            other => panic!("expected one selected tool, got {other:?}"),
+        }
+    }
 
     #[test]
     fn available_capability_binds_to_live_tool() {
         let available = available_tools(BASE_URL, None);
         let picker = ToolPicker::build(available.catalog().clone(), Config::default())
             .expect("fixture picker should build");
-        let registry = available.registry();
-        let prompt = parse_prompt(
-            r#"
-tools.need("fetch", "Fetch a web page and return its main content as markdown.")
-"#,
-        );
-
-        let bound = bind_prompt(
-            prompt,
-            &picker,
-            &registry,
-            &promptforge_core::model::ModelCatalog::empty(),
-            "test-run",
-            &NullObserver,
-        )
-        .expect("available fetch capability should bind");
-
         assert_eq!(
-            bound.alias_to_id().get("fetch"),
-            Some(&promptforge_core::tools::ToolId::new(
-                "promptforge",
-                "web_fetch"
-            ))
+            selected_name(
+                &picker,
+                "Fetch a web page and return its main content as markdown."
+            ),
+            "web_fetch"
         );
     }
 
     #[test]
     fn key_without_url_excludes_web_search_and_solo_candidate_binds_web_fetch() {
         let available = available_tools("", Some("test-token"));
-        let registry = available.registry();
         assert!(
-            registry
+            available
                 .tools()
                 .iter()
                 .all(|tool| tool.id().name() != "web_search")
         );
         let picker = ToolPicker::build(available.catalog().clone(), Config::default())
             .expect("fixture picker should build");
-        let prompt = parse_prompt(
-            r#"
-tools.need("search", "Search the web and return a list of results (title, url, description).")
-"#,
-        );
-
-        let bound = bind_prompt(
-            prompt,
-            &picker,
-            &registry,
-            &promptforge_core::model::ModelCatalog::empty(),
-            "test-run",
-            &NullObserver,
-        )
-        .expect("solo-candidate rule should bind web_fetch as the only match");
-
         assert_eq!(
-            bound.alias_to_id().get("search"),
-            Some(&promptforge_core::tools::ToolId::new(
-                "promptforge",
-                "web_fetch"
-            ))
+            selected_name(
+                &picker,
+                "Search the web and return a list of results (title, url, description)."
+            ),
+            "web_fetch"
         );
     }
 
     #[test]
     fn token_includes_web_search_and_need_can_bind() {
         let available = available_tools(BASE_URL, Some("test-token"));
-        let registry = available.registry();
         assert!(
-            registry
+            available
                 .tools()
                 .iter()
                 .any(|tool| tool.id().name() == "web_search")
@@ -174,37 +138,20 @@ tools.need("search", "Search the web and return a list of results (title, url, d
         );
         let picker = ToolPicker::build(available.catalog().clone(), Config::default())
             .expect("fixture picker should build");
-        let prompt = parse_prompt(
-            r#"
-tools.need("search", "Search the web and return a list of results (title, url, description).")
-"#,
-        );
-
-        let bound = bind_prompt(
-            prompt,
-            &picker,
-            &registry,
-            &promptforge_core::model::ModelCatalog::empty(),
-            "test-run",
-            &NullObserver,
-        )
-        .expect("available search capability should bind");
-
         assert_eq!(
-            bound.alias_to_id().get("search"),
-            Some(&promptforge_core::tools::ToolId::new(
-                "promptforge",
-                "web_search"
-            ))
+            selected_name(
+                &picker,
+                "Search the web and return a list of results (title, url, description)."
+            ),
+            "web_search"
         );
     }
 
     #[test]
     fn no_token_excludes_web_search_and_solo_candidate_binds_web_fetch() {
         let available = available_tools(BASE_URL, None);
-        let registry = available.registry();
         assert!(
-            registry
+            available
                 .tools()
                 .iter()
                 .all(|tool| tool.id().name() != "web_search")
@@ -218,28 +165,12 @@ tools.need("search", "Search the web and return a list of results (title, url, d
         );
         let picker = ToolPicker::build(available.catalog().clone(), Config::default())
             .expect("fixture picker should build");
-        let prompt = parse_prompt(
-            r#"
-tools.need("search", "Search the web and return a list of results (title, url, description).")
-"#,
-        );
-
-        let bound = bind_prompt(
-            prompt,
-            &picker,
-            &registry,
-            &promptforge_core::model::ModelCatalog::empty(),
-            "test-run",
-            &NullObserver,
-        )
-        .expect("solo-candidate rule should bind web_fetch as the only match");
-
         assert_eq!(
-            bound.alias_to_id().get("search"),
-            Some(&promptforge_core::tools::ToolId::new(
-                "promptforge",
-                "web_fetch"
-            ))
+            selected_name(
+                &picker,
+                "Search the web and return a list of results (title, url, description)."
+            ),
+            "web_fetch"
         );
     }
 
@@ -247,8 +178,7 @@ tools.need("search", "Search the web and return a list of results (title, url, d
     fn live_registry_and_picker_catalog_have_identical_ids() {
         for token in [None, Some("test-token")] {
             let available = available_tools(BASE_URL, token);
-            let registry = available.registry();
-            let live_ids = registry
+            let live_ids = available
                 .tools()
                 .iter()
                 .map(|tool| {
@@ -265,16 +195,5 @@ tools.need("search", "Search the web and return a list of results (title, url, d
 
             assert_eq!(live_ids, picker_ids);
         }
-    }
-
-    fn parse_prompt(declarations: &str) -> Prompt {
-        Prompt::parse(
-            &format!(
-                "---\nname: fixture\ndescription: registry fixture\npromptforge: 1\n---\n# Fixture\n\n```lua shared\n{declarations}```\n\n## Run\n\n```lua\nreturn \"done\"\n```\n"
-            ),
-            "test-run",
-            &NullObserver,
-        )
-        .expect("fixture prompt should parse")
     }
 }

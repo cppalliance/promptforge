@@ -325,11 +325,10 @@ pub struct CompletionOptions {
 
 impl Eq for CompletionOptions {}
 
-/// Immutable prompt-level model bindings from one H1 declaration pass.
+/// Immutable prompt-level model bindings from live H1 execution.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelBindings {
     bindings: Vec<ModelBinding>,
-    declarations: Vec<ModelDeclaration>,
     always: Option<String>,
 }
 
@@ -356,32 +355,9 @@ impl ModelBindings {
         self.bindings.iter().find(|binding| binding.alias == alias)
     }
 
-    pub(crate) fn declarations(&self) -> &[ModelDeclaration] {
-        &self.declarations
+    pub(crate) fn from_parts(bindings: Vec<ModelBinding>, always: Option<String>) -> Self {
+        Self { bindings, always }
     }
-
-    pub(crate) fn from_parts(
-        bindings: Vec<ModelBinding>,
-        declarations: Vec<ModelDeclaration>,
-        always: Option<String>,
-    ) -> Self {
-        Self {
-            bindings,
-            declarations,
-            always,
-        }
-    }
-}
-
-/// Exact H1 declaration recorded for section replay.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ModelDeclaration {
-    Need {
-        alias: String,
-        description: String,
-        opts: ModelNeedOpts,
-    },
-    Always(String),
 }
 
 /// Complete live model set for one bind pass.
@@ -726,10 +702,13 @@ pub fn pinned_qwen_dev_catalog(model_alias: &str) -> ModelCatalog {
 
 #[cfg(test)]
 mod tests {
+    use mlua::Lua;
+
     use super::*;
-    use crate::lua::{SectionVm, bind_shared_declarations};
+    use crate::lua::{LiveBindingProducer, LuaProgram, SectionVm, ToolBindings, ToolResolver};
     use crate::observe::NullObserver;
     use crate::store::StoreRef;
+    use crate::tools::ToolRegistry;
     use serde_json::json;
 
     const EXECUTION: &str = "model-bind-test";
@@ -775,6 +754,41 @@ mod tests {
             tool_dialect: hit.tool_dialect(),
             context: hit.context(),
         })
+    }
+
+    fn resolve_live_declarations_for_test(
+        source: &LuaProgram,
+        tool_resolver: &dyn ToolResolver,
+        model_resolver: &dyn ModelResolver,
+        _execution: &str,
+        _observer: &dyn crate::observe::Observer,
+        _section: &str,
+    ) -> Result<(ToolBindings, ModelBindings)> {
+        let registry = ToolRegistry::new(std::iter::empty());
+        let producer = LiveBindingProducer::default();
+        let lua = Lua::new();
+        let result = lua.scope(|scope| {
+            producer
+                .install(&lua, scope, tool_resolver, &registry, model_resolver)
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            lua.load(source.source()).exec()
+        });
+        if let Some(error) = producer.take_callback_error()? {
+            return Err(error);
+        }
+        result.map_err(|error| Error::Lua(error.to_string()))?;
+        producer.bindings()
+    }
+
+    fn section_vm_with_model_bindings(
+        _source: &LuaProgram,
+        tools: &ToolBindings,
+        models: &ModelBindings,
+        execution: &str,
+        observer: &dyn crate::observe::Observer,
+        section: &str,
+    ) -> Result<SectionVm> {
+        SectionVm::new_for_section(None, tools, models, execution, observer, section)
     }
 
     #[test]
@@ -847,7 +861,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (tools, models) = bind_shared_declarations(
+        let (tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -859,7 +873,7 @@ mod tests {
         assert_eq!(models.bindings()[0].id().name(), "analyst");
         assert_eq!(models.bindings()[0].invocation().thinking, Some(false));
 
-        let mut vm = SectionVm::new_with_shared_bindings(
+        let mut vm = section_vm_with_model_bindings(
             &shared,
             &tools,
             &models,
@@ -899,7 +913,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (tools, models) = bind_shared_declarations(
+        let (tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -908,7 +922,7 @@ mod tests {
             "Prompt",
         )
         .unwrap();
-        let mut vm = SectionVm::new_with_shared_bindings(
+        let mut vm = section_vm_with_model_bindings(
             &shared,
             &tools,
             &models,
@@ -937,7 +951,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let error = bind_shared_declarations(
+        let error = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -962,7 +976,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (tools, models) = bind_shared_declarations(
+        let (tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -971,7 +985,7 @@ mod tests {
             "Prompt",
         )
         .unwrap();
-        let mut vm = SectionVm::new_with_shared_bindings(
+        let mut vm = section_vm_with_model_bindings(
             &shared,
             &tools,
             &models,
@@ -1012,7 +1026,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (_tools, models) = bind_shared_declarations(
+        let (_tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1056,7 +1070,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (tools, models) = bind_shared_declarations(
+        let (tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1068,7 +1082,7 @@ mod tests {
         assert_eq!(models.always(), Some("writer"));
         assert_eq!(models.bindings()[0].context(), 8_192);
 
-        let vm = SectionVm::new_with_shared_bindings(
+        let vm = section_vm_with_model_bindings(
             &shared,
             &tools,
             &models,
@@ -1093,7 +1107,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let error = bind_shared_declarations(
+        let error = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1121,7 +1135,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let error = bind_shared_declarations(
+        let error = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1148,7 +1162,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (tools, models) = bind_shared_declarations(
+        let (tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1157,7 +1171,7 @@ mod tests {
             "Prompt",
         )
         .unwrap();
-        let mut vm = SectionVm::new_with_shared_bindings(
+        let mut vm = section_vm_with_model_bindings(
             &shared,
             &tools,
             &models,
@@ -1190,7 +1204,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (tools, models) = bind_shared_declarations(
+        let (tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1199,7 +1213,7 @@ mod tests {
             "Prompt",
         )
         .unwrap();
-        let mut vm = SectionVm::new_with_shared_bindings(
+        let mut vm = section_vm_with_model_bindings(
             &shared,
             &tools,
             &models,
@@ -1238,7 +1252,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (tools, models) = bind_shared_declarations(
+        let (tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1247,7 +1261,7 @@ mod tests {
             "Prompt",
         )
         .unwrap();
-        let mut vm = SectionVm::new_with_shared_bindings(
+        let mut vm = section_vm_with_model_bindings(
             &shared,
             &tools,
             &models,
@@ -1290,7 +1304,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (tools, models) = bind_shared_declarations(
+        let (tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1299,7 +1313,7 @@ mod tests {
             "Prompt",
         )
         .unwrap();
-        let mut vm = SectionVm::new_with_shared_bindings(
+        let mut vm = section_vm_with_model_bindings(
             &shared,
             &tools,
             &models,
@@ -1323,7 +1337,7 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(
-            msg.contains("only available during H1"),
+            msg.contains("only available during live H1 execution"),
             "unexpected error: {msg}"
         );
         vm.teardown(&NullObserver, "Section");
@@ -1342,7 +1356,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (_tools, models) = bind_shared_declarations(
+        let (_tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1353,15 +1367,6 @@ mod tests {
         .unwrap();
         assert_eq!(models.always(), Some("writer"));
         assert!(models.binding("writer").is_some());
-        assert_eq!(models.declarations().len(), 2);
-        assert!(matches!(
-            &models.declarations()[0],
-            ModelDeclaration::Need { alias, .. } if alias == "writer"
-        ));
-        assert!(matches!(
-            &models.declarations()[1],
-            ModelDeclaration::Always(alias) if alias == "writer"
-        ));
     }
 
     #[test]
@@ -1377,7 +1382,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (_tools, models) = bind_shared_declarations(
+        let (_tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1403,7 +1408,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (tools, models) = bind_shared_declarations(
+        let (tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1412,7 +1417,7 @@ mod tests {
             "Prompt",
         )
         .unwrap();
-        let mut vm = SectionVm::new_with_shared_bindings(
+        let mut vm = section_vm_with_model_bindings(
             &shared,
             &tools,
             &models,
@@ -1449,7 +1454,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (tools, models) = bind_shared_declarations(
+        let (tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1458,7 +1463,7 @@ mod tests {
             "Prompt",
         )
         .unwrap();
-        let mut vm = SectionVm::new_with_shared_bindings(
+        let mut vm = section_vm_with_model_bindings(
             &shared,
             &tools,
             &models,
@@ -1491,7 +1496,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let (_tools, models) = bind_shared_declarations(
+        let (_tools, models) = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,
@@ -1513,7 +1518,7 @@ mod tests {
             "Prompt",
         )
         .unwrap();
-        let error = bind_shared_declarations(
+        let error = resolve_live_declarations_for_test(
             &shared2,
             &tool_resolver,
             &fixture_resolver,
@@ -1540,7 +1545,7 @@ mod tests {
         .unwrap();
         let tool_resolver =
             |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-        let error = bind_shared_declarations(
+        let error = resolve_live_declarations_for_test(
             &shared,
             &tool_resolver,
             &fixture_resolver,

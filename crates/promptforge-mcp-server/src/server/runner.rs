@@ -1,8 +1,7 @@
 //! Running one catalog entry, and what happens when the run outlives its call.
 //!
 //! A call that reaches a prompt goes through four gates in order. A broken entry
-//! or an unbindable tool fails before anything is reserved, because neither ever
-//! reaches a model and neither should cost a run slot. Then admission: one of
+//! fails before anything is reserved. Then admission: one of
 //! `max_concurrent_runs` slots, waited for up to `admission_timeout` and
 //! refused with a message the calling model can retry on. Then the run itself,
 //! which happens on a task of its own rather than inline, and whose clock starts
@@ -28,9 +27,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use promptforge_core::bind::{BoundPrompt, bind_prompt};
 use promptforge_core::client::GatewayClient;
-use promptforge_core::execute::{self, RunOptions};
+use promptforge_core::execute::{self, ResolutionContext, RunOptions};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
 use rmcp::model::{CallToolResult, ErrorData};
@@ -53,7 +51,7 @@ struct Launch {
     /// The run's identifier, which is also how it is collected.
     run_id: String,
     /// The prompt to run, cloned from the catalog snapshot.
-    prompt: BoundPrompt,
+    prompt: Prompt,
     /// The prompt's name, as the result reports it.
     name: String,
     /// The run's whole input.
@@ -81,7 +79,7 @@ struct Observation {
 ///
 /// # Errors
 /// Returns `-32603` when the result cannot be serialized. Everything the
-/// calling model can act on - a broken prompt, an unbindable tool, a refused
+/// calling model can act on - a broken prompt, an unresolvable capability, a refused
 /// admission, a run that failed - is an `Ok` result carrying `isError`.
 pub(super) async fn run(
     config: &Config,
@@ -133,7 +131,7 @@ pub(super) async fn run(
 
 /// Runs one validated source snapshot under an already-created observation
 /// context. Keeping this boundary explicit lets the runner regression retain
-/// the observer while exercising the same parse-bind-run path as production.
+/// the observer while exercising the same parse-to-run path as production.
 async fn run_observed(
     config: &Config,
     registry: &Arc<RunRegistry>,
@@ -151,42 +149,7 @@ async fn run_observed(
     let prompt = match Prompt::parse(source, &run_id, observer.as_ref()) {
         Ok(prompt) => prompt,
         Err(error) => {
-            return binding_failed(run_id, entry, error.to_string(), observer, pump).await;
-        }
-    };
-
-    // Binding embeds each distinct capability synchronously. Keep that CPU work
-    // off the async executor, while using the exact observer execution will
-    // receive so the whole parse-bind-run lifecycle has one reporting seam.
-    let binding_tools = Arc::clone(&tools);
-    let binding_observer = Arc::clone(&observer);
-    let binding_execution = run_id.clone();
-    let binding = tokio::task::spawn_blocking(move || {
-        let live = binding_tools.registry();
-        bind_prompt(
-            prompt,
-            binding_tools.picker(),
-            &live,
-            binding_tools.models(),
-            &binding_execution,
-            binding_observer.as_ref(),
-        )
-    })
-    .await;
-    let bound = match binding {
-        Ok(Ok(bound)) => bound,
-        Ok(Err(error)) => {
-            return binding_failed(run_id, entry, error.to_string(), observer, pump).await;
-        }
-        Err(error) => {
-            return binding_failed(
-                run_id,
-                entry,
-                format!("prompt binding did not finish: {error}"),
-                observer,
-                pump,
-            )
-            .await;
+            return preparation_failed(run_id, entry, error.to_string(), observer, pump).await;
         }
     };
 
@@ -205,7 +168,7 @@ async fn run_observed(
         Arc::clone(registry),
         Launch {
             run_id: run_id.clone(),
-            prompt: bound,
+            prompt,
             name: entry.name().to_owned(),
             args: args.to_owned(),
             tools,
@@ -278,7 +241,18 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
         client: Some(client),
         debug: None,
     };
-    let outcome = execute::run(&prompt, &args, tools.tools(), &store, options).await;
+    let outcome = execute::run(
+        &prompt,
+        &args,
+        ResolutionContext {
+            picker: tools.picker(),
+            models: tools.models(),
+        },
+        tools.tools(),
+        &store,
+        options,
+    )
+    .await;
 
     let turns = observer.turns();
     // Timed here rather than after the flush, so the run's duration is the run's
@@ -299,8 +273,8 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
     result
 }
 
-/// Converts a binding or blocking-task failure into a caller-facing failed run.
-async fn binding_failed(
+/// Converts a parse or preparation failure into a caller-facing failed run.
+async fn preparation_failed(
     run_id: String,
     entry: &Entry,
     message: String,

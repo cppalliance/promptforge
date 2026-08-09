@@ -8,7 +8,6 @@
 //! `.exhausted`). Fatal arm errors abort siblings;
 //! [`Error::ToolLoopExhausted`] soft-degrades to an incomplete stub.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
@@ -16,7 +15,6 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-use crate::bind::BoundPrompt;
 use crate::cancel;
 use crate::client::GatewayClient;
 use crate::debug::{DebugCapture, DebugEvent};
@@ -76,7 +74,7 @@ pub(crate) struct FanoutContext<'a> {
     pub shared: Option<&'a LuaProgram>,
     pub bindings: &'a ToolBindings,
     pub models: &'a ModelBindings,
-    pub bound: Option<&'a BoundPrompt>,
+    pub analysis: &'a crate::execute::ToolAnalysis,
     pub shared_tools: &'a SharedTools,
     pub max_tool_iterations: usize,
     pub last_reply: Option<&'a str>,
@@ -126,7 +124,7 @@ pub(crate) async fn run_fanout_arms(
             shared: ctx.shared.cloned(),
             bindings: ctx.bindings.clone(),
             models: ctx.models.clone(),
-            bound: ctx.bound.cloned(),
+            analysis: ctx.analysis.clone(),
             shared_tools: ctx.shared_tools.clone(),
             max_tool_iterations: ctx.max_tool_iterations,
             parent_id: ctx.parent_id,
@@ -234,7 +232,7 @@ struct ArmPayload {
     shared: Option<LuaProgram>,
     bindings: ToolBindings,
     models: ModelBindings,
-    bound: Option<BoundPrompt>,
+    analysis: crate::execute::ToolAnalysis,
     shared_tools: SharedTools,
     max_tool_iterations: usize,
     parent_id: usize,
@@ -295,7 +293,7 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
         shared,
         bindings,
         models,
-        bound,
+        analysis,
         shared_tools,
         max_tool_iterations,
         parent_id,
@@ -309,28 +307,14 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
     let observer = observer.as_ref() as &dyn Observer;
     observer.observe(&execution, &worker.name, detail::FANOUT_ARM_STARTED);
 
-    let mut vm = if bound.is_none() {
-        SectionVm::new_for_section(
-            shared.as_ref(),
-            &bindings,
-            &models,
-            &execution,
-            observer,
-            &worker.name,
-        )?
-    } else {
-        match shared.as_ref() {
-            Some(program) => SectionVm::new_with_shared_bindings(
-                program,
-                &bindings,
-                &models,
-                &execution,
-                observer,
-                &worker.name,
-            )?,
-            None => SectionVm::new(None, &execution, observer, &worker.name)?,
-        }
-    };
+    let mut vm = SectionVm::new_for_section(
+        shared.as_ref(),
+        &bindings,
+        &models,
+        &execution,
+        observer,
+        &worker.name,
+    )?;
 
     let sys = json!({
         "when": when,
@@ -429,27 +413,22 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
         };
         let completion_options = model_binding.completion_options();
         let registry = shared_tools.registry();
-        let (schemas, dispatch) = match bound.as_ref() {
-            Some(bound_prompt) => {
-                match crate::execute::prepare_effective_scope(
-                    bound_prompt,
-                    &scope,
-                    &registry,
-                    &execution,
-                    observer,
-                    &worker.name,
-                ) {
-                    Ok(prepared) => prepared,
-                    Err(error) => {
-                        vm.teardown(observer, &worker.name);
-                        return Err(error);
-                    }
-                }
+        let (schemas, dispatch) = match crate::execute::prepare_effective_scope(
+            &analysis,
+            &scope,
+            &registry,
+            &execution,
+            observer,
+            &worker.name,
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                vm.teardown(observer, &worker.name);
+                return Err(error);
             }
-            None => (Vec::new(), BTreeMap::new()),
         };
         if let Some(client) = client.as_ref() {
-            let global_aliases = bound.as_ref().map(BoundPrompt::alias_to_id);
+            let global_aliases = Some(&analysis.alias_to_id);
             let debug_ref = debug.as_deref();
             let text = match crate::execute::run_tool_loop(
                 client,
@@ -621,6 +600,7 @@ mod tests {
         let store = StoreRef::memory();
         let bindings = ToolBindings::default();
         let models = ModelBindings::default();
+        let analysis = crate::execute::ToolAnalysis::default();
         let shared_tools = SharedTools::default();
         let client: Option<GatewayClient> = None;
         let observer = NullObserver;
@@ -634,7 +614,7 @@ mod tests {
             shared: None,
             bindings: &bindings,
             models: &models,
-            bound: None,
+            analysis: &analysis,
             shared_tools: &shared_tools,
             max_tool_iterations: 24,
             last_reply: None,
@@ -677,6 +657,7 @@ mod tests {
         let store = StoreRef::memory();
         let bindings = ToolBindings::default();
         let models = ModelBindings::default();
+        let analysis = crate::execute::ToolAnalysis::default();
         let shared_tools = SharedTools::default();
         let client: Option<GatewayClient> = None;
         let observer = NullObserver;
@@ -690,7 +671,7 @@ mod tests {
             shared: None,
             bindings: &bindings,
             models: &models,
-            bound: None,
+            analysis: &analysis,
             shared_tools: &shared_tools,
             max_tool_iterations: 24,
             last_reply: None,

@@ -7,7 +7,7 @@ max_tool_iterations: 24
 
 # Briefer
 
-```lua shared
+```lua
 models.always("writer",
     "A careful analysis model suited to structured reasoning and long-context review",
     { thinking = false, temperature = 0, context = 32768 })

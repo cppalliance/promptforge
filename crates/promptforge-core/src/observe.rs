@@ -81,24 +81,12 @@ pub mod detail {
     pub const LUA_TEARDOWN_STARTED: &str = "Lua teardown started";
     /// A section VM completed teardown.
     pub const LUA_TEARDOWN_SUCCEEDED: &str = "Lua teardown succeeded";
-    /// Prompt-level tool declarations began binding.
-    pub const TOOL_BINDING_STARTED: &str = "Tool binding started";
-    /// Prompt-level tool declarations bound successfully.
-    pub const TOOL_BINDING_SUCCEEDED: &str = "Tool binding succeeded";
-    /// Prompt-level tool declaration binding failed.
-    pub const TOOL_BINDING_FAILED: &str = "Tool binding failed";
     /// Live-registry and one-to-one binding validation began.
     pub const TOOL_REGISTRY_VALIDATION_STARTED: &str = "Tool registry validation started";
     /// Live-registry and one-to-one binding validation succeeded.
     pub const TOOL_REGISTRY_VALIDATION_SUCCEEDED: &str = "Tool registry validation succeeded";
     /// Live-registry or one-to-one binding validation failed.
     pub const TOOL_REGISTRY_VALIDATION_FAILED: &str = "Tool registry validation failed";
-    /// A section VM began replaying prompt-level tool declarations.
-    pub const TOOL_REPLAY_STARTED: &str = "Tool replay started";
-    /// A section VM replayed prompt-level tool declarations exactly.
-    pub const TOOL_REPLAY_SUCCEEDED: &str = "Tool replay succeeded";
-    /// A section VM's prompt-level tool declaration replay differed.
-    pub const TOOL_REPLAY_FAILED: &str = "Tool replay failed";
     /// A section began closing its effective tool scope.
     pub const TOOL_SCOPE_CLOSING: &str = "Tool scope closing";
     /// A section's effective tool scope was closed successfully.
@@ -111,24 +99,12 @@ pub mod detail {
     pub const TOOL_SCOPE_VALIDATION_SUCCEEDED: &str = "Tool scope validation succeeded";
     /// A model-visible tool scope failed semantic validation.
     pub const TOOL_SCOPE_VALIDATION_FAILED: &str = "Tool scope validation failed";
-    /// Prompt-level model declarations began binding.
-    pub const MODEL_BINDING_STARTED: &str = "Model binding started";
-    /// Prompt-level model declarations bound successfully.
-    pub const MODEL_BINDING_SUCCEEDED: &str = "Model binding succeeded";
-    /// Prompt-level model declaration binding failed.
-    pub const MODEL_BINDING_FAILED: &str = "Model binding failed";
     /// Live-catalog model binding validation began.
     pub const MODEL_CATALOG_VALIDATION_STARTED: &str = "Model catalog validation started";
     /// Live-catalog model binding validation succeeded.
     pub const MODEL_CATALOG_VALIDATION_SUCCEEDED: &str = "Model catalog validation succeeded";
     /// Live-catalog model binding validation failed.
     pub const MODEL_CATALOG_VALIDATION_FAILED: &str = "Model catalog validation failed";
-    /// A section VM began replaying prompt-level model declarations.
-    pub const MODEL_REPLAY_STARTED: &str = "Model replay started";
-    /// A section VM replayed prompt-level model declarations exactly.
-    pub const MODEL_REPLAY_SUCCEEDED: &str = "Model replay succeeded";
-    /// A section VM's prompt-level model declaration replay differed.
-    pub const MODEL_REPLAY_FAILED: &str = "Model replay failed";
     /// A section began closing its model selection.
     pub const MODEL_SCOPE_CLOSING: &str = "Model scope closing";
     /// A section's model selection was closed successfully.

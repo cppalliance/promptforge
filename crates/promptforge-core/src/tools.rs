@@ -153,7 +153,7 @@ pub trait Tool: Send + Sync {
 /// An ordered collection of callable live tools.
 ///
 /// The registry preserves every entry, including repeated identities. A later
-/// binding phase owns collision validation; this type only provides faithful
+/// live H1 resolution owns collision validation; this type only provides faithful
 /// iteration and identity-based lookup.
 pub struct ToolRegistry<'a> {
     tools: Vec<&'a dyn Tool>,
