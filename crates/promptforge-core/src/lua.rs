@@ -29,10 +29,11 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mlua::{
-    Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, MultiValue, Scope, StdLib, Value,
-    Variadic, VmState,
+    Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, MultiValue, Scope, StdLib, UserData,
+    UserDataFields, Value, Variadic, VmState,
 };
 use serde_json::Value as Json;
+use serde_json::json;
 
 use crate::lua_models::{
     ModelBindingState, ModelRuntime, close_model_scope, finish_model_replay, install_bind_models,
@@ -100,6 +101,80 @@ impl ToolBinding {
     #[must_use]
     pub fn id(&self) -> &ToolId {
         &self.id
+    }
+}
+
+/// Inspectable Tool object returned by Lua `tools.need`.
+///
+/// Authors read `.name`, `.description`, `.parameters`, `.wire_name`, and
+/// `.untrusted`. Existing callers that ignore the return value keep working.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LuaToolHandle {
+    name: String,
+    description: String,
+    parameters: Json,
+    wire_name: String,
+    untrusted: bool,
+}
+
+impl LuaToolHandle {
+    /// Builds a handle from a bound alias, capability description, and identity.
+    ///
+    /// Without a live registry lookup, `wire_name` is the identity's stable
+    /// name, `parameters` is an empty object, and `untrusted` is false.
+    #[must_use]
+    pub fn from_binding(
+        alias: impl Into<String>,
+        description: impl Into<String>,
+        id: &ToolId,
+    ) -> Self {
+        Self {
+            name: alias.into(),
+            description: description.into(),
+            parameters: json!({}),
+            wire_name: id.name().to_owned(),
+            untrusted: false,
+        }
+    }
+
+    /// Returns the prompt-local alias.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the capability description supplied to `tools.need`.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the JSON Schema for the tool's parameters.
+    #[must_use]
+    pub fn parameters(&self) -> &Json {
+        &self.parameters
+    }
+
+    /// Returns the transport-level wire name.
+    #[must_use]
+    pub fn wire_name(&self) -> &str {
+        &self.wire_name
+    }
+
+    /// Returns whether tool results are marked untrusted.
+    #[must_use]
+    pub fn untrusted(&self) -> bool {
+        self.untrusted
+    }
+}
+
+impl UserData for LuaToolHandle {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("name", |_, this| Ok(this.name.clone()));
+        fields.add_field_method_get("description", |_, this| Ok(this.description.clone()));
+        fields.add_field_method_get("parameters", |lua, this| lua.to_value(&this.parameters));
+        fields.add_field_method_get("wire_name", |_, this| Ok(this.wire_name.clone()));
+        fields.add_field_method_get("untrusted", |_, this| Ok(this.untrusted));
     }
 }
 
@@ -585,7 +660,7 @@ fn bind_shared_declarations_inner(
 
         let needs = Arc::clone(&state);
         let need = scope.create_function(
-            move |_, (alias, description): (String, String)| -> mlua::Result<()> {
+            move |_, (alias, description): (String, String)| -> mlua::Result<LuaToolHandle> {
                 validate_alias(&alias).map_err(|error| mlua::Error::external(error.to_string()))?;
                 let mut declarations = needs
                     .lock()
@@ -611,6 +686,7 @@ fn bind_shared_declarations_inner(
                         return Err(mlua::Error::external("tool capability resolution failed"));
                     }
                 };
+                let handle = LuaToolHandle::from_binding(&alias, &description, &id);
                 declarations.bindings.push(ToolBinding {
                     alias: alias.clone(),
                     description: description.clone(),
@@ -619,7 +695,7 @@ fn bind_shared_declarations_inner(
                 declarations
                     .declarations
                     .push(ToolDeclaration::Need { alias, description });
-                Ok(())
+                Ok(handle)
             },
         )?;
         tools.set("need", need)?;
@@ -1794,14 +1870,24 @@ fn install_replay_tools(
                     "tools.need call has no matching bound declaration; bind the prompt before executing",
                 ));
             };
-            if declaration != &(ToolDeclaration::Need { alias, description }) {
+            let expected_need = ToolDeclaration::Need {
+                alias: alias.clone(),
+                description: description.clone(),
+            };
+            if declaration != &expected_need {
                 return Err(mlua::Error::external(format!(
                     "tool declaration replay mismatch at declaration {}",
                     state.declaration_index + 1
                 )));
             }
+            let Some(binding) = expected.binding(&alias) else {
+                return Err(mlua::Error::external(format!(
+                    "tools.need alias {alias:?} has no frozen binding"
+                )));
+            };
+            let handle = LuaToolHandle::from_binding(alias, description, binding.id());
             state.declaration_index += 1;
-            Ok(())
+            Ok(handle)
         })
         .map_err(|error| Error::Lua(error.to_string()))?;
     tools
@@ -3097,6 +3183,29 @@ mod tests {
             ]
         );
         assert_eq!(bindings.always(), ["web_search"]);
+    }
+
+    #[test]
+    fn tool_need_returns_inspectable_object() {
+        let shared = program(
+            "local tool = tools.need('search', 'search the web')\n\
+             assert(tool.name == 'search')\n\
+             assert(tool.description == 'search the web')\n\
+             assert(type(tool.parameters) == 'table')\n\
+             assert(tool.wire_name == 'search')\n\
+             assert(tool.untrusted == false)\n\
+             tools.always('search')",
+        );
+        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
+        let bindings =
+            bind_tool_declarations(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+                .expect("tools.need must return an inspectable Tool object");
+        assert_eq!(bindings.bindings()[0].alias(), "search");
+
+        let vm =
+            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("replay must return the same inspectable Tool object");
+        vm.teardown(&NullObserver, "Section");
     }
 
     #[test]
