@@ -49,9 +49,11 @@ Rules:
 - Search hits are leads, not facts. Write ONLY from fetched page bodies.
 - Every factual claim needs a short verbatim quote from a fetch body and that page's URL in parentheses after the claim.
 - Never invent names, titles, years, officers, legal status, registry ids, addresses, CVE lists, quotes, or dates.
-- If unsupported, write `UNKNOWN` for that field. Prefer thin truth over a complete-looking dossier.
+- If unsupported, write `UNKNOWN` for that field value only. Prefer thin truth over a complete-looking dossier.
+- Never append `(UNKNOWN)` after a sourced claim. A field is either a sourced value or `UNKNOWN`, not both.
 - UNKNOWN does not skip tools: you still must search and attempt at least one fetch before writing UNKNOWN.
 - Entity check (HARD): claims must be about the Subject named above. Discard lookalike organizations; use UNKNOWN rather than their facts.
+- Founder/origin (HARD): only if a source explicitly says founder/co-founder/founded by. Officer, CEO, president, or director titles alone are not founder evidence.
 - Output (HARD): plain markdown only. First line must be exactly `## ` plus the Section name. Do NOT wrap the section in triple-backtick fences. No preamble or process commentary.
 - Scope: no morality, legality-as-verdict, product-quality, or "should it exist" judgments.
 - Do not assume the Subject is a nonprofit, company, government body, or project. Infer entity type from sources; use identifiers and filings that fit that type.
