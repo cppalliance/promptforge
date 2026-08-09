@@ -332,7 +332,7 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, String)> {
         return Err(error);
     }
 
-    let prologue_return = if let Some(program) = &worker.prologue {
+    let prologue_return = if let Some(program) = worker.prologue() {
         match vm.run_prologue(program, observer, &worker.name) {
             Ok(returned) => returned,
             Err(error) => {
@@ -385,7 +385,7 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, String)> {
         }
     };
     let prose = match subst::substitute(
-        &worker.prose,
+        worker.prose(),
         &args,
         last_reply.as_deref(),
         Some(&item_text),
@@ -474,7 +474,7 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, String)> {
         }
     }
 
-    let epilog_return = if let Some(program) = &worker.epilog {
+    let epilog_return = if let Some(program) = worker.epilog() {
         match vm.run_epilog(program, observer, &worker.name) {
             Ok(returned) => returned,
             Err(error) => {
@@ -495,6 +495,7 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::Block;
 
     #[test]
     fn resolve_sibling_finds_exact_match() {
@@ -502,18 +503,20 @@ mod tests {
             Section {
                 name: "Worker".to_string(),
                 level: 3,
-                prologue: None,
-                prose: String::new(),
-                epilog: None,
+                blocks: vec![Block::Prose {
+                    text: String::new(),
+                    loop_capable: true,
+                }],
                 children: Vec::new(),
                 items: Vec::new(),
             },
             Section {
                 name: "Topics".to_string(),
                 level: 3,
-                prologue: None,
-                prose: String::new(),
-                epilog: None,
+                blocks: vec![Block::Prose {
+                    text: String::new(),
+                    loop_capable: true,
+                }],
                 children: Vec::new(),
                 items: vec!["a".to_string()],
             },
@@ -527,9 +530,10 @@ mod tests {
         let sections = vec![Section {
             name: "Worker".to_string(),
             level: 3,
-            prologue: None,
-            prose: String::new(),
-            epilog: None,
+            blocks: vec![Block::Prose {
+                text: String::new(),
+                loop_capable: true,
+            }],
             children: Vec::new(),
             items: Vec::new(),
         }];
@@ -543,9 +547,10 @@ mod tests {
         let sections = vec![Section {
             name: "Worker".to_string(),
             level: 3,
-            prologue: None,
-            prose: String::new(),
-            epilog: None,
+            blocks: vec![Block::Prose {
+                text: String::new(),
+                loop_capable: true,
+            }],
             children: Vec::new(),
             items: Vec::new(),
         }];
@@ -577,9 +582,7 @@ mod tests {
         let worker = Section {
             name: "Worker".to_string(),
             level: 3,
-            prologue: Some(prologue),
-            prose: String::new(),
-            epilog: None,
+            blocks: vec![Block::Lua(prologue)],
             children: Vec::new(),
             items: Vec::new(),
         };
@@ -631,9 +634,10 @@ mod tests {
         let worker = Section {
             name: "Worker".to_string(),
             level: 3,
-            prologue: None,
-            prose: "Ask the model about {{ item }}.".to_string(),
-            epilog: None,
+            blocks: vec![Block::Prose {
+                text: "Ask the model about {{ item }}.".to_string(),
+                loop_capable: true,
+            }],
             children: Vec::new(),
             items: Vec::new(),
         };
