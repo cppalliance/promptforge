@@ -125,6 +125,7 @@ flash_attention = true
 cache_type_k = "q8_0"
 cache_type_v = "q4_0"
 n_predict = 8192
+chat_template_file = "..."  # optional; passed as --chat-template-file when GGUF template lacks tools
 ```
 
 On start (and after switch-profile), each local model becomes a catalog entry: `description` appears in `GET /v1/models` so semantic bind works the same as for remote models. Each local endpoint uses `LocalUpstream`, which owns the child and respawns it on send after a post-ready death so catalog `upstream_name` and port stay stable. Dropping `LocalRuntime` (process exit or profile replace) drops those upstreams and kills every child.

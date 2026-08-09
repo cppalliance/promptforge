@@ -34,3 +34,5 @@
 
 ## 2026-08-08 Detect the OpenAI dialect from ChatML tool templates
 
+## 2026-08-09 Add chat_template_file and detect Mistral tool templates
+

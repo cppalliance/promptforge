@@ -40,7 +40,12 @@ impl ToolDialect for OpenAiDialect {
         let template = evidence.chat_template.as_deref().unwrap_or("");
         let chatml_tools = template.contains("<|im_start|>")
             && (template.contains("<tool_call>") || template.contains("tool_call"));
-        if chatml_tools {
+        // Mistral Tekken / Small Instruct tools templates use bracket markers
+        // rather than ChatML fences.
+        let mistral_tools = template.contains("[AVAILABLE_TOOLS]")
+            || template.contains("[TOOL_CALLS]")
+            || template.contains("[TOOL_RESULTS]");
+        if chatml_tools || mistral_tools {
             Some(DetectScore(70))
         } else {
             None
