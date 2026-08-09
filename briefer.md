@@ -2,7 +2,7 @@
 name: briefer
 description: Generate a report on an entity analyzed through the lens of Great Founder Theory.
 promptforge: 1
-max_tool_iterations: 18
+max_tool_iterations: 24
 ---
 
 # Briefer
