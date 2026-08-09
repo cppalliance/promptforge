@@ -4,7 +4,8 @@
 //! run the worker template once per item parsed from the list section. Arms
 //! execute concurrently on a [`tokio::task::JoinSet`]; each gets a fresh
 //! [`SectionVm`] with `item` and `sys.taskid` injected. The invoker receives an
-//! ordered Lua table of arm replies. The first arm error aborts siblings.
+//! ordered Lua table of arm replies. Fatal arm errors abort siblings;
+//! [`Error::ToolLoopExhausted`] soft-degrades to an incomplete stub.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -89,7 +90,7 @@ pub(crate) struct FanoutContext<'a> {
 /// order).
 ///
 /// # Errors
-/// Fails fast: the first arm error aborts sibling tasks and propagates.
+/// Fatal arm errors abort siblings; tool-loop exhaustion soft-degrades.
 pub(crate) async fn run_fanout_arms(
     worker: &Section,
     items: &[String],
