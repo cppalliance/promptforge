@@ -52,7 +52,7 @@ Rules:
 - If unsupported, write `UNKNOWN` for that field value only. Prefer thin truth over a complete-looking dossier.
 - Never append `(UNKNOWN)` after a sourced claim. A field is either a sourced value or `UNKNOWN`, not both.
 - UNKNOWN does not skip tools: you still must search and attempt at least one fetch before writing UNKNOWN.
-- Entity check (HARD): claims must be about the Subject named above. Discard lookalike organizations; use UNKNOWN rather than their facts.
+- Entity check (HARD): claims must be about the Subject named above. Discard lookalike organizations and unrelated senses of the same word; use UNKNOWN rather than their facts.
 - Founder/origin (HARD): only if a source explicitly says founder/co-founder/founded by. Officer, CEO, president, or director titles alone are not founder evidence.
 - Output (HARD): plain markdown only. First line must be exactly `## ` plus the Section name. Do NOT wrap the section in triple-backtick fences. No preamble or process commentary.
 - Scope: no morality, legality-as-verdict, product-quality, or "should it exist" judgments.
@@ -68,8 +68,11 @@ What to fill by Section name:
 Query hints (adapt to the Subject; do not invent answers): official about/mission/leadership pages; Subject + governance OR leadership OR "annual report" OR "corporate filings"; Subject + structure OR history when Profile is thin.
 
 ```lua
-assert(tools.calls["search"] > 0)
-assert(tools.calls["fetch"] > 0)
+local searches = tools.calls["search"] or 0
+local fetches = tools.calls["fetch"] or 0
+if searches == 0 or fetches == 0 then
+    return "## " .. tostring(item) .. "\n\nUNKNOWN\n\n(section incomplete: required search/fetch not performed)"
+end
 local text = reply:gsub("^%s*```[Mm][Aa][Rr][Kk][Dd][Oo][Ww][Nn]%s*\n", ""):gsub("^%s*```%s*\n", "")
 text = text:gsub("\n```%s*$", ""):gsub("%s+$", "")
 return text
