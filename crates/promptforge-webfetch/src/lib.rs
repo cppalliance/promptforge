@@ -1168,14 +1168,14 @@ mod tests {
         let tool = WebFetch::with_config(loopback_config(port));
 
         let url = format!("http://localhost:{port}/redir");
-        let err = tool
+        let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect_err("a redirect to an internal ip literal must be refused");
+            .expect("a redirect-target policy refusal is a soft (recoverable) return");
 
         assert!(
-            matches!(&err, Error::Parse(msg) if msg.contains("refused")),
-            "expected a redirect-refused policy error, got: {err:?}"
+            result.contains("refused") && result.contains("127.0.0.1"),
+            "the soft return must name the refused redirect, got: {result}"
         );
         assert_eq!(
             hits.load(Ordering::SeqCst),
