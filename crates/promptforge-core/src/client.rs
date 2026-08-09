@@ -91,7 +91,6 @@ impl Message {
     }
 }
 
-
 /// A tool advertised to the model, in the `OpenAI` function-calling shape.
 ///
 /// When serialized into a request the wrapping code turns this into

@@ -35,8 +35,8 @@ use serde_json::json;
 
 use crate::bind::BoundPrompt;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
-use crate::dialects::{ToolDialect, ToolDialectRegistry};
 use crate::debug::{DebugCapture, DebugEvent};
+use crate::dialects::{ToolDialect, ToolDialectRegistry};
 use crate::fanout;
 use crate::lua::{SectionVm, ToolBindings, ToolCallCounts, ToolScope};
 use crate::model::{CompletionOptions, ModelBindings};
@@ -755,6 +755,7 @@ pub(crate) struct SectionProgress<'a> {
 /// transport/backend error from a model call or a tool's own failure.
 #[expect(
     clippy::too_many_arguments,
+    clippy::too_many_lines,
     reason = "counts and global_aliases extend the loop's borrowed context for per-VM call tracking"
 )]
 pub(crate) async fn run_tool_loop(
@@ -840,8 +841,8 @@ pub(crate) async fn run_tool_loop(
                 for call in &calls {
                     let Some(id) = dispatch.get(&call.name) else {
                         observer.observe(execution, section, detail::TOOL_CALL_FAILED);
-                        let global_exists = global_aliases
-                            .is_some_and(|g| g.contains_key(&call.name));
+                        let global_exists =
+                            global_aliases.is_some_and(|g| g.contains_key(&call.name));
                         let in_scope: Vec<String> = dispatch.keys().cloned().collect();
                         return Err(Error::OutOfScopeToolCall {
                             name: call.name.clone(),

@@ -71,9 +71,8 @@ pub(crate) fn dump_store(
         // Empty store and nothing left on disk (including no `.trace/`) →
         // remove the dump root so authors see a clean sibling tree.
         if paths.is_empty() && dir_is_effectively_empty(&directory) {
-            std::fs::remove_dir_all(&directory).with_context(|| {
-                format!("remove empty store dump {}", directory.display())
-            })?;
+            std::fs::remove_dir_all(&directory)
+                .with_context(|| format!("remove empty store dump {}", directory.display()))?;
         }
     }
 
@@ -185,17 +184,12 @@ impl DebugCapture for TraceCapture {
     fn on_event(&self, _execution: &str, _section: &str, turn_index: u32, event: DebugEvent) {
         let (name, body) = match &event {
             DebugEvent::Request { body } => (format!("turn-{turn_index}-request.json"), body),
-            DebugEvent::Response { body, .. } => {
-                (format!("turn-{turn_index}-response.json"), body)
-            }
+            DebugEvent::Response { body, .. } => (format!("turn-{turn_index}-response.json"), body),
             _ => return,
         };
         let trace_dir = self.dump_root.join(".trace");
         if let Err(error) = std::fs::create_dir_all(&trace_dir) {
-            eprintln!(
-                "trace dump failed: create {}: {error}",
-                trace_dir.display()
-            );
+            eprintln!("trace dump failed: create {}: {error}", trace_dir.display());
             return;
         }
         let target = trace_dir.join(name);
@@ -790,7 +784,10 @@ mod tests {
 
         let dump_dir = dump_directory(&prompt);
         assert!(
-            dump_dir.join(".trace").join("turn-1-request.json").is_file(),
+            dump_dir
+                .join(".trace")
+                .join("turn-1-request.json")
+                .is_file(),
             "empty store must not wipe .trace"
         );
     }

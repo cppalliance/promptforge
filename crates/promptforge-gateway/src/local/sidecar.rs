@@ -161,9 +161,7 @@ pub(crate) fn fetch_hf_chat_template(
     bearer: Option<&str>,
 ) -> Option<String> {
     let (repo, revision) = parse_hf_url(source_url)?;
-    let api_url = format!(
-        "https://huggingface.co/{repo}/raw/{revision}/tokenizer_config.json"
-    );
+    let api_url = format!("https://huggingface.co/{repo}/raw/{revision}/tokenizer_config.json");
     let mut request = client.get(&api_url);
     if let Some(token) = bearer {
         request = request.bearer_auth(token);
@@ -179,9 +177,7 @@ pub(crate) fn fetch_hf_chat_template(
         serde_json::Value::Array(arr) => {
             // Pick the "default" template, or the first one.
             arr.iter()
-                .find(|entry| {
-                    entry.get("name").and_then(|n| n.as_str()) == Some("default")
-                })
+                .find(|entry| entry.get("name").and_then(|n| n.as_str()) == Some("default"))
                 .or_else(|| arr.first())
                 .and_then(|entry| entry.get("template"))
                 .and_then(|t| t.as_str())
@@ -218,9 +214,7 @@ pub(crate) fn utc_now_iso() -> String {
         .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
         .output();
     match output {
-        Ok(o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout).trim().to_owned()
-        }
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_owned(),
         _ => "unknown".to_owned(),
     }
 }
@@ -284,7 +278,10 @@ mod tests {
     fn parse_sidecar_minimal() {
         let text = "---\nsource: https://example.com/model.gguf\n---\n";
         let meta = parse_sidecar(text);
-        assert_eq!(meta.source.as_deref(), Some("https://example.com/model.gguf"));
+        assert_eq!(
+            meta.source.as_deref(),
+            Some("https://example.com/model.gguf")
+        );
         assert!(meta.chat_template.is_none());
         assert!(meta.card.is_none());
     }
@@ -297,7 +294,8 @@ mod tests {
 
     #[test]
     fn parse_hf_url_extracts_repo_and_revision() {
-        let url = "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf";
+        let url =
+            "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf";
         let (repo, rev) = parse_hf_url(url).expect("should parse");
         assert_eq!(repo, "unsloth/Qwen3.5-9B-GGUF");
         assert_eq!(rev, "main");

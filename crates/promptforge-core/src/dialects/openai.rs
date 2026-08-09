@@ -5,9 +5,9 @@
 
 use serde_json::Value;
 
+use crate::Result;
 use crate::client::{Message, ToolCall};
 use crate::normalize::{CompletionNormalizer, NormalizedTurn, OpenAiChatNormalizer};
-use crate::Result;
 
 use super::{DetectScore, DialectEvidence, DialectRequest, ToolDialect, ToolDialectId};
 

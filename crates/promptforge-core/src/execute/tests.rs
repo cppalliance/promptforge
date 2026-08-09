@@ -2784,11 +2784,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         ```lua\nassert(tools.calls['echo'] == 1, \
         'expected 1 call, got ' .. tostring(tools.calls['echo']))\n\
         return 'ok'\n```\n";
-    let prompt = bound_with_tools(
-        md,
-        &|_: &str| Ok(ToolId::new("tests", "echo")),
-        Vec::new(),
-    );
+    let prompt = bound_with_tools(md, &|_: &str| Ok(ToolId::new("tests", "echo")), Vec::new());
     let out = run(
         &prompt,
         "",
@@ -2938,10 +2934,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
             in_scope,
         } => {
             assert_eq!(name, "global_tool");
-            assert!(
-                *global_exists,
-                "the alias was declared by tools.need"
-            );
+            assert!(*global_exists, "the alias was declared by tools.need");
             assert!(
                 in_scope.contains(&"scoped".to_string()),
                 "in_scope must list the scoped alias: {in_scope:?}"
@@ -2970,11 +2963,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
         tools.always('echo')\n\
         models.always('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\nUse the tool.\n";
-    let prompt = bound_with_tools(
-        md,
-        &|_: &str| Ok(ToolId::new("tests", "echo")),
-        Vec::new(),
-    );
+    let prompt = bound_with_tools(md, &|_: &str| Ok(ToolId::new("tests", "echo")), Vec::new());
     let error = run(
         &prompt,
         "",

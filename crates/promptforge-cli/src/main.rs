@@ -46,11 +46,7 @@ async fn main() -> ExitCode {
 /// Parse the file, execute its sections with `input` as `args`, and print the
 /// result.
 async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
-    let execution = format!(
-        "cli-{:016x}{:016x}",
-        fastrand::u64(..),
-        fastrand::u64(..)
-    );
+    let execution = format!("cli-{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..));
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
