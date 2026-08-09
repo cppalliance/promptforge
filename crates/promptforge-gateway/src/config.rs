@@ -207,6 +207,12 @@ pub struct LocalModelConfig {
     /// Generation ceiling (`--n-predict`). Defaults to 8192.
     #[serde(default = "default_n_predict")]
     pub n_predict: u32,
+    /// Optional path to a Jinja chat template file (`--chat-template-file`).
+    ///
+    /// Use when the GGUF embeds a template without tool-calling support (common
+    /// for Mistral Small Instruct quants) and a tools-capable override is needed.
+    #[serde(default)]
+    pub chat_template_file: Option<String>,
 }
 
 /// Server-level settings.
