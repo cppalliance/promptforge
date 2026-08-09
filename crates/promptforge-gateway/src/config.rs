@@ -317,11 +317,41 @@ pub struct WebSearchConfig {
     /// override to point at a proxy or a test server.
     #[serde(default = "default_brave_base_url")]
     pub base_url: String,
+    /// Used when the request omits `count`.
+    #[serde(default = "default_web_search_count")]
+    pub default_count: u8,
+    /// Clamp and over-fetch ceiling for result counts.
+    #[serde(default = "default_web_search_max_count")]
+    pub max_count: u8,
+    /// Diversity cap per hostname group.
+    #[serde(default = "default_web_search_max_per_host")]
+    pub max_per_host: u8,
+    /// Applied when the request omits `freshness` and this is non-empty.
+    #[serde(default)]
+    pub default_freshness: String,
+    /// Applied when the request omits `safesearch` and this is non-empty.
+    #[serde(default)]
+    pub default_safesearch: String,
+    /// When true, scrub known tracking query params from result URLs.
+    #[serde(default = "default_true")]
+    pub strip_tracking: bool,
 }
 
 /// The default Brave Search API base URL.
 fn default_brave_base_url() -> String {
     "https://api.search.brave.com/res/v1".to_string()
+}
+
+fn default_web_search_count() -> u8 {
+    10
+}
+
+fn default_web_search_max_count() -> u8 {
+    20
+}
+
+fn default_web_search_max_per_host() -> u8 {
+    2
 }
 
 /// A web-search provider. v0 supports only Brave.
@@ -924,6 +954,53 @@ api_key = "secret-key"
         assert_eq!(web_search.provider, SearchProvider::Brave);
         assert_eq!(web_search.api_key.expose(), "secret-key");
         assert_eq!(web_search.base_url, "https://api.search.brave.com/res/v1");
+        assert_eq!(web_search.default_count, 10);
+        assert_eq!(web_search.max_count, 20);
+        assert_eq!(web_search.max_per_host, 2);
+        assert_eq!(web_search.default_freshness, "");
+        assert_eq!(web_search.default_safesearch, "");
+        assert!(web_search.strip_tracking);
+    }
+
+    #[test]
+    fn parses_web_search_tool_config_explicit_defaults() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[[endpoint]]
+id = "anthropic"
+protocol = "openai"
+base_url = "https://api.anthropic.com/v1"
+api_key = ""
+
+[[model]]
+name = "m1"
+description = "a small test model"
+context = 8192
+upstream = "u1"
+endpoints = ["anthropic"]
+
+[tools.web_search]
+provider = "brave"
+api_key = "secret-key"
+default_count = 5
+max_count = 15
+max_per_host = 3
+default_freshness = "pw"
+default_safesearch = "moderate"
+strip_tracking = false
+"#;
+        let config = Config::from_toml_str(toml).unwrap();
+        let tools = config.tools.expect("tools section present");
+        let web_search = tools.web_search.expect("web_search section present");
+        assert_eq!(web_search.default_count, 5);
+        assert_eq!(web_search.max_count, 15);
+        assert_eq!(web_search.max_per_host, 3);
+        assert_eq!(web_search.default_freshness, "pw");
+        assert_eq!(web_search.default_safesearch, "moderate");
+        assert!(!web_search.strip_tracking);
     }
 
     #[test]
