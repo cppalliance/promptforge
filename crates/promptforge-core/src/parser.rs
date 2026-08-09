@@ -3,7 +3,7 @@
 //! A prompt is one markdown file: YAML frontmatter, a required H1, an optional
 //! immediately leading shared `lua` fence, then a sequence of H2 sections.
 //! Sections nest recursively (H3 under H2, H4 under H3, and so on through H6).
-//! Each section has an optional exact leading `lua` preamble fence, prose, and
+//! Each section has an optional exact leading `lua` prologue fence, prose, and
 //! an optional exact trailing `lua` epilog fence.
 //!
 //! The parser does no execution. It turns bytes into a [`Prompt`] tree.
@@ -46,14 +46,14 @@ pub struct Section {
     /// The heading level, 2 through 6.
     pub level: u8,
     /// The compiled exact leading `lua` fence, when present.
-    pub preamble: Option<LuaProgram>,
+    pub prologue: Option<LuaProgram>,
     /// The prose the model reads, between any reserved leading and trailing fences.
     pub prose: String,
     /// The compiled exact trailing `lua` fence, when present.
     pub epilog: Option<LuaProgram>,
     /// Child sections nested under this one (deeper heading levels).
     pub children: Vec<Section>,
-    /// Pre-parsed bullet items for list-only sections (no preamble, no epilog).
+    /// Pre-parsed bullet items for list-only sections (no prologue, no epilog).
     /// Empty for non-list sections.
     pub items: Vec<String>,
 }
@@ -85,7 +85,7 @@ impl Prompt {
     /// frontmatter is invalid, the required H1 is missing, the H1 opens with the
     /// removed `lua prompt` fence form, a reserved fence is not closed exactly,
     /// or the body has no `##` sections. Returns [`Error::LuaCompile`] when the
-    /// shared library or a section preamble or epilog is not valid Lua.
+    /// shared library or a section prologue or epilog is not valid Lua.
     pub fn parse(input: &str, execution: &str, observer: &dyn Observer) -> Result<Prompt> {
         observer.observe(execution, "Prompt", detail::PARSE_STARTED);
         let result = Self::parse_inner(input, execution, observer);
@@ -427,10 +427,10 @@ fn exact_lua_openings(content: &str) -> Vec<usize> {
 
 /// Result of splitting a section into its Lua phases and prose.
 struct SectionPhases {
-    preamble: Option<String>,
-    /// Line offset of the preamble Lua source within the section content
+    prologue: Option<String>,
+    /// Line offset of the prologue Lua source within the section content
     /// (number of lines before the first line of Lua source).
-    preamble_line_offset: u32,
+    prologue_line_offset: u32,
     prose: String,
     epilog: Option<String>,
     /// Line offset of the epilog Lua source within the section content.
@@ -439,14 +439,14 @@ struct SectionPhases {
 
 /// Splits a section into exact leading and trailing Lua source around prose.
 ///
-/// A lone reserved fence is the preamble for compatibility. Exact Lua fences
+/// A lone reserved fence is the prologue for compatibility. Exact Lua fences
 /// between prose remain prose, as do all near-miss fence forms.
 fn split_section_phases(content: &str, section: &str) -> Result<SectionPhases> {
     let leading = trim_leading_blank_lines(content);
     let blank_lines = count_lines(content) - count_lines(leading);
-    let (preamble, preamble_line_offset, remainder) =
+    let (prologue, prologue_line_offset, remainder) =
         if let Some(after_open) = strip_exact_lua_opening(leading) {
-            let label = format!("section `{section}` preamble `lua`");
+            let label = format!("section `{section}` prologue `lua`");
             let (source, rest) = extract_exact_fence(after_open, &label)?;
             // +1 for the ```lua opener line
             (Some(source), blank_lines + 1, rest)
@@ -469,12 +469,12 @@ fn split_section_phases(content: &str, section: &str) -> Result<SectionPhases> {
                 // Lines before the epilog opening within content:
                 // blank_lines to get to leading, then lines within remainder up
                 // to the opening, then +1 for the ```lua line.
-                let preamble_consumed = if preamble.is_some() {
+                let prologue_consumed = if prologue.is_some() {
                     count_lines(content) - count_lines(remainder)
                 } else {
                     0
                 };
-                epilog_line_offset = preamble_consumed + newlines_before(remainder, opening) + 1;
+                epilog_line_offset = prologue_consumed + newlines_before(remainder, opening) + 1;
                 epilog = Some(source);
                 prose = &remainder[..opening];
             }
@@ -484,8 +484,8 @@ fn split_section_phases(content: &str, section: &str) -> Result<SectionPhases> {
     }
 
     Ok(SectionPhases {
-        preamble,
-        preamble_line_offset,
+        prologue,
+        prologue_line_offset,
         prose: prose.trim().to_string(),
         epilog,
         epilog_line_offset,
@@ -494,7 +494,7 @@ fn split_section_phases(content: &str, section: &str) -> Result<SectionPhases> {
 
 /// Parses bullet items from prose in a list-only section.
 ///
-/// A list-only section has no preamble and no epilog. Its prose must contain
+/// A list-only section has no prologue and no epilog. Its prose must contain
 /// only unordered (`- ` or `* `) or ordered (`N. ` or `N) `) bullet lines,
 /// with blank lines ignored. Returns an error if the section contains non-list
 /// content or if the items list is empty.
@@ -578,14 +578,14 @@ fn build_sections(
         let name = h.title.clone();
         let content_abs_line = frontmatter_lines + h.content_start_line;
         let phases = split_section_phases(&h.content, &name)?;
-        let is_list_only = phases.preamble.is_none() && phases.epilog.is_none();
-        let preamble = phases
-            .preamble
+        let is_list_only = phases.prologue.is_none() && phases.epilog.is_none();
+        let prologue = phases
+            .prologue
             .map(|source| {
-                let abs_line = content_abs_line + phases.preamble_line_offset;
+                let abs_line = content_abs_line + phases.prologue_line_offset;
                 LuaProgram::compile(
                     &source,
-                    &format!("section `{name}` preamble"),
+                    &format!("section `{name}` prologue"),
                     abs_line,
                     execution,
                     observer,
@@ -621,7 +621,7 @@ fn build_sections(
         result.push(Section {
             name,
             level,
-            preamble,
+            prologue,
             prose,
             epilog,
             children,
@@ -721,7 +721,7 @@ Prose for the second section.\n";
         assert_eq!(first.name, "First");
         assert_eq!(first.level, 2);
         assert_eq!(
-            first.preamble.as_ref().map(LuaProgram::source),
+            first.prologue.as_ref().map(LuaProgram::source),
             Some("local x = 1")
         );
         assert_eq!(first.prose, "Prose for the first section.");
@@ -732,7 +732,7 @@ Prose for the second section.\n";
         assert_eq!(first.children[0].prose, "Child prose.");
 
         assert_eq!(p.sections[1].name, "Second");
-        assert!(p.sections[1].preamble.is_none());
+        assert!(p.sections[1].prologue.is_none());
         assert!(p.sections[1].epilog.is_none());
     }
 
@@ -837,7 +837,7 @@ Prose for the second section.\n";
         let in_section = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua prompt\nnot compiled =\n```\n";
         let prompt = Prompt::parse(in_section, "test", &NullObserver)
             .expect("the removed form in a section is ordinary Markdown");
-        assert!(prompt.entry().preamble.is_none());
+        assert!(prompt.entry().prologue.is_none());
         assert!(prompt.entry().prose.contains("```lua prompt"));
     }
 
@@ -894,7 +894,7 @@ Prose for the second section.\n";
 
         assert!(prompt.shared.is_none());
         assert!(prompt.description_text.contains("```lua"));
-        assert!(prompt.sections[0].preamble.is_none());
+        assert!(prompt.sections[0].prologue.is_none());
         assert!(prompt.sections[0].prose.contains("```lua"));
     }
 
@@ -968,7 +968,7 @@ Prose for the second section.\n";
         let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nreturn 42\n```\n\nActual prose here.\n";
         let p = Prompt::parse(src, "test", &NullObserver).unwrap();
         assert_eq!(
-            p.sections[0].preamble.as_ref().map(LuaProgram::source),
+            p.sections[0].prologue.as_ref().map(LuaProgram::source),
             Some("return 42")
         );
         assert_eq!(p.sections[0].prose, "Actual prose here.");
@@ -976,14 +976,14 @@ Prose for the second section.\n";
     }
 
     #[test]
-    fn section_compiles_preamble_and_epilog_around_prose() {
+    fn section_compiles_prologue_and_epilog_around_prose() {
         let src = "---\r\nname: x\r\ndescription: d\r\n---\r\n\r\n# T\r\n\r\n## Transform\r\n\r\n \t\r\n```lua\r\nvar.before = args\r\n```\r\n\r\nAsk about {{ var.before }}.\r\n\r\n```lua\r\nreturn reply\r\n```\r\n";
         let prompt = Prompt::parse(src, "test", &NullObserver)
             .expect("both exact section phases must compile");
         let section = prompt.entry();
 
         assert_eq!(
-            section.preamble.as_ref().map(LuaProgram::source),
+            section.prologue.as_ref().map(LuaProgram::source),
             Some("var.before = args")
         );
         assert_eq!(section.prose, "Ask about {{ var.before }}.");
@@ -994,13 +994,13 @@ Prose for the second section.\n";
     }
 
     #[test]
-    fn section_compiles_epilog_after_prose_without_preamble() {
+    fn section_compiles_epilog_after_prose_without_prologue() {
         let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Transform\n\nAsk the model.\n\n```lua\nreturn reply\n```\n";
         let prompt =
             Prompt::parse(src, "test", &NullObserver).expect("the trailing epilog must compile");
         let section = prompt.entry();
 
-        assert!(section.preamble.is_none());
+        assert!(section.prologue.is_none());
         assert_eq!(section.prose, "Ask the model.");
         assert_eq!(
             section.epilog.as_ref().map(LuaProgram::source),
@@ -1015,7 +1015,7 @@ Prose for the second section.\n";
             Prompt::parse(src, "test", &NullObserver).expect("middle Lua is model-facing prose");
         let section = prompt.entry();
 
-        assert!(section.preamble.is_none());
+        assert!(section.prologue.is_none());
         assert!(section.epilog.is_none());
         assert_eq!(
             section.prose,
@@ -1024,17 +1024,17 @@ Prose for the second section.\n";
     }
 
     #[test]
-    fn one_exact_fence_is_the_preamble_and_two_can_surround_empty_prose() {
+    fn one_exact_fence_is_the_prologue_and_two_can_surround_empty_prose() {
         let one = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.x = 1\n```\n";
-        let prompt = Prompt::parse(one, "test", &NullObserver).expect("one fence is the preamble");
-        assert!(prompt.entry().preamble.is_some());
+        let prompt = Prompt::parse(one, "test", &NullObserver).expect("one fence is the prologue");
+        assert!(prompt.entry().prologue.is_some());
         assert!(prompt.entry().epilog.is_none());
 
         let two = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.x = 1\n```\n\n```lua\nreturn reply\n```\n";
         let prompt =
             Prompt::parse(two, "test", &NullObserver).expect("two fences can enclose empty prose");
         assert_eq!(prompt.entry().prose, "");
-        assert!(prompt.entry().preamble.is_some());
+        assert!(prompt.entry().prologue.is_some());
         assert!(prompt.entry().epilog.is_some());
     }
 
@@ -1049,7 +1049,7 @@ Prose for the second section.\n";
             let src = format!("---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n{near_miss}\n");
             let prompt = Prompt::parse(&src, "test", &NullObserver)
                 .expect("near-miss fence must remain prose");
-            assert!(prompt.entry().preamble.is_none());
+            assert!(prompt.entry().prologue.is_none());
             assert!(prompt.entry().epilog.is_none());
             assert_eq!(prompt.entry().prose, near_miss.trim());
         }
@@ -1061,7 +1061,7 @@ Prose for the second section.\n";
         let prompt =
             Prompt::parse(src, "test", &NullObserver).expect("nested markers must remain prose");
 
-        assert!(prompt.entry().preamble.is_none());
+        assert!(prompt.entry().prologue.is_none());
         assert!(prompt.entry().epilog.is_none());
         assert!(prompt.entry().prose.contains("```lua"));
     }
@@ -1070,9 +1070,9 @@ Prose for the second section.\n";
     fn malformed_section_phases_report_locations_and_safe_boundaries() {
         for (phase, content, expected_location, expected_details) in [
             (
-                "preamble",
+                "prologue",
                 "```lua\nprivate_payload =\n```\n\nProse.",
-                "section `Private section` preamble",
+                "section `Private section` prologue",
                 vec![
                     detail::PARSE_STARTED,
                     detail::LUA_COMPILATION_STARTED,
@@ -1130,7 +1130,7 @@ Prose for the second section.\n";
     #[test]
     fn unclosed_reserved_section_fences_are_location_errors() {
         for (content, phase) in [
-            ("```lua\nreturn 1", "preamble"),
+            ("```lua\nreturn 1", "prologue"),
             ("Prose.\n\n```lua\nreturn reply", "epilog"),
         ] {
             let src = format!("---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n{content}\n");
@@ -1164,7 +1164,7 @@ Prose for the second section.\n";
     fn non_lua_fence_stays_in_prose() {
         let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nHere is code:\n\n```python\nprint(1)\n```\n";
         let p = Prompt::parse(src, "test", &NullObserver).unwrap();
-        assert!(p.sections[0].preamble.is_none());
+        assert!(p.sections[0].prologue.is_none());
         assert!(p.sections[0].epilog.is_none());
         assert!(p.sections[0].prose.contains("```python"));
     }
@@ -1365,7 +1365,7 @@ Prose for the second section.\n";
     }
 
     #[test]
-    fn preamble_source_line_maps_correctly() {
+    fn prologue_source_line_maps_correctly() {
         // Lines:
         //  1: ---
         //  2: name: x
@@ -1376,27 +1376,27 @@ Prose for the second section.\n";
         //  7: (empty)
         //  8: ## Work
         //  9: (empty)
-        // 10: ```lua       <- preamble opens
-        // 11: assert(false) <- preamble line 1 (source_line = 11, absolute = 11)
+        // 10: ```lua       <- prologue opens
+        // 11: assert(false) <- prologue line 1 (source_line = 11, absolute = 11)
         // 12: ```
         // 13: (empty)
         // 14: Do the work.
         let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Work\n\n```lua\nassert(false)\n```\n\nDo the work.\n";
         let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
-        let preamble = prompt
+        let prologue = prompt
             .entry()
-            .preamble
+            .prologue
             .as_ref()
-            .expect("preamble must exist");
+            .expect("prologue must exist");
 
-        assert_eq!(preamble.source_line(), 11, "preamble Lua starts on line 11");
+        assert_eq!(prologue.source_line(), 11, "prologue Lua starts on line 11");
 
         let lua = mlua::Lua::new();
-        let function = preamble.load(&lua).expect("bytecode must load");
+        let function = prologue.load(&lua).expect("bytecode must load");
         let raw_error = function
             .call::<()>(())
             .expect_err("assert(false) must fail");
-        let mapped = preamble.map_runtime_error(&raw_error);
+        let mapped = prologue.map_runtime_error(&raw_error);
         let msg = mapped.to_string();
         assert!(
             msg.contains(":11:"),

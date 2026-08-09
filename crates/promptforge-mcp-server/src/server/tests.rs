@@ -3,7 +3,7 @@
 //! Admission, the reply deadline, and collecting a run by id are in [`runs`],
 //! which shares these fixtures.
 //!
-//! Almost none of these needs a gateway: every fixture prompt's Lua preamble
+//! Almost none of these needs a gateway: every fixture prompt's Lua prologue
 //! returns a value, which finishes the run before any model call is made. The
 //! exception is the turn count, which is a statement about model round trips
 //! and so needs a backend to take one against.

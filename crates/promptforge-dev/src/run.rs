@@ -78,11 +78,11 @@ fn first_mapped_prompt_line(message: &str) -> Option<u32> {
         {
             // Ignore tiny lines that are just HTTP status noise; prompt lines
             // for real files are almost never in the URL/port range alone, but
-            // the surrounding tag (`epilog` / `preamble` / `library`) is the
+            // the surrounding tag (`epilog` / `prologue` / `library`) is the
             // real filter.
             let before = &rest[..idx];
             if before.ends_with("epilog")
-                || before.ends_with("preamble")
+                || before.ends_with("prologue")
                 || before.ends_with("library")
             {
                 found = Some(line);
@@ -423,7 +423,7 @@ mod tests {
         )
         .expect("write the lifecycle fixture");
         let recorder = Recorder::default();
-        // The preamble returns a scalar, so no model turn happens and the
+        // The prologue returns a scalar, so no model turn happens and the
         // unreachable server address below is never contacted.
         let result = run_once_with(
             &path,

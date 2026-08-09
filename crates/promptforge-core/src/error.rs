@@ -80,7 +80,7 @@ pub enum Error {
     /// Lua source was not syntactically valid at its prompt location.
     #[error("lua compilation error at {location} (line {source_line}): {message}")]
     LuaCompile {
-        /// The prompt region supplied by the parser, such as a section preamble.
+        /// The prompt region supplied by the parser, such as a section prologue.
         location: String,
         /// 1-based line number in the prompt source where this Lua region starts.
         source_line: u32,
@@ -275,7 +275,7 @@ pub enum Error {
         in_scope: Vec<String>,
     },
 
-    /// A section's Lua preamble scoped a tool by a name absent from the run's
+    /// A section's Lua prologue scoped a tool by a name absent from the run's
     /// supplied tool pool, so no matching tool could be advertised or dispatched.
     #[error("section scoped unknown tool {0}")]
     UnknownScopedTool(String),

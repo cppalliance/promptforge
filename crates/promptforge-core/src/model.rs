@@ -850,16 +850,16 @@ mod tests {
         .unwrap();
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .unwrap();
-        let preamble = crate::lua::LuaProgram::compile(
+        let prologue = crate::lua::LuaProgram::compile(
             r#"models.use("analyst")"#,
-            "preamble",
+            "prologue",
             1,
             EXECUTION,
             &NullObserver,
             "Section",
         )
         .unwrap();
-        vm.run_preamble(&preamble, &NullObserver, "Section")
+        vm.run_prologue(&prologue, &NullObserver, "Section")
             .unwrap();
         let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
         assert_eq!(scopes.model.unwrap().alias(), "analyst");
@@ -962,9 +962,9 @@ mod tests {
         .unwrap();
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .unwrap();
-        let preamble = crate::lua::LuaProgram::compile(
+        let prologue = crate::lua::LuaProgram::compile(
             r#"models.use("missing")"#,
-            "preamble",
+            "prologue",
             1,
             EXECUTION,
             &NullObserver,
@@ -972,7 +972,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            vm.run_preamble(&preamble, &NullObserver, "Section")
+            vm.run_prologue(&prologue, &NullObserver, "Section")
                 .is_err()
         );
         vm.teardown(&NullObserver, "Section");
@@ -1182,16 +1182,16 @@ mod tests {
         .unwrap();
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .unwrap();
-        let preamble = crate::lua::LuaProgram::compile(
+        let prologue = crate::lua::LuaProgram::compile(
             r#"models.use("analyst")"#,
-            "preamble",
+            "prologue",
             1,
             EXECUTION,
             &NullObserver,
             "Section",
         )
         .unwrap();
-        vm.run_preamble(&preamble, &NullObserver, "Section")
+        vm.run_prologue(&prologue, &NullObserver, "Section")
             .unwrap();
         let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
         assert_eq!(
@@ -1202,7 +1202,7 @@ mod tests {
     }
 
     #[test]
-    fn models_always_from_h2_preamble_fails() {
+    fn models_always_from_h2_prologue_fails() {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.need("writer", "A tiny model")"#,
             "shared",
@@ -1234,16 +1234,16 @@ mod tests {
         .unwrap();
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .unwrap();
-        let preamble = crate::lua::LuaProgram::compile(
+        let prologue = crate::lua::LuaProgram::compile(
             r#"models.always("writer")"#,
-            "preamble",
+            "prologue",
             1,
             EXECUTION,
             &NullObserver,
             "Section",
         )
         .unwrap();
-        let result = vm.run_preamble(&preamble, &NullObserver, "Section");
+        let result = vm.run_prologue(&prologue, &NullObserver, "Section");
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(

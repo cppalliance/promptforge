@@ -332,8 +332,8 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, String)> {
         return Err(error);
     }
 
-    let preamble_return = if let Some(program) = &worker.preamble {
-        match vm.run_preamble(program, observer, &worker.name) {
+    let prologue_return = if let Some(program) = &worker.prologue {
+        match vm.run_prologue(program, observer, &worker.name) {
             Ok(returned) => returned,
             Err(error) => {
                 vm.teardown(observer, &worker.name);
@@ -344,7 +344,7 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, String)> {
         None
     };
 
-    if let Some(value) = preamble_return {
+    if let Some(value) = prologue_return {
         vm.teardown(observer, &worker.name);
         observer.observe(&execution, &worker.name, detail::FANOUT_ARM_FINISHED);
         return Ok((index, value));
@@ -502,7 +502,7 @@ mod tests {
             Section {
                 name: "Worker".to_string(),
                 level: 3,
-                preamble: None,
+                prologue: None,
                 prose: String::new(),
                 epilog: None,
                 children: Vec::new(),
@@ -511,7 +511,7 @@ mod tests {
             Section {
                 name: "Topics".to_string(),
                 level: 3,
-                preamble: None,
+                prologue: None,
                 prose: String::new(),
                 epilog: None,
                 children: Vec::new(),
@@ -527,7 +527,7 @@ mod tests {
         let sections = vec![Section {
             name: "Worker".to_string(),
             level: 3,
-            preamble: None,
+            prologue: None,
             prose: String::new(),
             epilog: None,
             children: Vec::new(),
@@ -543,7 +543,7 @@ mod tests {
         let sections = vec![Section {
             name: "Worker".to_string(),
             level: 3,
-            preamble: None,
+            prologue: None,
             prose: String::new(),
             epilog: None,
             children: Vec::new(),
@@ -565,9 +565,9 @@ mod tests {
         use crate::parser::Section;
         use crate::store::StoreRef;
 
-        let preamble = LuaProgram::compile(
+        let prologue = LuaProgram::compile(
             "return item",
-            "test preamble",
+            "test prologue",
             1,
             "fanout-cancel-test",
             &NullObserver,
@@ -577,7 +577,7 @@ mod tests {
         let worker = Section {
             name: "Worker".to_string(),
             level: 3,
-            preamble: Some(preamble),
+            prologue: Some(prologue),
             prose: String::new(),
             epilog: None,
             children: Vec::new(),
@@ -631,7 +631,7 @@ mod tests {
         let worker = Section {
             name: "Worker".to_string(),
             level: 3,
-            preamble: None,
+            prologue: None,
             prose: "Ask the model about {{ item }}.".to_string(),
             epilog: None,
             children: Vec::new(),

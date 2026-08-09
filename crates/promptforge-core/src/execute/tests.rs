@@ -1370,11 +1370,11 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
             ("First".to_string(), detail::SECTION_STARTED.to_string()),
             (
                 "First".to_string(),
-                detail::LUA_PREAMBLE_STARTED.to_string()
+                detail::LUA_PROLOGUE_STARTED.to_string()
             ),
             (
                 "First".to_string(),
-                detail::LUA_PREAMBLE_SUCCEEDED.to_string(),
+                detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
             ),
             ("First".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
             ("First".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
@@ -1392,11 +1392,11 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
             ("Second".to_string(), detail::SECTION_STARTED.to_string()),
             (
                 "Second".to_string(),
-                detail::LUA_PREAMBLE_STARTED.to_string(),
+                detail::LUA_PROLOGUE_STARTED.to_string(),
             ),
             (
                 "Second".to_string(),
-                detail::LUA_PREAMBLE_SUCCEEDED.to_string(),
+                detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
             ),
             (
                 "Second".to_string(),
@@ -1463,10 +1463,10 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         },
     )
     .await
-    .expect_err("the preamble fails");
+    .expect_err("the prologue fails");
     let null_error = run(&failing, "", &[], &StoreRef::memory(), silent())
         .await
-        .expect_err("the preamble fails");
+        .expect_err("the prologue fails");
     assert_eq!(
         observed_error.to_string(),
         null_error.to_string(),
@@ -1490,7 +1490,7 @@ async fn a_run_refused_by_the_version_gate_reports_nothing() {
 
 #[tokio::test]
 async fn a_failing_run_still_reports_run_finished() {
-    // The preamble fails, so the walk tears down its VM and the final
+    // The prologue fails, so the walk tears down its VM and the final
     // observation must report the run failure.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nerror('expected failure')\n```\n";
@@ -1502,8 +1502,8 @@ async fn a_failing_run_still_reports_run_finished() {
         vec![
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
-            ("Only".to_string(), detail::LUA_PREAMBLE_STARTED.to_string()),
-            ("Only".to_string(), detail::LUA_PREAMBLE_FAILED.to_string()),
+            ("Only".to_string(), detail::LUA_PROLOGUE_STARTED.to_string()),
+            ("Only".to_string(), detail::LUA_PROLOGUE_FAILED.to_string()),
             ("Only".to_string(), detail::LUA_TEARDOWN_STARTED.to_string()),
             (
                 "Only".to_string(),
@@ -1596,7 +1596,7 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
         detail::TOOL_BINDING_STARTED,
         detail::RUN_STARTED,
         detail::SECTION_STARTED,
-        detail::LUA_PREAMBLE_STARTED,
+        detail::LUA_PROLOGUE_STARTED,
         detail::STORE_WRITE_SUCCEEDED,
         detail::MODEL_TURN_COMPLETED,
         detail::TOOL_CALL_SUCCEEDED,
@@ -1858,7 +1858,7 @@ async fn epilog_runs_after_reply_and_can_return() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\nSay something.\n\n```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'epilog result'\n```\n";
     let prompt = bound_for_model(md);
-    assert!(prompt.prompt().entry().preamble.is_none());
+    assert!(prompt.prompt().entry().prologue.is_none());
     assert!(prompt.prompt().entry().epilog.is_some());
 
     let recorder = Recorder::default();
@@ -1961,7 +1961,7 @@ async fn add_in_an_unbound_prompt_without_declarations_fails_the_run_loudly() {
 #[tokio::test]
 async fn add_in_a_bound_prompt_with_empty_needs_fails_the_run_loudly() {
     // A bound prompt whose shared library declares nothing closes over empty
-    // frozen bindings, so tools.add in a preamble is rejected the same way.
+    // frozen bindings, so tools.add in a prologue is rejected the same way.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ```lua\nfunction helper() return 'no declarations' end\n```\n\n\
@@ -1976,7 +1976,7 @@ async fn add_in_a_bound_prompt_with_empty_needs_fails_the_run_loudly() {
 }
 
 #[tokio::test]
-async fn preamble_return_skips_model_and_epilog() {
+async fn prologue_return_skips_model_and_epilog() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\n```lua\nreturn 'early'\n```\n\n\
@@ -1990,7 +1990,7 @@ This prose must not reach a model.\n\n\
 }
 
 #[tokio::test]
-async fn shared_helper_survives_preamble_model_and_epilog() {
+async fn shared_helper_survives_prologue_model_and_epilog() {
     let addr = spawn_text_gateway().await;
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
@@ -2032,8 +2032,8 @@ Ask using {{ var.question }}.\n\n\
                 "Only".to_owned(),
                 detail::LUA_SHARED_LOAD_SUCCEEDED.to_owned(),
             ),
-            ("Only".to_owned(), detail::LUA_PREAMBLE_STARTED.to_owned()),
-            ("Only".to_owned(), detail::LUA_PREAMBLE_SUCCEEDED.to_owned(),),
+            ("Only".to_owned(), detail::LUA_PROLOGUE_STARTED.to_owned()),
+            ("Only".to_owned(), detail::LUA_PROLOGUE_SUCCEEDED.to_owned(),),
             ("Only".to_owned(), detail::TOOL_SCOPE_CLOSING.to_owned()),
             ("Only".to_owned(), detail::TOOL_SCOPE_CLOSED.to_owned()),
             ("Only".to_owned(), detail::MODEL_SCOPE_CLOSING.to_owned()),
@@ -2069,14 +2069,14 @@ Ask using {{ var.question }}.\n\n\
 async fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
-## Only\n\n```lua\nvar.phase = 'preamble'\n```\n\n\
+## Only\n\n```lua\nvar.phase = 'prologue'\n```\n\n\
 ```lua\nif reply ~= nil then error('empty prose must not bind a reply') end\nreturn var.phase .. '-epilog'\n```\n";
 
     assert_eq!(
         run(&bound(md), "", &[], &StoreRef::memory(), silent())
             .await
             .unwrap(),
-        "preamble-epilog"
+        "prologue-epilog"
     );
 }
 
@@ -2128,12 +2128,12 @@ async fn prologue_sys_model_unknown_during_shared_replay() {
 }
 
 #[tokio::test]
-async fn preamble_sys_model_unknown_before_scope_close() {
+async fn prologue_sys_model_unknown_before_scope_close() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nreturn sys.model\n```\n\nprose\n";
     let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
         .await
-        .expect_err("preamble must not read sys.model before scope close");
+        .expect_err("prologue must not read sys.model before scope close");
     assert!(
         error.to_string().contains("unknown sys field 'model'"),
         "error must name the missing field: {error}"
@@ -2143,7 +2143,7 @@ async fn preamble_sys_model_unknown_before_scope_close() {
 #[tokio::test]
 async fn epilog_sees_sys_model_catalog_id_not_alias() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n```lua\n-- preamble\n```\n\n```lua\nreturn sys.model\n```\n\n";
+## Only\n\n```lua\n-- prologue\n```\n\n```lua\nreturn sys.model\n```\n\n";
     assert_eq!(
         run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
             .await
@@ -2155,7 +2155,7 @@ async fn epilog_sees_sys_model_catalog_id_not_alias() {
 #[tokio::test]
 async fn prose_substitution_sees_sys_model_catalog_id() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n```lua\n-- preamble\n```\n\nModel id is {{ sys.model }}.\n\n\
+## Only\n\n```lua\n-- prologue\n```\n\nModel id is {{ sys.model }}.\n\n\
 ```lua\nreturn 'done'\n```\n";
     let (addr, captured) = spawn_capturing_text_gateway().await;
     let out = run(
@@ -2193,7 +2193,7 @@ async fn prose_substitution_sees_sys_model_catalog_id() {
 #[tokio::test]
 async fn empty_prose_epilog_sees_sys_model_when_binding_present() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n```lua\n-- preamble\n```\n\n```lua\nreturn sys.model\n```\n\n";
+## Only\n\n```lua\n-- prologue\n```\n\n```lua\nreturn sys.model\n```\n\n";
     assert_eq!(
         run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
             .await
@@ -2207,7 +2207,7 @@ async fn fanout_arm_epilog_sees_sys_model_catalog_id() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ## Parent\n\n```lua\nlocal r = fanout('### Worker', '### Items')\nreturn table.concat(r, ',')\n```\n\n\
-### Worker\n\n```lua\n-- preamble\n```\n\nAsk about {{ item }}.\n\n```lua\nreturn sys.model .. ':' .. item\n```\n\n\
+### Worker\n\n```lua\n-- prologue\n```\n\nAsk about {{ item }}.\n\n```lua\nreturn sys.model .. ':' .. item\n```\n\n\
 ### Items\n\n- a\n";
     let addr = spawn_text_gateway().await;
     let out = run(
@@ -2254,7 +2254,7 @@ async fn default_return_precedes_the_last_model_reply() {
 // --- Reply forwarding across sections ---
 
 #[tokio::test]
-async fn reply_carries_forward_to_next_section_preamble() {
+async fn reply_carries_forward_to_next_section_prologue() {
     let addr = spawn_text_gateway().await;
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## First\n\nAsk the model.\n\n\
