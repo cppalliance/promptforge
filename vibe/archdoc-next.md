@@ -41,3 +41,4 @@
 - [2026-08-09-3-readme-and-ci-overhaul] documentation layering: Keep the landing page concise and move verified internals to development documentation.
 - [2026-08-09-3-readme-and-ci-overhaul] visuals carry no contract: Presentation assets may frame documentation but cannot be the only architecture record.
 - [2026-08-09-4-store-real-plus-virtual] capability object snapshots: Tool and model handles are first-class values whose execution snapshot changes only with scope generation.
+- [2026-08-09-5-h1-once-no-replay] frozen per-section installation: Install resolved capabilities from Rust while serialized variables and the run store carry state.

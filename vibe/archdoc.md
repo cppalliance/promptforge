@@ -25,7 +25,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A11. Every repeated model or tool operation has a finite explicit budget and fails visibly when exhausted.
 - A12. Each section receives only capabilities it explicitly names; unknown names fail before the model turn.
 - A15. Every section and fan-out arm gets a fresh model context; only explicit Lua chooses transitions, and state crosses through the store or named payloads.
-- A17. Shared Lua executes in a fresh VM for each section; mutable Lua state never crosses section boundaries.
 - A19. Runtime metadata is sealed: unknown reads and all author writes fail, and every field has an explicit refresh boundary.
 - A25. Every model-facing section uses a prompt-declared model binding; hosts never choose a model implicitly.
 - A26. Artifact credentials are read from process secrets at request time and are never persisted or logged.
@@ -37,9 +36,10 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A32. Search yields sanitized, source-diverse leads; fetch remains the boundary for page content.
 - A33. Alternating blocks share one section conversation; non-final prose runs one round and final prose owns the full tool loop.
 - A34. A subroutine call starts a fresh VM and returns; a transfer clears context, stops the caller, and does not return.
+- A35. The H1 program executes exactly once with live host resolution; no separate declaration or bind replay phase exists.
+- A36. Shared Lua libraries load into each section VM before host capability injection and have no load-time effects.
 
 ## Principles
 
 - Before adding configuration, public API, or resolution machinery, prefer sandboxed Lua, the run-scoped store, or the catalog when one already carries the work.
-- Keep ordinary tests deterministic and offline; run network, process, download, and live-model checks only through explicit scenario commands.
 - Formatting, warnings-free lint, and workspace tests are the minimum integration gate.
