@@ -31,13 +31,6 @@ use crate::{Error, Result};
 /// model picker rebuilt for this run, resolves each capability when Lua executes
 /// the corresponding call, and accumulates frozen bindings for later section
 /// VMs.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the live H1 runtime seam is wired into execution in step 3"
-    )
-)]
 pub(crate) struct RuntimeResolution<'a, 'tools: 'a> {
     tool_resolver: PickerResolver<'a, ToolPicker>,
     registry: &'a ToolRegistry<'tools>,
@@ -46,13 +39,6 @@ pub(crate) struct RuntimeResolution<'a, 'tools: 'a> {
     producer: LiveBindingProducer,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the live H1 runtime seam is wired into execution in step 3"
-    )
-)]
 impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
     /// Creates one run-scoped resolver over live tool and model catalogs.
     ///
@@ -112,6 +98,11 @@ impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
     /// Returns [`Error::Lua`] if a binding recorder mutex is poisoned.
     pub(crate) fn bindings(&self) -> Result<(ToolBindings, ModelBindings)> {
         self.producer.bindings()
+    }
+
+    /// Returns a shared handle to bindings resolved by live H1 so far.
+    pub(crate) fn producer(&self) -> LiveBindingProducer {
+        self.producer.clone()
     }
 }
 

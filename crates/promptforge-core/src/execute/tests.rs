@@ -1695,6 +1695,179 @@ async fn spawn_text_gateway() -> SocketAddr {
     addr
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn live_h1_infer_runs_once() {
+    async fn completions(
+        State(calls): State<Arc<AtomicUsize>>,
+        Json(_body): Json<Value>,
+    ) -> Json<Value> {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Json(json!({
+            "choices": [{
+                "message": { "role": "assistant", "content": "h1 answer" }
+            }]
+        }))
+    }
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let router = Router::new()
+        .route("/v1/chat/completions", post(completions))
+        .with_state(Arc::clone(&calls));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    let source = "---\nname: live-h1\ndescription: d\npromptforge: 1\n---\n\n\
+        # Live H1\n\n\
+        ```lua\n\
+        local writer = models.always('writer', 'A general model for tests')\n\
+        var.answer = writer:infer('answer once')\n\
+        ```\n\n\
+        ## Result\n\n\
+        ```lua\nreturn var.answer\n```\n";
+    let prompt = parse(source);
+    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
+        .expect("empty tool picker must build");
+    let models = test_model_catalog();
+    let out = run_prompt(
+        &prompt,
+        "",
+        ResolutionContext {
+            picker: &picker,
+            models: &models,
+        },
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .expect("live H1 path must run");
+
+    assert_eq!(out, "h1 answer");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn live_h1_infer_sees_tools_resolved_in_the_same_block() {
+    let addr = spawn_mock_gateway().await;
+    let echo = Arc::new(EchoTool);
+    let descriptor = ToolDescriptor::new(
+        PickerToolId::new("tests", "echo"),
+        echo.description(),
+        echo.parameters_schema(),
+    );
+    let capability =
+        serde_json::to_string(&descriptor.enriched_text()).expect("serialize tool capability");
+    let source = format!(
+        "---\nname: live-h1-tools\ndescription: d\npromptforge: 1\n---\n\n\
+         # Live H1 Tools\n\n\
+         ```lua\n\
+         local echo = tools.need('echo', {capability})\n\
+         tools.always(echo.name)\n\
+         local writer = models.always('writer', 'A general model for tests')\n\
+         var.answer = writer:infer('use echo')\n\
+         ```\n\n\
+         ## Result\n\n\
+         ```lua\nreturn var.answer\n```\n"
+    );
+    let prompt = parse(&source);
+    let picker = ToolPicker::build(Catalog::new(vec![descriptor]), PickerConfig::default())
+        .expect("tool picker must build");
+    let models = test_model_catalog();
+    let tools: [Arc<dyn Tool>; 1] = [echo];
+
+    let out = run_prompt(
+        &prompt,
+        "",
+        ResolutionContext {
+            picker: &picker,
+            models: &models,
+        },
+        &tools,
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .expect("live H1 infer must use its resolved always tool");
+
+    assert_eq!(out, "final answer");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var() {
+    let addr = spawn_mock_gateway().await;
+    let echo = Arc::new(EchoTool);
+    let descriptor = ToolDescriptor::new(
+        PickerToolId::new("tests", "echo"),
+        echo.description(),
+        echo.parameters_schema(),
+    );
+    let capability =
+        serde_json::to_string(&descriptor.enriched_text()).expect("serialize tool capability");
+    let source = format!(
+        "---\nname: live-h1-prose\ndescription: d\npromptforge: 1\n---\n\n\
+         # Live H1 Prose\n\n\
+         ```lua\n\
+         tools.need('echo', {capability})\n\
+         tools.always('echo')\n\
+         models.always('writer', 'A general model for tests')\n\
+         var.executions = (var.executions or 0) + 1\n\
+         ```\n\n\
+         Ask for one tool call.\n\n\
+         ```lua\n\
+         var.non_final_had_text = reply ~= nil\n\
+         var.executions = var.executions + 1\n\
+         ```\n\n\
+         Finish now.\n\n\
+         ```lua\n\
+         var.final_reply = reply\n\
+         var.executions = var.executions + 1\n\
+         ```\n\n\
+         ## Result\n\n\
+         ```lua\n\
+         return tostring(var.non_final_had_text) .. ':' .. var.final_reply .. ':' .. var.executions\n\
+         ```\n"
+    );
+    let prompt = parse(&source);
+    let picker = ToolPicker::build(Catalog::new(vec![descriptor]), PickerConfig::default())
+        .expect("tool picker must build");
+    let models = test_model_catalog();
+    let tools: [Arc<dyn Tool>; 1] = [echo];
+
+    let out = run_prompt(
+        &prompt,
+        "",
+        ResolutionContext {
+            picker: &picker,
+            models: &models,
+        },
+        &tools,
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: &NullObserver,
+            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            debug: None,
+        },
+    )
+    .await
+    .expect("live H1 prose must preserve block semantics");
+
+    assert_eq!(out, "false:final answer:3");
+}
+
 /// Spawn a text gateway that captures the first chat-completions body.
 async fn spawn_capturing_text_gateway() -> (SocketAddr, Arc<Mutex<Option<Value>>>) {
     async fn completions(

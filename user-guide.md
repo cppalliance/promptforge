@@ -102,11 +102,11 @@ The fenced `lua` block before the prose is the **prologue**. It runs before the 
 
 The prologue is an exact, unindented ` ```lua ` opening and ` ``` ` closing. Indented fences, longer backtick runs, or different capitalization are treated as ordinary prose.
 
-`models.use("writer")` selects a model binding declared in the preamble (covered next). Without a preamble declaring models, this would fail. For now, note the pattern: the prologue sets up what the model turn needs.
+`models.use("writer")` selects a model binding resolved in live H1 (covered next). Without H1 declaring models, this would fail. For now, note the pattern: the prologue sets up what the model turn needs.
 
 The prologue runs Lua before the model sees the prose.
 
-## 4. The Preamble (`lua shared`)
+## 4. Live H1 and the Shared Library
 
 ````markdown
 ---
@@ -117,7 +117,7 @@ promptforge: 1
 
 # Fetcher
 
-```lua shared
+```lua
 models.always("writer",
     "A model suited for careful analysis and summarization",
     { thinking = false, temperature = 0, context = 32768 })
@@ -125,6 +125,16 @@ tools.need("fetch", "Fetch a web page and return its main content as markdown.")
 ```
 
 A tool that fetches URLs and summarizes their content.
+
+```lua
+var.subject = args
+```
+
+```lua shared
+function summarize_request(subject)
+    return "Summarize " .. subject
+end
+```
 
 ## Main
 
@@ -135,29 +145,36 @@ tools.add("fetch")
 Fetch {{ args }} and summarize its content in three bullet points.
 ````
 
-The exact `lua shared` fence is the **preamble**. It may appear anywhere between the H1 and the first section. Binding runs it once to resolve `tools.need` / `models.need` into frozen bindings. Each section then creates a fresh VM and **replays** that same shared program so declarations match call-for-call and global helpers are loaded into that VM. Host values (`args`, `var`, `store`, `reply`, section `tools` / `models` APIs) are injected only after that replay.
+H1 is a live, single-pass program. Its ordinary Lua and prose blocks run once in source order before any H2 section:
+
+```
+[lua] [prose] [lua] [prose] ... [lua]
+```
+
+H1 Lua has `args`, `sys`, `var`, and `store`. `tools.need`, `models.need`, and `models.always` resolve immediately when execution reaches the call, so conditional declarations are natural and skipped branches resolve nothing. Model objects can call `model:infer()` in H1, H1 prose uses the model selected by `models.always`, and the final H1 `var` value seeds the sections. Non-final H1 prose makes one model round, dispatches any tool calls from that round, and then continues to the next Lua block. The final H1 prose runs the full tool loop until text is produced. A text response becomes `reply`; a tool-only non-final response leaves `reply` unchanged. H1 blocks are never replayed.
+
+The exact `lua shared` fence is a separate shared library chunk. It may appear anywhere between the H1 and the first section, but it is not part of the live H1 block sequence. Use it for functions that sections need, not for live capability resolution.
 
 A prompt may contain at most one `lua shared` fence, and it must be in H1. A second `lua shared` fence, or one under an H2 or deeper heading, is a parse error. The opening marker must be the exact, unindented text ` ```lua shared ` with an exact ` ``` ` closing marker.
 
-A plain H1 `lua` fence is not a shared library. It is parsed and executed as an ordinary live H1 Lua block, even when it is the only H1 block. Use the explicit `shared` tag for code that must be replayed into section VMs.
+A plain H1 `lua` fence is not a shared library. It is parsed and executed as an ordinary live H1 Lua block, even when it is the only H1 block. Use the explicit `shared` tag for code that must be loaded into section VMs.
 
-`models.always` does three things in one call: declares a model need, resolves it against the gateway catalog, and sets it as the default for all sections. Sections that call `models.use` override this default. The combined form takes an alias, a capability description, and an optional table of constraints. Both forms return a Model object.
+`models.always` does three things in one live H1 call: declares a model need, resolves it against the gateway catalog, and sets it as the default for H1 prose and all sections. Sections that call `models.use` override this default. The combined form takes an alias, a capability description, and an optional table of constraints. Both forms return a Model object.
 
 `tools.need` declares a semantic capability need and returns a Tool object. The alias is your local name. The description tells the tool picker what you need. Declaring a need does not expose the tool to the model. That requires `tools.add` in a section Lua block before tool scope closes.
 
-The preamble also accepts `models.need` (declare without selecting as default) and `tools.always` (expose a tool in every section).
+Live H1 also accepts `models.need` (declare without selecting as default) and `tools.always` (expose a tool in every section).
 
-**Globals vs locals.** Shared `function foo()` definitions and assignments to globals survive into the section's Lua blocks after replay. `local` names from the preamble chunk do not. If a later section must see a Tool or Model handle, assign it globally:
+**Globals vs locals.** Names in live H1 are not shared by Lua heap identity with section VMs. Rust captures resolved Tool and Model bindings and the serialized `var` table for sections. Put reusable pure functions in `lua shared`.
 
 ```lua
 search = tools.need("search", "Search the web and return a list of results.")
+var.query = args
 ```
 
-not `local search = ...`.
+The `search` binding and `var.query` are available to sections through the captured run state. A plain H1 local is not.
 
-`args`, `var`, and `store` are not available during the preamble. Use them in section Lua after host injection.
-
-The explicit `lua shared` preamble declares tools and models; aliases (and global handles) are then available to every section.
+The explicit `lua shared` library is for reusable definitions. Live H1 performs host calls and capability resolution.
 
 ## 5. The Epilog
 
@@ -170,7 +187,7 @@ promptforge: 1
 
 # Uppercase
 
-```lua shared
+```lua
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
@@ -211,7 +228,7 @@ promptforge: 1
 
 # Two Step
 
-```lua shared
+```lua
 models.always("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 16384 })
@@ -252,7 +269,7 @@ promptforge: 1
 
 # Store Demo
 
-```lua shared
+```lua
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
@@ -286,7 +303,7 @@ return reply
 ```
 ````
 
-The store is a run-scoped virtual filesystem. Files exist only for the duration of the run and are shared across all sections. Store methods are available in section Lua blocks (after host injection), not in the H1 preamble.
+The store is a run-scoped virtual filesystem. Files exist only for the duration of the run and are shared by live H1 and all sections.
 
 | Operation | What it does |
 |---|---|
@@ -315,7 +332,7 @@ promptforge: 1
 
 # Template Demo
 
-```lua shared
+```lua
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
@@ -376,7 +393,7 @@ promptforge: 1
 
 # Researcher
 
-```lua shared
+```lua
 models.always("writer",
     "A careful research model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -410,7 +427,7 @@ The tool loop works like this:
 
 The loop is capped at `max_tool_iterations` (default 24) per section (or per `model:infer` call) to prevent runaway loops. Set it in frontmatter to change the cap.
 
-`tools.add` accepts alias strings, Tool objects, and arrays of either. Only tools added in Lua before the section's tool scope closes (plus any `tools.always` from the preamble) are visible to the model. Scope closes on the first prose block.
+`tools.add` accepts alias strings, Tool objects, and arrays of either. Only tools added in Lua before the section's tool scope closes (plus any `tools.always` from live H1) are visible to the model. Scope closes on the first prose block.
 
 Tools give the model the ability to search and fetch during a section's model turn.
 
@@ -425,7 +442,7 @@ promptforge: 1
 
 # Tool Inspect
 
-```lua shared
+```lua
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
@@ -448,7 +465,7 @@ tools.add(search, fetch)
 Search for information about {{ args }} and summarize what you find.
 ````
 
-`tools.need` returns a Tool object. Assign it to a **global** in the preamble if a section must use the handle (locals from the shared chunk are not visible later).
+`tools.need` returns a Tool object. Call it in live H1. Rust captures the resolved alias and installs the corresponding Tool object for sections.
 
 | Property | Type | Description |
 |---|---|---|
@@ -482,7 +499,7 @@ promptforge: 1
 
 # Model Inspect
 
-```lua shared
+```lua
 writer = models.need("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -517,7 +534,7 @@ Tell me one fact about {{ args }}.
 | `.max_tokens` | number or nil | Frozen max tokens, if set |
 | `.dialect` | string | Tool dialect name |
 
-All properties are read-only. The Model object represents a frozen binding - its parameters were locked at bind time and cannot change during execution.
+All properties are read-only. The Model object represents a frozen binding - its parameters are locked when live H1 resolves it and cannot change during execution.
 
 You can declare multiple models with `models.need` and select between them per section with `models.use`. `models.always` sets the prompt-wide default.
 
@@ -534,7 +551,7 @@ promptforge: 1
 
 # Gated Research
 
-```lua shared
+```lua
 writer = models.always("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -585,7 +602,7 @@ promptforge: 1
 
 # Alternating
 
-```lua shared
+```lua
 writer = models.always("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -645,7 +662,7 @@ promptforge: 1
 
 # Composable Tools
 
-```lua shared
+```lua
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 16384 })
@@ -653,9 +670,11 @@ search = tools.need("search",
     "Search the web and return a list of results.")
 fetch = tools.need("fetch",
     "Fetch a URL and return its main content as markdown.")
+```
 
-research_tools = { search, fetch }
-fetch_only = { fetch }
+```lua shared
+research_tools = { "search", "fetch" }
+fetch_only = { "fetch" }
 ```
 
 ## Main
@@ -674,7 +693,7 @@ Otherwise, search for it, fetch the best result, and summarize.
 
 Because Tool objects are first-class Lua values, you can:
 
-- Store them in arrays on **globals** in the preamble (not `var` - `var` does not exist during shared Lua)
+- Store resolved aliases and serializable configuration in H1 `var`
 - Pass arrays to `tools.add`
 - Build conditional tool sets in the prologue based on `args` or other state
 - Override `.description` on individual tools before adding them
@@ -692,7 +711,7 @@ promptforge: 1
 
 # Pipeline
 
-```lua shared
+```lua
 models.always("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 16384 })
@@ -759,7 +778,7 @@ promptforge: 1
 
 # Branching
 
-```lua shared
+```lua
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
@@ -829,7 +848,7 @@ promptforge: 1
 
 # Evidence Gatherer
 
-```lua shared
+```lua
 models.always("writer",
     "A careful research model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -908,7 +927,7 @@ promptforge: 1
 
 # Sys Demo
 
-```lua shared
+```lua
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
@@ -940,7 +959,7 @@ The `sys` table provides runtime metadata. It is sealed: reading an unknown key 
 | `sys.reply_finish_reason` | string | After a model turn | Last finish reason (for example `stop`) |
 | `sys.taskid` | string | Fanout arms only | 1-based arm index |
 
-`sys.model` is not available in the preamble or in Lua before the first prose closes scope. It becomes available in later Lua blocks and in prose substitution after scope close.
+`sys.model` becomes available after a model is selected for a prose turn. It is absent before that point in live H1 and section Lua.
 
 `sys.when` is useful for report footers and provenance stamps. `sys.model` identifies which model produced the output.
 
@@ -957,7 +976,7 @@ promptforge: 1
 
 # Validated
 
-```lua shared
+```lua
 models.always("writer",
     "A careful research model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -1038,7 +1057,7 @@ max_tool_iterations: 24
 
 # Briefer
 
-```lua shared
+```lua
 writer = models.always("writer",
     "A careful analysis model suited to structured reasoning",
     { thinking = false, temperature = 0, context = 32768 })
@@ -1113,7 +1132,7 @@ This prompt uses every major feature:
 
 | Feature | Where |
 |---|---|
-| Preamble | H1 shared Lua declares model and tools as globals |
+| Live H1 | Resolves model and tool bindings once |
 | Tool objects | `search` and `fetch` globals passed to `tools.add` |
 | Model object | `writer` returned by `models.always` |
 | Fanout | `## Main` fans out `### Gather` over `### Topics` |
@@ -1129,7 +1148,7 @@ This prompt uses every major feature:
 
 The execution flow:
 
-1. Bind runs the preamble once; each section VM replays it and loads globals
+1. Live H1 runs once and captures model, tool, and `var` state
 2. `## Main` Lua calls `fanout` - three gather arms run in parallel
 3. Each arm searches, fetches, validates with `tools.calls`, returns evidence
 4. `## Main` writes concatenated evidence to the store
@@ -1137,7 +1156,7 @@ The execution flow:
 6. `## Report` injects evidence, model writes briefing, epilog stamps and returns
 7. `## Main` returns the report
 
-A complete pipeline prompt combines preamble globals, tool objects, fanout, store, execute, substitution, validation, and sys metadata.
+A complete pipeline prompt combines live H1 bindings, tool objects, fanout, store, execute, substitution, validation, and sys metadata.
 
 ## 21. API Reference
 
@@ -1146,7 +1165,7 @@ A complete pipeline prompt combines preamble globals, tool objects, fanout, stor
 #### `args`
 
 - **Type:** string
-- **Available:** Section Lua and prose substitution (after host inject; not in H1 preamble)
+- **Available:** Live H1, section Lua, and prose substitution
 - **Description:** The raw input string passed to `promptforge run <file> [input]`. Empty string if omitted.
 
 ```lua
@@ -1176,8 +1195,8 @@ log("Processing: " .. item)
 #### `var`
 
 - **Type:** table
-- **Available:** Section Lua and prose substitution (not in H1 preamble)
-- **Description:** Section-local variable table. Fresh per section and per fanout arm. Scalars render as strings in substitution, tables render as JSON.
+- **Available:** Live H1, section Lua, and prose substitution
+- **Description:** Serializable variable table. Live H1's final snapshot seeds each section; section and fanout mutations remain local. Scalars render as strings in substitution, tables render as JSON.
 
 ```lua
 var.count = 5
@@ -1187,7 +1206,7 @@ var.tags = { "alpha", "beta" }
 #### `sys`
 
 - **Type:** sealed table
-- **Available:** Section Lua after host inject (read-only)
+- **Available:** Live H1 and section Lua after host inject (read-only)
 - **Description:** Runtime metadata. See section 18 for all fields.
 
 ```lua
@@ -1210,7 +1229,7 @@ local out = execute(step)
 - **Type:** function
 - **Signature:** `log(message: string)`
 - **Returns:** nil
-- **Available:** Preamble and section Lua (a fresh callback is installed per phase)
+- **Available:** Live H1 and section Lua (a fresh callback is installed per phase)
 - **Description:** Emits an observer checkpoint. The message must be a valid UTF-8 string, at most 256 characters, with no newlines or control characters. Use short static labels. Never log args, replies, tool data, credentials, paths, or store contents.
 
 ```lua
@@ -1221,7 +1240,7 @@ log("Research phase complete")
 
 ### Store Methods
 
-All store methods are available in section Lua after host injection. They are not available in the H1 preamble.
+All store methods are available in live H1 and section Lua after host injection.
 
 #### `store.write`
 
@@ -1323,8 +1342,8 @@ end
 
 - **Signature:** `tools.need(alias: string, description: string) -> Tool`
 - **Returns:** Tool object
-- **Available:** Preamble only (bind and per-section replay)
-- **Description:** Declare a semantic tool capability need. The alias is case-sensitive (`[A-Za-z][A-Za-z0-9_-]{0,63}`). Returns a Tool object. Assign to a global if section Lua must keep the handle.
+- **Available:** Live H1 only
+- **Description:** Resolve a semantic tool capability immediately. The alias is case-sensitive (`[A-Za-z][A-Za-z0-9_-]{0,63}`). Returns a Tool object and records the frozen binding for sections.
 
 ```lua
 search = tools.need("search",
@@ -1348,7 +1367,7 @@ tools.add({search, fetch})
 
 - **Signature:** `tools.always(alias: string)`
 - **Returns:** nil
-- **Available:** Preamble only
+- **Available:** Live H1 only
 - **Description:** Expose a declared tool in every model-facing section. The alias must have been declared with `tools.need` first.
 
 ```lua
@@ -1373,8 +1392,8 @@ assert(tools.calls["search"] > 0, "search was never called")
 
 - **Signature:** `models.need(alias: string, description: string, opts?: table) -> Model`
 - **Returns:** Model object
-- **Available:** Preamble only
-- **Description:** Declare a model capability need. Optional `opts`: `context` (minimum window), `thinking` (boolean), `temperature`, `max_tokens`.
+- **Available:** Live H1 only
+- **Description:** Resolve a model capability immediately. Optional `opts`: `context` (minimum window), `thinking` (boolean), `temperature`, `max_tokens`.
 
 ```lua
 writer = models.need("writer",
@@ -1386,7 +1405,7 @@ writer = models.need("writer",
 
 - **Signature:** `models.always(alias: string) -> Model` or `models.always(alias: string, description: string, opts?: table) -> Model`
 - **Returns:** Model object (both forms)
-- **Available:** Preamble only
+- **Available:** Live H1 only
 - **Description:** Set the prompt-wide default model. The single-argument form selects an already-declared alias. The three-argument form declares and selects. At most one `models.always` per prompt.
 
 ```lua
@@ -1574,13 +1593,23 @@ frontmatter (YAML)
 
 # Title (exactly one)
 
-```lua shared
--- Preamble: shared Lua (bound once, replayed per section VM)
--- tools.need, tools.always, models.need, models.always
--- Use globals for handles sections must see
+```lua
+models.always("writer", "A capable model")
+search = tools.need("search", "Search the web")
+var.topic = args
 ```
 
-Description text (not executed)
+H1 may continue with the exact alternating sequence:
+
+```
+[lua] [prose] [lua] [prose] ... [lua]
+```
+
+```lua shared
+function normalize(text) return string.lower(text) end
+```
+
+H1 prose (executed in source order)
 
 ## Section (H2, runs top-to-bottom)
 
@@ -1621,22 +1650,22 @@ Worker prose with {{ item }}
 
 | Name | Kind | Available | Signature | Returns |
 |---|---|---|---|---|
-| `args` | global | Section Lua / prose | - | string |
+| `args` | global | Live H1, section Lua / prose | - | string |
 | `reply` | global | After model turn; section 2+ prologue | - | string or nil |
 | `item` | global | Fanout arms | - | string or nil |
-| `var` | global | Section Lua / prose | - | table |
-| `sys` | global | Section Lua (sealed) | - | table |
+| `var` | global | Live H1, section Lua / prose | - | table |
+| `sys` | global | Live H1, section Lua (sealed) | - | table |
 | `tasks` | global | Section Lua | `tasks["## Name"]` | Section |
-| `log` | function | Preamble, section Lua | `log(msg)` | nil |
-| `tools.need` | function | Preamble | `tools.need(alias, desc)` | Tool |
+| `log` | function | Live H1, section Lua | `log(msg)` | nil |
+| `tools.need` | function | Live H1 | `tools.need(alias, desc)` | Tool |
 | `tools.add` | function | Before first prose | `tools.add(...)` | nil |
-| `tools.always` | function | Preamble | `tools.always(alias)` | nil |
+| `tools.always` | function | Live H1 | `tools.always(alias)` | nil |
 | `tools.calls` | table | After counts install | `tools.calls[alias]` | number |
-| `models.need` | function | Preamble | `models.need(alias, desc, opts?)` | Model |
-| `models.always` | function | Preamble | `models.always(...)` | Model |
+| `models.need` | function | Live H1 | `models.need(alias, desc, opts?)` | Model |
+| `models.always` | function | Live H1 | `models.always(...)` | Model |
 | `models.use` | function | Before first prose | `models.use(alias)` | nil |
-| `model:infer` | method | Section Lua | `model:infer(prompt, opts?)` | string |
+| `model:infer` | method | Live H1, section Lua | `model:infer(prompt, opts?)` | string |
 | `execute` | function | Section Lua | `execute(target, input?)` | string |
 | `jump` | function | Section Lua | `jump(target)` | never |
 | `fanout` | function | Section Lua | `fanout(worker, list)` | FanoutResult[] |
-| `store.*` | functions | Section Lua | see Store Methods | varies |
+| `store.*` | functions | Live H1, section Lua | see Store Methods | varies |
