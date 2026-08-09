@@ -2,15 +2,15 @@
 //!
 //! The run walks top-level sections in file order, creating one isolated
 //! [`crate::lua::SectionVm`] for each. Shared Lua loads before host injection,
-//! then the preamble, model reply binding, and epilog use that same VM. A
-//! scalar preamble return skips the model and epilog; a scalar epilog return
+//! then the prologue, model reply binding, and epilog use that same VM. A
+//! scalar prologue return skips the model and epilog; a scalar epilog return
 //! ends the run after the model.
 //!
 //! Running off the last section ends the run: the result is `default_return`
 //! from the frontmatter, else the last model reply, else a generic completion.
 //!
 //! One run-scoped [`StoreRef`] is created once by the caller and threaded through
-//! every section (both its Lua preamble and, later, the model's file tools), so
+//! every section (both its Lua prologue and, later, the model's file tools), so
 //! bulk state persists across the context-clearing transitions even though a
 //! section's conversation never does.
 //!
@@ -161,7 +161,7 @@ impl fmt::Debug for RunOptions<'_> {
 ///
 /// `store` is the run's virtual-file handle. Create it once (typically with
 /// [`StoreRef::memory`]) and pass it in; the same handle is given to every
-/// section's Lua preamble, so files persist across sections even though each
+/// section's Lua prologue, so files persist across sections even though each
 /// section's context is cleared on entry. It is a shared handle, so passing
 /// `&store` (not a fresh store per section) is what makes the state durable.
 ///
@@ -175,7 +175,7 @@ impl fmt::Debug for RunOptions<'_> {
 /// Returns [`crate::Error::UnsupportedVersion`] if the prompt declares a
 /// `promptforge:` major this build does not support,
 /// [`crate::Error::Parse`] if the file has no `promptforge:` version (it is not
-/// a promptforge prompt), [`crate::Error::Lua`] if a Lua preamble fails,
+/// a promptforge prompt), [`crate::Error::Lua`] if a Lua prologue fails,
 /// [`crate::Error::Substitution`] if a `{{ }}` path cannot be resolved,
 /// [`crate::Error::MissingEnv`] if the gateway client cannot be built when a
 /// model call is needed, [`crate::Error::UnknownScopedTool`] if a section
@@ -318,7 +318,7 @@ async fn run_sections(
         }
 
         let has_children = !section.children.is_empty();
-        let preamble_return = if let Some(program) = &section.preamble {
+        let prologue_return = if let Some(program) = &section.prologue {
             if has_children {
                 let children = &section.children;
                 let fanout_store = store.clone();
@@ -332,7 +332,7 @@ async fn run_sections(
                 let fanout_client = client.clone();
                 let fanout_max_iters = max_tool_iterations;
                 let fanout_tools = shared_tools.clone();
-                match vm.run_preamble_with_fanout(
+                match vm.run_prologue_with_fanout(
                     program,
                     observer,
                     &section.name,
@@ -366,7 +366,7 @@ async fn run_sections(
                     }
                 }
             } else {
-                match vm.run_preamble(program, observer, &section.name) {
+                match vm.run_prologue(program, observer, &section.name) {
                     Ok(returned) => returned,
                     Err(error) => {
                         vm.teardown(observer, &section.name);
@@ -377,7 +377,7 @@ async fn run_sections(
         } else {
             None
         };
-        if let Some(value) = preamble_return {
+        if let Some(value) = prologue_return {
             vm.teardown(observer, &section.name);
             observer.observe(execution, &section.name, detail::SECTION_FINISHED);
             return Ok(value);
@@ -609,7 +609,7 @@ fn make_fanout_callback(
     if list.items.is_empty() {
         return Err(format!("section `{}` has no pre-parsed items", list.name));
     }
-    if worker.preamble.is_none() && worker.epilog.is_none() && !worker.items.is_empty() {
+    if worker.prologue.is_none() && worker.epilog.is_none() && !worker.items.is_empty() {
         return Err(format!(
             "section `{}` is a list section, not a worker template",
             worker.name

@@ -1,10 +1,10 @@
 ---
-name: preamble_return
-description: Return from a preamble before prose or epilog can run
+name: prologue_return
+description: Return from a prologue before prose or epilog can run
 promptforge: 1
 ---
 
-# Preamble Return
+# Prologue Return
 
 ## Stop Early
 

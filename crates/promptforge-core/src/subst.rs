@@ -1,11 +1,11 @@
 //! `{{ }}` prose substitution.
 //!
-//! After a section's Lua preamble runs, the harness resolves `{{ path }}`
+//! After a section's Lua prologue runs, the harness resolves `{{ path }}`
 //! placeholders in the prose before the model sees it. Lua source in the
-//! preamble and epilog is never substituted. Five namespaces are available:
+//! prologue and epilog is never substituted. Five namespaces are available:
 //! `args` (the single raw input string), `reply` (the previous section's model
 //! reply, nil in section 1), `item` (the current fanout arm's item text, nil
-//! outside arms), `var` (values the preamble wrote), and `sys`
+//! outside arms), `var` (values the prologue wrote), and `sys`
 //! (runtime-provided metadata). Resolution is a single pass with no recursion:
 //! scalars render as strings, tables/arrays as JSON, and a missing path is a
 //! hard error. `{{ reply }}` when nil is a hard error. `{{ item }}` outside a
@@ -19,7 +19,7 @@ use crate::{Error, Result};
 /// Resolve every `{{ path }}` in `prose` against `args`, `reply`, `item`,
 /// `var`, and `sys`.
 ///
-/// `var` and `sys` are JSON objects (`var` read back from the Lua preamble,
+/// `var` and `sys` are JSON objects (`var` read back from the Lua prologue,
 /// `sys` built by the runtime). `reply` is the previous section's model
 /// reply text, or `None` in the first section. `item` is the current fanout
 /// arm's item text, or `None` outside arms. This function receives prose
