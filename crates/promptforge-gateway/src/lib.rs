@@ -24,6 +24,7 @@ pub mod queue;
 pub mod routing;
 pub mod tools;
 pub mod upstream;
+pub mod web_search_process;
 pub mod wire;
 
 use std::path::{Path, PathBuf};
