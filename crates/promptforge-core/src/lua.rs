@@ -731,7 +731,7 @@ fn bind_shared_declarations_inner(
             Ok(())
         })?;
         tools.set("always", always)?;
-        let add = scope.create_function(|_, _: Variadic<String>| -> mlua::Result<()> {
+        let add = scope.create_function(|_, _: MultiValue| -> mlua::Result<()> {
             Err(mlua::Error::external(
                 "tools.add is only available during H2 recording",
             ))
@@ -1927,7 +1927,7 @@ fn install_replay_tools(
         .map_err(|error| Error::Lua(error.to_string()))?;
 
     let add = lua
-        .create_function(|_, _: Variadic<String>| -> mlua::Result<()> {
+        .create_function(|_, _: MultiValue| -> mlua::Result<()> {
             Err(mlua::Error::external(
                 "tools.add is only available during H2 recording",
             ))
@@ -2023,6 +2023,52 @@ fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, declared: &[String
     Ok(())
 }
 
+/// Collects alias strings from one `tools.add` argument.
+///
+/// Accepts a UTF-8 string, a [`LuaToolHandle`], or a sequence table of either.
+fn push_tools_add_alias(aliases: &mut Vec<String>, value: Value) -> mlua::Result<()> {
+    match value {
+        Value::String(s) => {
+            aliases.push(s.to_string_lossy());
+            Ok(())
+        }
+        Value::UserData(ud) => {
+            let handle = ud.borrow::<LuaToolHandle>()?;
+            aliases.push(handle.name().to_owned());
+            Ok(())
+        }
+        Value::Table(table) => {
+            for item in table.sequence_values::<Value>() {
+                match item? {
+                    Value::String(s) => aliases.push(s.to_string_lossy()),
+                    Value::UserData(ud) => {
+                        let handle = ud.borrow::<LuaToolHandle>()?;
+                        aliases.push(handle.name().to_owned());
+                    }
+                    _ => {
+                        return Err(mlua::Error::external(
+                            "tools.add array elements must be strings or Tool objects",
+                        ));
+                    }
+                }
+            }
+            Ok(())
+        }
+        _ => Err(mlua::Error::external(
+            "tools.add expects strings, Tool objects, or arrays of either",
+        )),
+    }
+}
+
+/// Flattens a `tools.add` variadic into alias strings for validation and scope.
+fn collect_tools_add_aliases(args: Variadic<Value>) -> mlua::Result<Vec<String>> {
+    let mut aliases = Vec::new();
+    for value in args {
+        push_tools_add_alias(&mut aliases, value)?;
+    }
+    Ok(aliases)
+}
+
 fn install_h2_tools(
     lua: &Lua,
     globals: &mlua::Table,
@@ -2061,7 +2107,8 @@ fn install_h2_tools(
     let frozen = bindings.clone();
     let state = Arc::clone(runtime);
     let add = lua
-        .create_function(move |_, aliases: Variadic<String>| {
+        .create_function(move |_, args: Variadic<Value>| {
+            let aliases = collect_tools_add_aliases(args)?;
             let mut state = state
                 .lock()
                 .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
@@ -2070,7 +2117,7 @@ fn install_h2_tools(
                     "tools.add is only available before the H2 tool scope closes",
                 ));
             }
-            for alias in aliases.iter() {
+            for alias in &aliases {
                 validate_alias(alias).map_err(|error| mlua::Error::external(error.to_string()))?;
                 if frozen.binding(alias).is_none() {
                     return Err(mlua::Error::external(format!(
@@ -3353,6 +3400,67 @@ mod tests {
             .run_epilog(&program("tools.add('fetch')"), &NullObserver, "Section")
             .expect_err("epilogs cannot mutate a closed scope");
         assert!(error.to_string().contains("scope closes"));
+    }
+
+    #[test]
+    fn h2_add_accepts_tool_objects_and_arrays() {
+        let resolver = |description: &str| {
+            Ok(ToolId::new(
+                "fixtures",
+                if description == "search the web" {
+                    "search"
+                } else {
+                    "fetch"
+                },
+            ))
+        };
+        let h1_error = bind_tool_declarations(
+            &program(
+                "local search = tools.need('search', 'search the web'); \
+                 tools.add(search)",
+            ),
+            &resolver,
+            EXECUTION,
+            &NullObserver,
+            "Prompt",
+        )
+        .expect_err("tools.add must stay H2-only even when passed a Tool object");
+        assert!(
+            h1_error
+                .to_string()
+                .contains("tools.add is only available during H2 recording"),
+            "H1 tools.add(Tool) must report the phase error, not a type error: {h1_error}"
+        );
+
+        let (shared, bindings) = fixture_bindings(
+            "search = tools.need('search', 'search the web'); \
+             fetch = tools.need('fetch', 'fetch a page')",
+        );
+        let prologue = program(
+            "tools.add(search); \
+             tools.add({fetch}); \
+             tools.add(search, 'fetch', {search, fetch})",
+        );
+        let mut vm =
+            SectionVm::new_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+                .expect("declarations must replay");
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .expect("host must inject");
+        vm.run_prologue(&prologue, &NullObserver, "Section")
+            .expect("tools.add must accept Tool objects, strings, and arrays");
+        let scope = vm
+            .close_tool_scope(&NullObserver, "Section")
+            .expect("scope must close");
+
+        assert_eq!(
+            scope
+                .bindings()
+                .iter()
+                .map(ToolBinding::alias)
+                .collect::<Vec<_>>(),
+            ["search", "fetch"]
+        );
+        vm.teardown(&NullObserver, "Section");
     }
 
     #[test]
