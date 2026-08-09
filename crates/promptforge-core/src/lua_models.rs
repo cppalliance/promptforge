@@ -244,8 +244,11 @@ fn replay_declaration(
     Ok(())
 }
 
-/// Installs H1 binding-mode `models.need` / forbidden `models.use`.
-pub(crate) fn install_bind_models<'scope, 'env: 'scope>(
+/// Installs live H1 `models.need` / `models.always` resolvers.
+///
+/// Each call resolves immediately and records the resulting frozen binding.
+/// `models.use` remains unavailable until section execution.
+pub(crate) fn install_live_models<'scope, 'env: 'scope>(
     lua: &'env Lua,
     scope: &'scope Scope<'scope, 'env>,
     resolver: &'env dyn ModelResolver,
@@ -323,6 +326,16 @@ pub(crate) fn install_bind_models<'scope, 'env: 'scope>(
     lua.globals()
         .raw_set("models", models)
         .map_err(|error| Error::Lua(error.to_string()))
+}
+
+/// Installs the legacy H1 declaration-mode model table.
+pub(crate) fn install_bind_models<'scope, 'env: 'scope>(
+    lua: &'env Lua,
+    scope: &'scope Scope<'scope, 'env>,
+    resolver: &'env dyn ModelResolver,
+    state: &Arc<Mutex<ModelBindingState>>,
+) -> Result<()> {
+    install_live_models(lua, scope, resolver, state)
 }
 
 /// Installs exact-replay `models.need`, `models.always`, and forbidden `models.use`.
