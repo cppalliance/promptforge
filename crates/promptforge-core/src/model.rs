@@ -80,7 +80,7 @@ pub enum ThinkingMode {
     Switchable,
 }
 
-/// One catalogued model with bind-time metadata.
+/// One catalogued model with live-resolution metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelDescriptor {
     id: ModelId,
@@ -1090,7 +1090,7 @@ mod tests {
             &NullObserver,
             "Section",
         )
-        .expect("replay must return the same inspectable Model object");
+        .expect("section install must expose the same inspectable Model object");
         vm.teardown(&NullObserver, "Section");
     }
 
@@ -1149,7 +1149,7 @@ mod tests {
     }
 
     #[test]
-    fn models_always_replays_exactly() {
+    fn models_always_installs_exactly() {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.need("writer", "A tiny model")
                models.always("writer")"#,
@@ -1442,7 +1442,7 @@ mod tests {
     }
 
     #[test]
-    fn models_always_multi_arg_replays_exactly() {
+    fn models_always_multi_arg_installs_exactly() {
         let shared = crate::lua::LuaProgram::compile(
             r#"models.always("writer", "A tiny model", { thinking = false })"#,
             "shared",

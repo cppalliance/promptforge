@@ -25,7 +25,7 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 /// Runs `prompt` once, then reruns it after every debounced save until the
 /// process is interrupted.
 ///
-/// Each rerun re-reads, re-parses, re-binds, and re-executes the file against
+/// Each rerun re-reads, re-parses, and re-executes the file against
 /// the already-running gateway named by the process environment, and dumps
 /// the run's store beside the prompt; the watcher's file-name filter keeps
 /// those dump writes from feeding back into the rerun loop. A failed run

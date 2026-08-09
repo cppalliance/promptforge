@@ -51,7 +51,7 @@ impl TestPrompt {
 }
 
 /// Build the tool-free parsed form consumed by the complete lifecycle path.
-fn bound(md: &str) -> TestPrompt {
+fn fixture(md: &str) -> TestPrompt {
     TestPrompt {
         prompt: parse(md),
         models: ModelCatalog::empty(),
@@ -170,7 +170,7 @@ fn silent() -> RunOptions<'static> {
 /// in-memory store created for the run - the ergonomic path for the
 /// Lua-only tests that do not care about the store's contents.
 async fn run_offline(md: &str) -> Result<String> {
-    run(&bound(md), "", &[], &StoreRef::memory(), silent()).await
+    run(&fixture(md), "", &[], &StoreRef::memory(), silent()).await
 }
 
 async fn run(
@@ -257,7 +257,7 @@ impl Recorder {
 async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String, String)>) {
     let recorder = Recorder::default();
     let result = run(
-        &bound(md),
+        &fixture(md),
         "",
         &[],
         &StoreRef::memory(),
@@ -379,7 +379,7 @@ async fn store_persists_across_sections() {
 ## Writer\n\n```lua\nstore.write('note.txt', 'carried across')\n```\n\n\
 ## Reader\n\n```lua\nvar.seen = store.read_lines('note.txt')\nreturn var.seen\n```\n";
     let store = StoreRef::memory();
-    let out = run(&bound(md), "", &[], &store, silent()).await.unwrap();
+    let out = run(&fixture(md), "", &[], &store, silent()).await.unwrap();
     assert_eq!(
         out, "1| carried across",
         "the second section must read what the first wrote"
@@ -1446,7 +1446,7 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
 
 #[tokio::test]
 async fn recording_and_null_observers_produce_the_same_result_and_store_state() {
-    let prompt = bound(STORE_SECTIONS);
+    let prompt = fixture(STORE_SECTIONS);
     let recorded_store = StoreRef::memory();
     let sink = Recorder::default();
     let observed_result = run(
@@ -1477,7 +1477,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         "observer choice must not change stored contents"
     );
 
-    let failing = bound(
+    let failing = fixture(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
          ## Only\n\n```lua\nerror('expected failure')\n```\n",
     );
@@ -2271,13 +2271,13 @@ async fn epilog_runs_after_reply_and_can_return() {
 }
 
 #[tokio::test]
-async fn add_in_an_unbound_prompt_without_declarations_fails_the_run_loudly() {
-    // Parsed (unbound) input with no shared library: the run goes through the
-    // same validated VM with empty frozen bindings, so the alias is rejected.
+async fn add_without_h1_needs_fails_the_run_loudly() {
+    // Input with no shared library goes through the same validated VM with
+    // empty frozen bindings, so the alias is rejected.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
-    let prompt = bound(md);
+    let prompt = fixture(md);
     let error = run(&prompt, "", &[], &StoreRef::memory(), silent())
         .await
         .expect_err("an undeclared alias must fail the run");
@@ -2288,14 +2288,14 @@ async fn add_in_an_unbound_prompt_without_declarations_fails_the_run_loudly() {
 }
 
 #[tokio::test]
-async fn add_in_a_bound_prompt_with_empty_needs_fails_the_run_loudly() {
-    // A bound prompt whose shared library declares nothing closes over empty
-    // frozen bindings, so tools.add in a prologue is rejected the same way.
+async fn add_with_an_empty_shared_library_fails_the_run_loudly() {
+    // A prompt whose shared library declares nothing closes over empty frozen
+    // bindings, so tools.add in a prologue is rejected the same way.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
 ```lua\nfunction helper() return 'no declarations' end\n```\n\n\
 ## Only\n\n```lua\ntools.add('web_search')\n```\n\nThis prose must not reach a model.\n";
-    let error = run(&bound(md), "", &[], &StoreRef::memory(), silent())
+    let error = run(&fixture(md), "", &[], &StoreRef::memory(), silent())
         .await
         .expect_err("an undeclared alias must fail the run");
     assert!(
@@ -2312,7 +2312,7 @@ async fn prologue_return_skips_model_and_epilog() {
 This prose must not reach a model.\n\n\
 ```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'late'\n```\n";
     let store = StoreRef::memory();
-    let out = run(&bound(md), "", &[], &store, silent()).await.unwrap();
+    let out = run(&fixture(md), "", &[], &store, silent()).await.unwrap();
 
     assert_eq!(out, "early");
     assert!(store.read_lines("epilog-ran.txt").is_err());
@@ -2414,7 +2414,7 @@ async fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
 ```lua\nif reply ~= nil then error('empty prose must not bind a reply') end\nreturn var.phase .. '-epilog'\n```\n";
 
     assert_eq!(
-        run(&bound(md), "", &[], &StoreRef::memory(), silent())
+        run(&fixture(md), "", &[], &StoreRef::memory(), silent())
             .await
             .unwrap(),
         "prologue-epilog"
@@ -2427,7 +2427,7 @@ async fn whitespace_only_prose_skips_model_without_binding() {
 # Test prompt\n\n\
 ## Only\n\n```lua\nif reply ~= nil then error('whitespace prose must not bind a reply') end\nreturn 'ok'\n```\n\n   \n\t\n";
     assert_eq!(
-        run(&bound(md), "", &[], &StoreRef::memory(), silent())
+        run(&fixture(md), "", &[], &StoreRef::memory(), silent())
             .await
             .unwrap(),
         "ok"
@@ -2438,7 +2438,7 @@ async fn whitespace_only_prose_skips_model_without_binding() {
 async fn model_required_when_non_empty_prose_has_no_binding() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\nAsk the model.\n";
-    let error = run(&bound(md), "", &[], &StoreRef::memory(), silent())
+    let error = run(&fixture(md), "", &[], &StoreRef::memory(), silent())
         .await
         .expect_err("non-empty prose without a model binding must fail");
     assert!(
@@ -3826,7 +3826,7 @@ assert(reply == nil, 'jump must clear prior reply context')\n\
 return 'helped:' .. store.read('seen.txt')\n\
 ```\n";
     let store = StoreRef::memory();
-    let out = run(&bound(md), "", &[], &store, silent())
+    let out = run(&fixture(md), "", &[], &store, silent())
         .await
         .expect("jump must transfer control");
     assert_eq!(out, "helped:check");
@@ -3857,7 +3857,7 @@ Do work.\n\n\
 ### Items\n\n\
 - alpha\n\
 - beta\n";
-    let out = run(&bound(md), "", &[], &StoreRef::memory(), silent())
+    let out = run(&fixture(md), "", &[], &StoreRef::memory(), silent())
         .await
         .expect("fanout must return structured results");
     assert_eq!(out, "ok");
