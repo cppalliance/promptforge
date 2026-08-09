@@ -27,7 +27,10 @@
 //! for semantic near-duplicates before concrete tools are advertised under
 //! their local aliases and dispatched by stable identity.
 //!
-//! Still to come: the other exit cases (a descriptor = goto/task/fanout).
+//! Lua `execute()` runs a named top-level section as a subroutine (fresh VM,
+//! fresh conversation, recursion capped at 8) and returns that section's reply.
+//! Lua `_G["goto"](target)` transfers control to a named section and clears
+//! cross-section reply context (Lua 5.4 reserves bare `goto` as a keyword).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -43,22 +46,26 @@ use crate::debug::{DebugCapture, DebugEvent};
 use crate::dialects::{ToolDialect, ToolDialectRegistry};
 use crate::fanout;
 use crate::lua::{
-    ModelInferHook, SectionVm, ToolBindings, ToolCallCounts, ToolRuntime, ToolScope,
-    install_lua_tool_calls, snapshot_tool_scope,
+    LuaBlockResult, LuaSectionHandle, ModelInferHook, SectionVm, ToolBindings, ToolCallCounts,
+    ToolRuntime, ToolScope, install_lua_tool_calls, resolve_section_target, snapshot_tool_scope,
 };
 use crate::model::{CompletionOptions, ModelBinding, ModelBindings};
 use crate::observe::{NullObserver, Observer, detail};
-use crate::parser::{Block, Prompt};
+use crate::parser::{Block, Prompt, Section};
 use crate::store::StoreRef;
 use crate::subst;
 use crate::tools::{SharedTools, Tool, ToolId, ToolRegistry};
 use crate::untrusted;
 use crate::{Error, NearDuplicateDiagnostic, Result};
+use mlua::Value as LuaValue;
 
 /// The default maximum number of model round trips a single section's
 /// tool-call loop will take before giving up, applied when a prompt's
 /// frontmatter does not declare its own `max_tool_iterations`.
 const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
+
+/// Maximum nested `execute()` depth (inclusive of the first call).
+const MAX_EXECUTE_DEPTH: usize = 8;
 
 /// The prompt language major this executor implements.
 const SUPPORTED_MAJOR: u32 = 1;
@@ -551,7 +558,10 @@ async fn run_sections(
         .max_tool_iterations
         .unwrap_or(DEFAULT_MAX_TOOL_ITERATIONS);
 
-    for (index, section) in prompt.sections.iter().enumerate() {
+    let task_handles = section_handles(&prompt.sections);
+    let mut index = 0usize;
+    while index < prompt.sections.len() {
+        let section = &prompt.sections[index];
         let sys = json!({ "when": when, "now": now_rfc3339(), "id": index + 1 });
 
         // `completed` counts sections entered, so the first is 1. It only ever
@@ -606,63 +616,47 @@ async fn run_sections(
         let mut completion_options: Option<CompletionOptions> = None;
         let mut sys = sys;
         let mut early_return: Option<String> = None;
+        let mut goto_heading: Option<String> = None;
 
         for block in &section.blocks {
             match block {
                 Block::Lua(program) => {
-                    let returned = if scopes_ready {
-                        run_section_lua(
-                            &vm,
-                            program,
-                            false,
-                            has_children,
-                            section,
-                            store,
-                            args,
-                            execution,
-                            observer,
-                            debug,
-                            prompt.shared.as_ref(),
-                            bindings,
-                            models,
-                            bound,
-                            shared_tools,
-                            client.as_ref(),
-                            max_tool_iterations,
-                            last_reply.as_deref(),
-                            &when,
-                            index + 1,
-                        )
-                    } else {
-                        run_section_lua(
-                            &vm,
-                            program,
-                            true,
-                            has_children,
-                            section,
-                            store,
-                            args,
-                            execution,
-                            observer,
-                            debug,
-                            prompt.shared.as_ref(),
-                            bindings,
-                            models,
-                            bound,
-                            shared_tools,
-                            client.as_ref(),
-                            max_tool_iterations,
-                            last_reply.as_deref(),
-                            &when,
-                            index + 1,
-                        )
-                    };
+                    let returned = run_section_lua(
+                        &vm,
+                        program,
+                        !scopes_ready,
+                        has_children,
+                        section,
+                        store,
+                        args,
+                        execution,
+                        observer,
+                        debug,
+                        prompt.shared.as_ref(),
+                        bindings,
+                        models,
+                        bound,
+                        shared_tools,
+                        client.as_ref(),
+                        max_tool_iterations,
+                        last_reply.as_deref(),
+                        &when,
+                        index + 1,
+                        &task_handles,
+                        &prompt.sections,
+                        &turns,
+                        0,
+                    );
                     match returned {
-                        Ok(Some(value)) => {
+                        Ok(LuaBlockResult::Returned(Some(value))) => {
                             early_return = Some(value);
                             break;
                         }
-                        Ok(None) => {}
+                        Ok(LuaBlockResult::Returned(None)) => {}
+                        Ok(LuaBlockResult::Goto(heading)) => {
+                            goto_heading = Some(heading);
+                            break;
+                        }
                         Err(error) => {
                             vm.teardown(observer, &section.name);
                             return Err(error);
@@ -814,10 +808,11 @@ async fn run_sections(
             }
         }
 
-        // Classic prologue-only early return tears down without closing scope.
-        // A lua-only section that falls through still closes, matching today.
+        // Classic prologue-only early return / goto tears down without closing
+        // scope. A lua-only section that falls through still closes, matching today.
         if !scopes_ready
             && early_return.is_none()
+            && goto_heading.is_none()
             && let Err(error) = vm.close_scopes(observer, &section.name)
         {
             vm.teardown(observer, &section.name);
@@ -826,9 +821,16 @@ async fn run_sections(
 
         vm.teardown(observer, &section.name);
         observer.observe(execution, &section.name, detail::SECTION_FINISHED);
+        if let Some(heading) = goto_heading {
+            let target = resolve_h2_index(&heading, &prompt.sections)?;
+            last_reply = None;
+            index = target;
+            continue;
+        }
         if let Some(value) = early_return {
             return Ok(value);
         }
+        index += 1;
     }
 
     // Ran off the end.
@@ -840,17 +842,21 @@ async fn run_sections(
         .unwrap_or_else(|| "done".to_string()))
 }
 
-/// Runs one section Lua block with optional fanout, as prologue or epilog.
+/// Runs one section Lua block with tasks/execute/goto and optional fanout.
 #[expect(
     clippy::too_many_arguments,
     reason = "mirrors make_fanout_callback's borrowed run context"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "builds execute and fanout closures that share the full run context"
 )]
 fn run_section_lua(
     vm: &SectionVm,
     program: &crate::lua::LuaProgram,
     before_prose: bool,
     has_children: bool,
-    section: &crate::parser::Section,
+    section: &Section,
     store: &StoreRef,
     args: &str,
     execution: &str,
@@ -866,24 +872,28 @@ fn run_section_lua(
     last_reply: Option<&str>,
     when: &str,
     parent_id: usize,
-) -> Result<Option<String>> {
-    if has_children {
-        let children = &section.children;
-        let fanout_store = store.clone();
-        let fanout_args = args.to_string();
-        let fanout_execution = execution.to_string();
-        let fanout_when = when.to_string();
-        let fanout_last_reply = last_reply.map(str::to_owned);
-        let fanout_shared = shared.cloned();
-        let fanout_bindings = bindings.clone();
-        let fanout_models = models.clone();
-        let fanout_client = client.cloned();
-        let fanout_tools = shared_tools.clone();
-        let callback = |worker_heading: String, list_heading: String| {
+    tasks: &[LuaSectionHandle],
+    top_sections: &[Section],
+    turns: &Arc<AtomicU32>,
+    execute_depth: usize,
+) -> Result<LuaBlockResult> {
+    let fanout_store = store.clone();
+    let fanout_args = args.to_string();
+    let fanout_execution = execution.to_string();
+    let fanout_when = when.to_string();
+    let fanout_last_reply = last_reply.map(str::to_owned);
+    let fanout_shared = shared.cloned();
+    let fanout_bindings = bindings.clone();
+    let fanout_models = models.clone();
+    let fanout_client = client.cloned();
+    let fanout_tools = shared_tools.clone();
+    let children = section.children.clone();
+    let fanout_callback = if has_children {
+        Some(move |worker_heading: String, list_heading: String| {
             make_fanout_callback(
                 &worker_heading,
                 &list_heading,
-                children,
+                &children,
                 &fanout_args,
                 &fanout_store,
                 &fanout_execution,
@@ -900,17 +910,407 @@ fn run_section_lua(
                 &fanout_when,
                 parent_id,
             )
-        };
-        if before_prose {
-            vm.run_prologue_with_fanout(program, observer, &section.name, callback)
-        } else {
-            vm.run_epilog_with_fanout(program, observer, &section.name, callback)
-        }
-    } else if before_prose {
-        vm.run_prologue(program, observer, &section.name)
+        })
     } else {
-        vm.run_epilog(program, observer, &section.name)
+        None
+    };
+
+    let exec_store = store.clone();
+    let exec_args = args.to_string();
+    let exec_execution = execution.to_string();
+    let exec_when = when.to_string();
+    let exec_last_reply = last_reply.map(str::to_owned);
+    let exec_shared = shared.cloned();
+    let exec_bindings = bindings.clone();
+    let exec_models = models.clone();
+    let exec_client = client.cloned();
+    let exec_tools = shared_tools.clone();
+    let exec_sections = top_sections.to_vec();
+    let exec_turns = Arc::clone(turns);
+    let exec_bound = bound.cloned();
+    let execute_callback =
+        move |target: LuaValue, input: Option<String>| -> std::result::Result<String, String> {
+            let heading = resolve_section_target(target).map_err(|e| e.to_string())?;
+            let next_depth = execute_depth + 1;
+            if next_depth > MAX_EXECUTE_DEPTH {
+                return Err(format!(
+                    "execute recursion exceeded cap of {MAX_EXECUTE_DEPTH}"
+                ));
+            }
+            let worker = resolve_h2_section(&heading, &exec_sections).map_err(|e| e.to_string())?;
+            let call_args = input.as_deref().unwrap_or(&exec_args);
+            let handle = tokio::runtime::Handle::current();
+            tokio::task::block_in_place(|| {
+                handle.block_on(run_execute_section(
+                    worker,
+                    call_args,
+                    &exec_store,
+                    &exec_execution,
+                    observer,
+                    debug,
+                    exec_shared.as_ref(),
+                    &exec_bindings,
+                    &exec_models,
+                    exec_bound.as_ref(),
+                    &exec_tools,
+                    exec_client.as_ref(),
+                    max_tool_iterations,
+                    exec_last_reply.as_deref(),
+                    &exec_when,
+                    &exec_turns,
+                    next_depth,
+                    &exec_sections,
+                ))
+            })
+            .map_err(|e| e.to_string())
+        };
+
+    if before_prose {
+        vm.run_prologue_with_control(
+            program,
+            observer,
+            &section.name,
+            tasks,
+            Some(&execute_callback),
+            fanout_callback.as_ref(),
+        )
+    } else {
+        vm.run_epilog_with_control(
+            program,
+            observer,
+            &section.name,
+            tasks,
+            Some(&execute_callback),
+            fanout_callback.as_ref(),
+        )
     }
+}
+
+fn section_handles(sections: &[Section]) -> Vec<LuaSectionHandle> {
+    sections
+        .iter()
+        .map(|section| {
+            let has_prose = section
+                .blocks
+                .iter()
+                .any(|block| matches!(block, Block::Prose { .. }));
+            LuaSectionHandle::new(&section.name, has_prose)
+        })
+        .collect()
+}
+
+fn resolve_h2_section<'a>(heading: &str, sections: &'a [Section]) -> Result<&'a Section> {
+    let stripped = heading.trim();
+    if !stripped.starts_with("##") || stripped.starts_with("###") {
+        return Err(Error::Lua(format!(
+            "section heading must use ## markers, got: {stripped}"
+        )));
+    }
+    let name = stripped.trim_start_matches('#').trim();
+    if name.is_empty() {
+        return Err(Error::Lua(format!(
+            "section heading has no name: {stripped}"
+        )));
+    }
+    sections
+        .iter()
+        .find(|section| section.name == name)
+        .ok_or_else(|| {
+            let available: Vec<String> =
+                sections.iter().map(|s| format!("## {}", s.name)).collect();
+            Error::Lua(format!(
+                "section `{stripped}` not found; available: {}",
+                available.join(", ")
+            ))
+        })
+}
+
+fn resolve_h2_index(heading: &str, sections: &[Section]) -> Result<usize> {
+    let section = resolve_h2_section(heading, sections)?;
+    sections
+        .iter()
+        .position(|s| s.name == section.name)
+        .ok_or_else(|| Error::Lua(format!("section `{heading}` index missing")))
+}
+
+/// Runs a named section as an `execute()` subroutine and returns its reply.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "subroutine shares the full run context with the top-level walker"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "mirrors the top-level section block walk for one isolated section"
+)]
+async fn run_execute_section(
+    section: &Section,
+    args: &str,
+    store: &StoreRef,
+    execution: &str,
+    observer: &dyn Observer,
+    debug: Option<&dyn DebugCapture>,
+    shared: Option<&crate::lua::LuaProgram>,
+    bindings: &ToolBindings,
+    models: &ModelBindings,
+    bound: Option<&BoundPrompt>,
+    shared_tools: &SharedTools,
+    client: Option<&GatewayClient>,
+    max_tool_iterations: usize,
+    last_reply: Option<&str>,
+    when: &str,
+    turns: &Arc<AtomicU32>,
+    execute_depth: usize,
+    top_sections: &[Section],
+) -> Result<String> {
+    let registry = shared_tools.registry();
+    let task_handles = section_handles(top_sections);
+    let sys = json!({ "when": when, "now": now_rfc3339(), "id": 0 });
+    observer.observe(execution, &section.name, detail::SECTION_STARTED);
+
+    let mut vm = match shared {
+        Some(program) => SectionVm::new_with_shared_bindings(
+            program,
+            bindings,
+            models,
+            execution,
+            observer,
+            &section.name,
+        )?,
+        None => SectionVm::new(None, execution, observer, &section.name)?,
+    };
+    if let Err(error) = vm.inject_host(args, &sys, store, last_reply) {
+        vm.teardown(observer, &section.name);
+        return Err(error);
+    }
+    let mut client = client.cloned();
+    if client.is_none()
+        && !models.bindings().is_empty()
+        && let Ok(new_client) = GatewayClient::from_env()
+    {
+        client = Some(new_client);
+    }
+    if let Some(infer_client) = client.as_ref() {
+        attach_infer_hook(
+            &vm,
+            infer_client,
+            shared_tools,
+            store,
+            execution,
+            &section.name,
+            max_tool_iterations,
+            turns,
+            bound,
+        );
+    }
+
+    let has_children = !section.children.is_empty();
+    let mut conversation: Vec<Message> = Vec::new();
+    let mut scopes_ready = false;
+    let mut counts: Option<ToolCallCounts> = None;
+    let mut model_binding: Option<ModelBinding> = None;
+    let mut schemas: Vec<ToolSchema> = Vec::new();
+    let mut dispatch: BTreeMap<String, ToolId> = BTreeMap::new();
+    let mut completion_options: Option<CompletionOptions> = None;
+    let mut sys = sys;
+    let mut section_reply: Option<String> = None;
+    let mut early_return: Option<String> = None;
+
+    for block in &section.blocks {
+        match block {
+            Block::Lua(program) => {
+                let returned = run_section_lua(
+                    &vm,
+                    program,
+                    !scopes_ready,
+                    has_children,
+                    section,
+                    store,
+                    args,
+                    execution,
+                    observer,
+                    debug,
+                    shared,
+                    bindings,
+                    models,
+                    bound,
+                    shared_tools,
+                    client.as_ref(),
+                    max_tool_iterations,
+                    last_reply,
+                    when,
+                    0,
+                    &task_handles,
+                    top_sections,
+                    turns,
+                    execute_depth,
+                );
+                match returned {
+                    Ok(LuaBlockResult::Returned(Some(value))) => {
+                        early_return = Some(value);
+                        break;
+                    }
+                    Ok(LuaBlockResult::Returned(None)) => {}
+                    Ok(LuaBlockResult::Goto(heading)) => {
+                        vm.teardown(observer, &section.name);
+                        return Err(Error::Lua(format!(
+                            "goto({heading}) is not allowed inside execute()"
+                        )));
+                    }
+                    Err(error) => {
+                        vm.teardown(observer, &section.name);
+                        return Err(error);
+                    }
+                }
+            }
+            Block::Prose { text, loop_capable } => {
+                if !scopes_ready {
+                    let scopes = match vm.close_scopes(observer, &section.name) {
+                        Ok(scopes) => scopes,
+                        Err(error) => {
+                            vm.teardown(observer, &section.name);
+                            return Err(error);
+                        }
+                    };
+                    counts = match vm.install_tool_call_counts(&scopes.tools) {
+                        Ok(c) => Some(c),
+                        Err(error) => {
+                            vm.teardown(observer, &section.name);
+                            return Err(error);
+                        }
+                    };
+                    if let Some(binding) = scopes.model.as_ref() {
+                        let enriched = crate::lua::enrich_sys_model(&sys, binding);
+                        if let Err(error) = vm.re_seal_sys(&enriched) {
+                            vm.teardown(observer, &section.name);
+                            return Err(error);
+                        }
+                        sys = enriched;
+                        completion_options = Some(binding.completion_options());
+                    }
+                    model_binding = scopes.model;
+                    let (prepared_schemas, prepared_dispatch) = match bound {
+                        Some(bound_prompt) => {
+                            match prepare_effective_scope(
+                                bound_prompt,
+                                &scopes.tools,
+                                &registry,
+                                execution,
+                                observer,
+                                &section.name,
+                            ) {
+                                Ok(prepared) => prepared,
+                                Err(error) => {
+                                    vm.teardown(observer, &section.name);
+                                    return Err(error);
+                                }
+                            }
+                        }
+                        None => (Vec::new(), BTreeMap::new()),
+                    };
+                    schemas = prepared_schemas;
+                    dispatch = prepared_dispatch;
+                    let _ = scopes.tools;
+                    scopes_ready = true;
+                }
+
+                let var = match vm.var() {
+                    Ok(var) => var,
+                    Err(error) => {
+                        vm.teardown(observer, &section.name);
+                        return Err(error);
+                    }
+                };
+                let prose = match subst::substitute(text, args, last_reply, None, &var, &sys) {
+                    Ok(prose) => prose,
+                    Err(error) => {
+                        vm.teardown(observer, &section.name);
+                        return Err(error);
+                    }
+                };
+                if prose.trim().is_empty() {
+                    continue;
+                }
+                if model_binding.is_none() {
+                    vm.teardown(observer, &section.name);
+                    return Err(Error::ModelRequired {
+                        section: section.name.clone(),
+                    });
+                }
+                if client.is_none() {
+                    match GatewayClient::from_env() {
+                        Ok(new_client) => client = Some(new_client),
+                        Err(error) => {
+                            vm.teardown(observer, &section.name);
+                            return Err(error);
+                        }
+                    }
+                }
+                let Some(active_client) = client.as_ref() else {
+                    continue;
+                };
+                let Some(options) = completion_options.as_ref() else {
+                    vm.teardown(observer, &section.name);
+                    return Err(Error::ModelRequired {
+                        section: section.name.clone(),
+                    });
+                };
+                let global_aliases = bound.map(BoundPrompt::alias_to_id);
+                let mode = if *loop_capable {
+                    ProseMode::Loop {
+                        max_tool_iterations,
+                    }
+                } else {
+                    ProseMode::SingleShot
+                };
+                let text = match run_prose_inference(
+                    active_client,
+                    &schemas,
+                    &dispatch,
+                    &registry,
+                    &mut conversation,
+                    prose,
+                    mode,
+                    SectionProgress {
+                        execution,
+                        observer,
+                        section: &section.name,
+                        turns,
+                        debug,
+                        completion_options: options,
+                    },
+                    counts.as_ref(),
+                    global_aliases,
+                )
+                .await
+                {
+                    Ok(text) => text,
+                    Err(error) => {
+                        vm.teardown(observer, &section.name);
+                        return Err(error);
+                    }
+                };
+                if let Some(text) = text {
+                    if let Err(error) = vm.bind_reply(&text, observer, &section.name) {
+                        vm.teardown(observer, &section.name);
+                        return Err(error);
+                    }
+                    section_reply = Some(text);
+                }
+            }
+        }
+    }
+
+    if !scopes_ready
+        && early_return.is_none()
+        && let Err(error) = vm.close_scopes(observer, &section.name)
+    {
+        vm.teardown(observer, &section.name);
+        return Err(error);
+    }
+
+    vm.teardown(observer, &section.name);
+    observer.observe(execution, &section.name, detail::SECTION_FINISHED);
+    Ok(early_return.or(section_reply).unwrap_or_default())
 }
 
 #[expect(
