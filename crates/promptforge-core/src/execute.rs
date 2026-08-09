@@ -36,6 +36,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use serde_json::json;
 
 use crate::bind::BoundPrompt;
+use crate::cancel;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::dialects::{ToolDialect, ToolDialectRegistry};
@@ -802,9 +803,14 @@ pub(crate) async fn run_tool_loop(
     let nonce = untrusted::nonce();
 
     for _ in 0..max_tool_iterations {
-        let completion = client
-            .complete(&conversation, tool_arg, completion_options)
-            .await;
+        let completion = tokio::select! {
+            biased;
+            () = cancel::wait_cancelled() => Err(Error::Interrupted),
+            result = client.complete(&conversation, tool_arg, completion_options) => result,
+        };
+        if let Err(Error::Interrupted) = &completion {
+            return Err(Error::Interrupted);
+        }
         if completion.is_err() {
             observer.observe(execution, section, detail::MODEL_TURN_FAILED);
         }

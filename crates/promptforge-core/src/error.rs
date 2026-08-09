@@ -69,6 +69,10 @@ pub enum Error {
         detail: &'static str,
     },
 
+    /// The host cancelled the run (for example Ctrl-C during fanout).
+    #[error("interrupted by Ctrl-C")]
+    Interrupted,
+
     /// A section's Lua phase failed to build, run, or return a usable value.
     #[error("lua error: {0}")]
     Lua(String),

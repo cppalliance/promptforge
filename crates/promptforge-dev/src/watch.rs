@@ -11,8 +11,9 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use notify::{RecursiveMode, Watcher as _};
+use promptforge_core::cancel;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use crate::run;
@@ -69,6 +70,9 @@ pub(crate) async fn run(prompt: &Path, input: &str) -> Result<()> {
         run_and_report(prompt, input).await;
     })
     .await;
+    if cancel::is_cancelled() {
+        bail!("interrupted by Ctrl-C");
+    }
     Ok(())
 }
 
@@ -118,13 +122,25 @@ async fn rerun_on_changes<F, Fut>(
 /// event source closes with nothing pending. A source that closes with a
 /// change already received still yields that final rerun first.
 async fn next_rerun(receiver: &mut UnboundedReceiver<()>, debounce: Duration) -> bool {
-    if receiver.recv().await.is_none() {
-        return false;
+    tokio::select! {
+        biased;
+        () = cancel::wait_cancelled() => return false,
+        msg = receiver.recv() => {
+            if msg.is_none() {
+                return false;
+            }
+        }
     }
     loop {
-        match tokio::time::timeout(debounce, receiver.recv()).await {
-            Ok(Some(())) => {}
-            Ok(None) | Err(_) => return true,
+        tokio::select! {
+            biased;
+            () = cancel::wait_cancelled() => return false,
+            timed = tokio::time::timeout(debounce, receiver.recv()) => {
+                match timed {
+                    Ok(Some(())) => {}
+                    Ok(None) | Err(_) => return true,
+                }
+            }
         }
     }
 }
