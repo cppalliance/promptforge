@@ -35,7 +35,7 @@ use mlua::{
 use serde_json::Value as Json;
 use serde_json::json;
 
-pub use crate::lua_models::LuaModelHandle;
+pub use crate::lua_models::{LuaModelHandle, ModelInferHook};
 use crate::lua_models::{
     ModelBindingState, ModelRuntime, close_model_scope, finish_model_replay, install_bind_models,
     install_h2_models, install_replay_models,
@@ -230,6 +230,16 @@ impl ToolCallCounts {
             .map_err(|_| Error::Lua("tool call counts mutex was poisoned".to_owned()))
     }
 
+    /// Ensures `alias` is present in the map, seeding it at 0 when new.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the mutex is poisoned.
+    pub fn ensure(&self, alias: &str) -> Result<()> {
+        let mut map = self.lock()?;
+        map.entry(alias.to_owned()).or_insert(0);
+        Ok(())
+    }
+
     /// Increments the count for `alias`.
     ///
     /// # Errors
@@ -315,7 +325,7 @@ enum ToolDeclaration {
 }
 
 #[derive(Debug)]
-struct ToolRuntime {
+pub(crate) struct ToolRuntime {
     phase: ToolPhase,
     declaration_index: usize,
     added: Vec<String>,
@@ -845,7 +855,9 @@ pub struct SectionVm {
     bound_models: ModelBindings,
     tool_runtime: Arc<Mutex<ToolRuntime>>,
     model_runtime: Arc<Mutex<ModelRuntime>>,
-    tool_call_counts: Option<ToolCallCounts>,
+    /// Shared with [`crate::execute::InferContext`] so `model:infer` and the
+    /// prose tool loop increment the same `tools.calls` counters.
+    counts_slot: Arc<Mutex<Option<ToolCallCounts>>>,
     store: Option<StoreRef>,
     host_injected: bool,
 }
@@ -908,7 +920,7 @@ impl SectionVm {
                 added: Vec::new(),
             })),
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new_replay())),
-            tool_call_counts: None,
+            counts_slot: Arc::new(Mutex::new(None)),
             store: None,
             host_injected: false,
         };
@@ -1018,7 +1030,7 @@ impl SectionVm {
             bound_models: models.clone(),
             tool_runtime: Arc::clone(&runtime),
             model_runtime: Arc::clone(&model_runtime),
-            tool_call_counts: None,
+            counts_slot: Arc::new(Mutex::new(None)),
             store: None,
             host_injected: false,
         };
@@ -1595,13 +1607,29 @@ impl SectionVm {
     /// to this section's scope, the diagnostic says so.
     ///
     /// Returns the `ToolCallCounts` handle so the executor's tool loop can
-    /// increment it.
+    /// increment it. Reuses counts already seeded by `model:infer` so counters
+    /// persist across infer and the prose path.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when installing the `tools.calls` index fails.
     pub fn install_tool_call_counts(&mut self, scope: &ToolScope) -> Result<ToolCallCounts> {
-        let counts = ToolCallCounts::new(scope.bindings().iter().map(|b| b.alias().to_owned()));
-        self.tool_call_counts = Some(counts.clone());
+        let counts = {
+            let mut slot = self
+                .counts_slot
+                .lock()
+                .map_err(|_| Error::Lua("tool call counts mutex was poisoned".to_owned()))?;
+            if let Some(existing) = slot.as_ref() {
+                for binding in scope.bindings() {
+                    existing.ensure(binding.alias())?;
+                }
+                existing.clone()
+            } else {
+                let created =
+                    ToolCallCounts::new(scope.bindings().iter().map(|b| b.alias().to_owned()));
+                *slot = Some(created.clone());
+                created
+            }
+        };
         let declared: Vec<String> = self
             .bound_tools
             .bindings()
@@ -1610,6 +1638,28 @@ impl SectionVm {
             .collect();
         install_lua_tool_calls(&self.lua, &counts, &declared)?;
         Ok(counts)
+    }
+
+    /// Returns frozen tool bindings and the live H2 addition runtime.
+    #[must_use]
+    pub(crate) fn tool_bag_handles(&self) -> (ToolBindings, Arc<Mutex<ToolRuntime>>) {
+        (self.bound_tools.clone(), Arc::clone(&self.tool_runtime))
+    }
+
+    /// Returns the shared tool-call counts slot for `model:infer`.
+    #[must_use]
+    pub(crate) fn counts_slot(&self) -> Arc<Mutex<Option<ToolCallCounts>>> {
+        Arc::clone(&self.counts_slot)
+    }
+
+    /// Installs the `model:infer` host hook for this VM's Lua state.
+    pub(crate) fn set_infer_hook(&self, hook: ModelInferHook) {
+        self.lua.set_app_data(hook);
+    }
+
+    /// Clears the `model:infer` host hook.
+    pub(crate) fn clear_infer_hook(&self) {
+        let _ = self.lua.remove_app_data::<ModelInferHook>();
     }
 
     fn require_closed_tool_scope(&self, operation: &str) -> Result<()> {
@@ -1643,6 +1693,7 @@ impl SectionVm {
     pub fn teardown(self, observer: &dyn Observer, section: &str) {
         let execution = self.execution.clone();
         observer.observe(&self.execution, section, detail::LUA_TEARDOWN_STARTED);
+        self.clear_infer_hook();
         drop(self);
         observer.observe(&execution, section, detail::LUA_TEARDOWN_SUCCEEDED);
     }
@@ -1964,7 +2015,44 @@ fn finish_replay(vm: &SectionVm) -> Result<()> {
 /// unknown key raises a hard Lua error naming the bad key and listing the VM's
 /// in-scope aliases. `declared` is the prompt-wide `tools.need` set used to
 /// distinguish pure unknowns from declared-but-unscoped aliases.
-fn install_lua_tool_calls(lua: &Lua, counts: &ToolCallCounts, declared: &[String]) -> Result<()> {
+/// Snapshot-reads always + H2 additions without closing the tool phase.
+pub(crate) fn snapshot_tool_scope(
+    bindings: &ToolBindings,
+    runtime: &Mutex<ToolRuntime>,
+) -> Result<ToolScope> {
+    let runtime = runtime
+        .lock()
+        .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
+    if runtime.phase == ToolPhase::Replay {
+        return Err(Error::Lua(
+            "tool bag is not available during declaration replay".to_owned(),
+        ));
+    }
+    let aliases = bindings
+        .always
+        .iter()
+        .chain(runtime.added.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    let effective = aliases
+        .iter()
+        .map(|alias| {
+            bindings
+                .binding(alias)
+                .cloned()
+                .ok_or_else(|| Error::Lua(format!("tool alias {alias:?} has no frozen binding")))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(ToolScope {
+        bindings: effective,
+    })
+}
+
+pub(crate) fn install_lua_tool_calls(
+    lua: &Lua,
+    counts: &ToolCallCounts,
+    declared: &[String],
+) -> Result<()> {
     let globals = lua.globals();
     let tools: mlua::Table = globals
         .raw_get("tools")

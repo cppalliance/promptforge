@@ -6,23 +6,23 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use mlua::{Lua, MultiValue, Scope, Table, UserData, UserDataFields, Value};
+use mlua::{Lua, MultiValue, Scope, Table, UserData, UserDataFields, UserDataMethods, Value};
 
 use crate::model::{ModelBinding, ModelBindings, ModelDeclaration, ModelNeedOpts, ModelResolver};
 use crate::observe::{Observer, detail};
 use crate::{Error, Result};
 
+/// Host hook that runs `model:infer` from Lua via the executor's shared context.
+///
+/// Installed as Lua app data for the duration of a section phase that may call
+/// infer. Absent app data means infer is unavailable in that context.
+pub type ModelInferHook =
+    Arc<dyn Fn(&Lua, &ModelBinding, &str) -> mlua::Result<String> + Send + Sync>;
+
 /// Inspectable Lua userdata returned by `models.need` / `models.always`.
 #[derive(Debug, Clone)]
 pub struct LuaModelHandle {
-    name: String,
-    model_id: String,
-    description: String,
-    context: u32,
-    thinking: Option<bool>,
-    temperature: Option<f64>,
-    max_tokens: Option<u32>,
-    dialect: String,
+    binding: ModelBinding,
 }
 
 impl LuaModelHandle {
@@ -30,76 +30,92 @@ impl LuaModelHandle {
     #[must_use]
     pub fn from_binding(binding: &ModelBinding) -> Self {
         Self {
-            name: binding.alias().to_owned(),
-            model_id: binding.id().name().to_owned(),
-            description: binding.description().to_owned(),
-            context: binding.context(),
-            thinking: binding.invocation().thinking,
-            temperature: binding.invocation().temperature,
-            max_tokens: binding.invocation().max_tokens,
-            dialect: binding.tool_dialect().to_string(),
+            binding: binding.clone(),
         }
+    }
+
+    /// Returns the frozen binding carried by this handle.
+    #[must_use]
+    pub fn binding(&self) -> &ModelBinding {
+        &self.binding
     }
 
     /// Returns the prompt-local alias.
     #[must_use]
     pub fn name(&self) -> &str {
-        &self.name
+        self.binding.alias()
     }
 
     /// Returns the caller-facing catalog model id.
     #[must_use]
     pub fn model_id(&self) -> &str {
-        &self.model_id
+        self.binding.id().name()
     }
 
     /// Returns the capability description supplied to `models.need`.
     #[must_use]
     pub fn description(&self) -> &str {
-        &self.description
+        self.binding.description()
     }
 
     /// Returns the catalog context window size in tokens.
     #[must_use]
     pub fn context(&self) -> u32 {
-        self.context
+        self.binding.context()
     }
 
     /// Returns the frozen thinking switch, when the need declared one.
     #[must_use]
     pub fn thinking(&self) -> Option<bool> {
-        self.thinking
+        self.binding.invocation().thinking
     }
 
     /// Returns the frozen sampling temperature, when the need declared one.
     #[must_use]
     pub fn temperature(&self) -> Option<f64> {
-        self.temperature
+        self.binding.invocation().temperature
     }
 
     /// Returns the frozen max generation tokens, when the need declared one.
     #[must_use]
     pub fn max_tokens(&self) -> Option<u32> {
-        self.max_tokens
+        self.binding.invocation().max_tokens
     }
 
     /// Returns the tool-calling dialect id string.
     #[must_use]
-    pub fn dialect(&self) -> &str {
-        &self.dialect
+    pub fn dialect(&self) -> String {
+        self.binding.tool_dialect().to_string()
     }
 }
 
 impl UserData for LuaModelHandle {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("name", |_, this| Ok(this.name.clone()));
-        fields.add_field_method_get("model_id", |_, this| Ok(this.model_id.clone()));
-        fields.add_field_method_get("description", |_, this| Ok(this.description.clone()));
-        fields.add_field_method_get("context", |_, this| Ok(this.context));
-        fields.add_field_method_get("thinking", |_, this| Ok(this.thinking));
-        fields.add_field_method_get("temperature", |_, this| Ok(this.temperature));
-        fields.add_field_method_get("max_tokens", |_, this| Ok(this.max_tokens));
-        fields.add_field_method_get("dialect", |_, this| Ok(this.dialect.clone()));
+        fields.add_field_method_get("name", |_, this| Ok(this.name().to_owned()));
+        fields.add_field_method_get("model_id", |_, this| Ok(this.model_id().to_owned()));
+        fields.add_field_method_get("description", |_, this| Ok(this.description().to_owned()));
+        fields.add_field_method_get("context", |_, this| Ok(this.context()));
+        fields.add_field_method_get("thinking", |_, this| Ok(this.thinking()));
+        fields.add_field_method_get("temperature", |_, this| Ok(this.temperature()));
+        fields.add_field_method_get("max_tokens", |_, this| Ok(this.max_tokens()));
+        fields.add_field_method_get("dialect", |_, this| Ok(this.dialect()));
+    }
+
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method(
+            "infer",
+            |lua, this, (prompt, _opts): (String, Option<Value>)| {
+                let hook = lua
+                    .app_data_ref::<ModelInferHook>()
+                    .ok_or_else(|| {
+                        mlua::Error::external(
+                            "model:infer is not available outside section execution",
+                        )
+                    })?
+                    .clone();
+                hook(lua, this.binding(), &prompt)
+            },
+        );
     }
 }
 
