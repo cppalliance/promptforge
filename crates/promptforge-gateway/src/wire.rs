@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 use crate::config::ThinkingMode;
 
 /// An incoming chat completions request.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ChatRequest {
     /// The model name, resolved against the routing table.

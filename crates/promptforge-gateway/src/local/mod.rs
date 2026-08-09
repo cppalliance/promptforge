@@ -10,6 +10,7 @@ pub(crate) mod artifacts;
 mod error;
 mod server;
 pub(crate) mod sidecar;
+mod upstream;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,7 +24,6 @@ use serde_json::Value;
 use crate::config::{Config, LocalModelConfig, ThinkingMode};
 use crate::queue::EndpointLane;
 use crate::routing::{Endpoint, Model};
-use crate::upstream::OpenAiUpstream;
 
 pub use artifacts::{
     DEV_MODEL_NAME, DEV_MODEL_SHA256, DEV_MODEL_URL, SCENARIO_MODEL_NAME, SCENARIO_MODEL_SHA256,
@@ -33,14 +33,14 @@ pub use error::LocalError;
 
 use artifacts::{ArtifactStore, default_promptforge_root};
 use server::{LaunchOptions, ServerGuard};
+use upstream::LocalUpstream;
 
 /// Running local `llama-server` children and the models they back.
 ///
 /// Keep this value alive for the lifetime of the gateway process. Dropping it
-/// terminates every child.
+/// terminates every child (via [`LocalUpstream`] Drop → [`ServerGuard`] Drop).
 #[derive(Debug)]
 pub struct LocalRuntime {
-    guards: Vec<ServerGuard>,
     models: Vec<Arc<Model>>,
 }
 
@@ -49,10 +49,7 @@ impl LocalRuntime {
     /// and as the placeholder before the first profile switch.
     #[must_use]
     pub fn empty() -> LocalRuntime {
-        LocalRuntime {
-            guards: Vec::new(),
-            models: Vec::new(),
-        }
+        LocalRuntime { models: Vec::new() }
     }
 
     /// Provisions binaries/models and starts one `llama-server` per local model.
@@ -75,7 +72,6 @@ impl LocalRuntime {
 
         let interrupted = Arc::new(AtomicBool::new(false));
         arm_startup_interrupt(Arc::clone(&interrupted));
-        let mut guards = Vec::with_capacity(config.local_models.len());
         let mut models = Vec::with_capacity(config.local_models.len());
 
         for local_model in &config.local_models {
@@ -101,9 +97,16 @@ impl LocalRuntime {
             let guard =
                 ServerGuard::start(&llama_server, &model_path, &options, interrupted.as_ref())?;
             let endpoint_id = format!("local-{}", local_model.name);
-            let upstream = Arc::new(OpenAiUpstream::new(
-                &guard.base_url(),
-                crate::config::Secret::from(guard.api_key().to_owned()),
+            let (tool_dialect, tools_mode) =
+                resolve_local_dialect(&guard, &local_model.name, &model_path)?;
+            let upstream_name = guard.model_alias().to_owned();
+            let base_url = guard.base_url();
+            let upstream = Arc::new(LocalUpstream::new(
+                guard,
+                llama_server.clone(),
+                model_path.clone(),
+                options,
+                local_model.name.clone(),
             ));
             let lane = EndpointLane::new(concurrency, &config.queue);
             let endpoint = Arc::new(Endpoint {
@@ -111,8 +114,6 @@ impl LocalRuntime {
                 upstream,
                 lane,
             });
-            let (tool_dialect, tools_mode) =
-                resolve_local_dialect(&guard, &local_model.name, &model_path)?;
             models.push(Arc::new(Model {
                 name: local_model.name.clone(),
                 description: local_model.description.clone(),
@@ -120,18 +121,17 @@ impl LocalRuntime {
                 thinking: local_model.thinking,
                 tool_dialect,
                 tools_mode,
-                upstream_name: guard.model_alias().to_owned(),
+                upstream_name,
                 endpoint,
             }));
             tracing::info!(
                 model = %local_model.name,
-                base_url = %guard.base_url(),
+                base_url = %base_url,
                 "local llama-server ready"
             );
-            guards.push(guard);
         }
 
-        Ok(LocalRuntime { guards, models })
+        Ok(LocalRuntime { models })
     }
 
     /// Models registered for local inference, in `[[local_model]]` order.
@@ -140,10 +140,10 @@ impl LocalRuntime {
         &self.models
     }
 
-    /// Number of running `llama-server` children.
+    /// Number of local model endpoints (each owns one `llama-server` child).
     #[must_use]
     pub fn child_count(&self) -> usize {
-        self.guards.len()
+        self.models.len()
     }
 }
 
