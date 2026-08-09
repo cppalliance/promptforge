@@ -28,7 +28,7 @@ A prompt file is Markdown with three parts:
 - **H1 heading** - exactly one. This is the prompt's title.
 - **H2 sections** - executable units. They run top to bottom.
 
-Everything between the H1 and the first H2 is a human-readable description. It is not sent to the model.
+Prose between the H1 and the first H2 is the H1 description. It is not part of any H2 section.
 
 Save this as `hello.md` and run it:
 
@@ -106,7 +106,7 @@ The prologue is an exact, unindented ` ```lua ` opening and ` ``` ` closing. Ind
 
 The prologue runs Lua before the model sees the prose.
 
-## 4. The Preamble (H1 Shared Lua)
+## 4. The Preamble (`lua shared`)
 
 ````markdown
 ---
@@ -117,7 +117,7 @@ promptforge: 1
 
 # Fetcher
 
-```lua
+```lua shared
 models.always("writer",
     "A model suited for careful analysis and summarization",
     { thinking = false, temperature = 0, context = 32768 })
@@ -135,7 +135,11 @@ tools.add("fetch")
 Fetch {{ args }} and summarize its content in three bullet points.
 ````
 
-The fenced `lua` block directly under the H1 is the **preamble** (shared Lua). Binding runs it once to resolve `tools.need` / `models.need` into frozen bindings. Each section then creates a fresh VM and **replays** that same shared program so declarations match call-for-call and global helpers are loaded into that VM. Host values (`args`, `var`, `store`, `reply`, section `tools` / `models` APIs) are injected only after that replay.
+The exact `lua shared` fence is the **preamble**. It may appear anywhere between the H1 and the first section. Binding runs it once to resolve `tools.need` / `models.need` into frozen bindings. Each section then creates a fresh VM and **replays** that same shared program so declarations match call-for-call and global helpers are loaded into that VM. Host values (`args`, `var`, `store`, `reply`, section `tools` / `models` APIs) are injected only after that replay.
+
+A prompt may contain at most one `lua shared` fence, and it must be in H1. A second `lua shared` fence, or one under an H2 or deeper heading, is a parse error. The opening marker must be the exact, unindented text ` ```lua shared ` with an exact ` ``` ` closing marker.
+
+A plain H1 `lua` fence is not a shared library. It is parsed and executed as an ordinary live H1 Lua block, even when it is the only H1 block. Use the explicit `shared` tag for code that must be replayed into section VMs.
 
 `models.always` does three things in one call: declares a model need, resolves it against the gateway catalog, and sets it as the default for all sections. Sections that call `models.use` override this default. The combined form takes an alias, a capability description, and an optional table of constraints. Both forms return a Model object.
 
@@ -153,7 +157,7 @@ not `local search = ...`.
 
 `args`, `var`, and `store` are not available during the preamble. Use them in section Lua after host injection.
 
-The preamble declares tools and models; aliases (and global handles) are then available to every section.
+The explicit `lua shared` preamble declares tools and models; aliases (and global handles) are then available to every section.
 
 ## 5. The Epilog
 
@@ -166,7 +170,7 @@ promptforge: 1
 
 # Uppercase
 
-```lua
+```lua shared
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
@@ -207,7 +211,7 @@ promptforge: 1
 
 # Two Step
 
-```lua
+```lua shared
 models.always("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 16384 })
@@ -248,7 +252,7 @@ promptforge: 1
 
 # Store Demo
 
-```lua
+```lua shared
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
@@ -311,7 +315,7 @@ promptforge: 1
 
 # Template Demo
 
-```lua
+```lua shared
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
@@ -372,7 +376,7 @@ promptforge: 1
 
 # Researcher
 
-```lua
+```lua shared
 models.always("writer",
     "A careful research model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -421,7 +425,7 @@ promptforge: 1
 
 # Tool Inspect
 
-```lua
+```lua shared
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
@@ -478,7 +482,7 @@ promptforge: 1
 
 # Model Inspect
 
-```lua
+```lua shared
 writer = models.need("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -530,7 +534,7 @@ promptforge: 1
 
 # Gated Research
 
-```lua
+```lua shared
 writer = models.always("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -581,7 +585,7 @@ promptforge: 1
 
 # Alternating
 
-```lua
+```lua shared
 writer = models.always("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -641,7 +645,7 @@ promptforge: 1
 
 # Composable Tools
 
-```lua
+```lua shared
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 16384 })
@@ -688,7 +692,7 @@ promptforge: 1
 
 # Pipeline
 
-```lua
+```lua shared
 models.always("writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 16384 })
@@ -755,7 +759,7 @@ promptforge: 1
 
 # Branching
 
-```lua
+```lua shared
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
@@ -825,7 +829,7 @@ promptforge: 1
 
 # Evidence Gatherer
 
-```lua
+```lua shared
 models.always("writer",
     "A careful research model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -904,7 +908,7 @@ promptforge: 1
 
 # Sys Demo
 
-```lua
+```lua shared
 models.always("writer",
     "A general-purpose model",
     { thinking = false, temperature = 0, context = 8192 })
@@ -953,7 +957,7 @@ promptforge: 1
 
 # Validated
 
-```lua
+```lua shared
 models.always("writer",
     "A careful research model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -1034,7 +1038,7 @@ max_tool_iterations: 24
 
 # Briefer
 
-```lua
+```lua shared
 writer = models.always("writer",
     "A careful analysis model suited to structured reasoning",
     { thinking = false, temperature = 0, context = 32768 })
@@ -1570,7 +1574,7 @@ frontmatter (YAML)
 
 # Title (exactly one)
 
-```lua
+```lua shared
 -- Preamble: shared Lua (bound once, replayed per section VM)
 -- tools.need, tools.always, models.need, models.always
 -- Use globals for handles sections must see

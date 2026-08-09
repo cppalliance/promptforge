@@ -6,7 +6,7 @@ promptforge: 1
 
 # Analyst Example
 
-```lua
+```lua shared
 models.need("analyst", "A model suited for careful analysis", { thinking = false, temperature = 0, context = 40000 })
 ```
 
