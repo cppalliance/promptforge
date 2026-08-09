@@ -592,7 +592,7 @@ async fn run_sections(
         // grows, which is what the progress contract requires.
         observer.observe(execution, &section.name, detail::SECTION_STARTED);
 
-        let mut vm = match prompt.shared.as_ref() {
+        let mut vm = match prompt.replay.as_ref() {
             Some(shared) => SectionVm::new_with_shared_bindings(
                 shared,
                 bindings,
@@ -656,7 +656,7 @@ async fn run_sections(
                         execution,
                         observer,
                         debug,
-                        prompt.shared.as_ref(),
+                        prompt.replay.as_ref(),
                         bindings,
                         models,
                         bound,

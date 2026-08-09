@@ -172,7 +172,7 @@ fn parse_execution_fixture(
 ) -> Prompt {
     let prompt = Prompt::parse(source, execution, observer)
         .unwrap_or_else(|error| panic!("fixture {name} failed to parse: {error}"));
-    if let Some(shared) = &prompt.shared {
+    if let Some(shared) = &prompt.replay {
         let bindings = bind_tool_declarations(shared, &NoTools, execution, observer, &prompt.title)
             .unwrap_or_else(|error| {
                 panic!("fixture {name} failed deterministic declaration binding: {error}")
@@ -252,7 +252,8 @@ fn verify_minimal(prompt: &Prompt) {
     assert_eq!(prompt.frontmatter.description, "minimum valid");
     assert_eq!(prompt.frontmatter.promptforge, Some(1));
     assert_eq!(prompt.title, "Test");
-    assert!(prompt.shared.is_none());
+    assert!(prompt.replay.is_none());
+    assert!(prompt.h1_blocks.is_empty());
     assert!(prompt.description_text.is_empty());
     assert_eq!(prompt.sections.len(), 1);
     assert_eq!(prompt.entry().name, "Run");
@@ -271,7 +272,7 @@ fn verify_shared_library(prompt: &Prompt) {
     assert_eq!(prompt.frontmatter.promptforge, Some(1));
     assert_eq!(prompt.title, "Shared Library");
     assert_eq!(
-        prompt.shared.as_ref().map(LuaProgram::source),
+        prompt.replay.as_ref().map(LuaProgram::source),
         Some("function normalize(value)\n    return string.lower(value)\nend")
     );
     assert_eq!(
@@ -313,7 +314,7 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
     );
     assert_eq!(prompt.frontmatter.max_tool_iterations, Some(3));
     assert_eq!(prompt.title, "Phase Boundaries");
-    assert!(prompt.shared.is_none());
+    assert!(prompt.replay.is_none());
     assert_eq!(prompt.description_text, "Transform one model response.");
     assert_eq!(prompt.sections.len(), 2);
 
