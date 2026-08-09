@@ -1,7 +1,7 @@
 //! Unit tests for section execution, tool scoping, and the tool-call loop.
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::Json;
@@ -595,7 +595,7 @@ async fn spawn_mock_gateway() -> SocketAddr {
 /// Progress that reports nowhere, for the loop tests that assert on the
 /// reply rather than on the events. The caller owns the turn counter, so
 /// the borrow ends with the call.
-fn silent_progress<'a>(turns: &'a mut u32, options: &'a CompletionOptions) -> SectionProgress<'a> {
+fn silent_progress<'a>(turns: &'a AtomicU32, options: &'a CompletionOptions) -> SectionProgress<'a> {
     SectionProgress {
         execution: EXECUTION,
         observer: &NullObserver,
@@ -639,7 +639,7 @@ async fn tool_loop_dispatches_then_returns_text() {
     let dispatch = dispatch_for(tools);
     let registry = ToolRegistry::new(tools.iter().copied());
 
-    let mut turns = 0;
+    let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let out = run_tool_loop(
         &client,
@@ -648,14 +648,14 @@ async fn tool_loop_dispatches_then_returns_text() {
         &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&mut turns, &options),
+        silent_progress(&turns, &options),
         None,
         None,
     )
     .await
     .unwrap();
     assert_eq!(out, "final answer");
-    assert_eq!(turns, 2, "one tool-call reply, then the final text");
+    assert_eq!(turns.load(Ordering::Relaxed), 2, "one tool-call reply, then the final text");
 }
 
 /// A mock gateway that always asks for a tool call, never converging. The
@@ -707,7 +707,7 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     let dispatch = dispatch_for(tools);
     let registry = ToolRegistry::new(tools.iter().copied());
 
-    let mut turns = 0;
+    let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let err = run_tool_loop(
         &client,
@@ -716,7 +716,7 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
         &registry,
         "loop forever".to_string(),
         cap,
-        silent_progress(&mut turns, &options),
+        silent_progress(&turns, &options),
         None,
         None,
     )
@@ -743,7 +743,7 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
     let dispatch = dispatch_for(tools);
     let registry = ToolRegistry::new(tools.iter().copied());
 
-    let mut turns = 0;
+    let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let err = run_tool_loop(
         &client,
@@ -752,7 +752,7 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
         &registry,
         "loop forever".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&mut turns, &options),
+        silent_progress(&turns, &options),
         None,
         None,
     )
@@ -799,7 +799,7 @@ async fn tool_loop_errors_on_unknown_tool() {
     let schemas = schemas_for(&[&echo]);
     let registry = ToolRegistry::new(std::iter::empty());
 
-    let mut turns = 0;
+    let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let err = run_tool_loop(
         &client,
@@ -808,7 +808,7 @@ async fn tool_loop_errors_on_unknown_tool() {
         &registry,
         "call unknown".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&mut turns, &options),
+        silent_progress(&turns, &options),
         None,
         None,
     )
@@ -843,7 +843,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     let registry = ToolRegistry::new(tools.iter().copied());
 
     let recorder = Recorder::default();
-    let mut turns = 0;
+    let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let err = run_tool_loop(
         &client,
@@ -856,7 +856,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
             execution: EXECUTION,
             observer: &recorder,
             section: "Gather",
-            turns: &mut turns,
+            turns: &turns,
             debug: None,
             completion_options: &options,
         },
@@ -907,7 +907,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
 
     let client = GatewayClient::new(&format!("http://{addr}/v1"), "secret token");
     let recorder = Recorder::default();
-    let mut turns = 0;
+    let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let error = run_tool_loop(
         &client,
@@ -920,7 +920,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
             execution: EXECUTION,
             observer: &recorder,
             section: "Gather",
-            turns: &mut turns,
+            turns: &turns,
             debug: None,
             completion_options: &options,
         },
@@ -977,7 +977,7 @@ async fn spawn_text_finish_gateway(
 async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(String, String)>, u32) {
     let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
     let recorder = Recorder::default();
-    let mut turns = 0;
+    let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let out = run_tool_loop(
         &client,
@@ -990,7 +990,7 @@ async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(Strin
             execution: EXECUTION,
             observer: &recorder,
             section: "Gather",
-            turns: &mut turns,
+            turns: &turns,
             debug: None,
             completion_options: &options,
         },
@@ -998,7 +998,7 @@ async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(Strin
         None,
     )
     .await;
-    (out, recorder.events(), turns)
+    (out, recorder.events(), turns.load(Ordering::Relaxed))
 }
 
 #[tokio::test]
@@ -1141,7 +1141,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     let dispatch = dispatch_for(tools);
     let registry = ToolRegistry::new(tools.iter().copied());
 
-    let mut turns = 0;
+    let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let out = run_tool_loop(
         &client,
@@ -1150,7 +1150,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&mut turns, &options),
+        silent_progress(&turns, &options),
         None,
         None,
     )
@@ -1184,7 +1184,7 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     let dispatch = dispatch_for(tools);
     let registry = ToolRegistry::new(tools.iter().copied());
 
-    let mut turns = 0;
+    let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let out = run_tool_loop(
         &client,
@@ -1193,7 +1193,7 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&mut turns, &options),
+        silent_progress(&turns, &options),
         None,
         None,
     )
@@ -1276,7 +1276,7 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
     let dispatch = dispatch_for(tools);
     let registry = ToolRegistry::new(tools.iter().copied());
 
-    let mut turns = 0;
+    let turns = AtomicU32::new(0);
     let options = CompletionOptions {
         model: "gemma-3-27b-it".to_owned(),
         temperature: None,
@@ -1291,7 +1291,7 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&mut turns, &options),
+        silent_progress(&turns, &options),
         None,
         None,
     )
@@ -1511,7 +1511,11 @@ async fn a_failing_run_still_reports_run_finished() {
 #[tokio::test]
 async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() {
     let (addr, _, _) = spawn_aliased_tool_gateway("echo").await;
-    let tool = ScopedFixtureTool::new("echo", "canonical_echo", "Echo a test value.");
+    let tool = Arc::new(ScopedFixtureTool::new(
+        "echo",
+        "canonical_echo",
+        "Echo a test value.",
+    ));
     let descriptor = ToolDescriptor::new(
         PickerToolId::new("tests", "echo"),
         tool.description(),
@@ -1534,8 +1538,8 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
         Prompt::parse(&source, EXECUTION, &recorder).expect("the lifecycle fixture must parse");
     let picker = ToolPicker::build(Catalog::new(vec![descriptor]), PickerConfig::default())
         .expect("the lifecycle picker must build");
-    let tools: &[&dyn Tool] = &[&tool];
-    let registry = ToolRegistry::new(tools.iter().copied());
+    let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];
+    let registry = ToolRegistry::new(tools.iter().map(AsRef::as_ref));
     let prompt = crate::bind::bind_prompt(
         prompt,
         &picker,
@@ -1550,7 +1554,7 @@ async fn one_execution_id_spans_parse_bind_and_the_complete_runtime_lifecycle() 
     let result = run(
         &prompt,
         "",
-        tools,
+        &tools,
         &store,
         RunOptions {
             execution: EXECUTION,
@@ -1612,7 +1616,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     let registry = ToolRegistry::new(tools.iter().copied());
 
     let recorder = Recorder::default();
-    let mut turns = 0;
+    let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let out = run_tool_loop(
         &client,
@@ -1625,7 +1629,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
             execution: EXECUTION,
             observer: &recorder,
             section: "Gather",
-            turns: &mut turns,
+            turns: &turns,
             debug: None,
             completion_options: &options,
         },
@@ -2429,7 +2433,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
     let out = run(
         &prompt,
         "",
-        &[&tool],
+        &[Arc::new(tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -2453,7 +2457,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
 #[tokio::test]
 async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_id() {
     let (addr, bodies, _) = spawn_aliased_tool_gateway("local_alias").await;
-    let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Concrete description.");
+    let tool = Arc::new(ScopedFixtureTool::new("concrete", "canonical_wire", "Concrete description."));
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua\n\
@@ -2468,7 +2472,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
     let out = run(
         &prompt,
         "",
-        &[&tool],
+        &[Arc::clone(&tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -2500,7 +2504,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
 #[tokio::test]
 async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
     let (addr, bodies, _) = spawn_aliased_tool_gateway("section_tool").await;
-    let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Section concrete.");
+    let tool = Arc::new(ScopedFixtureTool::new("concrete", "canonical_wire", "Section concrete."));
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua\n\
@@ -2514,7 +2518,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
     let out = run(
         &prompt,
         "",
-        &[&tool],
+        &[Arc::clone(&tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -2579,7 +2583,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
     let out = run(
         &prompt,
         "",
-        &[&first, &second],
+        &[Arc::new(first) as Arc<dyn Tool>, Arc::new(second) as Arc<dyn Tool>],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -2621,7 +2625,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
     let error = run(
         &prompt,
         "",
-        &[&first, &second],
+        &[Arc::new(first) as Arc<dyn Tool>, Arc::new(second) as Arc<dyn Tool>],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -2774,7 +2778,7 @@ async fn debug_capture_none_changes_nothing() {
 #[tokio::test]
 async fn tool_calls_count_increments_on_successful_dispatch() {
     let (addr, _, _) = spawn_aliased_tool_gateway("echo").await;
-    let tool = ScopedFixtureTool::new("echo", "canonical_echo", "Echo a test value.");
+    let tool = Arc::new(ScopedFixtureTool::new("echo", "canonical_echo", "Echo a test value."));
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua\n\
         tools.need('echo', 'echo tool')\n\
@@ -2788,7 +2792,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
     let out = run(
         &prompt,
         "",
-        &[&tool],
+        &[Arc::clone(&tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -2832,7 +2836,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
     let error = run(
         &prompt,
         "",
-        &[&tool],
+        &[Arc::new(tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -2868,7 +2872,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
     let error = run(
         &prompt,
         "",
-        &[&tool],
+        &[Arc::new(tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -2916,7 +2920,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
     let error = run(
         &prompt,
         "",
-        &[&scoped, &global],
+        &[Arc::new(scoped) as Arc<dyn Tool>, Arc::new(global) as Arc<dyn Tool>],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -2967,7 +2971,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
     let error = run(
         &prompt,
         "",
-        &[&tool],
+        &[Arc::new(tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
