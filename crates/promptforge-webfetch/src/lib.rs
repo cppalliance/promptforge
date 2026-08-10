@@ -14,8 +14,12 @@ use std::sync::Arc;
 use readabilityrs::{Readability, ReadabilityOptions};
 use reqwest::header::CONTENT_TYPE;
 
-use promptforge_core::tools::{Tool, ToolId};
+use promptforge_core::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
 use promptforge_core::{Error, Result};
+
+/// The result the [`Tool::call`] boundary returns: untrusted page text on
+/// success, a narrow [`ToolError`] on a hard failure.
+type CallResult = std::result::Result<ToolOutput, ToolError>;
 
 pub mod address;
 pub mod config;
@@ -99,9 +103,14 @@ impl WebFetch {
 
 /// Converts a [`FetchError`] into a tool outcome: recoverable failures become
 /// successful tool text the model reads; policy/admission failures remain hard errors.
-fn soft_or_hard(err: FetchError) -> Result<String> {
+/// Maps an argument-parsing failure onto an invalid-arguments [`ToolError`].
+fn invalid_args(err: Error) -> ToolError {
+    ToolError::message(err.to_string()).with_kind(ToolErrorKind::InvalidArguments)
+}
+
+fn soft_or_hard(err: FetchError) -> CallResult {
     if err.is_recoverable() {
-        Ok(err.model_facing())
+        Ok(ToolOutput::untrusted(err.model_facing()))
     } else {
         Err(err.into())
     }
@@ -113,38 +122,41 @@ fn soft_or_hard(err: FetchError) -> Result<String> {
 /// At body-read time, `Error::Parse` comes only from [`FetchError`] (TooLarge or
 /// Undecodable), both recoverable. Transport errors during streaming are also
 /// recoverable since the model can try a different URL.
-fn body_read_outcome(err: Error) -> Result<String> {
+fn body_read_outcome(err: Error) -> CallResult {
     match err {
-        Error::Parse(msg) => Ok(msg),
-        Error::Http(_) => {
-            Ok("fetch failed: network error during download; try a different URL".into())
-        }
-        other => Err(other),
+        Error::Parse(msg) => Ok(ToolOutput::untrusted(msg)),
+        Error::Http(_) => Ok(ToolOutput::untrusted(
+            "fetch failed: network error during download; try a different URL",
+        )),
+        other => Err(ToolError::message(other.to_string()).with_kind(ToolErrorKind::Backend)),
     }
 }
 
 /// Maps a reqwest send error into either a soft tool result (recoverable) or
 /// a hard `Err` (policy/admission).
-fn map_send_error_to_outcome(err: &reqwest::Error, url: &str) -> Result<String> {
+fn map_send_error_to_outcome(err: &reqwest::Error, url: &str) -> CallResult {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(err);
     while let Some(current) = source {
         if let Some(fetch_err) = current.downcast_ref::<FetchError>() {
             if fetch_err.is_recoverable() {
-                return Ok(fetch_err.model_facing());
+                return Ok(ToolOutput::untrusted(fetch_err.model_facing()));
             }
-            return Err(Error::Parse(fetch_err.model_facing()));
+            return Err(ToolError::message(fetch_err.model_facing())
+                .with_kind(ToolErrorKind::InvalidArguments));
         }
         source = current.source();
     }
     if err.is_timeout() {
-        return Ok(FetchError::Timeout {
-            url: url.to_string(),
-        }
-        .model_facing());
+        return Ok(ToolOutput::untrusted(
+            FetchError::Timeout {
+                url: url.to_string(),
+            }
+            .model_facing(),
+        ));
     }
-    Ok(format!(
+    Ok(ToolOutput::untrusted(format!(
         "fetch failed for {url}: network error; try a different URL"
-    ))
+    )))
 }
 
 impl Default for WebFetch {
@@ -329,6 +341,7 @@ fn extract_html(html: &str, base_url: Option<&str>, raw: bool) -> (String, Extra
 impl Tool for WebFetch {
     fn id(&self) -> ToolId {
         ToolId::new("promptforge", "web_fetch")
+            .expect("`promptforge`/`web_fetch` is a valid tool id")
     }
 
     #[expect(
@@ -345,13 +358,6 @@ impl Tool for WebFetch {
     )]
     fn description(&self) -> &str {
         "Fetch a web page and return its main content as markdown."
-    }
-
-    /// Fetched page text is attacker-controllable, so it is untrusted external
-    /// data: the runtime wraps this tool's result in a guard block before it
-    /// reaches the model.
-    fn untrusted_output(&self) -> bool {
-        true
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -376,18 +382,18 @@ impl Tool for WebFetch {
         })
     }
 
-    async fn call(&self, args: serde_json::Value) -> Result<String> {
-        let url = args
-            .get("url")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| Error::Parse("web_fetch: missing url argument".into()))?;
+    async fn call(&self, args: serde_json::Value) -> CallResult {
+        let url = args.get("url").and_then(serde_json::Value::as_str).ok_or_else(|| {
+            ToolError::message("web_fetch: missing url argument")
+                .with_kind(ToolErrorKind::InvalidArguments)
+        })?;
 
         // A per-call `max_chars` overrides the configured default for this
         // fetch; absent, the config default applies.
-        let max_chars = parse_max_chars(&args, self.config.max_chars)?;
+        let max_chars = parse_max_chars(&args, self.config.max_chars).map_err(invalid_args)?;
 
         // `raw` forces whole-page rendering of an HTML response.
-        let raw = parse_raw(&args)?;
+        let raw = parse_raw(&args).map_err(invalid_args)?;
 
         // Enforce the URL-admission policy before any network access. Scheme
         // refusals (plain http when disallowed) are soft so a fanout arm can
@@ -412,7 +418,7 @@ impl Tool for WebFetch {
                 url: final_url.to_string(),
                 status: status.as_u16(),
             };
-            return Ok(err.model_facing());
+            return Ok(ToolOutput::untrusted(err.model_facing()));
         }
 
         // Route on the response Content-Type, read before the body: a binary or
@@ -483,8 +489,11 @@ impl Tool for WebFetch {
                 (decoded, Extraction::Plain, false)
             }
             Route::Plain { structured: false } => {
-                let (body, size_truncated) =
-                    read_body_truncating(response, self.config.max_bytes).await?;
+                let (body, size_truncated) = read_body_truncating(response, self.config.max_bytes)
+                    .await
+                    .map_err(|e| {
+                        ToolError::message(e.to_string()).with_kind(ToolErrorKind::Transport)
+                    })?;
                 let decoded = match decode_body(&body, charset.as_deref(), final_url.as_str()) {
                     Ok(d) => d,
                     Err(e) => return soft_or_hard(e),
@@ -502,10 +511,10 @@ impl Tool for WebFetch {
         // Provenance header: a `url:` line naming the final URL, a `truncated:`
         // line, and an `extraction:` line naming how the text was produced, then
         // a blank line, then the content.
-        Ok(format!(
+        Ok(ToolOutput::untrusted(format!(
             "url: {final_url}\ntruncated: {truncated}\nextraction: {}\n\n{text}",
             extraction.label()
-        ))
+        )))
     }
 }
 
@@ -592,11 +601,13 @@ async fn read_body_capped(
     max_bytes: usize,
 ) -> Result<Vec<u8>> {
     let too_large = || -> Error {
-        FetchError::TooLarge {
-            url: url.to_string(),
-            limit: max_bytes,
-        }
-        .into()
+        Error::Parse(
+            FetchError::TooLarge {
+                url: url.to_string(),
+                limit: max_bytes,
+            }
+            .model_facing(),
+        )
     };
 
     // Precheck: an honest Content-Length over the cap is refused before any
@@ -1581,10 +1592,18 @@ mod tests {
     }
 
     #[test]
-    fn web_fetch_reports_untrusted_output() {
-        // Fetched page text is attacker-controllable, so the tool opts in to
-        // guard-wrapping by overriding the trait's defaulted `false`.
-        assert!(WebFetch::new().untrusted_output());
+    fn recoverable_failure_is_returned_as_untrusted_output() {
+        use promptforge_core::tools::OutputTrust;
+
+        use crate::error::FetchError;
+
+        // Fetched page text is attacker-controllable, so a recoverable failure
+        // that the model reads as tool text must carry `Untrusted` trust.
+        let outcome = super::soft_or_hard(FetchError::Timeout {
+            url: "https://example.test/".to_string(),
+        })
+        .expect("a recoverable failure is a soft, successful tool result");
+        assert_eq!(outcome.trust(), OutputTrust::Untrusted);
     }
 
     #[test]
