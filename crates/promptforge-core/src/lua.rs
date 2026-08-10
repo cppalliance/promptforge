@@ -1734,7 +1734,12 @@ impl SectionVm {
         section: &str,
     ) -> Result<ClosedScopes> {
         observer.observe(&self.execution, section, detail::TOOL_SCOPE_CLOSING);
-        let tools = self.close_tool_scope_inner();
+        // LUA-008: validate and compute BOTH scopes before committing either, so
+        // a model-close failure cannot leave the tool scope already committed to
+        // Closed. Phase 1 validates the tool phase and computes the effective
+        // tool scope WITHOUT committing; the model close then validates+resolves;
+        // only after both succeed is the (infallible) tool commit performed.
+        let tools = self.prepare_tool_scope();
         observer.observe(
             &self.execution,
             section,
@@ -1752,12 +1757,17 @@ impl SectionVm {
             observer,
             section,
         )?;
+        // Both scopes validated (and the model phase committed); the tool commit
+        // below only flips an enum and cannot fail.
+        self.commit_tool_scope_closed()?;
         Ok(ClosedScopes { tools, model })
     }
 
-    fn close_tool_scope_inner(&self) -> Result<ToolScope> {
+    /// Validates the tool phase is open and computes the effective tool scope
+    /// WITHOUT committing the phase transition (see [`Self::close_scopes`]).
+    fn prepare_tool_scope(&self) -> Result<ToolScope> {
         let bindings = &self.bound_tools;
-        let mut runtime = self
+        let runtime = self
             .tool_runtime
             .lock()
             .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
@@ -1766,7 +1776,6 @@ impl SectionVm {
                 "tool scope can only close once after H2 recording".to_owned(),
             ));
         }
-        runtime.phase = ToolPhase::Closed;
         let aliases = bindings
             .always
             .iter()
@@ -1780,6 +1789,19 @@ impl SectionVm {
         Ok(ToolScope {
             bindings: effective,
         })
+    }
+
+    /// Commits the tool scope's H2 -> Closed transition. Infallible apart from a
+    /// poisoned lock; only transitions from `H2` so a double call is safe.
+    fn commit_tool_scope_closed(&self) -> Result<()> {
+        let mut runtime = self
+            .tool_runtime
+            .lock()
+            .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
+        if runtime.phase == ToolPhase::H2 {
+            runtime.phase = ToolPhase::Closed;
+        }
+        Ok(())
     }
 
     /// Installs `tools.calls` as a read-only Lua table backed by the shared
@@ -4308,6 +4330,37 @@ mod tests {
                 .as_deref(),
             Some("1")
         );
+    }
+
+    #[test]
+    fn tool_scope_is_not_committed_when_model_close_fails() {
+        // LUA-008: the tool scope must not commit to Closed if the model close
+        // fails - both transitions are validated before either commits.
+        let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "S").expect("VM builds");
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .expect("host injects");
+        // Force the model close to fail: select an alias with no frozen binding.
+        vm.model_runtime.lock().expect("lock").used = Some("ghost".to_owned());
+
+        let error = vm
+            .close_scopes(&NullObserver, "S")
+            .expect_err("the model close must fail");
+        assert!(
+            error.to_string().contains("no frozen binding"),
+            "the failure names the missing model binding: {error}"
+        );
+        assert_eq!(
+            vm.tool_runtime.lock().expect("lock").phase,
+            ToolPhase::H2,
+            "a failed model close must leave the tool scope uncommitted"
+        );
+
+        // With the bad selection cleared the close now succeeds, proving the tool
+        // scope was still open (H2) rather than half-committed.
+        vm.model_runtime.lock().expect("lock").used = None;
+        vm.close_scopes(&NullObserver, "S")
+            .expect("closing succeeds once the model selection is valid");
+        vm.teardown(&NullObserver, "S");
     }
 
     #[test]
