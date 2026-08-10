@@ -78,6 +78,9 @@ struct AdminProfiles {
 pub(crate) struct AppState {
     live: Arc<RwLock<LiveState>>,
     profiles: Option<Arc<AdminProfiles>>,
+    /// Serializes profile switches so two concurrent switches cannot interleave
+    /// their reads and writes of the live state.
+    switch: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -100,6 +103,7 @@ impl AppState {
                 profile_name,
             })),
             profiles: profiles_dir.map(|dir| Arc::new(AdminProfiles { dir })),
+            switch: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -229,10 +233,19 @@ async fn admin_status(
     })))
 }
 
-/// Immediately switches to another named profile. Unloads the previous local
-/// runtime (killing its children) before loading the next; in-flight chat
-/// requests may fail with 503 or a transport error. A load failure leaves
-/// remote-only routing from the new profile with empty local models.
+/// Immediately switches to another named profile.
+///
+/// Switches are serialized by a dedicated mutex, so two concurrent requests
+/// cannot interleave. Configuration is loaded and validated off the live lock;
+/// a config or routing failure returns an error and leaves the live state
+/// untouched. The bearer key, routing, and web-search settings of the new
+/// profile are committed only after the new local runtime starts successfully,
+/// via a single atomic swap under the write lock, so a failed switch never
+/// rotates the admin credential. Because old and new `llama-server` children
+/// must not both hold VRAM, the old children are stopped before the new ones
+/// start; a start failure therefore leaves the previous profile authenticated
+/// and remote-routable but without its local models (a documented degraded
+/// state) rather than a half-applied new profile.
 async fn admin_switch_profile(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -243,37 +256,32 @@ async fn admin_switch_profile(
     let name = crate::profile::ProfileName::parse(&request.name)
         .map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
 
+    // Serialize switches for the whole operation (LIB-008).
+    let _switch = state.switch.lock().await;
+
     let path = dir.join(format!("{name}.toml"));
     if !path.is_file() {
         return Err(GatewayError::ProfileNotFound(name.to_string()));
     }
 
+    // Build and validate the entire remote side off the live lock. Any failure
+    // here returns before mutating live state at all (LIB-009).
     let config = crate::config::Config::load_profile(&dir, &name)
         .map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
-
-    // Remote-only routing for the interim (and failure) live state. Kept owned
-    // so a successful load can merge local models without reloading the file.
     let remote_routing =
         Routing::from_config(&config).map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
-    let interim_routing = Routing::new(remote_routing.models().to_vec());
     let new_web_search = config
-        .tools
-        .as_ref()
-        .and_then(|t| t.web_search.as_ref())
+        .web_search_config()
         .map(WebSearchState::new)
         .map(Arc::new);
-    let new_key = config.server.key.clone();
+    let new_key = config.server_key();
 
-    // Immediate unload under the write lock, then drop old children before load
-    // so old and new llama-server processes never hold VRAM at once.
+    // Stop the previous local children before starting new ones so the two
+    // never hold VRAM simultaneously. The bearer key, routing, and web-search
+    // settings are left untouched here, so auth stays stable if start fails.
     let old_local = {
         let mut live = state.live.write().await;
-        let old_local = std::mem::replace(&mut live.local, LocalRuntime::empty());
-        live.routing = Arc::new(interim_routing);
-        live.key = new_key;
-        live.web_search = new_web_search;
-        live.profile_name = Some(name.to_string());
-        old_local
+        std::mem::replace(&mut live.local, LocalRuntime::empty())
     };
     drop(old_local);
 
@@ -293,10 +301,14 @@ async fn admin_switch_profile(
         .merge(new_local.models().iter().cloned())
         .map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
 
+    // Atomic swap: commit the whole new profile at once.
     {
         let mut live = state.live.write().await;
-        live.local = new_local;
         live.routing = Arc::new(routing);
+        live.key = new_key;
+        live.web_search = new_web_search;
+        live.local = new_local;
+        live.profile_name = Some(name.to_string());
     }
 
     tracing::info!(profile = %name, "switched profile");
