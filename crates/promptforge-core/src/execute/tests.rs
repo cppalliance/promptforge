@@ -692,7 +692,7 @@ async fn tool_loop_dispatches_then_returns_text() {
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
     let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied());
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -767,7 +767,7 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
     let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied());
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -806,7 +806,7 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
     let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied());
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -865,7 +865,7 @@ async fn tool_loop_errors_on_unknown_tool() {
     // targets, so the returned call resolves to no tool.
     let echo = EchoTool;
     let schemas = schemas_for(&[&echo]);
-    let registry = ToolRegistry::new(std::iter::empty());
+    let registry = ToolRegistry::new(std::iter::empty()).expect("unique test registry");
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -911,7 +911,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     let tools: &[&dyn Tool] = &[&failing];
     let schemas = schemas_for(tools);
     let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied());
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
 
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
@@ -990,7 +990,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
         &client,
         &[],
         &BTreeMap::new(),
-        &ToolRegistry::new(std::iter::empty()),
+        &ToolRegistry::new(std::iter::empty()).expect("unique test registry"),
         "private model input".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
@@ -1063,7 +1063,7 @@ async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(Strin
         &client,
         &[],
         &BTreeMap::new(),
-        &ToolRegistry::new(std::iter::empty()),
+        &ToolRegistry::new(std::iter::empty()).expect("unique test registry"),
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
@@ -1223,7 +1223,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
     let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied());
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -1269,7 +1269,7 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
     let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied());
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -1364,7 +1364,7 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
     let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied());
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
 
     let turns = AtomicU32::new(0);
     let options = CompletionOptions {
@@ -1722,7 +1722,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     let tools: &[&dyn Tool] = &[&echo];
     let schemas = schemas_for(tools);
     let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied());
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
 
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
@@ -3111,7 +3111,8 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
             similarity: 0.98,
         }],
     };
-    let registry = ToolRegistry::new([&first as &dyn Tool, &second as &dyn Tool]);
+    let registry = ToolRegistry::new([&first as &dyn Tool, &second as &dyn Tool])
+        .expect("unique test registry");
     let recorder = Arc::new(Recorder::default());
 
     let error = prepare_effective_scope(
@@ -3658,7 +3659,8 @@ fn tool_bag_caches_on_unchanged_generation() {
     let mut bag = ToolBag::new(tool_bindings, Arc::clone(&tool_runtime));
     let echo = EchoTool;
     let fetch = FetchTool;
-    let registry = ToolRegistry::new([&echo as &dyn Tool, &fetch as &dyn Tool]);
+    let registry =
+        ToolRegistry::new([&echo as &dyn Tool, &fetch as &dyn Tool]).expect("unique test registry");
 
     let first = bag
         .prepare(&registry)
@@ -3745,7 +3747,7 @@ fn tool_description_override_appears_in_model_schema() {
         Vec::new(),
     );
     let echo = EchoTool;
-    let registry = ToolRegistry::new([&echo as &dyn Tool]);
+    let registry = ToolRegistry::new([&echo as &dyn Tool]).expect("unique test registry");
 
     // tools.add(Tool) without mutating .description keeps the registry text.
     let mut default_vm = SectionVm::new_for_section(

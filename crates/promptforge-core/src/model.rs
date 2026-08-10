@@ -732,19 +732,10 @@ struct ModelsListEntry {
     thinking: ThinkingMode,
     #[serde(default = "default_tool_dialect")]
     tool_dialect: ToolDialectId,
-    /// Parsed for wire-shape completeness; the runtime derives tools_mode from
-    /// tool_dialect via [`ToolDialectId::tools_mode`].
-    #[serde(default = "default_tools_mode")]
-    #[allow(dead_code)]
-    tools_mode: ToolsMode,
 }
 
 fn default_tool_dialect() -> ToolDialectId {
     ToolDialectId::OpenAi
-}
-
-fn default_tools_mode() -> ToolsMode {
-    ToolsMode::Native
 }
 
 /// Wire shape of gateway `GET /v1/models`.
@@ -989,7 +980,7 @@ mod tests {
         _observer: &dyn crate::observe::Observer,
         _section: &str,
     ) -> Result<(ToolBindings, ModelBindings)> {
-        let registry = ToolRegistry::new(std::iter::empty());
+        let registry = ToolRegistry::new(std::iter::empty()).expect("unique test registry");
         let producer = LiveBindingProducer::default();
         let lua = Lua::new();
         let result = lua.scope(|scope| {
@@ -1881,7 +1872,11 @@ mod tests {
         });
         let entry: ModelsListEntry = serde_json::from_value(json).unwrap();
         assert_eq!(entry.tool_dialect, ToolDialectId::Gemma3ToolCode);
-        assert_eq!(entry.tools_mode, crate::dialects::ToolsMode::Emulated);
+        // tools_mode is derived from the dialect at runtime, not read from the wire.
+        assert_eq!(
+            entry.tool_dialect.tools_mode(),
+            crate::dialects::ToolsMode::Emulated
+        );
     }
 
     #[test]
@@ -1894,6 +1889,9 @@ mod tests {
         });
         let entry: ModelsListEntry = serde_json::from_value(json).unwrap();
         assert_eq!(entry.tool_dialect, ToolDialectId::OpenAi);
-        assert_eq!(entry.tools_mode, crate::dialects::ToolsMode::Native);
+        assert_eq!(
+            entry.tool_dialect.tools_mode(),
+            crate::dialects::ToolsMode::Native
+        );
     }
 }

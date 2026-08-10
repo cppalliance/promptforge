@@ -34,17 +34,25 @@ impl std::fmt::Debug for SharedTools {
 
 impl SharedTools {
     /// Builds a shared set from caller-owned tool arcs.
-    #[must_use]
-    pub(crate) fn new(tools: &[Arc<dyn Tool>]) -> Self {
-        Self {
+    ///
+    /// Validates identity uniqueness once, here, so every [`Self::registry`] can
+    /// trust the invariant without rescanning.
+    ///
+    /// # Errors
+    /// Returns [`ToolRegistryError`] if two tools share a [`ToolId`].
+    pub(crate) fn new(tools: &[Arc<dyn Tool>]) -> Result<Self, ToolRegistryError> {
+        ToolRegistry::new(tools.iter().map(AsRef::as_ref))?;
+        Ok(Self {
             tools: Arc::from(tools.to_vec()),
-        }
+        })
     }
 
     /// Borrowing registry over the shared arcs.
+    ///
+    /// Uniqueness was established by [`Self::new`], so this skips revalidation.
     #[must_use]
     pub(crate) fn registry(&self) -> ToolRegistry<'_> {
-        ToolRegistry::new(self.tools.iter().map(AsRef::as_ref))
+        ToolRegistry::from_unique(self.tools.iter().map(AsRef::as_ref))
     }
 }
 
@@ -384,6 +392,29 @@ pub struct ToolIdError {
     reason: &'static str,
 }
 
+/// A [`ToolRegistry`] could not be built because an identity was repeated.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("duplicate tool identity {id:?} in registry")]
+#[non_exhaustive]
+pub struct ToolRegistryError {
+    /// The stable identity supplied more than once.
+    id: ToolId,
+}
+
+impl ToolRegistryError {
+    /// Returns the stable identity that was supplied more than once.
+    #[must_use]
+    pub fn id(&self) -> &ToolId {
+        &self.id
+    }
+}
+
+impl From<ToolRegistryError> for crate::error::Error {
+    fn from(error: ToolRegistryError) -> Self {
+        crate::error::Error::DuplicateLiveToolId { id: error.id }
+    }
+}
+
 /// A tool the executor can dispatch during a model's tool-call loop.
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
@@ -415,11 +446,11 @@ pub trait Tool: Send + Sync {
     async fn call(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError>;
 }
 
-/// An ordered collection of callable live tools.
+/// An ordered collection of callable live tools with unique identities.
 ///
-/// The registry preserves every entry, including repeated identities. A later
-/// live H1 resolution owns collision validation; this type only provides faithful
-/// iteration and identity-based lookup.
+/// Registration rejects repeated stable identities: a [`ToolRegistry`] can never
+/// hold two tools that share a [`ToolId`]. Iteration preserves supplied order and
+/// lookup is identity-based.
 pub struct ToolRegistry<'a> {
     tools: Vec<&'a dyn Tool>,
 }
@@ -439,16 +470,38 @@ impl std::fmt::Debug for ToolRegistry<'_> {
 impl<'a> ToolRegistry<'a> {
     /// Builds a registry in the order the live tools are supplied.
     ///
+    /// # Errors
+    /// Returns [`ToolRegistryError`] if two supplied tools share a [`ToolId`];
+    /// the registry never holds duplicate identities.
+    ///
     /// # Examples
     ///
     /// ```
     /// use promptforge_core::tools::ToolRegistry;
     ///
-    /// let registry = ToolRegistry::new(std::iter::empty());
+    /// let registry = ToolRegistry::new(std::iter::empty())?;
     /// assert!(registry.is_empty());
+    /// # Ok::<(), promptforge_core::tools::ToolRegistryError>(())
     /// ```
-    #[must_use]
-    pub fn new(tools: impl IntoIterator<Item = &'a dyn Tool>) -> Self {
+    pub fn new(
+        tools: impl IntoIterator<Item = &'a dyn Tool>,
+    ) -> Result<ToolRegistry<'a>, ToolRegistryError> {
+        let tools: Vec<&'a dyn Tool> = tools.into_iter().collect();
+        let mut seen = std::collections::BTreeSet::new();
+        for tool in &tools {
+            let id = tool.id();
+            if !seen.insert(id.clone()) {
+                return Err(ToolRegistryError { id });
+            }
+        }
+        Ok(Self { tools })
+    }
+
+    /// Builds a registry from tools whose identities are already known unique.
+    ///
+    /// For internal callers that validated uniqueness when the tool set was
+    /// assembled (see [`SharedTools`]), avoiding a redundant second scan.
+    pub(crate) fn from_unique(tools: impl IntoIterator<Item = &'a dyn Tool>) -> ToolRegistry<'a> {
         Self {
             tools: tools.into_iter().collect(),
         }
@@ -461,7 +514,8 @@ impl<'a> ToolRegistry<'a> {
     /// ```
     /// use promptforge_core::tools::ToolRegistry;
     ///
-    /// assert_eq!(ToolRegistry::new(std::iter::empty()).len(), 0);
+    /// assert_eq!(ToolRegistry::new(std::iter::empty())?.len(), 0);
+    /// # Ok::<(), promptforge_core::tools::ToolRegistryError>(())
     /// ```
     #[must_use]
     pub fn len(&self) -> usize {
@@ -475,7 +529,8 @@ impl<'a> ToolRegistry<'a> {
     /// ```
     /// use promptforge_core::tools::ToolRegistry;
     ///
-    /// assert!(ToolRegistry::new(std::iter::empty()).is_empty());
+    /// assert!(ToolRegistry::new(std::iter::empty())?.is_empty());
+    /// # Ok::<(), promptforge_core::tools::ToolRegistryError>(())
     /// ```
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -489,7 +544,8 @@ impl<'a> ToolRegistry<'a> {
     /// ```
     /// use promptforge_core::tools::ToolRegistry;
     ///
-    /// assert!(ToolRegistry::new(std::iter::empty()).tools().is_empty());
+    /// assert!(ToolRegistry::new(std::iter::empty())?.tools().is_empty());
+    /// # Ok::<(), promptforge_core::tools::ToolRegistryError>(())
     /// ```
     #[must_use]
     pub fn tools(&self) -> &[&'a dyn Tool] {
@@ -503,9 +559,10 @@ impl<'a> ToolRegistry<'a> {
     /// ```
     /// use promptforge_core::tools::{ToolId, ToolRegistry};
     ///
-    /// let registry = ToolRegistry::new(std::iter::empty());
+    /// let registry = ToolRegistry::new(std::iter::empty())?;
     /// let missing = ToolId::new("promptforge", "missing").expect("valid id");
     /// assert!(registry.get(&missing).is_none());
+    /// # Ok::<(), promptforge_core::tools::ToolRegistryError>(())
     /// ```
     #[must_use]
     pub fn get(&self, id: &ToolId) -> Option<&'a dyn Tool> {
@@ -642,7 +699,7 @@ mod tests {
     #[test]
     fn registry_lookup_uses_stable_identity_not_wire_name() {
         let tool = FixtureTool;
-        let registry = ToolRegistry::new([&tool as &dyn Tool]);
+        let registry = ToolRegistry::new([&tool as &dyn Tool]).expect("unique registry");
 
         let found = registry
             .get(&ToolId::new("fixtures", "inspect").expect("valid id"))
@@ -657,7 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_preserves_order_duplicates_and_first_match_lookup() {
+    fn registry_preserves_order_and_first_match_lookup() {
         let first = RegistryFixtureTool {
             id_name: "inspect",
             wire_name: "first_inspect",
@@ -666,15 +723,8 @@ mod tests {
             id_name: "summarize",
             wire_name: "summarize",
         };
-        let repeated = RegistryFixtureTool {
-            id_name: "inspect",
-            wire_name: "second_inspect",
-        };
-        let registry = ToolRegistry::new([
-            &first as &dyn Tool,
-            &middle as &dyn Tool,
-            &repeated as &dyn Tool,
-        ]);
+        let registry = ToolRegistry::new([&first as &dyn Tool, &middle as &dyn Tool])
+            .expect("distinct identities build a registry");
 
         assert_eq!(
             registry
@@ -682,16 +732,34 @@ mod tests {
                 .iter()
                 .map(|tool| tool.wire_name())
                 .collect::<Vec<_>>(),
-            ["first_inspect", "summarize", "second_inspect"]
+            ["first_inspect", "summarize"]
         );
-        assert_eq!(registry.len(), 3, "repeated identities must be retained");
+        assert_eq!(registry.len(), 2);
         assert_eq!(
             registry
                 .get(&ToolId::new("fixtures", "inspect").expect("valid id"))
-                .expect("the repeated identity should resolve")
+                .expect("the identity should resolve")
                 .wire_name(),
             "first_inspect",
-            "lookup must return the first matching entry"
+        );
+    }
+
+    #[test]
+    fn registry_rejects_duplicate_tool_ids() {
+        let first = RegistryFixtureTool {
+            id_name: "inspect",
+            wire_name: "first_inspect",
+        };
+        let repeated = RegistryFixtureTool {
+            id_name: "inspect",
+            wire_name: "second_inspect",
+        };
+        let error = ToolRegistry::new([&first as &dyn Tool, &repeated as &dyn Tool])
+            .expect_err("a repeated tool identity must be rejected at registration");
+        assert_eq!(
+            error.id(),
+            &ToolId::new("fixtures", "inspect").expect("valid id"),
+            "the error must name the duplicated identity"
         );
     }
 }

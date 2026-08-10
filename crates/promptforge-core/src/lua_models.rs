@@ -519,7 +519,7 @@ fn value_as_u32(value: &Value, field: &str) -> mlua::Result<u32> {
         Value::Number(number) if number.fract() == 0.0 => {
             let truncated = number.trunc();
             if (0.0..=f64::from(u32::MAX)).contains(&truncated) {
-                #[allow(
+                #[expect(
                     clippy::cast_possible_truncation,
                     clippy::cast_sign_loss,
                     reason = "range checked against u32::MAX and non-negative"

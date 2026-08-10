@@ -1,6 +1,6 @@
 //! Run-scoped live capability resolution for H1 execution.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use mlua::{Lua, Scope};
@@ -28,21 +28,16 @@ pub(crate) struct RuntimeResolution<'a, 'tools: 'a> {
 impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
     /// Creates one run-scoped resolver over live tool and model catalogs.
     ///
+    /// The `registry` already guarantees unique tool identities (duplicates are
+    /// rejected at registration), so no identity scan is needed here.
+    ///
     /// # Errors
-    /// Returns [`Error::DuplicateLiveToolId`] when the registry repeats an
-    /// identity, or [`Error::ModelBind`] when the model picker cannot be built.
+    /// Returns [`Error::ModelBind`] when the model picker cannot be built.
     pub(crate) fn new(
         picker: &'a ToolPicker,
         registry: &'a ToolRegistry<'tools>,
         models: &'a ModelCatalog,
     ) -> Result<Self> {
-        let mut live_ids = BTreeSet::new();
-        for tool in registry.tools() {
-            let id = tool.id();
-            if !live_ids.insert(id.clone()) {
-                return Err(Error::DuplicateLiveToolId { id });
-            }
-        }
         let model_picker = if models.is_empty() {
             None
         } else {
@@ -252,7 +247,6 @@ mod tests {
     use std::sync::Arc;
 
     use mlua::Lua;
-    use promptforge_tool_picker::{Catalog, Config};
     use serde_json::{Value, json};
 
     use super::*;
@@ -323,7 +317,8 @@ mod tests {
 
     fn callback_error(source: &FixtureSource, tools: &[Arc<dyn Tool>], code: &str) -> Error {
         let resolver = PickerResolver::new(source);
-        let registry = ToolRegistry::new(tools.iter().map(AsRef::as_ref));
+        let registry =
+            ToolRegistry::new(tools.iter().map(AsRef::as_ref)).expect("fixture tools are unique");
         let producer = LiveBindingProducer::default();
         let model_resolver = |description: &str, _: &ModelNeedOpts| {
             Err(Error::ModelAbsent {
@@ -423,9 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_rejects_duplicate_live_registry_ids() {
-        let picker =
-            ToolPicker::build(Catalog::default(), Config::default()).expect("empty picker builds");
+    fn registration_rejects_duplicate_live_registry_ids() {
         let tools: Vec<Arc<dyn Tool>> = vec![
             Arc::new(FixtureTool {
                 id: ToolId::new("tests", "same").expect("valid id"),
@@ -434,11 +427,9 @@ mod tests {
                 id: ToolId::new("tests", "same").expect("valid id"),
             }),
         ];
-        let registry = ToolRegistry::new(tools.iter().map(AsRef::as_ref));
-        assert!(matches!(
-            RuntimeResolution::new(&picker, &registry, &ModelCatalog::empty()),
-            Err(Error::DuplicateLiveToolId { id }) if id == ToolId::new("tests", "same").expect("valid id")
-        ));
+        let error = ToolRegistry::new(tools.iter().map(AsRef::as_ref))
+            .expect_err("a repeated live identity must be rejected at registration");
+        assert_eq!(error.id(), &ToolId::new("tests", "same").expect("valid id"));
     }
 
     #[test]

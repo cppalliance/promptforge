@@ -3069,7 +3069,8 @@ mod tests {
             Arc::new(FixtureTool("search")),
             Arc::new(FixtureTool("fetch")),
         ];
-        let registry = ToolRegistry::new(tools.iter().map(AsRef::as_ref));
+        let registry =
+            ToolRegistry::new(tools.iter().map(AsRef::as_ref)).expect("unique test registry");
         let models = |description: &str, _: &crate::model::ModelNeedOpts| {
             Err(Error::ModelAbsent {
                 capability: description.to_owned(),

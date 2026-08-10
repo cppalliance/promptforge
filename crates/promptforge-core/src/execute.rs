@@ -237,8 +237,9 @@ pub(crate) struct PreparedTools {
     pub(crate) schemas: Vec<ToolSchema>,
     /// Alias-to-identity dispatch map for this infer.
     pub(crate) dispatch: BTreeMap<String, ToolId>,
-    /// Whether schemas and dispatch came from the generation cache.
-    #[cfg_attr(not(test), allow(dead_code, reason = "cache diagnostic for tests"))]
+    /// Whether schemas and dispatch came from the generation cache. Test-only
+    /// diagnostic: it exists solely to let cache tests assert reuse.
+    #[cfg(test)]
     pub(crate) reused: bool,
 }
 
@@ -290,6 +291,7 @@ impl ToolBag {
                 scope: cached.scope.clone(),
                 schemas: cached.schemas.clone(),
                 dispatch: cached.dispatch.clone(),
+                #[cfg(test)]
                 reused: true,
             });
         }
@@ -306,6 +308,7 @@ impl ToolBag {
             scope,
             schemas,
             dispatch,
+            #[cfg(test)]
             reused: false,
         })
     }
@@ -313,13 +316,11 @@ impl ToolBag {
 
 /// Shared context for `model:infer` from Lua.
 ///
-/// Carries the gateway client, tool pool, store, observer, and the live tool bag
-/// so each infer call can snapshot-read the current effective set.
+/// Carries the gateway client, tool pool, observer, and the live tool bag so
+/// each infer call can snapshot-read the current effective set.
 pub(crate) struct InferContext {
     client: GatewayClient,
     shared_tools: SharedTools,
-    #[allow(dead_code, reason = "reserved for store-backed tools in later steps")]
-    store: StoreRef,
     observer: Arc<dyn Observer>,
     execution: String,
     section: String,
@@ -368,6 +369,7 @@ impl InferContext {
                     scope,
                     schemas,
                     dispatch,
+                    #[cfg(test)]
                     reused: false,
                 },
                 declared,
@@ -483,7 +485,6 @@ fn attach_infer_hook(
     vm: &SectionVm,
     client: &GatewayClient,
     shared_tools: &SharedTools,
-    store: &StoreRef,
     observer: Arc<dyn Observer>,
     execution: &str,
     section: &str,
@@ -496,7 +497,6 @@ fn attach_infer_hook(
     let ctx = Arc::new(InferContext {
         client: client.clone(),
         shared_tools: shared_tools.clone(),
-        store: store.clone(),
         // The run's owned observer reaches the nested `model:infer` hook, so
         // observations from nested inference are not lost (observe F1).
         observer,
@@ -825,7 +825,8 @@ pub async fn run(
     let debug = debug.as_deref();
     let client =
         client.map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
-    let shared_tools = SharedTools::new(tools);
+    let shared_tools =
+        SharedTools::new(tools).map_err(|error| RunError::from(Error::from(error)))?;
     let registry = shared_tools.registry();
     observer.observe(execution, &prompt.title, detail::RUN_STARTED);
     let turns = Arc::new(AtomicU32::new(0));
@@ -1014,7 +1015,6 @@ async fn execute_live_h1(
             &vm,
             infer_client,
             shared_tools,
-            store,
             Arc::clone(observer_arc),
             execution,
             &prompt.title,
@@ -1234,7 +1234,6 @@ async fn run_sections(
                 &vm,
                 infer_client,
                 shared_tools,
-                store,
                 Arc::clone(observer_arc),
                 execution,
                 &section.name,
@@ -1747,7 +1746,6 @@ async fn run_execute_section(
             &vm,
             infer_client,
             shared_tools,
-            store,
             Arc::clone(observer_arc),
             execution,
             &section.name,

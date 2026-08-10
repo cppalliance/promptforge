@@ -6,24 +6,32 @@
 //! server. The gateway's JSON results are returned verbatim as a string, ready
 //! to hand back to the model.
 
+use crate::client::SecretString;
 use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
 
 /// The largest error body kept for diagnostics, in characters.
 const MAX_ERROR_BODY: usize = 2000;
 
+/// The largest successful response body accepted from the gateway, in bytes.
+///
+/// Search results carry third-party web content, so the body is bounded to keep
+/// a hostile or misbehaving upstream from returning an unbounded payload.
+const MAX_RESPONSE_BODY: usize = 256 * 1024;
+
 /// A tool that searches the web by proxying through the gateway.
 ///
 /// The tool holds a reusable [`reqwest::Client`] plus the gateway base URL and
 /// the shared bearer token. Each call POSTs the search arguments to the
-/// gateway, which owns the search provider credential.
+/// gateway, which owns the search provider credential. The token is a
+/// [`SecretString`], so it is redacted from `Debug` output.
 #[derive(Debug, Clone)]
 pub struct WebSearch {
     /// The HTTP client used for outbound requests.
     http: reqwest::Client,
     /// The gateway base URL, with any trailing slash trimmed.
     base_url: String,
-    /// The shared bearer token presented to the gateway.
-    token: String,
+    /// The shared bearer token presented to the gateway, redacted in `Debug`.
+    token: SecretString,
 }
 
 impl WebSearch {
@@ -36,9 +44,28 @@ impl WebSearch {
         WebSearch {
             http: reqwest::Client::new(),
             base_url: base_url.trim_end_matches('/').to_string(),
-            token: token.into(),
+            token: SecretString::new(token),
         }
     }
+}
+
+/// Reads at most `limit` bytes of a response body, stopping early once the cap
+/// is reached so an oversized payload cannot exhaust memory.
+async fn read_bounded(mut response: reqwest::Response, limit: usize) -> Result<String, ToolError> {
+    let mut buffer: Vec<u8> = Vec::new();
+    while buffer.len() < limit {
+        let chunk = response.chunk().await.map_err(|source| {
+            ToolError::with_source("web_search: reading response failed", source)
+                .with_kind(ToolErrorKind::Transport)
+        })?;
+        let Some(chunk) = chunk else { break };
+        let take = (limit - buffer.len()).min(chunk.len());
+        buffer.extend_from_slice(&chunk[..take]);
+        if take < chunk.len() {
+            break;
+        }
+    }
+    Ok(String::from_utf8_lossy(&buffer).into_owned())
 }
 
 #[async_trait::async_trait]
@@ -122,7 +149,7 @@ impl Tool for WebSearch {
         let response = self
             .http
             .post(format!("{}/tools/web_search", self.base_url))
-            .bearer_auth(&self.token)
+            .bearer_auth(self.token.expose())
             .json(&args)
             .send()
             .await
@@ -147,20 +174,18 @@ impl Tool for WebSearch {
             .with_kind(ToolErrorKind::Backend));
         }
 
-        let text = response.text().await.map_err(|source| {
-            ToolError::with_source("web_search: reading response failed", source)
-                .with_kind(ToolErrorKind::Transport)
-        })?;
-        // Structured search snippets are first-party gateway output, not raw
-        // fetched page content, so they are trusted.
-        Ok(ToolOutput::trusted(text))
+        // Search results embed third-party titles, URLs, and descriptions, so
+        // the body is bounded and marked untrusted: it is nonce-wrapped before it
+        // can reach model input.
+        let text = read_bounded(response, MAX_RESPONSE_BODY).await?;
+        Ok(ToolOutput::untrusted(text))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::WebSearch;
-    use crate::tools::{Tool, ToolId};
+    use super::{MAX_RESPONSE_BODY, WebSearch};
+    use crate::tools::{OutputTrust, Tool, ToolId};
 
     use std::net::SocketAddr;
 
@@ -169,6 +194,20 @@ mod tests {
     use axum::http::HeaderMap;
     use axum::routing::post;
     use serde_json::Value;
+
+    #[test]
+    fn debug_never_leaks_the_bearer_token() {
+        let tool = WebSearch::new("http://localhost", "super-secret-token");
+        let rendered = format!("{tool:?}");
+        assert!(
+            !rendered.contains("super-secret-token"),
+            "the bearer token must never appear in Debug output, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("<redacted>"),
+            "the token field must be redacted, got: {rendered}"
+        );
+    }
 
     #[test]
     fn descriptor_is_stable_and_faithful() {
@@ -262,7 +301,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn forwards_query_and_returns_results() {
+    async fn forwards_query_and_returns_untrusted_results() {
         let addr = spawn_mock().await;
         let tool = WebSearch::new(&format!("http://{addr}"), "tok");
 
@@ -271,12 +310,54 @@ mod tests {
             .await
             .expect("call should succeed");
 
+        assert_eq!(
+            raw.trust(),
+            OutputTrust::Untrusted,
+            "external search content must be marked untrusted"
+        );
         let parsed: Value =
             serde_json::from_str(raw.text()).expect("response should be valid JSON");
         assert_eq!(
             parsed["results"][0]["title"].as_str(),
             Some("T"),
             "expected the canned result title to survive the round-trip"
+        );
+    }
+
+    /// Spawn a mock gateway whose successful body exceeds the response cap.
+    async fn spawn_oversized_mock() -> SocketAddr {
+        async fn web_search() -> String {
+            "x".repeat(MAX_RESPONSE_BODY + 4096)
+        }
+
+        let router = Router::new().route("/tools/web_search", post(web_search));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn oversized_response_body_is_bounded_and_untrusted() {
+        let addr = spawn_oversized_mock().await;
+        let tool = WebSearch::new(&format!("http://{addr}"), "tok");
+
+        let raw = tool
+            .call(serde_json::json!({ "query": "hi" }))
+            .await
+            .expect("call should succeed");
+
+        assert_eq!(
+            raw.text().len(),
+            MAX_RESPONSE_BODY,
+            "an oversized response body must be truncated to the cap"
+        );
+        assert_eq!(
+            raw.trust(),
+            OutputTrust::Untrusted,
+            "external search content must be marked untrusted"
         );
     }
 
