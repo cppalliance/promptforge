@@ -38,6 +38,38 @@ pub struct Frontmatter {
     pub max_tool_iterations: Option<usize>,
 }
 
+impl Frontmatter {
+    /// Returns the prompt's caller-supplied identifier.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the one-line description shown in listings.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the declared promptforge engine major, when present.
+    #[must_use]
+    pub fn promptforge(&self) -> Option<u32> {
+        self.promptforge
+    }
+
+    /// Returns the value produced when the run falls off the last section.
+    #[must_use]
+    pub fn default_return(&self) -> Option<&str> {
+        self.default_return.as_deref()
+    }
+
+    /// Returns the per-section tool-loop cap, when the author set one.
+    #[must_use]
+    pub fn max_tool_iterations(&self) -> Option<usize> {
+        self.max_tool_iterations
+    }
+}
+
 /// One executable block inside a section: a compiled Lua fence or prose.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -72,6 +104,36 @@ pub struct Section {
 }
 
 impl Section {
+    /// Returns the heading text (the section's address).
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the heading level (2 through 6).
+    #[must_use]
+    pub fn level(&self) -> u8 {
+        self.level
+    }
+
+    /// Returns the ordered Lua and prose blocks of this section.
+    #[must_use]
+    pub fn blocks(&self) -> &[Block] {
+        &self.blocks
+    }
+
+    /// Returns the child sections nested under this one.
+    #[must_use]
+    pub fn children(&self) -> &[Section] {
+        &self.children
+    }
+
+    /// Returns the pre-parsed bullet items for a list-only section.
+    #[must_use]
+    pub fn items(&self) -> &[String] {
+        &self.items
+    }
+
     /// Classic leading Lua fence when the first block is Lua.
     #[must_use]
     pub fn prologue(&self) -> Option<&LuaProgram> {
@@ -133,6 +195,38 @@ pub struct Prompt {
     pub description_text: String,
     /// Top-level sections (H2s) in file order.
     pub sections: Vec<Section>,
+}
+
+impl Prompt {
+    /// Returns the parsed frontmatter.
+    #[must_use]
+    pub fn frontmatter(&self) -> &Frontmatter {
+        &self.frontmatter
+    }
+
+    /// Returns the required H1 title.
+    #[must_use]
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// Returns the compiled `lua shared` library, when the prompt declares one.
+    #[must_use]
+    pub fn replay(&self) -> Option<&LuaProgram> {
+        self.replay.as_ref()
+    }
+
+    /// Returns the ordered live Lua and prose blocks from the H1.
+    #[must_use]
+    pub fn h1_blocks(&self) -> &[Block] {
+        &self.h1_blocks
+    }
+
+    /// Returns the top-level H2 sections in file order.
+    #[must_use]
+    pub fn sections(&self) -> &[Section] {
+        &self.sections
+    }
 }
 
 impl Prompt {
