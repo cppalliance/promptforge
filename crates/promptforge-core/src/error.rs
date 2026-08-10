@@ -331,6 +331,29 @@ pub(crate) enum Error {
     /// successful fall-through.
     #[error("internal invariant violated: {0}")]
     Internal(&'static str),
+
+    /// A Lua host resource quota (log events, log bytes, or instructions) was
+    /// exhausted. A stable typed error rather than a bare `Lua(String)` so hosts
+    /// can distinguish quota exhaustion from an authoring error.
+    #[error("lua {resource} quota exceeded")]
+    #[non_exhaustive]
+    LuaQuota {
+        /// The exhausted resource: `"log event"`, `"log byte"`, or `"instruction"`.
+        resource: &'static str,
+    },
+}
+
+/// Stable messages emitted by Lua host-quota refusals.
+///
+/// Kept as constants so [`crate::lua`] emits them and the runtime-error boundary
+/// recognizes them, mapping the refusal to the typed [`Error::LuaQuota`].
+pub(crate) mod lua_quota {
+    /// Log event-count budget exhausted.
+    pub(crate) const LOG_EVENT: &str = "lua log event budget exceeded";
+    /// Cumulative log byte budget exhausted.
+    pub(crate) const LOG_BYTE: &str = "lua log cumulative byte budget exceeded";
+    /// Per-VM instruction budget exhausted.
+    pub(crate) const INSTRUCTION: &str = "lua instruction budget exceeded";
 }
 
 impl Error {

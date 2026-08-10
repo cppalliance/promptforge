@@ -87,6 +87,9 @@ pub enum RunErrorKind {
     Store,
     /// A section's Lua phase failed to run or return a usable value.
     Lua,
+    /// A Lua host resource quota (log events, log bytes, or instructions) was
+    /// exhausted.
+    Quota,
     /// A `{{ }}` prose substitution failed.
     Substitution,
     /// The host cancelled the run.
@@ -113,6 +116,7 @@ impl RunError {
     pub fn kind(&self) -> RunErrorKind {
         match &self.inner {
             Error::Parse(_) => RunErrorKind::Parse,
+            Error::LuaQuota { .. } => RunErrorKind::Quota,
             Error::LuaCompile { .. } | Error::Lua(_) => RunErrorKind::Lua,
             Error::UnsupportedVersion(_) => RunErrorKind::Version,
             Error::MissingEnv(_)

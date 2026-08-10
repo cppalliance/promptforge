@@ -638,6 +638,10 @@ impl LuaProgram {
             return Error::Interrupted;
         }
         let raw = error.to_string();
+        // A host-quota refusal is a stable typed error, not an authoring error.
+        if let Some(resource) = quota_resource(&raw) {
+            return Error::LuaQuota { resource };
+        }
         let mapped = map_chunk_line_to_absolute(&raw, self.source_line, self.location());
         Error::Lua(mapped)
     }
@@ -646,6 +650,23 @@ impl LuaProgram {
     #[must_use]
     pub fn location(&self) -> &str {
         &self.location
+    }
+}
+
+/// Maps a raw Lua error string to the exhausted host-quota resource, if any.
+///
+/// Recognizes the stable quota messages our host callbacks emit so a refusal
+/// becomes the typed [`Error::LuaQuota`] instead of an opaque `Lua(String)`.
+fn quota_resource(raw: &str) -> Option<&'static str> {
+    use crate::error::lua_quota;
+    if raw.contains(lua_quota::LOG_EVENT) {
+        Some("log event")
+    } else if raw.contains(lua_quota::LOG_BYTE) {
+        Some("log byte")
+    } else if raw.contains(lua_quota::INSTRUCTION) {
+        Some("instruction")
+    } else {
+        None
     }
 }
 
@@ -2490,7 +2511,7 @@ fn install_log<'scope, 'env: 'scope>(
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
                 .is_err()
             {
-                return Err(mlua::Error::external("lua log event budget exceeded"));
+                return Err(mlua::Error::external(crate::error::lua_quota::LOG_EVENT));
             }
             let Some(Value::String(message)) = arguments.into_iter().next() else {
                 return Err(mlua::Error::external("log message must be a UTF-8 string"));
@@ -2517,9 +2538,7 @@ fn install_log<'scope, 'env: 'scope>(
                 })
                 .is_err()
             {
-                return Err(mlua::Error::external(
-                    "lua log cumulative byte budget exceeded",
-                ));
+                return Err(mlua::Error::external(crate::error::lua_quota::LOG_BYTE));
             }
             observer.observe(execution, section, Observation::Lua(message.to_owned()));
             Ok(())
@@ -2941,7 +2960,7 @@ fn install_instruction_budget(lua: &Lua) {
             }
             if fired.fetch_add(1, Ordering::Relaxed) >= HOOK_BUDGET {
                 return Err(mlua::Error::RuntimeError(
-                    "lua instruction budget exceeded".to_string(),
+                    crate::error::lua_quota::INSTRUCTION.to_string(),
                 ));
             }
             Ok(VmState::Continue)
@@ -3438,11 +3457,16 @@ mod tests {
         let error = vm
             .run_prologue(&program, &recorder, "Budget")
             .expect_err("the cumulative byte budget must refuse the third message");
+        // LUA-002: the refusal is the stable typed quota error, not an opaque
+        // Lua authoring string.
         assert!(
-            error
-                .to_string()
-                .contains("cumulative byte budget exceeded"),
-            "the byte ceiling must be the refusal reason: {error}"
+            matches!(
+                error,
+                Error::LuaQuota {
+                    resource: "log byte"
+                }
+            ),
+            "the byte ceiling must surface as a typed LuaQuota: {error:?}"
         );
         let logged = recorder
             .records()
@@ -4272,7 +4296,16 @@ mod tests {
         let error = vm
             .run_prologue(&work, &NullObserver, "Test")
             .expect_err("the prologue must exhaust the budget left by shared execution");
-        assert!(error.to_string().contains("instruction budget exceeded"));
+        // LUA-002: an exhausted instruction budget is the typed quota error.
+        assert!(
+            matches!(
+                error,
+                Error::LuaQuota {
+                    resource: "instruction"
+                }
+            ),
+            "instruction exhaustion must surface as a typed LuaQuota: {error:?}"
+        );
     }
 
     #[test]
