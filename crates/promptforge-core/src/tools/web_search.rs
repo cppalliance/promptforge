@@ -198,17 +198,31 @@ impl Tool for WebSearch {
         if !status.is_success() {
             let code = status.as_u16();
             // The error body is external gateway content: bound the read (same
-            // streaming cap as the success path), sanitize control characters,
-            // and preserve a read failure instead of masking it as empty.
-            let body = match read_bounded(response, MAX_ERROR_BODY).await {
-                Ok(body) if body.is_empty() => "(empty body)".to_owned(),
-                Ok(body) => sanitize_diagnostic(&body),
-                Err(_) => "(backend response body could not be read)".to_owned(),
-            };
-            return Err(
-                ToolError::message(format!("web_search: backend returned {code}: {body}"))
-                    .with_kind(ToolErrorKind::Backend),
-            );
+            // streaming cap as the success path) and sanitize control characters.
+            // If the body itself cannot be read, keep the read failure as the
+            // returned error's `source()` rather than discarding it.
+            match read_bounded(response, MAX_ERROR_BODY).await {
+                Ok(body) => {
+                    let body = if body.is_empty() {
+                        "(empty body)".to_owned()
+                    } else {
+                        sanitize_diagnostic(&body)
+                    };
+                    return Err(ToolError::message(format!(
+                        "web_search: backend returned {code}: {body}"
+                    ))
+                    .with_kind(ToolErrorKind::Backend));
+                }
+                Err(source) => {
+                    return Err(ToolError::with_source(
+                        format!(
+                            "web_search: backend returned {code}, and its error body could not be read"
+                        ),
+                        source,
+                    )
+                    .with_kind(ToolErrorKind::Backend));
+                }
+            }
         }
 
         // Search results embed third-party titles, URLs, and descriptions, so
@@ -222,7 +236,7 @@ impl Tool for WebSearch {
 #[cfg(test)]
 mod tests {
     use super::{MAX_ERROR_BODY, MAX_RESPONSE_BODY, WebSearch};
-    use crate::tools::{OutputTrust, Tool, ToolId};
+    use crate::tools::{OutputTrust, Tool, ToolErrorKind, ToolId};
 
     use std::net::SocketAddr;
 
@@ -418,6 +432,46 @@ mod tests {
             message.len() < MAX_ERROR_BODY + 128,
             "the error-path body must be bounded, got {} bytes",
             message.len()
+        );
+    }
+
+    /// Spawn a raw TCP mock that returns a non-success status, promises a large
+    /// body via `Content-Length`, then drops the connection mid-body so the
+    /// client's error-body read fails partway through.
+    async fn spawn_truncated_error_mock() -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+            if let Ok((mut socket, _)) = listener.accept().await {
+                // Drain the request so the client finishes sending before we reply.
+                let mut buf = [0u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                // Promise 100000 bytes, send only a few, then drop the socket so
+                // the client's body read errors before the promised length.
+                let header = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 100000\r\n\r\n";
+                let _ = socket.write_all(header.as_bytes()).await;
+                let _ = socket.write_all(b"partial").await;
+                let _ = socket.flush().await;
+            }
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn error_body_read_failure_is_preserved_as_source() {
+        let addr = spawn_truncated_error_mock().await;
+        let tool = WebSearch::new(&format!("http://{addr}"), "tok")
+            .expect("valid web search configuration");
+
+        let err = tool
+            .call(serde_json::json!({ "query": "hi" }))
+            .await
+            .expect_err("a truncated 500 body must surface as an error");
+        assert_eq!(err.kind(), ToolErrorKind::Backend);
+        assert!(
+            std::error::Error::source(&err).is_some(),
+            "the body-read failure must be preserved as the error's source, got: {err}"
         );
     }
 
