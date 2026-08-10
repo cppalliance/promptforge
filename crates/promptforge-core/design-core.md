@@ -18,8 +18,6 @@ Each section is an ordered sequence of alternating `lua` and prose blocks sharin
 
 Prompts depend on semantic aliases, never deployment vendor strings. Live H1 resolution captures one-to-one alias maps for section VMs. The observer reports deterministic borrowed `(execution, section, detail)` strings and cannot steer behavior. Expected failures return errors. The authoritative result is one string: scalar Lua return, frontmatter `default_return`, last model reply, or `"done"`.
 
-`design-core-orig.md` is byte-for-byte historical and is not part of the current contract.
-
 ## Standing rule
 
 **No defaults. Everything explicit. Implicit is the enemy of precision.**
@@ -132,4 +130,4 @@ Malformed frontmatter or Markdown, invalid `lua shared` placement or multiplicit
 
 Persistent bytecode, cross-section Lua memory, child execution by fall-through, nested/dynamic fanout, reranking, and model-generated authoritative progress labels remain non-goals. OverlayStore, Lua-as-tool, model file tools, `tools.remove`, and store list/grep are out of scope for this design revision.
 
-*2026-08-09 10:40 - Cursor Grok 4.5*
+*2026-08-09 18:05 - GPT-5.6 Sol*
