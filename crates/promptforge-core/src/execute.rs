@@ -124,7 +124,9 @@ impl RunError {
             | Error::GatewayDisabled
             | Error::Http(_)
             | Error::Backend { .. }
+            | Error::BackendBodyRead { .. }
             | Error::MalformedResponse(_)
+            | Error::MalformedResponseSource { .. }
             | Error::EmptyModelReply { .. }
             | Error::DialectNone
             | Error::DialectTie { .. }
@@ -166,7 +168,10 @@ impl RunError {
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         match &self.inner {
-            Error::Http(_) | Error::MalformedResponse(_) => true,
+            Error::Http(_)
+            | Error::MalformedResponse(_)
+            | Error::MalformedResponseSource { .. }
+            | Error::BackendBodyRead { .. } => true,
             Error::Backend { status, .. } => *status >= 500,
             _ => false,
         }

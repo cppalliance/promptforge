@@ -57,9 +57,11 @@ impl CompletionError {
     #[must_use]
     pub fn kind(&self) -> CompletionErrorKind {
         match &self.inner {
-            Error::Http(_) => CompletionErrorKind::Transport,
+            Error::Http(_) | Error::BackendBodyRead { .. } => CompletionErrorKind::Transport,
             Error::Backend { .. } => CompletionErrorKind::Backend,
-            Error::MalformedResponse(_) => CompletionErrorKind::MalformedResponse,
+            Error::MalformedResponse(_) | Error::MalformedResponseSource { .. } => {
+                CompletionErrorKind::MalformedResponse
+            }
             Error::EmptyModelReply { .. } => CompletionErrorKind::EmptyReply,
             Error::GatewayDisabled => CompletionErrorKind::Disabled,
             _ => CompletionErrorKind::Config,
@@ -70,7 +72,7 @@ impl CompletionError {
     #[must_use]
     pub fn status(&self) -> Option<u16> {
         match &self.inner {
-            Error::Backend { status, .. } => Some(*status),
+            Error::Backend { status, .. } | Error::BackendBodyRead { status, .. } => Some(*status),
             _ => None,
         }
     }
@@ -79,7 +81,7 @@ impl CompletionError {
     #[must_use]
     pub fn is_timeout(&self) -> bool {
         match &self.inner {
-            Error::Http(source) => source
+            Error::Http(source) | Error::BackendBodyRead { source, .. } => source
                 .downcast_ref::<reqwest::Error>()
                 .is_some_and(reqwest::Error::is_timeout),
             _ => false,
@@ -90,7 +92,10 @@ impl CompletionError {
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         match &self.inner {
-            Error::Http(_) | Error::MalformedResponse(_) => true,
+            Error::Http(_)
+            | Error::MalformedResponse(_)
+            | Error::MalformedResponseSource { .. }
+            | Error::BackendBodyRead { .. } => true,
             Error::Backend { status, .. } => *status >= 500,
             _ => false,
         }
@@ -125,7 +130,11 @@ impl From<CompletionError> for Error {
 ///
 /// v0 uses the `"gateway"` namespace plus the caller-facing model name (the
 /// gateway `[[model]].name` / OpenAI `id`).
+///
+/// `#[non_exhaustive]` so the invariant-bearing identity is only ever built
+/// through [`ModelId::new`]/[`ModelId::gateway`], never by a struct literal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
 pub struct ModelId {
     server: String,
     name: String,
@@ -311,7 +320,11 @@ pub enum ThinkingMode {
 }
 
 /// One catalogued model with live-resolution metadata.
+///
+/// `#[non_exhaustive]` so the descriptor is only ever built through
+/// [`ModelDescriptor::new`] and its validated context window is preserved.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ModelDescriptor {
     id: ModelId,
     description: String,
@@ -629,8 +642,12 @@ impl ModelBindings {
 }
 
 /// Complete live model set for one bind pass.
+///
+/// `#[non_exhaustive]` so the collision-free catalog invariant is only ever
+/// established through [`ModelCatalog::new`]/[`ModelCatalog::empty`].
 // No `Eq`: bindings carry `f64` temperatures transitively.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ModelCatalog {
     models: Vec<ModelDescriptor>,
 }
@@ -850,29 +867,32 @@ async fn read_catalog_body_capped(
 }
 
 /// Reads at most `limit` bytes of a non-success response body, stopping early so
-/// an oversized error body cannot exhaust memory, and preserving a read failure
-/// as an explicit diagnostic rather than an empty string.
-async fn read_error_body_bounded(mut response: reqwest::Response, limit: usize) -> String {
+/// an oversized error body cannot exhaust memory.
+///
+/// A read failure is returned as the concrete [`reqwest::Error`] (MODEL-010) so
+/// the caller can retain it as an error-chain `#[source]`, rather than being
+/// flattened into display text that severs the cause.
+async fn read_error_body_bounded(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> std::result::Result<String, reqwest::Error> {
     let mut buffer: Vec<u8> = Vec::new();
     while buffer.len() < limit {
-        match response.chunk().await {
-            Ok(Some(chunk)) => {
+        match response.chunk().await? {
+            Some(chunk) => {
                 let take = (limit - buffer.len()).min(chunk.len());
                 buffer.extend_from_slice(&chunk[..take]);
                 if take < chunk.len() {
                     break;
                 }
             }
-            Ok(None) => break,
-            Err(source) => {
-                return format!("(backend response body could not be read: {source})");
-            }
+            None => break,
         }
     }
     if buffer.is_empty() {
-        return "(empty body)".to_owned();
+        return Ok("(empty body)".to_owned());
     }
-    String::from_utf8_lossy(&buffer).into_owned()
+    Ok(String::from_utf8_lossy(&buffer).into_owned())
 }
 
 /// Fetches a [`ModelCatalog`] from a bearer-authed gateway `/models` endpoint.
@@ -898,8 +918,17 @@ pub async fn fetch_model_catalog(
     let status = response.status();
     if !status.is_success() {
         // The error body is external, so bound the read (MODEL-010: no unbounded
-        // buffering) and preserve a read failure instead of masking it as empty.
-        let body = read_error_body_bounded(response, MAX_CATALOG_ERROR_BODY).await;
+        // buffering) and preserve a read failure as a typed source rather than
+        // flattening it into display text.
+        let body = match read_error_body_bounded(response, MAX_CATALOG_ERROR_BODY).await {
+            Ok(body) => body,
+            Err(source) => {
+                return Err(CompletionError::from(Error::BackendBodyRead {
+                    status: status.as_u16(),
+                    source: Box::new(source),
+                }));
+            }
+        };
         return Err(CompletionError::from(Error::Backend {
             status: status.as_u16(),
             body,
@@ -911,9 +940,13 @@ pub async fn fetch_model_catalog(
     // A body that does not decode as a model list is a malformed response, not a
     // transport failure - matching this function's documented error contract.
     let list: ModelsListResponse = serde_json::from_slice(&body).map_err(|error| {
-        CompletionError::from(Error::MalformedResponse(format!(
-            "model list response was not valid JSON: {error}"
-        )))
+        // MODEL-009: keep the decode error as a private `#[source]` cause instead
+        // of flattening it into the message, while the classification stays
+        // `MalformedResponse`.
+        CompletionError::from(Error::MalformedResponseSource {
+            message: "model list response was not valid JSON".to_owned(),
+            source: Box::new(error),
+        })
     })?;
     let mut descriptors = Vec::with_capacity(list.data.len());
     for entry in list.data {
@@ -2192,6 +2225,71 @@ mod tests {
         assert!(
             err.to_string().contains("exceeds"),
             "the bound must report the size limit, got {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_model_catalog_preserves_the_json_decode_source() {
+        use axum::Router;
+        use axum::routing::get;
+
+        // MODEL-009: a 200 body that is not a valid model list is classified as
+        // MalformedResponse, and the underlying `serde_json::Error` survives as
+        // the error-chain `#[source]` rather than being flattened into the text.
+        async fn models() -> (axum::http::StatusCode, String) {
+            (axum::http::StatusCode::OK, "{ this is not json".to_owned())
+        }
+        let app = Router::new().route("/models", get(models));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
+            .await
+            .expect_err("an undecodable body must surface as an error");
+        assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+        let source =
+            std::error::Error::source(&err).expect("the decode error must be a preserved source");
+        assert!(
+            source.downcast_ref::<serde_json::Error>().is_some(),
+            "the preserved source must be the JSON decode error, got {source}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_model_catalog_preserves_a_body_read_failure_source() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // MODEL-010: a non-success response whose body cannot be fully read
+        // (the server promises a large body then drops the connection) must
+        // surface as a typed transport failure that keeps the `reqwest::Error`
+        // as its `#[source]`, not display text.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let header = "HTTP/1.1 500 Internal Server Error\r\n\
+                     Content-Length: 1000000\r\n\r\n";
+                let _ = sock.write_all(header.as_bytes()).await;
+                let _ = sock.write_all(b"abc").await;
+                // Socket drops here: the promised body never completes.
+            }
+        });
+
+        let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
+            .await
+            .expect_err("a truncated error body must surface as an error");
+        assert_eq!(err.kind(), CompletionErrorKind::Transport);
+        assert_eq!(err.status(), Some(500));
+        let source =
+            std::error::Error::source(&err).expect("the read failure must be a preserved source");
+        assert!(
+            source.downcast_ref::<reqwest::Error>().is_some(),
+            "the preserved source must be the reqwest read error, got {source}"
         );
     }
 }

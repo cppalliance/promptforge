@@ -81,6 +81,39 @@ pub(crate) enum Error {
     #[error("malformed response: {0}")]
     MalformedResponse(String),
 
+    /// The backend response could not be decoded, preserving the decoder cause.
+    ///
+    /// Like [`Error::MalformedResponse`] but retains the underlying decode
+    /// failure (for example a [`serde_json::Error`]) as the `#[source]` cause
+    /// rather than flattening it into the message (MODEL-009 / client F11), so
+    /// the error chain survives through the public wrappers' `source()`.
+    #[error("malformed response: {message}")]
+    #[non_exhaustive]
+    MalformedResponseSource {
+        /// The human-readable diagnostic (no raw body).
+        message: String,
+        /// The originating decode failure, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Reading a non-success backend response body failed at the transport
+    /// layer.
+    ///
+    /// Retains the [`reqwest::Error`] as the `#[source]` cause (MODEL-010)
+    /// rather than flattening the read failure into display text, so the error
+    /// chain (timeout, connection reset) survives. The status the backend had
+    /// already returned is preserved for classification.
+    #[error("failed to read backend error body (status {status})")]
+    #[non_exhaustive]
+    BackendBodyRead {
+        /// The non-success HTTP status whose body could not be read.
+        status: u16,
+        /// The originating transport read failure, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     /// The model returned neither non-empty tool calls nor non-empty text.
     ///
     /// Reasoning side-channel text, when present, is never promoted into the

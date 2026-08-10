@@ -493,8 +493,14 @@ impl GatewayClient {
             }));
         }
 
-        let response_body: Value = serde_json::from_slice(&raw_body)
-            .map_err(|error| Error::MalformedResponse(error.to_string()))?;
+        let response_body: Value = serde_json::from_slice(&raw_body).map_err(|error| {
+            // F11 / MODEL-009: retain the decode failure as a private `#[source]`
+            // cause rather than flattening it into the message string.
+            Error::MalformedResponseSource {
+                message: "completion response was not valid JSON".to_owned(),
+                source: Box::new(error),
+            }
+        })?;
         let turn = dialect.parse_turn(&response_body)?;
         Ok(Completion {
             result: turn.outcome,
