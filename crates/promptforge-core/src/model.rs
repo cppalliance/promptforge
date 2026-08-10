@@ -21,6 +21,19 @@ use crate::{Error, Result};
 /// A stable, matchable classification of a [`CompletionError`].
 ///
 /// `#[non_exhaustive]` so new kinds do not break a caller's `match`.
+///
+/// # Examples
+///
+/// ```
+/// use promptforge_core::model::CompletionErrorKind;
+///
+/// let kind = CompletionErrorKind::Backend;
+/// let retry_hint = match kind {
+///     CompletionErrorKind::Transport | CompletionErrorKind::MalformedResponse => "retry",
+///     _ => "inspect",
+/// };
+/// assert_eq!(retry_hint, "inspect");
+/// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompletionErrorKind {
@@ -46,6 +59,23 @@ pub enum CompletionErrorKind {
 /// `is_retryable`/`is_timeout`/`status` predicates, and preserves the underlying
 /// transport cause through [`std::error::Error::source`]. `#[non_exhaustive]`
 /// and not constructible outside the crate.
+///
+/// # Examples
+///
+/// ```no_run
+/// # async fn run() {
+/// use promptforge_core::model::{fetch_model_catalog, CompletionErrorKind};
+///
+/// if let Err(error) = fetch_model_catalog("http://127.0.0.1:8081/v1", "tok").await {
+///     if error.kind() == CompletionErrorKind::Backend {
+///         eprintln!("gateway returned status {:?}", error.status());
+///     }
+///     if error.is_retryable() {
+///         // A transient transport/backend failure: safe to retry.
+///     }
+/// }
+/// # }
+/// ```
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct CompletionError {
@@ -307,6 +337,16 @@ pub enum TemperatureError {
 }
 
 /// Whether a catalogued model can emit thinking tokens.
+///
+/// # Examples
+///
+/// ```
+/// use promptforge_core::model::ThinkingMode;
+///
+/// // Deserialized from the lowercase gateway wire form.
+/// let mode: ThinkingMode = serde_json::from_str("\"switchable\"").expect("valid mode");
+/// assert_eq!(mode, ThinkingMode::Switchable);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -340,6 +380,24 @@ impl ModelDescriptor {
     /// unrepresentable. Defaults `tool_dialect` to [`ToolDialectId::OpenAi`].
     /// Use [`Self::with_dialect`] to override; the tools mode is always derived
     /// from the dialect, never stored independently.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::num::NonZeroU32;
+    /// use promptforge_core::model::{ModelDescriptor, ModelId, ThinkingMode};
+    ///
+    /// let context = NonZeroU32::new(131_072).expect("non-zero");
+    /// let model = ModelDescriptor::new(
+    ///     ModelId::gateway("analyst")?,
+    ///     "A careful analysis model",
+    ///     context,
+    ///     ThinkingMode::Switchable,
+    /// );
+    /// assert_eq!(model.context(), context);
+    /// assert_eq!(model.thinking(), ThinkingMode::Switchable);
+    /// # Ok::<(), promptforge_core::model::ModelIdError>(())
+    /// ```
     #[must_use]
     pub fn new(
         id: ModelId,
@@ -357,6 +415,25 @@ impl ModelDescriptor {
     }
 
     /// Sets the tool dialect. The tools mode is derived from it on demand.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::num::NonZeroU32;
+    /// use promptforge_core::model::{ModelDescriptor, ModelId, ThinkingMode};
+    /// use promptforge_core::dialects::{ToolDialectId, ToolsMode};
+    ///
+    /// let model = ModelDescriptor::new(
+    ///     ModelId::gateway("gemma-local")?,
+    ///     "A local gemma model",
+    ///     NonZeroU32::new(32_768).expect("non-zero"),
+    ///     ThinkingMode::Never,
+    /// )
+    /// .with_dialect(ToolDialectId::Gemma3ToolCode);
+    /// assert_eq!(model.tool_dialect(), ToolDialectId::Gemma3ToolCode);
+    /// assert_eq!(model.tools_mode(), ToolsMode::Emulated);
+    /// # Ok::<(), promptforge_core::model::ModelIdError>(())
+    /// ```
     #[must_use]
     pub fn with_dialect(mut self, dialect: ToolDialectId) -> Self {
         self.tool_dialect = dialect;
@@ -568,6 +645,20 @@ pub struct CompletionOptions {
 impl CompletionOptions {
     /// Builds options for `model` under the given tool-calling `dialect`, with no
     /// temperature, token cap, or thinking switch.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::num::NonZeroU32;
+    /// use promptforge_core::model::CompletionOptions;
+    /// use promptforge_core::dialects::ToolDialectId;
+    ///
+    /// let options = CompletionOptions::new("analyst", ToolDialectId::OpenAi)
+    ///     .with_temperature(0.2)?
+    ///     .with_max_tokens(NonZeroU32::new(256).expect("non-zero"))
+    ///     .with_thinking(false);
+    /// # Ok::<(), promptforge_core::model::TemperatureError>(())
+    /// ```
     #[must_use]
     pub fn new(model: impl Into<String>, dialect: ToolDialectId) -> CompletionOptions {
         CompletionOptions {
@@ -658,6 +749,26 @@ impl ModelCatalog {
     /// # Errors
     /// Returns [`ModelCatalogError::DuplicateId`] when two descriptors share one
     /// stable [`ModelId`], so an ambiguous catalog is unrepresentable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::num::NonZeroU32;
+    /// use promptforge_core::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
+    ///
+    /// let ctx = NonZeroU32::new(8_192).expect("non-zero");
+    /// let id = ModelId::gateway("small")?;
+    /// let catalog = ModelCatalog::new([ModelDescriptor::new(
+    ///     id.clone(),
+    ///     "A tiny model",
+    ///     ctx,
+    ///     ThinkingMode::Never,
+    /// )])
+    /// .expect("unique ids");
+    /// assert!(catalog.contains(&id));
+    /// assert_eq!(catalog.models().len(), 1);
+    /// # Ok::<(), promptforge_core::model::ModelIdError>(())
+    /// ```
     pub fn new(
         models: impl IntoIterator<Item = ModelDescriptor>,
     ) -> std::result::Result<ModelCatalog, ModelCatalogError> {
@@ -922,6 +1033,18 @@ fn catalog_client() -> reqwest::Client {
 /// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
 /// `Transport` on transport failure, `Backend` on a non-success status, and
 /// `MalformedResponse` when the body is not a model list.
+///
+/// # Examples
+///
+/// ```no_run
+/// # async fn run() -> Result<(), promptforge_core::model::CompletionError> {
+/// use promptforge_core::model::fetch_model_catalog;
+///
+/// let catalog = fetch_model_catalog("http://127.0.0.1:8081/v1", "secret-token").await?;
+/// println!("gateway offers {} models", catalog.models().len());
+/// # Ok(())
+/// # }
+/// ```
 pub async fn fetch_model_catalog(
     base_url: &str,
     token: &str,
