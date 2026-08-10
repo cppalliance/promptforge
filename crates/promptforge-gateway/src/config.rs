@@ -546,6 +546,11 @@ impl Config {
     /// endpoint, an invalid `[[local_model]]`, `queue.max_depth` below 1, or
     /// an endpoint `concurrency` below 1.
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
+        if self.server.key.is_empty() {
+            return Err(ConfigError::Validation(
+                "server.key must not be empty".to_string(),
+            ));
+        }
         if self.queue.max_depth < 1 {
             return Err(ConfigError::Validation(
                 "queue.max_depth must be at least 1".to_string(),
@@ -897,6 +902,32 @@ endpoints = ["anthropic"]
         assert!(matches!(
             Config::parse_toml(toml),
             Err(ConfigError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_server_key() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+key = ""
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+"#;
+        assert!(matches!(
+            Config::parse_toml(toml),
+            Err(ConfigError::Validation(_))
         ));
     }
 
