@@ -16,7 +16,7 @@ use crate::normalize::NormalizedTurn;
 use crate::{Error, Result};
 
 use super::{
-    DetectScore, DialectEvidence, DialectRequest, ToolDialect, ToolDialectId,
+    DetectScore, DialectEvidence, DialectRequest, FramedToolResult, ToolDialect, ToolDialectId,
     correlate_tool_results,
 };
 
@@ -187,20 +187,29 @@ impl ToolDialect for Gemma3ToolCodeDialect {
         &self,
         conversation: &mut Vec<Message>,
         calls: &[ToolCall],
-        results: &[(String, String)],
+        results: &[FramedToolResult],
     ) -> Result<()> {
         correlate_tool_results(calls, results)?;
 
         let fence = render_tool_code_fence(calls)?;
         conversation.push(Message::assistant(fence));
 
+        // Each result content is already trust-framed by the executor; it is
+        // embedded verbatim as opaque data. The continuation is tool-neutral and
+        // sits outside the data blocks, so it never assumes a specific tool
+        // (e.g. fetch) and cannot be read as part of a result's framed payload.
         let mut parts: Vec<String> = Vec::with_capacity(results.len());
-        for (call, (id, content)) in calls.iter().zip(results.iter()) {
-            parts.push(format!("TOOL RESULT {} ({}):\n{}", call.name, id, content));
+        for (call, result) in calls.iter().zip(results.iter()) {
+            parts.push(format!(
+                "TOOL RESULT {} ({}):\n{}",
+                call.name,
+                result.id(),
+                result.content()
+            ));
         }
         let mut follow_up = parts.join("\n\n");
         follow_up.push_str(
-            "\n\nContinue the protocol. Call another tool with a tool_code fence, or write the final evidence from fetch bodies only.",
+            "\n\nContinue the protocol: emit another tool_code fence to call a tool, or write your final answer using only the tool results above.",
         );
         conversation.push(Message::user(follow_up));
         Ok(())
@@ -1229,7 +1238,7 @@ mod tests {
             arguments: serde_json::json!({ "query": "rust" }),
         }];
         // Wrong id breaks correlation; the conversation must stay untouched.
-        let results = vec![("mismatched_id".to_string(), "text".to_string())];
+        let results = vec![FramedToolResult::new("mismatched_id".into(), "text".into())];
         let mut conversation = Vec::new();
         let error = dialect
             .echo_tool_results(&mut conversation, &calls, &results)
@@ -1280,7 +1289,10 @@ mod tests {
             name: "search".into(),
             arguments: serde_json::json!({"query": "rust"}),
         }];
-        let results = vec![("call_tool_code_0".into(), "result text".into())];
+        let results = vec![FramedToolResult::new(
+            "call_tool_code_0".into(),
+            "result text".into(),
+        )];
         let mut conversation = Vec::new();
         dialect
             .echo_tool_results(&mut conversation, &calls, &results)

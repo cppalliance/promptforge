@@ -2471,8 +2471,9 @@ pub(crate) async fn run_prose_inference(
             }
             CompletionResult::ToolCalls(calls) => {
                 let finish_reason = completion.finish_reason.clone();
-                // Dispatch each requested tool and collect results.
-                let mut results: Vec<(String, String)> = Vec::with_capacity(calls.len());
+                // Dispatch each requested tool and collect already-framed results.
+                let mut results: Vec<crate::dialects::FramedToolResult> =
+                    Vec::with_capacity(calls.len());
                 for call in &calls {
                     let Some(id) = dispatch.get(&call.name) else {
                         observer.observe(execution, section, detail::TOOL_CALL_FAILED);
@@ -2522,7 +2523,10 @@ pub(crate) async fn run_prose_inference(
                         crate::tools::OutputTrust::Untrusted => untrusted::wrap(output.text()),
                         crate::tools::OutputTrust::Trusted => output.text().to_owned(),
                     };
-                    results.push((call.id.clone(), result));
+                    results.push(crate::dialects::FramedToolResult::new(
+                        call.id.clone(),
+                        result,
+                    ));
                 }
 
                 dialect.echo_tool_results(conversation, &calls, &results)?;

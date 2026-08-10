@@ -10,7 +10,7 @@ use crate::client::{Message, ToolCall};
 use crate::normalize::{CompletionNormalizer, NormalizedTurn, OpenAiChatNormalizer};
 
 use super::{
-    DetectScore, DialectEvidence, DialectRequest, ToolDialect, ToolDialectId,
+    DetectScore, DialectEvidence, DialectRequest, FramedToolResult, ToolDialect, ToolDialectId,
     correlate_tool_results,
 };
 
@@ -78,7 +78,7 @@ impl ToolDialect for OpenAiDialect {
         &self,
         conversation: &mut Vec<Message>,
         calls: &[ToolCall],
-        results: &[(String, String)],
+        results: &[FramedToolResult],
     ) -> Result<()> {
         correlate_tool_results(calls, results)?;
         let raw_calls: Vec<Value> = calls
@@ -96,8 +96,11 @@ impl ToolDialect for OpenAiDialect {
             .collect();
         conversation.push(Message::assistant_tool_calls(raw_calls));
 
-        for (id, content) in results {
-            conversation.push(Message::tool(id.clone(), content.clone()));
+        for result in results {
+            conversation.push(Message::tool(
+                result.id().to_string(),
+                result.content().to_string(),
+            ));
         }
         Ok(())
     }
@@ -218,8 +221,8 @@ mod tests {
             },
         ];
         let results = vec![
-            ("call_1".into(), "result 1".into()),
-            ("call_2".into(), "result 2".into()),
+            FramedToolResult::new("call_1".into(), "result 1".into()),
+            FramedToolResult::new("call_2".into(), "result 2".into()),
         ];
         let mut conversation = Vec::new();
         dialect
@@ -262,15 +265,19 @@ mod tests {
         let mut conversation = Vec::new();
         assert!(
             dialect
-                .echo_tool_results(&mut conversation, &calls, &[("call_1".into(), "r".into())])
+                .echo_tool_results(
+                    &mut conversation,
+                    &calls,
+                    &[FramedToolResult::new("call_1".into(), "r".into())]
+                )
                 .is_err()
         );
         assert!(conversation.is_empty());
 
         // Order/id mismatch.
         let swapped = vec![
-            ("call_2".to_string(), "r2".to_string()),
-            ("call_1".to_string(), "r1".to_string()),
+            FramedToolResult::new("call_2".into(), "r2".into()),
+            FramedToolResult::new("call_1".into(), "r1".into()),
         ];
         let mut conversation = Vec::new();
         assert!(

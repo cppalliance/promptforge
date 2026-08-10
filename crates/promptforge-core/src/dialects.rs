@@ -363,8 +363,37 @@ pub(crate) trait ToolDialect: Send + Sync {
         &self,
         conversation: &mut Vec<Message>,
         calls: &[ToolCall],
-        results: &[(String, String)],
+        results: &[FramedToolResult],
     ) -> Result<()>;
+}
+
+/// A tool result whose content has already crossed the trust boundary.
+///
+/// The executor frames each result before echo: an untrusted result is
+/// nonce-wrapped, a trusted one passes through verbatim. This newtype carries
+/// that already-framed content so the echo boundary treats it as opaque data
+/// and never re-frames, re-inspects trust, or accepts a bare unframed string.
+#[derive(Debug, Clone)]
+pub(crate) struct FramedToolResult {
+    id: String,
+    content: String,
+}
+
+impl FramedToolResult {
+    /// Wrap an already-framed `(id, content)` pair for echo.
+    pub(crate) fn new(id: String, content: String) -> FramedToolResult {
+        FramedToolResult { id, content }
+    }
+
+    /// The tool-call id this result answers.
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// The already-framed result content.
+    pub(crate) fn content(&self) -> &str {
+        &self.content
+    }
 }
 
 /// Validates that `results` correlate one-to-one with `calls` before any dialect
@@ -382,7 +411,7 @@ pub(crate) trait ToolDialect: Send + Sync {
 /// id uniqueness invariant does not hold.
 pub(crate) fn correlate_tool_results(
     calls: &[ToolCall],
-    results: &[(String, String)],
+    results: &[FramedToolResult],
 ) -> Result<()> {
     if calls.len() != results.len() {
         return Err(Error::Internal(
@@ -390,13 +419,13 @@ pub(crate) fn correlate_tool_results(
         ));
     }
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    for (call, (result_id, _)) in calls.iter().zip(results.iter()) {
+    for (call, result) in calls.iter().zip(results.iter()) {
         if !seen.insert(call.id.as_str()) {
             return Err(Error::Internal(
                 "tool-result echo: duplicate tool call id within one turn",
             ));
         }
-        if call.id != *result_id {
+        if call.id != result.id() {
             return Err(Error::Internal(
                 "tool-result echo: result id does not correlate with its call id in order",
             ));
