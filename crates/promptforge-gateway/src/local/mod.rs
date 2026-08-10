@@ -13,8 +13,8 @@ pub(crate) mod sidecar;
 mod upstream;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -66,8 +66,7 @@ impl LocalRuntime {
         let llama_server = store.provision_llama_server()?;
         tracing::info!(path = %llama_server.display(), "provisioned llama-server");
 
-        let interrupted = Arc::new(AtomicBool::new(false));
-        arm_startup_interrupt(Arc::clone(&interrupted));
+        let interrupted = startup_interrupt_flag();
         let mut models = Vec::with_capacity(config.local_models.len());
 
         for local_model in &config.local_models {
@@ -371,21 +370,36 @@ fn fetch_tool_call_capability(
         .unwrap_or(false)
 }
 
-/// Arms a Ctrl-C watcher so readiness loops can abort while children are starting.
-fn arm_startup_interrupt(interrupted: Arc<AtomicBool>) {
-    thread::spawn(move || {
-        let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        else {
-            return;
-        };
-        runtime.block_on(async {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                interrupted.store(true, Ordering::Release);
-            }
-        });
-    });
+/// Process-wide Ctrl-C flag for startup readiness loops.
+static STARTUP_INTERRUPT: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+
+/// Returns the shared startup-interrupt flag, installing the single process-wide
+/// Ctrl-C watcher on first use.
+///
+/// Earlier code armed a fresh OS thread and Tokio runtime on every
+/// [`LocalRuntime::start`], leaking both on each profile switch. One `OnceLock`
+/// watcher is installed once and its flag shared by every start.
+fn startup_interrupt_flag() -> Arc<AtomicBool> {
+    STARTUP_INTERRUPT
+        .get_or_init(|| {
+            let flag = Arc::new(AtomicBool::new(false));
+            let watcher = Arc::clone(&flag);
+            thread::spawn(move || {
+                let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                else {
+                    return;
+                };
+                runtime.block_on(async {
+                    if tokio::signal::ctrl_c().await.is_ok() {
+                        watcher.store(true, Ordering::Release);
+                    }
+                });
+            });
+            flag
+        })
+        .clone()
 }
 
 #[cfg(test)]
