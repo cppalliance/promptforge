@@ -3510,6 +3510,35 @@ fn bridge_blocking_rejects_a_current_thread_runtime_instead_of_panicking() {
     }
 }
 
+#[test]
+fn gateway_source_resolves_ready_and_preserves_the_env_error() {
+    // F5: lazy client acquisition is centralized. A ready source resolves to its
+    // client; a missing client becomes an `Env` source whose resolution mirrors
+    // `env_client_with_limits` (same Ok/Err disposition), so a construction
+    // failure is preserved as an error rather than swallowed with `.ok()`.
+    let limits = RunLimits::new();
+    let client = GatewayClient::new(
+        GatewayEndpoint::new("http://localhost/v1").expect("valid endpoint"),
+        SecretString::new("k"),
+    );
+    let ready = GatewaySource::from_optional(Some(client), limits);
+    assert!(
+        ready.resolve().is_ok(),
+        "a ready source must resolve to its client"
+    );
+
+    let env_source = GatewaySource::from_optional(None, limits);
+    assert!(
+        matches!(env_source, GatewaySource::Env(_)),
+        "a missing client must defer to an environment source"
+    );
+    assert_eq!(
+        env_source.resolve().is_err(),
+        env_client_with_limits(limits).is_err(),
+        "the env source must preserve the construction result, not swallow it"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn nested_model_infer_capture_reaches_the_debug_sink() {
     // F4: a nested `model:infer` called from Lua must route its request/response

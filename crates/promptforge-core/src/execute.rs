@@ -321,7 +321,7 @@ impl ToolBag {
 /// Carries the gateway client, tool pool, observer, and the live tool bag so
 /// each infer call can snapshot-read the current effective set.
 pub(crate) struct InferContext {
-    client: GatewayClient,
+    client: GatewaySource,
     shared_tools: SharedTools,
     observer: Arc<dyn Observer>,
     /// Owned debug sink so nested `model:infer` capture is not lost (F4).
@@ -437,8 +437,15 @@ impl InferContext {
             .map_err(|error| mlua::Error::external(error.to_string()))?;
 
         let completion_options = binding.completion_options();
+        // Resolve the client on first use so a construction failure surfaces
+        // here, at the first attempted inference, rather than being swallowed at
+        // setup (F5).
+        let client = self
+            .client
+            .resolve()
+            .map_err(|error| mlua::Error::external(error.to_string()))?;
         let (text, finish_reason) = bridge_blocking(run_tool_loop(
-            &self.client,
+            &client,
             &prepared.schemas,
             &prepared.dispatch,
             &registry,
@@ -486,7 +493,7 @@ impl InferContext {
 )]
 fn attach_infer_hook(
     vm: &SectionVm,
-    client: &GatewayClient,
+    client: GatewaySource,
     shared_tools: &SharedTools,
     observer: Arc<dyn Observer>,
     debug: Option<Arc<dyn DebugCapture>>,
@@ -499,7 +506,7 @@ fn attach_infer_hook(
 ) {
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
     let ctx = Arc::new(InferContext {
-        client: client.clone(),
+        client,
         shared_tools: shared_tools.clone(),
         // The run's owned observer reaches the nested `model:infer` hook, so
         // observations from nested inference are not lost (observe F1).
@@ -807,6 +814,36 @@ fn env_client_with_limits(limits: RunLimits) -> Result<GatewayClient> {
         .map_err(Error::from)
 }
 
+/// How the nested `model:infer` hook obtains its gateway client.
+///
+/// Centralizes lazy client acquisition (F5): rather than eagerly building an
+/// environment client and discarding a construction failure with `.ok()`, the
+/// hook carries a source and resolves it on the FIRST attempted inference, so a
+/// concrete construction error (for example a missing gateway key) is surfaced
+/// at infer time instead of being silently swallowed.
+#[derive(Clone)]
+enum GatewaySource {
+    /// A client the caller supplied or the run already built.
+    Ready(GatewayClient),
+    /// Build from the environment with the run's limits on first use.
+    Env(RunLimits),
+}
+
+impl GatewaySource {
+    /// Chooses a ready client when one exists, else an environment source.
+    fn from_optional(client: Option<GatewayClient>, limits: RunLimits) -> GatewaySource {
+        client.map_or(GatewaySource::Env(limits), GatewaySource::Ready)
+    }
+
+    /// Resolves the source to a concrete client, preserving a build error.
+    fn resolve(&self) -> Result<GatewayClient> {
+        match self {
+            GatewaySource::Ready(client) => Ok(client.clone()),
+            GatewaySource::Env(limits) => env_client_with_limits(*limits),
+        }
+    }
+}
+
 /// Execute a parsed prompt through the single-pass live H1 path.
 ///
 /// H1 Lua and prose blocks run once in source order with full host access.
@@ -1045,28 +1082,28 @@ async fn execute_live_h1(
             }
         };
     }
-    let mut active_client = client.cloned();
-    if active_client.is_none() {
-        active_client = env_client_with_limits(limits).ok();
-    }
-    if let Some(infer_client) = active_client.as_ref() {
-        attach_infer_hook(
-            &vm,
-            infer_client,
-            shared_tools,
-            Arc::clone(observer_arc),
-            debug_arc.cloned(),
-            execution,
-            &prompt.title,
-            prompt
-                .frontmatter
-                .max_tool_iterations
-                .resolve(default_max_tool_iterations),
-            &turns,
-            None,
-            Some(runtime.producer()),
-        );
-    }
+    // The infer hook carries a lazy client source so a nested `model:infer`
+    // surfaces a concrete construction error on first use instead of the setup
+    // swallowing it (F5). `active_client` stays lazy for the direct H1 prose
+    // path below, which builds and propagates its own error via `h1_try!`.
+    let active_client = client.cloned();
+    attach_infer_hook(
+        &vm,
+        GatewaySource::from_optional(active_client.clone(), limits),
+        shared_tools,
+        Arc::clone(observer_arc),
+        debug_arc.cloned(),
+        execution,
+        &prompt.title,
+        prompt
+            .frontmatter
+            .max_tool_iterations
+            .resolve(default_max_tool_iterations),
+        &turns,
+        None,
+        Some(runtime.producer()),
+    );
+    let mut active_client = active_client;
 
     let mut conversation = Vec::new();
     let mut reply: Option<String> = None;
@@ -1263,18 +1300,14 @@ async fn run_sections(
             return Err(error);
         }
 
-        // Ensure a gateway client exists before Lua may call model:infer.
-        // Offline Lua-only prompts declare no models and skip this.
-        if client.is_none()
-            && !models.bindings().is_empty()
-            && let Ok(new_client) = env_client_with_limits(limits)
+        // The infer hook carries a lazy client source (F5): a nested
+        // `model:infer` surfaces a concrete construction error on first use
+        // instead of the setup swallowing it. The direct prose path below still
+        // builds `client` and propagates its own error.
         {
-            client = Some(new_client);
-        }
-        if let Some(infer_client) = client.as_ref() {
             attach_infer_hook(
                 &vm,
-                infer_client,
+                GatewaySource::from_optional(client.clone(), limits),
                 shared_tools,
                 Arc::clone(observer_arc),
                 debug_arc.cloned(),
@@ -1792,27 +1825,21 @@ async fn run_execute_section(
         return Err(error);
     }
     let mut client = client.cloned();
-    if client.is_none()
-        && !models.bindings().is_empty()
-        && let Ok(new_client) = env_client_with_limits(limits)
-    {
-        client = Some(new_client);
-    }
-    if let Some(infer_client) = client.as_ref() {
-        attach_infer_hook(
-            &vm,
-            infer_client,
-            shared_tools,
-            Arc::clone(observer_arc),
-            debug_arc.cloned(),
-            execution,
-            &section.name,
-            max_tool_iterations,
-            turns,
-            Some(analysis),
-            None,
-        );
-    }
+    // Lazy client source for the infer hook (F5): a construction failure is
+    // surfaced at the first nested `model:infer`, not swallowed here.
+    attach_infer_hook(
+        &vm,
+        GatewaySource::from_optional(client.clone(), limits),
+        shared_tools,
+        Arc::clone(observer_arc),
+        debug_arc.cloned(),
+        execution,
+        &section.name,
+        max_tool_iterations,
+        turns,
+        Some(analysis),
+        None,
+    );
 
     let has_children = !section.children.is_empty();
     let mut conversation: Vec<Message> = Vec::new();
