@@ -17,7 +17,7 @@
 //! `promptforge:` version; [`promptforge_version`] reports it (or `None`), and
 //! the runtime refuses a source that lacks a supported version.
 
-pub mod cancel;
+pub(crate) mod cancel;
 pub mod client;
 pub mod debug;
 pub mod dialects;

@@ -60,7 +60,7 @@ impl CancelHandle {
 }
 
 /// Runs `fut` with `cancel` installed for [`wait_cancelled`] on this task.
-pub async fn scope<F, T>(cancel: CancelHandle, fut: F) -> T
+pub(crate) async fn scope<F, T>(cancel: CancelHandle, fut: F) -> T
 where
     F: Future<Output = T>,
 {
@@ -71,19 +71,11 @@ where
 ///
 /// When no handle is installed, the future never completes (hosts that do not
 /// wire Ctrl-C keep prior behavior).
-pub async fn wait_cancelled() {
+pub(crate) async fn wait_cancelled() {
     match CURRENT.try_with(Clone::clone) {
         Ok(handle) => handle.cancelled().await,
         Err(_) => std::future::pending::<()>().await,
     }
-}
-
-/// Returns whether the task-local handle is cancelled (false if none installed).
-#[must_use]
-pub fn is_cancelled() -> bool {
-    CURRENT
-        .try_with(CancelHandle::is_cancelled)
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
