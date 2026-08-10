@@ -4401,17 +4401,21 @@ mod tests {
     fn control_globals_are_cleared_even_when_the_block_errors() {
         // LUA-007: an ordinary execution error must still clear jump/execute/
         // fanout/tasks so no live control global leaks into a later phase.
+        type NoExecute = fn(Value, Option<String>) -> std::result::Result<String, String>;
+        type NoFanout = fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, String>;
         let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Ctl").expect("VM builds");
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host injects");
         let boom = program("error('boom')");
-        let no_execute: Option<&fn(Value, Option<String>) -> std::result::Result<String, String>> =
-            None;
-        let no_fanout: Option<
-            &fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, String>,
-        > = None;
-        vm.run_prologue_with_control(&boom, &NullObserver, "Ctl", &[], no_execute, no_fanout)
-            .expect_err("the erroring control block must fail");
+        vm.run_prologue_with_control(
+            &boom,
+            &NullObserver,
+            "Ctl",
+            &[],
+            None::<&NoExecute>,
+            None::<&NoFanout>,
+        )
+        .expect_err("the erroring control block must fail");
 
         // A follow-up plain block observes the global table: every control global
         // must be nil despite the prior error.
