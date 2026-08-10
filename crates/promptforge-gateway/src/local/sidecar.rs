@@ -263,7 +263,10 @@ mod tests {
     fn formats_unix_epoch_boundaries() {
         assert_eq!(super::format_unix_utc(0), "1970-01-01T00:00:00Z");
         // 2021-01-01T00:00:00Z == 1609459200
-        assert_eq!(super::format_unix_utc(1_609_459_200), "2021-01-01T00:00:00Z");
+        assert_eq!(
+            super::format_unix_utc(1_609_459_200),
+            "2021-01-01T00:00:00Z"
+        );
         // 2000-02-29T12:34:56Z (leap day) == 951827696
         assert_eq!(super::format_unix_utc(951_827_696), "2000-02-29T12:34:56Z");
     }

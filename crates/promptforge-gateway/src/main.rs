@@ -84,9 +84,9 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<ServeOptions, 
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--profiles-dir") => {
-                let dir = args
-                    .next()
-                    .ok_or_else(|| ParseError::Usage("--profiles-dir requires a path".to_string()))?;
+                let dir = args.next().ok_or_else(|| {
+                    ParseError::Usage("--profiles-dir requires a path".to_string())
+                })?;
                 profiles_dir = Some(PathBuf::from(dir));
             }
             Some("--profile") => {

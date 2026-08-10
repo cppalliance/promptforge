@@ -74,7 +74,7 @@ impl ProfilesContext {
 /// A fully assembled, owning gateway.
 ///
 /// Holds the live routing table, the server key, the web-search capability, and
-/// the [`LocalRuntime`], so dropping a `Gateway` terminates every managed
+/// the local model runtime, so dropping a `Gateway` terminates every managed
 /// `llama-server` child. The type is opaque; assemble it with
 /// [`Gateway::from_config`].
 #[derive(Debug)]

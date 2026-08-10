@@ -48,7 +48,9 @@ impl ProfileName {
             return Err(ProfileNameError::new("profile name must not be empty"));
         }
         if name == "." || name == ".." {
-            return Err(ProfileNameError::new("profile name must not be `.` or `..`"));
+            return Err(ProfileNameError::new(
+                "profile name must not be `.` or `..`",
+            ));
         }
         if name.contains(['/', '\\']) || name.contains('\0') {
             return Err(ProfileNameError::new(

@@ -160,7 +160,8 @@ impl LocalUpstream {
         let status = response.status();
         if !status.is_success() {
             let body =
-                crate::http_util::read_body_capped(response, crate::http_util::MAX_ERROR_BODY).await;
+                crate::http_util::read_body_capped(response, crate::http_util::MAX_ERROR_BODY)
+                    .await;
             let body: String = body.chars().take(2000).collect();
             return Err(GatewayError::UpstreamStatus {
                 status: status.as_u16(),

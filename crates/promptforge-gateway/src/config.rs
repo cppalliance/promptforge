@@ -428,7 +428,9 @@ impl Config {
     /// The web-search configuration, when `[tools.web_search]` is present.
     #[must_use]
     pub(crate) fn web_search_config(&self) -> Option<&WebSearchConfig> {
-        self.tools.as_ref().and_then(|tools| tools.web_search.as_ref())
+        self.tools
+            .as_ref()
+            .and_then(|tools| tools.web_search.as_ref())
     }
 
     /// Resolve the concurrency limit for an endpoint: explicit

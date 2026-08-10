@@ -16,7 +16,6 @@ use crate::config::{Secret, WebSearchConfig};
 use crate::error::GatewayError;
 use crate::web_search_process::post_process_results;
 
-
 /// Cloneable runtime settings for `web_search`, filled from [`WebSearchConfig`].
 #[derive(Debug, Clone)]
 pub(crate) struct WebSearchSettings {
