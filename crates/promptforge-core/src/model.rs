@@ -361,7 +361,7 @@ impl PartialEq for ModelNeedOpts {
     }
 }
 
-impl Eq for ModelNeedOpts {}
+// No `Eq`: `temperature` is an `f64`, so equality is not reflexive for NaN.
 
 /// Frozen per-request fields carried by a resolved model binding.
 #[derive(Debug, Clone, PartialEq)]
@@ -374,7 +374,7 @@ pub(crate) struct ModelInvocation {
     pub(crate) thinking: Option<bool>,
 }
 
-impl Eq for ModelInvocation {}
+// No `Eq`: `temperature` is an `f64`, so equality is not reflexive for NaN.
 
 impl From<&ModelNeedOpts> for ModelInvocation {
     fn from(opts: &ModelNeedOpts) -> Self {
@@ -387,7 +387,8 @@ impl From<&ModelNeedOpts> for ModelInvocation {
 }
 
 /// One prompt-local alias bound to a model identity and frozen invocation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+// No `Eq`: the frozen invocation carries an `f64` temperature.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ModelBinding {
     alias: String,
     description: String,
@@ -540,7 +541,8 @@ impl CompletionOptions {
 }
 
 /// Immutable prompt-level model bindings from live H1 execution.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+// No `Eq`: bindings carry `f64` temperatures transitively.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct ModelBindings {
     bindings: Vec<ModelBinding>,
     always: Option<String>,
@@ -569,7 +571,8 @@ impl ModelBindings {
 }
 
 /// Complete live model set for one bind pass.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+// No `Eq`: bindings carry `f64` temperatures transitively.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ModelCatalog {
     models: Vec<ModelDescriptor>,
 }
@@ -711,7 +714,8 @@ where
 }
 
 /// The identity and invocation produced by a successful model resolve.
-#[derive(Debug, Clone, PartialEq, Eq)]
+// No `Eq`: the invocation carries an `f64` temperature.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ResolvedModel {
     /// The selected catalog identity.
     pub(crate) id: ModelId,
@@ -777,7 +781,13 @@ pub async fn fetch_model_catalog(
             },
         }));
     }
-    let list: ModelsListResponse = response.json().await.map_err(Error::http)?;
+    // A body that does not decode as a model list is a malformed response, not a
+    // transport failure - matching this function's documented error contract.
+    let list: ModelsListResponse = response.json().await.map_err(|error| {
+        CompletionError::from(Error::MalformedResponse(format!(
+            "model list response was not valid JSON: {error}"
+        )))
+    })?;
     let mut descriptors = Vec::with_capacity(list.data.len());
     for entry in list.data {
         let id = ModelId::gateway(entry.id).map_err(|error| {
@@ -848,15 +858,22 @@ impl ModelResolver for PickerModelResolver<'_> {
         match picker.resolve(description) {
             Ok(promptforge_tool_picker::Outcome::Bind(tool)) => {
                 let id = model_from_picker_id(tool.id());
-                let descriptor = filtered.get(&id);
-                let dialect =
-                    descriptor.map_or(ToolDialectId::OpenAi, ModelDescriptor::tool_dialect);
-                let context = descriptor.map_or(0, |d| d.context().get());
+                // The picker was rebuilt from `filtered`, so a selected id absent
+                // from it is an encoding/consistency fault, not a bind. Fail
+                // explicitly instead of fabricating OpenAI + zero-context metadata.
+                let descriptor = filtered.get(&id).ok_or_else(|| Error::ModelBind {
+                    capability: description.to_owned(),
+                    detail: format!(
+                        "picker selected model {}/{} which is absent from the filtered live catalog",
+                        id.server(),
+                        id.name()
+                    ),
+                })?;
                 Ok(ResolvedModel {
                     id,
                     invocation: ModelInvocation::from(opts),
-                    tool_dialect: dialect,
-                    context,
+                    tool_dialect: descriptor.tool_dialect(),
+                    context: descriptor.context().get(),
                 })
             }
             Ok(promptforge_tool_picker::Outcome::Absent) => Err(Error::ModelAbsent {
@@ -1805,6 +1822,18 @@ mod tests {
         );
         assert_eq!(descriptor.tool_dialect(), ToolDialectId::OpenAi);
         assert_eq!(descriptor.tools_mode(), crate::dialects::ToolsMode::Native);
+    }
+
+    #[test]
+    fn model_invocation_equality_is_not_reflexive_for_nan() {
+        // Documents why these float-bearing types intentionally do not implement
+        // `Eq`: a NaN temperature is not equal to itself.
+        let nan = ModelInvocation {
+            temperature: Some(f64::NAN),
+            max_tokens: None,
+            thinking: None,
+        };
+        assert_ne!(nan, nan.clone());
     }
 
     #[test]

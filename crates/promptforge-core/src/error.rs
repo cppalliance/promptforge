@@ -41,6 +41,10 @@ pub(crate) enum Error {
     #[error("missing environment variable: {0}")]
     MissingEnv(String),
 
+    /// An environment variable was set but its value was not valid Unicode.
+    #[error("environment variable is set but not valid Unicode: {0}")]
+    InvalidEnv(String),
+
     /// Gateway access was explicitly disabled by the host.
     #[error("gateway access is disabled")]
     GatewayDisabled,

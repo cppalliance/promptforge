@@ -76,7 +76,10 @@ fn resolve(
         });
     }
     let Some((namespace, keys)) = path.split_once('.') else {
-        return Err(Error::Substitution(format!("bad path: {{{{ {path} }}}}")));
+        return Err(Error::Substitution(format!(
+            "bad path: {{{{ {} }}}}",
+            path_preview(path)
+        )));
     };
     let root = match namespace {
         "var" => var,
@@ -98,23 +101,54 @@ fn resolve(
         }
         other => {
             return Err(Error::Substitution(format!(
-                "unknown namespace '{other}' in {{{{ {path} }}}}"
+                "unknown namespace '{}' in {{{{ {} }}}}",
+                path_preview(other),
+                path_preview(path)
             )));
         }
     };
     let mut current = root;
     for key in keys.split('.') {
-        current = current
-            .get(key)
-            .ok_or_else(|| Error::Substitution(format!("missing {{{{ {path} }}}}")))?;
+        current = current.get(key).ok_or_else(|| {
+            Error::Substitution(format!("missing {{{{ {} }}}}", path_preview(path)))
+        })?;
     }
     render(current, path)
+}
+
+/// Renders a prompt-controlled placeholder path for a diagnostic.
+///
+/// Control characters are escaped and the text is truncated to a bounded length
+/// so a hostile or malformed placeholder cannot forge multiline log records,
+/// leak an oversized span, or smuggle control characters through `Display`.
+fn path_preview(path: &str) -> String {
+    use std::fmt::Write as _;
+    const MAX_PREVIEW_CHARS: usize = 80;
+    let mut out = String::with_capacity(path.len().min(MAX_PREVIEW_CHARS));
+    for ch in path.chars().take(MAX_PREVIEW_CHARS) {
+        match ch {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                let _ = write!(out, "\\u{{{:04x}}}", u32::from(c));
+            }
+            c => out.push(c),
+        }
+    }
+    if path.chars().count() > MAX_PREVIEW_CHARS {
+        out.push_str("...");
+    }
+    out
 }
 
 /// Render a resolved JSON value as its substituted string.
 fn render(value: &Value, path: &str) -> Result<String> {
     match value {
-        Value::Null => Err(Error::Substitution(format!("missing {{{{ {path} }}}}"))),
+        Value::Null => Err(Error::Substitution(format!(
+            "missing {{{{ {} }}}}",
+            path_preview(path)
+        ))),
         Value::String(s) => Ok(s.clone()),
         Value::Bool(b) => Ok(b.to_string()),
         Value::Number(n) => Ok(n.to_string()),
@@ -133,6 +167,25 @@ mod tests {
         let var = json!({ "kind": "library", "count": 3, "row": { "a": 1 } });
         let sys = json!({ "when": "2026-07-29T00:00:00Z", "id": 1 });
         substitute(prose, "Acme Corp", None, None, &var, &sys)
+    }
+
+    #[test]
+    fn substitution_diagnostics_escape_and_bound_the_placeholder() {
+        let hostile = format!("var.{}", "x".repeat(500));
+        let preview = path_preview(&hostile);
+        assert!(
+            preview.chars().count() <= 83,
+            "preview must be bounded, got {} chars",
+            preview.chars().count()
+        );
+        assert!(preview.ends_with("..."), "over-long preview must be elided");
+
+        let with_controls = path_preview("var.a\nb\tc");
+        assert!(
+            !with_controls.contains('\n') && !with_controls.contains('\t'),
+            "control characters must be escaped, got: {with_controls}"
+        );
+        assert!(with_controls.contains("\\n") && with_controls.contains("\\t"));
     }
 
     #[test]

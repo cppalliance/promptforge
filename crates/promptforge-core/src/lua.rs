@@ -446,7 +446,8 @@ impl ToolScope {
 }
 
 /// Closed H2 tool scope and optional section model selection.
-#[derive(Debug, Clone, PartialEq, Eq)]
+// No `Eq`: the optional model binding carries an `f64` temperature transitively.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ClosedScopes {
     /// Effective tool bindings for this section.
     pub(crate) tools: ToolScope,

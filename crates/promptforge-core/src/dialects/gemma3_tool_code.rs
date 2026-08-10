@@ -147,6 +147,14 @@ impl ToolDialect for Gemma3ToolCodeDialect {
     ) {
         conversation.push(Message::assistant(render_tool_code_fence(calls)));
 
+        // The sole caller (the tool-call loop) pushes exactly one result per
+        // call, in call order, so the positional pairing below is correct. This
+        // asserts that crate-internal invariant rather than silently truncating.
+        debug_assert_eq!(
+            calls.len(),
+            results.len(),
+            "echo_tool_results requires one result per call, in order"
+        );
         let mut parts: Vec<String> = Vec::with_capacity(results.len());
         for (call, (id, content)) in calls.iter().zip(results.iter()) {
             parts.push(format!("TOOL RESULT {} ({}):\n{}", call.name, id, content));

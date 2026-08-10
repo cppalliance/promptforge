@@ -116,6 +116,7 @@ impl RunError {
             Error::LuaCompile { .. } | Error::Lua(_) => RunErrorKind::Lua,
             Error::UnsupportedVersion(_) => RunErrorKind::Version,
             Error::MissingEnv(_)
+            | Error::InvalidEnv(_)
             | Error::GatewayDisabled
             | Error::Http(_)
             | Error::Backend { .. }

@@ -390,7 +390,14 @@ impl GatewayClient {
     /// Returns a [`CompletionError`] with `Config` kind when either variable is
     /// not set.
     pub fn from_env() -> std::result::Result<GatewayClient, CompletionError> {
-        from_env_with(|name| std::env::var(name).ok()).map_err(CompletionError::from)
+        from_env_with(|name| match std::env::var(name) {
+            Ok(value) => Ok(Some(value)),
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            // A set-but-non-Unicode value is a real misconfiguration, surfaced
+            // explicitly instead of being silently treated as "not set".
+            Err(std::env::VarError::NotUnicode(_)) => Err(Error::InvalidEnv(name.to_owned())),
+        })
+        .map_err(CompletionError::from)
     }
 
     /// Send a list of messages and return the model's outcome.
@@ -522,10 +529,12 @@ async fn read_body_capped(mut response: reqwest::Response, cap: u64) -> Result<V
     Ok(body)
 }
 
-fn from_env_with(lookup: impl Fn(&str) -> Option<String>) -> Result<GatewayClient> {
-    let base_url = lookup("PROMPTFORGE_GATEWAY_URL")
+fn from_env_with(
+    lookup: impl Fn(&str) -> std::result::Result<Option<String>, Error>,
+) -> Result<GatewayClient> {
+    let base_url = lookup("PROMPTFORGE_GATEWAY_URL")?
         .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_URL".into()))?;
-    let key = lookup("PROMPTFORGE_GATEWAY_KEY")
+    let key = lookup("PROMPTFORGE_GATEWAY_KEY")?
         .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_KEY".into()))?;
     let endpoint = GatewayEndpoint::new(&base_url).map_err(Error::from)?;
     Ok(GatewayClient::new(endpoint, SecretString::new(key)))
@@ -535,17 +544,35 @@ fn from_env_with(lookup: impl Fn(&str) -> Option<String>) -> Result<GatewayClien
 mod tests {
     use super::*;
 
-    fn lookup_from<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+    fn lookup_from<'a>(
+        pairs: &'a [(&'a str, &'a str)],
+    ) -> impl Fn(&str) -> std::result::Result<Option<String>, Error> + 'a {
         let pairs: Vec<(String, String)> = pairs
             .iter()
             .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
             .collect();
         move |name| {
-            pairs
+            Ok(pairs
                 .iter()
                 .find(|(key, _)| key == name)
-                .map(|(_, value)| value.clone())
+                .map(|(_, value)| value.clone()))
         }
+    }
+
+    #[test]
+    fn from_env_surfaces_non_unicode_value_instead_of_dropping_it() {
+        let err = from_env_with(|name| {
+            if name == "PROMPTFORGE_GATEWAY_URL" {
+                Err(Error::InvalidEnv(name.to_owned()))
+            } else {
+                Ok(Some("tok".to_owned()))
+            }
+        })
+        .expect_err("a non-Unicode variable must be surfaced, not treated as missing");
+        assert!(
+            matches!(err, Error::InvalidEnv(ref name) if name == "PROMPTFORGE_GATEWAY_URL"),
+            "expected an explicit InvalidEnv error, got {err:?}"
+        );
     }
 
     #[test]
