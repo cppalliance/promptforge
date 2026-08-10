@@ -351,12 +351,15 @@ impl Section {
         }
     }
 
-    /// True when this section has no Lua blocks.
+    /// True when this section is a validated bullet list.
+    ///
+    /// A section is list-only exactly when it parsed into non-empty
+    /// [`items`](Self::items) - i.e. it had no Lua blocks and every nonblank
+    /// prose line was a valid list item (PF-PARSER-005). Ordinary prose (even
+    /// prose that happens to contain a single bullet line) is not list-only.
     #[must_use]
     pub fn is_list_only(&self) -> bool {
-        self.blocks
-            .iter()
-            .all(|block| matches!(block, Block::Prose { .. }))
+        !self.items.is_empty()
     }
 }
 
@@ -964,31 +967,18 @@ pub(crate) fn parse_bullet_items(prose: &str, section: &str) -> Result<Vec<Strin
         if trimmed.is_empty() {
             continue;
         }
-        if let Some(rest) = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("* "))
-        {
-            if rest.trim().is_empty() {
+        match classify_list_line(trimmed) {
+            ListLine::Item(content) => items.push(content.to_string()),
+            ListLine::EmptyMarker => {
                 return Err(Error::Parse(format!(
                     "empty bullet item in list section `{section}`"
                 )));
             }
-            items.push(rest.to_string());
-        } else if trimmed == "-" || trimmed == "*" {
-            return Err(Error::Parse(format!(
-                "empty bullet item in list section `{section}`"
-            )));
-        } else if let Some(item) = strip_ordered_marker(trimmed) {
-            if item.trim().is_empty() {
+            ListLine::NotAMarker => {
                 return Err(Error::Parse(format!(
-                    "empty bullet item in list section `{section}`"
+                    "section `{section}` is a list section but contains non-list content: {trimmed}"
                 )));
             }
-            items.push(item.to_string());
-        } else {
-            return Err(Error::Parse(format!(
-                "section `{section}` is a list section but contains non-list content: {trimmed}"
-            )));
         }
     }
     if items.is_empty() {
@@ -999,18 +989,67 @@ pub(crate) fn parse_bullet_items(prose: &str, section: &str) -> Result<Vec<Strin
     Ok(items)
 }
 
-/// Strips an ordered-list marker (`N. ` or `N) `) and returns the remainder.
-fn strip_ordered_marker(line: &str) -> Option<&str> {
-    let bytes = line.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        i += 1;
+/// The classification of a single nonblank prose line as a list marker.
+///
+/// One classifier feeds both list *detection* (is this section a list?) and
+/// *extraction* (parse its items), so the two can never disagree about what
+/// counts as a marker.
+enum ListLine<'a> {
+    /// A well-formed marker with nonblank content (the returned item text).
+    Item(&'a str),
+    /// A marker with no content: `-`, `*`, `1.`, `1. `, `1)`.
+    EmptyMarker,
+    /// Not a list marker at all (ordinary prose).
+    NotAMarker,
+}
+
+/// Classify one already-trimmed, nonblank line as a list marker.
+fn classify_list_line(trimmed: &str) -> ListLine<'_> {
+    // Unordered: `- item` / `* item`, or a bare `-` / `*`.
+    if let Some(rest) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+    {
+        return if rest.trim().is_empty() {
+            ListLine::EmptyMarker
+        } else {
+            ListLine::Item(rest)
+        };
     }
-    if i == 0 {
-        return None;
+    if trimmed == "-" || trimmed == "*" {
+        return ListLine::EmptyMarker;
     }
-    let rest = &line[i..];
-    rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") "))
+
+    // Ordered: `N. item` / `N) item`, or a bare/empty `N.` / `N. ` / `N)`.
+    let digits = trimmed
+        .as_bytes()
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digits == 0 {
+        return ListLine::NotAMarker;
+    }
+    let after_digits = &trimmed[digits..];
+    let Some(after_punct) = after_digits
+        .strip_prefix('.')
+        .or_else(|| after_digits.strip_prefix(')'))
+    else {
+        return ListLine::NotAMarker;
+    };
+    if after_punct.is_empty() {
+        // `1.` / `1)` - a bare marker with no separating space or content.
+        return ListLine::EmptyMarker;
+    }
+    // A valid ordered item requires a space after the marker punctuation, so
+    // `1.foo` is prose, not a list item.
+    if let Some(content) = after_punct.strip_prefix(' ') {
+        return if content.trim().is_empty() {
+            ListLine::EmptyMarker
+        } else {
+            ListLine::Item(content)
+        };
+    }
+    ListLine::NotAMarker
 }
 
 /// Build a section tree from a flat, document-ordered list of headings.
@@ -1096,16 +1135,19 @@ fn build_sections(
         let children =
             build_sections(headings, pos, level, frontmatter_lines, execution, observer)?;
 
-        let is_list_only = blocks
+        let has_no_lua = blocks
             .iter()
             .all(|block| matches!(block, Block::Prose { .. }));
         let prose_for_items = blocks.iter().find_map(|block| match block {
             Block::Prose { text, .. } => Some(text.as_str()),
             Block::Lua(_) => None,
         });
-        let items = if is_list_only
+        // A section is a list only when it has no Lua and every nonblank prose
+        // line is a list marker; one incidental bullet in mixed prose leaves a
+        // non-marker line, so the section stays prose.
+        let items = if has_no_lua
             && let Some(prose) = prose_for_items
-            && has_any_bullet_line(prose)
+            && is_all_list_markers(prose)
         {
             parse_bullet_items(prose, &name)?
         } else {
@@ -1133,14 +1175,27 @@ fn build_sections(
     Ok(result)
 }
 
-/// Returns true if the prose contains at least one bullet-list line.
-fn has_any_bullet_line(prose: &str) -> bool {
-    prose.lines().any(|line| {
+/// Returns true when `prose` is entirely list markers: every nonblank line is a
+/// list marker (well-formed or empty) and there is at least one such line.
+///
+/// This is the list-only invariant (PF-PARSER-005): a single incidental bullet
+/// line in otherwise ordinary prose leaves a non-marker line present, so the
+/// section is classified as prose rather than forced through strict list
+/// parsing. A section whose lines are all markers but include an empty one is
+/// still a list, so `parse_bullet_items` reports the empty item.
+fn is_all_list_markers(prose: &str) -> bool {
+    let mut saw_marker = false;
+    for line in prose.lines() {
         let trimmed = line.trim();
-        trimmed.starts_with("- ")
-            || trimmed.starts_with("* ")
-            || strip_ordered_marker(trimmed).is_some()
-    })
+        if trimmed.is_empty() {
+            continue;
+        }
+        match classify_list_line(trimmed) {
+            ListLine::NotAMarker => return false,
+            ListLine::Item(_) | ListLine::EmptyMarker => saw_marker = true,
+        }
+    }
+    saw_marker
 }
 
 #[cfg(test)]
@@ -1149,6 +1204,57 @@ mod tests {
 
     use super::*;
     use crate::observe::{NullObserver, Observation, detail};
+
+    #[test]
+    fn mixed_prose_with_one_bullet_is_not_a_list() {
+        // PF-PARSER-005: an incidental bullet line in ordinary prose must not
+        // force strict list parsing; the section stays prose.
+        let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\nHere is context.\n- one incidental bullet\nMore prose follows.\n";
+        let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+        let section = &prompt.sections[0];
+        assert!(!section.is_list_only(), "mixed prose is not a list");
+        assert!(section.items().is_empty());
+        assert!(section.prose().contains("incidental bullet"));
+    }
+
+    #[test]
+    fn pure_list_section_parses_items() {
+        let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\n- alpha\n- beta\n3. gamma\n";
+        let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+        let section = &prompt.sections[0];
+        assert!(section.is_list_only());
+        assert_eq!(section.items(), ["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn empty_and_bare_markers_are_classified() {
+        assert!(matches!(
+            classify_list_line("- item"),
+            ListLine::Item("item")
+        ));
+        assert!(matches!(
+            classify_list_line("1. item"),
+            ListLine::Item("item")
+        ));
+        assert!(matches!(classify_list_line("-"), ListLine::EmptyMarker));
+        assert!(matches!(classify_list_line("1."), ListLine::EmptyMarker));
+        assert!(matches!(classify_list_line("1. "), ListLine::EmptyMarker));
+        assert!(matches!(classify_list_line("1)"), ListLine::EmptyMarker));
+        assert!(matches!(classify_list_line("1.foo"), ListLine::NotAMarker));
+        assert!(matches!(
+            classify_list_line("plain prose"),
+            ListLine::NotAMarker
+        ));
+    }
+
+    #[test]
+    fn all_marker_list_with_empty_item_is_rejected() {
+        // Every nonblank line is a marker, so it is a list; the empty marker is
+        // then a hard error rather than a detector miss.
+        let src = "---\nname: p\ndescription: d\n---\n\n# T\n\n## S\n\n- alpha\n1.\n- beta\n";
+        let error = Prompt::parse(src, "test", &NullObserver).expect_err("empty item must fail");
+        assert_eq!(error.kind(), ParseErrorKind::List);
+    }
 
     #[test]
     fn parsed_prompt_value_types_are_equatable() {
