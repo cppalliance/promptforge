@@ -853,8 +853,14 @@ mod tests {
         // through, so a body cannot forge log lines.
         let escaped = escape_controls("line1\nline2\r\u{7}end", 2000);
         assert!(!escaped.contains('\n'), "raw newline must be escaped");
-        assert!(!escaped.contains('\r'), "raw carriage return must be escaped");
-        assert!(escaped.contains("\\n"), "escaped newline expected, got {escaped}");
+        assert!(
+            !escaped.contains('\r'),
+            "raw carriage return must be escaped"
+        );
+        assert!(
+            escaped.contains("\\n"),
+            "escaped newline expected, got {escaped}"
+        );
         assert_eq!(escape_controls("", 2000), "(empty body)");
         assert_eq!(escape_controls("abcdef", 3), "abc");
     }
@@ -897,9 +903,17 @@ mod tests {
             "the raw body must not ride in Display, got {shown}"
         );
         // The bounded, control-escaped body is available only via the opt-in.
-        let body = err.backend_body().expect("backend body is available opt-in");
-        assert!(body.contains("\\n"), "control chars must be escaped, got {body}");
-        assert!(!body.contains('\n'), "no raw newline in the diagnostic body");
+        let body = err
+            .backend_body()
+            .expect("backend body is available opt-in");
+        assert!(
+            body.contains("\\n"),
+            "control chars must be escaped, got {body}"
+        );
+        assert!(
+            !body.contains('\n'),
+            "no raw newline in the diagnostic body"
+        );
     }
 
     #[test]

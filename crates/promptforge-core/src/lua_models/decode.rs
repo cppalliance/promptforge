@@ -163,7 +163,9 @@ pub(crate) fn value_as_u32(value: &Value, field: &str) -> mlua::Result<u32> {
 pub(crate) fn value_as_nonzero_u32(value: &Value, field: &str) -> mlua::Result<NonZeroU32> {
     let raw = value_as_u32(value, field)?;
     NonZeroU32::new(raw).ok_or_else(|| {
-        mlua::Error::external(format!("models.need opts.{field} must be greater than zero"))
+        mlua::Error::external(format!(
+            "models.need opts.{field} must be greater than zero"
+        ))
     })
 }
 

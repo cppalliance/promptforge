@@ -130,7 +130,9 @@ impl CachedDecision {
         match outcome {
             Ok(Outcome::Bind(tool)) => Self::Bind(tool_id_of(tool)),
             Ok(Outcome::Absent) => Self::Absent,
-            Ok(Outcome::Duplicate(group)) => Self::Duplicate(group.iter().map(tool_id_of).collect()),
+            Ok(Outcome::Duplicate(group)) => {
+                Self::Duplicate(group.iter().map(tool_id_of).collect())
+            }
             Ok(Outcome::Ambiguous(group)) => {
                 Self::Ambiguous(group.iter().map(tool_id_of).collect())
             }
@@ -505,7 +507,11 @@ mod tests {
         let miss_b = resolver.resolve("absent").expect_err("absent fails again");
         assert!(matches!(miss_a, Error::Absent { .. }));
         assert!(matches!(miss_b, Error::Absent { .. }));
-        assert_eq!(source.count("absent"), 1, "a cached miss must not re-decide");
+        assert_eq!(
+            source.count("absent"),
+            1,
+            "a cached miss must not re-decide"
+        );
 
         // A distinct capability is decided on its own miss.
         resolver.resolve("second").expect("second resolves");

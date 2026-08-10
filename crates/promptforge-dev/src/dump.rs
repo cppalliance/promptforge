@@ -498,19 +498,28 @@ mod tests {
     fn unsafe_store_paths_are_skipped_with_a_status_report() {
         let directory = tempfile::tempdir().expect("create dump fixture directory");
         let store = StoreRef::memory();
-        // Absolute and traversal paths never enter the store: `StoreRef`
-        // validates every path at the boundary and rejects them before any
-        // backend write, so they can never reach a dump in the first place.
-        for rejected in ["/absolute.txt", "../escape.txt", "a/../traversal.txt"] {
+        // These paths never enter the store: `StoreRef` validates every path at
+        // the boundary and rejects them before any backend write (STORE-003
+        // hardened this to also cover backslashes, reserved device names, and
+        // trailing dot/space), so they can never reach a dump in the first place.
+        for rejected in [
+            "/absolute.txt",
+            "../escape.txt",
+            "a/../traversal.txt",
+            "back\\slash.txt",
+            "nul.txt",
+            "trailing. /x",
+        ] {
             assert!(
                 store.write(rejected, "must not land on disk").is_err(),
                 "the store must reject the unsafe path {rejected:?} at the boundary"
             );
         }
-        // These pass the store's path rules but are unsafe to mirror onto this
-        // host's filesystem (drive letters, backslash separators, reserved
-        // names, trailing space/dot), so the dump skips them and reports it.
-        let dump_skipped = ["C:/drive.txt", "back\\slash.txt", "nul.txt", "trailing. /x"];
+        // These pass the store's path rules but carry characters Windows
+        // reserves in a filename (drive-letter colon, `* ? |`), so they are
+        // unsafe to mirror onto this host's filesystem: the dump skips them and
+        // reports it.
+        let dump_skipped = ["C:/drive.txt", "star*.txt", "q?.txt", "pipe|x.txt"];
         for path in dump_skipped {
             store
                 .write(path, "must not land on disk")

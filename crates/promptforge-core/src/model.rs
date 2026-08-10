@@ -850,7 +850,6 @@ impl ModelCatalog {
             .filter(|model| satisfies_constraints(model, opts))
             .collect()
     }
-
 }
 
 /// Builds a tool-picker [`Catalog`] from borrowed model descriptors.

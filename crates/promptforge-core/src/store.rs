@@ -1402,7 +1402,9 @@ mod tests {
             .expect_err("anchor absent in empty file");
         assert!(matches!(empty_err, StoreError::AnchorNotFound { .. }));
 
-        store.write("ascii.txt", "one two three").expect("write ascii");
+        store
+            .write("ascii.txt", "one two three")
+            .expect("write ascii");
         store
             .str_replace("ascii.txt", "two", "TWO")
             .expect("ascii anchor replaced");
@@ -1412,7 +1414,10 @@ mod tests {
         let ambiguous = store
             .str_replace("multi.txt", "café", "COFFEE")
             .expect_err("multibyte anchor occurs twice");
-        assert!(matches!(ambiguous, StoreError::AnchorAmbiguous { count: 2, .. }));
+        assert!(matches!(
+            ambiguous,
+            StoreError::AnchorAmbiguous { count: 2, .. }
+        ));
         store
             .str_replace("multi.txt", "résumé", "CV")
             .expect("unique multibyte anchor replaced");
@@ -1445,7 +1450,9 @@ mod tests {
             StoreErrorKind::InvalidPath
         );
         // Names that merely contain a device substring are allowed.
-        store.write("console.txt", "ok").expect("console is not CON");
+        store
+            .write("console.txt", "ok")
+            .expect("console is not CON");
         store.write("com10.txt", "ok").expect("com10 is not com1");
     }
 
@@ -1484,7 +1491,12 @@ mod tests {
         store.write("x/y/z.rs", "").expect("write nested");
         assert_eq!(store.glob("x/**/z.rs").expect("glob"), vec!["x/y/z.rs"]);
         store.write("z2.rs", "").expect("write top");
-        assert!(store.glob("**/z2.rs").expect("glob").contains(&"z2.rs".to_owned()));
+        assert!(
+            store
+                .glob("**/z2.rs")
+                .expect("glob")
+                .contains(&"z2.rs".to_owned())
+        );
     }
 
     #[test]
