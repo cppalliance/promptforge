@@ -1072,9 +1072,7 @@ fn glob_match(pattern: &[u8], text: &[u8]) -> bool {
     let mut next = vec![false; len + 1];
 
     for token in tokens {
-        for slot in &mut next {
-            *slot = false;
-        }
+        next.fill(false);
         match token {
             GlobToken::Literal(byte) => {
                 for j in 0..len {

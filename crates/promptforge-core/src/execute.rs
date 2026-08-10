@@ -1119,7 +1119,7 @@ async fn execute_live_h1(
     turns: Arc<AtomicU32>,
 ) -> Result<LiveH1State> {
     let default_max_tool_iterations = limits.tool_iterations().get() as usize;
-    let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models)?;
+    let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models);
     let now = now_rfc3339_checked()?;
     let sys = json!({
         "when": now.clone(),

@@ -39,14 +39,14 @@ impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
         picker: &'a ToolPicker,
         registry: &'a ToolRegistry<'tools>,
         models: &'a ModelCatalog,
-    ) -> Result<Self> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             tool_resolver: PickerResolver::new(picker),
             registry,
             models,
             base_picker: picker,
             producer: LiveBindingProducer::default(),
-        })
+        }
     }
 
     /// Installs call-time tool and model resolution into an H1 Lua scope.
@@ -128,7 +128,7 @@ impl CachedDecision {
         outcome: std::result::Result<Outcome<'_>, promptforge_tool_picker::QueryError>,
     ) -> Self {
         match outcome {
-            Ok(Outcome::Bind(tool)) => Self::Bind(tool_id_of(&tool)),
+            Ok(Outcome::Bind(tool)) => Self::Bind(tool_id_of(tool)),
             Ok(Outcome::Absent) => Self::Absent,
             Ok(Outcome::Duplicate(group)) => Self::Duplicate(group.iter().map(tool_id_of).collect()),
             Ok(Outcome::Ambiguous(group)) => {
