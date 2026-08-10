@@ -29,16 +29,16 @@ use crate::{Error, Result};
 #[non_exhaustive]
 pub struct Message {
     /// The role: `system`, `user`, `assistant`, or `tool`.
-    pub role: String,
+    pub(crate) role: String,
     /// The message text.
-    pub content: String,
+    pub(crate) content: String,
     /// For a `tool` message, the id of the tool call this result answers.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
+    pub(crate) tool_call_id: Option<String>,
     /// For an `assistant` turn that requested tools, the raw `tool_calls` array
     /// as received from the backend, echoed back verbatim.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<Value>>,
+    pub(crate) tool_calls: Option<Vec<Value>>,
 }
 
 impl Message {
@@ -82,13 +82,25 @@ impl Message {
     /// `raw_tool_calls` is the backend's `tool_calls` array echoed back
     /// verbatim so the conversation history matches what the model emitted.
     #[must_use]
-    pub fn assistant_tool_calls(raw_tool_calls: Vec<Value>) -> Message {
+    pub(crate) fn assistant_tool_calls(raw_tool_calls: Vec<Value>) -> Message {
         Message {
             role: "assistant".into(),
             content: String::new(),
             tool_call_id: None,
             tool_calls: Some(raw_tool_calls),
         }
+    }
+
+    /// Returns the message role (`system`, `user`, `assistant`, or `tool`).
+    #[must_use]
+    pub fn role(&self) -> &str {
+        &self.role
+    }
+
+    /// Returns the message text.
+    #[must_use]
+    pub fn content(&self) -> &str {
+        &self.content
     }
 }
 
@@ -100,11 +112,11 @@ impl Message {
 #[non_exhaustive]
 pub struct ToolSchema {
     /// The tool's wire name.
-    pub name: String,
+    pub(crate) name: String,
     /// A one-sentence description shown to the model.
-    pub description: String,
+    pub(crate) description: String,
     /// The JSON Schema for the tool's parameters.
-    pub parameters: Value,
+    pub(crate) parameters: Value,
 }
 
 /// A tool invocation requested by the model.
@@ -116,11 +128,31 @@ pub struct ToolSchema {
 #[non_exhaustive]
 pub struct ToolCall {
     /// The id the model assigned to this call, echoed back with its result.
-    pub id: String,
+    pub(crate) id: String,
     /// The name of the tool to invoke.
-    pub name: String,
+    pub(crate) name: String,
     /// The parsed arguments for the call.
-    pub arguments: Value,
+    pub(crate) arguments: Value,
+}
+
+impl ToolCall {
+    /// Returns the id the model assigned to this call.
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns the name of the tool to invoke.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the parsed arguments for the call.
+    #[must_use]
+    pub fn arguments(&self) -> &Value {
+        &self.arguments
+    }
 }
 
 /// The outcome of a completion round trip.
@@ -144,15 +176,36 @@ pub enum CompletionResult {
 #[non_exhaustive]
 pub struct Completion {
     /// The text or tool-call outcome the tool loop consumes.
-    pub result: CompletionResult,
+    pub(crate) result: CompletionResult,
     /// The choice's `finish_reason`, when the backend supplied one.
-    pub finish_reason: Option<String>,
+    pub(crate) finish_reason: Option<String>,
     /// The message's reasoning side channel, when the backend supplied one.
-    pub reasoning_content: Option<String>,
+    pub(crate) reasoning_content: Option<String>,
     /// The JSON body sent to the gateway.
     pub(crate) request_body: Value,
     /// The JSON body returned by the gateway.
     pub(crate) response_body: Value,
+}
+
+impl Completion {
+    /// Returns the text or tool-call outcome the tool loop consumes.
+    #[must_use]
+    pub fn result(&self) -> &CompletionResult {
+        &self.result
+    }
+
+    /// Returns the choice's `finish_reason`, when the backend supplied one.
+    #[must_use]
+    pub fn finish_reason(&self) -> Option<&str> {
+        self.finish_reason.as_deref()
+    }
+
+    /// Returns the reasoning side channel, when the backend supplied one. It is
+    /// never promoted into the answer.
+    #[must_use]
+    pub fn reasoning_content(&self) -> Option<&str> {
+        self.reasoning_content.as_deref()
+    }
 }
 
 /// A chat completions client bound to one gateway URL and shared bearer key.

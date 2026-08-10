@@ -756,9 +756,9 @@ impl fmt::Debug for RunConfig {
 #[non_exhaustive]
 pub struct ResolutionContext<'a> {
     /// Semantic picker used by executed H1 capability calls.
-    pub picker: &'a ToolPicker,
+    pub(crate) picker: &'a ToolPicker,
     /// Live model catalog used by executed H1 model calls.
-    pub models: &'a ModelCatalog,
+    pub(crate) models: &'a ModelCatalog,
 }
 
 impl<'a> ResolutionContext<'a> {

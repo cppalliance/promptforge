@@ -412,21 +412,61 @@ impl ModelBinding {
 }
 
 /// Per-call fields merged into a chat-completions request body.
+///
+/// Built through [`CompletionOptions::new`] and its `with_*` setters; the fields
+/// are private so a caller cannot assemble an inconsistent request by hand.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct CompletionOptions {
     /// The caller-facing model name sent on the wire.
-    pub model: String,
+    pub(crate) model: String,
     /// Sampling temperature.
-    pub temperature: Option<f64>,
+    pub(crate) temperature: Option<f64>,
     /// Maximum generation tokens.
-    pub max_tokens: Option<u32>,
+    pub(crate) max_tokens: Option<u32>,
     /// When set, emits `chat_template_kwargs.enable_thinking`.
-    pub thinking: Option<bool>,
+    pub(crate) thinking: Option<bool>,
     /// Which tool-calling dialect to use for this completion.
-    pub tool_dialect: ToolDialectId,
+    pub(crate) tool_dialect: ToolDialectId,
 }
 
 impl Eq for CompletionOptions {}
+
+impl CompletionOptions {
+    /// Builds options for `model` under the given tool-calling `dialect`, with no
+    /// temperature, token cap, or thinking switch.
+    #[must_use]
+    pub fn new(model: impl Into<String>, dialect: ToolDialectId) -> CompletionOptions {
+        CompletionOptions {
+            model: model.into(),
+            temperature: None,
+            max_tokens: None,
+            thinking: None,
+            tool_dialect: dialect,
+        }
+    }
+
+    /// Sets the sampling temperature.
+    #[must_use]
+    pub fn with_temperature(mut self, temperature: f64) -> CompletionOptions {
+        self.temperature = Some(temperature);
+        self
+    }
+
+    /// Sets the maximum generation tokens.
+    #[must_use]
+    pub fn with_max_tokens(mut self, max_tokens: u32) -> CompletionOptions {
+        self.max_tokens = Some(max_tokens);
+        self
+    }
+
+    /// Sets the `enable_thinking` switch.
+    #[must_use]
+    pub fn with_thinking(mut self, thinking: bool) -> CompletionOptions {
+        self.thinking = Some(thinking);
+        self
+    }
+}
 
 /// Immutable prompt-level model bindings from live H1 execution.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
