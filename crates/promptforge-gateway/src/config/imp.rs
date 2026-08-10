@@ -207,6 +207,42 @@ impl Config {
         self.validate_devices()?;
         let endpoint_ids = self.validate_endpoints()?;
         self.validate_models(&endpoint_ids)?;
+        self.validate_tools()?;
+        Ok(())
+    }
+
+    /// Validate `[tools.web_search]` bounds at load so downstream code never has
+    /// to clamp operator input (CFG-006).
+    fn validate_tools(&self) -> Result<(), ConfigError> {
+        let Some(web_search) = self.web_search_config() else {
+            return Ok(());
+        };
+        if web_search.default_count < 1 {
+            return Err(ConfigError::Validation(
+                "tools.web_search.default_count must be at least 1".to_string(),
+            ));
+        }
+        if web_search.max_count < 1 {
+            return Err(ConfigError::Validation(
+                "tools.web_search.max_count must be at least 1".to_string(),
+            ));
+        }
+        if web_search.default_count > web_search.max_count {
+            return Err(ConfigError::Validation(
+                "tools.web_search.default_count must not exceed max_count".to_string(),
+            ));
+        }
+        if web_search.max_per_host < 1 {
+            return Err(ConfigError::Validation(
+                "tools.web_search.max_per_host must be at least 1".to_string(),
+            ));
+        }
+        let base_url = web_search.base_url.trim();
+        if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+            return Err(ConfigError::Validation(
+                "tools.web_search.base_url must be an http(s) URL".to_string(),
+            ));
+        }
         Ok(())
     }
 

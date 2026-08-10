@@ -1,4 +1,3 @@
-
 use super::*;
 
 const SAMPLE: &str = r#"
@@ -100,6 +99,70 @@ description = "prose"
 context = 8192
 upstream = "u"
 endpoints = ["e"]
+"#;
+    assert!(matches!(
+        Config::parse_toml(toml),
+        Err(ConfigError::Validation(_))
+    ));
+}
+
+#[test]
+fn rejects_web_search_default_count_over_max() {
+    let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+
+[tools.web_search]
+provider = "brave"
+api_key = "k"
+base_url = "https://api.search.brave.com/res/v1"
+default_count = 30
+max_count = 10
+"#;
+    assert!(matches!(
+        Config::parse_toml(toml),
+        Err(ConfigError::Validation(_))
+    ));
+}
+
+#[test]
+fn rejects_web_search_non_http_base_url() {
+    let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+
+[tools.web_search]
+provider = "brave"
+api_key = "k"
+base_url = "ftp://nope"
 "#;
     assert!(matches!(
         Config::parse_toml(toml),
