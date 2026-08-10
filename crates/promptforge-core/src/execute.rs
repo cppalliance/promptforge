@@ -1950,21 +1950,24 @@ pub(crate) async fn run_prose_inference(
                     if let Some(counts) = counts {
                         counts.increment(&call.name)?;
                     }
-                    let result = tool.call(call.arguments.clone()).await;
+                    let call_result = tool.call(call.arguments.clone()).await;
                     observer.observe(
                         execution,
                         section,
-                        if result.is_ok() {
+                        if call_result.is_ok() {
                             detail::TOOL_CALL_SUCCEEDED
                         } else {
                             detail::TOOL_CALL_FAILED
                         },
                     );
-                    let result = result?;
-                    let result = if tool.untrusted_output() {
-                        untrusted::wrap(&result, &nonce)
-                    } else {
-                        result
+                    let output = call_result.map_err(|error| Error::Tool(error.to_string()))?;
+                    // Trust travels with the output: an untrusted result is
+                    // nonce-wrapped before it can reach the next model turn.
+                    let result = match output.trust() {
+                        crate::tools::OutputTrust::Untrusted => {
+                            untrusted::wrap(output.text(), &nonce)
+                        }
+                        crate::tools::OutputTrust::Trusted => output.text().to_owned(),
                     };
                     results.push((call.id.clone(), result));
                 }

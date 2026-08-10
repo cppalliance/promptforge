@@ -8,8 +8,6 @@
 
 use std::sync::Arc;
 
-use crate::Result;
-
 pub mod web_search;
 
 pub use web_search::WebSearch;
@@ -352,25 +350,17 @@ pub trait Tool: Send + Sync {
     /// The JSON Schema describing the tool's parameters.
     fn parameters_schema(&self) -> serde_json::Value;
 
-    /// Execute the tool with the given JSON arguments and return its result.
+    /// Execute the tool with the given JSON arguments and return its output.
+    ///
+    /// The returned [`ToolOutput`] carries its own [`OutputTrust`], so trust is
+    /// mandatory and cannot be forgotten: an [`OutputTrust::Untrusted`] result
+    /// is nonce-wrapped before it can reach model input. A failure returns a
+    /// narrow, model-safe [`ToolError`].
     ///
     /// # Errors
-    /// Returns [`crate::Error`] if the tool call fails (bad arguments, network,
-    /// or a backend failure).
-    async fn call(&self, args: serde_json::Value) -> Result<String>;
-
-    /// Whether this tool's result is untrusted external data.
-    ///
-    /// A tool that returns `true` has its result wrapped in a self-contained
-    /// guard block (a data-not-instructions rule plus a random-tagged,
-    /// escape-protected delimiter) before it reaches the model, reducing the
-    /// risk that attacker-controlled content (for example a fetched web page)
-    /// is followed as instructions. Defaults to `false`, so a tool is trusted
-    /// and its result appended verbatim unless it opts in; the default means
-    /// existing implementations need no change.
-    fn untrusted_output(&self) -> bool {
-        false
-    }
+    /// Returns a [`ToolError`] if the arguments are unacceptable, the backend
+    /// refuses, the transport fails, or the run is cancelled.
+    async fn call(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError>;
 }
 
 /// An ordered collection of callable live tools.

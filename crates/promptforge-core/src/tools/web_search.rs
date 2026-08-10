@@ -6,8 +6,7 @@
 //! server. The gateway's JSON results are returned verbatim as a string, ready
 //! to hand back to the model.
 
-use crate::tools::{Tool, ToolId};
-use crate::{Error, Result};
+use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
 
 /// The largest error body kept for diagnostics, in characters.
 const MAX_ERROR_BODY: usize = 2000;
@@ -109,14 +108,15 @@ impl Tool for WebSearch {
         })
     }
 
-    async fn call(&self, args: serde_json::Value) -> Result<String> {
+    async fn call(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError> {
         // Validate the query argument before spending a network round-trip.
         if args
             .get("query")
             .and_then(serde_json::Value::as_str)
             .is_none()
         {
-            return Err(Error::Parse("web_search: missing query argument".into()));
+            return Err(ToolError::message("web_search: missing query argument")
+                .with_kind(ToolErrorKind::InvalidArguments));
         }
 
         let response = self
@@ -126,7 +126,10 @@ impl Tool for WebSearch {
             .json(&args)
             .send()
             .await
-            .map_err(Error::http)?;
+            .map_err(|source| {
+                ToolError::with_source("web_search: request failed", source)
+                    .with_kind(ToolErrorKind::Transport)
+            })?;
 
         let status = response.status();
         if !status.is_success() {
@@ -137,13 +140,20 @@ impl Tool for WebSearch {
             } else {
                 body
             };
-            return Err(Error::Backend {
-                status: status.as_u16(),
-                body,
-            });
+            return Err(ToolError::message(format!(
+                "web_search: backend returned {}: {body}",
+                status.as_u16()
+            ))
+            .with_kind(ToolErrorKind::Backend));
         }
 
-        response.text().await.map_err(Error::http)
+        let text = response.text().await.map_err(|source| {
+            ToolError::with_source("web_search: reading response failed", source)
+                .with_kind(ToolErrorKind::Transport)
+        })?;
+        // Structured search snippets are first-party gateway output, not raw
+        // fetched page content, so they are trusted.
+        Ok(ToolOutput::trusted(text))
     }
 }
 

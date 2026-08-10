@@ -323,6 +323,15 @@ pub enum Error {
         /// Which operation was attempted.
         operation: &'static str,
     },
+
+    /// A dispatched [`crate::tools::Tool`] returned a model-safe failure.
+    ///
+    /// Transitional during the API redesign: the orchestration boundary error
+    /// (`RunError`) will carry the narrow [`crate::tools::ToolError`] behind a
+    /// `#[source]` classifier once `execute` is migrated off the crate-wide
+    /// `Error`.
+    #[error("tool call failed: {0}")]
+    Tool(String),
 }
 
 impl Error {

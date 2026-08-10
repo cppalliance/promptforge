@@ -175,7 +175,9 @@ impl LuaToolHandle {
             description_overridden: false,
             parameters: tool.parameters_schema(),
             wire_name: tool.wire_name().to_owned(),
-            untrusted: tool.untrusted_output(),
+            // Trust is now carried per-call in `ToolOutput`, not a static
+            // per-tool flag; the executor wraps untrusted results at dispatch.
+            untrusted: false,
         }
     }
 
