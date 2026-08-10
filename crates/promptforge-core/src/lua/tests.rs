@@ -196,7 +196,7 @@ fn execute_live_tool_needs(
     if let Some(error) = producer.take_callback_error()? {
         return Err(error);
     }
-    result.map_err(|error| Error::Lua(error.to_string()))?;
+    result.map_err(Error::lua)?;
     producer.bindings().map(|(tools, _)| tools)
 }
 
@@ -2004,13 +2004,15 @@ fn store_delete_then_read_raises() {
             "",
         )
         .expect_err("reading a deleted file must raise");
-    match err {
-        Error::Lua(msg) => assert!(
-            msg.contains("file not found"),
-            "the Lua error must carry the store message, got: {msg}"
-        ),
-        other => panic!("expected Error::Lua, got {other:?}"),
-    }
+    let msg = match &err {
+        Error::Lua(msg) => msg.clone(),
+        Error::LuaRuntime { message, .. } => message.clone(),
+        other => panic!("expected a Lua-category error, got {other:?}"),
+    };
+    assert!(
+        msg.contains("file not found"),
+        "the Lua error must carry the store message, got: {msg}"
+    );
 }
 
 #[test]
@@ -2032,13 +2034,31 @@ fn store_error_surfaces_as_lua_error() {
         "",
     )
     .expect_err("an ambiguous anchor must raise");
-    match err {
-        Error::Lua(msg) => assert!(
-            msg.contains("expected exactly one"),
-            "the Lua error must carry the ambiguity message, got: {msg}"
-        ),
-        other => panic!("expected Error::Lua, got {other:?}"),
-    }
+    let msg = match &err {
+        Error::Lua(msg) => msg.clone(),
+        Error::LuaRuntime { message, .. } => message.clone(),
+        other => panic!("expected a Lua-category error, got {other:?}"),
+    };
+    assert!(
+        msg.contains("expected exactly one"),
+        "the Lua error must carry the ambiguity message, got: {msg}"
+    );
+}
+
+#[test]
+fn lua_runtime_error_preserves_its_mlua_source() {
+    // F4: a Lua runtime failure is the source-bearing `LuaRuntime` variant and
+    // retains the originating `mlua` error as a private `source()` instead of
+    // flattening it to a string.
+    let err = run("error('boom')", "").expect_err("an explicit error() must raise");
+    assert!(
+        matches!(err, Error::LuaRuntime { .. }),
+        "a Lua runtime failure must use the source-bearing variant, got {err:?}"
+    );
+    assert!(
+        std::error::Error::source(&err).is_some(),
+        "the originating mlua error must be preserved as the error source"
+    );
 }
 
 #[test]
@@ -2071,7 +2091,7 @@ fn store_reports_are_ordered_exact_and_payload_free_on_failure() {
         "Gather",
     )
     .expect_err("the missing anchor must fail");
-    assert!(matches!(error, Error::Lua(_)));
+    assert!(matches!(error, Error::Lua(_) | Error::LuaRuntime { .. }));
 
     let observations = recorder.observations();
     assert_eq!(
@@ -2205,7 +2225,7 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
             "StoreRef",
         )
         .expect_err("the failing backend rejects every operation");
-        assert!(matches!(error, Error::Lua(_)));
+        assert!(matches!(error, Error::Lua(_) | Error::LuaRuntime { .. }));
         assert_eq!(
             recorder.observations(),
             vec![("StoreRef".to_owned(), case.failure.clone())],

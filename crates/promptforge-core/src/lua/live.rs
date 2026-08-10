@@ -103,7 +103,7 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
 ) -> Result<()> {
     let tools = lua
         .create_table()
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let needs = Arc::clone(state);
     let need = scope
@@ -184,10 +184,10 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                 Ok(handle)
             },
         )
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     tools
         .set("need", need)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let prompt_wide = Arc::clone(state);
     let always = scope
@@ -213,10 +213,10 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
             bindings.always.push(alias);
             Ok(())
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     tools
         .set("always", always)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let add = scope
         .create_function(|_, _: MultiValue| -> mlua::Result<()> {
@@ -224,13 +224,13 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                 "tools.add is only available during H2 recording",
             ))
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     tools
         .set("add", add)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     lua.globals()
         .raw_set("tools", tools)
-        .map_err(|error| Error::Lua(error.to_string()))
+        .map_err(Error::lua)
 }
 
 pub(crate) fn validate_alias(alias: &str) -> Result<()> {

@@ -167,14 +167,35 @@ pub(crate) enum Error {
     #[error("interrupted by Ctrl-C")]
     Interrupted,
 
-    /// A section's Lua phase failed to build, run, or return a usable value.
+    /// A section's Lua phase failed a host contract or hit a poisoned lock: a
+    /// runtime-internal condition with no originating `mlua` error to preserve
+    /// (for example "host values have not been injected" or a poisoned mutex).
     ///
-    /// The message is the specific Lua failure as a noun phrase; the public
-    /// wrapper classifies this as a Lua failure, so no redundant `lua error:`
-    /// type label is prepended (F8). Dropping the label also stops a nested
-    /// re-wrap from producing a doubled `lua error: lua error:` prefix.
+    /// Failures that *do* carry an `mlua` cause use [`Error::LuaRuntime`], which
+    /// retains that cause as a private source (F4). The message is the specific
+    /// failure as a noun phrase; the public wrapper classifies this as a Lua
+    /// failure, so no redundant `lua error:` type label is prepended (F8).
     #[error("{0}")]
     Lua(String),
+
+    /// A section's Lua phase failed at runtime or while bridging host values,
+    /// retaining the originating `mlua` error as the private `#[source]` cause
+    /// (F4) alongside the mapped prompt-location message.
+    ///
+    /// This is the source-bearing counterpart to [`Error::Lua`]: it is built
+    /// from a concrete `mlua::Error` (see [`Error::lua`] and
+    /// [`crate::lua::LuaProgram::map_runtime_error`]), so the failure chain
+    /// survives through the public wrappers' `source()` instead of being
+    /// flattened to a string.
+    #[error("{message}")]
+    #[non_exhaustive]
+    LuaRuntime {
+        /// The mapped, location-tagged diagnostic (no redundant type label).
+        message: String,
+        /// The originating Lua error, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     /// Lua source was not syntactically valid at its prompt location.
     #[error("lua compilation error at {location} (line {source_line}): {message}")]
@@ -494,6 +515,15 @@ impl Error {
     /// Wrap a transport-layer error, hiding its concrete type from the API.
     pub(crate) fn http(source: reqwest::Error) -> Error {
         Error::Http(Box::new(source))
+    }
+
+    /// Wrap an `mlua` failure as [`Error::LuaRuntime`], preserving it as the
+    /// `#[source]` cause (F4) rather than flattening it to a string.
+    pub(crate) fn lua(source: mlua::Error) -> Error {
+        Error::LuaRuntime {
+            message: source.to_string(),
+            source: Box::new(source),
+        }
     }
 
     /// Wrap a tool failure, preserving the tool's own error as the `#[source]`

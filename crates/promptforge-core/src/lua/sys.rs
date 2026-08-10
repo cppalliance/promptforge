@@ -49,10 +49,10 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
 
     let proxy = lua
         .create_table()
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     let metatable = lua
         .create_table()
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let index = lua
         .create_function(move |lua, (_table, key): (Value, Value)| {
@@ -68,10 +68,10 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
                 Some(value) => lua.to_value(value),
             }
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     metatable
         .set("__index", index)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let newindex = lua
         .create_function(
@@ -85,13 +85,13 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
                 )))
             },
         )
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     metatable
         .set("__newindex", newindex)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     metatable
         .set("__metatable", "sys is sealed")
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     proxy.set_metatable(Some(metatable));
     Ok(proxy)

@@ -119,7 +119,9 @@ impl RunError {
                 RunErrorKind::Parse
             }
             Error::LuaQuota { .. } => RunErrorKind::Quota,
-            Error::LuaCompile { .. } | Error::Lua(_) => RunErrorKind::Lua,
+            Error::LuaCompile { .. } | Error::Lua(_) | Error::LuaRuntime { .. } => {
+                RunErrorKind::Lua
+            }
             Error::UnsupportedVersion(_) => RunErrorKind::Version,
             Error::MissingEnv(_)
             | Error::InvalidEnv(_)

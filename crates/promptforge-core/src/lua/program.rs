@@ -110,7 +110,7 @@ impl LuaProgram {
             Ok(lua) => lua,
             Err(error) => {
                 observer.observe(execution, section, detail::LUA_COMPILATION_FAILED);
-                return Err(Error::Lua(error.to_string()));
+                return Err(Error::lua(error));
             }
         };
 
@@ -162,7 +162,7 @@ impl LuaProgram {
     pub(crate) fn load(&self, lua: &Lua) -> Result<Function> {
         lua.load(self.bytecode.as_slice())
             .into_function()
-            .map_err(|error| Error::Lua(error.to_string()))
+            .map_err(Error::lua)
     }
 
     /// Maps a Lua runtime error to an [`Error::Lua`] with the chunk-relative
@@ -186,7 +186,12 @@ impl LuaProgram {
             return Error::LuaQuota { resource };
         }
         let mapped = map_chunk_line_to_absolute(&raw, self.source_line, self.location());
-        Error::Lua(mapped)
+        // Retain the originating `mlua` error as the private source (F4) with the
+        // mapped prompt-location message, instead of flattening it to a string.
+        Error::LuaRuntime {
+            message: mapped,
+            source: Box::new(error.clone()),
+        }
     }
 
     /// Chunk name recorded at compile time (parser location string).

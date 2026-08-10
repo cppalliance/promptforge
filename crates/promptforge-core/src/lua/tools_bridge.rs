@@ -11,14 +11,14 @@ pub(crate) fn install_lua_tool_calls(
     let globals = lua.globals();
     let tools: mlua::Table = globals
         .raw_get("tools")
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let calls_inner = lua
         .create_table()
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     let meta = lua
         .create_table()
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let counts_for_index = counts.clone();
     let declared: Vec<String> = declared.to_vec();
@@ -47,23 +47,23 @@ pub(crate) fn install_lua_tool_calls(
                 )))
             }
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     meta.set("__index", index)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let newindex_err = lua
         .create_function(|_, _: MultiValue| -> mlua::Result<()> {
             Err(mlua::Error::external("tools.calls is read-only"))
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     meta.set("__newindex", newindex_err)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     calls_inner.set_metatable(Some(meta));
 
     tools
         .set("calls", calls_inner)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     Ok(())
 }
 
@@ -157,7 +157,7 @@ pub(crate) fn install_h2_tools(
 
     let tools = lua
         .create_table()
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     for name in ["need", "always"] {
         let operation = name;
         let forbidden = lua
@@ -166,10 +166,10 @@ pub(crate) fn install_h2_tools(
                     "tools.{operation} is only available during live H1 execution"
                 )))
             })
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
         tools
             .set(name, forbidden)
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
     }
 
     let frozen = bindings.clone();
@@ -226,13 +226,13 @@ pub(crate) fn install_h2_tools(
             }
             Ok(())
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     tools
         .set("add", add)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     globals
         .raw_set("tools", tools)
-        .map_err(|error| Error::Lua(error.to_string()))
+        .map_err(Error::lua)
 }
 
 /// Installs the phase-local author diagnostic callback.
@@ -243,16 +243,16 @@ pub(crate) fn install_h2_tools(
 pub(crate) fn install_tasks_table(lua: &Lua, tasks: &[LuaSectionHandle]) -> Result<()> {
     let table = lua
         .create_table_with_capacity(0, tasks.len())
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     for handle in tasks {
         let userdata = lua
             .create_userdata(handle.clone())
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
         table
             .raw_set(handle.heading(), userdata)
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
     }
     lua.globals()
         .raw_set("tasks", table)
-        .map_err(|error| Error::Lua(error.to_string()))
+        .map_err(Error::lua)
 }

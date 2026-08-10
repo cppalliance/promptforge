@@ -106,12 +106,12 @@ impl SectionVm {
             StdLib::STRING | StdLib::TABLE | StdLib::MATH,
             LuaOptions::default(),
         )
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
         // Bound the VM heap by default; `apply_lua_limits` may tighten or relax
         // it to the caller's `RunLimits`. A safe non-env default keeps every VM
         // bounded even when the run installs no explicit limits.
         lua.set_memory_limit(DEFAULT_LUA_MEMORY_BYTES)
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
         let vm = Self {
             execution: execution.to_owned(),
             lua,
@@ -197,19 +197,19 @@ impl SectionVm {
             let userdata = self
                 .lua
                 .create_userdata(handle)
-                .map_err(|error| Error::Lua(error.to_string()))?;
+                .map_err(Error::lua)?;
             globals
                 .raw_set(binding.alias(), userdata)
-                .map_err(|error| Error::Lua(error.to_string()))?;
+                .map_err(Error::lua)?;
         }
         for binding in self.bound_models.bindings() {
             let userdata = self
                 .lua
                 .create_userdata(LuaModelHandle::from_binding(binding))
-                .map_err(|error| Error::Lua(error.to_string()))?;
+                .map_err(Error::lua)?;
             globals
                 .raw_set(binding.alias(), userdata)
-                .map_err(|error| Error::Lua(error.to_string()))?;
+                .map_err(Error::lua)?;
         }
         Ok(())
     }
@@ -269,11 +269,11 @@ impl SectionVm {
         let globals = self.lua.globals();
         globals
             .raw_set("args", args)
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
         let sys_table = seal_sys(&self.lua, sys)?;
         globals
             .raw_set("sys", sys_table)
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
         {
             let mut live = self
                 .sys_live
@@ -285,29 +285,29 @@ impl SectionVm {
             Some(value) => self
                 .lua
                 .to_value(value)
-                .map_err(|error| Error::Lua(error.to_string()))?,
+                .map_err(Error::lua)?,
             None => Value::Table(
                 self.lua
                     .create_table()
-                    .map_err(|error| Error::Lua(error.to_string()))?,
+                    .map_err(Error::lua)?,
             ),
         };
         globals
             .raw_set("var", var)
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
         install_h2_tools(&self.lua, &globals, &self.bound_tools, &self.tool_runtime)?;
         install_h2_models(&self.lua, &globals, &self.bound_models, &self.model_runtime)?;
         let reply_value = match last_reply {
             Some(text) => Value::String(
                 self.lua
                     .create_string(text)
-                    .map_err(|error| Error::Lua(error.to_string()))?,
+                    .map_err(Error::lua)?,
             ),
             None => Value::Nil,
         };
         globals
             .raw_set("reply", reply_value)
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
         self.store = Some(store.clone());
         self.host_injected = true;
         Ok(())
@@ -340,7 +340,7 @@ impl SectionVm {
             Ok(value) => Ok(value),
             Err(error) => match resolution.take_callback_error()? {
                 Some(error) => Err(error),
-                None => Err(Error::Lua(error.to_string())),
+                None => Err(Error::lua(error)),
             },
         }
     }
@@ -359,7 +359,7 @@ impl SectionVm {
         let sys_table = seal_sys(&self.lua, sys)?;
         globals
             .raw_set("sys", sys_table)
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
         let mut live = self
             .sys_live
             .lock()
@@ -535,7 +535,7 @@ impl SectionVm {
             .lua
             .globals()
             .raw_set("reply", reply)
-            .map_err(|error| Error::Lua(error.to_string()));
+            .map_err(Error::lua);
         observer.observe(
             &self.execution,
             section,
@@ -641,10 +641,10 @@ impl SectionVm {
             .lua
             .globals()
             .get("var")
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
         self.lua
             .from_value(value)
-            .map_err(|error| Error::Lua(error.to_string()))
+            .map_err(Error::lua)
     }
 
     /// Sets a string global in the VM, overwriting any existing value.
@@ -657,7 +657,7 @@ impl SectionVm {
         self.lua
             .globals()
             .raw_set(name, value)
-            .map_err(|error| Error::Lua(error.to_string()))
+            .map_err(Error::lua)
     }
 
     /// Executes a compiled epilog with `tasks`, `execute`, `jump`, and optional `fanout`.
@@ -902,7 +902,7 @@ impl SectionVm {
     pub(crate) fn apply_lua_limits(&self, memory_bytes: usize, log_events: u32) -> Result<()> {
         self.lua
             .set_memory_limit(memory_bytes)
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
         self.log_budget.store(log_events, Ordering::Relaxed);
         self.log_byte_budget
             .store(default_log_byte_budget(log_events), Ordering::Relaxed);
@@ -1177,7 +1177,7 @@ impl SectionVm {
             if let Err(error) = globals.raw_set(name, Value::Nil)
                 && first_error.is_none()
             {
-                first_error = Some(Error::Lua(error.to_string()));
+                first_error = Some(Error::lua(error));
             }
         }
         match first_error {
@@ -1222,7 +1222,7 @@ impl SectionVm {
                 let result = self.lua.load(source).eval();
                 finish_log_phase(&self.lua, result)
             })
-            .map_err(|error| Error::Lua(error.to_string()))?;
+            .map_err(Error::lua)?;
         scalar_return(returned)
     }
 }

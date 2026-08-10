@@ -179,7 +179,7 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
 ) -> Result<()> {
     let models = lua
         .create_table()
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let needs = Arc::clone(state);
     let need = scope
@@ -192,10 +192,10 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
             let binding = record_need_binding(&mut guard, resolver, &alias, &description, &opts)?;
             Ok(LuaModelHandle::from_binding(&binding))
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     models
         .set("need", need)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let always_state = Arc::clone(state);
     let always = scope
@@ -229,10 +229,10 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
                 Ok(LuaModelHandle::from_binding(&binding))
             }
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     models
         .set("always", always)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let use_fn = scope
         .create_function(|_, _: MultiValue| -> mlua::Result<()> {
@@ -240,14 +240,14 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
                 "models.use is only available during H2 recording",
             ))
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     models
         .set("use", use_fn)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     lua.globals()
         .raw_set("models", models)
-        .map_err(|error| Error::Lua(error.to_string()))
+        .map_err(Error::lua)
 }
 
 /// Switches to H2: forbids `models.need`, installs `models.use`.
@@ -270,7 +270,7 @@ pub(crate) fn install_h2_models(
 
     let models = lua
         .create_table()
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let need = lua
         .create_function(|_, _: MultiValue| -> mlua::Result<()> {
@@ -278,10 +278,10 @@ pub(crate) fn install_h2_models(
                 "models.need is only available during live H1 execution",
             ))
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     models
         .set("need", need)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let always_fn = lua
         .create_function(|_, _: MultiValue| -> mlua::Result<()> {
@@ -289,10 +289,10 @@ pub(crate) fn install_h2_models(
                 "models.always is only available during live H1 execution",
             ))
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     models
         .set("always", always_fn)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     let frozen = bindings.clone();
     let state = Arc::clone(runtime);
@@ -317,14 +317,14 @@ pub(crate) fn install_h2_models(
             })?;
             Ok(())
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     models
         .set("use", use_fn)
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
 
     globals
         .raw_set("models", models)
-        .map_err(|error| Error::Lua(error.to_string()))
+        .map_err(Error::lua)
 }
 
 /// Closes H2 model recording and returns the section's selected binding.

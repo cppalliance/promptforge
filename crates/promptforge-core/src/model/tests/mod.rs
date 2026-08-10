@@ -82,7 +82,7 @@ fn resolve_live_declarations_for_test(
     if let Some(error) = producer.take_callback_error()? {
         return Err(error);
     }
-    result.map_err(|error| Error::Lua(error.to_string()))?;
+    result.map_err(Error::lua)?;
     producer.bindings()
 }
 

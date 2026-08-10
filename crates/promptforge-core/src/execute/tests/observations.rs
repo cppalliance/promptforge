@@ -147,7 +147,10 @@ async fn a_failing_run_still_reports_run_finished() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nerror('expected failure')\n```\n";
     let (result, records) = run_recorded(md).await;
-    assert!(matches!(result, Err(Error::Lua(_))));
+    assert!(matches!(
+        result,
+        Err(Error::Lua(_) | Error::LuaRuntime { .. })
+    ));
 
     assert_eq!(
         events(&records),

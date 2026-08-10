@@ -31,7 +31,7 @@ pub(crate) fn harden(lua: &Lua) -> Result<()> {
     ] {
         globals
             .set(name, Value::Nil)
-            .map_err(|e| Error::Lua(e.to_string()))?;
+            .map_err(Error::lua)?;
     }
     lua.load(
         r#"
@@ -60,7 +60,7 @@ end
 "#,
     )
     .exec()
-    .map_err(|e| Error::Lua(e.to_string()))?;
+    .map_err(Error::lua)?;
     Ok(())
 }
 

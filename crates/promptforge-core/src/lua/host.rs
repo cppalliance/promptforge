@@ -55,10 +55,10 @@ pub(crate) fn install_log<'scope, 'env: 'scope>(
             observer.observe(execution, section, Observation::Lua(message.to_owned()));
             Ok(())
         })
-        .map_err(|error| Error::Lua(error.to_string()))?;
+        .map_err(Error::lua)?;
     lua.globals()
         .raw_set("log", log)
-        .map_err(|error| Error::Lua(error.to_string()))
+        .map_err(Error::lua)
 }
 
 pub(crate) fn is_log_line_break_or_control(character: char) -> bool {
@@ -125,7 +125,7 @@ pub(crate) fn install_store_table<'scope, 'env: 'scope>(
     observer: &'env dyn Observer,
     section: &'env str,
 ) -> Result<()> {
-    let table = lua.create_table().map_err(|e| Error::Lua(e.to_string()))?;
+    let table = lua.create_table().map_err(Error::lua)?;
 
     let handle = store.clone();
     let write = scope
@@ -142,10 +142,10 @@ pub(crate) fn install_store_table<'scope, 'env: 'scope>(
             result.map_err(mlua::Error::external)?;
             Ok(())
         })
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
     table
         .set("write", write)
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
 
     let handle = store.clone();
     let append = scope
@@ -162,10 +162,10 @@ pub(crate) fn install_store_table<'scope, 'env: 'scope>(
             result.map_err(mlua::Error::external)?;
             Ok(())
         })
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
     table
         .set("append", append)
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
 
     let handle = store.clone();
     let read_lines = scope
@@ -181,10 +181,10 @@ pub(crate) fn install_store_table<'scope, 'env: 'scope>(
             );
             result.map_err(mlua::Error::external)
         })
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
     table
         .set("read_lines", read_lines)
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
 
     let handle = store.clone();
     let read = scope
@@ -200,10 +200,10 @@ pub(crate) fn install_store_table<'scope, 'env: 'scope>(
             );
             result.map_err(mlua::Error::external)
         })
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
     table
         .set("read", read)
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
 
     let handle = store.clone();
     let inject = scope
@@ -219,10 +219,10 @@ pub(crate) fn install_store_table<'scope, 'env: 'scope>(
             );
             result.map_err(mlua::Error::external)
         })
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
     table
         .set("inject", inject)
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
 
     let handle = store.clone();
     let str_replace = scope
@@ -239,10 +239,10 @@ pub(crate) fn install_store_table<'scope, 'env: 'scope>(
             result.map_err(mlua::Error::external)?;
             Ok(())
         })
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
     table
         .set("str_replace", str_replace)
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
 
     let handle = store.clone();
     let delete = scope
@@ -259,10 +259,10 @@ pub(crate) fn install_store_table<'scope, 'env: 'scope>(
             result.map_err(mlua::Error::external)?;
             Ok(())
         })
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
     table
         .set("delete", delete)
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
 
     let handle = store.clone();
     let glob = scope
@@ -279,21 +279,21 @@ pub(crate) fn install_store_table<'scope, 'env: 'scope>(
             let paths = result.map_err(mlua::Error::external)?;
             lua.create_sequence_from(paths)
         })
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
     table
         .set("glob", glob)
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
 
     let handle = store.clone();
     let exists = scope
         .create_function(move |_, path: String| handle.exists(&path).map_err(mlua::Error::external))
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
     table
         .set("exists", exists)
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
 
     globals
         .raw_set("store", table)
-        .map_err(|e| Error::Lua(e.to_string()))?;
+        .map_err(Error::lua)?;
     Ok(())
 }
