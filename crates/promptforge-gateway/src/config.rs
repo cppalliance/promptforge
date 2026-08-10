@@ -81,8 +81,8 @@ pub(crate) enum Protocol {
 /// The whole gateway configuration.
 ///
 /// Validated on construction: a value of this type cannot hold an invalid
-/// configuration. Deserialization goes through the private [`RawConfig`] DTO and
-/// a validating conversion, so `Config` itself carries no public `Deserialize`
+/// configuration. Deserialization goes through a private raw DTO and a
+/// validating conversion, so `Config` itself carries no public `Deserialize`
 /// impl and cannot be built from arbitrary TOML without validation.
 #[derive(Debug)]
 #[non_exhaustive]
