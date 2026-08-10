@@ -11,7 +11,6 @@ use promptforge_tool_picker::{Outcome, ToolDescriptor, ToolPicker};
 use crate::lua::{LiveBindingProducer, ToolBindings, ToolResolver};
 use crate::model::{
     ModelBindings, ModelCatalog, ModelNeedOpts, ModelResolver, PickerModelResolver, ResolvedModel,
-    model_picker_from,
 };
 use crate::tools::{ToolId, ToolRegistry};
 use crate::{Error, Result};
@@ -21,7 +20,7 @@ pub(crate) struct RuntimeResolution<'a, 'tools: 'a> {
     tool_resolver: PickerResolver<'a, ToolPicker>,
     registry: &'a ToolRegistry<'tools>,
     models: &'a ModelCatalog,
-    model_picker: Option<ToolPicker>,
+    base_picker: &'a ToolPicker,
     producer: LiveBindingProducer,
 }
 
@@ -31,23 +30,21 @@ impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
     /// The `registry` already guarantees unique tool identities (duplicates are
     /// rejected at registration), so no identity scan is needed here.
     ///
-    /// # Errors
-    /// Returns [`Error::ModelBind`] when the model picker cannot be built.
+    /// Construction retains only the base picker/embedder (F7): it does NOT
+    /// pre-build a full model index that model resolution would immediately
+    /// discard and rebuild from the constraint-filtered subset. The filtered
+    /// model index is built on demand, when a `models.need`'s constraints are
+    /// known, so the redundant full-catalog index is never materialized.
     pub(crate) fn new(
         picker: &'a ToolPicker,
         registry: &'a ToolRegistry<'tools>,
         models: &'a ModelCatalog,
     ) -> Result<Self> {
-        let model_picker = if models.is_empty() {
-            None
-        } else {
-            Some(model_picker_from(picker, models)?)
-        };
         Ok(Self {
             tool_resolver: PickerResolver::new(picker),
             registry,
             models,
-            model_picker,
+            base_picker: picker,
             producer: LiveBindingProducer::default(),
         })
     }
@@ -82,6 +79,10 @@ impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
     }
 
     /// Returns a shared handle to bindings resolved by live H1 so far.
+    ///
+    /// `#[must_use]`: the returned clone is this call's sole effect (F6), so
+    /// discarding it silently drops the snapshot handle the caller asked for.
+    #[must_use]
     pub(crate) fn producer(&self) -> LiveBindingProducer {
         self.producer.clone()
     }
@@ -89,22 +90,37 @@ impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
 
 impl ModelResolver for RuntimeResolution<'_, '_> {
     fn resolve(&self, description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel> {
-        let Some(picker) = self.model_picker.as_ref() else {
+        // An empty catalog resolves every need as absent without touching the
+        // picker at all.
+        if self.models.is_empty() {
             return Err(Error::ModelAbsent {
                 capability: description.to_owned(),
             });
-        };
-        PickerModelResolver::new(self.models, picker).resolve(description, opts)
+        }
+        // The filtered model index is built here, from the base embedder, over
+        // just the descriptors that satisfy the need's constraints (F7).
+        PickerModelResolver::new(self.models, self.base_picker).resolve(description, opts)
     }
 }
 
-#[derive(Debug, Clone)]
+/// A resolved capability outcome, normalized once into core-owned identities.
+///
+/// Picker [`ToolDescriptor`]s are converted to core [`ToolId`]s at decision
+/// time (F4), so a cached decision holds only the stable identities the caller
+/// needs; a cache hit produces its typed result from these borrowed ids without
+/// re-cloning full descriptors on every resolve.
+#[derive(Debug)]
 enum CachedDecision {
-    Bind(ToolDescriptor),
+    Bind(ToolId),
     Absent,
-    Duplicate(Vec<ToolDescriptor>),
-    Ambiguous(Vec<ToolDescriptor>),
+    Duplicate(Vec<ToolId>),
+    Ambiguous(Vec<ToolId>),
     Failed(String),
+}
+
+/// Converts a borrowed picker descriptor to a core-owned [`ToolId`].
+fn tool_id_of(tool: &ToolDescriptor) -> ToolId {
+    ToolId::from_validated(tool.id().server(), tool.id().name())
 }
 
 impl CachedDecision {
@@ -112,10 +128,12 @@ impl CachedDecision {
         outcome: std::result::Result<Outcome<'_>, promptforge_tool_picker::QueryError>,
     ) -> Self {
         match outcome {
-            Ok(Outcome::Bind(tool)) => Self::Bind(tool.clone()),
+            Ok(Outcome::Bind(tool)) => Self::Bind(tool_id_of(&tool)),
             Ok(Outcome::Absent) => Self::Absent,
-            Ok(Outcome::Duplicate(group)) => Self::Duplicate(group.iter().cloned().collect()),
-            Ok(Outcome::Ambiguous(group)) => Self::Ambiguous(group.iter().cloned().collect()),
+            Ok(Outcome::Duplicate(group)) => Self::Duplicate(group.iter().map(tool_id_of).collect()),
+            Ok(Outcome::Ambiguous(group)) => {
+                Self::Ambiguous(group.iter().map(tool_id_of).collect())
+            }
             Ok(_) => Self::Failed("the picker reported an unrecognized outcome".to_owned()),
             Err(error) => Self::Failed(error.to_string()),
         }
@@ -123,23 +141,17 @@ impl CachedDecision {
 
     fn result(&self, capability: &str) -> Result<ToolId> {
         match self {
-            Self::Bind(tool) => Ok(ToolId::from_validated(tool.id().server(), tool.id().name())),
+            Self::Bind(id) => Ok(id.clone()),
             Self::Absent => Err(Error::Absent {
                 capability: capability.to_owned(),
             }),
-            Self::Duplicate(tools) => Err(Error::Duplicate {
+            Self::Duplicate(ids) => Err(Error::Duplicate {
                 capability: capability.to_owned(),
-                candidates: tools
-                    .iter()
-                    .map(|tool| ToolId::from_validated(tool.id().server(), tool.id().name()))
-                    .collect(),
+                candidates: ids.clone(),
             }),
-            Self::Ambiguous(tools) => Err(Error::Ambiguous {
+            Self::Ambiguous(ids) => Err(Error::Ambiguous {
                 capability: capability.to_owned(),
-                candidates: tools
-                    .iter()
-                    .map(|tool| ToolId::from_validated(tool.id().server(), tool.id().name()))
-                    .collect(),
+                candidates: ids.clone(),
             }),
             Self::Failed(detail) => Err(Error::Bind {
                 capability: capability.to_owned(),
@@ -187,34 +199,29 @@ impl DecisionSource for ToolPicker {
 }
 
 #[derive(Debug)]
-struct ResolverState {
-    decisions: BTreeMap<String, CachedDecision>,
-    diagnostics: BTreeMap<ToolId, ToolDescriptor>,
-}
-
-#[derive(Debug)]
 struct PickerResolver<'a, S: ?Sized> {
     source: &'a S,
-    state: Mutex<ResolverState>,
+    /// Per-capability decision cache. Holds only normalized outcomes (F2: the
+    /// former write-only diagnostics map, whose sole reader was a test, is gone).
+    decisions: Mutex<BTreeMap<String, CachedDecision>>,
 }
 
 impl<'a, S: ?Sized> PickerResolver<'a, S> {
     fn new(source: &'a S) -> Self {
         Self {
             source,
-            state: Mutex::new(ResolverState {
-                decisions: BTreeMap::new(),
-                diagnostics: BTreeMap::new(),
-            }),
+            decisions: Mutex::new(BTreeMap::new()),
         }
     }
 
-    #[cfg(test)]
-    fn diagnostics(self) -> Result<BTreeMap<ToolId, ToolDescriptor>> {
-        self.state
-            .into_inner()
-            .map(|state| state.diagnostics)
-            .map_err(|_| Error::Lua("tool picker cache was poisoned".to_owned()))
+    /// Locks the decision cache, mapping a poisoned lock to a resolver-state
+    /// error (F3) rather than mislabeling it as a Lua authoring failure.
+    fn lock_decisions(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, BTreeMap<String, CachedDecision>>> {
+        self.decisions
+            .lock()
+            .map_err(|_| Error::Internal("tool picker resolver cache was poisoned"))
     }
 }
 
@@ -223,21 +230,22 @@ where
     S: DecisionSource + ?Sized,
 {
     fn resolve(&self, capability: &str) -> Result<ToolId> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| Error::Lua("tool picker cache was poisoned".to_owned()))?;
-        let decision = state
-            .decisions
-            .entry(capability.to_owned())
-            .or_insert_with(|| self.source.decide(capability))
-            .clone();
-        if let CachedDecision::Bind(tool) = &decision {
-            state.diagnostics.insert(
-                ToolId::from_validated(tool.id().server(), tool.id().name()),
-                tool.clone(),
-            );
+        // Fast path: a short lock that only reads an already-computed decision.
+        {
+            let decisions = self.lock_decisions()?;
+            if let Some(decision) = decisions.get(capability) {
+                return decision.result(capability);
+            }
         }
+        // Compute the (potentially expensive, re-entrant) decision OUTSIDE the
+        // lock so unrelated capability misses do not serialize behind one
+        // capability's picker query (F1).
+        let computed = self.source.decide(capability);
+        // Publish under a short lock. If another thread raced us to the same
+        // key, keep the already-published decision so repeated lookups return a
+        // stable cached outcome.
+        let mut decisions = self.lock_decisions()?;
+        let decision = decisions.entry(capability.to_owned()).or_insert(computed);
         decision.result(capability)
     }
 }
@@ -254,12 +262,8 @@ mod tests {
     use crate::model::ModelNeedOpts;
     use crate::tools::{Tool, ToolError, ToolOutput};
 
-    fn descriptor(name: &str) -> ToolDescriptor {
-        ToolDescriptor::new(
-            PickerToolId::new("tests", name),
-            format!("{name} capability"),
-            json!({}),
-        )
+    fn tid(name: &str) -> ToolId {
+        ToolId::from_validated("tests", name)
     }
 
     struct FixtureSource;
@@ -267,15 +271,11 @@ mod tests {
     impl DecisionSource for FixtureSource {
         fn decide(&self, capability: &str) -> CachedDecision {
             match capability {
-                "first" | "same-one" | "same-two" => CachedDecision::Bind(descriptor("first")),
-                "second" => CachedDecision::Bind(descriptor("second")),
+                "first" | "same-one" | "same-two" => CachedDecision::Bind(tid("first")),
+                "second" => CachedDecision::Bind(tid("second")),
                 "absent" => CachedDecision::Absent,
-                "duplicate" => {
-                    CachedDecision::Duplicate(vec![descriptor("first"), descriptor("second")])
-                }
-                "ambiguous" => {
-                    CachedDecision::Ambiguous(vec![descriptor("first"), descriptor("second")])
-                }
+                "duplicate" => CachedDecision::Duplicate(vec![tid("first"), tid("second")]),
+                "ambiguous" => CachedDecision::Ambiguous(vec![tid("first"), tid("second")]),
                 other => CachedDecision::Failed(format!("picker failed for {other}")),
             }
         }
@@ -341,7 +341,7 @@ mod tests {
 
     #[test]
     fn picker_outcomes_preserve_typed_errors_and_candidate_order() {
-        let duplicate = CachedDecision::Duplicate(vec![descriptor("first"), descriptor("second")])
+        let duplicate = CachedDecision::Duplicate(vec![tid("first"), tid("second")])
             .result("duplicate")
             .expect_err("duplicate must fail");
         assert!(matches!(
@@ -358,8 +358,7 @@ mod tests {
             Err(Error::Absent { capability }) if capability == "absent"
         ));
         assert!(matches!(
-            CachedDecision::Ambiguous(vec![descriptor("first"), descriptor("second")])
-                .result("ambiguous"),
+            CachedDecision::Ambiguous(vec![tid("first"), tid("second")]).result("ambiguous"),
             Err(Error::Ambiguous { capability, candidates })
                 if capability == "ambiguous" && candidates.len() == 2
         ));
@@ -433,29 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_are_identity_ordered_and_near_duplicates_are_forwarded() {
-        let resolver = PickerResolver::new(&FixtureSource);
-        assert_eq!(
-            resolver.resolve("second").expect("second resolves"),
-            ToolId::new("tests", "second").expect("valid id")
-        );
-        assert_eq!(
-            resolver.resolve("first").expect("first resolves"),
-            ToolId::new("tests", "first").expect("valid id")
-        );
-        let keys = resolver
-            .diagnostics()
-            .expect("diagnostics remain available")
-            .into_keys()
-            .collect::<Vec<_>>();
-        assert_eq!(
-            keys,
-            [
-                ToolId::new("tests", "first").expect("valid id"),
-                ToolId::new("tests", "second").expect("valid id")
-            ]
-        );
-
+    fn near_duplicates_are_forwarded_from_the_source() {
         let ids = [
             PickerToolId::new("tests", "first"),
             PickerToolId::new("tests", "second"),
@@ -465,5 +442,74 @@ mod tests {
             .expect("analysis succeeds");
         assert_eq!(pairs.len(), 1);
         assert!((pairs[0].2 - 0.97).abs() < f32::EPSILON);
+    }
+
+    /// A decision source that counts how many times each capability is decided,
+    /// so a test can prove the resolver caches (decides at most once) and does
+    /// not re-query the picker on repeated hits (F5).
+    struct CountingSource {
+        counts: Mutex<BTreeMap<String, usize>>,
+    }
+
+    impl CountingSource {
+        fn new() -> Self {
+            Self {
+                counts: Mutex::new(BTreeMap::new()),
+            }
+        }
+
+        fn count(&self, capability: &str) -> usize {
+            self.counts
+                .lock()
+                .expect("counts lock")
+                .get(capability)
+                .copied()
+                .unwrap_or(0)
+        }
+    }
+
+    impl DecisionSource for CountingSource {
+        fn decide(&self, capability: &str) -> CachedDecision {
+            *self
+                .counts
+                .lock()
+                .expect("counts lock")
+                .entry(capability.to_owned())
+                .or_insert(0) += 1;
+            FixtureSource.decide(capability)
+        }
+
+        fn near_duplicates(
+            &self,
+            _ids: &[PickerToolId],
+        ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, String> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn each_capability_is_decided_once_and_returns_a_stable_cached_outcome() {
+        let source = CountingSource::new();
+        let resolver = PickerResolver::new(&source);
+
+        // A successful capability, resolved repeatedly, is decided exactly once
+        // and returns the same identity every time.
+        let first_a = resolver.resolve("first").expect("first resolves");
+        let first_b = resolver.resolve("first").expect("first resolves again");
+        assert_eq!(first_a, first_b);
+        assert_eq!(first_a, ToolId::new("tests", "first").expect("valid id"));
+        assert_eq!(source.count("first"), 1, "a hit must not re-decide");
+
+        // A failing capability is likewise cached: decided once, stable error.
+        let miss_a = resolver.resolve("absent").expect_err("absent fails");
+        let miss_b = resolver.resolve("absent").expect_err("absent fails again");
+        assert!(matches!(miss_a, Error::Absent { .. }));
+        assert!(matches!(miss_b, Error::Absent { .. }));
+        assert_eq!(source.count("absent"), 1, "a cached miss must not re-decide");
+
+        // A distinct capability is decided on its own miss.
+        resolver.resolve("second").expect("second resolves");
+        assert_eq!(source.count("second"), 1);
+        assert_eq!(source.count("first"), 1);
     }
 }

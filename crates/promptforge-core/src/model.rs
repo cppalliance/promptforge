@@ -836,11 +836,6 @@ impl ModelCatalog {
             .collect()
     }
 
-    /// Builds a tool-picker [`Catalog`] from model descriptions for semantic resolve.
-    #[must_use]
-    pub(crate) fn to_picker_catalog(&self) -> Catalog {
-        picker_catalog_from(self.models.iter())
-    }
 }
 
 /// Builds a tool-picker [`Catalog`] from borrowed model descriptors.
@@ -1128,18 +1123,6 @@ pub async fn fetch_model_catalog(
             "gateway returned an inconsistent model catalog: {error}"
         )))
     })
-}
-
-/// Builds a [`ToolPicker`] over `catalog` by reusing `base`'s embedder.
-///
-/// # Errors
-/// Returns [`Error::ModelBind`] when the picker cannot index the catalog.
-pub(crate) fn model_picker_from(base: &ToolPicker, catalog: &ModelCatalog) -> Result<ToolPicker> {
-    base.rebuild(catalog.to_picker_catalog())
-        .map_err(|error| Error::ModelBind {
-            capability: String::new(),
-            detail: error.to_string(),
-        })
 }
 
 /// Resolver that filters the catalog, then semantically resolves via a picker.
