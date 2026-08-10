@@ -421,7 +421,8 @@ mod tests {
         let sections = super::CAPACITY + 16;
         let source = long_prompt(sections);
         let prompt =
-            Prompt::parse(&source, "test-run", &NullObserver).expect("the fixture prompt parses");
+            Prompt::parse(&source, "test-run", &NullObserver::default())
+                .expect("the fixture prompt parses");
         let (observer, _frames) = McpObserver::queued();
         let observer = Arc::new(observer);
 

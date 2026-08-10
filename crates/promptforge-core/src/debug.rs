@@ -20,11 +20,50 @@ use serde_json::Value;
 /// persists it owns treating it as sensitive. The bearer credential is never
 /// part of a body (it rides an HTTP header the client never captures).
 ///
-/// # Ordering and blocking
-/// [`on_event`](Self::on_event) is called synchronously from the task driving
-/// the run, in turn order, with the request delivered before its matching
-/// response. Implementations must return promptly (copy into a queue rather than
-/// blocking on I/O) and must not panic; a panic unwinds the run.
+/// # Ordering and delivery
+/// Both events for a turn are delivered only after the model round trip
+/// succeeds. [`on_event`](Self::on_event) is then called synchronously from the
+/// task driving the run, in turn order, with the [`DebugEvent::Request`]
+/// delivered before its matching [`DebugEvent::Response`]. A turn whose round
+/// trip does not complete - a transport error, cancellation, or a response the
+/// client rejects - emits neither event, so a capture records only completed
+/// turns and never a lone request.
+///
+/// Implementations must return promptly (copy into a queue rather than blocking
+/// on I/O) and must not panic; a panic unwinds the run.
+///
+/// # Examples
+/// A nonblocking capture copies each event into an in-memory queue and handles
+/// events forward-compatibly. [`DebugEvent`] and its variants are
+/// `#[non_exhaustive]`, so a wildcard arm is required:
+///
+/// ```
+/// use std::sync::Mutex;
+/// use promptforge_core::debug::{DebugCapture, DebugEvent};
+///
+/// #[derive(Default)]
+/// struct QueueCapture {
+///     turns: Mutex<Vec<(String, u32)>>,
+/// }
+///
+/// impl DebugCapture for QueueCapture {
+///     fn on_event(&self, _execution: &str, section: &str, turn_index: u32, event: DebugEvent) {
+///         // Copy into an in-memory queue; never block on I/O on this path.
+///         let kind = match event {
+///             DebugEvent::Request { .. } => "request",
+///             DebugEvent::Response { .. } => "response",
+///             _ => "other",
+///         };
+///         self.turns.lock().unwrap().push((format!("{section}:{kind}"), turn_index));
+///     }
+/// }
+///
+/// let capture = QueueCapture::default();
+/// capture.on_event("run", "Say hi", 1, DebugEvent::request(serde_json::Value::Null));
+/// capture.on_event("run", "Say hi", 1, DebugEvent::response(serde_json::Value::Null, None, None));
+/// let turns = capture.turns.lock().unwrap();
+/// assert_eq!(turns.as_slice(), &[("Say hi:request".to_owned(), 1), ("Say hi:response".to_owned(), 1)]);
+/// ```
 pub trait DebugCapture: Send + Sync {
     /// Receives one capture event for a model turn.
     ///

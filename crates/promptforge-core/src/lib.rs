@@ -31,7 +31,7 @@
 //! assert_eq!(promptforge_version(source), Some(1));
 //! assert_eq!(promptforge_version("plain text, no frontmatter"), None);
 //!
-//! let prompt = Prompt::parse(source, "doc-example", &NullObserver)?;
+//! let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
 //! assert_eq!(prompt.title(), "Greeter");
 //! assert_eq!(prompt.sections()[0].name(), "Say hi");
 //! # Ok::<(), promptforge_core::ParseError>(())
@@ -50,7 +50,7 @@
 //! use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 //!
 //! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 1\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n";
-//! let prompt = Prompt::parse(source, "run-example", &NullObserver)?;
+//! let prompt = Prompt::parse(source, "run-example", &NullObserver::default())?;
 //!
 //! let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())?;
 //! let models = ModelCatalog::empty();
@@ -87,7 +87,8 @@ pub(crate) mod subst;
 pub mod tools;
 pub(crate) mod untrusted;
 
-pub(crate) use crate::error::{Error, NearDuplicateDiagnostic, Result};
+pub(crate) use crate::error::{Error, Result};
+pub(crate) use crate::tools::NearDuplicateDiagnostic;
 
 pub use crate::cancel::CancelHandle;
 pub use crate::dialects::{DialectError, DialectErrorKind};

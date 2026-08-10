@@ -40,7 +40,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             };
             let input = args.next().unwrap_or_default();
-            let observer: Arc<dyn Observer> = Arc::new(NullObserver);
+            let observer: Arc<dyn Observer> = Arc::new(NullObserver::default());
             run(&path, &input, observer, cancel).await
         }
         Some(other) => {

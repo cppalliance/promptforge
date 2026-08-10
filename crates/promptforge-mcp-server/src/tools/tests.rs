@@ -25,7 +25,8 @@ fn prompt(name: &str, description: &str) -> (String, Prompt) {
          # Title\n\n## Main\n\n```lua\nreturn args\n```\n"
     );
     let prompt =
-        Prompt::parse(&source, "test-run", &NullObserver).expect("the fixture prompt parses");
+        Prompt::parse(&source, "test-run", &NullObserver::default())
+            .expect("the fixture prompt parses");
     (source, prompt)
 }
 

@@ -58,6 +58,26 @@ impl SharedTools {
     }
 }
 
+/// Diagnostics for two semantic near-duplicates exposed in one model turn.
+///
+/// The near-duplicate check is part of tool-scope validation, so the diagnostic
+/// vocabulary lives here (F10); the internal error substrate references this
+/// type rather than owning it.
+#[derive(Debug)]
+#[non_exhaustive]
+pub(crate) struct NearDuplicateDiagnostic {
+    /// The first prompt-local alias in picker catalog pair order.
+    pub(crate) first_alias: String,
+    /// The first stable identity.
+    pub(crate) first_id: ToolId,
+    /// The second prompt-local alias in picker catalog pair order.
+    pub(crate) second_alias: String,
+    /// The second stable identity.
+    pub(crate) second_id: ToolId,
+    /// The cosine similarity reported by the picker.
+    pub(crate) similarity: f32,
+}
+
 /// The stable identity of a live tool.
 ///
 /// Identity is structural over the server and tool name. The wire name used

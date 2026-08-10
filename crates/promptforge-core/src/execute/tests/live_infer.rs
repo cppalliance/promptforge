@@ -233,6 +233,82 @@ async fn live_h1_infer_sees_tools_resolved_in_the_same_block() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn nested_lua_infer_emits_model_and_tool_observations() {
+    // observe.rs F1: a nested Lua `model:infer` that drives a tool round trip
+    // must surface BOTH model-turn and tool-call observations to the run's
+    // observer, proving owned-observer propagation reaches the inner tool loop.
+    let addr = spawn_mock_gateway().await;
+    let echo = Arc::new(EchoTool);
+    let descriptor = ToolDescriptor::new(
+        PickerToolId::new("tests", "echo"),
+        echo.description(),
+        echo.parameters_schema(),
+    );
+    let capability =
+        serde_json::to_string(&capability_for(&descriptor)).expect("serialize tool capability");
+    let source = format!(
+        "---\nname: nested-infer-observations\ndescription: d\npromptforge: 1\n---\n\n\
+         # Nested Infer Observations\n\n\
+         ```lua\n\
+         local echo = tools.need('echo', {capability})\n\
+         tools.always(echo.name)\n\
+         local writer = models.always('writer', 'A general model for tests')\n\
+         var.answer = writer:infer('use echo')\n\
+         ```\n\n\
+         ## Result\n\n\
+         ```lua\nreturn var.answer\n```\n"
+    );
+    let prompt = parse(&source);
+    let picker = ToolPicker::build(Catalog::new(vec![descriptor]), PickerConfig::default())
+        .expect("tool picker must build");
+    let models = test_model_catalog();
+    let tools: [Arc<dyn Tool>; 1] = [echo];
+    let recorder = Arc::new(Recorder::default());
+
+    let out = super::super::run(
+        &prompt,
+        "",
+        ResolutionContext::new(&picker, &models),
+        &tools,
+        &StoreRef::memory(),
+        to_config(RunOptions {
+            execution: EXECUTION,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test").expect("non-empty test key"),
+            )),
+            debug: None,
+        }),
+    )
+    .await
+    .expect("nested infer must run its tool loop");
+
+    assert_eq!(out, "final answer");
+    let details: Vec<String> = recorder
+        .records()
+        .into_iter()
+        .map(|(_, _, detail)| detail)
+        .collect();
+    let model_turns = details
+        .iter()
+        .filter(|d| d.as_str() == "Model turn completed")
+        .count();
+    let tool_calls = details
+        .iter()
+        .filter(|d| d.as_str() == "Tool call succeeded")
+        .count();
+    assert!(
+        model_turns >= 2,
+        "nested infer drives two model round trips; saw {model_turns}: {details:?}"
+    );
+    assert_eq!(
+        tool_calls, 1,
+        "the single echo dispatch must emit exactly one tool-call observation: {details:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var() {
     let addr = spawn_mock_gateway().await;
     let echo = Arc::new(EchoTool);

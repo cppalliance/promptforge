@@ -263,8 +263,8 @@ return 'resolved'
 ```
 ",
             );
-            let mut prompt =
-                Prompt::parse(&probe, "test-run", &NullObserver).unwrap_or_else(|error| {
+            let mut prompt = Prompt::parse(&probe, "test-run", &NullObserver::default())
+                .unwrap_or_else(|error| {
                     panic!("{} must parse: {error}", path.display());
                 });
             prompt.strip_h1_prose();

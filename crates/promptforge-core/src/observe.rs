@@ -4,10 +4,24 @@
 //! [`Observation`] at operational boundaries. The observation is the complete
 //! trace record. Fixed runtime observations carry no raw prompt prose, model
 //! input or output, tool arguments or results, store paths or contents,
-//! credentials, or fetched content. The sole author-controlled exception is a
-//! validated [`Observation::Lua`] checkpoint from the phase-local Lua
-//! `log(message)` callback. Reports are synchronous and never consulted for a
-//! decision. [`NullObserver`] provides silence without a second execution path.
+//! credentials, or fetched content. Reports are synchronous and never consulted
+//! for a decision. [`NullObserver`] provides silence without a second execution
+//! path.
+//!
+//! # Sensitivity of metadata
+//! The variant *identity* of a fixed [`Observation`] is safe, but three inputs
+//! are author-controlled and must be treated as potentially sensitive untrusted
+//! metadata, not as safe fixed vocabulary:
+//! - `execution` - a caller-chosen run identifier;
+//! - `section` - the prompt's H2 heading text, authored in the prompt file;
+//! - [`Observation::Lua`] and [`Observation::Other`] messages - a validated Lua
+//!   `log(message)` checkpoint and the forward-compatible escape hatch.
+//!
+//! An [`Observer`] that persists or forwards reports owns treating `execution`,
+//! `section`, and any message-carrying variant as untrusted: they can echo
+//! prompt-authored text, so a sink must not log them into a trusted context, and
+//! prompt authors must never place arguments, replies, tool data, credentials,
+//! paths, or store contents in a `log(message)`.
 
 use std::fmt;
 
@@ -24,6 +38,37 @@ use std::fmt;
 /// forward-compatible escape hatch. Both own their message, so an observation
 /// crosses a thread boundary (fanout arms report through a channel) without
 /// borrowing the emitting frame.
+///
+/// # Examples
+/// Match the variants a consumer cares about, use [`label`](Observation::label)
+/// and [`Display`](fmt::Display), and tolerate unknown variants through a
+/// wildcard arm (the enum is `#[non_exhaustive]`):
+///
+/// ```
+/// use promptforge_core::observe::Observation;
+///
+/// fn describe(event: &Observation) -> String {
+///     match event {
+///         Observation::RunStarted => "run began".to_owned(),
+///         // The author-controlled checkpoint owns its message.
+///         Observation::Lua(message) => format!("lua says: {message}"),
+///         // A forward-compatible escape hatch.
+///         Observation::Other(message) => format!("other: {message}"),
+///         // Any other fixed variant renders through its stable label.
+///         fixed => fixed.label().unwrap_or("unknown").to_owned(),
+///     }
+/// }
+///
+/// assert_eq!(describe(&Observation::RunStarted), "run began");
+/// assert_eq!(describe(&Observation::Lua("hi".to_owned())), "lua says: hi");
+/// assert_eq!(describe(&Observation::Other("x".to_owned())), "other: x");
+/// assert_eq!(describe(&Observation::SectionFinished), "Section finished");
+///
+/// // Fixed variants expose a stable label; message-carrying ones do not.
+/// assert_eq!(Observation::RunStarted.label(), Some("Run started"));
+/// assert_eq!(Observation::Lua("hi".to_owned()).label(), None);
+/// assert_eq!(Observation::RunStarted.to_string(), "Run started");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Observation {
@@ -150,17 +195,29 @@ pub enum Observation {
     /// A harness-mediated store glob failed.
     StoreGlobFailed,
     /// A fanout arm began execution.
+    ///
+    /// Every arm emits exactly one [`FanoutArmStarted`](Observation::FanoutArmStarted)
+    /// followed by exactly one terminal event: one of
+    /// [`FanoutArmSucceeded`](Observation::FanoutArmSucceeded),
+    /// [`FanoutArmExhausted`](Observation::FanoutArmExhausted),
+    /// [`FanoutArmFailed`](Observation::FanoutArmFailed), or
+    /// [`FanoutArmCancelled`](Observation::FanoutArmCancelled). The runtime
+    /// enforces this state machine with a drop guard, so an aborted or
+    /// cancelled arm still reports a terminal event.
     FanoutArmStarted,
-    /// A fanout arm completed execution (generic terminal, retained for compat).
+    /// Legacy generic terminal, retained only so an older consumer's match arm
+    /// stays valid. The current runtime never emits it: a finishing arm always
+    /// reports one of the specific terminal variants below (succeeded /
+    /// exhausted / failed / cancelled).
     FanoutArmFinished,
-    /// A fanout arm finished with a normal successful result.
+    /// Terminal: a fanout arm finished with a normal successful result.
     FanoutArmSucceeded,
-    /// A fanout arm soft-degraded because its tool loop was exhausted.
+    /// Terminal: a fanout arm soft-degraded because its tool loop was exhausted.
     FanoutArmExhausted,
-    /// A fanout arm ended with a hard error.
+    /// Terminal: a fanout arm ended with a hard error.
     FanoutArmFailed,
-    /// A fanout arm was cancelled or aborted (Ctrl-C or a sibling's hard error)
-    /// before it could finalize.
+    /// Terminal: a fanout arm was cancelled or aborted (Ctrl-C or a sibling's
+    /// hard error) before it could finalize.
     FanoutArmCancelled,
     /// The one author-controlled checkpoint: a validated Lua `log(message)`.
     ///
@@ -387,10 +444,13 @@ pub trait Observer: Send + Sync {
 /// ```
 /// use promptforge_core::observe::{Observation, NullObserver, Observer};
 ///
-/// let observer = NullObserver;
+/// // `#[non_exhaustive]`, so construct it through `Default` rather than the
+/// // unit literal.
+/// let observer = NullObserver::default();
 /// observer.observe("example-run", "Example prompt", Observation::RunSucceeded);
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NullObserver;
 
 impl Observer for NullObserver {
@@ -434,8 +494,110 @@ mod tests {
         observer.observe("example-run", "Gather", Observation::SectionFinished);
     }
 
+    /// A recorder that keeps every correlated `(execution, section, event)`
+    /// record, for the cross-module contract tests below.
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<(String, String, Observation)>>);
+
+    impl Observer for Recorder {
+        fn observe(&self, execution: &str, section: &str, event: Observation) {
+            self.0
+                .lock()
+                .expect("recorder mutex must remain usable")
+                .push((execution.to_owned(), section.to_owned(), event));
+        }
+    }
+
+    impl Recorder {
+        fn records(&self) -> Vec<(String, String, Observation)> {
+            self.0
+                .lock()
+                .expect("recorder mutex must remain usable")
+                .clone()
+        }
+    }
+
     #[test]
-    fn mutex_recorder_keeps_interleaved_execution_ids_ordered() {
+    fn unknown_and_message_variants_are_tolerated_by_a_wildcard_consumer() {
+        // F7 (unknown events): a consumer that matches only the variants it
+        // knows must tolerate `Other` (a forward-compatible variant it does not
+        // model) through a wildcard arm, and the message-carrying variants must
+        // preserve their author-controlled text verbatim.
+        fn classify(event: &Observation) -> &'static str {
+            match event {
+                Observation::RunStarted => "known-fixed",
+                Observation::Lua(_) => "lua-checkpoint",
+                _ => "unknown-or-other",
+            }
+        }
+        assert_eq!(classify(&Observation::RunStarted), "known-fixed");
+        assert_eq!(
+            classify(&Observation::Lua("hi".to_owned())),
+            "lua-checkpoint"
+        );
+        // `Other` stands in for a future variant this consumer has never seen.
+        assert_eq!(
+            classify(&Observation::Other("future".to_owned())),
+            "unknown-or-other"
+        );
+        assert_eq!(classify(&Observation::SectionFinished), "unknown-or-other");
+        assert_eq!(
+            Observation::Lua("secret note".to_owned()).to_string(),
+            "Lua: secret note"
+        );
+        assert_eq!(
+            Observation::Other("verbatim".to_owned()).to_string(),
+            "verbatim"
+        );
+    }
+
+    #[test]
+    fn parse_failure_pairs_started_with_failed_and_carries_author_labels() {
+        // F7 (failure lifecycle pairing + sensitive labels), cross-module
+        // through the parser: a failed parse emits `ParseStarted` first and
+        // `ParseFailed` last, and the caller-chosen `execution` id (untrusted,
+        // author-controlled metadata) is carried verbatim to the observer.
+        use crate::parser::Prompt;
+
+        let recorder = Recorder::default();
+        let execution = "author/controlled:run id";
+        let _ = Prompt::parse("no frontmatter here", execution, &recorder)
+            .expect_err("a source without frontmatter must fail to parse");
+
+        let records = recorder.records();
+        assert_eq!(
+            records.first().map(|(_, _, event)| event),
+            Some(&Observation::ParseStarted),
+            "the lifecycle must open with ParseStarted: {records:?}"
+        );
+        assert_eq!(
+            records.last().map(|(_, _, event)| event),
+            Some(&Observation::ParseFailed),
+            "a failed parse must close with ParseFailed: {records:?}"
+        );
+        assert!(
+            records
+                .iter()
+                .all(|(seen_execution, _, _)| seen_execution == execution),
+            "the author-controlled execution id must be carried verbatim: {records:?}"
+        );
+
+        // The success lifecycle pairs Started with Succeeded instead.
+        let recorder = Recorder::default();
+        let source =
+            "---\nname: greeter\ndescription: d\npromptforge: 1\n---\n\n# T\n\n## S\n\nhi\n";
+        Prompt::parse(source, execution, &recorder).expect("a well-formed source must parse");
+        let events: Vec<Observation> = recorder
+            .records()
+            .into_iter()
+            .map(|(_, _, event)| event)
+            .collect();
+        assert_eq!(events.first(), Some(&Observation::ParseStarted));
+        assert_eq!(events.last(), Some(&Observation::ParseSucceeded));
+    }
+
+    #[test]
+    fn interleaved_reports_stay_correlated_by_execution_and_section() {
         #[derive(Default)]
         struct Recorder(Mutex<Vec<(String, String, Observation)>>);
 

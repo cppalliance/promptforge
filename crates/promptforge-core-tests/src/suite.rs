@@ -220,7 +220,7 @@ fn collect_markdown(directory: &Path, files: &mut Vec<std::path::PathBuf>) {
 #[test]
 fn valid_prompt_files_parse_through_the_public_api() {
     for fixture in VALID_FIXTURES {
-        let prompt = Prompt::parse(fixture.source, fixture.name, &NullObserver)
+        let prompt = Prompt::parse(fixture.source, fixture.name, &NullObserver::default())
             .unwrap_or_else(|error| panic!("fixture {} failed to parse: {error}", fixture.name));
         let verification = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             (fixture.verify)(&prompt);
@@ -236,7 +236,8 @@ fn valid_prompt_files_parse_through_the_public_api() {
 #[test]
 fn invalid_prompt_files_report_public_error_contracts() {
     for fixture in INVALID_FIXTURES {
-        let Err(error) = Prompt::parse(fixture.source, fixture.name, &NullObserver) else {
+        let Err(error) = Prompt::parse(fixture.source, fixture.name, &NullObserver::default())
+        else {
             panic!("fixture {} unexpectedly parsed", fixture.name);
         };
 
@@ -833,7 +834,7 @@ fn every_shipped_prompt_parses_offline() {
             "{} must declare semantic capabilities, not concrete tools",
             path.display()
         );
-        Prompt::parse(&source, SHIPPED_PARSE, &NullObserver)
+        Prompt::parse(&source, SHIPPED_PARSE, &NullObserver::default())
             .unwrap_or_else(|error| panic!("{} must parse: {error}", path.display()));
     }
 }

@@ -7,22 +7,6 @@
 //! classify this substrate and preserve its source. See the module wrappers for
 //! the `From` bridges that let internal `?` keep flowing through the substrate.
 
-/// Diagnostics for two semantic near-duplicates exposed in one model turn.
-#[derive(Debug)]
-#[non_exhaustive]
-pub(crate) struct NearDuplicateDiagnostic {
-    /// The first prompt-local alias in picker catalog pair order.
-    pub(crate) first_alias: String,
-    /// The first stable identity.
-    pub(crate) first_id: crate::tools::ToolId,
-    /// The second prompt-local alias in picker catalog pair order.
-    pub(crate) second_alias: String,
-    /// The second stable identity.
-    pub(crate) second_id: crate::tools::ToolId,
-    /// The cosine similarity reported by the picker.
-    pub(crate) similarity: f32,
-}
-
 /// A cloneable, shareable error cause.
 ///
 /// Some caches re-produce a typed [`Error`] on every lookup (for example the
@@ -65,6 +49,22 @@ pub(crate) enum Error {
     /// The prompt file could not be parsed (bad frontmatter, no sections, etc.).
     #[error("parse error: {0}")]
     Parse(String),
+
+    /// The prompt frontmatter was not valid YAML, preserving the parser cause.
+    ///
+    /// Unlike [`Error::Parse`], this retains the originating YAML decode failure
+    /// (a [`serde_yaml::Error`]) as the `#[source]` cause (F3) so
+    /// [`crate::ParseError::source`] can expose the frontmatter syntax location
+    /// instead of flattening it into the message.
+    #[error("invalid frontmatter: {message}")]
+    #[non_exhaustive]
+    ParseFrontmatter {
+        /// The human-readable diagnostic (no raw source dump).
+        message: String,
+        /// The originating YAML parse failure, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     /// A structurally-classified parse failure carrying a stable kind and an
     /// optional source byte span, so [`crate::ParseError`] can expose the
@@ -294,7 +294,8 @@ pub(crate) enum Error {
     #[non_exhaustive]
     NearDuplicateTools {
         /// The complete pair diagnostic, boxed to keep every crate error small.
-        diagnostic: Box<NearDuplicateDiagnostic>,
+        /// The diagnostic vocabulary lives in tool-scope validation (F10).
+        diagnostic: Box<crate::tools::NearDuplicateDiagnostic>,
     },
 
     /// The concrete picker failed while resolving a model capability declaration.

@@ -32,8 +32,8 @@ use super::{
 /// use promptforge_core::lua::SectionVm;
 /// use promptforge_core::observe::NullObserver;
 ///
-/// let vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
-/// vm.teardown(&NullObserver, "Example");
+/// let vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
+/// vm.teardown(&NullObserver::default(), "Example");
 /// # Ok::<(), promptforge_core::Error>(())
 /// ```
 #[derive(Debug)]
@@ -89,11 +89,11 @@ impl SectionVm {
     ///     "shared",
     ///     1,
     ///     "example-run",
-    ///     &NullObserver,
+    ///     &NullObserver::default(),
     ///     "Example",
     /// )?;
-    /// let vm = SectionVm::new(Some(&shared), "example-run", &NullObserver, "Example")?;
-    /// vm.teardown(&NullObserver, "Example");
+    /// let vm = SectionVm::new(Some(&shared), "example-run", &NullObserver::default(), "Example")?;
+    /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     pub(crate) fn new(
@@ -232,9 +232,9 @@ impl SectionVm {
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
     ///
-    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
+    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &StoreRef::memory(), None)?;
-    /// vm.teardown(&NullObserver, "Example");
+    /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     pub(crate) fn inject_host(
@@ -416,13 +416,13 @@ impl SectionVm {
     ///     "prologue",
     ///     1,
     ///     "example-run",
-    ///     &NullObserver,
+    ///     &NullObserver::default(),
     ///     "Example",
     /// )?;
-    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
+    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// assert_eq!(vm.run_prologue(&prologue, &NullObserver, "Example")?, None);
-    /// vm.teardown(&NullObserver, "Example");
+    /// assert_eq!(vm.run_prologue(&prologue, &NullObserver::default(), "Example")?, None);
+    /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     pub(crate) fn run_prologue(
@@ -508,11 +508,11 @@ impl SectionVm {
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
     ///
-    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
+    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// vm.close_tool_scope(&NullObserver, "Example")?;
-    /// vm.bind_reply("model answer", &NullObserver, "Example")?;
-    /// vm.teardown(&NullObserver, "Example");
+    /// vm.close_tool_scope(&NullObserver::default(), "Example")?;
+    /// vm.bind_reply("model answer", &NullObserver::default(), "Example")?;
+    /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     pub(crate) fn bind_reply(
@@ -570,18 +570,18 @@ impl SectionVm {
     ///     "epilog",
     ///     1,
     ///     "example-run",
-    ///     &NullObserver,
+    ///     &NullObserver::default(),
     ///     "Example",
     /// )?;
-    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
+    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// vm.close_tool_scope(&NullObserver, "Example")?;
-    /// vm.bind_reply("done", &NullObserver, "Example")?;
+    /// vm.close_tool_scope(&NullObserver::default(), "Example")?;
+    /// vm.bind_reply("done", &NullObserver::default(), "Example")?;
     /// assert_eq!(
-    ///     vm.run_epilog(&epilog, &NullObserver, "Example")?.as_deref(),
+    ///     vm.run_epilog(&epilog, &NullObserver::default(), "Example")?.as_deref(),
     ///     Some("done"),
     /// );
-    /// vm.teardown(&NullObserver, "Example");
+    /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     pub(crate) fn run_epilog(
@@ -625,10 +625,10 @@ impl SectionVm {
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
     ///
-    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
+    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
     /// assert_eq!(vm.var()?, serde_json::json!({}));
-    /// vm.teardown(&NullObserver, "Example");
+    /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     pub(crate) fn var(&self) -> Result<Json> {
@@ -731,13 +731,13 @@ impl SectionVm {
     ///     &ToolBindings::default(),
     ///     &ModelBindings::default(),
     ///     "example-run",
-    ///     &NullObserver,
+    ///     &NullObserver::default(),
     ///     "Example",
     /// )?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// let scope = vm.close_tool_scope(&NullObserver, "Example")?;
+    /// let scope = vm.close_tool_scope(&NullObserver::default(), "Example")?;
     /// assert!(scope.bindings().is_empty());
-    /// vm.teardown(&NullObserver, "Example");
+    /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     /// Closes and returns this section's effective tool scope.
@@ -943,8 +943,8 @@ impl SectionVm {
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     ///
-    /// let vm = SectionVm::new(None, "example-run", &NullObserver, "Example")?;
-    /// vm.teardown(&NullObserver, "Example");
+    /// let vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
+    /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
     pub(crate) fn teardown(self, observer: &dyn Observer, section: &str) {

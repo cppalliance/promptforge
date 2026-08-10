@@ -62,6 +62,7 @@ pub struct ParseError {
 fn classify_parse_error(inner: &Error) -> (ParseErrorKind, Option<(usize, usize)>) {
     match inner {
         Error::ParseStructured { kind, span, .. } => (*kind, *span),
+        Error::ParseFrontmatter { .. } => (ParseErrorKind::Frontmatter, None),
         Error::LuaCompile { .. } => (ParseErrorKind::Lua, None),
         Error::Parse(message) => {
             let kind = if message.contains("frontmatter") {
@@ -462,14 +463,14 @@ impl Prompt {
     /// use promptforge_core::parser::{Prompt, ParseErrorKind};
     ///
     /// let source = "---\nname: greeter\ndescription: says hi\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n";
-    /// let prompt = Prompt::parse(source, "docs", &NullObserver).expect("valid prompt");
+    /// let prompt = Prompt::parse(source, "docs", &NullObserver::default()).expect("valid prompt");
     /// assert_eq!(prompt.frontmatter().name(), "greeter");
     /// assert_eq!(prompt.title(), "Greeter");
     /// assert_eq!(prompt.sections().len(), 1);
     /// assert_eq!(prompt.sections()[0].name(), "Say hi");
     ///
     /// // A malformed prompt reports a classified error.
-    /// let err = Prompt::parse("no frontmatter here", "docs", &NullObserver).unwrap_err();
+    /// let err = Prompt::parse("no frontmatter here", "docs", &NullObserver::default()).unwrap_err();
     /// assert_eq!(err.kind(), ParseErrorKind::Frontmatter);
     /// ```
     ///
@@ -502,8 +503,14 @@ impl Prompt {
 
     fn parse_inner(input: &str, execution: &str, observer: &dyn Observer) -> Result<Prompt> {
         let (yaml, body, frontmatter_lines) = split_frontmatter(input)?;
-        let frontmatter: Frontmatter = serde_yaml::from_str(&yaml)
-            .map_err(|e| Error::Parse(format!("invalid frontmatter: {e}")))?;
+        let frontmatter: Frontmatter = serde_yaml::from_str(&yaml).map_err(|e| {
+            // Retain the YAML decode failure as the `#[source]` cause (F3) so the
+            // public parse error can expose the frontmatter syntax location.
+            Error::ParseFrontmatter {
+                message: e.to_string(),
+                source: Box::new(e),
+            }
+        })?;
 
         let headings = collect_headings(&body)?;
 
@@ -884,6 +891,21 @@ mod tests {
 
     use super::*;
     use crate::observe::{NullObserver, Observation, detail};
+
+    #[test]
+    fn invalid_frontmatter_preserves_the_yaml_cause_as_source() {
+        // error.rs F3: a malformed-YAML frontmatter must classify as
+        // `Frontmatter` and retain the underlying serde_yaml failure as the
+        // public error's `source()`, instead of flattening it into a string.
+        let src = "---\nname: p\ndescription: d\n: : :\n---\n\n# T\n\n## S\n\nhi\n";
+        let error = Prompt::parse(src, "test", &NullObserver)
+            .expect_err("malformed YAML frontmatter must fail to parse");
+        assert_eq!(error.kind(), ParseErrorKind::Frontmatter);
+        assert!(
+            std::error::Error::source(&error).is_some(),
+            "the YAML decode failure must be preserved as the error source: {error}"
+        );
+    }
 
     #[test]
     fn mixed_prose_with_one_bullet_is_not_a_list() {

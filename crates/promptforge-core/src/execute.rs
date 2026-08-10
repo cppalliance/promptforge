@@ -115,7 +115,9 @@ impl RunError {
     #[must_use]
     pub fn kind(&self) -> RunErrorKind {
         match &self.inner {
-            Error::Parse(_) | Error::ParseStructured { .. } => RunErrorKind::Parse,
+            Error::Parse(_) | Error::ParseStructured { .. } | Error::ParseFrontmatter { .. } => {
+                RunErrorKind::Parse
+            }
             Error::LuaQuota { .. } => RunErrorKind::Quota,
             Error::LuaCompile { .. } | Error::Lua(_) => RunErrorKind::Lua,
             Error::UnsupportedVersion(_) => RunErrorKind::Version,
@@ -900,7 +902,7 @@ impl GatewaySource {
 ///     "```lua\nreturn 'hello'\n```\n\n",
 ///     "## Only\n\ndone\n",
 /// );
-/// let prompt = Prompt::parse(source, "doc-example", &NullObserver)?;
+/// let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
 /// let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())?;
 /// let models = ModelCatalog::empty();
 ///

@@ -36,7 +36,7 @@ use super::{Error, Function, Lua, LuaOptions, NonZeroU32, Observer, Result, StdL
 ///     "## Only\n\n",
 ///     "```lua\nreturn 1\n```\n",
 /// );
-/// let prompt = Prompt::parse(source, "doc", &NullObserver)?;
+/// let prompt = Prompt::parse(source, "doc", &NullObserver::default())?;
 /// let program = prompt.sections()[0]
 ///     .prologue()
 ///     .expect("the section has a Lua prologue");
@@ -84,7 +84,7 @@ impl LuaProgram {
     ///     "example prologue",
     ///     1,
     ///     "example-run",
-    ///     &NullObserver,
+    ///     &NullObserver::default(),
     ///     "Example",
     /// )?;
     /// let lua = Lua::new();
