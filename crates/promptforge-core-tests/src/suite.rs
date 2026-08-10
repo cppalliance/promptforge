@@ -143,7 +143,7 @@ const INVALID_FIXTURES: &[InvalidFixture] = &[
         name: "invalid/list-h3-non-list-content.md",
         source: LIST_H3_NON_LIST,
         kind: ErrorKind::Parse,
-        message_fragment: "non-list content",
+        message_fragment: "empty bullet item",
     },
 ];
 
