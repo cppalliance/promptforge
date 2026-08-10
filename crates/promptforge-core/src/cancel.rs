@@ -124,6 +124,17 @@ where
     CURRENT.scope(cancel, fut).await
 }
 
+/// Returns the [`CancelHandle`] installed on this task, if any.
+///
+/// A spawned task (a fanout arm) does NOT inherit the task-local, so code about
+/// to cross a spawn boundary reads the current handle here and carries an
+/// explicit clone into the new task, where it re-installs it with [`scope`].
+/// Returning `Option` makes an absent context representable rather than silently
+/// becoming a forever-pending wait.
+pub(crate) fn current() -> Option<CancelHandle> {
+    CURRENT.try_with(Clone::clone).ok()
+}
+
 /// Completes when the task-local [`CancelHandle`] is cancelled.
 ///
 /// When no handle is installed, the future never completes (hosts that do not
@@ -264,6 +275,30 @@ mod tests {
             .await
             .expect("a spawned clone must observe the parent's cancel")
             .expect("join ok");
+    }
+
+    #[tokio::test]
+    async fn current_reports_absent_and_present_context() {
+        // PF-CANCEL-003: an absent cancellation context is representable as
+        // `None` (not a silent forever-pending), and an installed scope exposes
+        // the explicit handle for carrying across a spawn boundary.
+        assert!(current().is_none(), "no scope installed => no handle");
+        let handle = CancelHandle::new();
+        let probe = handle.clone();
+        scope(handle, async {
+            let got = current().expect("an installed scope exposes its handle");
+            assert!(!got.is_cancelled());
+            probe.cancel();
+            assert!(
+                current().expect("still present").is_cancelled(),
+                "the exposed handle reflects cancellation"
+            );
+        })
+        .await;
+        assert!(
+            current().is_none(),
+            "the handle is gone after the scope exits"
+        );
     }
 
     #[tokio::test]

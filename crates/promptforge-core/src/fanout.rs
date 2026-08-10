@@ -159,6 +159,11 @@ pub(crate) async fn run_fanout_arms(
     }
 
     let turns = Arc::new(AtomicU32::new(0));
+    // A spawned arm does not inherit the run's task-local CancelHandle, so
+    // capture it here (on the parent task) and carry an explicit clone into every
+    // arm payload; each arm re-installs it so its own Lua hook and tool loop
+    // observe cancellation (PF-CANCEL-002).
+    let arm_cancel = cancel::current();
     // Side channels carry report-only observation/debug traffic. They are BOUNDED
     // so a burst of arm events cannot grow memory without limit. On overload the
     // proxies drop events (see `ProxyObserver`/`ProxyDebugCapture`) rather than
@@ -203,6 +208,7 @@ pub(crate) async fn run_fanout_arms(
             turns: Arc::clone(&turns),
             observer: Arc::clone(&proxy_observer),
             debug: proxy_debug.clone(),
+            cancel: arm_cancel.clone(),
         };
         join_set.spawn(run_one_arm(payload));
     };
@@ -364,6 +370,9 @@ struct ArmPayload {
     turns: Arc<AtomicU32>,
     observer: Arc<ProxyObserver>,
     debug: Option<Arc<dyn DebugCapture>>,
+    /// Explicit cancellation handle carried across the spawn boundary, since a
+    /// spawned arm does not inherit the parent task-local (PF-CANCEL-002).
+    cancel: Option<cancel::CancelHandle>,
 }
 
 /// Bound on each fanout side channel (observation and debug).
@@ -484,6 +493,7 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
         turns,
         observer,
         debug,
+        cancel,
     } = payload;
 
     let taskid = (index + 1).to_string();
@@ -643,7 +653,13 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
         ))
     };
 
-    let outcome: Result<(LuaFanoutResult, Observation)> = body.await;
+    // Re-install the explicit cancel handle on THIS arm's task so its Lua
+    // instruction hook and tool loop observe cancellation cooperatively; a
+    // spawned task never inherits the parent's task-local (PF-CANCEL-002).
+    let outcome: Result<(LuaFanoutResult, Observation)> = match cancel {
+        Some(handle) => cancel::scope(handle, body).await,
+        None => body.await,
+    };
 
     // Single epilogue: tear the VM down once, then record exactly one terminal
     // observation matching the arm's real outcome.
@@ -1196,6 +1212,79 @@ mod tests {
             recorder.snapshot()
         );
         assert_eq!(recorder.count("Fanout arm succeeded"), 0);
+    }
+
+    /// Signals a oneshot the first time it observes a Lua `log` event, so a test
+    /// can learn deterministically that an arm has started running.
+    struct SignalOnLog {
+        tx: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    }
+
+    impl Observer for SignalOnLog {
+        fn observe(&self, _execution: &str, _section: &str, event: Observation) {
+            if matches!(event, Observation::Lua(_))
+                && let Some(tx) = self.tx.lock().expect("signal mutex").take()
+            {
+                let _ = tx.send(());
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn an_in_flight_fanout_arm_is_cancelled_cooperatively() {
+        // PF-CANCEL-002 / FANOUT-003 (in-flight): a spawned arm carries an
+        // explicit CancelHandle, so an arm spinning in synchronous Lua stops via
+        // its OWN instruction hook when cancelled mid-flight. Without the
+        // per-arm handle the arm could not be aborted (synchronous Lua cannot be
+        // preempted) and the join drain would hang - so the timeout below is the
+        // regression guard. Readiness is signaled explicitly (no sleeps).
+        use crate::cancel::{self, CancelHandle};
+
+        let worker = lua_worker("log('running')\nwhile true do end\nreturn item");
+        let items = vec!["only".to_string()];
+        let store = StoreRef::memory();
+        let bindings = ToolBindings::default();
+        let models = ModelBindings::default();
+        let analysis = crate::execute::ToolAnalysis::default();
+        let shared_tools = SharedTools::default();
+        let client: Option<GatewayClient> = None;
+
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let observer = SignalOnLog {
+            tx: std::sync::Mutex::new(Some(ready_tx)),
+        };
+        let ctx = terminal_ctx(
+            &observer,
+            &store,
+            &bindings,
+            &models,
+            &analysis,
+            &shared_tools,
+            &client,
+        );
+
+        let cancel = CancelHandle::new();
+        let canceller = {
+            let handle = cancel.clone();
+            tokio::spawn(async move {
+                // Cancel only once the arm has actually started spinning.
+                let _ = ready_rx.await;
+                handle.cancel();
+            })
+        };
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            cancel::scope(cancel, run_fanout_arms(&worker, &items, &ctx)),
+        )
+        .await
+        .expect("the in-flight arm must cooperatively cancel, not hang the join drain");
+        let error = result.expect_err("a cancelled fanout returns an error");
+        assert!(
+            matches!(error, crate::Error::Interrupted),
+            "expected Interrupted, got {error}"
+        );
+        canceller.await.expect("the canceller task joins");
     }
 
     #[test]
