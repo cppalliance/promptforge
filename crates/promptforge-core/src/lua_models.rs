@@ -655,11 +655,14 @@ mod tests {
 
     use super::{
         LuaModelHandle, ModelBindingState, ModelPhase, ModelRuntime, close_model_scope_inner,
-        record_always_binding, reject_infer_options, value_as_temperature,
+        decode_lua_number, parse_need_args, parse_opts_table, parse_single_alias,
+        record_always_binding, reject_infer_options, validate_alias, value_as_bool,
+        value_as_temperature, value_as_u32,
     };
     use crate::dialects::ToolDialectId;
     use crate::model::{ModelBinding, ModelBindings, ModelId, ModelInvocation, ModelNeedOpts};
     use mlua::Value;
+    use mlua::{Lua, MultiValue};
 
     fn test_binding(alias: &str, dialect: ToolDialectId) -> ModelBinding {
         ModelBinding::new(
@@ -798,5 +801,140 @@ mod tests {
                 "error must explain the rejection, got: {error}"
             );
         }
+    }
+
+    // PF-LM-014: direct coverage of every parser branch and state transition.
+
+    fn lua_string(lua: &Lua, value: &str) -> Value {
+        Value::String(lua.create_string(value).expect("create Lua string"))
+    }
+
+    #[test]
+    fn parse_need_args_covers_each_branch() {
+        let lua = Lua::new();
+        // Missing description.
+        let one: MultiValue = [lua_string(&lua, "writer")].into_iter().collect();
+        assert!(parse_need_args(one).is_err(), "one argument is rejected");
+        // Non-string alias.
+        let bad_alias: MultiValue = [Value::Integer(1), lua_string(&lua, "desc")]
+            .into_iter()
+            .collect();
+        assert!(
+            parse_need_args(bad_alias).is_err(),
+            "non-string alias fails"
+        );
+        // opts not a table.
+        let bad_opts: MultiValue = [
+            lua_string(&lua, "writer"),
+            lua_string(&lua, "desc"),
+            Value::Integer(3),
+        ]
+        .into_iter()
+        .collect();
+        assert!(parse_need_args(bad_opts).is_err(), "non-table opts fails");
+        // Too many arguments.
+        let too_many: MultiValue = [
+            lua_string(&lua, "writer"),
+            lua_string(&lua, "desc"),
+            Value::Nil,
+            Value::Nil,
+        ]
+        .into_iter()
+        .collect();
+        assert!(parse_need_args(too_many).is_err(), "four arguments fail");
+        // Valid two-argument form.
+        let ok: MultiValue = [lua_string(&lua, "writer"), lua_string(&lua, "desc")]
+            .into_iter()
+            .collect();
+        let (alias, description, opts) = parse_need_args(ok).expect("valid need args");
+        assert_eq!(alias, "writer");
+        assert_eq!(description, "desc");
+        assert_eq!(opts.temperature, None);
+    }
+
+    #[test]
+    fn parse_opts_table_covers_each_key_and_rejects_unknown() {
+        let lua = Lua::new();
+        let table = lua.create_table().expect("table");
+        table.set("thinking", true).expect("set thinking");
+        table.set("context", 8192).expect("set context");
+        table.set("temperature", 0.5).expect("set temperature");
+        table.set("max_tokens", 256).expect("set max_tokens");
+        let opts = parse_opts_table(&table).expect("all known keys parse");
+        assert_eq!(opts.thinking, Some(true));
+        assert_eq!(opts.context, Some(8192));
+        assert_eq!(opts.temperature, Some(0.5));
+        assert_eq!(opts.max_tokens, Some(256));
+
+        let unknown = lua.create_table().expect("table");
+        unknown.set("bogus", 1).expect("set bogus");
+        assert!(
+            parse_opts_table(&unknown).is_err(),
+            "an unknown opts key must be rejected"
+        );
+
+        let non_string_key = lua.create_table().expect("table");
+        non_string_key.set(1, "x").expect("set numeric key");
+        assert!(
+            parse_opts_table(&non_string_key).is_err(),
+            "a non-string opts key must be rejected"
+        );
+    }
+
+    #[test]
+    fn scalar_decoders_cover_valid_and_invalid_inputs() {
+        assert!(value_as_bool(&Value::Boolean(false), "thinking").is_ok());
+        assert!(value_as_bool(&Value::Integer(1), "thinking").is_err());
+
+        assert_eq!(value_as_u32(&Value::Integer(7), "context").expect("ok"), 7);
+        assert_eq!(
+            value_as_u32(&Value::Number(9.0), "context").expect("whole number ok"),
+            9
+        );
+        assert!(value_as_u32(&Value::Integer(-1), "context").is_err());
+        assert!(value_as_u32(&Value::Number(1.5), "context").is_err());
+        assert!(value_as_u32(&Value::Boolean(true), "context").is_err());
+
+        assert!(
+            (decode_lua_number(&Value::Integer(2), "t").expect("int") - 2.0).abs() < f64::EPSILON
+        );
+        assert!(decode_lua_number(&Value::Boolean(true), "t").is_err());
+    }
+
+    #[test]
+    fn parse_single_alias_and_validate_alias_branches() {
+        let lua = Lua::new();
+        let ok: MultiValue = [lua_string(&lua, "writer")].into_iter().collect();
+        assert_eq!(
+            parse_single_alias(&ok, "models.always").expect("string alias"),
+            "writer"
+        );
+        let bad: MultiValue = [Value::Integer(1)].into_iter().collect();
+        assert!(
+            parse_single_alias(&bad, "models.always").is_err(),
+            "a non-string alias must be rejected"
+        );
+
+        assert!(validate_alias("Writer_1-x").is_ok());
+        assert!(validate_alias("").is_err(), "empty alias rejected");
+        assert!(validate_alias("1abc").is_err(), "leading digit rejected");
+        assert!(validate_alias("a b").is_err(), "space rejected");
+    }
+
+    #[test]
+    fn model_runtime_transitions_h2_then_closed() {
+        // State transition: a fresh runtime is H2, and closing an empty scope
+        // yields no binding and transitions to Closed exactly once.
+        let bindings = ModelBindings::default();
+        let runtime = Arc::new(Mutex::new(ModelRuntime::new()));
+        assert_eq!(runtime.lock().expect("lock").phase, ModelPhase::H2);
+        let selected = close_model_scope_inner(&bindings, &runtime).expect("empty close is ok");
+        assert!(selected.is_none(), "no use/always yields no binding");
+        assert_eq!(runtime.lock().expect("lock").phase, ModelPhase::Closed);
+        // A second close is rejected (can only close once).
+        assert!(
+            close_model_scope_inner(&bindings, &runtime).is_err(),
+            "closing a Closed scope must fail"
+        );
     }
 }
