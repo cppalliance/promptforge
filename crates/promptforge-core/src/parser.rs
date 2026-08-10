@@ -13,7 +13,7 @@ use std::ops::Range;
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
-use crate::lua::LuaProgram;
+pub use crate::lua::LuaProgram;
 use crate::observe::{Observer, detail};
 use crate::{Error, Result};
 

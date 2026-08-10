@@ -35,7 +35,7 @@ use mlua::{
 use serde_json::Value as Json;
 use serde_json::json;
 
-pub use crate::lua_models::{LuaModelHandle, ModelInferHook};
+pub(crate) use crate::lua_models::{LuaModelHandle, ModelInferHook};
 use crate::lua_models::{
     ModelBindingState, ModelRuntime, close_model_scope, install_h2_models, install_live_models,
 };
@@ -62,7 +62,7 @@ const DEFAULT_LUA_LOG_EVENTS: u32 = 1024;
 /// This is the deterministic seam used by live H1 resolution. It keeps core
 /// independent of any concrete picker implementation while allowing a caller
 /// to supply a fixed resolver in tests.
-pub trait ToolResolver: Send + Sync {
+pub(crate) trait ToolResolver: Send + Sync {
     /// Resolves `description` to a stable tool identity.
     ///
     /// # Errors
@@ -81,7 +81,7 @@ where
 
 /// One prompt-local alias bound to one stable live tool identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolBinding {
+pub(crate) struct ToolBinding {
     alias: String,
     description: String,
     id: ToolId,
@@ -106,25 +106,25 @@ impl ToolBinding {
 
     /// Returns the exact prompt-local alias.
     #[must_use]
-    pub fn alias(&self) -> &str {
+    pub(crate) fn alias(&self) -> &str {
         &self.alias
     }
 
     /// Returns the declared capability description.
     #[must_use]
-    pub fn description(&self) -> &str {
+    pub(crate) fn description(&self) -> &str {
         &self.description
     }
 
     /// Returns the selected stable live identity.
     #[must_use]
-    pub fn id(&self) -> &ToolId {
+    pub(crate) fn id(&self) -> &ToolId {
         &self.id
     }
 
     /// Returns the author override for the model-facing description, if any.
     #[must_use]
-    pub fn model_description(&self) -> Option<&str> {
+    pub(crate) fn model_description(&self) -> Option<&str> {
         self.model_description.as_deref()
     }
 }
@@ -136,7 +136,7 @@ impl ToolBinding {
 /// overrides the model-facing schema text. Existing callers that ignore the
 /// return value keep working.
 #[derive(Debug, Clone, PartialEq)]
-pub struct LuaToolHandle {
+pub(crate) struct LuaToolHandle {
     name: String,
     description: String,
     description_overridden: bool,
@@ -151,7 +151,7 @@ impl LuaToolHandle {
     /// Without a live registry lookup, `wire_name` is the identity's stable
     /// name, `parameters` is an empty object, and `untrusted` is false.
     #[must_use]
-    pub fn from_binding(
+    pub(crate) fn from_binding(
         alias: impl Into<String>,
         description: impl Into<String>,
         id: &ToolId,
@@ -185,39 +185,43 @@ impl LuaToolHandle {
 
     /// Returns the prompt-local alias.
     #[must_use]
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         &self.name
     }
 
     /// Returns the current description (need capability, or author override).
+    #[cfg(test)]
     #[must_use]
-    pub fn description(&self) -> &str {
+    pub(crate) fn description(&self) -> &str {
         &self.description
     }
 
     /// Returns the model-facing description override when the author assigned
     /// `.description` on this handle.
     #[must_use]
-    pub fn model_description_override(&self) -> Option<&str> {
+    pub(crate) fn model_description_override(&self) -> Option<&str> {
         self.description_overridden
             .then_some(self.description.as_str())
     }
 
     /// Returns the JSON Schema for the tool's parameters.
+    #[cfg(test)]
     #[must_use]
-    pub fn parameters(&self) -> &Json {
+    pub(crate) fn parameters(&self) -> &Json {
         &self.parameters
     }
 
     /// Returns the transport-level wire name.
+    #[cfg(test)]
     #[must_use]
-    pub fn wire_name(&self) -> &str {
+    pub(crate) fn wire_name(&self) -> &str {
         &self.wire_name
     }
 
     /// Returns whether tool results are marked untrusted.
+    #[cfg(test)]
     #[must_use]
-    pub fn untrusted(&self) -> bool {
+    pub(crate) fn untrusted(&self) -> bool {
         self.untrusted
     }
 }
@@ -242,7 +246,7 @@ impl UserData for LuaToolHandle {
 /// Authors read `.name` and `.has_prose`, and pass the object to `execute` or
 /// `jump` in place of a heading string.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LuaSectionHandle {
+pub(crate) struct LuaSectionHandle {
     name: String,
     heading: String,
     has_prose: bool,
@@ -251,7 +255,7 @@ pub struct LuaSectionHandle {
 impl LuaSectionHandle {
     /// Builds a handle for a top-level H2 section.
     #[must_use]
-    pub fn new(name: impl Into<String>, has_prose: bool) -> Self {
+    pub(crate) fn new(name: impl Into<String>, has_prose: bool) -> Self {
         let name = name.into();
         let heading = format!("## {name}");
         Self {
@@ -262,20 +266,22 @@ impl LuaSectionHandle {
     }
 
     /// Returns the section heading text without markers.
+    #[cfg(test)]
     #[must_use]
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         &self.name
     }
 
     /// Returns the canonical `"## Name"` heading used by `execute` / `jump`.
     #[must_use]
-    pub fn heading(&self) -> &str {
+    pub(crate) fn heading(&self) -> &str {
         &self.heading
     }
 
     /// Returns whether the section contains any prose block.
+    #[cfg(test)]
     #[must_use]
-    pub fn has_prose(&self) -> bool {
+    pub(crate) fn has_prose(&self) -> bool {
         self.has_prose
     }
 }
@@ -292,7 +298,7 @@ impl UserData for LuaSectionHandle {
 /// Authors read `.text`, `.ok`, `.item`, and `.exhausted`. `__tostring` returns
 /// `.text` so `tostring` and a tostring-coercing `table.concat` keep working.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LuaFanoutResult {
+pub(crate) struct LuaFanoutResult {
     text: String,
     ok: bool,
     item: String,
@@ -302,7 +308,7 @@ pub struct LuaFanoutResult {
 impl LuaFanoutResult {
     /// Builds a successful arm result.
     #[must_use]
-    pub fn success(item: impl Into<String>, text: impl Into<String>) -> Self {
+    pub(crate) fn success(item: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             ok: true,
@@ -313,7 +319,7 @@ impl LuaFanoutResult {
 
     /// Builds a soft-degraded arm result after tool-loop exhaustion.
     #[must_use]
-    pub fn exhausted_stub(item: impl Into<String>, text: impl Into<String>) -> Self {
+    pub(crate) fn exhausted_stub(item: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             ok: false,
@@ -323,26 +329,30 @@ impl LuaFanoutResult {
     }
 
     /// Returns the reply text (or soft-degrade stub).
+    #[cfg(test)]
     #[must_use]
-    pub fn text(&self) -> &str {
+    pub(crate) fn text(&self) -> &str {
         &self.text
     }
 
     /// Returns whether the arm completed successfully.
+    #[cfg(test)]
     #[must_use]
-    pub fn ok(&self) -> bool {
+    pub(crate) fn ok(&self) -> bool {
         self.ok
     }
 
     /// Returns the input item for this arm.
+    #[cfg(test)]
     #[must_use]
-    pub fn item(&self) -> &str {
+    pub(crate) fn item(&self) -> &str {
         &self.item
     }
 
     /// Returns whether the arm soft-degraded after tool-loop exhaustion.
+    #[cfg(test)]
     #[must_use]
-    pub fn exhausted(&self) -> bool {
+    pub(crate) fn exhausted(&self) -> bool {
         self.exhausted
     }
 }
@@ -389,7 +399,7 @@ pub(crate) fn resolve_section_target(value: Value) -> mlua::Result<String> {
 
 /// Immutable prompt-level tool bindings produced by live H1 execution.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ToolBindings {
+pub(crate) struct ToolBindings {
     bindings: Vec<ToolBinding>,
     always: Vec<String>,
 }
@@ -402,13 +412,13 @@ impl ToolBindings {
 
     /// Returns bindings in declaration order.
     #[must_use]
-    pub fn bindings(&self) -> &[ToolBinding] {
+    pub(crate) fn bindings(&self) -> &[ToolBinding] {
         &self.bindings
     }
 
     /// Returns prompt-wide aliases in declaration order.
     #[must_use]
-    pub fn always(&self) -> &[String] {
+    pub(crate) fn always(&self) -> &[String] {
         &self.always
     }
 
@@ -422,14 +432,14 @@ impl ToolBindings {
 /// The executor increments a count when dispatch is attempted (even if the tool
 /// later errors). Lua reads the snapshot through the `tools.calls` table.
 #[derive(Debug, Clone, Default)]
-pub struct ToolCallCounts {
+pub(crate) struct ToolCallCounts {
     inner: Arc<Mutex<BTreeMap<String, u64>>>,
 }
 
 impl ToolCallCounts {
     /// Creates a counts map pre-seeded with 0 for every alias.
     #[must_use]
-    pub fn new(aliases: impl IntoIterator<Item = String>) -> Self {
+    pub(crate) fn new(aliases: impl IntoIterator<Item = String>) -> Self {
         let map: BTreeMap<String, u64> = aliases.into_iter().map(|a| (a, 0)).collect();
         Self {
             inner: Arc::new(Mutex::new(map)),
@@ -446,7 +456,7 @@ impl ToolCallCounts {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.
-    pub fn ensure(&self, alias: &str) -> Result<()> {
+    pub(crate) fn ensure(&self, alias: &str) -> Result<()> {
         let mut map = self.lock()?;
         map.entry(alias.to_owned()).or_insert(0);
         Ok(())
@@ -456,7 +466,7 @@ impl ToolCallCounts {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned or alias is not in scope.
-    pub fn increment(&self, alias: &str) -> Result<()> {
+    pub(crate) fn increment(&self, alias: &str) -> Result<()> {
         let mut map = self.lock()?;
         let count = map.get_mut(alias).ok_or_else(|| {
             Error::Lua(format!(
@@ -471,7 +481,8 @@ impl ToolCallCounts {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.
-    pub fn contains(&self, alias: &str) -> Result<bool> {
+    #[cfg(test)]
+    pub(crate) fn contains(&self, alias: &str) -> Result<bool> {
         Ok(self.lock()?.contains_key(alias))
     }
 
@@ -479,7 +490,7 @@ impl ToolCallCounts {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.
-    pub fn get(&self, alias: &str) -> Result<Option<u64>> {
+    pub(crate) fn get(&self, alias: &str) -> Result<Option<u64>> {
         Ok(self.lock()?.get(alias).copied())
     }
 
@@ -487,7 +498,7 @@ impl ToolCallCounts {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.
-    pub fn aliases(&self) -> Result<Vec<String>> {
+    pub(crate) fn aliases(&self) -> Result<Vec<String>> {
         Ok(self.lock()?.keys().cloned().collect())
     }
 
@@ -495,14 +506,15 @@ impl ToolCallCounts {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the mutex is poisoned.
-    pub fn snapshot(&self) -> Result<BTreeMap<String, u64>> {
+    #[cfg(test)]
+    pub(crate) fn snapshot(&self) -> Result<BTreeMap<String, u64>> {
         Ok(self.lock()?.clone())
     }
 }
 
 /// A closed H2 tool scope, ordered with prompt-wide aliases first.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolScope {
+pub(crate) struct ToolScope {
     bindings: Vec<ToolBinding>,
 }
 
@@ -515,18 +527,18 @@ impl ToolScope {
 
     /// Returns the effective bindings in model-advertisement order.
     #[must_use]
-    pub fn bindings(&self) -> &[ToolBinding] {
+    pub(crate) fn bindings(&self) -> &[ToolBinding] {
         &self.bindings
     }
 }
 
 /// Closed H2 tool scope and optional section model selection.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClosedScopes {
+pub(crate) struct ClosedScopes {
     /// Effective tool bindings for this section.
-    pub tools: ToolScope,
+    pub(crate) tools: ToolScope,
     /// Selected model binding from `models.use` or prompt-wide `models.always`.
-    pub model: Option<ModelBinding>,
+    pub(crate) model: Option<ModelBinding>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -562,8 +574,8 @@ impl ToolRuntime {
 /// produced once by Lua 5.4. The bytecode is an in-memory implementation detail:
 /// it is not a stable or portable serialization format and must not be persisted.
 ///
-/// Compilation does not execute the source. Loading a program with [`load`](Self::load)
-/// creates a function in the supplied VM but likewise does not call it.
+/// Compilation does not execute the source. Loading a program (a crate-internal
+/// step) creates a function in the supplied VM but likewise does not call it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LuaProgram {
     source: String,
@@ -610,7 +622,7 @@ impl LuaProgram {
     /// assert_eq!(answer, 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn compile(
+    pub(crate) fn compile(
         source: &str,
         location: &str,
         source_line: u32,
@@ -676,7 +688,7 @@ impl LuaProgram {
     /// # Errors
     /// Returns [`Error::Lua`] if the VM rejects the internally compiled
     /// bytecode.
-    pub fn load(&self, lua: &Lua) -> Result<Function> {
+    pub(crate) fn load(&self, lua: &Lua) -> Result<Function> {
         lua.load(self.bytecode.as_slice())
             .into_function()
             .map_err(|error| Error::Lua(error.to_string()))
@@ -1025,7 +1037,7 @@ fn validate_alias(alias: &str) -> Result<()> {
 /// # Ok::<(), promptforge_core::Error>(())
 /// ```
 #[derive(Debug)]
-pub struct SectionVm {
+pub(crate) struct SectionVm {
     execution: String,
     lua: Lua,
     bound_tools: ToolBindings,
@@ -1081,7 +1093,7 @@ impl SectionVm {
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
-    pub fn new(
+    pub(crate) fn new(
         shared: Option<&LuaProgram>,
         execution: &str,
         observer: &dyn Observer,
@@ -1144,7 +1156,7 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] if VM construction, shared-library execution, or
     /// captured-binding installation fails.
-    pub fn new_for_section(
+    pub(crate) fn new_for_section(
         replay: Option<&LuaProgram>,
         tools: &ToolBindings,
         models: &ModelBindings,
@@ -1219,7 +1231,7 @@ impl SectionVm {
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
-    pub fn inject_host(
+    pub(crate) fn inject_host(
         &mut self,
         args: &str,
         sys: &Json,
@@ -1398,7 +1410,7 @@ impl SectionVm {
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
-    pub fn run_prologue(
+    pub(crate) fn run_prologue(
         &self,
         program: &LuaProgram,
         observer: &dyn Observer,
@@ -1431,7 +1443,8 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected or
     /// execution fails.
-    pub fn run_prologue_with_fanout<F>(
+    #[cfg(test)]
+    pub(crate) fn run_prologue_with_fanout<F>(
         &self,
         program: &LuaProgram,
         observer: &dyn Observer,
@@ -1521,7 +1534,7 @@ impl SectionVm {
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
-    pub fn bind_reply(&self, reply: &str, observer: &dyn Observer, section: &str) -> Result<()> {
+    pub(crate) fn bind_reply(&self, reply: &str, observer: &dyn Observer, section: &str) -> Result<()> {
         observer.observe(&self.execution, section, detail::LUA_REPLY_BINDING_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
@@ -1585,7 +1598,7 @@ impl SectionVm {
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
-    pub fn run_epilog(
+    pub(crate) fn run_epilog(
         &self,
         program: &LuaProgram,
         observer: &dyn Observer,
@@ -1632,7 +1645,7 @@ impl SectionVm {
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
-    pub fn var(&self) -> Result<Json> {
+    pub(crate) fn var(&self) -> Result<Json> {
         if !self.host_injected {
             return Err(Error::Lua(
                 "section VM host values have not been injected".to_owned(),
@@ -1654,7 +1667,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the global cannot be set.
-    pub fn set_global_string(&self, name: &str, value: &str) -> Result<()> {
+    pub(crate) fn set_global_string(&self, name: &str, value: &str) -> Result<()> {
         self.lua
             .globals()
             .raw_set(name, value)
@@ -1670,7 +1683,8 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected, if the
     /// tool scope is still open, or if execution fails.
-    pub fn run_epilog_with_fanout<F>(
+    #[cfg(test)]
+    pub(crate) fn run_epilog_with_fanout<F>(
         &self,
         program: &LuaProgram,
         observer: &dyn Observer,
@@ -1783,7 +1797,8 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] for a poisoned declaration runtime, a closure
     /// attempt before host injection, or a second closure attempt.
-    pub fn close_tool_scope(&self, observer: &dyn Observer, section: &str) -> Result<ToolScope> {
+    #[cfg(test)]
+    pub(crate) fn close_tool_scope(&self, observer: &dyn Observer, section: &str) -> Result<ToolScope> {
         Ok(self.close_scopes(observer, section)?.tools)
     }
 
@@ -1792,7 +1807,7 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] for a poisoned declaration runtime, a closure
     /// attempt before host injection, or a second closure attempt.
-    pub fn close_scopes(&self, observer: &dyn Observer, section: &str) -> Result<ClosedScopes> {
+    pub(crate) fn close_scopes(&self, observer: &dyn Observer, section: &str) -> Result<ClosedScopes> {
         observer.observe(&self.execution, section, detail::TOOL_SCOPE_CLOSING);
         let tools = self.close_tool_scope_inner();
         observer.observe(
@@ -1854,7 +1869,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when installing the `tools.calls` index fails.
-    pub fn install_tool_call_counts(&mut self, scope: &ToolScope) -> Result<ToolCallCounts> {
+    pub(crate) fn install_tool_call_counts(&mut self, scope: &ToolScope) -> Result<ToolCallCounts> {
         let counts = {
             let mut slot = self
                 .counts_slot
@@ -1953,7 +1968,7 @@ impl SectionVm {
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
-    pub fn teardown(self, observer: &dyn Observer, section: &str) {
+    pub(crate) fn teardown(self, observer: &dyn Observer, section: &str) {
         let execution = self.execution.clone();
         observer.observe(&self.execution, section, detail::LUA_TEARDOWN_STARTED);
         self.clear_infer_hook();
@@ -2143,6 +2158,7 @@ impl SectionVm {
         Ok(LuaBlockResult::Returned(scalar_return(returned)?))
     }
 
+    #[cfg(test)]
     fn run_source(
         &self,
         source: &str,
@@ -2176,12 +2192,13 @@ impl SectionVm {
 }
 
 /// The result of running a section's Lua block.
+#[cfg(test)]
 #[derive(Debug, Clone)]
-pub struct LuaOutcome {
+pub(crate) struct LuaOutcome {
     /// The chunk's top-level return value, if it returned one (the finish case).
-    pub returned: Option<String>,
+    pub(crate) returned: Option<String>,
     /// The `var` table after the block ran, as JSON, for prose substitution.
-    pub var: Json,
+    pub(crate) var: Json,
 }
 
 /// Run a section's Lua chunk with `args` and `sys` exposed, a writable `var`
@@ -2205,7 +2222,8 @@ pub struct LuaOutcome {
 /// cannot be bridged, the chunk fails to run (including hitting the instruction
 /// budget or a failing `store` op, which raises a Lua error), or it returns a
 /// value that cannot be rendered as a result string.
-pub fn run_chunk(
+#[cfg(test)]
+pub(crate) fn run_chunk(
     source: &str,
     args: &str,
     sys: &Json,

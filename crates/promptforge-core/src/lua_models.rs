@@ -16,19 +16,19 @@ use crate::{Error, Result};
 ///
 /// Installed as Lua app data for the duration of a section phase that may call
 /// infer. Absent app data means infer is unavailable in that context.
-pub type ModelInferHook =
+pub(crate) type ModelInferHook =
     Arc<dyn Fn(&Lua, &ModelBinding, &str) -> mlua::Result<String> + Send + Sync>;
 
 /// Inspectable Lua userdata returned by `models.need` / `models.always`.
 #[derive(Debug, Clone)]
-pub struct LuaModelHandle {
+pub(crate) struct LuaModelHandle {
     binding: ModelBinding,
 }
 
 impl LuaModelHandle {
     /// Builds a handle from a frozen [`ModelBinding`].
     #[must_use]
-    pub fn from_binding(binding: &ModelBinding) -> Self {
+    pub(crate) fn from_binding(binding: &ModelBinding) -> Self {
         Self {
             binding: binding.clone(),
         }
@@ -36,55 +36,55 @@ impl LuaModelHandle {
 
     /// Returns the frozen binding carried by this handle.
     #[must_use]
-    pub fn binding(&self) -> &ModelBinding {
+    pub(crate) fn binding(&self) -> &ModelBinding {
         &self.binding
     }
 
     /// Returns the prompt-local alias.
     #[must_use]
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         self.binding.alias()
     }
 
     /// Returns the caller-facing catalog model id.
     #[must_use]
-    pub fn model_id(&self) -> &str {
+    pub(crate) fn model_id(&self) -> &str {
         self.binding.id().name()
     }
 
     /// Returns the capability description supplied to `models.need`.
     #[must_use]
-    pub fn description(&self) -> &str {
+    pub(crate) fn description(&self) -> &str {
         self.binding.description()
     }
 
     /// Returns the catalog context window size in tokens.
     #[must_use]
-    pub fn context(&self) -> u32 {
+    pub(crate) fn context(&self) -> u32 {
         self.binding.context()
     }
 
     /// Returns the frozen thinking switch, when the need declared one.
     #[must_use]
-    pub fn thinking(&self) -> Option<bool> {
+    pub(crate) fn thinking(&self) -> Option<bool> {
         self.binding.invocation().thinking
     }
 
     /// Returns the frozen sampling temperature, when the need declared one.
     #[must_use]
-    pub fn temperature(&self) -> Option<f64> {
+    pub(crate) fn temperature(&self) -> Option<f64> {
         self.binding.invocation().temperature
     }
 
     /// Returns the frozen max generation tokens, when the need declared one.
     #[must_use]
-    pub fn max_tokens(&self) -> Option<u32> {
+    pub(crate) fn max_tokens(&self) -> Option<u32> {
         self.binding.invocation().max_tokens
     }
 
     /// Returns the tool-calling dialect id string.
     #[must_use]
-    pub fn dialect(&self) -> String {
+    pub(crate) fn dialect(&self) -> String {
         self.binding.tool_dialect().to_string()
     }
 }

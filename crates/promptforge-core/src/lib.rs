@@ -24,7 +24,7 @@ pub mod dialects;
 mod error;
 pub mod execute;
 pub(crate) mod fanout;
-pub mod lua;
+pub(crate) mod lua;
 mod lua_models;
 pub mod model;
 pub(crate) mod normalize;
