@@ -32,8 +32,8 @@ pub(crate) struct SectionVm {
     lua: Lua,
     bound_tools: ToolBindings,
     bound_models: ModelBindings,
-    tool_runtime: Arc<Mutex<ToolRuntime>>,
-    model_runtime: Arc<Mutex<ModelRuntime>>,
+    pub(crate) tool_runtime: Arc<Mutex<ToolRuntime>>,
+    pub(crate) model_runtime: Arc<Mutex<ModelRuntime>>,
     /// Shared with [`crate::execute::InferContext`] so `model:infer` and the
     /// prose tool loop increment the same `tools.calls` counters.
     counts_slot: Arc<Mutex<Option<ToolCallCounts>>>,

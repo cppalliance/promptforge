@@ -49,7 +49,7 @@ use super::*;
 #[non_exhaustive]
 pub struct LuaProgram {
     source: String,
-    bytecode: Vec<u8>,
+    pub(crate) bytecode: Vec<u8>,
     /// Parser location string used as the Lua chunk name (for example
     /// `section \`Web Search\` epilog`).
     location: String,

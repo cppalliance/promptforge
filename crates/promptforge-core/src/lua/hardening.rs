@@ -106,6 +106,3 @@ pub(crate) fn scalar_return(returned: MultiValue) -> Result<Option<String>> {
         Some(value) => value_to_string(&value).map(Some),
     }
 }
-
-#[cfg(test)]
-mod tests;

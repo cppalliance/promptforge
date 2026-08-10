@@ -91,3 +91,6 @@ mod scope;
 pub(crate) use scope::*;
 mod handles;
 pub(crate) use handles::*;
+
+#[cfg(test)]
+mod tests;
