@@ -242,6 +242,7 @@ pub enum Block {
     Lua(LuaProgram),
     /// Author prose for the model. `loop_capable` is true only for the last
     /// prose block in the section (full tool loop); earlier prose is single-shot.
+    #[non_exhaustive]
     Prose {
         /// Substituted and sent to the model when non-empty.
         text: String,
@@ -1026,6 +1027,13 @@ fn build_sections(
         }
         let h = &headings[*pos];
         let name = h.title.clone();
+        // A section's name is its runtime address (jumps, lookups, fanout), so an
+        // empty/whitespace heading is unaddressable and must be rejected at parse.
+        if name.trim().is_empty() {
+            return Err(Error::Parse(format!(
+                "an H{level} section heading must not be empty"
+            )));
+        }
         let content_abs_line = frontmatter_lines + h.content_start_line;
         let raw_blocks = split_section_blocks(&h.content, &name)?;
         let has_prose = raw_blocks
@@ -1770,6 +1778,17 @@ Prose for the second section.\n";
         // A known-field-only frontmatter still parses.
         let ok = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
         assert!(Prompt::parse(ok, "test", &NullObserver).is_ok());
+    }
+
+    #[test]
+    fn empty_section_heading_is_rejected() {
+        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## \n\na\n";
+        let err = Prompt::parse(src, "test", &NullObserver)
+            .expect_err("an empty section heading must be rejected");
+        assert!(
+            err.to_string().contains("must not be empty"),
+            "expected an empty-heading error, got: {err}"
+        );
     }
 
     #[test]

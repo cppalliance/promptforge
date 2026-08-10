@@ -656,6 +656,15 @@ mod tests {
     }
 
     #[test]
+    fn tool_registry_is_send_and_sync() {
+        // The public dyn-bearing registry must stay `Send + Sync` so downstream
+        // callers can share it across tasks; a representation change that dropped
+        // either auto trait would fail to compile here (tools.rs F6).
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<ToolRegistry<'static>>();
+    }
+
+    #[test]
     fn tool_error_classifies_and_hides_source() {
         use super::{ToolError, ToolErrorKind};
         fn assert_send_sync<T: Send + Sync + 'static>() {}
