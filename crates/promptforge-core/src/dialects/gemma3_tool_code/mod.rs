@@ -494,7 +494,7 @@ mod tests {
             supports_tool_calls: Some(false),
             chat_template: Some("<start_of_turn>user\n".to_string()),
             model_id: Some("gemma-3-27b-it".to_string()),
-            source: None,
+            ..Default::default()
         };
         let score = dialect.detect(&evidence).expect("should score");
         assert!(score.0 >= 80, "expected high score, got {}", score.0);
@@ -507,7 +507,7 @@ mod tests {
             supports_tool_calls: Some(true),
             chat_template: Some("<start_of_turn>user\n".to_string()),
             model_id: Some("gemma-3-27b-it".to_string()),
-            source: None,
+            ..Default::default()
         };
         assert!(dialect.detect(&evidence).is_none());
     }
@@ -519,7 +519,7 @@ mod tests {
             supports_tool_calls: Some(false),
             chat_template: Some("{{ messages }}".to_string()),
             model_id: Some("qwen3-0.6b".to_string()),
-            source: None,
+            ..Default::default()
         };
         assert!(dialect.detect(&evidence).is_none());
     }

@@ -34,20 +34,29 @@ impl ToolDialect for OpenAiDialect {
     }
 
     fn detect(&self, evidence: &DialectEvidence) -> Option<DetectScore> {
-        if evidence.supports_tool_calls == Some(true) {
-            return Some(DetectScore(80));
+        match evidence.supports_tool_calls {
+            // Positive support authoritatively selects the native dialect.
+            Some(true) => return Some(DetectScore(80)),
+            // F5: an authoritative negative is never overridden by template
+            // heuristics; this endpoint has no native tool-call protocol.
+            Some(false) if evidence.supports_tool_calls_authoritative => return None,
+            // Unknown, or an unreliable negative (e.g. llama.cpp `/props`, which
+            // can deny tool support a GGUF template actually provides): fall
+            // through to structured template evidence.
+            _ => {}
         }
-        // Some GGUFs (notably Qwen ChatML) ship tool_call templates while
-        // llama `/props` omits or denies native tool_calls. Prefer this over
-        // DialectNone so those models still route.
+
+        // F6: require a *conjunction* of a request-side and a response/result
+        // marker for each template family, not a single broad substring that a
+        // mere mention of "tool_call" would satisfy.
         let template = evidence.chat_template.as_deref().unwrap_or("");
-        let chatml_tools = template.contains("<|im_start|>")
-            && (template.contains("<tool_call>") || template.contains("tool_call"));
-        // Mistral Tekken / Small Instruct tools templates use bracket markers
-        // rather than ChatML fences.
+        // Qwen/ChatML: the `<|im_start|>` turn framing plus the `<tool_call>`
+        // request tag together indicate a genuine tool-calling template.
+        let chatml_tools = template.contains("<|im_start|>") && template.contains("<tool_call>");
+        // Mistral Tekken / Small Instruct: the `[AVAILABLE_TOOLS]` declaration
+        // plus a call or result marker.
         let mistral_tools = template.contains("[AVAILABLE_TOOLS]")
-            || template.contains("[TOOL_CALLS]")
-            || template.contains("[TOOL_RESULTS]");
+            && (template.contains("[TOOL_CALLS]") || template.contains("[TOOL_RESULTS]"));
         if chatml_tools || mistral_tools {
             Some(DetectScore(70))
         } else {
@@ -67,9 +76,15 @@ impl ToolDialect for OpenAiDialect {
     /// Push the assistant's tool-call turn and one `role=tool` message per
     /// result into the conversation.
     ///
-    /// `calls` and `results` are parallel: `results[i]` is `(id, content)`
-    /// answering `calls[i]`. The assistant turn echoes the raw wire shape so
-    /// the backend sees exactly the `tool_calls` array it emitted.
+    /// `calls` and `results` correlate one-to-one. The assistant turn is a
+    /// **canonical, deliberately lossy reconstruction** of each call, not a
+    /// verbatim echo: exactly `{ "id", "type": "function", "function": { "name",
+    /// "arguments" } }`, where `arguments` is the compact JSON string of the
+    /// parsed object. Unknown/extension fields, key ordering, and original
+    /// whitespace from the model's wire call are intentionally dropped because
+    /// [`ToolCall`] retains only the validated `id`, `name`, and `arguments`.
+    /// This canonical subset is what backends require to continue a tool loop;
+    /// it is stable and tested (see `echo_produces_canonical_subset`).
     ///
     /// # Errors
     /// Returns an error, leaving the conversation unmodified, when `calls` and
@@ -243,6 +258,45 @@ mod tests {
         assert_eq!(conversation[2].role, "tool");
         assert_eq!(conversation[2].tool_call_id.as_deref(), Some("call_2"));
         assert_eq!(conversation[2].content, "result 2");
+    }
+
+    #[test]
+    fn echo_produces_canonical_subset() {
+        // F2/F10: the echoed assistant turn is exactly the canonical subset -
+        // id, type=function, function.name, and function.arguments as a compact
+        // JSON string - with no extra fields and a stable shape.
+        let dialect = OpenAiDialect;
+        let calls = vec![ToolCall {
+            id: "call_1".into(),
+            name: "search".into(),
+            arguments: serde_json::json!({ "b": 2, "a": 1 }),
+        }];
+        let results = vec![FramedToolResult::new("call_1".into(), "ok".into())];
+        let mut conversation = Vec::new();
+        dialect
+            .echo_tool_results(&mut conversation, &calls, &results)
+            .expect("echoes");
+
+        let raw = conversation[0].tool_calls.as_ref().expect("tool_calls");
+        assert_eq!(raw.len(), 1);
+        // Exactly the canonical fields, nothing else.
+        let obj = raw[0].as_object().expect("object");
+        let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["function", "id", "type"]);
+        assert_eq!(obj["type"], "function");
+        assert_eq!(obj["id"], "call_1");
+        let function = obj["function"].as_object().expect("function object");
+        let mut fkeys: Vec<&str> = function.keys().map(String::as_str).collect();
+        fkeys.sort_unstable();
+        assert_eq!(fkeys, vec!["arguments", "name"]);
+        assert_eq!(function["name"], "search");
+        // arguments is a JSON *string*.
+        let args = function["arguments"].as_str().expect("arguments string");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(args).unwrap(),
+            serde_json::json!({ "a": 1, "b": 2 })
+        );
     }
 
     #[test]

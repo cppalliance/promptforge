@@ -209,6 +209,14 @@ impl ToolDialectId {
 pub struct DialectEvidence {
     /// Whether the model endpoint advertises native tool-call support.
     pub supports_tool_calls: Option<bool>,
+    /// Whether [`Self::supports_tool_calls`] is authoritative.
+    ///
+    /// An authoritative `Some(false)` (the endpoint genuinely has no native
+    /// tool-call protocol) must never be overridden by template heuristics into
+    /// selecting a native dialect. An unreliable `Some(false)` - the default -
+    /// may be overridden, because sources like llama.cpp `/props` can deny tool
+    /// support that a GGUF chat template actually provides.
+    pub supports_tool_calls_authoritative: bool,
     /// The raw Jinja chat template string, when available from model metadata.
     pub chat_template: Option<String>,
     /// The model identifier from the catalog or endpoint metadata.
@@ -237,10 +245,19 @@ impl DialectEvidence {
     ) -> Self {
         Self {
             supports_tool_calls,
+            supports_tool_calls_authoritative: false,
             chat_template,
             model_id,
             source,
         }
+    }
+
+    /// Marks [`Self::supports_tool_calls`] as authoritative, so an authoritative
+    /// negative can never be overridden into a native dialect by template text.
+    #[must_use]
+    pub fn authoritative_tool_support(mut self, authoritative: bool) -> Self {
+        self.supports_tool_calls_authoritative = authoritative;
+        self
     }
 }
 
@@ -584,7 +601,7 @@ mod tests {
                 "<|im_start|>system\n{%- if tools %}<tool_call>{%- endif %}<|im_end|>".to_string(),
             ),
             model_id: Some("qwen3.5-9b".to_string()),
-            source: None,
+            ..Default::default()
         };
         let id = registry.resolve(&evidence).expect("should resolve");
         assert_eq!(id, ToolDialectId::OpenAi);
@@ -596,14 +613,59 @@ mod tests {
         let evidence = DialectEvidence {
             supports_tool_calls: Some(false),
             chat_template: Some(
-                "[SYSTEM_PROMPT]x[/SYSTEM_PROMPT][AVAILABLE_TOOLS][][/AVAILABLE_TOOLS][INST]"
+                "[SYSTEM_PROMPT]x[/SYSTEM_PROMPT][AVAILABLE_TOOLS][][/AVAILABLE_TOOLS][INST][TOOL_CALLS][TOOL_RESULTS]"
                     .to_string(),
             ),
             model_id: Some("mistral-small".to_string()),
-            source: None,
+            ..Default::default()
         };
         let id = registry.resolve(&evidence).expect("should resolve");
         assert_eq!(id, ToolDialectId::OpenAi);
+    }
+
+    #[test]
+    fn authoritative_negative_is_never_overridden_by_template() {
+        // F5: an authoritative `Some(false)` must not be overridden into the
+        // native dialect by tool-calling template markers.
+        let registry = ToolDialectRegistry::builtin();
+        let evidence = DialectEvidence {
+            supports_tool_calls: Some(false),
+            supports_tool_calls_authoritative: true,
+            chat_template: Some(
+                "<|im_start|>system\n<tool_call>{%- endif %}<|im_end|>".to_string(),
+            ),
+            model_id: Some("qwen-mystery".to_string()),
+            ..Default::default()
+        };
+        let error = registry
+            .resolve(&evidence)
+            .expect_err("authoritative negative must not select a native dialect");
+        assert_eq!(error.kind(), DialectErrorKind::NoMatch);
+    }
+
+    #[test]
+    fn single_marker_template_does_not_select_native() {
+        // F6: a lone marker (or a mere mention of "tool_call") must not select
+        // the native dialect; a conjunction of request + response markers is
+        // required.
+        let registry = ToolDialectRegistry::builtin();
+        for template in [
+            "<|im_start|>system\nplease tool_call something<|im_end|>", // mention only
+            "[AVAILABLE_TOOLS][]",                                      // request marker only
+            "[TOOL_CALLS]",                                             // response marker only
+        ] {
+            let evidence = DialectEvidence {
+                supports_tool_calls: Some(false),
+                chat_template: Some(template.to_string()),
+                model_id: Some("mystery".to_string()),
+                ..Default::default()
+            };
+            assert_eq!(
+                registry.resolve(&evidence).map_err(|e| e.kind()),
+                Err(DialectErrorKind::NoMatch),
+                "template {template:?} must not select a dialect",
+            );
+        }
     }
 
     #[test]
@@ -613,7 +675,7 @@ mod tests {
             supports_tool_calls: Some(false),
             chat_template: Some("<start_of_turn>user\n".to_string()),
             model_id: Some("gemma-3-27b-it".to_string()),
-            source: None,
+            ..Default::default()
         };
         let id = registry.resolve(&evidence).expect("should resolve");
         assert_eq!(id, ToolDialectId::Gemma3ToolCode);
