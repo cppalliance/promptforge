@@ -139,6 +139,7 @@ impl RunError {
             | Error::Tool { .. } => RunErrorKind::Tool,
             Error::FanoutArmJoin(_) | Error::Internal(_) => RunErrorKind::Internal,
             Error::Bind { .. }
+            | Error::BindQuery { .. }
             | Error::Absent { .. }
             | Error::Duplicate { .. }
             | Error::Ambiguous { .. }

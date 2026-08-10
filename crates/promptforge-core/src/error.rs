@@ -23,6 +23,35 @@ pub(crate) struct NearDuplicateDiagnostic {
     pub(crate) similarity: f32,
 }
 
+/// A cloneable, shareable error cause.
+///
+/// Some caches re-produce a typed [`Error`] on every lookup (for example the
+/// resolver decision cache), so a non-`Clone` dependency error cannot be moved
+/// into a fresh [`Error`] each time. Wrapping it in a reference-counted
+/// [`SharedSource`] lets the typed cause be retained as a `#[source]` and cloned
+/// cheaply per lookup instead of being flattened to a string (resolve F4).
+#[derive(Debug, Clone)]
+pub(crate) struct SharedSource(std::sync::Arc<dyn std::error::Error + Send + Sync>);
+
+impl SharedSource {
+    /// Wraps a concrete error as a shareable cause.
+    pub(crate) fn new(source: impl std::error::Error + Send + Sync + 'static) -> SharedSource {
+        SharedSource(std::sync::Arc::new(source))
+    }
+}
+
+impl std::fmt::Display for SharedSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, formatter)
+    }
+}
+
+impl std::error::Error for SharedSource {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
+}
+
 /// The crate's internal error substrate, spanning parsing, HTTP, and execution
 /// failures.
 ///
@@ -159,6 +188,20 @@ pub(crate) enum Error {
         capability: String,
         /// The picker failure without exposing its concrete error type.
         detail: String,
+    },
+
+    /// The picker's query failed while resolving a capability, retaining the
+    /// picker's own typed error as the private `#[source]` cause (resolve F4)
+    /// so the failure chain survives the resolution cache instead of being
+    /// flattened to a string.
+    #[error("could not bind tool capability {capability:?}: {source}")]
+    #[non_exhaustive]
+    BindQuery {
+        /// The exact capability description passed to `tools.need`.
+        capability: String,
+        /// The picker's typed query failure, kept as a shareable cause.
+        #[source]
+        source: SharedSource,
     },
 
     /// No picker catalog entry matched a declared capability.

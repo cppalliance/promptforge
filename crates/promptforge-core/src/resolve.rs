@@ -12,6 +12,7 @@ use crate::lua::{LiveBindingProducer, ToolBindings, ToolResolver};
 use crate::model::{
     ModelBindings, ModelCatalog, ModelNeedOpts, ModelResolver, PickerModelResolver, ResolvedModel,
 };
+use crate::error::SharedSource;
 use crate::tools::{ToolId, ToolRegistry};
 use crate::{Error, Result};
 
@@ -115,7 +116,14 @@ enum CachedDecision {
     Absent,
     Duplicate(Vec<ToolId>),
     Ambiguous(Vec<ToolId>),
-    Failed(String),
+    /// The picker's query failed. The typed [`QueryError`] is retained as a
+    /// shareable source (F4) so the failure chain survives the cache; it is
+    /// wrapped once here and cloned (an `Arc` bump) into a fresh `Error` on
+    /// every cache hit.
+    QueryFailed(SharedSource),
+    /// The picker returned an outcome this resolver does not model (a defensive
+    /// catch-all; no dependency error to preserve).
+    Unrecognized,
 }
 
 /// Converts a borrowed picker descriptor to a core-owned [`ToolId`].
@@ -136,8 +144,8 @@ impl CachedDecision {
             Ok(Outcome::Ambiguous(group)) => {
                 Self::Ambiguous(group.iter().map(tool_id_of).collect())
             }
-            Ok(_) => Self::Failed("the picker reported an unrecognized outcome".to_owned()),
-            Err(error) => Self::Failed(error.to_string()),
+            Ok(_) => Self::Unrecognized,
+            Err(error) => Self::QueryFailed(SharedSource::new(error)),
         }
     }
 
@@ -155,9 +163,13 @@ impl CachedDecision {
                 capability: capability.to_owned(),
                 candidates: ids.clone(),
             }),
-            Self::Failed(detail) => Err(Error::Bind {
+            Self::QueryFailed(source) => Err(Error::BindQuery {
                 capability: capability.to_owned(),
-                detail: detail.clone(),
+                source: source.clone(),
+            }),
+            Self::Unrecognized => Err(Error::Bind {
+                capability: capability.to_owned(),
+                detail: "the picker reported an unrecognized outcome".to_owned(),
             }),
         }
     }
@@ -278,7 +290,9 @@ mod tests {
                 "absent" => CachedDecision::Absent,
                 "duplicate" => CachedDecision::Duplicate(vec![tid("first"), tid("second")]),
                 "ambiguous" => CachedDecision::Ambiguous(vec![tid("first"), tid("second")]),
-                other => CachedDecision::Failed(format!("picker failed for {other}")),
+                other => CachedDecision::QueryFailed(SharedSource::new(std::io::Error::other(
+                    format!("picker failed for {other}"),
+                ))),
             }
         }
 
@@ -364,10 +378,28 @@ mod tests {
             Err(Error::Ambiguous { capability, candidates })
                 if capability == "ambiguous" && candidates.len() == 2
         ));
+        // F4: a picker query failure keeps the typed cause as a private
+        // `#[source]` rather than flattening it into a string.
+        let query_failed = CachedDecision::QueryFailed(SharedSource::new(std::io::Error::other(
+            "embedding backend down",
+        )))
+        .result("failed")
+        .expect_err("a query failure must be an error");
         assert!(matches!(
-            CachedDecision::Failed("private failure".to_owned()).result("failed"),
+            &query_failed,
+            Error::BindQuery { capability, .. } if capability == "failed"
+        ));
+        let source = std::error::Error::source(&query_failed).expect("cause preserved");
+        assert!(
+            source.to_string().contains("embedding backend down"),
+            "the picker cause must survive as a source, got {source}"
+        );
+
+        // The defensive unrecognized-outcome decision maps to a sourceless bind.
+        assert!(matches!(
+            CachedDecision::Unrecognized.result("weird"),
             Err(Error::Bind { capability, detail })
-                if capability == "failed" && detail == "private failure"
+                if capability == "weird" && detail.contains("unrecognized")
         ));
     }
 
