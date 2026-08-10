@@ -2090,19 +2090,44 @@ impl SectionVm {
                 .call(());
             finish_log_phase(&self.lua, result)
         });
-        if let Some(heading) = self.take_jump() {
-            let _ = self.lua.globals().raw_set("jump", Value::Nil);
-            let _ = self.lua.globals().raw_set("execute", Value::Nil);
-            let _ = self.lua.globals().raw_set("fanout", Value::Nil);
-            let _ = self.lua.globals().raw_set("tasks", Value::Nil);
+        // Control-global cleanup runs on EVERY exit (jump, success, or ordinary
+        // execution error), so a failing block never leaks live `jump`/`execute`/
+        // `fanout`/`tasks` globals into a later phase (LUA-007). Cleanup failures
+        // are combined with the execution outcome rather than discarded.
+        let jump = self.take_jump();
+        let cleanup = self.clear_control_globals();
+        if let Some(heading) = jump {
+            cleanup?;
             return Ok(LuaBlockResult::Jump(heading));
         }
-        let returned: MultiValue = result.map_err(|error| program.map_runtime_error(&error))?;
-        let _ = self.lua.globals().raw_set("jump", Value::Nil);
-        let _ = self.lua.globals().raw_set("execute", Value::Nil);
-        let _ = self.lua.globals().raw_set("fanout", Value::Nil);
-        let _ = self.lua.globals().raw_set("tasks", Value::Nil);
-        Ok(LuaBlockResult::Returned(scalar_return(returned)?))
+        let returned = result.map_err(|error| program.map_runtime_error(&error));
+        match (returned, cleanup) {
+            // Execution error is the primary cause; it takes precedence.
+            (Err(execution), _) => Err(execution),
+            // Execution succeeded but cleanup failed: surface the cleanup error.
+            (Ok(_), Err(cleanup)) => Err(cleanup),
+            (Ok(values), Ok(())) => Ok(LuaBlockResult::Returned(scalar_return(values)?)),
+        }
+    }
+
+    /// Clears the phase's control-flow globals, returning the first failure.
+    ///
+    /// Always attempts to clear every global even if an earlier clear fails, so
+    /// no live control function is left installed for the next phase.
+    fn clear_control_globals(&self) -> Result<()> {
+        let globals = self.lua.globals();
+        let mut first_error: Option<Error> = None;
+        for name in ["jump", "execute", "fanout", "tasks"] {
+            if let Err(error) = globals.raw_set(name, Value::Nil)
+                && first_error.is_none()
+            {
+                first_error = Some(Error::Lua(error.to_string()));
+            }
+        }
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     #[cfg(test)]
@@ -4283,6 +4308,39 @@ mod tests {
                 .as_deref(),
             Some("1")
         );
+    }
+
+    #[test]
+    fn control_globals_are_cleared_even_when_the_block_errors() {
+        // LUA-007: an ordinary execution error must still clear jump/execute/
+        // fanout/tasks so no live control global leaks into a later phase.
+        let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Ctl").expect("VM builds");
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .expect("host injects");
+        let boom = program("error('boom')");
+        let no_execute: Option<&fn(Value, Option<String>) -> std::result::Result<String, String>> =
+            None;
+        let no_fanout: Option<
+            &fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, String>,
+        > = None;
+        vm.run_prologue_with_control(&boom, &NullObserver, "Ctl", &[], no_execute, no_fanout)
+            .expect_err("the erroring control block must fail");
+
+        // A follow-up plain block observes the global table: every control global
+        // must be nil despite the prior error.
+        let check = program(
+            "return (jump == nil and execute == nil and fanout == nil and tasks == nil) \
+             and 'clean' or 'leaked'",
+        );
+        let result = vm
+            .run_prologue(&check, &NullObserver, "Ctl")
+            .expect("the check block runs");
+        assert_eq!(
+            result.as_deref(),
+            Some("clean"),
+            "control globals must be cleared after an erroring control block"
+        );
+        vm.teardown(&NullObserver, "Ctl");
     }
 
     #[test]
