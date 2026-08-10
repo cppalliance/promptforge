@@ -4374,7 +4374,11 @@ mod tests {
         vm.inject_host("", &json!({}), &StoreRef::memory(), None)
             .expect("host injects");
         // Force the model close to fail: select an alias with no frozen binding.
-        vm.model_runtime.lock().expect("lock").used = Some("ghost".to_owned());
+        vm.model_runtime
+            .lock()
+            .expect("lock")
+            .select("ghost".to_owned())
+            .expect("recording is open");
 
         let error = vm
             .close_scopes(&NullObserver, "S")
@@ -4391,7 +4395,7 @@ mod tests {
 
         // With the bad selection cleared the close now succeeds, proving the tool
         // scope was still open (H2) rather than half-committed.
-        vm.model_runtime.lock().expect("lock").used = None;
+        *vm.model_runtime.lock().expect("lock") = ModelRuntime::new();
         vm.close_scopes(&NullObserver, "S")
             .expect("closing succeeds once the model selection is valid");
         vm.teardown(&NullObserver, "S");

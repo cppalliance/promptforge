@@ -5,9 +5,7 @@ use super::decode::{
     value_as_bool, value_as_temperature, value_as_u32,
 };
 use super::userdata::{LuaModelHandle, reject_infer_options};
-use super::{
-    ModelBindingState, ModelPhase, ModelRuntime, close_model_scope_inner, record_always_binding,
-};
+use super::{ModelBindingState, ModelRuntime, close_model_scope_inner, record_always_binding};
 use crate::dialects::ToolDialectId;
 use crate::model::{ModelBinding, ModelBindings, ModelId, ModelInvocation, ModelNeedOpts};
 use mlua::Value;
@@ -113,7 +111,11 @@ fn close_model_scope_validates_binding_before_transition() {
     // dangling selection.
     let bindings = ModelBindings::default();
     let runtime = Arc::new(Mutex::new(ModelRuntime::new()));
-    runtime.lock().expect("lock the runtime").used = Some("ghost".to_owned());
+    runtime
+        .lock()
+        .expect("lock the runtime")
+        .select("ghost".to_owned())
+        .expect("recording is open");
 
     let err = close_model_scope_inner(&bindings, &runtime)
         .expect_err("a selected alias with no binding must fail the close");
@@ -121,9 +123,8 @@ fn close_model_scope_validates_binding_before_transition() {
         err.to_string().contains("no frozen binding"),
         "error must name the missing binding: {err}"
     );
-    assert_eq!(
-        runtime.lock().expect("lock the runtime").phase,
-        ModelPhase::H2,
+    assert!(
+        runtime.lock().expect("lock the runtime").is_open(),
         "a failed close must not transition the scope to Closed"
     );
 }
@@ -272,10 +273,10 @@ fn model_runtime_transitions_h2_then_closed() {
     // yields no binding and transitions to Closed exactly once.
     let bindings = ModelBindings::default();
     let runtime = Arc::new(Mutex::new(ModelRuntime::new()));
-    assert_eq!(runtime.lock().expect("lock").phase, ModelPhase::H2);
+    assert!(runtime.lock().expect("lock").is_open());
     let selected = close_model_scope_inner(&bindings, &runtime).expect("empty close is ok");
     assert!(selected.is_none(), "no use/always yields no binding");
-    assert_eq!(runtime.lock().expect("lock").phase, ModelPhase::Closed);
+    assert!(!runtime.lock().expect("lock").is_open());
     // A second close is rejected (can only close once).
     assert!(
         close_model_scope_inner(&bindings, &runtime).is_err(),

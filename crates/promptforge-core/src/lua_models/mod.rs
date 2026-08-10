@@ -19,27 +19,68 @@ pub(crate) use userdata::{LuaModelHandle, ModelInferHook};
 
 use decode::{parse_need_args, parse_single_alias, validate_alias};
 
-/// Phase of the section-local models table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ModelPhase {
-    H2,
-    Closed,
-}
-
-/// Mutable H2 recording state for `models.use`.
+/// H2 model-recording state, as phase-owning variants (PF-LM-006).
+///
+/// A `models.use` selection is only valid while recording is open, so it lives
+/// inside the `Open` variant; a `Closed` scope owns no selection state, making a
+/// "used-after-close" mutation unrepresentable. Fields are private; all access is
+/// through the methods below.
 #[derive(Debug)]
-pub(crate) struct ModelRuntime {
-    pub(crate) phase: ModelPhase,
-    pub(crate) used: Option<String>,
+pub(crate) enum ModelRuntime {
+    /// H2 recording is open; `used` holds an optional `models.use` selection.
+    Open { used: Option<String> },
+    /// Recording has closed; no further selection or close is possible.
+    Closed,
 }
 
 impl ModelRuntime {
     pub(crate) fn new() -> Self {
-        Self {
-            phase: ModelPhase::H2,
-            used: None,
+        ModelRuntime::Open { used: None }
+    }
+
+    /// Whether recording is still open.
+    pub(crate) fn is_open(&self) -> bool {
+        matches!(self, ModelRuntime::Open { .. })
+    }
+
+    /// The current `models.use` selection, if any.
+    pub(crate) fn used(&self) -> Option<&str> {
+        match self {
+            ModelRuntime::Open { used } => used.as_deref(),
+            ModelRuntime::Closed => None,
         }
     }
+
+    /// Records a `models.use` selection.
+    ///
+    /// # Errors
+    /// Returns [`SelectError::Closed`] if recording has closed, or
+    /// [`SelectError::AlreadyUsed`] if a selection was already recorded.
+    pub(crate) fn select(&mut self, alias: String) -> std::result::Result<(), SelectError> {
+        match self {
+            ModelRuntime::Open { used } if used.is_some() => Err(SelectError::AlreadyUsed),
+            ModelRuntime::Open { used } => {
+                *used = Some(alias);
+                Ok(())
+            }
+            ModelRuntime::Closed => Err(SelectError::Closed),
+        }
+    }
+
+    /// Transitions an open scope to closed. Idempotent-safe: a `Closed` scope
+    /// stays closed.
+    pub(crate) fn close(&mut self) {
+        *self = ModelRuntime::Closed;
+    }
+}
+
+/// Why a `models.use` selection was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SelectError {
+    /// The model scope had already closed.
+    Closed,
+    /// A `models.use` selection was already recorded this section.
+    AlreadyUsed,
 }
 
 /// Accumulator populated by model needs executed during live H1.
@@ -215,7 +256,7 @@ pub(crate) fn install_h2_models(
         let state = runtime
             .lock()
             .map_err(|_| Error::Lua("model declaration runtime was poisoned".to_owned()))?;
-        if state.phase != ModelPhase::H2 {
+        if !state.is_open() {
             return Err(Error::Lua(
                 "model scope is not open for H2 recording".to_owned(),
             ));
@@ -256,7 +297,7 @@ pub(crate) fn install_h2_models(
             let mut state = state
                 .lock()
                 .map_err(|_| mlua::Error::external("model declaration runtime was poisoned"))?;
-            if state.phase != ModelPhase::H2 {
+            if !state.is_open() {
                 return Err(mlua::Error::external(
                     "models.use is only available before the H2 model scope closes",
                 ));
@@ -266,12 +307,9 @@ pub(crate) fn install_h2_models(
                     "models.use alias {alias:?} was not declared by models.need"
                 )));
             }
-            if state.used.is_some() {
-                return Err(mlua::Error::external(
-                    "models.use may be called at most once per section",
-                ));
-            }
-            state.used = Some(alias);
+            state.select(alias).map_err(|_| {
+                mlua::Error::external("models.use may be called at most once per section")
+            })?;
             Ok(())
         })
         .map_err(|error| Error::Lua(error.to_string()))?;
@@ -313,7 +351,7 @@ fn close_model_scope_inner(
     let mut runtime = runtime
         .lock()
         .map_err(|_| Error::Lua("model declaration runtime was poisoned".to_owned()))?;
-    if runtime.phase != ModelPhase::H2 {
+    if !runtime.is_open() {
         return Err(Error::Lua(
             "model scope can only close once after H2 recording".to_owned(),
         ));
@@ -321,10 +359,10 @@ fn close_model_scope_inner(
     // Resolve (and clone) the effective binding BEFORE transitioning to Closed,
     // so a missing frozen binding fails while the scope is still H2. Otherwise a
     // failed close would leave a Closed scope whose selected alias has no
-    // binding - an inconsistent state. The phase write below is infallible.
+    // binding - an inconsistent state. The close below is infallible.
     let effective_alias = runtime
-        .used
-        .clone()
+        .used()
+        .map(String::from)
         .or_else(|| bindings.always().map(String::from));
     let resolved =
         match effective_alias {
@@ -333,7 +371,7 @@ fn close_model_scope_inner(
             })?),
             None => None,
         };
-    runtime.phase = ModelPhase::Closed;
+    runtime.close();
     Ok(resolved)
 }
 
