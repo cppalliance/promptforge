@@ -34,14 +34,17 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::json;
 
 use promptforge_tool_picker::{ToolId as PickerToolId, ToolPicker};
 
 use crate::cancel;
+use crate::cancel::CancelHandle;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::dialects::{ToolDialect, ToolDialectRegistry};
@@ -62,10 +65,29 @@ use crate::untrusted;
 use crate::{Error, NearDuplicateDiagnostic, Result};
 use mlua::Value as LuaValue;
 
-/// The default maximum number of model round trips a single section's
-/// tool-call loop will take before giving up, applied when a prompt's
-/// frontmatter does not declare its own `max_tool_iterations`.
-const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
+/// Builds a [`NonZeroU32`] from a compile-time-known non-zero value.
+const fn nz_u32(value: u32) -> NonZeroU32 {
+    match NonZeroU32::new(value) {
+        Some(non_zero) => non_zero,
+        None => unreachable!(),
+    }
+}
+
+/// Builds a [`NonZeroU64`] from a compile-time-known non-zero value.
+const fn nz_u64(value: u64) -> NonZeroU64 {
+    match NonZeroU64::new(value) {
+        Some(non_zero) => non_zero,
+        None => unreachable!(),
+    }
+}
+
+/// Builds a [`NonZeroUsize`] from a compile-time-known non-zero value.
+const fn nz_usize(value: usize) -> NonZeroUsize {
+    match NonZeroUsize::new(value) {
+        Some(non_zero) => non_zero,
+        None => unreachable!(),
+    }
+}
 
 /// Maximum nested `execute()` depth (inclusive of the first call).
 const MAX_EXECUTE_DEPTH: usize = 8;
@@ -367,41 +389,245 @@ fn attach_infer_hook(
     vm.set_infer_hook(hook);
 }
 
-/// Everything a run needs beyond the prompt, its input, its tools, and its
-/// store: where progress is reported, and which gateway it talks to.
+/// Resource ceilings a run honors at every otherwise-unbounded site.
+///
+/// The defaults are safe, non-environment values so a clean build needs no
+/// provisioning. Frontmatter `max_tool_iterations`, when present, still
+/// overrides [`RunLimits::max_tool_iterations`] for that prompt.
 ///
 /// # Examples
 /// ```
-/// use promptforge_core::execute::RunOptions;
-/// use promptforge_core::observe::NullObserver;
+/// use std::num::NonZeroU32;
 ///
-/// let opts = RunOptions {
-///     execution: "example-run",
-///     observer: &NullObserver,
-///     client: None,
-///     debug: None,
-/// };
-/// assert!(opts.client.is_none());
-/// assert!(opts.debug.is_none());
+/// use promptforge_core::execute::RunLimits;
+///
+/// let limits = RunLimits::new().max_tool_iterations(NonZeroU32::new(8).unwrap());
+/// assert_eq!(limits.tool_iterations().get(), 8);
 /// ```
-pub struct RunOptions<'a> {
-    /// The caller-provided identifier shared by every report in this execution.
-    pub execution: &'a str,
-    /// Where the run reports its progress. Pass
-    /// [`NullObserver`](crate::observe::NullObserver) to discard it.
-    pub observer: &'a dyn Observer,
-    /// The gateway client the run's model calls go through. `None` builds one
-    /// from the process environment on the first call that needs it, which is
-    /// what the CLI uses; a caller configured from a file (rather than from the
-    /// environment) passes its own.
-    pub client: Option<GatewayClient>,
-    /// Opt-in raw request/response capture for model turns. `None` (the
-    /// production default) skips the seam entirely so hosts pay nothing.
-    pub debug: Option<&'a dyn DebugCapture>,
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct RunLimits {
+    max_tool_iterations: NonZeroU32,
+    fanout_concurrency: NonZeroUsize,
+    max_response_bytes: NonZeroU64,
+    lua_memory_bytes: NonZeroUsize,
+    lua_log_events: NonZeroU32,
+    request_timeout: Duration,
+}
+
+impl RunLimits {
+    /// Builds the default limits (24 tool iterations, 8-way fanout, 16 MiB
+    /// response cap, 64 MiB Lua memory, 1024 Lua log events, 120 s timeout).
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::execute::RunLimits;
+    ///
+    /// assert_eq!(RunLimits::new().tool_iterations().get(), 24);
+    /// ```
+    #[must_use]
+    pub fn new() -> RunLimits {
+        RunLimits {
+            max_tool_iterations: nz_u32(24),
+            fanout_concurrency: nz_usize(8),
+            max_response_bytes: nz_u64(16 * 1024 * 1024),
+            lua_memory_bytes: nz_usize(64 * 1024 * 1024),
+            lua_log_events: nz_u32(1024),
+            request_timeout: Duration::from_secs(120),
+        }
+    }
+
+    /// Sets the default per-section model round-trip cap.
+    #[must_use]
+    pub fn max_tool_iterations(mut self, value: NonZeroU32) -> RunLimits {
+        self.max_tool_iterations = value;
+        self
+    }
+
+    /// Sets the maximum number of concurrent fanout arms.
+    #[must_use]
+    pub fn fanout_concurrency(mut self, value: NonZeroUsize) -> RunLimits {
+        self.fanout_concurrency = value;
+        self
+    }
+
+    /// Sets the maximum accepted model response body size, in bytes.
+    #[must_use]
+    pub fn max_response_bytes(mut self, value: NonZeroU64) -> RunLimits {
+        self.max_response_bytes = value;
+        self
+    }
+
+    /// Sets the per-VM Lua memory ceiling, in bytes.
+    #[must_use]
+    pub fn lua_memory_bytes(mut self, value: NonZeroUsize) -> RunLimits {
+        self.lua_memory_bytes = value;
+        self
+    }
+
+    /// Sets the maximum number of Lua author `log` checkpoints per VM.
+    #[must_use]
+    pub fn lua_log_events(mut self, value: NonZeroU32) -> RunLimits {
+        self.lua_log_events = value;
+        self
+    }
+
+    /// Sets the per-request model HTTP timeout.
+    #[must_use]
+    pub fn request_timeout(mut self, value: Duration) -> RunLimits {
+        self.request_timeout = value;
+        self
+    }
+}
+
+impl RunLimits {
+    /// Returns the default per-section model round-trip cap.
+    #[must_use]
+    pub fn tool_iterations(&self) -> NonZeroU32 {
+        self.max_tool_iterations
+    }
+
+    /// Returns the maximum number of concurrent fanout arms.
+    #[must_use]
+    pub fn fanout(&self) -> NonZeroUsize {
+        self.fanout_concurrency
+    }
+
+    /// Returns the maximum accepted model response body size, in bytes.
+    #[must_use]
+    pub fn response_bytes(&self) -> NonZeroU64 {
+        self.max_response_bytes
+    }
+
+    /// Returns the per-VM Lua memory ceiling, in bytes.
+    #[must_use]
+    pub fn lua_memory(&self) -> NonZeroUsize {
+        self.lua_memory_bytes
+    }
+
+    /// Returns the maximum number of Lua author `log` checkpoints per VM.
+    #[must_use]
+    pub fn lua_logs(&self) -> NonZeroU32 {
+        self.lua_log_events
+    }
+
+    /// Returns the per-request model HTTP timeout.
+    #[must_use]
+    pub fn timeout(&self) -> Duration {
+        self.request_timeout
+    }
+}
+
+impl Default for RunLimits {
+    fn default() -> RunLimits {
+        RunLimits::new()
+    }
+}
+
+/// Everything a run needs beyond the prompt, its input, its tools, and its
+/// store: the execution id, where progress is reported, the raw-capture seam,
+/// the gateway client, an explicit cancellation handle, and resource limits.
+///
+/// `RunConfig` is owned (no borrows), so its observer and debug sinks reach the
+/// nested `model:infer` hook that a borrowed option could not.
+///
+/// # Examples
+/// ```
+/// use promptforge_core::execute::{RunConfig, RunLimits};
+///
+/// let config = RunConfig::new("example-run").limits(RunLimits::new());
+/// assert_eq!(config.execution(), "example-run");
+/// ```
+#[non_exhaustive]
+pub struct RunConfig {
+    execution: String,
+    observer: Arc<dyn Observer>,
+    debug: Option<Arc<dyn DebugCapture>>,
+    client: Option<GatewayClient>,
+    cancel: Option<CancelHandle>,
+    limits: RunLimits,
+}
+
+impl RunConfig {
+    /// Builds a config for `execution` with default observer, no client, no
+    /// capture, no cancellation, and default [`RunLimits`].
+    #[must_use]
+    pub fn new(execution: impl Into<String>) -> RunConfig {
+        RunConfig {
+            execution: execution.into(),
+            observer: Arc::new(NullObserver),
+            debug: None,
+            client: None,
+            cancel: None,
+            limits: RunLimits::new(),
+        }
+    }
+
+    /// Sets the progress observer, retained for the whole run and its infer hook.
+    #[must_use]
+    pub fn observer(mut self, observer: Arc<dyn Observer>) -> RunConfig {
+        self.observer = observer;
+        self
+    }
+
+    /// Sets the opt-in raw request/response capture sink.
+    #[must_use]
+    pub fn debug(mut self, debug: Arc<dyn DebugCapture>) -> RunConfig {
+        self.debug = Some(debug);
+        self
+    }
+
+    /// Sets the gateway client; `None` builds one from the environment on first
+    /// use.
+    #[must_use]
+    pub fn client(mut self, client: GatewayClient) -> RunConfig {
+        self.client = Some(client);
+        self
+    }
+
+    /// Sets the explicit cancellation handle threaded through the run.
+    #[must_use]
+    pub fn cancel(mut self, handle: CancelHandle) -> RunConfig {
+        self.cancel = Some(handle);
+        self
+    }
+
+    /// Sets the resource limits honored across the run.
+    #[must_use]
+    pub fn limits(mut self, limits: RunLimits) -> RunConfig {
+        self.limits = limits;
+        self
+    }
+
+    /// Returns the execution identifier shared by every report.
+    #[must_use]
+    pub fn execution(&self) -> &str {
+        &self.execution
+    }
+
+    /// Returns the resource limits.
+    #[must_use]
+    pub fn limits_ref(&self) -> &RunLimits {
+        &self.limits
+    }
+}
+
+impl fmt::Debug for RunConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RunConfig")
+            .field("execution", &self.execution)
+            .field("observer", &"<dyn Observer>")
+            .field("client", &self.client)
+            .field("debug", &self.debug.as_ref().map(|_| "<dyn DebugCapture>"))
+            .field("cancel", &self.cancel.is_some())
+            .field("limits", &self.limits)
+            .finish()
+    }
 }
 
 /// Live capability inputs for the parse-to-run execution path.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
+#[non_exhaustive]
 pub struct ResolutionContext<'a> {
     /// Semantic picker used by executed H1 capability calls.
     pub picker: &'a ToolPicker,
@@ -409,23 +635,17 @@ pub struct ResolutionContext<'a> {
     pub models: &'a ModelCatalog,
 }
 
-impl fmt::Debug for RunOptions<'_> {
-    /// Formats the options without the observer or debug capture, which are
-    /// trait objects and carry no `Debug`; their presence is reported instead.
+impl<'a> ResolutionContext<'a> {
+    /// Builds a resolution context from a live picker and model catalog.
+    #[must_use]
+    pub fn new(picker: &'a ToolPicker, models: &'a ModelCatalog) -> ResolutionContext<'a> {
+        ResolutionContext { picker, models }
+    }
+}
+
+impl fmt::Debug for ResolutionContext<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RunOptions")
-            .field("execution", &self.execution)
-            .field("observer", &"<dyn Observer>")
-            .field("client", &self.client)
-            .field(
-                "debug",
-                &if self.debug.is_some() {
-                    "<dyn DebugCapture>"
-                } else {
-                    "None"
-                },
-            )
-            .finish()
+        f.debug_struct("ResolutionContext").finish_non_exhaustive()
     }
 }
 
@@ -444,7 +664,7 @@ pub async fn run(
     resolution: ResolutionContext<'_>,
     tools: &[Arc<dyn Tool>],
     store: &StoreRef,
-    opts: RunOptions<'_>,
+    config: RunConfig,
 ) -> Result<String> {
     match prompt.frontmatter.promptforge {
         Some(SUPPORTED_MAJOR) => {}
@@ -456,18 +676,23 @@ pub async fn run(
         }
     }
 
-    let RunOptions {
+    let RunConfig {
         execution,
         observer,
-        client,
         debug,
-    } = opts;
+        client,
+        cancel,
+        limits,
+    } = config;
+    let execution = execution.as_str();
+    let observer = observer.as_ref();
+    let debug = debug.as_deref();
     let shared_tools = SharedTools::new(tools);
     let registry = shared_tools.registry();
     observer.observe(execution, &prompt.title, detail::RUN_STARTED);
     let turns = Arc::new(AtomicU32::new(0));
 
-    let result = async {
+    let run_body = async {
         let h1 = execute_live_h1(
             prompt,
             args,
@@ -479,6 +704,7 @@ pub async fn run(
             observer,
             client.as_ref(),
             debug,
+            limits,
             Arc::clone(&turns),
         )
         .await?;
@@ -500,11 +726,19 @@ pub async fn run(
             observer,
             client,
             debug,
+            limits,
             Arc::clone(&turns),
         )
         .await
-    }
-    .await;
+    };
+
+    // Explicit cancellation: when the caller supplies a handle it is installed
+    // for the run so cooperative cancel checks observe it; without one the run
+    // simply is not cancellable from this path.
+    let result = match cancel {
+        Some(handle) => cancel::scope(handle, run_body).await,
+        None => run_body.await,
+    };
 
     observer.observe(
         execution,
@@ -605,8 +839,10 @@ async fn execute_live_h1(
     observer: &dyn Observer,
     client: Option<&GatewayClient>,
     debug: Option<&dyn DebugCapture>,
+    limits: RunLimits,
     turns: Arc<AtomicU32>,
 ) -> Result<LiveH1State> {
+    let default_max_tool_iterations = limits.tool_iterations().get() as usize;
     let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models)?;
     let sys = json!({
         "when": now_rfc3339(),
@@ -644,7 +880,7 @@ async fn execute_live_h1(
             prompt
                 .frontmatter
                 .max_tool_iterations
-                .unwrap_or(DEFAULT_MAX_TOOL_ITERATIONS),
+                .unwrap_or(default_max_tool_iterations),
             &turns,
             None,
             Some(runtime.producer()),
@@ -722,7 +958,7 @@ async fn execute_live_h1(
                         max_tool_iterations: prompt
                             .frontmatter
                             .max_tool_iterations
-                            .unwrap_or(DEFAULT_MAX_TOOL_ITERATIONS),
+                            .unwrap_or(default_max_tool_iterations),
                     }
                 } else {
                     ProseMode::SingleShot
@@ -796,8 +1032,10 @@ async fn run_sections(
     observer: &dyn Observer,
     mut client: Option<GatewayClient>,
     debug: Option<&dyn DebugCapture>,
+    limits: RunLimits,
     turns: Arc<AtomicU32>,
 ) -> Result<String> {
+    let default_max_tool_iterations = limits.tool_iterations().get() as usize;
     let when = now_rfc3339();
     let mut last_reply: Option<String> = None;
 
@@ -806,7 +1044,7 @@ async fn run_sections(
     let max_tool_iterations = prompt
         .frontmatter
         .max_tool_iterations
-        .unwrap_or(DEFAULT_MAX_TOOL_ITERATIONS);
+        .unwrap_or(default_max_tool_iterations);
 
     let task_handles = section_handles(&prompt.sections);
     let mut index = 0usize;
