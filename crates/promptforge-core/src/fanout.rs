@@ -408,10 +408,57 @@ impl DebugCapture for ProxyDebugCapture {
     }
 }
 
+/// Emits exactly one distinct terminal observation per fanout arm.
+///
+/// The arm's normal exits call [`finish`](Self::finish) with the specific
+/// terminal event (succeeded / exhausted / failed). If the arm's future is
+/// instead dropped before finalizing - a sibling's hard error aborts it, or the
+/// run is cancelled - `Drop` emits [`detail::FANOUT_ARM_CANCELLED`]. Exactly one
+/// terminal event therefore fires for every arm (FANOUT-004).
+struct ArmFinalizer {
+    observer: Arc<ProxyObserver>,
+    execution: String,
+    section: String,
+    finished: bool,
+}
+
+impl ArmFinalizer {
+    fn new(observer: Arc<ProxyObserver>, execution: String, section: String) -> Self {
+        Self {
+            observer,
+            execution,
+            section,
+            finished: false,
+        }
+    }
+
+    fn finish(&mut self, event: Observation) {
+        self.finished = true;
+        (self.observer.as_ref() as &dyn Observer).observe(&self.execution, &self.section, event);
+    }
+}
+
+impl Drop for ArmFinalizer {
+    fn drop(&mut self) {
+        if !self.finished {
+            (self.observer.as_ref() as &dyn Observer).observe(
+                &self.execution,
+                &self.section,
+                detail::FANOUT_ARM_CANCELLED,
+            );
+        }
+    }
+}
+
 /// Runs one fanout arm to completion.
+///
+/// VM teardown and the terminal arm observation happen in ONE epilogue
+/// (FANOUT-006): the fallible body runs against a borrowed VM without any inline
+/// teardown, then the epilogue tears the VM down once and records the single
+/// distinct terminal event via [`ArmFinalizer`].
 #[expect(
     clippy::too_many_lines,
-    reason = "the arm lifecycle is a linear sequence of fallible steps with per-step cleanup"
+    reason = "the arm body is one cohesive linear sequence of fallible steps"
 )]
 async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
     let ArmPayload {
@@ -440,227 +487,177 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
     } = payload;
 
     let taskid = (index + 1).to_string();
-    let observer = observer.as_ref() as &dyn Observer;
+    let observer_arc = observer;
+    let observer = observer_arc.as_ref() as &dyn Observer;
     observer.observe(&execution, &worker.name, detail::FANOUT_ARM_STARTED);
 
-    let mut vm = SectionVm::new_for_section(
+    // The guard defaults to a CANCELLED terminal event; the epilogue below
+    // upgrades it to the arm's real outcome unless the arm is aborted first.
+    let mut finalizer = ArmFinalizer::new(
+        Arc::clone(&observer_arc),
+        execution.clone(),
+        worker.name.clone(),
+    );
+
+    let mut vm = match SectionVm::new_for_section(
         shared.as_ref(),
         &bindings,
         &models,
         &execution,
         observer,
         &worker.name,
-    )?;
-    if let Err(error) = vm.apply_lua_limits(lua_memory_bytes, lua_log_events) {
-        vm.teardown(observer, &worker.name);
-        return Err(error);
-    }
-
-    let now = match crate::execute::now_rfc3339_checked() {
-        Ok(now) => now,
-        Err(error) => {
-            vm.teardown(observer, &worker.name);
-            return Err(error);
-        }
-    };
-    let sys = json!({
-        "when": when,
-        "now": now,
-        "id": parent_id,
-        "taskid": taskid,
-        "section_name": worker.name,
-        "execution": execution,
-        "section_count": section_count,
-    });
-
-    if let Err(error) = vm.inject_host(&args, &sys, &store, last_reply.as_deref()) {
-        vm.teardown(observer, &worker.name);
-        return Err(error);
-    }
-
-    if let Err(error) = vm.set_global_string("item", &item_text) {
-        vm.teardown(observer, &worker.name);
-        return Err(error);
-    }
-
-    let prologue_return = if let Some(program) = worker.prologue() {
-        match vm.run_prologue(program, observer, &worker.name) {
-            Ok(returned) => returned,
-            Err(error) => {
-                vm.teardown(observer, &worker.name);
-                return Err(error);
-            }
-        }
-    } else {
-        None
-    };
-
-    if let Some(value) = prologue_return {
-        vm.teardown(observer, &worker.name);
-        observer.observe(&execution, &worker.name, detail::FANOUT_ARM_FINISHED);
-        return Ok((index, LuaFanoutResult::success(&item_text, value)));
-    }
-
-    let scopes = match vm.close_scopes(observer, &worker.name) {
-        Ok(scopes) => scopes,
-        Err(error) => {
-            vm.teardown(observer, &worker.name);
-            return Err(error);
-        }
-    };
-    let scope = scopes.tools;
-    let counts = match vm.install_tool_call_counts(&scope) {
-        Ok(c) => Some(c),
-        Err(error) => {
-            vm.teardown(observer, &worker.name);
-            return Err(error);
-        }
-    };
-
-    let sys = if let Some(model_binding) = scopes.model.as_ref() {
-        let current = match vm.current_sys(&sys) {
-            Ok(current) => current,
-            Err(error) => {
-                vm.teardown(observer, &worker.name);
-                return Err(error);
-            }
-        };
-        let enriched = crate::lua::enrich_sys_model(&current, model_binding);
-        if let Err(error) = vm.re_seal_sys(&enriched) {
-            vm.teardown(observer, &worker.name);
-            return Err(error);
-        }
-        enriched
-    } else {
-        sys
-    };
-
-    let var = match vm.var() {
-        Ok(var) => var,
-        Err(error) => {
-            vm.teardown(observer, &worker.name);
-            return Err(error);
-        }
-    };
-    let prose = match subst::substitute(
-        worker.prose(),
-        &args,
-        last_reply.as_deref(),
-        Some(&item_text),
-        &var,
-        &sys,
     ) {
-        Ok(prose) => prose,
+        Ok(vm) => vm,
         Err(error) => {
-            vm.teardown(observer, &worker.name);
+            finalizer.finish(detail::FANOUT_ARM_FAILED);
             return Err(error);
         }
     };
 
-    let mut arm_reply: Option<String> = None;
-    if !prose.trim().is_empty() {
-        let Some(model_binding) = scopes.model else {
-            vm.teardown(observer, &worker.name);
-            return Err(Error::ModelRequired {
-                section: worker.name.clone(),
-            });
-        };
-        let completion_options = model_binding.completion_options();
-        let registry = shared_tools.registry();
-        let (schemas, dispatch) = match crate::execute::prepare_effective_scope(
-            &analysis,
-            &scope,
-            &registry,
-            &execution,
-            observer,
-            &worker.name,
-        ) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                vm.teardown(observer, &worker.name);
-                return Err(error);
-            }
-        };
-        if let Some(client) = client.as_ref() {
-            let global_aliases = Some(&analysis.alias_to_id);
-            let debug_ref = debug.as_deref();
-            let text = match crate::execute::run_tool_loop(
-                client,
-                &schemas,
-                &dispatch,
-                &registry,
-                prose,
-                max_tool_iterations,
-                crate::execute::SectionProgress {
-                    execution: &execution,
-                    observer,
-                    section: &worker.name,
-                    turns: turns.as_ref(),
-                    debug: debug_ref,
-                    completion_options: &completion_options,
-                },
-                counts.as_ref(),
-                global_aliases,
-            )
-            .await
-            {
-                Ok((text, finish_reason)) => {
-                    let current = match vm.current_sys(&sys) {
-                        Ok(current) => current,
-                        Err(error) => {
-                            vm.teardown(observer, &worker.name);
-                            return Err(error);
-                        }
-                    };
-                    let enriched = crate::lua::enrich_sys_reply_finish_reason(
-                        &current,
-                        finish_reason.as_deref(),
-                    );
-                    if let Err(error) = vm.re_seal_sys(&enriched) {
-                        vm.teardown(observer, &worker.name);
-                        return Err(error);
-                    }
-                    text
-                }
-                // One stuck arm must not kill sibling evidence facets.
-                Err(Error::ToolLoopExhausted) => {
-                    vm.teardown(observer, &worker.name);
-                    let stub = format!(
-                        "## {item_text}\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)"
-                    );
-                    observer.observe(&execution, &worker.name, detail::FANOUT_ARM_FINISHED);
-                    return Ok((index, LuaFanoutResult::exhausted_stub(&item_text, stub)));
-                }
-                Err(error) => {
-                    vm.teardown(observer, &worker.name);
-                    return Err(error);
-                }
-            };
-            if let Err(error) = vm.bind_reply(&text, observer, &worker.name) {
-                vm.teardown(observer, &worker.name);
-                return Err(error);
-            }
-            arm_reply = Some(text);
-        }
-    }
+    // The body performs no teardown; every fallible step uses `?`. It returns the
+    // arm result paired with its distinct terminal event.
+    let body = async {
+        vm.apply_lua_limits(lua_memory_bytes, lua_log_events)?;
 
-    let epilog_return = if let Some(program) = worker.epilog() {
-        match vm.run_epilog(program, observer, &worker.name) {
-            Ok(returned) => returned,
-            Err(error) => {
-                vm.teardown(observer, &worker.name);
-                return Err(error);
+        let now = crate::execute::now_rfc3339_checked()?;
+        let sys = json!({
+            "when": when,
+            "now": now,
+            "id": parent_id,
+            "taskid": taskid,
+            "section_name": worker.name,
+            "execution": execution,
+            "section_count": section_count,
+        });
+
+        vm.inject_host(&args, &sys, &store, last_reply.as_deref())?;
+        vm.set_global_string("item", &item_text)?;
+
+        if let Some(program) = worker.prologue()
+            && let Some(value) = vm.run_prologue(program, observer, &worker.name)?
+        {
+            return Ok((
+                LuaFanoutResult::success(&item_text, value),
+                detail::FANOUT_ARM_SUCCEEDED,
+            ));
+        }
+
+        let scopes = vm.close_scopes(observer, &worker.name)?;
+        let scope = scopes.tools;
+        let counts = Some(vm.install_tool_call_counts(&scope)?);
+
+        let sys = if let Some(model_binding) = scopes.model.as_ref() {
+            let current = vm.current_sys(&sys)?;
+            let enriched = crate::lua::enrich_sys_model(&current, model_binding);
+            vm.re_seal_sys(&enriched)?;
+            enriched
+        } else {
+            sys
+        };
+
+        let var = vm.var()?;
+        let prose = subst::substitute(
+            worker.prose(),
+            &args,
+            last_reply.as_deref(),
+            Some(&item_text),
+            &var,
+            &sys,
+        )?;
+
+        let mut arm_reply: Option<String> = None;
+        if !prose.trim().is_empty() {
+            let Some(model_binding) = scopes.model else {
+                return Err(Error::ModelRequired {
+                    section: worker.name.clone(),
+                });
+            };
+            let completion_options = model_binding.completion_options();
+            let registry = shared_tools.registry();
+            let (schemas, dispatch) = crate::execute::prepare_effective_scope(
+                &analysis,
+                &scope,
+                &registry,
+                &execution,
+                observer,
+                &worker.name,
+            )?;
+            if let Some(client) = client.as_ref() {
+                let global_aliases = Some(&analysis.alias_to_id);
+                let debug_ref = debug.as_deref();
+                match crate::execute::run_tool_loop(
+                    client,
+                    &schemas,
+                    &dispatch,
+                    &registry,
+                    prose,
+                    max_tool_iterations,
+                    crate::execute::SectionProgress {
+                        execution: &execution,
+                        observer,
+                        section: &worker.name,
+                        turns: turns.as_ref(),
+                        debug: debug_ref,
+                        completion_options: &completion_options,
+                    },
+                    counts.as_ref(),
+                    global_aliases,
+                )
+                .await
+                {
+                    Ok((text, finish_reason)) => {
+                        let current = vm.current_sys(&sys)?;
+                        let enriched = crate::lua::enrich_sys_reply_finish_reason(
+                            &current,
+                            finish_reason.as_deref(),
+                        );
+                        vm.re_seal_sys(&enriched)?;
+                        vm.bind_reply(&text, observer, &worker.name)?;
+                        arm_reply = Some(text);
+                    }
+                    // One stuck arm must not kill sibling evidence facets.
+                    Err(Error::ToolLoopExhausted) => {
+                        let stub = format!(
+                            "## {item_text}\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)"
+                        );
+                        return Ok((
+                            LuaFanoutResult::exhausted_stub(&item_text, stub),
+                            detail::FANOUT_ARM_EXHAUSTED,
+                        ));
+                    }
+                    Err(error) => return Err(error),
+                }
             }
         }
-    } else {
-        None
+
+        let epilog_return = if let Some(program) = worker.epilog() {
+            vm.run_epilog(program, observer, &worker.name)?
+        } else {
+            None
+        };
+
+        let text = epilog_return.or(arm_reply).unwrap_or_default();
+        Ok((
+            LuaFanoutResult::success(item_text.clone(), text),
+            detail::FANOUT_ARM_SUCCEEDED,
+        ))
     };
 
-    vm.teardown(observer, &worker.name);
-    observer.observe(&execution, &worker.name, detail::FANOUT_ARM_FINISHED);
+    let outcome: Result<(LuaFanoutResult, Observation)> = body.await;
 
-    let text = epilog_return.or(arm_reply).unwrap_or_default();
-    Ok((index, LuaFanoutResult::success(item_text, text)))
+    // Single epilogue: tear the VM down once, then record exactly one terminal
+    // observation matching the arm's real outcome.
+    vm.teardown(observer, &worker.name);
+    match outcome {
+        Ok((result, event)) => {
+            finalizer.finish(event);
+            Ok((index, result))
+        }
+        Err(error) => {
+            finalizer.finish(detail::FANOUT_ARM_FAILED);
+            Err(error)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1039,6 +1036,189 @@ mod tests {
                 .to_string()
                 .contains("model binding required for section Worker"),
             "error must name the worker section: {error}"
+        );
+    }
+
+    /// Records every observation's Display string, in order.
+    #[derive(Default)]
+    struct EventRecorder(std::sync::Mutex<Vec<String>>);
+
+    impl Observer for EventRecorder {
+        fn observe(&self, _execution: &str, _section: &str, event: Observation) {
+            self.0
+                .lock()
+                .expect("recorder mutex is not poisoned")
+                .push(event.to_string());
+        }
+    }
+
+    impl EventRecorder {
+        fn snapshot(&self) -> Vec<String> {
+            self.0
+                .lock()
+                .expect("recorder mutex is not poisoned")
+                .clone()
+        }
+
+        fn count(&self, label: &str) -> usize {
+            self.snapshot()
+                .iter()
+                .filter(|e| e.as_str() == label)
+                .count()
+        }
+    }
+
+    fn lua_worker(source: &str) -> Section {
+        let program = LuaProgram::compile(
+            source,
+            "test prologue",
+            NonZeroU32::new(1).expect("compile source line is non-zero"),
+            "fanout-terminal-test",
+            &crate::observe::NullObserver,
+            "Worker",
+        )
+        .expect("test Lua must compile");
+        Section {
+            name: "Worker".to_string(),
+            level: 3,
+            blocks: vec![Block::Lua(program)],
+            children: Vec::new(),
+            items: Vec::new(),
+        }
+    }
+
+    fn terminal_ctx<'a>(
+        observer: &'a dyn Observer,
+        store: &'a StoreRef,
+        bindings: &'a ToolBindings,
+        models: &'a ModelBindings,
+        analysis: &'a crate::execute::ToolAnalysis,
+        shared_tools: &'a SharedTools,
+        client: &'a Option<GatewayClient>,
+    ) -> FanoutContext<'a> {
+        FanoutContext {
+            args: "",
+            store,
+            execution: "fanout-terminal-test",
+            observer,
+            client,
+            debug: None,
+            shared: None,
+            bindings,
+            models,
+            analysis,
+            shared_tools,
+            max_tool_iterations: 24,
+            fanout_concurrency: NonZeroUsize::new(4).expect("4 is non-zero"),
+            max_fanout_items: NonZeroUsize::new(1024).expect("1024 is non-zero"),
+            lua_memory_bytes: 64 * 1024 * 1024,
+            lua_log_events: 1024,
+            last_reply: None,
+            when: "2026-08-08",
+            parent_id: 1,
+            section_count: 1,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn each_arm_emits_a_distinct_succeeded_terminal_event() {
+        // FANOUT-004: every arm is finalized exactly once with a distinct
+        // terminal event. Two arms whose prologue returns a value each emit one
+        // `started` and one `succeeded`, and nothing else.
+        let worker = lua_worker("return item");
+        let items = vec!["a".to_string(), "b".to_string()];
+        let store = StoreRef::memory();
+        let bindings = ToolBindings::default();
+        let models = ModelBindings::default();
+        let analysis = crate::execute::ToolAnalysis::default();
+        let shared_tools = SharedTools::default();
+        let client: Option<GatewayClient> = None;
+        let recorder = EventRecorder::default();
+        let ctx = terminal_ctx(
+            &recorder,
+            &store,
+            &bindings,
+            &models,
+            &analysis,
+            &shared_tools,
+            &client,
+        );
+
+        let results = run_fanout_arms(&worker, &items, &ctx)
+            .await
+            .expect("both arms must succeed");
+        assert_eq!(results.len(), 2);
+        assert_eq!(recorder.count("Fanout arm started"), 2);
+        assert_eq!(
+            recorder.count("Fanout arm succeeded"),
+            2,
+            "each arm emits one distinct succeeded event: {:?}",
+            recorder.snapshot()
+        );
+        assert_eq!(recorder.count("Fanout arm failed"), 0);
+        assert_eq!(recorder.count("Fanout arm cancelled"), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_hard_failing_arm_emits_a_failed_terminal_event() {
+        // FANOUT-004: a hard arm error emits a distinct `failed` terminal event,
+        // never `succeeded`.
+        let worker = lua_worker("error('boom')");
+        let items = vec!["a".to_string()];
+        let store = StoreRef::memory();
+        let bindings = ToolBindings::default();
+        let models = ModelBindings::default();
+        let analysis = crate::execute::ToolAnalysis::default();
+        let shared_tools = SharedTools::default();
+        let client: Option<GatewayClient> = None;
+        let recorder = EventRecorder::default();
+        let ctx = terminal_ctx(
+            &recorder,
+            &store,
+            &bindings,
+            &models,
+            &analysis,
+            &shared_tools,
+            &client,
+        );
+
+        run_fanout_arms(&worker, &items, &ctx)
+            .await
+            .expect_err("a hard arm error must fail the fanout");
+        assert_eq!(
+            recorder.count("Fanout arm failed"),
+            1,
+            "the failing arm emits one failed event: {:?}",
+            recorder.snapshot()
+        );
+        assert_eq!(recorder.count("Fanout arm succeeded"), 0);
+    }
+
+    #[test]
+    fn arm_finalizer_emits_cancelled_on_drop_unless_finished() {
+        // FANOUT-004/006: the guard emits exactly one terminal event. Dropped
+        // without finishing => cancelled; finished => only that event.
+        let (tx, mut rx) = mpsc::channel::<(String, Observation)>(8);
+        let proxy = Arc::new(ProxyObserver { tx });
+
+        drop(ArmFinalizer::new(
+            Arc::clone(&proxy),
+            "exec".to_string(),
+            "S".to_string(),
+        ));
+        let (_, event) = rx.try_recv().expect("a dropped finalizer emits an event");
+        assert_eq!(event.to_string(), "Fanout arm cancelled");
+        assert!(rx.try_recv().is_err(), "exactly one terminal event on drop");
+
+        let mut finalizer =
+            ArmFinalizer::new(Arc::clone(&proxy), "exec".to_string(), "S".to_string());
+        finalizer.finish(detail::FANOUT_ARM_SUCCEEDED);
+        drop(finalizer);
+        let (_, event) = rx.try_recv().expect("finish emits its event");
+        assert_eq!(event.to_string(), "Fanout arm succeeded");
+        assert!(
+            rx.try_recv().is_err(),
+            "a finished finalizer does not also emit cancelled on drop"
         );
     }
 }

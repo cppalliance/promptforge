@@ -151,8 +151,17 @@ pub enum Observation {
     StoreGlobFailed,
     /// A fanout arm began execution.
     FanoutArmStarted,
-    /// A fanout arm completed execution.
+    /// A fanout arm completed execution (generic terminal, retained for compat).
     FanoutArmFinished,
+    /// A fanout arm finished with a normal successful result.
+    FanoutArmSucceeded,
+    /// A fanout arm soft-degraded because its tool loop was exhausted.
+    FanoutArmExhausted,
+    /// A fanout arm ended with a hard error.
+    FanoutArmFailed,
+    /// A fanout arm was cancelled or aborted (Ctrl-C or a sibling's hard error)
+    /// before it could finalize.
+    FanoutArmCancelled,
     /// The one author-controlled checkpoint: a validated Lua `log(message)`.
     ///
     /// Prompt authors must never place arguments, replies, tool data,
@@ -232,6 +241,10 @@ impl Observation {
             Observation::StoreGlobFailed => "Store glob failed",
             Observation::FanoutArmStarted => "Fanout arm started",
             Observation::FanoutArmFinished => "Fanout arm finished",
+            Observation::FanoutArmSucceeded => "Fanout arm succeeded",
+            Observation::FanoutArmExhausted => "Fanout arm exhausted",
+            Observation::FanoutArmFailed => "Fanout arm failed",
+            Observation::FanoutArmCancelled => "Fanout arm cancelled",
             Observation::Lua(_) | Observation::Other(_) => return None,
         };
         Some(label)
@@ -316,7 +329,10 @@ pub(crate) mod detail {
     pub(crate) const STORE_GLOB_SUCCEEDED: Observation = Observation::StoreGlobSucceeded;
     pub(crate) const STORE_GLOB_FAILED: Observation = Observation::StoreGlobFailed;
     pub(crate) const FANOUT_ARM_STARTED: Observation = Observation::FanoutArmStarted;
-    pub(crate) const FANOUT_ARM_FINISHED: Observation = Observation::FanoutArmFinished;
+    pub(crate) const FANOUT_ARM_SUCCEEDED: Observation = Observation::FanoutArmSucceeded;
+    pub(crate) const FANOUT_ARM_EXHAUSTED: Observation = Observation::FanoutArmExhausted;
+    pub(crate) const FANOUT_ARM_FAILED: Observation = Observation::FanoutArmFailed;
+    pub(crate) const FANOUT_ARM_CANCELLED: Observation = Observation::FanoutArmCancelled;
 }
 
 /// A report-only sink for operational observations.
