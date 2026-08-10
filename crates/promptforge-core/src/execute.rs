@@ -867,6 +867,7 @@ async fn execute_live_h1(
         "section_count": prompt.sections.len(),
     });
     let mut vm = SectionVm::new(None, execution, observer, &prompt.title)?;
+    vm.apply_lua_limits(limits.lua_memory().get(), limits.lua_logs().get())?;
     vm.inject_host(args, &sys, store, None)?;
     macro_rules! h1_try {
         ($expression:expr) => {
@@ -1087,6 +1088,7 @@ async fn run_sections(
             observer,
             &section.name,
         )?;
+        vm.apply_lua_limits(limits.lua_memory().get(), limits.lua_logs().get())?;
         if let Err(error) =
             vm.inject_host_with_var(args, &sys, store, last_reply.as_deref(), initial_var)
         {
@@ -1426,7 +1428,7 @@ fn run_section_lua(
                 analysis,
                 &fanout_tools,
                 max_tool_iterations,
-                limits.fanout(),
+                limits,
                 fanout_last_reply.as_deref(),
                 &fanout_when,
                 parent_id,
@@ -1603,6 +1605,7 @@ async fn run_execute_section(
 
     let mut vm =
         SectionVm::new_for_section(shared, bindings, models, execution, observer, &section.name)?;
+    vm.apply_lua_limits(limits.lua_memory().get(), limits.lua_logs().get())?;
     if let Err(error) = vm.inject_host(args, &sys, store, last_reply) {
         vm.teardown(observer, &section.name);
         return Err(error);
@@ -1865,7 +1868,7 @@ fn make_fanout_callback(
     analysis: &ToolAnalysis,
     shared_tools: &SharedTools,
     max_tool_iterations: usize,
-    fanout_concurrency: NonZeroUsize,
+    limits: RunLimits,
     last_reply: Option<&str>,
     when: &str,
     parent_id: usize,
@@ -1897,7 +1900,9 @@ fn make_fanout_callback(
         analysis,
         shared_tools,
         max_tool_iterations,
-        fanout_concurrency,
+        fanout_concurrency: limits.fanout(),
+        lua_memory_bytes: limits.lua_memory().get(),
+        lua_log_events: limits.lua_logs().get(),
         last_reply,
         when,
         parent_id,

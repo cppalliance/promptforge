@@ -80,6 +80,10 @@ pub(crate) struct FanoutContext<'a> {
     pub max_tool_iterations: usize,
     /// Maximum number of arms permitted to execute concurrently.
     pub fanout_concurrency: NonZeroUsize,
+    /// Per-arm Lua heap ceiling.
+    pub lua_memory_bytes: usize,
+    /// Per-arm Lua `log()` event budget.
+    pub lua_log_events: u32,
     pub last_reply: Option<&'a str>,
     pub when: &'a str,
     /// The 1-based id of the parent section that initiated the fanout.
@@ -135,6 +139,8 @@ pub(crate) async fn run_fanout_arms(
             analysis: ctx.analysis.clone(),
             shared_tools: ctx.shared_tools.clone(),
             max_tool_iterations: ctx.max_tool_iterations,
+            lua_memory_bytes: ctx.lua_memory_bytes,
+            lua_log_events: ctx.lua_log_events,
             parent_id: ctx.parent_id,
             section_count: ctx.section_count,
             turns: Arc::clone(&turns),
@@ -249,6 +255,8 @@ struct ArmPayload {
     analysis: crate::execute::ToolAnalysis,
     shared_tools: SharedTools,
     max_tool_iterations: usize,
+    lua_memory_bytes: usize,
+    lua_log_events: u32,
     parent_id: usize,
     section_count: usize,
     turns: Arc<AtomicU32>,
@@ -310,6 +318,8 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
         analysis,
         shared_tools,
         max_tool_iterations,
+        lua_memory_bytes,
+        lua_log_events,
         parent_id,
         section_count,
         turns,
@@ -329,6 +339,10 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
         observer,
         &worker.name,
     )?;
+    if let Err(error) = vm.apply_lua_limits(lua_memory_bytes, lua_log_events) {
+        vm.teardown(observer, &worker.name);
+        return Err(error);
+    }
 
     let sys = json!({
         "when": when,
@@ -632,6 +646,8 @@ mod tests {
             shared_tools: &shared_tools,
             max_tool_iterations: 24,
             fanout_concurrency: NonZeroUsize::new(8).expect("8 is non-zero"),
+            lua_memory_bytes: 64 * 1024 * 1024,
+            lua_log_events: 1024,
             last_reply: None,
             when: "2026-08-08",
             parent_id: 1,
@@ -690,6 +706,8 @@ mod tests {
             shared_tools: &shared_tools,
             max_tool_iterations: 24,
             fanout_concurrency: NonZeroUsize::new(8).expect("8 is non-zero"),
+            lua_memory_bytes: 64 * 1024 * 1024,
+            lua_log_events: 1024,
             last_reply: None,
             when: "2026-08-08",
             parent_id: 1,

@@ -26,7 +26,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use mlua::{
     Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, MetaMethod, MultiValue, Scope, StdLib,
@@ -52,6 +52,10 @@ const HOOK_INTERVAL: u32 = 10_000;
 const HOOK_BUDGET: u64 = 1_000;
 /// Maximum number of Unicode scalar values accepted by `log`.
 const LUA_LOG_CHARACTER_LIMIT: usize = 256;
+/// Default per-VM Lua heap ceiling, matching [`crate::execute::RunLimits`].
+const DEFAULT_LUA_MEMORY_BYTES: usize = 64 * 1024 * 1024;
+/// Default per-VM `log()` event budget, matching [`crate::execute::RunLimits`].
+const DEFAULT_LUA_LOG_EVENTS: u32 = 1024;
 
 /// Resolves one plain-English capability description to one stable live tool.
 ///
@@ -1037,6 +1041,8 @@ pub struct SectionVm {
     sys_live: Arc<Mutex<Option<Json>>>,
     store: Option<StoreRef>,
     host_injected: bool,
+    /// Remaining `log()` events this VM may emit before the budget is exhausted.
+    log_budget: Arc<AtomicU32>,
 }
 
 impl SectionVm {
@@ -1086,6 +1092,11 @@ impl SectionVm {
             LuaOptions::default(),
         )
         .map_err(|error| Error::Lua(error.to_string()))?;
+        // Bound the VM heap by default; `apply_lua_limits` may tighten or relax
+        // it to the caller's `RunLimits`. A safe non-env default keeps every VM
+        // bounded even when the run installs no explicit limits.
+        lua.set_memory_limit(DEFAULT_LUA_MEMORY_BYTES)
+            .map_err(|error| Error::Lua(error.to_string()))?;
         let vm = Self {
             execution: execution.to_owned(),
             lua,
@@ -1103,6 +1114,7 @@ impl SectionVm {
             sys_live: Arc::new(Mutex::new(None)),
             store: None,
             host_injected: false,
+            log_budget: Arc::new(AtomicU32::new(DEFAULT_LUA_LOG_EVENTS)),
         };
         if let Err(error) = harden(&vm.lua) {
             return vm.construction_failed(error, observer, section);
@@ -1882,6 +1894,27 @@ impl SectionVm {
         Arc::clone(&self.counts_slot)
     }
 
+    /// Applies the run's Lua resource limits to this VM.
+    ///
+    /// Sets the heap ceiling (`lua_memory_bytes`) and resets the `log()` event
+    /// budget (`lua_log_events`). Called by the executor right after
+    /// construction so a VM honors the caller's [`RunLimits`] rather than only
+    /// the safe non-env defaults installed in [`SectionVm::new`].
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the underlying VM rejects the memory limit.
+    pub(crate) fn apply_lua_limits(
+        &self,
+        memory_bytes: usize,
+        log_events: u32,
+    ) -> Result<()> {
+        self.lua
+            .set_memory_limit(memory_bytes)
+            .map_err(|error| Error::Lua(error.to_string()))?;
+        self.log_budget.store(log_events, Ordering::Relaxed);
+        Ok(())
+    }
+
     /// Installs the `model:infer` host hook for this VM's Lua state.
     pub(crate) fn set_infer_hook(&self, hook: ModelInferHook) {
         self.lua.set_app_data(hook);
@@ -1947,7 +1980,7 @@ impl SectionVm {
         let returned: MultiValue = self
             .lua
             .scope(|scope| {
-                install_log(&self.lua, scope, &self.execution, observer, section)
+                install_log(&self.lua, scope, &self.execution, observer, section, &self.log_budget)
                     .map_err(|error| mlua::Error::external(error.to_string()))?;
                 let result = program
                     .load(&self.lua)
@@ -1979,7 +2012,7 @@ impl SectionVm {
         let returned: MultiValue = self
             .lua
             .scope(|scope| {
-                install_log(&self.lua, scope, &self.execution, observer, section)
+                install_log(&self.lua, scope, &self.execution, observer, section, &self.log_budget)
                     .map_err(|error| mlua::Error::external(error.to_string()))?;
                 install_store_table(
                     &self.lua,
@@ -2031,7 +2064,7 @@ impl SectionVm {
         }
         let jump_slot = Arc::clone(&self.jump_slot);
         let result = self.lua.scope(|scope| {
-            install_log(&self.lua, scope, &self.execution, observer, section)
+            install_log(&self.lua, scope, &self.execution, observer, section, &self.log_budget)
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
             install_store_table(
                 &self.lua,
@@ -2122,7 +2155,7 @@ impl SectionVm {
         let returned: MultiValue = self
             .lua
             .scope(|scope| {
-                install_log(&self.lua, scope, &self.execution, observer, section)
+                install_log(&self.lua, scope, &self.execution, observer, section, &self.log_budget)
                     .map_err(|error| mlua::Error::external(error.to_string()))?;
                 install_store_table(
                     &self.lua,
@@ -2491,11 +2524,20 @@ fn install_log<'scope, 'env: 'scope>(
     execution: &'env str,
     observer: &'env dyn Observer,
     section: &'env str,
+    log_budget: &'env AtomicU32,
 ) -> Result<()> {
     let log = scope
         .create_function(move |_, arguments: MultiValue| {
             if arguments.len() != 1 {
                 return Err(mlua::Error::external("log expects exactly one argument"));
+            }
+            // Spend one unit of the per-VM log budget before doing any work; an
+            // exhausted budget refuses further checkpoints (lua 002).
+            if log_budget
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
+                .is_err()
+            {
+                return Err(mlua::Error::external("lua log event budget exceeded"));
             }
             let Some(Value::String(message)) = arguments.into_iter().next() else {
                 return Err(mlua::Error::external("log message must be a UTF-8 string"));
