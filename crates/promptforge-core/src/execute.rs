@@ -811,6 +811,14 @@ fn env_client_with_limits(limits: RunLimits) -> Result<GatewayClient> {
 /// # Errors
 /// Returns the same lifecycle errors as [`run`], plus live tool or model
 /// resolution failures raised by executed H1 code.
+///
+/// # Panics
+/// Nested Lua host calls (`model:infer`, `execute`, `fanout`) bridge synchronous
+/// Lua into async work via `tokio::task::block_in_place`, which requires the
+/// multi-threaded Tokio runtime. Calling `run` on a current-thread runtime and
+/// then reaching one of those host calls will panic. Drive `run` on a
+/// multi-threaded runtime (for example `#[tokio::main]` or
+/// `Runtime::new()`/`new_multi_thread`).
 pub async fn run(
     prompt: &Prompt,
     args: &str,
