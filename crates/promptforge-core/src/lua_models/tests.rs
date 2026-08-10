@@ -25,7 +25,9 @@ fn test_binding(alias: &str, dialect: ToolDialectId) -> ModelBinding {
 #[test]
 fn temperature_accepts_finite_in_domain_and_rejects_the_rest() {
     for good in [0.0, 0.7, 1.0, 2.0] {
-        let got = value_as_temperature(&Value::Number(good)).expect("in-domain temperature");
+        let got = value_as_temperature(&Value::Number(good))
+            .expect("in-domain temperature")
+            .get();
         assert!(
             (got - good).abs() <= f64::EPSILON,
             "temperature {good} must pass through unchanged, got {got}"
@@ -43,8 +45,12 @@ fn temperature_accepts_finite_in_domain_and_rejects_the_rest() {
 fn integer_and_number_temperatures_share_one_decode_and_domain_check() {
     // The Lua integer form is decoded through the same path as the number
     // form (no separate i32 gate) and validated by the same domain check.
-    let from_integer = value_as_temperature(&Value::Integer(1)).expect("integer 1 is in-domain");
-    let from_number = value_as_temperature(&Value::Number(1.0)).expect("number 1.0 is in-domain");
+    let from_integer = value_as_temperature(&Value::Integer(1))
+        .expect("integer 1 is in-domain")
+        .get();
+    let from_number = value_as_temperature(&Value::Number(1.0))
+        .expect("number 1.0 is in-domain")
+        .get();
     assert!((from_integer - from_number).abs() <= f64::EPSILON);
     assert!(
         value_as_temperature(&Value::Integer(5)).is_err(),
@@ -211,7 +217,10 @@ fn parse_opts_table_covers_each_key_and_rejects_unknown() {
     let opts = parse_opts_table(&table).expect("all known keys parse");
     assert_eq!(opts.thinking, Some(true));
     assert_eq!(opts.context, Some(8192));
-    assert_eq!(opts.temperature, Some(0.5));
+    assert_eq!(
+        opts.temperature.map(crate::model::Temperature::get),
+        Some(0.5)
+    );
     assert_eq!(opts.max_tokens, Some(256));
 
     let unknown = lua.create_table().expect("table");

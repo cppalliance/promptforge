@@ -394,38 +394,30 @@ impl ModelDescriptor {
 ///
 /// `context` and `thinking` filter the catalog. `temperature`, `max_tokens`,
 /// and a requested `thinking` switch ride on each completion for the binding.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct ModelNeedOpts {
     /// When set, filters models by thinking capability and freezes the switch.
     pub(crate) thinking: Option<bool>,
     /// Minimum context window size in tokens.
     pub(crate) context: Option<u32>,
     /// Sampling temperature for every complete under this binding.
-    pub(crate) temperature: Option<f64>,
+    ///
+    /// A validated [`Temperature`] (PF-LM-004): a non-finite or out-of-range
+    /// value is unrepresentable, so an invalid temperature can never reach the
+    /// binding or the wire.
+    pub(crate) temperature: Option<Temperature>,
     /// Maximum generation tokens for every complete under this binding.
     pub(crate) max_tokens: Option<u32>,
 }
 
-impl PartialEq for ModelNeedOpts {
-    fn eq(&self, other: &Self) -> bool {
-        self.thinking == other.thinking
-            && self.context == other.context
-            && self.max_tokens == other.max_tokens
-            && match (self.temperature, other.temperature) {
-                (None, None) => true,
-                (Some(left), Some(right)) => left.to_bits() == right.to_bits(),
-                _ => false,
-            }
-    }
-}
-
-// No `Eq`: `temperature` is an `f64`, so equality is not reflexive for NaN.
+// No `Eq`: `temperature` is a `Temperature` (an `f64` newtype), so equality is
+// not reflexive for a NaN placed in-crate via the private field.
 
 /// Frozen per-request fields carried by a resolved model binding.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ModelInvocation {
     /// Sampling temperature, when the need declared one.
-    pub(crate) temperature: Option<f64>,
+    pub(crate) temperature: Option<Temperature>,
     /// Maximum generation tokens, when the need declared one.
     pub(crate) max_tokens: Option<u32>,
     /// Thinking switch for `chat_template_kwargs.enable_thinking`, when set.
@@ -550,8 +542,8 @@ impl ModelBinding {
 pub struct CompletionOptions {
     /// The caller-facing model name sent on the wire.
     pub(crate) model: String,
-    /// Sampling temperature.
-    pub(crate) temperature: Option<f64>,
+    /// Sampling temperature (a validated [`Temperature`]).
+    pub(crate) temperature: Option<Temperature>,
     /// Maximum generation tokens.
     pub(crate) max_tokens: Option<u32>,
     /// When set, emits `chat_template_kwargs.enable_thinking`.
@@ -588,7 +580,7 @@ impl CompletionOptions {
         mut self,
         temperature: f64,
     ) -> std::result::Result<CompletionOptions, TemperatureError> {
-        self.temperature = Some(Temperature::new(temperature)?.get());
+        self.temperature = Some(Temperature::new(temperature)?);
         Ok(self)
     }
 
@@ -1193,7 +1185,7 @@ mod tests {
             "careful analysis",
             id.clone(),
             ModelInvocation {
-                temperature: Some(0.0),
+                temperature: Some(Temperature::new(0.0).expect("0.0 is valid")),
                 max_tokens: None,
                 thinking: Some(false),
             },
@@ -1203,7 +1195,7 @@ mod tests {
             "careful analysis",
             id,
             ModelInvocation {
-                temperature: Some(0.7),
+                temperature: Some(Temperature::new(0.7).expect("0.7 is valid")),
                 max_tokens: None,
                 thinking: Some(false),
             },
@@ -1592,7 +1584,7 @@ mod tests {
         let opts = scopes.model.as_ref().map(ModelBinding::completion_options);
         let expected = CompletionOptions {
             model: "small".to_owned(),
-            temperature: Some(0.0),
+            temperature: Some(Temperature::new(0.0).expect("0.0 is valid")),
             max_tokens: None,
             thinking: Some(false),
             tool_dialect: ToolDialectId::OpenAi,
@@ -1796,7 +1788,7 @@ mod tests {
         let opts = scopes.model.as_ref().map(ModelBinding::completion_options);
         let expected = CompletionOptions {
             model: "small".to_owned(),
-            temperature: Some(0.0),
+            temperature: Some(Temperature::new(0.0).expect("0.0 is valid")),
             max_tokens: None,
             thinking: Some(false),
             tool_dialect: ToolDialectId::OpenAi,
@@ -1960,7 +1952,7 @@ mod tests {
         // Documents why these float-bearing types intentionally do not implement
         // `Eq`: a NaN temperature is not equal to itself.
         let nan = ModelInvocation {
-            temperature: Some(f64::NAN),
+            temperature: Some(Temperature(f64::NAN)),
             max_tokens: None,
             thinking: None,
         };
@@ -1969,15 +1961,16 @@ mod tests {
 
     #[test]
     fn completion_options_equality_is_not_reflexive_for_nan() {
-        // `CompletionOptions` carries an `Option<f64>` temperature, so it must
-        // not implement `Eq`: a NaN temperature is not equal to itself, which
-        // would violate the reflexivity `Eq` promises. This test would fail to
-        // compile if `Eq` were (re)added. A NaN cannot enter through the public
-        // validated setter, so the field is set directly (in-crate) to prove the
-        // soundness reason `Eq` is withheld.
+        // `CompletionOptions` carries an `Option<Temperature>` (an `f64`
+        // newtype) temperature, so it must not implement `Eq`: a NaN temperature
+        // is not equal to itself, which would violate the reflexivity `Eq`
+        // promises. This test would fail to compile if `Eq` were (re)added. A NaN
+        // cannot enter through the public validated setter; the field is set with
+        // an in-crate `Temperature(NaN)` (private tuple) to prove the soundness
+        // reason `Eq` is withheld.
         let options = CompletionOptions {
             model: "m".to_owned(),
-            temperature: Some(f64::NAN),
+            temperature: Some(Temperature(f64::NAN)),
             max_tokens: None,
             thinking: None,
             tool_dialect: ToolDialectId::OpenAi,
@@ -2009,21 +2002,24 @@ mod tests {
             base()
                 .with_temperature(0.0)
                 .expect("0.0 is valid")
-                .temperature,
+                .temperature
+                .map(Temperature::get),
             Some(0.0)
         );
         assert_eq!(
             base()
                 .with_temperature(TEMPERATURE_MAX)
                 .expect("2.0 is valid")
-                .temperature,
+                .temperature
+                .map(Temperature::get),
             Some(TEMPERATURE_MAX)
         );
         assert_eq!(
             base()
                 .with_temperature(0.7)
                 .expect("0.7 is valid")
-                .temperature,
+                .temperature
+                .map(Temperature::get),
             Some(0.7)
         );
     }

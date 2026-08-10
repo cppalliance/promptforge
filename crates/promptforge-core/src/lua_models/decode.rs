@@ -5,7 +5,7 @@
 
 use mlua::{MultiValue, Table, Value};
 
-use crate::model::ModelNeedOpts;
+use crate::model::{ModelNeedOpts, Temperature};
 use crate::{Error, Result};
 
 /// Extracts a single string alias from a `MultiValue` (for the 1-arg form).
@@ -100,24 +100,19 @@ pub(crate) fn parse_opts_table(table: &Table) -> mlua::Result<ModelNeedOpts> {
     Ok(opts)
 }
 
-/// The inclusive domain of a sampling temperature.
-const TEMPERATURE_RANGE: std::ops::RangeInclusive<f64> = 0.0..=2.0;
-
 /// Parses and validates a sampling temperature at the Lua trust boundary.
 ///
 /// Lua integer and number forms are decoded through ONE numeric path (no
-/// arbitrary `i32` gate), then validated by ONE domain check: the result must be
-/// a finite number within [`TEMPERATURE_RANGE`]. Non-finite (`NaN`, infinity) or
-/// out-of-domain values are rejected here rather than forwarded to the gateway
-/// as an invalid request.
-pub(crate) fn value_as_temperature(value: &Value) -> mlua::Result<f64> {
+/// arbitrary `i32` gate), then validated by the core-owned [`Temperature`]
+/// newtype - the single source of truth for the finite `[0.0, 2.0]` domain
+/// (PF-LM-004/PF-LM-005). A non-finite (`NaN`, infinity) or out-of-domain value
+/// is rejected here rather than forwarded to the gateway, and the validated
+/// value travels onward as a `Temperature`, not a raw `f64`.
+pub(crate) fn value_as_temperature(value: &Value) -> mlua::Result<Temperature> {
     let temperature = decode_lua_number(value, "temperature")?;
-    if !temperature.is_finite() || !TEMPERATURE_RANGE.contains(&temperature) {
-        return Err(mlua::Error::external(format!(
-            "models.need opts.temperature must be a finite number in [0.0, 2.0], got {temperature}"
-        )));
-    }
-    Ok(temperature)
+    Temperature::new(temperature).map_err(|error| {
+        mlua::Error::external(format!("models.need opts.temperature is invalid: {error}"))
+    })
 }
 
 pub(crate) fn value_as_bool(value: &Value, field: &str) -> mlua::Result<bool> {

@@ -69,9 +69,15 @@ impl LuaModelHandle {
     }
 
     /// Returns the frozen sampling temperature, when the need declared one.
+    ///
+    /// The binding stores a validated [`crate::model::Temperature`]; the raw
+    /// `f64` is exposed only here, at the Lua presentation boundary.
     #[must_use]
     pub(crate) fn temperature(&self) -> Option<f64> {
-        self.binding.invocation().temperature
+        self.binding
+            .invocation()
+            .temperature
+            .map(crate::model::Temperature::get)
     }
 
     /// Returns the frozen max generation tokens, when the need declared one.
