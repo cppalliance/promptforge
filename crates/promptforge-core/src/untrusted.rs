@@ -199,13 +199,11 @@ mod tests {
             '<', '>', '/', '&', 'u', 'n', 't', 'r', 's', 'e', 'd', '_', 'i', 'p', 'x', '0', '9',
             ' ', '\n',
         ];
-        for iteration in 0..2000u32 {
-            let len = (rand::random::<u8>() % 40) as usize;
+        for _ in 0..2000u32 {
+            let len = usize::from(rand::random::<u8>() % 40);
             let content: String = (0..len)
-                .map(|i| {
-                    let pick = (rand::random::<u32>() ^ iteration.rotate_left(i as u32 % 7))
-                        as usize
-                        % alphabet.len();
+                .map(|_| {
+                    let pick = usize::from(rand::random::<u8>()) % alphabet.len();
                     alphabet[pick]
                 })
                 .collect();

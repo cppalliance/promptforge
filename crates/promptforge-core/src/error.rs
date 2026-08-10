@@ -248,8 +248,12 @@ pub(crate) enum Error {
     },
 
     /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
+    ///
+    /// Carries a typed [`crate::subst::SubstitutionError`] with a stable kind,
+    /// the byte offset of the offending placeholder, a bounded preview, and any
+    /// preserved serialization source, rather than a flattened string.
     #[error("substitution error: {0}")]
-    Substitution(String),
+    Substitution(#[source] Box<crate::subst::SubstitutionError>),
 
     /// The tool-call loop ran its iteration cap without a final text reply.
     #[error("tool-call loop did not converge")]
@@ -369,6 +373,12 @@ impl Error {
             message: source.to_string(),
             source: Box::new(source),
         }
+    }
+}
+
+impl From<crate::subst::SubstitutionError> for Error {
+    fn from(error: crate::subst::SubstitutionError) -> Error {
+        Error::Substitution(Box::new(error))
     }
 }
 
