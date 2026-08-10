@@ -10,13 +10,14 @@
 
 use std::io::Write;
 use std::path::Path;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::{Context as _, Result, bail};
+use promptforge_core::CancelHandle;
 use promptforge_core::client::GatewayClient;
-use promptforge_core::execute::{ResolutionContext, RunOptions, run};
+use promptforge_core::execute::{ResolutionContext, RunConfig, run};
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
-use promptforge_core::observe::Observer;
+use promptforge_core::observe::{Observation, Observer};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
 use promptforge_tool_picker::{Config as PickerConfig, ToolPicker};
@@ -128,13 +129,17 @@ pub(crate) fn require_gateway_env_from(
 /// Returns an error when gateway credentials are missing, the file cannot be
 /// read, the file declares no `promptforge:` version, the catalog cannot be
 /// fetched, the prompt fails to parse, or execution fails.
-pub(crate) async fn run_once(prompt_path: &Path, input: &str) -> Result<String> {
+pub(crate) async fn run_once(
+    prompt_path: &Path,
+    input: &str,
+    cancel: CancelHandle,
+) -> Result<String> {
     let gateway = require_gateway_env()?;
-    let observer = VerboseObserver::new(std::io::stderr());
+    let observer: Arc<dyn Observer> = Arc::new(VerboseObserver::new(std::io::stderr()));
     let models = fetch_model_catalog(&gateway.base_url, &gateway.key)
         .await
         .context("fetch model catalog")?;
-    run_once_with(prompt_path, input, &gateway, &models, &observer).await
+    run_once_with(prompt_path, input, &gateway, &models, observer, cancel).await
 }
 
 /// [`run_once`] with gateway, catalog, and observer injected for offline tests
@@ -144,7 +149,8 @@ pub(crate) async fn run_once_with(
     input: &str,
     gateway: &GatewayEnv,
     models: &ModelCatalog,
-    observer: &dyn Observer,
+    observer: Arc<dyn Observer>,
+    cancel: CancelHandle,
 ) -> Result<String> {
     let source = std::fs::read_to_string(prompt_path)
         .with_context(|| format!("read {}", prompt_path.display()))?;
@@ -159,14 +165,14 @@ pub(crate) async fn run_once_with(
     // Banner before observer traffic so a fresh process is obvious in scrollback
     // even when an earlier run's lines are still on screen.
     eprintln!("run id: {execution}");
-    let prompt = Prompt::parse(&source, &execution, observer)
+    let prompt = Prompt::parse(&source, &execution, observer.as_ref())
         .with_context(|| format!("parse {}", prompt_path.display()))?;
 
     let available = tools::available_tools(&gateway.base_url, Some(gateway.key.as_str()));
     let picker = ToolPicker::build(available.catalog().clone(), PickerConfig::default())
         .context("build the live tool picker")?;
     let client = GatewayClient::new(&gateway.base_url, gateway.key.as_str());
-    let capture = dump::TraceCapture::new(prompt_path);
+    let capture = Arc::new(dump::TraceCapture::new(prompt_path));
 
     // Clear the previous run's dump before starting so stale store files and
     // traces never masquerade as the current run. Mid-run writes go through
@@ -178,22 +184,18 @@ pub(crate) async fn run_once_with(
 
     let store = StoreRef::new(Box::new(dump::MirrorStore::new(dump_dir)));
 
-    let options = RunOptions {
-        execution: &execution,
-        observer,
-        client: Some(client),
-        debug: Some(&capture),
-    };
+    let config = RunConfig::new(&execution)
+        .observer(Arc::clone(&observer))
+        .debug(capture)
+        .client(client)
+        .cancel(cancel);
     let result = run(
         &prompt,
         input,
-        ResolutionContext {
-            picker: &picker,
-            models,
-        },
+        ResolutionContext::new(&picker, models),
         available.tools(),
         &store,
-        options,
+        config,
     )
     .await
     .with_context(|| format!("run {}", prompt_path.display()));
@@ -226,17 +228,17 @@ impl<W: Write + Send> VerboseObserver<W> {
 }
 
 impl<W: Write + Send> Observer for VerboseObserver<W> {
-    fn observe(&self, execution: &str, section: &str, detail: &str) {
+    fn observe(&self, execution: &str, section: &str, event: Observation) {
         let mut sink = self.sink.lock().unwrap_or_else(PoisonError::into_inner);
         // Observers must not panic and reporting is a side channel, so a
         // failed write is deliberately dropped rather than surfaced.
-        let _ignored = writeln!(sink, "{}", format_record(execution, section, detail));
+        let _ignored = writeln!(sink, "{}", format_record(execution, section, &event));
     }
 }
 
-/// Formats one `(execution, section, detail)` record as one trace line.
-fn format_record(execution: &str, section: &str, detail: &str) -> String {
-    format!("[{execution}] {section}: {detail}")
+/// Formats one `(execution, section, event)` record as one trace line.
+fn format_record(execution: &str, section: &str, event: &Observation) -> String {
+    format!("[{execution}] {section}: {event}")
 }
 
 /// Mints a fresh per-invocation execution id: `dev-` plus 128 random bits.

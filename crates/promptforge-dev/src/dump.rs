@@ -162,7 +162,7 @@ impl Store for MirrorStore {
         self.inner.glob(pattern)
     }
 
-    fn exists(&self, path: &str) -> bool {
+    fn exists(&self, path: &str) -> Result<bool, StoreError> {
         self.inner.exists(path)
     }
 }
@@ -185,7 +185,7 @@ impl TraceCapture {
 impl DebugCapture for TraceCapture {
     fn on_event(&self, _execution: &str, _section: &str, turn_index: u32, event: DebugEvent) {
         let (name, body) = match &event {
-            DebugEvent::Request { body } => (format!("turn-{turn_index}-request.json"), body),
+            DebugEvent::Request { body, .. } => (format!("turn-{turn_index}-request.json"), body),
             DebugEvent::Response { body, .. } => (format!("turn-{turn_index}-response.json"), body),
             _ => return,
         };

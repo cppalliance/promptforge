@@ -7,11 +7,11 @@
 //! version - or the CLI declines to run it.
 
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use promptforge_core::CancelHandle;
-use promptforge_core::cancel;
 use promptforge_core::client::GatewayClient;
-use promptforge_core::execute::{ResolutionContext, RunOptions};
+use promptforge_core::execute::{ResolutionContext, RunConfig};
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::observe::{NullObserver, Observer};
 use promptforge_core::store::StoreRef;
@@ -33,38 +33,42 @@ async fn main() -> ExitCode {
 
     let mut args = std::env::args().skip(1);
     let command = args.next();
-    cancel::scope(cancel, async {
-        match command.as_deref() {
-            Some("run") => {
-                let Some(path) = args.next() else {
-                    eprintln!("usage: promptforge run <file.md> [input]");
-                    return ExitCode::FAILURE;
-                };
-                let input = args.next().unwrap_or_default();
-                run(&path, &input, &NullObserver).await
-            }
-            Some(other) => {
-                eprintln!("unknown command: {other}\nusage: promptforge run <file.md> [input]");
-                ExitCode::FAILURE
-            }
-            None => {
+    match command.as_deref() {
+        Some("run") => {
+            let Some(path) = args.next() else {
                 eprintln!("usage: promptforge run <file.md> [input]");
-                ExitCode::FAILURE
-            }
+                return ExitCode::FAILURE;
+            };
+            let input = args.next().unwrap_or_default();
+            let observer: Arc<dyn Observer> = Arc::new(NullObserver);
+            run(&path, &input, observer, cancel).await
         }
-    })
-    .await
+        Some(other) => {
+            eprintln!("unknown command: {other}\nusage: promptforge run <file.md> [input]");
+            ExitCode::FAILURE
+        }
+        None => {
+            eprintln!("usage: promptforge run <file.md> [input]");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Parse the file, execute its sections with `input` as `args`, and print the
 /// result.
-async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
+async fn run(
+    path: &str,
+    input: &str,
+    observer: Arc<dyn Observer>,
+    cancel: CancelHandle,
+) -> ExitCode {
     let gateway_key = std::env::var("PROMPTFORGE_GATEWAY_KEY").ok();
     let gateway_url = std::env::var("PROMPTFORGE_GATEWAY_URL").ok();
     run_with_gateway(
         path,
         input,
         observer,
+        cancel,
         Gateway::Environment {
             url: gateway_url.as_deref(),
             key: gateway_key.as_deref(),
@@ -85,7 +89,8 @@ enum Gateway<'a> {
 async fn run_with_gateway(
     path: &str,
     input: &str,
-    observer: &dyn Observer,
+    observer: Arc<dyn Observer>,
+    cancel: CancelHandle,
     gateway: Gateway<'_>,
 ) -> ExitCode {
     let execution = format!("cli-{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..));
@@ -104,7 +109,7 @@ async fn run_with_gateway(
         return ExitCode::FAILURE;
     }
 
-    let prompt = match Prompt::parse(&source, &execution, observer) {
+    let prompt = match Prompt::parse(&source, &execution, observer.as_ref()) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {e}");
@@ -145,6 +150,7 @@ async fn run_with_gateway(
                 &prompt,
                 input,
                 observer,
+                cancel,
                 &execution,
                 &picker,
                 &models,
@@ -169,6 +175,7 @@ async fn run_with_gateway(
                 &prompt,
                 input,
                 observer,
+                cancel,
                 &execution,
                 &picker,
                 &ModelCatalog::empty(),
@@ -187,29 +194,28 @@ async fn run_with_gateway(
 async fn execute_prompt(
     prompt: &Prompt,
     input: &str,
-    observer: &dyn Observer,
+    observer: Arc<dyn Observer>,
+    cancel: CancelHandle,
     execution: &str,
     picker: &ToolPicker,
     models: &ModelCatalog,
-    tools: &[std::sync::Arc<dyn promptforge_core::tools::Tool>],
+    tools: &[Arc<dyn promptforge_core::tools::Tool>],
     client: Option<GatewayClient>,
 ) -> ExitCode {
     let store = StoreRef::memory();
 
-    let options = RunOptions {
-        execution,
-        observer,
-        client,
-        debug: None,
-    };
+    let mut config = RunConfig::new(execution).observer(observer).cancel(cancel);
+    if let Some(client) = client {
+        config = config.client(client);
+    }
 
     match execute::run(
         prompt,
         input,
-        ResolutionContext { picker, models },
+        ResolutionContext::new(picker, models),
         tools,
         &store,
-        options,
+        config,
     )
     .await
     {

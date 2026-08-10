@@ -15,7 +15,6 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use promptforge_core::CancelHandle;
-use promptforge_core::cancel;
 
 use crate::run::require_gateway_env;
 
@@ -73,7 +72,7 @@ async fn main() -> ExitCode {
         }
     });
 
-    let result = cancel::scope(cancel, dispatch(args)).await;
+    let result = dispatch(args, cancel).await;
 
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -85,11 +84,11 @@ async fn main() -> ExitCode {
 }
 
 /// Routes one parsed invocation to single-shot or watch mode.
-async fn dispatch(args: Args) -> Result<()> {
+async fn dispatch(args: Args, cancel: CancelHandle) -> Result<()> {
     if args.watch {
-        return watch::run(&args.prompt, &args.input).await;
+        return watch::run(&args.prompt, &args.input, &cancel).await;
     }
-    let result = run::run_once(&args.prompt, &args.input).await?;
+    let result = run::run_once(&args.prompt, &args.input, cancel).await?;
     println!("{result}");
     Ok(())
 }
