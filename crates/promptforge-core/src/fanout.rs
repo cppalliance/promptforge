@@ -159,8 +159,14 @@ pub(crate) async fn run_fanout_arms(
     }
 
     let turns = Arc::new(AtomicU32::new(0));
-    let (observe_tx, mut observe_rx) = mpsc::unbounded_channel::<(String, Observation)>();
-    let (debug_tx, mut debug_rx) = mpsc::unbounded_channel::<DebugMsg>();
+    // Side channels carry report-only observation/debug traffic. They are BOUNDED
+    // so a burst of arm events cannot grow memory without limit. On overload the
+    // proxies drop events (see `ProxyObserver`/`ProxyDebugCapture`) rather than
+    // block an arm, so back-pressure can never alter execution results - only the
+    // completeness of best-effort progress reporting.
+    let (observe_tx, mut observe_rx) =
+        mpsc::channel::<(String, Observation)>(SIDE_CHANNEL_CAPACITY);
+    let (debug_tx, mut debug_rx) = mpsc::channel::<DebugMsg>(SIDE_CHANNEL_CAPACITY);
     let proxy_observer = Arc::new(ProxyObserver { tx: observe_tx });
     let proxy_debug = ctx.debug.map(|_| {
         Arc::new(ProxyDebugCapture {
@@ -312,8 +318,8 @@ impl ArmWindow {
 async fn abort_fanout_arms(
     join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>,
     ctx: &FanoutContext<'_>,
-    observe_rx: &mut mpsc::UnboundedReceiver<(String, Observation)>,
-    debug_rx: &mut mpsc::UnboundedReceiver<DebugMsg>,
+    observe_rx: &mut mpsc::Receiver<(String, Observation)>,
+    debug_rx: &mut mpsc::Receiver<DebugMsg>,
 ) {
     join_set.abort_all();
     while join_set.join_next().await.is_some() {}
@@ -322,8 +328,8 @@ async fn abort_fanout_arms(
 
 fn drain_side_channels(
     ctx: &FanoutContext<'_>,
-    observe_rx: &mut mpsc::UnboundedReceiver<(String, Observation)>,
-    debug_rx: &mut mpsc::UnboundedReceiver<DebugMsg>,
+    observe_rx: &mut mpsc::Receiver<(String, Observation)>,
+    debug_rx: &mut mpsc::Receiver<DebugMsg>,
 ) {
     while let Ok((section, event)) = observe_rx.try_recv() {
         ctx.observer.observe(ctx.execution, &section, event);
@@ -360,14 +366,23 @@ struct ArmPayload {
     debug: Option<Arc<dyn DebugCapture>>,
 }
 
+/// Bound on each fanout side channel (observation and debug).
+///
+/// Sized to absorb normal bursts while capping worst-case queued memory. On
+/// overload the proxies drop events instead of blocking, so this bound never
+/// changes execution results - only best-effort report completeness.
+const SIDE_CHANNEL_CAPACITY: usize = 256;
+
 struct ProxyObserver {
-    tx: mpsc::UnboundedSender<(String, Observation)>,
+    tx: mpsc::Sender<(String, Observation)>,
 }
 
 impl Observer for ProxyObserver {
     fn observe(&self, _execution: &str, section: &str, event: Observation) {
-        // Parent may already have returned after fail-fast drain/drop.
-        let _ = self.tx.send((section.to_owned(), event));
+        // Report-only: never block an arm on a slow/full/closed consumer. A full
+        // channel drops this event; the parent may also have returned already
+        // after a fail-fast drain/drop. Neither can alter execution results.
+        let _ = self.tx.try_send((section.to_owned(), event));
     }
 }
 
@@ -378,13 +393,14 @@ struct DebugMsg {
 }
 
 struct ProxyDebugCapture {
-    tx: mpsc::UnboundedSender<DebugMsg>,
+    tx: mpsc::Sender<DebugMsg>,
 }
 
 impl DebugCapture for ProxyDebugCapture {
     fn on_event(&self, _execution: &str, section: &str, turn_index: u32, event: DebugEvent) {
-        // Parent may already have returned after fail-fast drain/drop.
-        let _ = self.tx.send(DebugMsg {
+        // Report-only: a full or closed channel drops this event rather than
+        // blocking the arm, so debug back-pressure cannot alter execution.
+        let _ = self.tx.try_send(DebugMsg {
             section: section.to_owned(),
             turn_index,
             event,
