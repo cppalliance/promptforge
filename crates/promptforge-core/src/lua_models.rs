@@ -8,6 +8,7 @@ use std::sync::Mutex;
 
 use mlua::{Lua, MultiValue, Scope, Table, UserData, UserDataFields, UserDataMethods, Value};
 
+use crate::dialects::ToolDialectId;
 use crate::model::{ModelBinding, ModelBindings, ModelNeedOpts, ModelResolver};
 use crate::observe::{Observer, detail};
 use crate::{Error, Result};
@@ -82,10 +83,14 @@ impl LuaModelHandle {
         self.binding.invocation().max_tokens
     }
 
-    /// Returns the tool-calling dialect id string.
+    /// Returns the tool-calling dialect id.
+    ///
+    /// Returns the closed [`ToolDialectId`] identity; the `String` allocation
+    /// happens only in the Lua userdata field callback, at the boundary that
+    /// actually needs a Lua string.
     #[must_use]
-    pub(crate) fn dialect(&self) -> String {
-        self.binding.tool_dialect().to_string()
+    pub(crate) fn dialect(&self) -> ToolDialectId {
+        self.binding.tool_dialect()
     }
 }
 
@@ -98,7 +103,7 @@ impl UserData for LuaModelHandle {
         fields.add_field_method_get("thinking", |_, this| Ok(this.thinking()));
         fields.add_field_method_get("temperature", |_, this| Ok(this.temperature()));
         fields.add_field_method_get("max_tokens", |_, this| Ok(this.max_tokens()));
-        fields.add_field_method_get("dialect", |_, this| Ok(this.dialect()));
+        fields.add_field_method_get("dialect", |_, this| Ok(this.dialect().to_string()));
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
@@ -212,6 +217,33 @@ fn record_always_selection(state: &mut ModelBindingState, alias: String) -> mlua
     Ok(())
 }
 
+/// Records the multi-argument `models.always(alias, description, opts)` form
+/// atomically.
+///
+/// All preconditions (the at-most-once `always` rule and, via
+/// [`record_need_binding`], the duplicate-alias and resolution rules) are
+/// checked BEFORE any state is mutated, so a rejected call can never leave a
+/// half-recorded binding with no matching default alias behind. Only when every
+/// precondition passes are the binding and the default alias committed together.
+fn record_always_binding(
+    state: &mut ModelBindingState,
+    resolver: &dyn ModelResolver,
+    alias: &str,
+    description: &str,
+    opts: &ModelNeedOpts,
+) -> mlua::Result<ModelBinding> {
+    if state.always.is_some() {
+        return Err(mlua::Error::external(
+            "models.always may be called at most once per prompt",
+        ));
+    }
+    // `record_need_binding` only pushes after its own preconditions pass, and we
+    // have already verified `always` is unset, so this commit is atomic.
+    let binding = record_need_binding(state, resolver, alias, description, opts)?;
+    state.always = Some(alias.to_owned());
+    Ok(binding)
+}
+
 /// Extracts a single string alias from a `MultiValue` (for the 1-arg form).
 fn parse_single_alias(args: &MultiValue, label: &str) -> mlua::Result<String> {
     match args.iter().next() {
@@ -265,8 +297,7 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
                     .lock()
                     .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
                 let binding =
-                    record_need_binding(&mut guard, resolver, &alias, &description, &opts)?;
-                record_always_selection(&mut guard, alias)?;
+                    record_always_binding(&mut guard, resolver, &alias, &description, &opts)?;
                 Ok(LuaModelHandle::from_binding(&binding))
             } else {
                 let alias = parse_single_alias(&args, "models.always")?;
@@ -423,20 +454,23 @@ fn close_model_scope_inner(
             "model scope can only close once after H2 recording".to_owned(),
         ));
     }
-    runtime.phase = ModelPhase::Closed;
+    // Resolve (and clone) the effective binding BEFORE transitioning to Closed,
+    // so a missing frozen binding fails while the scope is still H2. Otherwise a
+    // failed close would leave a Closed scope whose selected alias has no
+    // binding - an inconsistent state. The phase write below is infallible.
     let effective_alias = runtime
         .used
         .clone()
         .or_else(|| bindings.always().map(String::from));
-    match effective_alias {
-        Some(alias) => {
-            let binding = bindings.binding(&alias).cloned().ok_or_else(|| {
+    let resolved =
+        match effective_alias {
+            Some(alias) => Some(bindings.binding(&alias).cloned().ok_or_else(|| {
                 Error::Lua(format!("model alias {alias:?} has no frozen binding"))
-            })?;
-            Ok(Some(binding))
-        }
-        None => Ok(None),
-    }
+            })?),
+            None => None,
+        };
+    runtime.phase = ModelPhase::Closed;
+    Ok(resolved)
 }
 
 fn parse_need_args(args: MultiValue) -> mlua::Result<(String, String, ModelNeedOpts)> {
@@ -523,11 +557,13 @@ const TEMPERATURE_RANGE: std::ops::RangeInclusive<f64> = 0.0..=2.0;
 
 /// Parses and validates a sampling temperature at the Lua trust boundary.
 ///
-/// It must be a finite number within [`TEMPERATURE_RANGE`]. Non-finite (`NaN`,
-/// infinity) or out-of-domain values are rejected here rather than forwarded to
-/// the gateway as an invalid request.
+/// Lua integer and number forms are decoded through ONE numeric path (no
+/// arbitrary `i32` gate), then validated by ONE domain check: the result must be
+/// a finite number within [`TEMPERATURE_RANGE`]. Non-finite (`NaN`, infinity) or
+/// out-of-domain values are rejected here rather than forwarded to the gateway
+/// as an invalid request.
 fn value_as_temperature(value: &Value) -> mlua::Result<f64> {
-    let temperature = value_as_f64(value, "temperature")?;
+    let temperature = decode_lua_number(value, "temperature")?;
     if !temperature.is_finite() || !TEMPERATURE_RANGE.contains(&temperature) {
         return Err(mlua::Error::external(format!(
             "models.need opts.temperature must be a finite number in [0.0, 2.0], got {temperature}"
@@ -573,14 +609,24 @@ fn value_as_u32(value: &Value, field: &str) -> mlua::Result<u32> {
     }
 }
 
-fn value_as_f64(value: &Value, field: &str) -> mlua::Result<f64> {
+/// Decodes a Lua integer or number into an `f64` through a single path.
+///
+/// Both Lua numeric forms are accepted and converted uniformly; the caller's
+/// domain check (for example [`value_as_temperature`]) is the single place that
+/// bounds the result, so there is no separate, arbitrary integer-range gate.
+fn decode_lua_number(value: &Value, field: &str) -> mlua::Result<f64> {
     match value {
         Value::Number(number) => Ok(*number),
-        Value::Integer(number) => i32::try_from(*number).map(f64::from).map_err(|_| {
-            mlua::Error::external(format!(
-                "models.need opts.{field} must be a number within i32 range"
-            ))
-        }),
+        Value::Integer(number) => {
+            // Lua integers are i64. The caller bounds the domain (temperatures
+            // live in [0.0, 2.0]); any magnitude that would lose precision here
+            // is far outside that domain and rejected by the caller's check.
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "domain is bounded by the caller; large magnitudes are rejected there"
+            )]
+            Ok(*number as f64)
+        }
         _ => Err(mlua::Error::external(format!(
             "models.need opts.{field} must be a number"
         ))),
@@ -605,8 +651,26 @@ fn validate_alias(alias: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{reject_infer_options, value_as_temperature};
+    use std::sync::{Arc, Mutex};
+
+    use super::{
+        LuaModelHandle, ModelBindingState, ModelPhase, ModelRuntime, close_model_scope_inner,
+        record_always_binding, reject_infer_options, value_as_temperature,
+    };
+    use crate::dialects::ToolDialectId;
+    use crate::model::{ModelBinding, ModelBindings, ModelId, ModelInvocation, ModelNeedOpts};
     use mlua::Value;
+
+    fn test_binding(alias: &str, dialect: ToolDialectId) -> ModelBinding {
+        ModelBinding::new(
+            alias,
+            "a test capability",
+            ModelId::from_validated("gateway", "m1"),
+            ModelInvocation::from(&ModelNeedOpts::default()),
+        )
+        .with_dialect(dialect)
+        .with_context(8192)
+    }
 
     #[test]
     fn temperature_accepts_finite_in_domain_and_rejects_the_rest() {
@@ -623,6 +687,95 @@ mod tests {
                 "temperature {bad} must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn integer_and_number_temperatures_share_one_decode_and_domain_check() {
+        // The Lua integer form is decoded through the same path as the number
+        // form (no separate i32 gate) and validated by the same domain check.
+        let from_integer =
+            value_as_temperature(&Value::Integer(1)).expect("integer 1 is in-domain");
+        let from_number =
+            value_as_temperature(&Value::Number(1.0)).expect("number 1.0 is in-domain");
+        assert!((from_integer - from_number).abs() <= f64::EPSILON);
+        assert!(
+            value_as_temperature(&Value::Integer(5)).is_err(),
+            "an out-of-domain integer temperature must be rejected by the one domain check"
+        );
+    }
+
+    #[test]
+    fn dialect_getter_returns_the_closed_dialect_id() {
+        // PF-LM-011: the Rust getter returns the closed identity type, not a
+        // freshly allocated String.
+        let handle = LuaModelHandle::from_binding(&test_binding("a", ToolDialectId::OpenAi));
+        assert_eq!(handle.dialect(), ToolDialectId::OpenAi);
+    }
+
+    #[test]
+    fn always_multi_arg_rolls_back_when_already_selected() {
+        // PF-LM-003: a second multi-arg `models.always` must be rejected WITHOUT
+        // leaving a half-recorded binding behind.
+        let resolver = |_: &str, _: &ModelNeedOpts| {
+            Ok(crate::model::ResolvedModel {
+                id: ModelId::from_validated("gateway", "m1"),
+                invocation: ModelInvocation::from(&ModelNeedOpts::default()),
+                tool_dialect: ToolDialectId::OpenAi,
+                context: 8192,
+            })
+        };
+        let mut state = ModelBindingState::default();
+        record_always_binding(
+            &mut state,
+            &resolver,
+            "a",
+            "desc",
+            &ModelNeedOpts::default(),
+        )
+        .expect("the first models.always must succeed");
+        assert_eq!(state.bindings.len(), 1);
+        assert_eq!(state.always.as_deref(), Some("a"));
+
+        let err = record_always_binding(
+            &mut state,
+            &resolver,
+            "b",
+            "desc",
+            &ModelNeedOpts::default(),
+        )
+        .expect_err("a second models.always must be rejected");
+        assert!(
+            err.to_string().contains("at most once"),
+            "error must explain the at-most-once rule: {err}"
+        );
+        assert_eq!(
+            state.bindings.len(),
+            1,
+            "a rejected second models.always must not record a binding (rollback)"
+        );
+        assert_eq!(state.always.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn close_model_scope_validates_binding_before_transition() {
+        // PF-LM-007: when the selected alias has no frozen binding, close must
+        // fail while the scope is still H2, never leaving a Closed scope with a
+        // dangling selection.
+        let bindings = ModelBindings::default();
+        let runtime = Arc::new(Mutex::new(ModelRuntime::new()));
+        runtime.lock().expect("lock the runtime").used = Some("ghost".to_owned());
+
+        let err = close_model_scope_inner(&bindings, &runtime)
+            .expect_err("a selected alias with no binding must fail the close");
+        assert!(
+            err.to_string().contains("no frozen binding"),
+            "error must name the missing binding: {err}"
+        );
+        assert_eq!(
+            runtime.lock().expect("lock the runtime").phase,
+            ModelPhase::H2,
+            "a failed close must not transition the scope to Closed"
+        );
     }
 
     #[test]

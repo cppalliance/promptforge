@@ -131,6 +131,7 @@ impl RunError {
             | Error::OutOfScopeToolCall { .. }
             | Error::UnknownScopedTool(_)
             | Error::Tool { .. } => RunErrorKind::Tool,
+            Error::FanoutArmJoin(_) | Error::Internal(_) => RunErrorKind::Internal,
             Error::Bind { .. }
             | Error::Absent { .. }
             | Error::Duplicate { .. }
@@ -1010,9 +1011,10 @@ async fn execute_live_h1(
 ) -> Result<LiveH1State> {
     let default_max_tool_iterations = limits.tool_iterations().get() as usize;
     let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models)?;
+    let now = now_rfc3339_checked()?;
     let sys = json!({
-        "when": now_rfc3339(),
-        "now": now_rfc3339(),
+        "when": now.clone(),
+        "now": now,
         "id": 0,
         "section_name": prompt.title,
         "execution": execution,
@@ -1204,7 +1206,7 @@ async fn run_sections(
     turns: Arc<AtomicU32>,
 ) -> Result<String> {
     let default_max_tool_iterations = limits.tool_iterations().get() as usize;
-    let when = now_rfc3339();
+    let when = now_rfc3339_checked()?;
     let mut last_reply: Option<String> = None;
 
     // Resolve the tool-loop cap once: the prompt's declared budget, or the
@@ -1218,9 +1220,10 @@ async fn run_sections(
     let mut index = 0usize;
     while index < prompt.sections.len() {
         let section = &prompt.sections[index];
+        let now = now_rfc3339_checked()?;
         let sys = json!({
             "when": when,
-            "now": now_rfc3339(),
+            "now": now,
             "id": index + 1,
             "section_name": section.name,
             "execution": execution,
@@ -1416,7 +1419,13 @@ async fn run_sections(
                         }
                     }
                     let Some(active_client) = client.as_ref() else {
-                        continue;
+                        // The block just above guarantees a client exists here;
+                        // a `None` is an internal invariant violation, not a
+                        // reason to silently skip this section's prose.
+                        vm.teardown(observer, &section.name);
+                        return Err(Error::Internal(
+                            "model-facing prose reached inference with no gateway client",
+                        ));
                     };
                     let Some(options) = completion_options.as_ref() else {
                         vm.teardown(observer, &section.name);
@@ -1743,9 +1752,10 @@ async fn run_execute_section(
 ) -> Result<String> {
     let registry = shared_tools.registry();
     let task_handles = section_handles(top_sections);
+    let now = now_rfc3339_checked()?;
     let sys = json!({
         "when": when,
-        "now": now_rfc3339(),
+        "now": now,
         "id": 0,
         "section_name": section.name,
         "execution": execution,
@@ -1922,7 +1932,13 @@ async fn run_execute_section(
                     }
                 }
                 let Some(active_client) = client.as_ref() else {
-                    continue;
+                    // The block just above guarantees a client exists here; a
+                    // `None` is an internal invariant violation, not a reason to
+                    // silently skip this section's prose.
+                    vm.teardown(observer, &section.name);
+                    return Err(Error::Internal(
+                        "model-facing prose reached inference with no gateway client",
+                    ));
                 };
                 let Some(options) = completion_options.as_ref() else {
                     vm.teardown(observer, &section.name);
@@ -2311,7 +2327,7 @@ pub(crate) async fn run_prose_inference(
 
         // A round trip that produced a reply is a turn, whether the reply is
         // the section's final text or a batch of tool calls.
-        let turn = turns.fetch_add(1, Ordering::Relaxed).saturating_add(1);
+        let turn = advance_turn(turns);
         if let Some(capture) = debug {
             capture.on_event(
                 execution,
@@ -2422,11 +2438,32 @@ pub(crate) async fn run_prose_inference(
     }
 }
 
-/// The current UTC time as an RFC 3339 string, or empty on a formatting error.
-pub(crate) fn now_rfc3339() -> String {
+/// Advances the shared turn counter with saturation, returning the 1-based
+/// index of the turn just started.
+///
+/// Uses `fetch_update` so the STORED counter saturates at [`u32::MAX`] rather
+/// than wrapping through `fetch_add`. A wrapped counter would reuse a turn index
+/// and desynchronize debug capture; saturation makes that unrepresentable. The
+/// closure never returns `None`, so the update never fails.
+fn advance_turn(turns: &AtomicU32) -> u32 {
+    turns
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            Some(current.saturating_add(1))
+        })
+        .unwrap_or(u32::MAX)
+        .saturating_add(1)
+}
+
+/// The current UTC time as an RFC 3339 string.
+///
+/// # Errors
+/// Returns [`Error::Internal`] when the well-known RFC 3339 formatter fails to
+/// render the current time, so a formatting failure surfaces as a concrete
+/// error instead of being coerced to an empty timestamp.
+pub(crate) fn now_rfc3339_checked() -> Result<String> {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_default()
+        .map_err(|_| Error::Internal("failed to format the current time as RFC 3339"))
 }
 
 #[cfg(test)]

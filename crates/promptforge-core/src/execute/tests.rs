@@ -4362,3 +4362,42 @@ return 'done'\n\
     .expect("sys must expose section metadata");
     assert_eq!(out, "done");
 }
+
+#[test]
+fn advance_turn_saturates_and_never_wraps_the_stored_counter() {
+    // FANOUT-008: the shared turn counter must saturate at u32::MAX rather than
+    // wrapping through fetch_add and reusing a turn index.
+    let turns = AtomicU32::new(0);
+    assert_eq!(advance_turn(&turns), 1);
+    assert_eq!(advance_turn(&turns), 2);
+    assert_eq!(turns.load(Ordering::Relaxed), 2);
+
+    // At the boundary, both the presented value and the stored value saturate.
+    let maxed = AtomicU32::new(u32::MAX);
+    assert_eq!(advance_turn(&maxed), u32::MAX);
+    assert_eq!(
+        maxed.load(Ordering::Relaxed),
+        u32::MAX,
+        "the stored counter must not wrap to zero"
+    );
+
+    let near = AtomicU32::new(u32::MAX - 1);
+    assert_eq!(advance_turn(&near), u32::MAX);
+    assert_eq!(advance_turn(&near), u32::MAX);
+    assert_eq!(near.load(Ordering::Relaxed), u32::MAX);
+}
+
+#[test]
+fn now_rfc3339_checked_produces_a_parseable_timestamp() {
+    // F11: timestamp construction is fallible and, on the normal path, yields a
+    // valid RFC 3339 string (never silently coerced to empty).
+    let now = now_rfc3339_checked().expect("formatting the current time must succeed");
+    assert!(!now.is_empty(), "a formatted timestamp is never empty");
+    // RFC 3339 shape: `YYYY-MM-DDThh:mm:ss...` with a `T` date/time separator and
+    // a UTC designator (the formatter renders UTC, so `Z` or a `+00:00` offset).
+    assert!(now.contains('T'), "RFC 3339 has a T separator: {now}");
+    assert!(
+        now.ends_with('Z') || now.contains('+'),
+        "RFC 3339 UTC has a zone designator: {now}"
+    );
+}

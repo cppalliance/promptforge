@@ -27,41 +27,79 @@ use crate::store::StoreRef;
 use crate::tools::SharedTools;
 use crate::{Error, Result, subst};
 
-/// Resolves a heading string like `"### Name"` against a list of sibling
-/// sections, returning the matching section.
+/// Parses a fanout heading like `"### Name"` into an exact `(level, name)`
+/// address.
+///
+/// The marker run must be one-or-more `#`, immediately followed by whitespace,
+/// then a non-empty name. `"###Name"` (no whitespace) and a bare name are both
+/// rejected, so a malformed heading can never be silently reinterpreted.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] when the heading does not start with `#` markers,
-/// or when no sibling matches. The error message lists available siblings.
-pub(crate) fn resolve_sibling<'a>(heading: &str, siblings: &'a [Section]) -> Result<&'a Section> {
+/// Returns [`Error::Lua`] when the marker run is absent, is not followed by
+/// whitespace, or the name is empty.
+fn parse_heading_address(heading: &str) -> Result<(usize, String)> {
     let stripped = heading.trim();
-    if !stripped.starts_with('#') {
+    let level = stripped.chars().take_while(|&c| c == '#').count();
+    if level == 0 {
         return Err(Error::Lua(format!(
             "fanout heading must include ### markers, got bare name: {stripped}"
         )));
     }
-    let level_end = stripped.find(|c: char| c != '#').unwrap_or(stripped.len());
-    let name = stripped[level_end..].trim();
+    // The `#` run is ASCII, so a byte slice at `level` is a valid boundary.
+    let rest = &stripped[level..];
+    if !rest.starts_with(|c: char| c.is_whitespace()) {
+        return Err(Error::Lua(format!(
+            "fanout heading must have whitespace after the {} markers: {stripped}",
+            "#".repeat(level)
+        )));
+    }
+    let name = rest.trim();
     if name.is_empty() {
         return Err(Error::Lua(format!(
             "fanout heading has no name: {stripped}"
         )));
     }
+    Ok((level, name.to_owned()))
+}
 
-    for section in siblings {
-        if section.name == name {
-            return Ok(section);
-        }
-    }
+/// Resolves a heading string like `"### Name"` against a list of sibling
+/// sections, returning the single matching section.
+///
+/// The heading is parsed into an exact `(level, name)` address; a sibling
+/// matches only when BOTH its level and name are equal. Zero matches and more
+/// than one match are both rejected, so an ambiguous or level-mismatched
+/// heading never resolves to an arbitrary first hit.
+///
+/// # Errors
+/// Returns [`Error::Lua`] when the heading is malformed (see
+/// [`parse_heading_address`]), when no sibling matches the exact address, or
+/// when more than one sibling matches. The error message lists available
+/// siblings.
+pub(crate) fn resolve_sibling<'a>(heading: &str, siblings: &'a [Section]) -> Result<&'a Section> {
+    let (level, name) = parse_heading_address(heading)?;
 
-    let available: Vec<String> = siblings
+    let mut matches = siblings
         .iter()
-        .map(|s| format!("{} {}", "#".repeat(s.level.into()), s.name))
-        .collect();
-    Err(Error::Lua(format!(
-        "fanout heading `{stripped}` not found; available siblings: {}",
-        available.join(", ")
-    )))
+        .filter(|section| usize::from(section.level) == level && section.name == name);
+    let Some(found) = matches.next() else {
+        let available: Vec<String> = siblings
+            .iter()
+            .map(|s| format!("{} {}", "#".repeat(s.level.into()), s.name))
+            .collect();
+        return Err(Error::Lua(format!(
+            "fanout heading `{}` not found; available siblings: {}",
+            heading.trim(),
+            available.join(", ")
+        )));
+    };
+    if matches.next().is_some() {
+        return Err(Error::Lua(format!(
+            "fanout heading `{}` is ambiguous; more than one sibling matches {} {name}",
+            heading.trim(),
+            "#".repeat(level)
+        )));
+    }
+    Ok(found)
 }
 
 /// Everything a fanout needs from the invoker's context.
@@ -205,9 +243,9 @@ pub(crate) async fn run_fanout_arms(
                     Some(Err(join_error)) if join_error.is_cancelled() => {}
                     Some(Err(join_error)) => {
                         abort_fanout_arms(&mut join_set, ctx, &mut observe_rx, &mut debug_rx).await;
-                        return Err(Error::Lua(format!(
-                            "fanout arm join failed: {join_error}"
-                        )));
+                        // Keep the structured JoinError as the error source; it is
+                        // only stringified at the Lua callback boundary.
+                        return Err(Error::FanoutArmJoin(join_error));
                     }
                 }
             }
@@ -402,9 +440,16 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
         return Err(error);
     }
 
+    let now = match crate::execute::now_rfc3339_checked() {
+        Ok(now) => now,
+        Err(error) => {
+            vm.teardown(observer, &worker.name);
+            return Err(error);
+        }
+    };
     let sys = json!({
         "when": when,
-        "now": crate::execute::now_rfc3339(),
+        "now": now,
         "id": parent_id,
         "taskid": taskid,
         "section_name": worker.name,
@@ -655,6 +700,68 @@ mod tests {
         let err =
             resolve_sibling("Worker", &sections).expect_err("bare name without ### must error");
         assert!(err.to_string().contains("### markers"), "error was: {err}");
+    }
+
+    fn sibling(name: &str, level: u8) -> Section {
+        Section {
+            name: name.to_string(),
+            level,
+            blocks: vec![Block::Prose {
+                text: String::new(),
+                loop_capable: true,
+            }],
+            children: Vec::new(),
+            items: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn resolve_sibling_requires_whitespace_after_markers() {
+        let sections = vec![sibling("Worker", 3)];
+        let err = resolve_sibling("###Worker", &sections)
+            .expect_err("no whitespace after markers must error");
+        assert!(err.to_string().contains("whitespace"), "error was: {err}");
+    }
+
+    #[test]
+    fn resolve_sibling_requires_exact_level() {
+        let sections = vec![sibling("Worker", 3)];
+        // Same name, wrong marker level, must not resolve.
+        let err = resolve_sibling("## Worker", &sections)
+            .expect_err("a level mismatch must not resolve by name alone");
+        assert!(err.to_string().contains("not found"), "error was: {err}");
+        // The exact address resolves.
+        let ok = resolve_sibling("### Worker", &sections).expect("exact address resolves");
+        assert_eq!(ok.name, "Worker");
+    }
+
+    #[test]
+    fn resolve_sibling_rejects_more_than_one_match() {
+        let sections = vec![sibling("Worker", 3), sibling("Worker", 3)];
+        let err = resolve_sibling("### Worker", &sections)
+            .expect_err("two identical siblings must be rejected as ambiguous");
+        assert!(err.to_string().contains("ambiguous"), "error was: {err}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fanout_arm_join_failure_preserves_the_join_error_source() {
+        // A panicked/aborted arm surfaces as `Error::FanoutArmJoin` that keeps
+        // the structured `JoinError` as its `#[source]`, rather than being
+        // flattened into an `Error::Lua` string that loses the cause.
+        use std::error::Error as _;
+
+        let join_error = tokio::spawn(async { panic!("arm blew up") })
+            .await
+            .expect_err("a panicking task must produce a JoinError");
+        let error = Error::FanoutArmJoin(join_error);
+        assert!(
+            error.source().is_some(),
+            "the JoinError must be preserved as the error source"
+        );
+        assert!(
+            !error.to_string().contains("arm blew up"),
+            "the panic payload is not stringified into the outer message"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
