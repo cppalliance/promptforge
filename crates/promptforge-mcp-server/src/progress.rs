@@ -420,9 +420,8 @@ mod tests {
         // stopped accepting: the queue fills, and the run must not notice.
         let sections = super::CAPACITY + 16;
         let source = long_prompt(sections);
-        let prompt =
-            Prompt::parse(&source, "test-run", &NullObserver::default())
-                .expect("the fixture prompt parses");
+        let prompt = Prompt::parse(&source, "test-run", &NullObserver::default())
+            .expect("the fixture prompt parses");
         let (observer, _frames) = McpObserver::queued();
         let observer = Arc::new(observer);
 

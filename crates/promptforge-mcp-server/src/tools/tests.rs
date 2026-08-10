@@ -24,9 +24,8 @@ fn prompt(name: &str, description: &str) -> (String, Prompt) {
         "---\nname: {name}\ndescription: {description}\npromptforge: 1\n---\n\n\
          # Title\n\n## Main\n\n```lua\nreturn args\n```\n"
     );
-    let prompt =
-        Prompt::parse(&source, "test-run", &NullObserver::default())
-            .expect("the fixture prompt parses");
+    let prompt = Prompt::parse(&source, "test-run", &NullObserver::default())
+        .expect("the fixture prompt parses");
     (source, prompt)
 }
 

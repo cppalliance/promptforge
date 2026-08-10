@@ -141,6 +141,7 @@ impl RunError {
             | Error::Tool { .. } => RunErrorKind::Tool,
             Error::FanoutArmJoin(_) | Error::Internal(_) => RunErrorKind::Internal,
             Error::Bind { .. }
+            | Error::BindSchema { .. }
             | Error::BindQuery { .. }
             | Error::Absent { .. }
             | Error::Duplicate { .. }
@@ -150,6 +151,7 @@ impl RunError {
             | Error::ToolIdSelectedTwice { .. }
             | Error::PickedToolNotLive { .. }
             | Error::ToolScopeAnalysis { .. }
+            | Error::ToolScopeAnalysisSource { .. }
             | Error::NearDuplicateTools { .. }
             | Error::ModelBind { .. }
             | Error::ModelAbsent { .. }
@@ -1076,8 +1078,8 @@ impl ToolAnalysis {
             .collect::<Vec<_>>();
         let near_duplicates = picker
             .near_duplicates(&ids)
-            .map_err(|error| Error::ToolScopeAnalysis {
-                detail: error.to_string(),
+            .map_err(|error| Error::ToolScopeAnalysisSource {
+                source: Box::new(error),
             })?
             .iter()
             .map(|pair| OwnedNearDuplicate {
@@ -2284,9 +2286,9 @@ fn prepare_scoped_tools(
             description,
             tool.parameters_schema(),
         )
-        .map_err(|error| Error::Bind {
-            capability: binding.alias().to_owned(),
-            detail: error.to_string(),
+        .map_err(|error| Error::BindSchema {
+            alias: binding.alias().to_owned(),
+            source: Box::new(error),
         })?;
         schemas.push(schema);
         dispatch.insert(binding.alias().to_owned(), binding.id().clone());

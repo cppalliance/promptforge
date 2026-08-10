@@ -47,7 +47,11 @@ impl std::error::Error for SharedSource {
 #[non_exhaustive]
 pub(crate) enum Error {
     /// The prompt file could not be parsed (bad frontmatter, no sections, etc.).
-    #[error("parse error: {0}")]
+    ///
+    /// The message is the specific failure as a noun phrase; the public wrapper
+    /// already conveys that this is a parse failure, so no redundant `parse
+    /// error:` type label is prepended here (F8).
+    #[error("{0}")]
     Parse(String),
 
     /// The prompt frontmatter was not valid YAML, preserving the parser cause.
@@ -94,7 +98,7 @@ pub(crate) enum Error {
     GatewayDisabled,
 
     /// The HTTP request to the model backend failed at the transport layer.
-    #[error("http transport error")]
+    #[error("http transport failed")]
     Http(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// The backend returned a non-success status.
@@ -164,7 +168,12 @@ pub(crate) enum Error {
     Interrupted,
 
     /// A section's Lua phase failed to build, run, or return a usable value.
-    #[error("lua error: {0}")]
+    ///
+    /// The message is the specific Lua failure as a noun phrase; the public
+    /// wrapper classifies this as a Lua failure, so no redundant `lua error:`
+    /// type label is prepended (F8). Dropping the label also stops a nested
+    /// re-wrap from producing a doubled `lua error: lua error:` prefix.
+    #[error("{0}")]
     Lua(String),
 
     /// Lua source was not syntactically valid at its prompt location.
@@ -188,6 +197,19 @@ pub(crate) enum Error {
         capability: String,
         /// The picker failure without exposing its concrete error type.
         detail: String,
+    },
+
+    /// Building a model-facing tool schema for a bound alias failed, retaining
+    /// the schema validation error as the private `#[source]` cause (F5) rather
+    /// than flattening it into `detail`.
+    #[error("could not build the model-facing schema for tool alias {alias:?}")]
+    #[non_exhaustive]
+    BindSchema {
+        /// The prompt-local alias whose schema could not be built.
+        alias: String,
+        /// The originating schema validation failure, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 
     /// The picker's query failed while resolving a capability, retaining the
@@ -282,6 +304,17 @@ pub(crate) enum Error {
         detail: String,
     },
 
+    /// The picker's near-duplicate analysis of the selected tool scope failed,
+    /// retaining the picker's typed selection error as the private `#[source]`
+    /// cause (F5) rather than flattening it into a string.
+    #[error("could not analyze the selected tool scope")]
+    #[non_exhaustive]
+    ToolScopeAnalysisSource {
+        /// The picker's typed selection failure, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     /// Two tools in one model-visible scope are semantic near-duplicates.
     #[error(
         "tool aliases {first_alias:?} ({first_id:?}) and {second_alias:?} ({second_id:?}) are near-duplicates with similarity {similarity}",
@@ -349,7 +382,7 @@ pub(crate) enum Error {
     /// Carries a typed [`crate::subst::SubstitutionError`] with a stable kind,
     /// the byte offset of the offending placeholder, a bounded preview, and any
     /// preserved serialization source, rather than a flattened string.
-    #[error("substitution error: {0}")]
+    #[error("{0}")]
     Substitution(#[source] Box<crate::subst::SubstitutionError>),
 
     /// The tool-call loop ran its iteration cap without a final text reply.
@@ -481,3 +514,43 @@ impl From<crate::subst::SubstitutionError> for Error {
 
 /// Crate-internal result alias over the [`Error`] substrate.
 pub(crate) type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_bearing_binding_errors_preserve_their_cause() {
+        // F5: the binding and tool-scope failures keep the originating typed
+        // error as a private `source()` instead of flattening it to a string,
+        // and the chain survives through the public `RunError` wrapper.
+        let schema_error = crate::client::ToolSchemaError::NonObjectSchema {
+            name: "echo".to_owned(),
+        };
+        let bind = Error::BindSchema {
+            alias: "echo".to_owned(),
+            source: Box::new(schema_error),
+        };
+        assert!(
+            std::error::Error::source(&bind).is_some(),
+            "BindSchema must preserve the schema validation cause"
+        );
+        assert_eq!(
+            bind.to_string(),
+            "could not build the model-facing schema for tool alias \"echo\""
+        );
+        assert!(
+            std::error::Error::source(&crate::RunError::from(bind)).is_some(),
+            "the public RunError wrapper must keep the binding cause reachable"
+        );
+
+        let analysis = Error::ToolScopeAnalysisSource {
+            source: Box::new(std::io::Error::other("picker selection failed")),
+        };
+        assert!(
+            std::error::Error::source(&analysis).is_some(),
+            "ToolScopeAnalysisSource must preserve the picker selection cause"
+        );
+        assert!(std::error::Error::source(&crate::RunError::from(analysis)).is_some());
+    }
+}
