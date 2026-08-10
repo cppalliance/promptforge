@@ -451,6 +451,22 @@ impl Prompt {
     /// Every parse and compilation report carries the caller-provided
     /// `execution` identifier unchanged.
     ///
+    /// ```
+    /// use promptforge_core::observe::NullObserver;
+    /// use promptforge_core::parser::{Prompt, ParseErrorKind};
+    ///
+    /// let source = "---\nname: greeter\ndescription: says hi\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n";
+    /// let prompt = Prompt::parse(source, "docs", &NullObserver).expect("valid prompt");
+    /// assert_eq!(prompt.frontmatter().name(), "greeter");
+    /// assert_eq!(prompt.title(), "Greeter");
+    /// assert_eq!(prompt.sections().len(), 1);
+    /// assert_eq!(prompt.sections()[0].name(), "Say hi");
+    ///
+    /// // A malformed prompt reports a classified error.
+    /// let err = Prompt::parse("no frontmatter here", "docs", &NullObserver).unwrap_err();
+    /// assert_eq!(err.kind(), ParseErrorKind::Frontmatter);
+    /// ```
+    ///
     /// # Errors
     /// Returns a [`ParseError`] classified `Frontmatter` when the frontmatter
     /// delimiters are missing or the frontmatter is invalid; `Structure` when
