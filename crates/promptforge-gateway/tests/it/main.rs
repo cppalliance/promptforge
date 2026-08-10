@@ -90,13 +90,10 @@ async fn happy_path_through_the_real_client() {
     let gateway = gateway_for(backend).await;
 
     let client = GatewayClient::new(&format!("http://{gateway}/v1"), "test-token");
-    let options = CompletionOptions {
-        model: "test-model".into(),
-        temperature: None,
-        max_tokens: None,
-        thinking: None,
-        tool_dialect: promptforge_core::dialects::ToolDialectId::OpenAi,
-    };
+    let options = CompletionOptions::new(
+        "test-model",
+        promptforge_core::dialects::ToolDialectId::OpenAi,
+    );
     let result = client
         .complete(
             &[promptforge_core::client::Message::user("ping")],
@@ -105,7 +102,7 @@ async fn happy_path_through_the_real_client() {
         )
         .await
         .unwrap();
-    match result.result {
+    match result.result() {
         promptforge_core::client::CompletionResult::Text(reply) => assert_eq!(reply, "pong"),
         other => panic!("expected text reply, got {other:?}"),
     }
@@ -764,13 +761,10 @@ n_predict = 64
     );
 
     let client = GatewayClient::new(&format!("http://{gateway}/v1"), "test-token");
-    let options = CompletionOptions {
-        model: "qwen-tiny".into(),
-        temperature: None,
-        max_tokens: None,
-        thinking: None,
-        tool_dialect: promptforge_core::dialects::ToolDialectId::OpenAi,
-    };
+    let options = CompletionOptions::new(
+        "qwen-tiny",
+        promptforge_core::dialects::ToolDialectId::OpenAi,
+    );
     let result = client
         .complete(
             &[promptforge_core::client::Message::user(
@@ -781,7 +775,7 @@ n_predict = 64
         )
         .await
         .unwrap();
-    match result.result {
+    match result.result() {
         promptforge_core::client::CompletionResult::Text(text) => {
             assert!(!text.trim().is_empty(), "local model returned empty text");
         }

@@ -8,7 +8,7 @@ use promptforge_core::execute::{
 };
 use promptforge_core::model::ModelCatalog;
 use promptforge_core::observe::{NullObserver, Observation, Observer};
-use promptforge_core::parser::{LuaProgram, ParseError, ParseErrorKind, Prompt};
+use promptforge_core::parser::{LuaProgram, ParseErrorKind, Prompt};
 use promptforge_core::store::StoreRef;
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 
@@ -40,13 +40,20 @@ const FANOUT_ARM_FAILURE: &str = include_str!("../prompts/execution/fanout-arm-f
 const ITEM_OUTSIDE_FANOUT: &str = include_str!("../prompts/invalid/item-outside-fanout.md");
 const LIST_H3_NON_LIST: &str = include_str!("../prompts/invalid/list-h3-non-list-content.md");
 
+/// Owned run inputs a fixture supplies. Mirrors the old borrowed `RunOptions`
+/// with an owned `Arc` observer so the local `run` helper can build a
+/// [`RunConfig`]. The fixtures are offline, so `client`/`debug` stay `None`.
+struct RunOptions {
+    execution: &'static str,
+    observer: Arc<dyn Observer>,
+}
+
 async fn run(
     prompt: &Prompt,
     args: &str,
     tools: &[Arc<dyn promptforge_core::tools::Tool>],
     store: &StoreRef,
-    execution: &str,
-    observer: Arc<dyn Observer>,
+    opts: RunOptions,
 ) -> std::result::Result<String, RunError> {
     let picker = ToolPicker::build(Catalog::default(), Config::default())
         .expect("empty fixture picker must build");
@@ -57,7 +64,7 @@ async fn run(
         ResolutionContext::new(&picker, &models),
         tools,
         store,
-        RunConfig::new(execution).observer(observer),
+        RunConfig::new(opts.execution).observer(opts.observer),
     )
     .await
 }
@@ -233,10 +240,12 @@ fn invalid_prompt_files_report_public_error_contracts() {
             panic!("fixture {} unexpectedly parsed", fixture.name);
         };
 
-        let variant_matches = matches!(
-            (fixture.kind, &error),
-            (ErrorKind::Parse, Error::Parse(_)) | (ErrorKind::LuaCompile, Error::LuaCompile { .. })
-        );
+        let variant_matches = match fixture.kind {
+            // A structural/frontmatter/fence/list parse failure is any parse
+            // error that is not a Lua compilation failure.
+            ErrorKind::Parse => error.kind() != ParseErrorKind::Lua,
+            ErrorKind::LuaCompile => error.kind() == ParseErrorKind::Lua,
+        };
         assert!(
             variant_matches,
             "fixture {} returned the wrong error variant: expected {:?}, got {error:?}",
@@ -335,12 +344,12 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
 
 #[tokio::test]
 async fn log_fixture_reports_exact_author_checkpoints() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         LOG_CHECKPOINTS,
         "execution/log-checkpoints.md",
         LOG_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     let result = run(
@@ -350,9 +359,7 @@ async fn log_fixture_reports_exact_author_checkpoints() {
         &store,
         RunOptions {
             execution: LOG_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -394,12 +401,12 @@ async fn log_fixture_reports_exact_author_checkpoints() {
 
 #[tokio::test]
 async fn prologue_return_fixture_skips_model_and_epilog() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         PROLOGUE_RETURN,
         "execution/prologue-return.md",
         PROLOGUE_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     let result = run(
@@ -409,9 +416,7 @@ async fn prologue_return_fixture_skips_model_and_epilog() {
         &store,
         RunOptions {
             execution: PROLOGUE_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -434,12 +439,12 @@ async fn prologue_return_fixture_skips_model_and_epilog() {
 
 #[tokio::test]
 async fn store_fixture_persists_state_across_fall_through() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         STORE_FALLTHROUGH,
         "execution/store-fallthrough.md",
         STORE_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     let result = run(
@@ -449,9 +454,7 @@ async fn store_fixture_persists_state_across_fall_through() {
         &store,
         RunOptions {
             execution: STORE_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -512,9 +515,7 @@ async fn concurrent_runs_keep_execution_ids_separate() {
             &StoreRef::memory(),
             RunOptions {
                 execution: FIRST,
-                observer: first_recorder.as_ref(),
-                client: None,
-                debug: None,
+                observer: Arc::clone(&first_recorder) as Arc<dyn Observer>,
             },
         )
         .await
@@ -530,9 +531,7 @@ async fn concurrent_runs_keep_execution_ids_separate() {
             &StoreRef::memory(),
             RunOptions {
                 execution: SECOND,
-                observer: second_recorder.as_ref(),
-                client: None,
-                debug: None,
+                observer: Arc::clone(&second_recorder) as Arc<dyn Observer>,
             },
         )
         .await
@@ -586,12 +585,12 @@ async fn concurrent_runs_keep_execution_ids_separate() {
 
 #[tokio::test]
 async fn reply_nil_in_section_one() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         REPLY_NIL_SECTION_ONE,
         "execution/reply-nil-section-one.md",
         REPLY_NIL_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let result = run(
         &prompt,
@@ -600,9 +599,7 @@ async fn reply_nil_in_section_one() {
         &StoreRef::memory(),
         RunOptions {
             execution: REPLY_NIL_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -613,12 +610,12 @@ async fn reply_nil_in_section_one() {
 
 #[tokio::test]
 async fn store_triad_numbered_vs_verbatim_vs_inject() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         STORE_TRIAD,
         "execution/store-triad.md",
         STORE_TRIAD_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let result = run(
         &prompt,
@@ -627,9 +624,7 @@ async fn store_triad_numbered_vs_verbatim_vs_inject() {
         &StoreRef::memory(),
         RunOptions {
             execution: STORE_TRIAD_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -641,9 +636,13 @@ async fn store_triad_numbered_vs_verbatim_vs_inject() {
 #[tokio::test]
 async fn reply_substitution_nil_errors() {
     for fixture in EXECUTION_ERROR_FIXTURES {
-        let recorder = Recorder::default();
-        let prompt =
-            parse_execution_fixture(fixture.source, fixture.name, fixture.execution, &recorder);
+        let recorder = Arc::new(Recorder::default());
+        let prompt = parse_execution_fixture(
+            fixture.source,
+            fixture.name,
+            fixture.execution,
+            recorder.as_ref(),
+        );
         let error = run(
             &prompt,
             "",
@@ -651,18 +650,15 @@ async fn reply_substitution_nil_errors() {
             &StoreRef::memory(),
             RunOptions {
                 execution: fixture.execution,
-                observer: &recorder,
-                client: None,
-                debug: None,
+                observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             },
         )
         .await
         .expect_err(&format!("fixture {} must fail at execution", fixture.name));
 
-        let variant_matches = matches!(
-            (fixture.kind, &error),
-            (ExecutionErrorKind::Substitution, Error::Substitution(_))
-        );
+        let variant_matches = match fixture.kind {
+            ExecutionErrorKind::Substitution => error.kind() == RunErrorKind::Substitution,
+        };
         assert!(
             variant_matches,
             "fixture {} returned the wrong error variant: expected {:?}, got {error:?}",
@@ -679,12 +675,12 @@ async fn reply_substitution_nil_errors() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_basic_two_items_prologue_return() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         FANOUT_BASIC,
         "execution/fanout-basic.md",
         FANOUT_BASIC_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     let result = run(
@@ -694,9 +690,7 @@ async fn fanout_basic_two_items_prologue_return() {
         &store,
         RunOptions {
             execution: FANOUT_BASIC_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -719,12 +713,12 @@ async fn fanout_basic_two_items_prologue_return() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_epilog_two_items() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         FANOUT_EPILOG,
         "execution/fanout-epilog.md",
         FANOUT_EPILOG_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     let result = run(
@@ -734,9 +728,7 @@ async fn fanout_epilog_two_items() {
         &store,
         RunOptions {
             execution: FANOUT_EPILOG_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -759,12 +751,12 @@ async fn fanout_epilog_two_items() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_store_writes_persist_across_arms() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         FANOUT_STORE_WRITES,
         "execution/fanout-store-writes.md",
         FANOUT_STORE_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     // Arms rendezvous on ready-*.md; sequential fanout would hang here.
@@ -777,9 +769,7 @@ async fn fanout_store_writes_persist_across_arms() {
             &store,
             RunOptions {
                 execution: FANOUT_STORE_EXECUTION,
-                observer: &recorder,
-                client: None,
-                debug: None,
+                observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             },
         ),
     )
@@ -798,12 +788,12 @@ async fn fanout_store_writes_persist_across_arms() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_failure_propagates() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         FANOUT_ARM_FAILURE,
         "execution/fanout-arm-failure.md",
         FANOUT_FAILURE_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     let error = run(
@@ -813,9 +803,7 @@ async fn fanout_arm_failure_propagates() {
         &store,
         RunOptions {
             execution: FANOUT_FAILURE_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
