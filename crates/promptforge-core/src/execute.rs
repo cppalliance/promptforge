@@ -2519,9 +2519,7 @@ pub(crate) async fn run_prose_inference(
                     // never reused across tool results or rounds; reuse would let
                     // content seen under one nonce forge a later block's close tag.
                     let result = match output.trust() {
-                        crate::tools::OutputTrust::Untrusted => {
-                            untrusted::wrap(output.text(), &untrusted::nonce())
-                        }
+                        crate::tools::OutputTrust::Untrusted => untrusted::wrap(output.text()),
                         crate::tools::OutputTrust::Trusted => output.text().to_owned(),
                     };
                     results.push((call.id.clone(), result));
