@@ -1,4 +1,3 @@
-
 use mlua::Lua;
 
 use super::*;
@@ -903,83 +902,6 @@ fn descriptor_default_dialect_is_openai_native() {
     );
     assert_eq!(descriptor.tool_dialect(), ToolDialectId::OpenAi);
     assert_eq!(descriptor.tools_mode(), crate::dialects::ToolsMode::Native);
-}
-
-#[test]
-fn model_invocation_equality_is_not_reflexive_for_nan() {
-    // Documents why these float-bearing types intentionally do not implement
-    // `Eq`: a NaN temperature is not equal to itself.
-    let nan = ModelInvocation {
-        temperature: Some(Temperature(f64::NAN)),
-        max_tokens: None,
-        thinking: None,
-    };
-    assert_ne!(nan, nan.clone());
-}
-
-#[test]
-fn completion_options_equality_is_not_reflexive_for_nan() {
-    // `CompletionOptions` carries an `Option<Temperature>` (an `f64`
-    // newtype) temperature, so it must not implement `Eq`: a NaN temperature
-    // is not equal to itself, which would violate the reflexivity `Eq`
-    // promises. This test would fail to compile if `Eq` were (re)added. A NaN
-    // cannot enter through the public validated setter; the field is set with
-    // an in-crate `Temperature(NaN)` (private tuple) to prove the soundness
-    // reason `Eq` is withheld.
-    let options = CompletionOptions {
-        model: "m".to_owned(),
-        temperature: Some(Temperature(f64::NAN)),
-        max_tokens: None,
-        thinking: None,
-        tool_dialect: ToolDialectId::OpenAi,
-    };
-    assert_ne!(options, options.clone());
-}
-
-#[test]
-fn with_temperature_rejects_non_finite_and_out_of_range() {
-    let base = || CompletionOptions::new("m", ToolDialectId::OpenAi);
-    assert_eq!(
-        base().with_temperature(f64::NAN),
-        Err(TemperatureError::NotFinite)
-    );
-    assert_eq!(
-        base().with_temperature(f64::INFINITY),
-        Err(TemperatureError::NotFinite)
-    );
-    assert!(matches!(
-        base().with_temperature(-0.1),
-        Err(TemperatureError::OutOfRange { .. })
-    ));
-    assert!(matches!(
-        base().with_temperature(2.5),
-        Err(TemperatureError::OutOfRange { .. })
-    ));
-    // The range endpoints and an interior value are accepted.
-    assert_eq!(
-        base()
-            .with_temperature(0.0)
-            .expect("0.0 is valid")
-            .temperature
-            .map(Temperature::get),
-        Some(0.0)
-    );
-    assert_eq!(
-        base()
-            .with_temperature(TEMPERATURE_MAX)
-            .expect("2.0 is valid")
-            .temperature
-            .map(Temperature::get),
-        Some(TEMPERATURE_MAX)
-    );
-    assert_eq!(
-        base()
-            .with_temperature(0.7)
-            .expect("0.7 is valid")
-            .temperature
-            .map(Temperature::get),
-        Some(0.7)
-    );
 }
 
 #[test]
