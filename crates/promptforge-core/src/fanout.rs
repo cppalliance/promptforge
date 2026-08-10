@@ -518,7 +518,14 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
     };
 
     let sys = if let Some(model_binding) = scopes.model.as_ref() {
-        let enriched = crate::lua::enrich_sys_model(&vm.current_sys(&sys), model_binding);
+        let current = match vm.current_sys(&sys) {
+            Ok(current) => current,
+            Err(error) => {
+                vm.teardown(observer, &worker.name);
+                return Err(error);
+            }
+        };
+        let enriched = crate::lua::enrich_sys_model(&current, model_binding);
         if let Err(error) = vm.re_seal_sys(&enriched) {
             vm.teardown(observer, &worker.name);
             return Err(error);
@@ -598,8 +605,15 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
             .await
             {
                 Ok((text, finish_reason)) => {
+                    let current = match vm.current_sys(&sys) {
+                        Ok(current) => current,
+                        Err(error) => {
+                            vm.teardown(observer, &worker.name);
+                            return Err(error);
+                        }
+                    };
                     let enriched = crate::lua::enrich_sys_reply_finish_reason(
-                        &vm.current_sys(&sys),
+                        &current,
                         finish_reason.as_deref(),
                     );
                     if let Err(error) = vm.re_seal_sys(&enriched) {

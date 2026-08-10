@@ -490,7 +490,11 @@ impl ToolRuntime {
 ///
 /// Compilation does not execute the source. Loading a program (a crate-internal
 /// step) creates a function in the supplied VM but likewise does not call it.
+///
+/// `#[non_exhaustive]` so the crate can evolve the retained representation
+/// (fields are already private) without a breaking change before release.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct LuaProgram {
     source: String,
     bytecode: Vec<u8>,
@@ -1300,12 +1304,21 @@ impl SectionVm {
     }
 
     /// Snapshot of the live sealed `sys` JSON, or `fallback` when unset.
-    pub(crate) fn current_sys(&self, fallback: &Json) -> Json {
-        self.sys_live
+    ///
+    /// Distinguishes the two non-value states rather than collapsing both to
+    /// `fallback`: an *unset* live slot (before any [`Self::re_seal_sys`]) is a
+    /// legitimate state and yields `Ok(fallback)`, while a *poisoned* lock is a
+    /// real failure and yields [`Error::Lua`] instead of silently masquerading
+    /// as the fallback.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] when the live `sys` mutex is poisoned.
+    pub(crate) fn current_sys(&self, fallback: &Json) -> Result<Json> {
+        let guard = self
+            .sys_live
             .lock()
-            .ok()
-            .and_then(|guard| guard.clone())
-            .unwrap_or_else(|| fallback.clone())
+            .map_err(|_| Error::Lua("sys live slot was poisoned".to_owned()))?;
+        Ok(guard.clone().unwrap_or_else(|| fallback.clone()))
     }
 
     /// Executes a compiled prologue in this VM's persistent environment.
@@ -4321,6 +4334,38 @@ mod tests {
         assert!(
             !message.contains("?:"),
             "stripped debug info must not leave '?:' in the traceback: {message}"
+        );
+    }
+
+    #[test]
+    fn current_sys_returns_fallback_when_unset_and_errors_on_poison() {
+        // LUA-006: an unset live slot is a legitimate state and yields the
+        // fallback; a poisoned lock is a real failure and must NOT masquerade as
+        // the fallback.
+        let vm = SectionVm::new(None, EXECUTION, &NullObserver, "Section").expect("VM must build");
+        let fallback = json!({ "id": 7 });
+        let got = vm
+            .current_sys(&fallback)
+            .expect("an unset live slot yields the fallback");
+        assert_eq!(got, fallback, "unset must return the fallback verbatim");
+
+        // Poison the live mutex via a panicking guard, then a snapshot must be a
+        // concrete error rather than a silent fallback.
+        let handle = vm.sys_live_handle();
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = handle.lock().expect("first lock is not poisoned");
+            panic!("poison the sys_live mutex");
+        }));
+        assert!(
+            poisoned.is_err(),
+            "the panic must unwind and poison the lock"
+        );
+        let error = vm
+            .current_sys(&fallback)
+            .expect_err("a poisoned live slot must surface a concrete error");
+        assert!(
+            error.to_string().contains("poisoned"),
+            "the error must name the poison: {error}"
         );
     }
 

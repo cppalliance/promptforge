@@ -1349,8 +1349,14 @@ async fn run_sections(
                             }
                         };
                         if let Some(binding) = scopes.model.as_ref() {
-                            let enriched =
-                                crate::lua::enrich_sys_model(&vm.current_sys(&sys), binding);
+                            let current = match vm.current_sys(&sys) {
+                                Ok(current) => current,
+                                Err(error) => {
+                                    vm.teardown(observer, &section.name);
+                                    return Err(error);
+                                }
+                            };
+                            let enriched = crate::lua::enrich_sys_model(&current, binding);
                             if let Err(error) = vm.re_seal_sys(&enriched) {
                                 vm.teardown(observer, &section.name);
                                 return Err(error);
@@ -1870,7 +1876,14 @@ async fn run_execute_section(
                         }
                     };
                     if let Some(binding) = scopes.model.as_ref() {
-                        let enriched = crate::lua::enrich_sys_model(&vm.current_sys(&sys), binding);
+                        let current = match vm.current_sys(&sys) {
+                            Ok(current) => current,
+                            Err(error) => {
+                                vm.teardown(observer, &section.name);
+                                return Err(error);
+                            }
+                        };
+                        let enriched = crate::lua::enrich_sys_model(&current, binding);
                         if let Err(error) = vm.re_seal_sys(&enriched) {
                             vm.teardown(observer, &section.name);
                             return Err(error);
