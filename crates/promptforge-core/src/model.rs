@@ -502,7 +502,9 @@ pub struct CompletionOptions {
     pub(crate) tool_dialect: ToolDialectId,
 }
 
-impl Eq for CompletionOptions {}
+// No `Eq`: `temperature` is an `Option<f64>`, so equality is not reflexive for
+// NaN. A manual `impl Eq` here would claim a total equivalence the field cannot
+// honor, breaking every `Eq`/`Hash` consumer's contract.
 
 impl CompletionOptions {
     /// Builds options for `model` under the given tool-calling `dialect`, with no
@@ -751,6 +753,41 @@ struct ModelsListResponse {
 /// The largest gateway error body kept for a catalog-fetch diagnostic, in bytes.
 const MAX_CATALOG_ERROR_BODY: usize = 2000;
 
+/// The largest success-path model-catalog body accepted before decoding, in
+/// bytes. A gateway that returns more than this is refused rather than buffered
+/// unbounded, mirroring the bound the error path already applies. Sized well
+/// above any realistic model list (16 MiB) so legitimate catalogs are unaffected.
+const MAX_CATALOG_BODY: u64 = 16 * 1024 * 1024;
+
+/// Reads a success-path response body, refusing it once it would exceed `cap`
+/// bytes so a decode cannot buffer an unbounded body first.
+///
+/// The advertised `Content-Length` short-circuits an oversize body, and the
+/// streamed chunks are bounded so a gateway that omits or lies about the length
+/// still cannot force an unbounded allocation.
+async fn read_catalog_body_capped(
+    mut response: reqwest::Response,
+    cap: u64,
+) -> std::result::Result<Vec<u8>, CompletionError> {
+    if let Some(len) = response.content_length()
+        && len > cap
+    {
+        return Err(CompletionError::from(Error::MalformedResponse(format!(
+            "model list body of {len} bytes exceeds the {cap}-byte limit"
+        ))));
+    }
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(Error::http)? {
+        if body.len() as u64 + chunk.len() as u64 > cap {
+            return Err(CompletionError::from(Error::MalformedResponse(format!(
+                "model list body exceeds the {cap}-byte limit"
+            ))));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
 /// Reads at most `limit` bytes of a non-success response body, stopping early so
 /// an oversized error body cannot exhaust memory, and preserving a read failure
 /// as an explicit diagnostic rather than an empty string.
@@ -807,9 +844,12 @@ pub async fn fetch_model_catalog(
             body,
         }));
     }
+    // Bound the success body BEFORE decoding so an oversized (or unbounded)
+    // model list cannot exhaust memory, matching the bound the error path applies.
+    let body = read_catalog_body_capped(response, MAX_CATALOG_BODY).await?;
     // A body that does not decode as a model list is a malformed response, not a
     // transport failure - matching this function's documented error contract.
-    let list: ModelsListResponse = response.json().await.map_err(|error| {
+    let list: ModelsListResponse = serde_json::from_slice(&body).map_err(|error| {
         CompletionError::from(Error::MalformedResponse(format!(
             "model list response was not valid JSON: {error}"
         )))
@@ -1863,6 +1903,17 @@ mod tests {
     }
 
     #[test]
+    fn completion_options_equality_is_not_reflexive_for_nan() {
+        // `CompletionOptions` carries an `Option<f64>` temperature, so it must
+        // not implement `Eq`: a NaN temperature is not equal to itself, which
+        // would violate the reflexivity `Eq` promises. This test would fail to
+        // compile if `Eq` were (re)added, and fails at runtime if the field were
+        // ever coerced into a total-equality comparison.
+        let options = CompletionOptions::new("m", ToolDialectId::OpenAi).with_temperature(f64::NAN);
+        assert_ne!(options, options.clone());
+    }
+
+    #[test]
     fn model_id_rejects_empty_and_control_characters() {
         assert!(ModelId::gateway("").is_err());
         assert!(ModelId::new("", "name").is_err());
@@ -1977,6 +2028,35 @@ mod tests {
             msg.len() < MAX_CATALOG_ERROR_BODY + 128,
             "the error-path body must be bounded, got {} bytes",
             msg.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_model_catalog_bounds_an_oversized_success_body() {
+        use axum::Router;
+        use axum::routing::get;
+
+        // A 200 response whose body exceeds the success cap must be refused
+        // BEFORE decoding, not buffered unbounded. The body is deliberately not
+        // valid JSON: the bound must trip first, regardless of contents.
+        async fn models() -> (axum::http::StatusCode, String) {
+            let oversized = usize::try_from(MAX_CATALOG_BODY).unwrap() + 1;
+            (axum::http::StatusCode::OK, "e".repeat(oversized))
+        }
+        let app = Router::new().route("/models", get(models));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
+            .await
+            .expect_err("an oversized success body must be refused");
+        assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+        assert!(
+            err.to_string().contains("exceeds"),
+            "the bound must report the size limit, got {err}"
         );
     }
 }
