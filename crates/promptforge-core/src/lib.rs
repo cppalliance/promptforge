@@ -16,6 +16,57 @@
 //! A source is a promptforge prompt only when its frontmatter declares a
 //! `promptforge:` version; [`promptforge_version`] reports it (or `None`), and
 //! the runtime refuses a source that lacks a supported version.
+//!
+//! # Examples
+//!
+//! Detect a promptforge source and parse it into a [`Prompt`]:
+//!
+//! ```
+//! use promptforge_core::{Prompt, promptforge_version};
+//! use promptforge_core::observe::NullObserver;
+//!
+//! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 1\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n";
+//!
+//! // Version detection gates whether the runtime will accept the source.
+//! assert_eq!(promptforge_version(source), Some(1));
+//! assert_eq!(promptforge_version("plain text, no frontmatter"), None);
+//!
+//! let prompt = Prompt::parse(source, "doc-example", &NullObserver)?;
+//! assert_eq!(prompt.title(), "Greeter");
+//! assert_eq!(prompt.sections()[0].name(), "Say hi");
+//! # Ok::<(), promptforge_core::ParseError>(())
+//! ```
+//!
+//! Executing a parsed prompt goes through [`run`] with a [`RunConfig`], a
+//! [`ResolutionContext`], a tool slice, and a store; that path can perform
+//! gateway I/O, so it is shown as `no_run`:
+//!
+//! ```no_run
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! use promptforge_core::{Prompt, ResolutionContext, RunConfig, run};
+//! use promptforge_core::model::ModelCatalog;
+//! use promptforge_core::observe::NullObserver;
+//! use promptforge_core::store::StoreRef;
+//! use promptforge_tool_picker::{Catalog, Config, ToolPicker};
+//!
+//! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 1\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n";
+//! let prompt = Prompt::parse(source, "run-example", &NullObserver)?;
+//!
+//! let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())?;
+//! let models = ModelCatalog::empty();
+//! let answer = run(
+//!     &prompt,
+//!     "",
+//!     ResolutionContext::new(&picker, &models),
+//!     &[],
+//!     &StoreRef::memory(),
+//!     RunConfig::new("run-example"),
+//! )
+//! .await?;
+//! println!("{answer}");
+//! # Ok(())
+//! # }
+//! ```
 
 pub(crate) mod cancel;
 pub mod client;
@@ -40,6 +91,6 @@ pub(crate) use crate::error::{Error, NearDuplicateDiagnostic, Result};
 
 pub use crate::cancel::CancelHandle;
 pub use crate::dialects::{DialectError, DialectErrorKind};
-pub use crate::execute::{RunError, RunErrorKind};
+pub use crate::execute::{ResolutionContext, RunConfig, RunError, RunErrorKind, RunLimits, run};
 pub use crate::model::{CompletionError, CompletionErrorKind};
-pub use crate::parser::{ParseError, ParseErrorKind, promptforge_version};
+pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};

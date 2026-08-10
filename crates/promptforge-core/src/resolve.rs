@@ -462,7 +462,10 @@ mod tests {
         ];
         let error = ToolRegistry::new(tools.iter().map(AsRef::as_ref))
             .expect_err("a repeated live identity must be rejected at registration");
-        assert_eq!(error.id(), &ToolId::new("tests", "same").expect("valid id"));
+        assert_eq!(
+            error.duplicate_id(),
+            Some(&ToolId::new("tests", "same").expect("valid id"))
+        );
     }
 
     #[test]
