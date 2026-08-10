@@ -22,24 +22,6 @@ const INSTALL_MARKER: &str = ".promptforge-install";
 /// Non-TTY log cadence: every 64 MiB or 5% of Content-Length, whichever fires first.
 const LOG_PROGRESS_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Pinned Qwen3.5-9B Q4_K_M GGUF URL (same pin as core-tests Dev).
-pub const DEV_MODEL_URL: &str =
-    "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf";
-/// SHA-256 of [`DEV_MODEL_URL`].
-pub const DEV_MODEL_SHA256: &str =
-    "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8";
-/// Basename of the Dev-model GGUF.
-pub const DEV_MODEL_NAME: &str = "Qwen3.5-9B-Q4_K_M.gguf";
-
-/// Pinned tiny Qwen3-0.6B GGUF URL (same pin as core-tests Scenario).
-pub const SCENARIO_MODEL_URL: &str =
-    "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf?download=true";
-/// SHA-256 of [`SCENARIO_MODEL_URL`].
-pub const SCENARIO_MODEL_SHA256: &str =
-    "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031";
-/// Basename of the Scenario-model GGUF.
-pub const SCENARIO_MODEL_NAME: &str = "Qwen3-0.6B-Q8_0.gguf";
-
 type Result<T> = std::result::Result<T, LocalError>;
 
 /// Cache root plus HTTP client for provisioning local inference artifacts.

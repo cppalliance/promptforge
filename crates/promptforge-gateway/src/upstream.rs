@@ -13,7 +13,7 @@ use crate::wire::{ChatRequest, ChatResponse};
 
 /// A backend the gateway can forward a chat completion to.
 #[async_trait]
-pub trait Upstream: Send + Sync {
+pub(crate) trait Upstream: Send + Sync {
     /// Forward `req` to the backend, substituting `upstream_model` for the
     /// caller's model name, and return the response.
     ///
@@ -29,7 +29,7 @@ pub trait Upstream: Send + Sync {
 
 /// An OpenAI-compatible backend reached over HTTP.
 #[derive(Debug)]
-pub struct OpenAiUpstream {
+pub(crate) struct OpenAiUpstream {
     base_url: String,
     api_key: Secret,
     http: reqwest::Client,
@@ -38,7 +38,7 @@ pub struct OpenAiUpstream {
 impl OpenAiUpstream {
     /// Build an upstream for `base_url` (a trailing slash is trimmed).
     #[must_use]
-    pub fn new(base_url: &str, api_key: Secret) -> OpenAiUpstream {
+    pub(crate) fn new(base_url: &str, api_key: Secret) -> OpenAiUpstream {
         OpenAiUpstream {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key,

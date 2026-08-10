@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 /// A request-time failure, rendered to the client as an OpenAI error envelope.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum GatewayError {
+pub(crate) enum GatewayError {
     /// The bearer key was missing or did not match `server.key`.
     #[error("unauthorized")]
     Unauthorized,
@@ -72,7 +72,7 @@ impl From<crate::queue::AdmitError> for GatewayError {
 impl GatewayError {
     /// Wrap a transport error, hiding its concrete type from the public API.
     #[must_use]
-    pub fn upstream_transport(source: reqwest::Error) -> GatewayError {
+    pub(crate) fn upstream_transport(source: reqwest::Error) -> GatewayError {
         GatewayError::UpstreamTransport(Box::new(source))
     }
 

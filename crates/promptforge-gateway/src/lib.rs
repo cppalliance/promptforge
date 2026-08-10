@@ -16,16 +16,25 @@
 //! `GET /health`. In-process llama.cpp FFI, endpoint pinning, model packs,
 //! streaming, and the Anthropic protocol shim are deferred.
 
-pub mod config;
-pub mod error;
-pub mod local;
-pub mod profile;
-pub mod queue;
-pub mod routing;
-pub mod tools;
-pub mod upstream;
-pub mod web_search_process;
-pub mod wire;
+mod api_error;
+mod config;
+mod error;
+mod local;
+mod profile;
+mod queue;
+mod routing;
+mod runner;
+mod tools;
+mod upstream;
+mod web_search_process;
+mod wire;
+
+pub use crate::api_error::{
+    ConfigError, ConfigErrorKind, ServeError, StartupError, StartupErrorKind,
+};
+pub use crate::config::{Config, Secret};
+pub use crate::profile::{ProfileName, ProfileNameError, default_profiles_dir};
+pub use crate::runner::{ConfigSource, Gateway, ProfilesContext, ServeOptions, run};
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -39,7 +48,7 @@ use axum::{Router, response::IntoResponse};
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
-use crate::config::{Secret, WebSearchConfig};
+use crate::config::WebSearchConfig;
 use crate::error::GatewayError;
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
@@ -59,27 +68,21 @@ struct LiveState {
 
 /// Directory used by admin profile routes.
 #[derive(Debug)]
-struct ProfilesContext {
+struct AdminProfiles {
     dir: PathBuf,
 }
 
 /// Shared handler state: live routing/key/local runtime, and optional profiles dir.
 #[derive(Debug, Clone)]
-pub struct AppState {
+pub(crate) struct AppState {
     live: Arc<RwLock<LiveState>>,
-    profiles: Option<Arc<ProfilesContext>>,
+    profiles: Option<Arc<AdminProfiles>>,
 }
 
 impl AppState {
-    /// Build handler state from a routing table and the server key.
+    /// Build full runtime state for `Gateway` and integration tests.
     #[must_use]
-    pub fn new(routing: Arc<Routing>, key: Secret) -> AppState {
-        AppState::from_parts(routing, key, LocalRuntime::empty(), None, None, None)
-    }
-
-    /// Build full runtime state for `serve` and integration tests.
-    #[must_use]
-    pub fn from_parts(
+    pub(crate) fn from_parts(
         routing: Arc<Routing>,
         key: Secret,
         local: LocalRuntime,
@@ -95,7 +98,7 @@ impl AppState {
                 local,
                 profile_name,
             })),
-            profiles: profiles_dir.map(|dir| Arc::new(ProfilesContext { dir })),
+            profiles: profiles_dir.map(|dir| Arc::new(AdminProfiles { dir })),
         }
     }
 
@@ -106,7 +109,7 @@ impl AppState {
 }
 
 /// Build the gateway's axum router.
-pub fn build_router(state: AppState) -> Router {
+pub(crate) fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/models", get(list_models))
@@ -226,20 +229,16 @@ async fn admin_switch_profile(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &headers).await?;
     let dir = profiles_dir(&state)?.to_path_buf();
-    let name = request.name.trim();
-    if name.is_empty() {
-        return Err(GatewayError::SwitchFailed(
-            "profile name must not be empty".to_string(),
-        ));
-    }
+    let name = crate::profile::ProfileName::parse(&request.name)
+        .map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
 
     let path = dir.join(format!("{name}.toml"));
     if !path.is_file() {
-        return Err(GatewayError::ProfileNotFound(name.to_owned()));
+        return Err(GatewayError::ProfileNotFound(name.to_string()));
     }
 
-    let config =
-        profile::load_named(&dir, name).map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
+    let config = crate::config::Config::load_profile(&dir, &name)
+        .map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
 
     // Remote-only routing for the interim (and failure) live state. Kept owned
     // so a successful load can merge local models without reloading the file.
@@ -262,7 +261,7 @@ async fn admin_switch_profile(
         live.routing = Arc::new(interim_routing);
         live.key = new_key;
         live.web_search = new_web_search;
-        live.profile_name = Some(name.to_owned());
+        live.profile_name = Some(name.to_string());
         old_local
     };
     drop(old_local);
@@ -292,7 +291,7 @@ async fn admin_switch_profile(
     tracing::info!(profile = %name, "switched profile");
     Ok(Json(serde_json::json!({
         "ok": true,
-        "profile": name,
+        "profile": name.to_string(),
     })))
 }
 

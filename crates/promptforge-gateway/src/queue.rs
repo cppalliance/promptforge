@@ -17,7 +17,7 @@ use tokio::sync::oneshot;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct QueueConfig {
+pub(crate) struct QueueConfig {
     /// Maximum number of waiting requests before new admits return
     /// [`AdmitError::QueueFull`]. Defaults to 100.
     #[serde(default = "default_max_depth")]
@@ -48,7 +48,7 @@ impl Default for QueueConfig {
 /// Failure to admit a request onto an endpoint lane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum AdmitError {
+pub(crate) enum AdmitError {
     /// The endpoint's waiting queue is already at `max_depth`.
     #[error("queue full")]
     QueueFull,
@@ -60,7 +60,7 @@ pub enum AdmitError {
 /// waiter). An unlimited lane returns a no-op permit.
 #[derive(Debug)]
 #[must_use = "dropping the permit releases the concurrency slot"]
-pub struct Permit {
+pub(crate) struct Permit {
     limited: Option<Arc<LimitedLane>>,
 }
 
@@ -74,7 +74,7 @@ impl Drop for Permit {
 
 /// Per-endpoint admission controller.
 #[derive(Debug, Clone)]
-pub struct EndpointLane {
+pub(crate) struct EndpointLane {
     inner: LaneInner,
 }
 
@@ -120,7 +120,7 @@ struct Waiter {
 impl EndpointLane {
     /// An unlimited lane: every [`admit`](Self::admit) succeeds immediately.
     #[must_use]
-    pub fn unlimited() -> EndpointLane {
+    pub(crate) fn unlimited() -> EndpointLane {
         EndpointLane {
             inner: LaneInner::Unlimited,
         }
@@ -133,7 +133,7 @@ impl EndpointLane {
     /// Panics if `concurrency` is zero. Callers must validate configuration
     /// first.
     #[must_use]
-    pub fn new(concurrency: usize, queue: &QueueConfig) -> EndpointLane {
+    pub(crate) fn new(concurrency: usize, queue: &QueueConfig) -> EndpointLane {
         assert!(concurrency >= 1, "endpoint concurrency must be at least 1");
         assert!(queue.max_depth >= 1, "queue.max_depth must be at least 1");
         EndpointLane {
@@ -162,18 +162,7 @@ impl EndpointLane {
     /// # Errors
     /// Returns [`AdmitError::QueueFull`] when the waiting queue is at
     /// `max_depth` and no in-flight slot is free.
-    ///
-    /// # Examples
-    /// ```
-    /// # async fn demo() -> Result<(), promptforge_gateway::queue::AdmitError> {
-    /// use promptforge_gateway::queue::{EndpointLane, QueueConfig};
-    ///
-    /// let lane = EndpointLane::unlimited();
-    /// let _permit = lane.admit("default").await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn admit(&self, client_key: &str) -> Result<Permit, AdmitError> {
+    pub(crate) async fn admit(&self, client_key: &str) -> Result<Permit, AdmitError> {
         let LaneInner::Limited(lane) = &self.inner else {
             return Ok(Permit { limited: None });
         };

@@ -1,149 +1,192 @@
 //! The `promptforge-gateway` binary:
 //! `promptforge-gateway serve [--profiles-dir DIR] [--profile NAME] [config.toml]`.
+//!
+//! This is a thin shell: it parses arguments into a typed [`ServeOptions`] and
+//! hands off to [`run`], which owns the tokio runtime, provisioning, and serving.
 
-use std::path::{Path, PathBuf};
+use std::ffi::OsString;
+use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
 
-use promptforge_gateway::config::Config;
-use promptforge_gateway::local::LocalRuntime;
-use promptforge_gateway::profile::{self, default_profiles_dir};
-use promptforge_gateway::routing::Routing;
-use promptforge_gateway::{AppState, build_router};
+use promptforge_gateway::{ConfigSource, ProfileName, ServeOptions, default_profiles_dir, run};
 
 const USAGE: &str =
     "usage: promptforge-gateway serve [--profiles-dir DIR] [--profile NAME] [config.toml]";
 
-/// Entry point. Builds the tokio runtime inside `main` (not via an attribute
-/// macro) so the future service handler can construct it the same way.
 fn main() -> ExitCode {
     tracing_subscriber::fmt::init();
 
-    let mut args = std::env::args().skip(1);
-    let Some("serve") = args.next().as_deref() else {
-        eprintln!("{USAGE}");
-        return ExitCode::FAILURE;
+    let options = match parse_args(std::env::args_os()) {
+        Ok(options) => options,
+        Err(ParseError::Help) => {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        Err(ParseError::Usage(message)) => {
+            eprintln!("error: {message}");
+            eprintln!("{USAGE}");
+            return ExitCode::FAILURE;
+        }
     };
 
-    let mut profiles_dir = None;
-    let mut profile = None;
-    let mut config_path = None;
-    let mut rest = args.peekable();
-    while let Some(arg) = rest.next() {
-        match arg.as_str() {
-            "--profiles-dir" => {
-                let Some(dir) = rest.next() else {
-                    eprintln!("error: --profiles-dir requires a directory path");
-                    eprintln!("{USAGE}");
-                    return ExitCode::FAILURE;
-                };
-                profiles_dir = Some(PathBuf::from(dir));
-            }
-            "--profile" => {
-                let Some(name) = rest.next() else {
-                    eprintln!("error: --profile requires a name");
-                    eprintln!("{USAGE}");
-                    return ExitCode::FAILURE;
-                };
-                profile = Some(name);
-            }
-            "-h" | "--help" => {
-                eprintln!("{USAGE}");
-                return ExitCode::SUCCESS;
-            }
-            other if other.starts_with('-') => {
-                eprintln!("error: unknown flag {other}");
-                eprintln!("{USAGE}");
-                return ExitCode::FAILURE;
-            }
-            other => {
-                if config_path.is_some() {
-                    eprintln!("error: unexpected argument {other}");
-                    eprintln!("{USAGE}");
-                    return ExitCode::FAILURE;
-                }
-                config_path = Some(PathBuf::from(other));
-            }
-        }
-    }
-
-    if profile.is_none() && config_path.is_none() {
-        eprintln!("error: provide --profile NAME and/or a config.toml path");
-        eprintln!("{USAGE}");
-        return ExitCode::FAILURE;
-    }
-
-    match serve(ServeArgs {
-        profiles_dir: profiles_dir.unwrap_or_else(default_profiles_dir),
-        profile,
-        config_path,
-    }) {
+    match run(options) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("error: {error}");
+            print_error_chain(&error);
             ExitCode::FAILURE
         }
     }
 }
 
-struct ServeArgs {
-    profiles_dir: PathBuf,
-    profile: Option<String>,
-    config_path: Option<PathBuf>,
+/// Print the error and its full `source()` chain to stderr.
+fn print_error_chain(error: &dyn std::error::Error) {
+    eprintln!("error: {error}");
+    let mut source = error.source();
+    while let Some(cause) = source {
+        eprintln!("  caused by: {cause}");
+        source = cause.source();
+    }
 }
 
-/// Load the config, start local children, build the router, and serve.
-fn serve(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let (config, profile_name) = load_startup_config(&args)?;
-    let local = LocalRuntime::start(&config)?;
-    let routing = Arc::new(Routing::from_config(&config)?.merge(local.models().iter().cloned())?);
-    let bind = config.server.bind;
-    let web_search = config
-        .tools
-        .as_ref()
-        .and_then(|tools| tools.web_search.as_ref());
-    let state = AppState::from_parts(
-        routing,
-        config.server.key,
-        local,
-        web_search,
-        Some(args.profiles_dir),
-        profile_name,
-    );
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-    runtime.block_on(async move {
-        let listener = tokio::net::TcpListener::bind(bind).await?;
-        tracing::info!("promptforge-gateway serving on {bind}");
-        axum::serve(listener, build_router(state))
-            .with_graceful_shutdown(async {
-                let _ = tokio::signal::ctrl_c().await;
-            })
-            .await?;
-        Ok::<(), Box<dyn std::error::Error>>(())
-    })?;
-    Ok(())
+/// Why argument parsing stopped.
+#[derive(Debug, PartialEq, Eq)]
+enum ParseError {
+    /// `-h`/`--help` was requested.
+    Help,
+    /// The arguments were invalid; the string is the operator-facing reason.
+    Usage(String),
 }
 
-fn load_startup_config(
-    args: &ServeArgs,
-) -> Result<(Config, Option<String>), Box<dyn std::error::Error>> {
-    if let Some(name) = &args.profile {
-        if let Some(path) = &args.config_path {
-            return Err(format!(
-                "pass either --profile or a config path, not both (got --profile {name} and {})",
-                path.display()
-            )
-            .into());
+/// Parse `serve` arguments into typed [`ServeOptions`].
+///
+/// Uses `OsString` operands so non-UTF-8 config paths survive; `--profile`
+/// names must be valid UTF-8 and parse as a [`ProfileName`]. A profile and an
+/// explicit config path are mutually exclusive.
+fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<ServeOptions, ParseError> {
+    let mut args = args.into_iter();
+    let _binary = args.next();
+
+    match args.next() {
+        Some(command) if command == *"serve" => {}
+        Some(other) => {
+            return Err(ParseError::Usage(format!(
+                "unknown command {}",
+                other.to_string_lossy()
+            )));
         }
-        let config = profile::load_named(&args.profiles_dir, name)?;
-        return Ok((config, Some(name.clone())));
+        None => return Err(ParseError::Usage("missing 'serve' subcommand".to_string())),
     }
 
-    let path = args.config_path.as_deref().ok_or("missing config path")?;
-    let config = Config::load(Path::new(path))?;
-    let name = path.file_stem().and_then(|s| s.to_str()).map(str::to_owned);
-    Ok((config, name))
+    let mut profiles_dir: Option<PathBuf> = None;
+    let mut profile: Option<String> = None;
+    let mut config_path: Option<PathBuf> = None;
+
+    while let Some(arg) = args.next() {
+        match arg.to_str() {
+            Some("--profiles-dir") => {
+                let dir = args
+                    .next()
+                    .ok_or_else(|| ParseError::Usage("--profiles-dir requires a path".to_string()))?;
+                profiles_dir = Some(PathBuf::from(dir));
+            }
+            Some("--profile") => {
+                let name = args
+                    .next()
+                    .ok_or_else(|| ParseError::Usage("--profile requires a name".to_string()))?;
+                let name = name.into_string().map_err(|_| {
+                    ParseError::Usage("--profile name must be valid UTF-8".to_string())
+                })?;
+                profile = Some(name);
+            }
+            Some("-h" | "--help") => return Err(ParseError::Help),
+            Some(other) if other.starts_with('-') => {
+                return Err(ParseError::Usage(format!("unknown flag {other}")));
+            }
+            _ => {
+                if config_path.is_some() {
+                    return Err(ParseError::Usage(format!(
+                        "unexpected argument {}",
+                        arg.to_string_lossy()
+                    )));
+                }
+                config_path = Some(PathBuf::from(arg));
+            }
+        }
+    }
+
+    let profiles_dir = profiles_dir.unwrap_or_else(default_profiles_dir);
+    let source = match (profile, config_path) {
+        (Some(_), Some(_)) => {
+            return Err(ParseError::Usage(
+                "pass either --profile or a config path, not both".to_string(),
+            ));
+        }
+        (Some(name), None) => {
+            let name = ProfileName::parse(&name)
+                .map_err(|error| ParseError::Usage(format!("invalid profile name: {error}")))?;
+            ConfigSource::Profile(name)
+        }
+        (None, Some(path)) => ConfigSource::Path(path),
+        (None, None) => {
+            return Err(ParseError::Usage(
+                "provide --profile NAME or a config.toml path".to_string(),
+            ));
+        }
+    };
+
+    Ok(ServeOptions::new(profiles_dir, source))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(items: &[&str]) -> Vec<OsString> {
+        std::iter::once("promptforge-gateway")
+            .chain(items.iter().copied())
+            .map(OsString::from)
+            .collect()
+    }
+
+    #[test]
+    fn parses_profile_source() {
+        let options = parse_args(args(&["serve", "--profile", "dev"])).expect("parse");
+        assert!(matches!(options.source, ConfigSource::Profile(_)));
+    }
+
+    #[test]
+    fn parses_config_path_source() {
+        let options = parse_args(args(&["serve", "gateway.toml"])).expect("parse");
+        assert!(matches!(options.source, ConfigSource::Path(_)));
+    }
+
+    #[test]
+    fn profile_and_path_are_mutually_exclusive() {
+        let error = parse_args(args(&["serve", "--profile", "dev", "gateway.toml"])).unwrap_err();
+        assert!(matches!(error, ParseError::Usage(_)));
+    }
+
+    #[test]
+    fn requires_a_source() {
+        let error = parse_args(args(&["serve"])).unwrap_err();
+        assert!(matches!(error, ParseError::Usage(_)));
+    }
+
+    #[test]
+    fn rejects_unknown_command() {
+        let error = parse_args(args(&["frobnicate"])).unwrap_err();
+        assert!(matches!(error, ParseError::Usage(_)));
+    }
+
+    #[test]
+    fn help_is_recognized() {
+        let error = parse_args(args(&["serve", "--help"])).unwrap_err();
+        assert_eq!(error, ParseError::Help);
+    }
+
+    #[test]
+    fn rejects_traversal_profile_name() {
+        let error = parse_args(args(&["serve", "--profile", "../escape"])).unwrap_err();
+        assert!(matches!(error, ParseError::Usage(_)));
+    }
 }

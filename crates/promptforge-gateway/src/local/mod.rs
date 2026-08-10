@@ -25,11 +25,7 @@ use crate::config::{Config, LocalModelConfig, ThinkingMode};
 use crate::queue::EndpointLane;
 use crate::routing::{Endpoint, Model};
 
-pub use artifacts::{
-    DEV_MODEL_NAME, DEV_MODEL_SHA256, DEV_MODEL_URL, SCENARIO_MODEL_NAME, SCENARIO_MODEL_SHA256,
-    SCENARIO_MODEL_URL,
-};
-pub use error::LocalError;
+pub(crate) use error::LocalError;
 
 use artifacts::{ArtifactStore, default_promptforge_root};
 use server::{LaunchOptions, ServerGuard};
@@ -40,7 +36,7 @@ use upstream::LocalUpstream;
 /// Keep this value alive for the lifetime of the gateway process. Dropping it
 /// terminates every child (via [`LocalUpstream`] Drop → [`ServerGuard`] Drop).
 #[derive(Debug)]
-pub struct LocalRuntime {
+pub(crate) struct LocalRuntime {
     models: Vec<Arc<Model>>,
 }
 
@@ -48,7 +44,7 @@ impl LocalRuntime {
     /// An empty runtime with no children. Used when no `[[local_model]]` is set
     /// and as the placeholder before the first profile switch.
     #[must_use]
-    pub fn empty() -> LocalRuntime {
+    pub(crate) fn empty() -> LocalRuntime {
         LocalRuntime { models: Vec::new() }
     }
 
@@ -59,7 +55,7 @@ impl LocalRuntime {
     ///
     /// # Errors
     /// Returns [`LocalError`] when download, verification, spawn, or readiness fails.
-    pub fn start(config: &Config) -> Result<LocalRuntime, LocalError> {
+    pub(crate) fn start(config: &Config) -> Result<LocalRuntime, LocalError> {
         if config.local_models.is_empty() {
             return Ok(LocalRuntime::empty());
         }
@@ -136,13 +132,13 @@ impl LocalRuntime {
 
     /// Models registered for local inference, in `[[local_model]]` order.
     #[must_use]
-    pub fn models(&self) -> &[Arc<Model>] {
+    pub(crate) fn models(&self) -> &[Arc<Model>] {
         &self.models
     }
 
     /// Number of local model endpoints (each owns one `llama-server` child).
     #[must_use]
-    pub fn child_count(&self) -> usize {
+    pub(crate) fn child_count(&self) -> usize {
         self.models.len()
     }
 }

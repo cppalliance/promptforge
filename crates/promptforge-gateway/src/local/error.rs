@@ -6,7 +6,7 @@ use std::path::PathBuf;
 /// A failure while downloading, verifying, or launching a local model.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum LocalError {
+pub(crate) enum LocalError {
     /// The host OS/arch has no pinned `llama-server` archive.
     #[error("unsupported llama-server platform `{os}/{arch}`")]
     UnsupportedPlatform {

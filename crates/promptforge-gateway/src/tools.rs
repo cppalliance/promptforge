@@ -16,14 +16,10 @@ use crate::config::{Secret, WebSearchConfig};
 use crate::error::GatewayError;
 use crate::web_search_process::post_process_results;
 
-pub use crate::web_search_process::{
-    DESCRIPTION_MAX_CHARS, TITLE_MAX_CHARS, URL_MAX_CHARS, diversify_hosts, filter_domains,
-    host_from_url, sanitize_text, site_name_from_host, strip_tracking_params,
-};
 
 /// Cloneable runtime settings for `web_search`, filled from [`WebSearchConfig`].
 #[derive(Debug, Clone)]
-pub struct WebSearchSettings {
+pub(crate) struct WebSearchSettings {
     /// Used when the request omits `count`.
     pub default_count: u8,
     /// Clamp and over-fetch ceiling for result counts.
@@ -41,7 +37,7 @@ pub struct WebSearchSettings {
 impl WebSearchSettings {
     /// Build settings from the tool configuration.
     #[must_use]
-    pub fn from_config(cfg: &WebSearchConfig) -> WebSearchSettings {
+    pub(crate) fn from_config(cfg: &WebSearchConfig) -> WebSearchSettings {
         WebSearchSettings {
             default_count: cfg.default_count,
             max_count: cfg.max_count,
@@ -56,7 +52,7 @@ impl WebSearchSettings {
 /// The web-search runtime state: the provider credential, the base URL, and a
 /// shared HTTP client.
 #[derive(Debug)]
-pub struct WebSearchState {
+pub(crate) struct WebSearchState {
     /// The credential sent to the search provider.
     api_key: Secret,
     /// The search API base URL.
@@ -70,7 +66,10 @@ pub struct WebSearchState {
 impl WebSearchState {
     /// Build web-search state from its configuration.
     #[must_use]
-    pub fn new(cfg: &WebSearchConfig) -> WebSearchState {
+    pub(crate) fn new(cfg: &WebSearchConfig) -> WebSearchState {
+        // v0 supports only the Brave provider; the query path below is
+        // Brave-shaped. Reading the provider keeps the selection explicit.
+        let crate::config::SearchProvider::Brave = cfg.provider;
         WebSearchState {
             api_key: cfg.api_key.clone(),
             base_url: cfg.base_url.trim_end_matches('/').to_string(),
@@ -83,7 +82,7 @@ impl WebSearchState {
 /// The request body for `POST /v1/tools/web_search`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct WebSearchRequest {
+pub(crate) struct WebSearchRequest {
     /// The search query.
     pub query: String,
     /// The desired number of results. Defaults to
@@ -113,7 +112,7 @@ pub struct WebSearchRequest {
 
 /// The response body for `POST /v1/tools/web_search`.
 #[derive(Debug, Serialize)]
-pub struct WebSearchResponse {
+pub(crate) struct WebSearchResponse {
     /// The trimmed request query that produced these results.
     pub query: String,
     /// The trimmed search results.
@@ -122,7 +121,7 @@ pub struct WebSearchResponse {
 
 /// One search result, trimmed to the fields the executor needs.
 #[derive(Debug, Serialize)]
-pub struct SearchResult {
+pub(crate) struct SearchResult {
     /// The result's title.
     pub title: String,
     /// The result's URL.
@@ -357,7 +356,7 @@ async fn brave_search(
 /// wrong, [`GatewayError::ToolNotConfigured`] when no `[tools.web_search]`
 /// section is present, [`GatewayError::MalformedRequest`] when `query` is empty
 /// after trimming, and the upstream variants on a provider failure.
-pub async fn web_search(
+pub(crate) async fn web_search(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<WebSearchRequest>,

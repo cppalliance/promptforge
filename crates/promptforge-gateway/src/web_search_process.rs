@@ -9,16 +9,16 @@ use std::collections::HashMap;
 use crate::tools::SearchResult;
 
 /// Max characters kept for a result title after sanitisation.
-pub const TITLE_MAX_CHARS: usize = 512;
+pub(crate) const TITLE_MAX_CHARS: usize = 512;
 /// Max characters kept for a result description after sanitisation.
-pub const DESCRIPTION_MAX_CHARS: usize = 4096;
+pub(crate) const DESCRIPTION_MAX_CHARS: usize = 4096;
 /// Max characters kept for a result URL after tracking strip.
-pub const URL_MAX_CHARS: usize = 2048;
+pub(crate) const URL_MAX_CHARS: usize = 2048;
 
 /// Sanitize free text: drop most controls, collapse whitespace, trim, decode a
 /// fixed entity set, then cap by Unicode scalar count.
 #[must_use]
-pub fn sanitize_text(text: &str, max_chars: usize) -> String {
+pub(crate) fn sanitize_text(text: &str, max_chars: usize) -> String {
     let mut cleaned = String::with_capacity(text.len());
     for c in text.chars() {
         if c == '\n' || c == '\t' {
@@ -38,7 +38,7 @@ pub fn sanitize_text(text: &str, max_chars: usize) -> String {
 /// Params removed when the name equals `fbclid`, `gclid`, `mc_cid`, `mc_eid`,
 /// or starts with `utm_`.
 #[must_use]
-pub fn strip_tracking_params(url: &str) -> String {
+pub(crate) fn strip_tracking_params(url: &str) -> String {
     let Some((base, query)) = url.split_once('?') else {
         return truncate_chars(url, URL_MAX_CHARS);
     };
@@ -74,7 +74,7 @@ pub fn strip_tracking_params(url: &str) -> String {
 /// Handles optional scheme, `userinfo@`, and strips a trailing port. Returns
 /// lowercase host text, or `None` when no host can be parsed.
 #[must_use]
-pub fn host_from_url(url: &str) -> Option<String> {
+pub(crate) fn host_from_url(url: &str) -> Option<String> {
     let rest = match url.split_once("://") {
         Some((_, after)) => after,
         None => url.strip_prefix("//").unwrap_or(url),
@@ -105,7 +105,7 @@ pub fn host_from_url(url: &str) -> Option<String> {
 
 /// Hostname group / display name: lowercase host with one leading `www.` removed.
 #[must_use]
-pub fn site_name_from_host(host: &str) -> String {
+pub(crate) fn site_name_from_host(host: &str) -> String {
     let lower = host.to_ascii_lowercase();
     lower
         .strip_prefix("www.")
@@ -119,7 +119,7 @@ pub fn site_name_from_host(host: &str) -> String {
 /// means no exclude filter. A hostname matches a listed domain when they are
 /// equal (ASCII lowercase) or the hostname ends with `.` + domain.
 #[must_use]
-pub fn filter_domains(
+pub(crate) fn filter_domains(
     results: Vec<SearchResult>,
     include_domains: &[String],
     exclude_domains: &[String],
@@ -155,7 +155,7 @@ pub fn filter_domains(
 ///
 /// Host groups use full hostname, lowercase, with one leading `www.` stripped.
 #[must_use]
-pub fn diversify_hosts(
+pub(crate) fn diversify_hosts(
     results: Vec<SearchResult>,
     max_per_host: u8,
     count: u8,
@@ -187,7 +187,7 @@ pub fn diversify_hosts(
 /// Steps: sanitize title/description, optional tracking strip + URL cap,
 /// set `site_name`, include then exclude domain filters, diversify hosts.
 #[must_use]
-pub fn post_process_results(
+pub(crate) fn post_process_results(
     results: Vec<SearchResult>,
     strip_tracking: bool,
     include_domains: &[String],

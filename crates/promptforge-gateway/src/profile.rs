@@ -15,9 +15,107 @@ use crate::error::ConfigError;
 use crate::local::artifacts::default_promptforge_root;
 
 /// Maximum `include` nesting depth (guards against runaway trees).
-pub const MAX_INCLUDE_DEPTH: usize = 16;
+pub(crate) const MAX_INCLUDE_DEPTH: usize = 16;
+
+/// A validated profile name: exactly one normal path component with a non-empty
+/// UTF-8 stem.
+///
+/// Rejects path separators, `.`, `..`, and the empty string, so a profile
+/// selection can never escape the configured profiles directory. This is the
+/// profile-switch confinement type.
+///
+/// # Examples
+/// ```
+/// use promptforge_gateway::ProfileName;
+///
+/// assert!(ProfileName::parse("dev").is_ok());
+/// assert!(ProfileName::parse("../secrets").is_err());
+/// assert!(ProfileName::parse("a/b").is_err());
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileName(String);
+
+impl ProfileName {
+    /// Parse a profile name, confining it to a single normal path component.
+    ///
+    /// # Errors
+    /// Returns [`ProfileNameError`] when `name` is empty, is `.` or `..`,
+    /// contains a path separator or NUL, or is not exactly one normal path
+    /// component.
+    pub fn parse(name: &str) -> Result<ProfileName, ProfileNameError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(ProfileNameError::new("profile name must not be empty"));
+        }
+        if name == "." || name == ".." {
+            return Err(ProfileNameError::new("profile name must not be `.` or `..`"));
+        }
+        if name.contains(['/', '\\']) || name.contains('\0') {
+            return Err(ProfileNameError::new(
+                "profile name must not contain path separators",
+            ));
+        }
+        let mut components = Path::new(name).components();
+        match (components.next(), components.next()) {
+            (Some(std::path::Component::Normal(part)), None)
+                if part == std::ffi::OsStr::new(name) => {}
+            _ => {
+                return Err(ProfileNameError::new(
+                    "profile name must be a single path component",
+                ));
+            }
+        }
+        Ok(ProfileName(name.to_owned()))
+    }
+
+    /// The validated name as a string slice.
+    #[must_use]
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ProfileName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The reason a string was rejected as a [`ProfileName`].
+#[non_exhaustive]
+pub struct ProfileNameError {
+    reason: &'static str,
+}
+
+impl ProfileNameError {
+    fn new(reason: &'static str) -> ProfileNameError {
+        ProfileNameError { reason }
+    }
+}
+
+impl std::fmt::Debug for ProfileNameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProfileNameError")
+            .field("reason", &self.reason)
+            .finish()
+    }
+}
+
+impl std::fmt::Display for ProfileNameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.reason)
+    }
+}
+
+impl std::error::Error for ProfileNameError {}
 
 /// Default directory for named profiles: `~/.promptforge/profiles`.
+///
+/// # Examples
+/// ```
+/// let dir = promptforge_gateway::default_profiles_dir();
+/// assert!(dir.ends_with("profiles"));
+/// ```
 #[must_use]
 pub fn default_profiles_dir() -> PathBuf {
     default_promptforge_root().join("profiles")
@@ -31,7 +129,7 @@ pub fn default_profiles_dir() -> PathBuf {
 /// # Errors
 /// Returns [`ConfigError::Read`] when the directory cannot be read, or
 /// [`ConfigError::Validation`] when `dir` exists but is not a directory.
-pub fn list_profiles(dir: &Path) -> Result<Vec<String>, ConfigError> {
+pub(crate) fn list_profiles(dir: &Path) -> Result<Vec<String>, ConfigError> {
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -67,7 +165,7 @@ pub fn list_profiles(dir: &Path) -> Result<Vec<String>, ConfigError> {
 /// # Errors
 /// Returns [`ConfigError`] when the file is missing, includes cycle or exceed
 /// depth, merge fails, or the resolved document fails config validation.
-pub fn load_named(dir: &Path, name: &str) -> Result<Config, ConfigError> {
+pub(crate) fn load_named(dir: &Path, name: &str) -> Result<Config, ConfigError> {
     if name.is_empty() || name.contains(['/', '\\']) || name.contains("..") {
         return Err(ConfigError::Validation(format!(
             "invalid profile name {name:?}"
@@ -81,12 +179,12 @@ pub fn load_named(dir: &Path, name: &str) -> Result<Config, ConfigError> {
 ///
 /// # Errors
 /// Returns [`ConfigError`] on read, include, parse, or validation failure.
-pub fn load_path(path: &Path) -> Result<Config, ConfigError> {
+pub(crate) fn load_path(path: &Path) -> Result<Config, ConfigError> {
     let mut stack = Vec::new();
     let mut visiting = HashSet::new();
     let value = load_value(path, 0, &mut stack, &mut visiting)?;
     let raw = toml::to_string(&value).map_err(|e| ConfigError::Parse(e.to_string()))?;
-    Config::from_toml_str(&raw)
+    Config::parse_toml(&raw)
 }
 
 fn load_value(

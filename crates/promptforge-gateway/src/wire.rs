@@ -14,7 +14,7 @@ use crate::config::ThinkingMode;
 /// An incoming chat completions request.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
-pub struct ChatRequest {
+pub(crate) struct ChatRequest {
     /// The model name, resolved against the routing table.
     pub model: String,
     /// The conversation messages, passed through to the backend verbatim.
@@ -27,7 +27,7 @@ pub struct ChatRequest {
 /// An outgoing chat completions response.
 #[derive(Debug, Deserialize, Serialize)]
 #[non_exhaustive]
-pub struct ChatResponse {
+pub(crate) struct ChatResponse {
     /// The model name, rewritten to the caller's requested name.
     pub model: String,
     /// The completion choices, passed through from the backend verbatim.
@@ -40,7 +40,7 @@ pub struct ChatResponse {
 /// The OpenAI-shaped model list returned by `GET /v1/models`.
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-pub struct ModelsResponse {
+pub(crate) struct ModelsResponse {
     /// Always `"list"`.
     pub object: &'static str,
     /// One entry per configured `[[model]]`, in config order.
@@ -50,7 +50,7 @@ pub struct ModelsResponse {
 /// One catalogued model, with PromptForge extensions beside the OpenAI `id`.
 #[derive(Debug, Serialize)]
 #[non_exhaustive]
-pub struct ModelInfo {
+pub(crate) struct ModelInfo {
     /// The caller-facing model name (`[[model]].name`).
     pub id: String,
     /// Always `"model"`.

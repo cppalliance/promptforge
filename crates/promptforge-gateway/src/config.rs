@@ -73,7 +73,7 @@ impl fmt::Display for Secret {
 /// the Anthropic translation shim is deferred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Protocol {
+pub(crate) enum Protocol {
     /// The OpenAI `/chat/completions` shape.
     Openai,
 }
@@ -84,36 +84,36 @@ pub enum Protocol {
 #[non_exhaustive]
 pub struct Config {
     /// Server bind address and shared key.
-    pub server: ServerConfig,
+    pub(crate) server: ServerConfig,
     /// Waiting-queue settings for limited endpoints.
     #[serde(default)]
-    pub queue: QueueConfig,
+    pub(crate) queue: QueueConfig,
     /// Cache and binary settings for gateway-owned local inference.
     #[serde(default)]
-    pub local: LocalConfig,
+    pub(crate) local: LocalConfig,
     /// Physical compute resources with concurrency limits.
     #[serde(rename = "device", default)]
-    pub devices: Vec<DeviceConfig>,
+    pub(crate) devices: Vec<DeviceConfig>,
     /// The configured backends.
     #[serde(rename = "endpoint", default)]
-    pub endpoints: Vec<EndpointConfig>,
+    pub(crate) endpoints: Vec<EndpointConfig>,
     /// The routing table from model name to remote backend.
     #[serde(rename = "model", default)]
-    pub models: Vec<ModelConfig>,
+    pub(crate) models: Vec<ModelConfig>,
     /// Local generative models served by a managed `llama-server` child.
     #[serde(rename = "local_model", default)]
-    pub local_models: Vec<LocalModelConfig>,
+    pub(crate) local_models: Vec<LocalModelConfig>,
     /// Optional built-in tool configuration. Absent when no `[tools]` section
     /// is present.
     #[serde(default)]
-    pub tools: Option<ToolsConfig>,
+    pub(crate) tools: Option<ToolsConfig>,
 }
 
 /// Whether a device is a remote provider or a local GPU managed by the gateway.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
-pub enum DeviceKind {
+pub(crate) enum DeviceKind {
     /// A remote HTTP provider; concurrency is flat (no lanes required).
     Remote,
     /// A local GPU; concurrency comes from `[[device.lane]]` entries.
@@ -124,7 +124,7 @@ pub enum DeviceKind {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct DeviceConfig {
+pub(crate) struct DeviceConfig {
     /// Operator-chosen device id, referenced by endpoints and local models.
     pub id: String,
     /// Remote provider or local GPU.
@@ -143,7 +143,7 @@ pub struct DeviceConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct LaneConfig {
+pub(crate) struct LaneConfig {
     /// Lane id referenced by `[[local_model]].lane`.
     pub id: String,
     /// Max concurrent inferences on this lane.
@@ -157,7 +157,7 @@ pub struct LaneConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct LocalConfig {
+pub(crate) struct LocalConfig {
     /// Root directory for GGUF files and the pinned `llama-server` install.
     ///
     /// Defaults to `~/.promptforge` (Windows: `%USERPROFILE%\.promptforge`).
@@ -171,7 +171,7 @@ pub struct LocalConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct LocalModelConfig {
+pub(crate) struct LocalModelConfig {
     /// Caller-facing model name in `/v1/models` and chat completions.
     pub name: String,
     /// Prose describing the model for catalog consumers and semantic bind.
@@ -219,7 +219,7 @@ pub struct LocalModelConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct ServerConfig {
+pub(crate) struct ServerConfig {
     /// The socket address to bind.
     pub bind: SocketAddr,
     /// The shared bearer key every `/v1/*` request must present.
@@ -230,7 +230,7 @@ pub struct ServerConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct EndpointConfig {
+pub(crate) struct EndpointConfig {
     /// The endpoint's id: an operator-chosen handle referenced by `[[model]]`
     /// entries. Distinct from a model's caller-facing `name`.
     pub id: String,
@@ -260,7 +260,7 @@ pub struct EndpointConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
-pub enum ThinkingMode {
+pub(crate) enum ThinkingMode {
     /// The backend never emits thinking tokens; a per-call switch is ignored.
     #[default]
     Never,
@@ -274,7 +274,7 @@ pub enum ThinkingMode {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct ModelConfig {
+pub(crate) struct ModelConfig {
     /// The name callers request and that a slot resolves to.
     pub name: String,
     /// Prose describing the model for catalog consumers and semantic bind.
@@ -297,7 +297,7 @@ pub struct ModelConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct ToolsConfig {
+pub(crate) struct ToolsConfig {
     /// The web-search tool configuration. Absent when no `[tools.web_search]`
     /// section is present.
     #[serde(default)]
@@ -308,7 +308,7 @@ pub struct ToolsConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct WebSearchConfig {
+pub(crate) struct WebSearchConfig {
     /// The search provider backing the tool.
     pub provider: SearchProvider,
     /// The credential sent to the search provider.
@@ -358,7 +358,7 @@ fn default_web_search_max_per_host() -> u8 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
-pub enum SearchProvider {
+pub(crate) enum SearchProvider {
     /// The Brave Search API.
     Brave,
 }
@@ -367,18 +367,75 @@ impl Config {
     /// Load a configuration file with recursive `include` resolution.
     ///
     /// # Errors
-    /// Returns [`ConfigError`] if the file cannot be read, an include cycle or
-    /// depth limit is hit, an interpolation is malformed or references an unset
-    /// variable, the TOML is invalid, or a semantic check fails.
-    pub fn load(path: &Path) -> Result<Config, ConfigError> {
-        crate::profile::load_path(path)
+    /// Returns [`ConfigError`](crate::ConfigError) if the file cannot be read,
+    /// an include cycle or depth limit is hit, an interpolation is malformed or
+    /// references an unset variable, the TOML is invalid, or a semantic check
+    /// fails.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use promptforge_gateway::Config;
+    /// use std::path::Path;
+    ///
+    /// # fn demo() -> Result<(), promptforge_gateway::ConfigError> {
+    /// let config = Config::load(Path::new("gateway.toml"))?;
+    /// let _ = config;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn load(path: &Path) -> Result<Config, crate::api_error::ConfigError> {
+        crate::profile::load_path(path).map_err(crate::api_error::ConfigError::from)
+    }
+
+    /// Load a named profile from `dir` with recursive `include` resolution.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError`](crate::ConfigError) when the profile is missing,
+    /// includes cycle or exceed depth, or the resolved document fails config
+    /// validation.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use promptforge_gateway::{Config, ProfileName};
+    /// use std::path::Path;
+    ///
+    /// # fn demo() -> Result<(), Box<dyn std::error::Error>> {
+    /// let name = ProfileName::parse("dev")?;
+    /// let config = Config::load_profile(Path::new("/etc/promptforge/profiles"), &name)?;
+    /// let _ = config;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn load_profile(
+        dir: &Path,
+        name: &crate::profile::ProfileName,
+    ) -> Result<Config, crate::api_error::ConfigError> {
+        crate::profile::load_named(dir, name.as_str()).map_err(crate::api_error::ConfigError::from)
+    }
+
+    /// The server bind address.
+    #[must_use]
+    pub(crate) fn bind_addr(&self) -> SocketAddr {
+        self.server.bind
+    }
+
+    /// A clone of the server's bearer key.
+    #[must_use]
+    pub(crate) fn server_key(&self) -> Secret {
+        self.server.key.clone()
+    }
+
+    /// The web-search configuration, when `[tools.web_search]` is present.
+    #[must_use]
+    pub(crate) fn web_search_config(&self) -> Option<&WebSearchConfig> {
+        self.tools.as_ref().and_then(|tools| tools.web_search.as_ref())
     }
 
     /// Resolve the concurrency limit for an endpoint: explicit
     /// `concurrency`, else the referenced remote device's concurrency, else
     /// unlimited (`None`).
     #[must_use]
-    pub fn endpoint_concurrency(&self, endpoint: &EndpointConfig) -> Option<usize> {
+    pub(crate) fn endpoint_concurrency(&self, endpoint: &EndpointConfig) -> Option<usize> {
         if let Some(n) = endpoint.concurrency {
             return Some(n);
         }
@@ -394,7 +451,10 @@ impl Config {
     ///
     /// # Errors
     /// Returns [`ConfigError::Validation`] when the device or lane is missing.
-    pub fn local_model_concurrency(&self, model: &LocalModelConfig) -> Result<usize, ConfigError> {
+    pub(crate) fn local_model_concurrency(
+        &self,
+        model: &LocalModelConfig,
+    ) -> Result<usize, ConfigError> {
         match (&model.device, &model.lane) {
             (None, None) => Ok(1),
             (Some(device_id), Some(lane_id)) => {
@@ -435,9 +495,40 @@ impl Config {
     /// Interpolate, parse, and validate a configuration from a TOML string.
     ///
     /// # Errors
-    /// Returns [`ConfigError`] for a malformed or unresolved interpolation,
-    /// invalid TOML, or a failed semantic check.
-    pub fn from_toml_str(raw: &str) -> Result<Config, ConfigError> {
+    /// Returns [`ConfigError`](crate::ConfigError) for a malformed or unresolved
+    /// interpolation, invalid TOML, or a failed semantic check.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_gateway::Config;
+    ///
+    /// let toml = r#"
+    /// [server]
+    /// bind = "127.0.0.1:8080"
+    /// key = "secret"
+    ///
+    /// [[endpoint]]
+    /// id = "e"
+    /// protocol = "openai"
+    /// base_url = "http://127.0.0.1:9"
+    /// api_key = ""
+    ///
+    /// [[model]]
+    /// name = "m"
+    /// description = "a model"
+    /// context = 8192
+    /// upstream = "u"
+    /// endpoints = ["e"]
+    /// "#;
+    /// let config = Config::from_toml_str(toml).unwrap();
+    /// let _ = config;
+    /// ```
+    pub fn from_toml_str(raw: &str) -> Result<Config, crate::api_error::ConfigError> {
+        Self::parse_toml(raw).map_err(crate::api_error::ConfigError::from)
+    }
+
+    /// Interpolate, parse, and validate, returning the internal error type.
+    pub(crate) fn parse_toml(raw: &str) -> Result<Config, ConfigError> {
         let interpolated = interpolate(raw)?;
         let config: Config =
             toml::from_str(&interpolated).map_err(|e| ConfigError::Parse(e.to_string()))?;
@@ -452,7 +543,7 @@ impl Config {
     /// name, a model with an empty endpoint list, a model naming an undefined
     /// endpoint, an invalid `[[local_model]]`, `queue.max_depth` below 1, or
     /// an endpoint `concurrency` below 1.
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
         if self.queue.max_depth < 1 {
             return Err(ConfigError::Validation(
                 "queue.max_depth must be at least 1".to_string(),
@@ -564,12 +655,42 @@ impl Config {
                     model.name
                 )));
             }
+            if model.name.trim().is_empty() {
+                return Err(ConfigError::Validation(
+                    "model name must not be empty".to_string(),
+                ));
+            }
+            if model.description.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "model {} description must not be empty",
+                    model.name
+                )));
+            }
+            if model.upstream.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "model {} upstream must not be empty",
+                    model.name
+                )));
+            }
+            if model.context == 0 {
+                return Err(ConfigError::Validation(format!(
+                    "model {} context must be greater than zero",
+                    model.name
+                )));
+            }
+            if model.default_max_tokens == Some(0) {
+                return Err(ConfigError::Validation(format!(
+                    "model {} default_max_tokens must be greater than zero",
+                    model.name
+                )));
+            }
             if model.endpoints.is_empty() {
                 return Err(ConfigError::Validation(format!(
                     "model {} has no endpoints",
                     model.name
                 )));
             }
+            let mut seen_endpoints = HashSet::new();
             for endpoint in &model.endpoints {
                 if !endpoint_ids.contains(endpoint.as_str()) {
                     return Err(ConfigError::Validation(format!(
@@ -577,9 +698,22 @@ impl Config {
                         model.name
                     )));
                 }
+                if !seen_endpoints.insert(endpoint.as_str()) {
+                    return Err(ConfigError::Validation(format!(
+                        "model {} lists duplicate endpoint {endpoint}",
+                        model.name
+                    )));
+                }
             }
         }
 
+        self.validate_local_models(&mut model_names)
+    }
+
+    fn validate_local_models<'a>(
+        &'a self,
+        model_names: &mut HashSet<&'a str>,
+    ) -> Result<(), ConfigError> {
         for local_model in &self.local_models {
             if local_model.name.is_empty() {
                 return Err(ConfigError::Validation(
@@ -734,7 +868,7 @@ upstream = "u"
 endpoints = ["anthropic"]
 "#;
         assert!(matches!(
-            Config::from_toml_str(toml),
+            Config::parse_toml(toml),
             Err(ConfigError::Parse(_))
         ));
     }
@@ -759,7 +893,7 @@ upstream = "u"
 endpoints = ["anthropic"]
 "#;
         assert!(matches!(
-            Config::from_toml_str(toml),
+            Config::parse_toml(toml),
             Err(ConfigError::Parse(_))
         ));
     }
@@ -786,7 +920,7 @@ endpoints = ["anthropic"]
 mystery = true
 "#;
         assert!(matches!(
-            Config::from_toml_str(toml),
+            Config::parse_toml(toml),
             Err(ConfigError::Parse(_))
         ));
     }
@@ -867,7 +1001,7 @@ upstream = "u"
 endpoints = ["dup"]
 "#;
         assert!(matches!(
-            Config::from_toml_str(toml),
+            Config::parse_toml(toml),
             Err(ConfigError::Validation(_))
         ));
     }
@@ -893,7 +1027,7 @@ upstream = "u"
 endpoints = ["ghost"]
 "#;
         assert!(matches!(
-            Config::from_toml_str(toml),
+            Config::parse_toml(toml),
             Err(ConfigError::Validation(_))
         ));
     }
@@ -919,7 +1053,7 @@ upstream = "u"
 endpoints = []
 "#;
         assert!(matches!(
-            Config::from_toml_str(toml),
+            Config::parse_toml(toml),
             Err(ConfigError::Validation(_))
         ));
     }
@@ -1078,7 +1212,7 @@ upstream = "u"
 endpoints = ["anthropic"]
 "#;
         assert!(matches!(
-            Config::from_toml_str(toml),
+            Config::parse_toml(toml),
             Err(ConfigError::Validation(_))
         ));
     }
@@ -1107,7 +1241,7 @@ upstream = "u"
 endpoints = ["anthropic"]
 "#;
         assert!(matches!(
-            Config::from_toml_str(toml),
+            Config::parse_toml(toml),
             Err(ConfigError::Validation(_))
         ));
     }
@@ -1205,7 +1339,7 @@ source = "https://example.com/model.gguf"
 context = 4096
 "#;
         assert!(matches!(
-            Config::from_toml_str(toml),
+            Config::parse_toml(toml),
             Err(ConfigError::Validation(_))
         ));
     }
@@ -1225,7 +1359,7 @@ sha256 = "not-a-digest"
 context = 4096
 "#;
         assert!(matches!(
-            Config::from_toml_str(toml),
+            Config::parse_toml(toml),
             Err(ConfigError::Validation(_))
         ));
     }
@@ -1244,7 +1378,7 @@ source = ""
 context = 4096
 "#;
         assert!(matches!(
-            Config::from_toml_str(toml),
+            Config::parse_toml(toml),
             Err(ConfigError::Validation(_))
         ));
     }
@@ -1329,7 +1463,7 @@ upstream = "u"
 endpoints = ["e"]
 "#;
         assert!(matches!(
-            Config::from_toml_str(toml),
+            Config::parse_toml(toml),
             Err(ConfigError::Validation(_))
         ));
     }
