@@ -462,9 +462,22 @@ impl Tool for EchoTool {
     }
 
     async fn call(&self, args: Value) -> std::result::Result<ToolOutput, ToolError> {
-        let value = args.get("value").and_then(Value::as_str).unwrap_or("");
+        let value = require_string_arg(&args, "value")?;
         Ok(ToolOutput::trusted(format!("echoed: {value}")))
     }
+}
+
+/// Reads a required string argument from a fixture tool's call arguments.
+///
+/// The fixtures declare their arguments `required` in their JSON schema, so a
+/// missing or non-string value is a malformed call, not something to paper over
+/// with an empty string. Returning a concrete [`ToolError`] makes a malformed
+/// fixture call fail loudly instead of silently succeeding on `""`.
+fn require_string_arg<'a>(args: &'a Value, key: &str) -> std::result::Result<&'a str, ToolError> {
+    args.get(key).and_then(Value::as_str).ok_or_else(|| {
+        ToolError::message(format!("fixture tool requires a string `{key}` argument"))
+            .with_kind(ToolErrorKind::InvalidArguments)
+    })
 }
 
 /// A tool whose output opts in to guard-wrapping, standing in for a tool
@@ -502,7 +515,7 @@ impl Tool for UntrustedEchoTool {
     }
 
     async fn call(&self, args: Value) -> std::result::Result<ToolOutput, ToolError> {
-        let value = args.get("value").and_then(Value::as_str).unwrap_or("");
+        let value = require_string_arg(&args, "value")?;
         Ok(ToolOutput::untrusted(format!("echoed: {value}")))
     }
 }
@@ -590,10 +603,10 @@ impl Tool for ScopedFixtureTool {
 
     async fn call(&self, args: Value) -> std::result::Result<ToolOutput, ToolError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        let value = require_string_arg(&args, "value")?;
         Ok(ToolOutput::trusted(format!(
-            "called {} with {}",
+            "called {} with {value}",
             self.id.name(),
-            args["value"].as_str().unwrap_or_default()
         )))
     }
 }
@@ -3534,12 +3547,63 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
 
 #[tokio::test]
 async fn tool_calls_count_increments_even_when_tool_errors() {
-    let counts = crate::lua::ToolCallCounts::new(["echo".to_string()]);
-    assert_eq!(counts.get("echo").unwrap(), Some(0));
-    counts.increment("echo").unwrap();
-    assert_eq!(counts.get("echo").unwrap(), Some(1));
-    counts.increment("echo").unwrap();
-    assert_eq!(counts.get("echo").unwrap(), Some(2));
+    // TESTS-002: drive a real `FailingTool` through `run_tool_loop` and prove the
+    // counter records exactly one call even though the tool errors (the count is
+    // incremented before dispatch), and that the tool's backend error still ends
+    // the loop. The old version poked `ToolCallCounts` directly and dispatched no
+    // tool at all.
+    let (addr, _calls) = spawn_always_tool_call().await;
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
+
+    let failing = FailingTool;
+    let tools: &[&dyn Tool] = &[&failing];
+    let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+
+    let recorder = Arc::new(Recorder::default());
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    // The gateway always calls the tool wired as "echo".
+    let counts = ToolCallCounts::new(["echo".to_string()]);
+
+    let err = run_tool_loop(
+        &client,
+        &schemas,
+        &dispatch,
+        &registry,
+        "ask the model".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        SectionProgress {
+            execution: EXECUTION,
+            observer: recorder.as_ref(),
+            section: "Gather",
+            turns: &turns,
+            debug: None,
+            completion_options: &options,
+        },
+        Some(&counts),
+        None,
+    )
+    .await
+    .expect_err("a tool whose call fails must fail the loop");
+
+    match &err {
+        Error::Tool { message, .. } => assert!(
+            message.contains("the tool's own backend failed"),
+            "the tool's own backend error must propagate: {message}"
+        ),
+        other => panic!("expected the tool's own backend error, got {other:?}"),
+    }
+
+    assert_eq!(
+        counts.get("echo").expect("echo is a tracked alias"),
+        Some(1),
+        "the counter must record exactly one call even though the tool errored"
+    );
 }
 
 #[tokio::test]
