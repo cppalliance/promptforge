@@ -3,12 +3,12 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use promptforge_core::Error;
-use promptforge_core::execute::{ResolutionContext, RunOptions, run as run_core};
-use promptforge_core::lua::LuaProgram;
+use promptforge_core::execute::{
+    ResolutionContext, RunConfig, RunError, RunErrorKind, run as run_core,
+};
 use promptforge_core::model::ModelCatalog;
-use promptforge_core::observe::{NullObserver, Observer};
-use promptforge_core::parser::Prompt;
+use promptforge_core::observe::{NullObserver, Observation, Observer};
+use promptforge_core::parser::{LuaProgram, ParseError, ParseErrorKind, Prompt};
 use promptforge_core::store::StoreRef;
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 
@@ -45,20 +45,19 @@ async fn run(
     args: &str,
     tools: &[Arc<dyn promptforge_core::tools::Tool>],
     store: &StoreRef,
-    options: RunOptions<'_>,
-) -> promptforge_core::Result<String> {
+    execution: &str,
+    observer: Arc<dyn Observer>,
+) -> std::result::Result<String, RunError> {
     let picker = ToolPicker::build(Catalog::default(), Config::default())
         .expect("empty fixture picker must build");
+    let models = ModelCatalog::empty();
     run_core(
         prompt,
         args,
-        ResolutionContext {
-            picker: &picker,
-            models: &ModelCatalog::empty(),
-        },
+        ResolutionContext::new(&picker, &models),
         tools,
         store,
-        options,
+        RunConfig::new(execution).observer(observer),
     )
     .await
 }
@@ -162,11 +161,11 @@ const EXECUTION_ERROR_FIXTURES: &[ExecutionErrorFixture] = &[
 struct Recorder(Mutex<Vec<Record>>);
 
 impl Observer for Recorder {
-    fn observe(&self, execution: &str, section: &str, detail: &str) {
+    fn observe(&self, execution: &str, section: &str, event: Observation) {
         self.0
             .lock()
             .expect("the fixture recorder mutex must remain usable")
-            .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+            .push((execution.to_owned(), section.to_owned(), event.to_string()));
     }
 }
 
@@ -253,78 +252,69 @@ fn invalid_prompt_files_report_public_error_contracts() {
 }
 
 fn verify_minimal(prompt: &Prompt) {
-    assert_eq!(prompt.frontmatter.name, "test");
-    assert_eq!(prompt.frontmatter.description, "minimum valid");
-    assert_eq!(prompt.frontmatter.promptforge, Some(1));
-    assert_eq!(prompt.title, "Test");
-    assert!(prompt.replay.is_none());
-    assert!(prompt.h1_blocks.is_empty());
-    assert!(prompt.description_text.is_empty());
-    assert_eq!(prompt.sections.len(), 1);
-    assert_eq!(prompt.entry().name, "Run");
-    assert_eq!(prompt.entry().level, 2);
+    assert_eq!(prompt.frontmatter().name(), "test");
+    assert_eq!(prompt.frontmatter().description(), "minimum valid");
+    assert_eq!(prompt.frontmatter().promptforge(), Some(1));
+    assert_eq!(prompt.title(), "Test");
+    assert!(prompt.replay().is_none());
+    assert!(prompt.h1_blocks().is_empty());
+    assert_eq!(prompt.sections().len(), 1);
+    assert_eq!(prompt.entry().name(), "Run");
+    assert_eq!(prompt.entry().level(), 2);
     assert_eq!(prompt.entry().prose(), "Done.");
     assert!(prompt.entry().prologue().is_none());
     assert!(prompt.entry().epilog().is_none());
 }
 
 fn verify_shared_library(prompt: &Prompt) {
-    assert_eq!(prompt.frontmatter.name, "shared_library");
+    assert_eq!(prompt.frontmatter().name(), "shared_library");
     assert_eq!(
-        prompt.frontmatter.description,
+        prompt.frontmatter().description(),
         "Exercise an H1 shared library and nested author prose"
     );
-    assert_eq!(prompt.frontmatter.promptforge, Some(1));
-    assert_eq!(prompt.title, "Shared Library");
+    assert_eq!(prompt.frontmatter().promptforge(), Some(1));
+    assert_eq!(prompt.title(), "Shared Library");
     assert_eq!(
-        prompt.replay.as_ref().map(LuaProgram::source),
+        prompt.replay().map(LuaProgram::source),
         Some("function normalize(value)\n    return string.lower(value)\nend")
     );
-    assert_eq!(
-        prompt.description_text,
-        "The shared helper is available to each executable section."
-    );
-    assert_eq!(prompt.sections.len(), 2);
+    assert_eq!(prompt.sections().len(), 2);
 
-    let prepare = &prompt.sections[0];
-    assert_eq!(prepare.name, "Prepare");
-    assert_eq!(prepare.level, 2);
+    let prepare = &prompt.sections()[0];
+    assert_eq!(prepare.name(), "Prepare");
+    assert_eq!(prepare.level(), 2);
     assert_eq!(prepare.prose(), "Normalize the supplied subject.");
     assert!(prepare.prologue().is_none());
     assert!(prepare.epilog().is_none());
-    assert_eq!(prepare.children.len(), 1);
-    assert_eq!(prepare.children[0].name, "Author note");
-    assert_eq!(prepare.children[0].level, 3);
+    assert_eq!(prepare.children().len(), 1);
+    assert_eq!(prepare.children()[0].name(), "Author note");
+    assert_eq!(prepare.children()[0].level(), 3);
     assert_eq!(
-        prepare.children[0].prose(),
+        prepare.children()[0].prose(),
         "This nested prose remains attached to Prepare."
     );
 
-    let finish = &prompt.sections[1];
-    assert_eq!(finish.name, "Finish");
+    let finish = &prompt.sections()[1];
+    assert_eq!(finish.name(), "Finish");
     assert_eq!(finish.prose(), "Return the normalized subject.");
-    assert!(finish.children.is_empty());
+    assert!(finish.children().is_empty());
 }
 
 fn verify_prologue_prose_epilog(prompt: &Prompt) {
-    assert_eq!(prompt.frontmatter.name, "phase_boundaries");
+    assert_eq!(prompt.frontmatter().name(), "phase_boundaries");
     assert_eq!(
-        prompt.frontmatter.description,
+        prompt.frontmatter().description(),
         "Exercise an author-shaped prologue, prose, and epilog"
     );
-    assert_eq!(prompt.frontmatter.promptforge, Some(1));
-    assert_eq!(
-        prompt.frontmatter.default_return.as_deref(),
-        Some("fallback")
-    );
-    assert_eq!(prompt.frontmatter.max_tool_iterations, Some(3));
-    assert_eq!(prompt.title, "Phase Boundaries");
-    assert!(prompt.replay.is_none());
-    assert_eq!(prompt.description_text, "Transform one model response.");
-    assert_eq!(prompt.sections.len(), 2);
+    assert_eq!(prompt.frontmatter().promptforge(), Some(1));
+    assert_eq!(prompt.frontmatter().default_return(), Some("fallback"));
+    assert_eq!(prompt.frontmatter().max_tool_iterations(), Some(3));
+    assert_eq!(prompt.title(), "Phase Boundaries");
+    assert!(prompt.replay().is_none());
+    assert_eq!(prompt.sections().len(), 2);
 
     let transform = prompt.entry();
-    assert_eq!(transform.name, "Transform");
+    assert_eq!(transform.name(), "Transform");
     assert_eq!(
         transform.prologue().map(LuaProgram::source),
         Some("var.subject = args")
@@ -334,10 +324,10 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
         transform.epilog().map(LuaProgram::source),
         Some("return reply")
     );
-    assert!(transform.children.is_empty());
+    assert!(transform.children().is_empty());
 
-    let fallback = &prompt.sections[1];
-    assert_eq!(fallback.name, "Fallback");
+    let fallback = &prompt.sections()[1];
+    assert_eq!(fallback.name(), "Fallback");
     assert_eq!(fallback.prose(), "This section has prose only.");
     assert!(fallback.prologue().is_none());
     assert!(fallback.epilog().is_none());

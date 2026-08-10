@@ -28,7 +28,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use promptforge_core::client::GatewayClient;
-use promptforge_core::execute::{self, ResolutionContext, RunOptions};
+use promptforge_core::execute::{self, ResolutionContext, RunConfig};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
 use rmcp::model::{CallToolResult, ErrorData};
@@ -235,22 +235,16 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
     } = launch;
 
     let store = StoreRef::memory();
-    let options = RunOptions {
-        execution: &run_id,
-        observer: observer.as_ref(),
-        client: Some(client),
-        debug: None,
-    };
+    let config = RunConfig::new(run_id.as_str())
+        .observer(Arc::clone(&observer) as Arc<dyn promptforge_core::observe::Observer>)
+        .client(client);
     let outcome = execute::run(
         &prompt,
         &args,
-        ResolutionContext {
-            picker: tools.picker(),
-            models: tools.models(),
-        },
+        ResolutionContext::new(tools.picker(), tools.models()),
         tools.tools(),
         &store,
-        options,
+        config,
     )
     .await;
 

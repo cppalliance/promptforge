@@ -55,7 +55,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use promptforge_core::observe::{Observer, detail};
+use promptforge_core::observe::{Observation, Observer};
 use rmcp::RoleServer;
 use rmcp::model::{ProgressNotificationParam, ProgressToken};
 use rmcp::service::Peer;
@@ -104,11 +104,11 @@ struct Frame {
 ///
 /// # Examples
 /// ```
-/// use promptforge_core::observe::{Observer, detail};
+/// use promptforge_core::observe::{Observation, Observer};
 /// use promptforge_mcp_server::McpObserver;
 ///
 /// let observer = McpObserver::silent();
-/// observer.observe("example-run", "Gather", detail::MODEL_TURN_COMPLETED);
+/// observer.observe("example-run", "Gather", Observation::ModelTurnCompleted);
 /// assert_eq!(observer.turns(), 1);
 /// ```
 #[derive(Debug)]
@@ -226,44 +226,44 @@ impl McpObserver {
 }
 
 impl Observer for McpObserver {
-    fn observe(&self, execution: &str, section: &str, report: &str) {
+    fn observe(&self, execution: &str, section: &str, event: Observation) {
         #[cfg(test)]
         self.records
             .lock()
             .expect("the MCP test recorder mutex must not be poisoned")
-            .push((execution.to_owned(), section.to_owned(), report.to_owned()));
-        match report {
-            detail::RUN_STARTED => {
+            .push((execution.to_owned(), section.to_owned(), event.to_string()));
+        match event {
+            Observation::RunStarted => {
                 tracing::info!(%execution, %section, "run started");
                 self.queue(0, section);
             }
-            detail::SECTION_STARTED => {
+            Observation::SectionStarted => {
                 self.queue(self.advance(), section);
             }
-            detail::SECTION_FINISHED => {
+            Observation::SectionFinished => {
                 tracing::debug!(%execution, %section, "section finished");
             }
-            detail::MODEL_TURN_COMPLETED => {
+            Observation::ModelTurnCompleted => {
                 let turn = self.turns.fetch_add(1, Ordering::Relaxed) + 1;
                 tracing::debug!(%execution, %section, turn, "model turn completed");
             }
-            detail::MODEL_TURN_FAILED => {
+            Observation::ModelTurnFailed => {
                 tracing::warn!(%execution, %section, "model turn failed");
             }
-            detail::TOOL_CALL_SUCCEEDED => {
+            Observation::ToolCallSucceeded => {
                 tracing::debug!(%execution, %section, "tool call succeeded");
             }
-            detail::TOOL_CALL_FAILED => {
+            Observation::ToolCallFailed => {
                 tracing::warn!(%execution, %section, "tool call failed");
             }
-            detail::RUN_SUCCEEDED => {
+            Observation::RunSucceeded => {
                 tracing::debug!(%execution, %section, "run success observed");
             }
-            detail::RUN_FAILED => {
+            Observation::RunFailed => {
                 tracing::debug!(%execution, %section, "run failure observed");
             }
-            unknown => {
-                tracing::debug!(%execution, %section, detail = %unknown, "unrecognized observation");
+            other => {
+                tracing::debug!(%execution, %section, detail = %other, "unrecognized observation");
             }
         }
     }

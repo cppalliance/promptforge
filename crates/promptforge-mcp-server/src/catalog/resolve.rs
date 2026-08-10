@@ -165,7 +165,7 @@ fn parse(source: &str) -> Result<Prompt, String> {
 /// Turns a parsed prompt into an entry, checking the frontmatter name and, for
 /// a named block, that the name is the one the block was keyed on.
 fn admit(path: PathBuf, source: String, prompt: Prompt, block_key: Option<&str>) -> Entry {
-    let name = prompt.frontmatter.name.clone();
+    let name = prompt.frontmatter().name().to_owned();
     if !is_valid_tool_name(&name) {
         let detail = format!(
             "tool name {name:?} is not ^[a-z][a-z0-9_]{{0,{}}}$",
