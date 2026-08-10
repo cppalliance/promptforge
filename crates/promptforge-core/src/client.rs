@@ -124,7 +124,7 @@ pub struct ToolSchema {
 /// `OpenAI` returns tool calls with `function.arguments` as a JSON-encoded
 /// string; this type holds that string parsed into a [`Value`] (falling back to
 /// a string `Value` if it is not valid JSON).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct ToolCall {
     /// The id the model assigned to this call, echoed back with its result.
@@ -156,7 +156,11 @@ impl ToolCall {
 }
 
 /// The outcome of a completion round trip.
-#[derive(Debug)]
+///
+/// `Eq` is intentionally omitted: [`ToolCall`] arguments are a
+/// [`serde_json::Value`], which is not `Eq`, so only `Clone` and `PartialEq`
+/// are coherent.
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum CompletionResult {
     /// The model returned a final text reply.

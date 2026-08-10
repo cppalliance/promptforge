@@ -18,7 +18,11 @@ const EMPTY_REPLY_REASONING_IGNORED: &str =
     "empty model reply: reasoning content was present but ignored";
 
 /// A parsed assistant turn: outcome plus payload-free metadata.
-#[derive(Debug)]
+///
+/// `Eq` is intentionally omitted: [`CompletionResult`] carries tool-call
+/// arguments as a [`serde_json::Value`], which is not `Eq` (it can hold an
+/// `f64`), so only `Clone` and `PartialEq` are coherent here.
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub(crate) struct NormalizedTurn {
     /// The text or tool-call product the tool loop consumes.
@@ -49,25 +53,56 @@ pub(crate) struct OpenAiChatNormalizer;
 
 impl CompletionNormalizer for OpenAiChatNormalizer {
     fn normalize(&self, body: &Value) -> Result<NormalizedTurn> {
-        let choice = body
-            .get("choices")
-            .and_then(Value::as_array)
-            .and_then(|choices| choices.first())
-            .ok_or_else(|| Error::MalformedResponse("no choices in response".into()))?;
-        let finish_reason = choice
-            .get("finish_reason")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+        let choices = match body.get("choices") {
+            None => return Err(Error::MalformedResponse("no choices in response".into())),
+            Some(Value::Array(choices)) => choices,
+            Some(_) => {
+                return Err(Error::MalformedResponse(
+                    "`choices` was present but not an array".into(),
+                ));
+            }
+        };
+        let choice = choices
+            .first()
+            .ok_or_else(|| Error::MalformedResponse("response had zero choices".into()))?;
+        if !choice.is_object() {
+            return Err(Error::MalformedResponse(
+                "`choices[0]` was not an object".into(),
+            ));
+        }
+
+        let finish_reason = match choice.get("finish_reason") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(reason)) => Some(reason.clone()),
+            Some(_) => {
+                return Err(Error::MalformedResponse(
+                    "`finish_reason` was present but not a string".into(),
+                ));
+            }
+        };
+
         let message = choice
             .get("message")
             .ok_or_else(|| Error::MalformedResponse("choice had no message".into()))?;
-        let reasoning_content = extract_reasoning(message);
+        if !message.is_object() {
+            return Err(Error::MalformedResponse(
+                "`message` was present but not an object".into(),
+            ));
+        }
+        let reasoning_content = extract_reasoning(message)?;
 
-        if let Some(raw_calls) = message
-            .get("tool_calls")
-            .and_then(Value::as_array)
-            .filter(|calls| !calls.is_empty())
-        {
+        // `tool_calls`, when present, must be an array; a present non-array is a
+        // malformed shape, not an absence.
+        let tool_calls = match message.get("tool_calls") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(calls)) => Some(calls),
+            Some(_) => {
+                return Err(Error::MalformedResponse(
+                    "`tool_calls` was present but not an array".into(),
+                ));
+            }
+        };
+        if let Some(raw_calls) = tool_calls.filter(|calls| !calls.is_empty()) {
             let calls = parse_openai_tool_calls(raw_calls)?;
             return Ok(NormalizedTurn {
                 outcome: CompletionResult::ToolCalls(calls),
@@ -76,13 +111,22 @@ impl CompletionNormalizer for OpenAiChatNormalizer {
             });
         }
 
-        if let Some(content) = message
-            .get("content")
-            .and_then(Value::as_str)
-            .filter(|content| !content.is_empty())
-        {
+        // `content`, when present, must be a string or JSON null; a present
+        // value of any other type is a malformed shape.
+        let content = match message.get("content") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(text)) => Some(text.as_str()),
+            Some(_) => {
+                return Err(Error::MalformedResponse(
+                    "`content` was present but not a string".into(),
+                ));
+            }
+        };
+        // Whitespace-only content is not a product; classify with `trim`, but
+        // preserve the original nonblank payload verbatim.
+        if let Some(text) = content.filter(|text| !text.trim().is_empty()) {
             return Ok(NormalizedTurn {
-                outcome: CompletionResult::Text(content.to_string()),
+                outcome: CompletionResult::Text(text.to_string()),
                 finish_reason,
                 reasoning_content,
             });
@@ -99,35 +143,85 @@ impl CompletionNormalizer for OpenAiChatNormalizer {
 }
 
 /// Parse the OpenAI `message.tool_calls` array into runtime [`ToolCall`]s.
-fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCall>> {
+///
+/// Crate-private and shared: the OpenAI normalizer and the Gemma dialect's
+/// fenced-OpenAI path both decode the same wire shape through this one function
+/// so validation cannot drift between them.
+///
+/// Each call must be an object with a nonblank string `id`, an object
+/// `function` carrying a nonblank string `name`, and an `arguments` field that
+/// is present, a JSON-encoded string, and decodes to a JSON object. Blank
+/// identifiers, duplicate ids within the turn, missing or null arguments, and
+/// arguments that do not decode to an object are all rejected rather than
+/// coerced.
+pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCall>> {
     let mut calls = Vec::with_capacity(raw_calls.len());
+    let mut seen_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for raw in raw_calls {
+        if !raw.is_object() {
+            return Err(Error::MalformedResponse(
+                "tool call was not an object".into(),
+            ));
+        }
+        // `type`, when present, must name a function call.
+        match raw.get("type") {
+            None | Some(Value::Null) => {}
+            Some(Value::String(kind)) if kind == "function" => {}
+            Some(_) => {
+                return Err(Error::MalformedResponse(
+                    "tool call `type` was not \"function\"".into(),
+                ));
+            }
+        }
         let id = raw
             .get("id")
             .and_then(Value::as_str)
-            .ok_or_else(|| Error::MalformedResponse("tool call had no id".into()))?
-            .to_string();
+            .ok_or_else(|| Error::MalformedResponse("tool call had no string id".into()))?;
+        if id.trim().is_empty() {
+            return Err(Error::MalformedResponse("tool call id was blank".into()));
+        }
+        if !seen_ids.insert(id) {
+            return Err(Error::MalformedResponse(format!(
+                "duplicate tool call id {id:?} within one turn"
+            )));
+        }
         let function = raw
             .get("function")
             .ok_or_else(|| Error::MalformedResponse("tool call had no function".into()))?;
+        if !function.is_object() {
+            return Err(Error::MalformedResponse(
+                "tool call `function` was not an object".into(),
+            ));
+        }
         let name = function
             .get("name")
             .and_then(Value::as_str)
-            .ok_or_else(|| Error::MalformedResponse("tool call had no name".into()))?
-            .to_string();
-        // OpenAI encodes `function.arguments` as a JSON string. A missing or
-        // JSON-null field means "no arguments"; anything else must parse as JSON
-        // or the turn is malformed. Coercing invalid JSON into a string
-        // `Value` (the old behavior) would hand a tool arguments it never
-        // agreed to accept, so it is rejected instead.
+            .ok_or_else(|| Error::MalformedResponse("tool call had no string name".into()))?;
+        if name.trim().is_empty() {
+            return Err(Error::MalformedResponse("tool call name was blank".into()));
+        }
+        // OpenAI encodes `function.arguments` as a JSON string. It must be
+        // present, a string, and decode to a JSON object - the shape tools
+        // accept. Missing, null, non-string, invalid-JSON, and non-object
+        // decoded values are all rejected rather than coerced.
         let arguments = match function.get("arguments") {
-            None | Some(Value::Null) => Value::Null,
             Some(Value::String(raw_args)) => {
-                serde_json::from_str::<Value>(raw_args).map_err(|error| {
+                let decoded = serde_json::from_str::<Value>(raw_args).map_err(|error| {
                     Error::MalformedResponse(format!(
                         "tool call arguments were not valid JSON: {error}"
                     ))
-                })?
+                })?;
+                if !decoded.is_object() {
+                    return Err(Error::MalformedResponse(
+                        "tool call arguments did not decode to a JSON object".into(),
+                    ));
+                }
+                decoded
+            }
+            None | Some(Value::Null) => {
+                return Err(Error::MalformedResponse(
+                    "tool call arguments were missing".into(),
+                ));
             }
             Some(_) => {
                 return Err(Error::MalformedResponse(
@@ -136,26 +230,39 @@ fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCall>> {
             }
         };
         calls.push(ToolCall {
-            id,
-            name,
+            id: id.to_string(),
+            name: name.to_string(),
             arguments,
         });
     }
     Ok(calls)
 }
 
-/// First non-empty string among the known reasoning field synonyms.
-fn extract_reasoning(message: &Value) -> Option<String> {
+/// First nonblank string among the known reasoning field synonyms.
+///
+/// A reasoning synonym that is present but neither a string nor JSON null is a
+/// malformed shape; whitespace-only strings are treated as absent.
+///
+/// # Errors
+/// Returns [`Error::MalformedResponse`] when a present reasoning field is not a
+/// string or null.
+fn extract_reasoning(message: &Value) -> Result<Option<String>> {
     for key in ["reasoning_content", "reasoning", "thinking"] {
-        if let Some(text) = message
-            .get(key)
-            .and_then(Value::as_str)
-            .filter(|text| !text.is_empty())
-        {
-            return Some(text.to_owned());
+        match message.get(key) {
+            None | Some(Value::Null) => {}
+            Some(Value::String(text)) => {
+                if !text.trim().is_empty() {
+                    return Ok(Some(text.clone()));
+                }
+            }
+            Some(_) => {
+                return Err(Error::MalformedResponse(format!(
+                    "`{key}` reasoning field was present but not a string"
+                )));
+            }
         }
     }
-    None
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -295,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn absent_tool_arguments_default_to_null() {
+    fn absent_tool_arguments_are_rejected() {
         let body = serde_json::json!({
             "choices": [{
                 "message": {
@@ -310,11 +417,138 @@ mod tests {
             }]
         });
 
-        let turn = normalize(&body).unwrap();
-        match turn.outcome {
-            CompletionResult::ToolCalls(calls) => assert_eq!(calls[0].arguments, Value::Null),
-            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
-        }
+        assert!(
+            matches!(normalize(&body), Err(Error::MalformedResponse(_))),
+            "missing tool arguments must be rejected, not coerced to null"
+        );
+    }
+
+    #[test]
+    fn non_object_decoded_arguments_are_rejected() {
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_arr",
+                        "type": "function",
+                        "function": { "name": "ping", "arguments": "[1,2,3]" }
+                    }]
+                }
+            }]
+        });
+
+        assert!(
+            matches!(normalize(&body), Err(Error::MalformedResponse(_))),
+            "arguments that decode to a non-object must be rejected"
+        );
+    }
+
+    #[test]
+    fn blank_tool_call_id_is_rejected() {
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "   ",
+                        "type": "function",
+                        "function": { "name": "ping", "arguments": "{}" }
+                    }]
+                }
+            }]
+        });
+        assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
+    }
+
+    #[test]
+    fn duplicate_tool_call_ids_are_rejected() {
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [
+                        { "id": "dup", "type": "function", "function": { "name": "a", "arguments": "{}" } },
+                        { "id": "dup", "type": "function", "function": { "name": "b", "arguments": "{}" } }
+                    ]
+                }
+            }]
+        });
+        assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
+    }
+
+    #[test]
+    fn wrong_type_type_field_is_rejected() {
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_x",
+                        "type": "not_function",
+                        "function": { "name": "ping", "arguments": "{}" }
+                    }]
+                }
+            }]
+        });
+        assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
+    }
+
+    #[test]
+    fn wrong_typed_top_level_fields_are_malformed() {
+        // choices not an array
+        assert!(matches!(
+            normalize(&serde_json::json!({ "choices": {} })),
+            Err(Error::MalformedResponse(_))
+        ));
+        // message not an object
+        assert!(matches!(
+            normalize(&serde_json::json!({ "choices": [{ "message": 7 }] })),
+            Err(Error::MalformedResponse(_))
+        ));
+        // finish_reason not a string
+        assert!(matches!(
+            normalize(&serde_json::json!({
+                "choices": [{ "message": { "content": "hi" }, "finish_reason": 3 }]
+            })),
+            Err(Error::MalformedResponse(_))
+        ));
+        // content wrong type
+        assert!(matches!(
+            normalize(&serde_json::json!({
+                "choices": [{ "message": { "content": [] } }]
+            })),
+            Err(Error::MalformedResponse(_))
+        ));
+        // tool_calls wrong type
+        assert!(matches!(
+            normalize(&serde_json::json!({
+                "choices": [{ "message": { "content": null, "tool_calls": {} } }]
+            })),
+            Err(Error::MalformedResponse(_))
+        ));
+        // reasoning wrong type
+        assert!(matches!(
+            normalize(&serde_json::json!({
+                "choices": [{ "message": { "content": "hi", "reasoning_content": 5 } }]
+            })),
+            Err(Error::MalformedResponse(_))
+        ));
+    }
+
+    #[test]
+    fn whitespace_only_content_is_empty_reply() {
+        let body = serde_json::json!({
+            "choices": [{ "message": { "content": "   \n\t " } }]
+        });
+        assert!(matches!(
+            normalize(&body),
+            Err(Error::EmptyModelReply { .. })
+        ));
     }
 
     #[test]
