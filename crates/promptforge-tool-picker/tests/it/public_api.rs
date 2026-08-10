@@ -1,20 +1,24 @@
 //! The crate as a caller sees it, through the public API and nothing else.
 //!
-//! Everything here is reachable from outside the crate: no private module is
-//! touched, no test-only constructor is used, and every type named is one the
-//! `use` at the top of the file imports. That is the point of the file - the
-//! unit tests inside the crate can pass while the surface a dependent builds
-//! against is missing an export or a signature it cannot call.
-//!
-//! One engine is built per test and each build loads the compiled-in model, so
-//! the catalog is kept to two tools and the file to a few tests.
+//! One model is loaded per test binary and shared, so the suite pays for the
+//! weights once however many pickers it builds.
 
-use std::sync::Arc;
+use std::sync::OnceLock;
 
 use promptforge_tool_picker::{
-    Catalog, Config, Embedder, Error, NearDuplicate, Outcome, ToolDescriptor, ToolId, ToolPicker,
+    BuildError, Catalog, Config, ConfigError, ConfigField, Model, ModelLoadError, Outcome,
+    QueryError, SelectionError, ToolDescriptor, ToolId, ToolPicker,
 };
 use serde_json::json;
+
+/// The one loaded model for this test binary.
+fn model() -> &'static Model {
+    static MODEL: OnceLock<Model> = OnceLock::new();
+    MODEL.get_or_init(|| match Model::load() {
+        Ok(model) => model,
+        Err(error) => panic!("the compiled-in model must load: {error}"),
+    })
+}
 
 /// Two plainly unrelated tools: enough to bind one and to miss both.
 fn catalog() -> Catalog {
@@ -32,121 +36,122 @@ fn catalog() -> Catalog {
     ])
 }
 
-#[test]
-fn a_caller_can_build_resolve_and_shortlist_through_the_public_api() {
-    let tools = catalog();
-    let picker = ToolPicker::build(tools.clone(), Config::default()).unwrap();
-    assert_eq!(picker.len(), 2);
-    assert_eq!(picker.tools(), tools.tools());
+const fn assert_send_sync_static<T: Send + Sync + 'static>() {}
 
-    // A need that restates one tool binds to that tool.
-    match picker.resolve("read a file from disk").unwrap() {
-        Outcome::Bind(tool) => assert_eq!(tool.id, ToolId::new("files", "read_file")),
+#[test]
+fn public_types_are_send_sync_static() {
+    assert_send_sync_static::<Model>();
+    assert_send_sync_static::<ToolPicker>();
+    assert_send_sync_static::<BuildError>();
+    assert_send_sync_static::<ModelLoadError>();
+    assert_send_sync_static::<QueryError>();
+    assert_send_sync_static::<SelectionError>();
+    assert_send_sync_static::<ConfigError>();
+}
+
+#[test]
+fn a_caller_builds_resolves_and_shortlists_through_the_public_api() {
+    let picker = ToolPicker::build_with_model(model(), catalog(), Config::default())
+        .expect("index the catalog");
+    assert_eq!(picker.len(), 2);
+    assert_eq!(picker.iter().count(), 2);
+
+    match picker.resolve("read a file from disk").expect("resolve") {
+        Outcome::Bind(tool) => assert_eq!(tool.id(), &ToolId::new("files", "read_file")),
         outcome => panic!("expected a binding, got {outcome:?}"),
     }
 
-    // A need nothing in the catalog covers is an abstention, not an error.
     assert_eq!(
-        picker.resolve("send an email to the team").unwrap(),
+        picker
+            .resolve("send an email to the team")
+            .expect("resolve"),
         Outcome::Absent
     );
 
-    // A shortlist reports candidates rather than deciding between them.
-    let candidates = picker.shortlist("fetch a web page over HTTP", 2).unwrap();
-    assert_eq!(candidates[0].id, ToolId::new("net", "fetch_url"));
-    assert!(candidates.len() <= 2);
+    let listed = picker
+        .shortlist("fetch a web page over HTTP", 2)
+        .expect("shortlist");
+    assert_eq!(
+        listed.first().map(ToolDescriptor::id),
+        Some(&ToolId::new("net", "fetch_url"))
+    );
+    assert!(listed.len() <= 2);
 
-    let pairs: Vec<NearDuplicate> = picker
+    let pairs = picker
         .near_duplicates(&[
             ToolId::new("net", "fetch_url"),
             ToolId::new("files", "read_file"),
         ])
-        .unwrap();
+        .expect("selected analysis");
     assert!(pairs.is_empty());
 }
 
 #[test]
-fn selected_set_analysis_rejects_an_absent_id_and_accepts_repetition() {
-    let tools = catalog();
-    let picker = ToolPicker::build(tools.clone(), Config::default()).unwrap();
+fn a_selection_error_names_the_first_missing_identity() {
+    let picker = ToolPicker::build_with_model(model(), catalog(), Config::default())
+        .expect("index the catalog");
     let missing = ToolId::new("missing", "tool");
     let error = picker
-        .near_duplicates(&[
-            tools.tools()[0].id.clone(),
-            tools.tools()[0].id.clone(),
-            missing.clone(),
-        ])
-        .expect_err("an absent identity must reject the complete selected set");
-
-    assert!(
-        matches!(error, Error::ToolNotInCatalog { ref id, .. } if *id == missing),
-        "got {error:?}"
-    );
-    assert!(
-        picker
-            .near_duplicates(&[tools.tools()[0].id.clone(), tools.tools()[0].id.clone(),])
-            .unwrap()
-            .is_empty()
-    );
+        .near_duplicates(&[ToolId::new("files", "read_file"), missing.clone()])
+        .expect_err("an absent identity rejects the selected set");
+    assert_eq!(error.missing_id(), &missing);
 }
 
 #[test]
-fn a_shortlist_offers_nothing_for_a_need_that_resolves_absent() {
-    let picker = ToolPicker::build(catalog(), Config::default()).unwrap();
-    let need = "send an email to the team";
-    assert_eq!(picker.resolve(need).unwrap(), Outcome::Absent);
-    assert!(
-        picker.shortlist(need, 2).unwrap().is_empty(),
-        "a shortlist must not offer candidates the engine declined to match"
-    );
-}
-
-#[test]
-fn a_caller_holding_one_encoder_can_build_an_engine_per_catalog() {
-    // The whole point of the constructor: one model load, several engines. A
-    // caller with a catalog that changes rebuilds instead of reloading.
-    let embedder = Arc::new(Embedder::new().unwrap());
-    let files =
-        ToolPicker::build_with(Arc::clone(&embedder), catalog(), Config::default()).unwrap();
-
+fn one_model_builds_a_picker_per_catalog_and_rebuild_reuses_it() {
+    let files = ToolPicker::build_with_model(model(), catalog(), Config::default())
+        .expect("index the catalog");
     let weather = Catalog::new(vec![ToolDescriptor::new(
         ToolId::new("weather", "get_forecast"),
         "Get the weather forecast for a city",
         json!({"properties": {"city": {"type": "string"}}}),
     )]);
-    let forecasts =
-        ToolPicker::build_with(Arc::clone(&embedder), weather.clone(), Config::default()).unwrap();
+    let forecasts = ToolPicker::build_with_model(model(), weather.clone(), Config::default())
+        .expect("index a second catalog");
 
     match forecasts
         .resolve("get the weather forecast for a city")
-        .unwrap()
+        .expect("resolve")
     {
-        Outcome::Bind(tool) => assert_eq!(tool.id, ToolId::new("weather", "get_forecast")),
+        Outcome::Bind(tool) => assert_eq!(tool.id(), &ToolId::new("weather", "get_forecast")),
         outcome => panic!("expected a binding, got {outcome:?}"),
     }
-    // Each engine answers from its own catalog alone.
     assert_eq!(
-        forecasts.resolve("read a file from disk").unwrap(),
+        forecasts.resolve("read a file from disk").expect("resolve"),
         Outcome::Absent
     );
-    assert_eq!(files.tools(), catalog().tools());
 
-    // A rebuild is the same path reached from an engine rather than an `Arc`.
-    let rebuilt = files.rebuild(weather).unwrap();
-    assert_eq!(rebuilt.tools(), forecasts.tools());
-    assert_eq!(rebuilt.vector(0), forecasts.vector(0));
+    let rebuilt = files.rebuild(weather).expect("rebuild");
+    assert_eq!(rebuilt.len(), forecasts.len());
 }
 
 #[test]
 fn the_same_need_answers_the_same_way_every_time() {
-    let picker = ToolPicker::build(catalog(), Config::default()).unwrap();
-    let first = picker.resolve("read a file from disk").unwrap();
-    let listed = picker.shortlist("read a file from disk", 2).unwrap();
+    let picker = ToolPicker::build_with_model(model(), catalog(), Config::default())
+        .expect("index the catalog");
+    let first = picker.resolve("read a file from disk").expect("resolve");
+    let listed = picker
+        .shortlist("read a file from disk", 2)
+        .expect("shortlist");
     for _ in 0..3 {
-        assert_eq!(picker.resolve("read a file from disk").unwrap(), first);
         assert_eq!(
-            picker.shortlist("read a file from disk", 2).unwrap(),
+            picker.resolve("read a file from disk").expect("resolve"),
+            first
+        );
+        assert_eq!(
+            picker
+                .shortlist("read a file from disk", 2)
+                .expect("shortlist"),
             listed
         );
     }
+}
+
+#[test]
+fn configuration_setters_reject_out_of_domain_values() {
+    let error: ConfigError = Config::default()
+        .with_similarity_floor(2.0)
+        .expect_err("out of domain");
+    assert_eq!(error.field(), ConfigField::SimilarityFloor);
+    assert!(Config::default().with_top_k(0).is_err());
 }

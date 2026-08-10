@@ -174,17 +174,17 @@ async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
     let prompt = Prompt::parse(REAL_TOOL_CALL, TOOL_EXECUTION, &observer)
         .context("parse execution/real-tool-call.md")?;
     let schema = tool.parameters_schema();
+    let config = Config::default()
+        .with_similarity_floor(0.0)
+        .and_then(|config| config.with_margin(0.0))
+        .context("build deterministic one-tool fixture config")?;
     let picker = ToolPicker::build(
         Catalog::new(vec![ToolDescriptor::new(
             PickerToolId::new("real-model-fixtures", "string_fixture"),
             tool.description(),
             schema,
         )]),
-        Config {
-            similarity_floor: 0.0,
-            margin: 0.0,
-            ..Config::default()
-        },
+        config,
     )
     .context("build deterministic one-tool fixture picker")?;
     let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];
