@@ -159,6 +159,23 @@ impl EndpointLane {
     /// limited, waits (fairly or FIFO) until a slot is free, or fails if the
     /// waiting queue is already at `max_depth`.
     ///
+    /// Number of requests currently waiting for a slot on this lane.
+    ///
+    /// Test-only observation seam so tests can rendezvous on a waiter being
+    /// enqueued instead of sleeping.
+    #[cfg(test)]
+    pub(crate) fn waiter_count(&self) -> usize {
+        match &self.inner {
+            LaneInner::Unlimited => 0,
+            LaneInner::Limited(lane) => {
+                lane.state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .waiter_count
+            }
+        }
+    }
+
     /// # Errors
     /// Returns [`AdmitError::QueueFull`] when the waiting queue is at
     /// `max_depth` and no in-flight slot is free.
@@ -341,6 +358,14 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
+    /// Deterministically wait until exactly `n` requests are enqueued as waiters,
+    /// yielding to the runtime so spawned admits can register (no sleeps).
+    async fn await_waiters(lane: &EndpointLane, n: usize) {
+        while lane.waiter_count() != n {
+            tokio::task::yield_now().await;
+        }
+    }
+
     #[tokio::test]
     async fn unlimited_lane_admits_immediately() {
         let lane = EndpointLane::unlimited();
@@ -365,7 +390,7 @@ mod tests {
             permit
         });
 
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        await_waiters(&lane, 1).await;
         assert_eq!(
             phase.load(Ordering::SeqCst),
             2,
@@ -391,7 +416,7 @@ mod tests {
 
         let lane_wait = lane.clone();
         let waiting = tokio::spawn(async move { lane_wait.admit("b").await });
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        await_waiters(&lane, 1).await;
 
         let err = lane.admit("c").await.unwrap_err();
         assert_eq!(err, AdmitError::QueueFull);
@@ -415,12 +440,12 @@ mod tests {
 
         let order = Arc::new(Mutex::new(Vec::new()));
         let mut handles = Vec::new();
-        for key in ["A", "A", "B"] {
-            let lane = lane.clone();
+        for (registered, key) in ["A", "A", "B"].into_iter().enumerate() {
+            let lane_task = lane.clone();
             let order = Arc::clone(&order);
             let key = key.to_string();
             handles.push(tokio::spawn(async move {
-                let permit = lane.admit(&key).await.unwrap();
+                let permit = lane_task.admit(&key).await.unwrap();
                 order
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -428,8 +453,9 @@ mod tests {
                 // Release immediately so the next fair waiter can run.
                 drop(permit);
             }));
-            // Let each waiter register before the next enqueue.
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            // Deterministically wait for this waiter to enqueue before the next
+            // one, so fair-scheduling order is well defined (no sleeps).
+            await_waiters(&lane, registered + 1).await;
         }
 
         drop(held);
