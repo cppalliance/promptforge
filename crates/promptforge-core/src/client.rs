@@ -18,7 +18,6 @@ use serde_json::Value;
 
 use crate::dialects::{DialectRequest, ToolDialectRegistry};
 use crate::model::CompletionOptions;
-use crate::normalize::{CompletionNormalizer, OpenAiChatNormalizer};
 use crate::{Error, Result};
 
 /// A single chat message.
@@ -162,7 +161,6 @@ pub struct GatewayClient {
     transport: GatewayTransport,
     base_url: String,
     key: String,
-    normalizer: Arc<dyn CompletionNormalizer>,
     dialect_registry: Arc<ToolDialectRegistry>,
     /// Wall-clock cap applied to each completion request.
     request_timeout: Duration,
@@ -200,7 +198,6 @@ impl GatewayClient {
             transport: GatewayTransport::Http(reqwest::Client::new()),
             base_url: base_url.trim_end_matches('/').to_string(),
             key: key.into(),
-            normalizer: OpenAiChatNormalizer::shared(),
             dialect_registry: Arc::new(ToolDialectRegistry::builtin()),
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
@@ -217,7 +214,6 @@ impl GatewayClient {
             transport: GatewayTransport::Disabled,
             base_url: String::new(),
             key: String::new(),
-            normalizer: OpenAiChatNormalizer::shared(),
             dialect_registry: Arc::new(ToolDialectRegistry::builtin()),
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
@@ -237,13 +233,6 @@ impl GatewayClient {
     ) -> GatewayClient {
         self.request_timeout = request_timeout;
         self.max_response_bytes = max_response_bytes.get();
-        self
-    }
-
-    /// Replace the response normalizer used by [`GatewayClient::complete`].
-    #[must_use]
-    pub fn with_normalizer(mut self, normalizer: Arc<dyn CompletionNormalizer>) -> GatewayClient {
-        self.normalizer = normalizer;
         self
     }
 

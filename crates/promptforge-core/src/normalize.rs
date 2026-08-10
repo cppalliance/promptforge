@@ -6,8 +6,6 @@
 //! [`Error::EmptyModelReply`]. Reasoning fields are a side channel only and
 //! are never promoted into the answer.
 
-use std::sync::Arc;
-
 use serde_json::Value;
 
 use crate::client::{CompletionResult, ToolCall};
@@ -22,20 +20,20 @@ const EMPTY_REPLY_REASONING_IGNORED: &str =
 /// A parsed assistant turn: outcome plus payload-free metadata.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct NormalizedTurn {
+pub(crate) struct NormalizedTurn {
     /// The text or tool-call product the tool loop consumes.
-    pub outcome: CompletionResult,
+    pub(crate) outcome: CompletionResult,
     /// The choice's `finish_reason`, when the backend supplied one.
-    pub finish_reason: Option<String>,
+    pub(crate) finish_reason: Option<String>,
     /// Reasoning text from the wire, never used as the answer.
-    pub reasoning_content: Option<String>,
+    pub(crate) reasoning_content: Option<String>,
 }
 
 /// Turns a chat-completions response body into a [`NormalizedTurn`].
 ///
-/// Implementors concentrate vendor wire quirks. The default is
-/// [`OpenAiChatNormalizer`].
-pub trait CompletionNormalizer: Send + Sync {
+/// The one implementor is [`OpenAiChatNormalizer`]; the OpenAI dialect delegates
+/// to it. This canonicalization is a crate-private dialect concern.
+pub(crate) trait CompletionNormalizer: Send + Sync {
     /// Parse `body` into a turn that satisfies the empty-response invariant.
     ///
     /// # Errors
@@ -47,21 +45,7 @@ pub trait CompletionNormalizer: Send + Sync {
 
 /// Default normalizer for OpenAI-compatible `/chat/completions` bodies.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct OpenAiChatNormalizer;
-
-impl OpenAiChatNormalizer {
-    /// Construct the default OpenAI chat normalizer.
-    #[must_use]
-    pub fn new() -> OpenAiChatNormalizer {
-        OpenAiChatNormalizer
-    }
-
-    /// An [`Arc`] of the default normalizer for storing on a client.
-    #[must_use]
-    pub fn shared() -> Arc<dyn CompletionNormalizer> {
-        Arc::new(OpenAiChatNormalizer)
-    }
-}
+pub(crate) struct OpenAiChatNormalizer;
 
 impl CompletionNormalizer for OpenAiChatNormalizer {
     fn normalize(&self, body: &Value) -> Result<NormalizedTurn> {
