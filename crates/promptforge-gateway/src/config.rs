@@ -79,34 +79,68 @@ pub(crate) enum Protocol {
 }
 
 /// The whole gateway configuration.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+///
+/// Validated on construction: a value of this type cannot hold an invalid
+/// configuration. Deserialization goes through the private [`RawConfig`] DTO and
+/// a validating conversion, so `Config` itself carries no public `Deserialize`
+/// impl and cannot be built from arbitrary TOML without validation.
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct Config {
     /// Server bind address and shared key.
     pub(crate) server: ServerConfig,
     /// Waiting-queue settings for limited endpoints.
-    #[serde(default)]
     pub(crate) queue: QueueConfig,
     /// Cache and binary settings for gateway-owned local inference.
-    #[serde(default)]
     pub(crate) local: LocalConfig,
     /// Physical compute resources with concurrency limits.
-    #[serde(rename = "device", default)]
     pub(crate) devices: Vec<DeviceConfig>,
     /// The configured backends.
-    #[serde(rename = "endpoint", default)]
     pub(crate) endpoints: Vec<EndpointConfig>,
     /// The routing table from model name to remote backend.
-    #[serde(rename = "model", default)]
     pub(crate) models: Vec<ModelConfig>,
     /// Local generative models served by a managed `llama-server` child.
-    #[serde(rename = "local_model", default)]
     pub(crate) local_models: Vec<LocalModelConfig>,
     /// Optional built-in tool configuration. Absent when no `[tools]` section
     /// is present.
-    #[serde(default)]
     pub(crate) tools: Option<ToolsConfig>,
+}
+
+/// Private deserialization DTO for [`Config`]. Holds the raw TOML shape before
+/// validation; never exposed publicly, so no serde impl reaches the API.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConfig {
+    server: ServerConfig,
+    #[serde(default)]
+    queue: QueueConfig,
+    #[serde(default)]
+    local: LocalConfig,
+    #[serde(rename = "device", default)]
+    devices: Vec<DeviceConfig>,
+    #[serde(rename = "endpoint", default)]
+    endpoints: Vec<EndpointConfig>,
+    #[serde(rename = "model", default)]
+    models: Vec<ModelConfig>,
+    #[serde(rename = "local_model", default)]
+    local_models: Vec<LocalModelConfig>,
+    #[serde(default)]
+    tools: Option<ToolsConfig>,
+}
+
+impl From<RawConfig> for Config {
+    fn from(raw: RawConfig) -> Config {
+        Config {
+            server: raw.server,
+            queue: raw.queue,
+            local: raw.local,
+            devices: raw.devices,
+            endpoints: raw.endpoints,
+            models: raw.models,
+            local_models: raw.local_models,
+            tools: raw.tools,
+        }
+    }
 }
 
 /// Whether a device is a remote provider or a local GPU managed by the gateway.
@@ -532,8 +566,9 @@ impl Config {
     /// Interpolate, parse, and validate, returning the internal error type.
     pub(crate) fn parse_toml(raw: &str) -> Result<Config, ConfigError> {
         let interpolated = interpolate(raw)?;
-        let config: Config =
+        let raw: RawConfig =
             toml::from_str(&interpolated).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        let config = Config::from(raw);
         config.validate()?;
         Ok(config)
     }
