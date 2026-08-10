@@ -160,7 +160,8 @@ impl ToolDialect for Gemma3ToolCodeDialect {
     ) -> Result<()> {
         correlate_tool_results(calls, results)?;
 
-        conversation.push(Message::assistant(render_tool_code_fence(calls)));
+        let fence = render_tool_code_fence(calls)?;
+        conversation.push(Message::assistant(fence));
 
         let mut parts: Vec<String> = Vec::with_capacity(results.len());
         for (call, (id, content)) in calls.iter().zip(results.iter()) {
@@ -264,18 +265,41 @@ fn split_fence_close(input: &str) -> Option<(&str, &str)> {
     Some((&input[..idx], &input[idx + 3..]))
 }
 
-/// Parse `search(query="x", count=3)` into a [`ToolCall`].
+/// True when `s` is a `tool_code` identifier: `[A-Za-z_][A-Za-z0-9_]*`.
+///
+/// Enforced on both tool names and keyword-argument keys so a name cannot start
+/// with a digit and a key cannot smuggle punctuation or control characters.
+fn is_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c == '_' || c.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+}
+
+/// Parse one `name(args)` call line into a [`ToolCall`].
+///
+/// The name must be an identifier, the arguments live between the first `(` and
+/// the final `)`, and the `)` must end the non-whitespace input so trailing text
+/// after the call is rejected rather than silently ignored.
 fn parse_tool_code_call(line: &str, index: usize) -> Option<ToolCall> {
+    let line = line.trim();
     let open = line.find('(')?;
-    let close = line.rfind(')')?;
-    if close < open {
+    // The close paren must be the last non-whitespace character: `name(...)x` and
+    // `name(...) then more` are rejected, not truncated.
+    if !line.ends_with(')') {
         return None;
     }
-    let name = line[..open].trim();
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+    let close = line.len() - 1;
+    if close <= open {
         return None;
     }
-    let args_src = line[open + 1..close].trim();
+    let name = &line[..open];
+    if !is_identifier(name) {
+        return None;
+    }
+    let args_src = &line[open + 1..close];
     let arguments = parse_tool_code_args(name, args_src)?;
     Some(ToolCall {
         id: format!("call_tool_code_{index}"),
@@ -284,48 +308,111 @@ fn parse_tool_code_call(line: &str, index: usize) -> Option<ToolCall> {
     })
 }
 
+/// Parse the argument list into a JSON object.
+///
+/// Arguments are either all keyword (`key=<json>`) or all positional
+/// (`<json>`); mixing the two forms is rejected, as is a duplicate keyword key.
+/// Every value is a complete JSON value, so strings decode their escapes and
+/// null, numbers, booleans, arrays, and objects all round-trip.
 fn parse_tool_code_args(tool_name: &str, src: &str) -> Option<Value> {
+    let src = src.trim();
     if src.is_empty() {
         return Some(Value::Object(Map::new()));
     }
-    // Keyword form `query="..."` wins when any part contains `=`. A malformed
-    // argument list (unbalanced delimiters, open quote, dangling escape) is
-    // rejected here rather than parsed into corrupted arguments.
     let parts = split_top_level_commas(src)?;
-    let keyword = parts.iter().any(|part| part.contains('='));
-    if keyword {
+    // A blank part (e.g. a trailing comma) is malformed, not skippable.
+    if parts.iter().any(|part| part.trim().is_empty()) {
+        return None;
+    }
+    // Assignment is only an assignment at top level, outside quotes and nested
+    // delimiters; a `=` inside a quoted value or a nested object never flips the
+    // call into keyword mode.
+    let assignments: Vec<Option<usize>> = parts
+        .iter()
+        .map(|part| top_level_assignment(part))
+        .collect();
+    let any_keyword = assignments.iter().any(Option::is_some);
+    let all_keyword = assignments.iter().all(Option::is_some);
+    if any_keyword && !all_keyword {
+        // F8: mixed positional and keyword arguments are diagnosed, not guessed.
+        return None;
+    }
+
+    if all_keyword {
         let mut map = Map::new();
-        for part in parts {
-            let part = part.trim();
-            if part.is_empty() {
-                continue;
-            }
-            let eq = part.find('=')?;
+        for (part, eq) in parts.iter().zip(assignments) {
+            let eq = eq?;
             let key = part[..eq].trim();
-            if key.is_empty() {
+            if !is_identifier(key) {
                 return None;
             }
-            let raw = part[eq + 1..].trim();
-            map.insert(key.to_string(), parse_tool_code_value(raw)?);
+            let value = parse_json_value(&part[eq + 1..])?;
+            // F8: a duplicate keyword key is rejected before insertion rather
+            // than silently overwriting the earlier value.
+            if map.insert(key.to_string(), value).is_some() {
+                return None;
+            }
         }
         return Some(Value::Object(map));
     }
 
-    // Gemma often emits positionals: `search("C++ Alliance")`.
-    let mut values = Vec::new();
-    for part in parts {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        values.push(parse_tool_code_value(part)?);
+    // All positional: Gemma often emits `search("C++ Alliance")`.
+    let mut values = Vec::with_capacity(parts.len());
+    for part in &parts {
+        values.push(parse_json_value(part)?);
     }
     let keys = positional_arg_keys(tool_name, values.len())?;
     let mut map = Map::new();
     for (key, value) in keys.iter().zip(values) {
-        map.insert(key.to_string(), value);
+        map.insert((*key).to_string(), value);
     }
     Some(Value::Object(map))
+}
+
+/// Byte offset of the first top-level `=` in `part`, outside quotes and nested
+/// delimiters, or `None` when the part carries no top-level assignment.
+fn top_level_assignment(part: &str) -> Option<usize> {
+    let mut expected_closers: Vec<char> = Vec::new();
+    let mut in_quote: Option<char> = None;
+    let mut escaped = false;
+    for (idx, ch) in part.char_indices() {
+        if let Some(q) = in_quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == q {
+                in_quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '"' | '\'' => in_quote = Some(ch),
+            '(' => expected_closers.push(')'),
+            '[' => expected_closers.push(']'),
+            '{' => expected_closers.push('}'),
+            ')' | ']' | '}' => {
+                expected_closers.pop();
+            }
+            '=' if expected_closers.is_empty() => return Some(idx),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Decode one argument token as a complete JSON value.
+///
+/// Using JSON as the value grammar gives one symmetric codec with the renderer:
+/// strings decode their escapes, and null, numbers, booleans, arrays, and
+/// objects parse to the same [`Value`] the renderer emits. A bare word, an
+/// unterminated string, or any other non-JSON token is rejected.
+fn parse_json_value(token: &str) -> Option<Value> {
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<Value>(token).ok()
 }
 
 /// Map positional `tool_code` args onto schema-ish parameter names.
@@ -430,30 +517,6 @@ fn render_tool_guide(tools: &Value) -> Option<String> {
     Some(lines.join("\n"))
 }
 
-fn parse_tool_code_value(raw: &str) -> Option<Value> {
-    if let Some(inner) = strip_quotes(raw, '"').or_else(|| strip_quotes(raw, '\'')) {
-        return Some(Value::String(inner.to_string()));
-    }
-    if raw.eq_ignore_ascii_case("true") {
-        return Some(Value::Bool(true));
-    }
-    if raw.eq_ignore_ascii_case("false") {
-        return Some(Value::Bool(false));
-    }
-    if let Ok(n) = raw.parse::<i64>() {
-        return Some(Value::Number(n.into()));
-    }
-    if let Ok(n) = raw.parse::<f64>() {
-        return serde_json::Number::from_f64(n).map(Value::Number);
-    }
-    None
-}
-
-fn strip_quotes(raw: &str, quote: char) -> Option<&str> {
-    let raw = raw.strip_prefix(quote)?.strip_suffix(quote)?;
-    Some(raw)
-}
-
 /// Splits `src` on top-level commas, rejecting malformed argument syntax.
 ///
 /// Returns `None` when a closer does not match its most recent opener (for
@@ -510,43 +573,58 @@ fn split_top_level_commas(src: &str) -> Option<Vec<&str>> {
 // --- Rendering helpers ---
 
 /// Render parsed tool calls as the Gemma ` ```tool_code ` content dialect.
-pub(crate) fn render_tool_code_fence(calls: &[ToolCall]) -> String {
+///
+/// The renderer is symmetric with the parser: every argument is emitted as
+/// `key=<json>` using the same JSON value grammar the parser decodes, so a
+/// parsed call round-trips back to the identical [`ToolCall`] arguments. String
+/// values are JSON-escaped, so quotes and control characters inside a value
+/// cannot break the call syntax.
+///
+/// # Errors
+/// Returns [`Error::Internal`] when a tool name or an argument key is not a
+/// valid identifier, or when the arguments are not a JSON object - shapes the
+/// `tool_code` grammar cannot faithfully represent.
+pub(crate) fn render_tool_code_fence(calls: &[ToolCall]) -> Result<String> {
     let mut body = String::from("```tool_code\n");
     for call in calls {
+        if !is_identifier(&call.name) {
+            return Err(Error::Internal(
+                "tool_code render: tool name is not a valid identifier",
+            ));
+        }
         body.push_str(&call.name);
         body.push('(');
-        match &call.arguments {
-            Value::Object(map) => {
-                let mut first = true;
-                for (key, value) in map {
-                    if !first {
-                        body.push_str(", ");
-                    }
-                    first = false;
-                    body.push_str(key);
-                    body.push('=');
-                    body.push_str(&render_tool_code_arg(value));
-                }
+        let Value::Object(map) = &call.arguments else {
+            return Err(Error::Internal(
+                "tool_code render: arguments must be a JSON object",
+            ));
+        };
+        let mut first = true;
+        for (key, value) in map {
+            if !is_identifier(key) {
+                return Err(Error::Internal(
+                    "tool_code render: argument key is not a valid identifier",
+                ));
             }
-            other => {
-                body.push_str("arguments=");
-                body.push_str(&render_tool_code_arg(other));
+            if !first {
+                body.push_str(", ");
             }
+            first = false;
+            body.push_str(key);
+            body.push('=');
+            body.push_str(&render_json_value(value)?);
         }
         body.push_str(")\n");
     }
     body.push_str("```");
-    body
+    Ok(body)
 }
 
-fn render_tool_code_arg(value: &Value) -> String {
-    match value {
-        Value::String(s) => format!("\"{s}\""),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
-        Value::Null => "null".into(),
-        other => format!("\"{other}\""),
-    }
+/// Render one argument value as its JSON text (the symmetric inverse of
+/// [`parse_json_value`]).
+fn render_json_value(value: &Value) -> Result<String> {
+    serde_json::to_string(value)
+        .map_err(|_| Error::Internal("tool_code render: value could not be serialized"))
 }
 
 #[cfg(test)]
@@ -602,6 +680,102 @@ mod tests {
         // into a ToolCall with corrupted arguments.
         assert!(parse_tool_code_call("search(query=\"a\", nested(b)", 0).is_none());
         assert!(parse_tool_code_call("search(a, (b)", 0).is_none());
+    }
+
+    fn call(name: &str, args: Value) -> ToolCall {
+        ToolCall {
+            id: "id".into(),
+            name: name.into(),
+            arguments: args,
+        }
+    }
+
+    #[test]
+    fn value_grammar_round_trips_all_json_shapes() {
+        // A call carrying string (with escapes), number, bool, null, array, and
+        // object arguments must render and re-parse to the identical arguments.
+        let original = call(
+            "tool",
+            serde_json::json!({
+                "s": "he said \"hi\"\nbye",
+                "n": 42,
+                "f": 3.5,
+                "b": true,
+                "nul": null,
+                "arr": [1, "two", false],
+                "obj": { "k": "v", "nested": [1, 2] }
+            }),
+        );
+        let fence = render_tool_code_fence(std::slice::from_ref(&original)).expect("renders");
+        // Strip the fence framing and re-parse the single call line.
+        let inner = fence
+            .trim_start_matches("```tool_code\n")
+            .trim_end_matches("\n```");
+        let reparsed = parse_tool_code_call(inner, 0).expect("re-parses");
+        assert_eq!(
+            reparsed.arguments, original.arguments,
+            "arguments must round-trip losslessly: {fence}"
+        );
+    }
+
+    #[test]
+    fn equals_inside_quoted_value_stays_positional() {
+        // A `=` inside a quoted value must not flip the call to keyword mode.
+        let parsed = parse_tool_code_call("search(\"a=b\")", 0).expect("parses");
+        assert_eq!(parsed.arguments, serde_json::json!({ "query": "a=b" }));
+    }
+
+    #[test]
+    fn string_escapes_are_decoded() {
+        let parsed = parse_tool_code_call("echo(value=\"line1\\nline2\")", 0).expect("parses");
+        assert_eq!(
+            parsed.arguments,
+            serde_json::json!({ "value": "line1\nline2" })
+        );
+    }
+
+    #[test]
+    fn mixed_positional_and_keyword_is_rejected() {
+        assert!(parse_tool_code_call("search(\"a\", count=3)", 0).is_none());
+    }
+
+    #[test]
+    fn duplicate_keyword_key_is_rejected() {
+        assert!(parse_tool_code_call("search(query=\"a\", query=\"b\")", 0).is_none());
+    }
+
+    #[test]
+    fn names_and_keys_must_be_identifiers_and_close_must_end_input() {
+        // Name starting with a digit.
+        assert!(parse_tool_code_call("3search(query=\"a\")", 0).is_none());
+        // Punctuation in a keyword key.
+        assert!(parse_tool_code_call("search(a-b=\"x\")", 0).is_none());
+        // Trailing text after the close paren.
+        assert!(parse_tool_code_call("search(query=\"a\") extra", 0).is_none());
+        // Bare-word value is not valid JSON.
+        assert!(parse_tool_code_call("search(query=bareword)", 0).is_none());
+    }
+
+    #[test]
+    fn render_rejects_shapes_the_grammar_cannot_represent() {
+        // Non-identifier argument key.
+        let bad_key = call("tool", serde_json::json!({ "a-b": 1 }));
+        assert!(matches!(
+            render_tool_code_fence(std::slice::from_ref(&bad_key)),
+            Err(Error::Internal(_))
+        ));
+        // Non-identifier tool name.
+        let bad_name = call("3tool", serde_json::json!({}));
+        assert!(matches!(
+            render_tool_code_fence(std::slice::from_ref(&bad_name)),
+            Err(Error::Internal(_))
+        ));
+        // Non-object arguments.
+        let bad_args = call("tool", serde_json::json!([1, 2]));
+        assert!(matches!(
+            render_tool_code_fence(std::slice::from_ref(&bad_args)),
+            Err(Error::Internal(_))
+        ));
     }
 
     #[test]
