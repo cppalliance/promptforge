@@ -22,20 +22,20 @@ use crate::{Error, Result};
 #[non_exhaustive]
 pub struct Frontmatter {
     /// The prompt's identifier, supplied explicitly by a caller.
-    pub name: String,
+    pub(crate) name: String,
     /// One-line description shown in prompt listings and name retrieval.
-    pub description: String,
+    pub(crate) description: String,
     /// The promptforge engine major this file targets. Its presence marks the
     /// file as a promptforge prompt; `None` means the file is not one. Optional.
     #[serde(default)]
-    pub promptforge: Option<u32>,
+    pub(crate) promptforge: Option<u32>,
     /// Value returned when the run falls off the last section. Optional.
     #[serde(default)]
-    pub default_return: Option<String>,
+    pub(crate) default_return: Option<String>,
     /// Maximum model round trips a section's tool-call loop may take. Optional;
     /// `None` means the runtime applies its default cap rather than zero.
     #[serde(default)]
-    pub max_tool_iterations: Option<usize>,
+    pub(crate) max_tool_iterations: Option<usize>,
 }
 
 impl Frontmatter {
@@ -91,16 +91,16 @@ pub enum Block {
 #[non_exhaustive]
 pub struct Section {
     /// The heading text (the section's address).
-    pub name: String,
+    pub(crate) name: String,
     /// The heading level, 2 through 6.
-    pub level: u8,
+    pub(crate) level: u8,
     /// Ordered lua/prose blocks for this section.
-    pub blocks: Vec<Block>,
+    pub(crate) blocks: Vec<Block>,
     /// Child sections nested under this one (deeper heading levels).
-    pub children: Vec<Section>,
+    pub(crate) children: Vec<Section>,
     /// Pre-parsed bullet items for list-only sections (no lua blocks).
     /// Empty for non-list sections.
-    pub items: Vec<String>,
+    pub(crate) items: Vec<String>,
 }
 
 impl Section {
@@ -184,17 +184,17 @@ impl Section {
 #[non_exhaustive]
 pub struct Prompt {
     /// The parsed YAML frontmatter.
-    pub frontmatter: Frontmatter,
+    pub(crate) frontmatter: Frontmatter,
     /// The required H1 title.
-    pub title: String,
+    pub(crate) title: String,
     /// The compiled `lua shared` library loaded into section VMs.
-    pub replay: Option<LuaProgram>,
+    pub(crate) replay: Option<LuaProgram>,
     /// Ordered live Lua and prose blocks from the H1.
-    pub h1_blocks: Vec<Block>,
+    pub(crate) h1_blocks: Vec<Block>,
     /// Human-readable prose from the H1.
-    pub description_text: String,
+    pub(crate) description_text: String,
     /// Top-level sections (H2s) in file order.
-    pub sections: Vec<Section>,
+    pub(crate) sections: Vec<Section>,
 }
 
 impl Prompt {
@@ -226,6 +226,20 @@ impl Prompt {
     #[must_use]
     pub fn sections(&self) -> &[Section] {
         &self.sections
+    }
+
+    /// Removes the human-readable prose from the H1, keeping only its live Lua
+    /// blocks.
+    ///
+    /// This is the invariant-preserving replacement for mutating `h1_blocks`
+    /// directly: it drops every [`Block::Prose`] from the H1 and clears the
+    /// derived description text, leaving the compiled H1 Lua blocks and the rest
+    /// of the prompt tree untouched. Callers use it to run a prompt's live H1
+    /// resolution without sending any H1 prose to a model.
+    pub fn strip_h1_prose(&mut self) {
+        self.h1_blocks
+            .retain(|block| matches!(block, Block::Lua(_)));
+        self.description_text.clear();
     }
 }
 
