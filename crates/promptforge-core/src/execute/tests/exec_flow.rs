@@ -1,6 +1,6 @@
 use super::super::*;
-use super::*;
 use super::run;
+use super::*;
 
 /// Alternating lua/prose blocks run in order; non-final prose is single-shot,
 /// final prose loops, and trailing lua sees the last reply.
