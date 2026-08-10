@@ -515,7 +515,7 @@ impl LuaProgram {
     /// [`Error::Lua`] if the temporary compiler VM cannot be created.
     ///
     /// # Examples
-    /// ```ignore
+    /// ```text
     /// use mlua::Lua;
     /// use promptforge_core::lua::LuaProgram;
     /// use promptforge_core::observe::NullObserver;
@@ -940,7 +940,7 @@ fn validate_alias(alias: &str) -> Result<()> {
 /// the same explicit observed teardown boundary as later lifecycle failures.
 ///
 /// # Examples
-/// ```ignore
+/// ```text
 /// use promptforge_core::lua::SectionVm;
 /// use promptforge_core::observe::NullObserver;
 ///
@@ -989,7 +989,7 @@ impl SectionVm {
     /// shared program fails or returns a non-scalar value.
     ///
     /// # Examples
-    /// ```ignore
+    /// ```text
     /// use promptforge_core::lua::{LuaProgram, SectionVm};
     /// use promptforge_core::observe::NullObserver;
     ///
@@ -1133,7 +1133,7 @@ impl SectionVm {
     /// values were already injected.
     ///
     /// # Examples
-    /// ```ignore
+    /// ```text
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
@@ -1303,7 +1303,7 @@ impl SectionVm {
     /// returns a non-scalar value.
     ///
     /// # Examples
-    /// ```ignore
+    /// ```text
     /// use promptforge_core::lua::{LuaProgram, SectionVm};
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
@@ -1400,7 +1400,7 @@ impl SectionVm {
     /// scope remains open, or the reply cannot be installed.
     ///
     /// # Examples
-    /// ```ignore
+    /// ```text
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
@@ -1457,7 +1457,7 @@ impl SectionVm {
     /// exhausted, or the program returns a non-scalar value.
     ///
     /// # Examples
-    /// ```ignore
+    /// ```text
     /// use promptforge_core::lua::{LuaProgram, SectionVm};
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
@@ -1517,7 +1517,7 @@ impl SectionVm {
     /// cannot be represented as JSON.
     ///
     /// # Examples
-    /// ```ignore
+    /// ```text
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
@@ -1812,7 +1812,7 @@ impl SectionVm {
     /// retained by the VM.
     ///
     /// # Examples
-    /// ```ignore
+    /// ```text
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     ///

@@ -35,11 +35,14 @@ pub(crate) fn wrap(content: &str, nonce: &str) -> String {
 
 /// Builds one unpredictable hex nonce for guard tags.
 ///
-/// The value need only be unguessable by fetched content, not cryptographic,
-/// so a single random `u64` rendered as 16 hex digits is sufficient.
+/// The nonce comes from a cryptographically secure RNG so fetched content
+/// cannot predict or forge the guard tag's closing delimiter. `rand::random`
+/// draws from the thread-local ChaCha-based CSPRNG (seeded from the operating
+/// system's entropy), and 128 bits rendered as 32 hex digits leaves no useful
+/// guessing margin.
 #[must_use]
 pub(crate) fn nonce() -> String {
-    format!("{:016x}", fastrand::u64(..))
+    format!("{:032x}", rand::random::<u128>())
 }
 
 #[cfg(test)]
@@ -102,12 +105,26 @@ mod tests {
     }
 
     #[test]
-    fn nonce_returns_16_hex_chars() {
+    fn nonce_is_128_bits_of_hex() {
         let n = nonce();
-        assert_eq!(n.len(), 16, "nonce must be 16 hex chars, got: {n}");
+        assert_eq!(
+            n.len(),
+            32,
+            "nonce must be 32 hex chars (128 bits), got: {n}"
+        );
         assert!(
             n.chars().all(|c| c.is_ascii_hexdigit()),
             "nonce must be hex, got: {n}"
         );
+    }
+
+    #[test]
+    fn nonces_do_not_repeat() {
+        // A CSPRNG makes collisions astronomically unlikely; a repeat in a small
+        // sample would signal a broken (constant or low-entropy) source.
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            assert!(seen.insert(nonce()), "nonce values must not repeat");
+        }
     }
 }

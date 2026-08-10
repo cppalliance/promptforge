@@ -181,9 +181,12 @@ enum GatewayTransport {
 
 impl fmt::Debug for GatewayClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The bearer key is a credential and must never appear in Debug output,
+        // logs, or panic messages. It is redacted to a fixed marker regardless of
+        // whether one is set, so no length or presence signal leaks either.
         f.debug_struct("GatewayClient")
             .field("base_url", &self.base_url)
-            .field("key", &self.key)
+            .field("key", &"<redacted>")
             .finish_non_exhaustive()
     }
 }
@@ -426,11 +429,20 @@ mod tests {
     }
 
     #[test]
-    fn client_constructs_without_model() {
-        let client = GatewayClient::new("http://127.0.0.1:8081/v1", "tok");
-        assert_eq!(
-            format!("{client:?}"),
-            "GatewayClient { base_url: \"http://127.0.0.1:8081/v1\", key: \"tok\", .. }"
+    fn debug_redacts_the_bearer_key_and_never_leaks_it() {
+        let client = GatewayClient::new("http://127.0.0.1:8081/v1", "super-secret-token");
+        let rendered = format!("{client:?}");
+        assert!(
+            !rendered.contains("super-secret-token"),
+            "the bearer key must never appear in Debug output, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("<redacted>"),
+            "the key field must be redacted, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("http://127.0.0.1:8081/v1"),
+            "the base URL is not a secret and should still appear, got: {rendered}"
         );
     }
 

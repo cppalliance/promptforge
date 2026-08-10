@@ -115,10 +115,25 @@ fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCall>> {
             .and_then(Value::as_str)
             .ok_or_else(|| Error::MalformedResponse("tool call had no name".into()))?
             .to_string();
-        let arguments = match function.get("arguments").and_then(Value::as_str) {
-            Some(raw_args) => serde_json::from_str::<Value>(raw_args)
-                .unwrap_or_else(|_| Value::String(raw_args.to_string())),
-            None => Value::Null,
+        // OpenAI encodes `function.arguments` as a JSON string. A missing or
+        // JSON-null field means "no arguments"; anything else must parse as JSON
+        // or the turn is malformed. Coercing invalid JSON into a string
+        // `Value` (the old behavior) would hand a tool arguments it never
+        // agreed to accept, so it is rejected instead.
+        let arguments = match function.get("arguments") {
+            None | Some(Value::Null) => Value::Null,
+            Some(Value::String(raw_args)) => {
+                serde_json::from_str::<Value>(raw_args).map_err(|error| {
+                    Error::MalformedResponse(format!(
+                        "tool call arguments were not valid JSON: {error}"
+                    ))
+                })?
+            }
+            Some(_) => {
+                return Err(Error::MalformedResponse(
+                    "tool call arguments were not a JSON-encoded string".into(),
+                ));
+            }
         };
         calls.push(ToolCall {
             id,
@@ -220,7 +235,7 @@ mod tests {
                     "tool_calls": [{
                         "id": "call_2",
                         "type": "function",
-                        "function": { "name": "web_fetch", "arguments": "not json" }
+                        "function": { "name": "web_fetch", "arguments": "{\"url\":\"https://example.com\"}" }
                     }]
                 }
             }]
@@ -229,8 +244,75 @@ mod tests {
         let turn = normalize(&body).unwrap();
         match turn.outcome {
             CompletionResult::ToolCalls(calls) => {
-                assert_eq!(calls[0].arguments, Value::String("not json".into()));
+                assert_eq!(
+                    calls[0].arguments,
+                    serde_json::json!({ "url": "https://example.com" })
+                );
             }
+            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
+        }
+    }
+
+    #[test]
+    fn malformed_tool_arguments_are_rejected_not_coerced() {
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_bad",
+                        "type": "function",
+                        "function": { "name": "web_fetch", "arguments": "not json" }
+                    }]
+                }
+            }]
+        });
+
+        assert!(
+            matches!(normalize(&body), Err(Error::MalformedResponse(_))),
+            "invalid-JSON tool arguments must be rejected, never coerced to a string"
+        );
+    }
+
+    #[test]
+    fn non_string_tool_arguments_are_rejected() {
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_obj",
+                        "type": "function",
+                        "function": { "name": "web_fetch", "arguments": { "url": "x" } }
+                    }]
+                }
+            }]
+        });
+
+        assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
+    }
+
+    #[test]
+    fn absent_tool_arguments_default_to_null() {
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_none",
+                        "type": "function",
+                        "function": { "name": "ping" }
+                    }]
+                }
+            }]
+        });
+
+        let turn = normalize(&body).unwrap();
+        match turn.outcome {
+            CompletionResult::ToolCalls(calls) => assert_eq!(calls[0].arguments, Value::Null),
             CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
         }
     }
