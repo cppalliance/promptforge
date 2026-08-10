@@ -145,12 +145,14 @@ fn bound_for_model(md: &str) -> TestPrompt {
     }
 }
 
+// PFCORE-EXEC-TESTS-001: the former `resolver` parameter was a fake seam - it was
+// accepted and discarded because live tool binding actually resolves through the
+// `ToolPicker` built from the catalog in `run`. It has been removed so the test
+// helper cannot imply a resolution path it does not exercise.
 fn bound_with_tools(
     md: &str,
-    resolver: &dyn crate::lua::ToolResolver,
     near_duplicates: Vec<(ToolDescriptor, ToolDescriptor)>,
 ) -> TestPrompt {
-    let _ = resolver;
     let mut live_source = md.to_owned();
     if let Some(marker) = live_source.find("```lua shared\n")
         && live_source
@@ -3152,11 +3154,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua shared\ntools.need('local_alias', 'capability')\nmodels.always('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\nAsk without tools.\n";
-    let prompt = bound_with_tools(
-        md,
-        &|_: &str| Ok(ToolId::new("tests", "concrete").expect("valid id")),
-        Vec::new(),
-    );
+    let prompt = bound_with_tools(md, Vec::new());
     let out = run(
         &prompt,
         "",
@@ -3199,7 +3197,6 @@ tools.need('local_alias', 'capability')\n\
 tools.always('local_alias')\n\
 models.always('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\nUse the tool.\n",
-        &|_: &str| Ok(ToolId::new("tests", "concrete").expect("valid id")),
         Vec::new(),
     );
 
@@ -3252,7 +3249,6 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
 tools.need('section_tool', 'capability')\n\
 models.always('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\n```lua\ntools.add('section_tool')\n```\n\nUse the tool.\n",
-        &|_: &str| Ok(ToolId::new("tests", "concrete").expect("valid id")),
         Vec::new(),
     );
 
@@ -3316,7 +3312,6 @@ tools.need('second_local', 'second')\n\
 models.always('writer', 'A general model for tests')\n```\n\n\
 ## First\n\n```lua\ntools.add('first_local')\n```\n\nFirst model turn.\n\n\
 ## Second\n\n```lua\ntools.add('second_local')\n```\n\nSecond model turn.\n",
-        &|capability: &str| Ok(ToolId::new("tests", capability).expect("valid id")),
         vec![(first_descriptor, second_descriptor)],
     );
 
@@ -3557,11 +3552,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
         local text = writer:infer('say hello')\n\
         return text\n\
         ```\n";
-    let prompt = bound_with_tools(
-        md,
-        &|_: &str| Ok(ToolId::new("tests", "echo").expect("valid id")),
-        Vec::new(),
-    );
+    let prompt = bound_with_tools(md, Vec::new());
     let out = run(
         &prompt,
         "",
@@ -3644,11 +3635,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         ```lua\nassert(tools.calls['echo'] == 1, \
         'expected 1 call, got ' .. tostring(tools.calls['echo']))\n\
         return 'ok'\n```\n";
-    let prompt = bound_with_tools(
-        md,
-        &|_: &str| Ok(ToolId::new("tests", "echo").expect("valid id")),
-        Vec::new(),
-    );
+    let prompt = bound_with_tools(md, Vec::new());
     let out = run(
         &prompt,
         "",
@@ -3742,11 +3729,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
         return 'unreached'\n```\n";
     let tool = ScopedFixtureTool::new("search", "canonical_search", "Search for things.");
     let addr = spawn_text_gateway().await;
-    let prompt = bound_with_tools(
-        md,
-        &|_: &str| Ok(ToolId::new("tests", "search").expect("valid id")),
-        Vec::new(),
-    );
+    let prompt = bound_with_tools(md, Vec::new());
     let error = run(
         &prompt,
         "",
@@ -3781,11 +3764,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
         return 'unreached'\n```\n";
     let tool = ScopedFixtureTool::new("search", "canonical_search", "Search for things.");
     let addr = spawn_text_gateway().await;
-    let prompt = bound_with_tools(
-        md,
-        &|_: &str| Ok(ToolId::new("tests", "search").expect("valid id")),
-        Vec::new(),
-    );
+    let prompt = bound_with_tools(md, Vec::new());
     let error = run(
         &prompt,
         "",
@@ -3826,17 +3805,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
         tools.always('scoped')\n\
         models.always('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\nUse the tool.\n";
-    let prompt = bound_with_tools(
-        md,
-        &|capability: &str| {
-            if capability.contains("scoped") {
-                Ok(ToolId::new("tests", "scoped").expect("valid id"))
-            } else {
-                Ok(ToolId::new("tests", "global_tool").expect("valid id"))
-            }
-        },
-        Vec::new(),
-    );
+    let prompt = bound_with_tools(md, Vec::new());
     let error = run(
         &prompt,
         "",
@@ -3893,11 +3862,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
         tools.always('echo')\n\
         models.always('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\nUse the tool.\n";
-    let prompt = bound_with_tools(
-        md,
-        &|_: &str| Ok(ToolId::new("tests", "echo").expect("valid id")),
-        Vec::new(),
-    );
+    let prompt = bound_with_tools(md, Vec::new());
     let error = run(
         &prompt,
         "",
@@ -3958,11 +3923,7 @@ async fn model_infer_single_shot_returns_text() {
         assert(tools.calls['echo'] == 1, 'infer tool loop must increment tools.calls')\n\
         return text\n\
         ```\n";
-    let prompt = bound_with_tools(
-        md,
-        &|_: &str| Ok(ToolId::new("tests", "echo").expect("valid id")),
-        Vec::new(),
-    );
+    let prompt = bound_with_tools(md, Vec::new());
     let out = run(
         &prompt,
         "",
@@ -4483,11 +4444,7 @@ return 'ok'\n\
 Loop forever on {{ item }}.\n\n\
 ### Items\n\n\
 - alpha\n";
-    let prompt = bound_with_tools(
-        md,
-        &|_: &str| Ok(ToolId::new("tests", "echo").expect("valid id")),
-        Vec::new(),
-    );
+    let prompt = bound_with_tools(md, Vec::new());
     let out = run(
         &prompt,
         "",
