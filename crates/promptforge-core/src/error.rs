@@ -1,66 +1,171 @@
-//! The crate's error type and result alias.
+//! The crate's internal error substrate.
+//!
+//! [`Error`] is a `pub(crate)` substrate: it is never part of the public API.
+//! Every public boundary returns its own typed error ([`crate::RunError`],
+//! [`crate::ParseError`], [`crate::CompletionError`], [`crate::DialectError`],
+//! [`crate::tools::ToolError`], [`crate::store::StoreError`]); those wrappers
+//! classify this substrate and preserve its source. See the module wrappers for
+//! the `From` bridges that let internal `?` keep flowing through the substrate.
 
-/// Diagnostics for two semantic near-duplicates exposed in one model turn.
-#[derive(Debug)]
-#[non_exhaustive]
-pub struct NearDuplicateDiagnostic {
-    /// The first prompt-local alias in picker catalog pair order.
-    pub first_alias: String,
-    /// The first stable identity.
-    pub first_id: crate::tools::ToolId,
-    /// The first concrete picker description.
-    pub first_description: String,
-    /// The first concrete picker behavioural hints.
-    pub first_annotations: promptforge_tool_picker::ToolAnnotations,
-    /// The second prompt-local alias in picker catalog pair order.
-    pub second_alias: String,
-    /// The second stable identity.
-    pub second_id: crate::tools::ToolId,
-    /// The second concrete picker description.
-    pub second_description: String,
-    /// The second concrete picker behavioural hints.
-    pub second_annotations: promptforge_tool_picker::ToolAnnotations,
-    /// The cosine similarity reported by the picker.
-    pub similarity: f32,
+/// A cloneable, shareable error cause.
+///
+/// Some caches re-produce a typed [`Error`] on every lookup (for example the
+/// resolver decision cache), so a non-`Clone` dependency error cannot be moved
+/// into a fresh [`Error`] each time. Wrapping it in a reference-counted
+/// [`SharedSource`] lets the typed cause be retained as a `#[source]` and cloned
+/// cheaply per lookup instead of being flattened to a string (resolve F4).
+#[derive(Debug, Clone)]
+pub(crate) struct SharedSource(std::sync::Arc<dyn std::error::Error + Send + Sync>);
+
+impl SharedSource {
+    /// Wraps a concrete error as a shareable cause.
+    pub(crate) fn new(source: impl std::error::Error + Send + Sync + 'static) -> SharedSource {
+        SharedSource(std::sync::Arc::new(source))
+    }
 }
 
-/// The crate's error type, spanning parsing, HTTP, and execution failures.
+impl std::fmt::Display for SharedSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, formatter)
+    }
+}
+
+impl std::error::Error for SharedSource {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
+}
+
+/// The crate's internal error substrate, spanning parsing, HTTP, and execution
+/// failures.
 ///
-/// Marked `#[non_exhaustive]` so future variants are not a breaking change. The
-/// data-carrying tool-binding variants are likewise non-exhaustive so fields can
-/// be added compatibly, and the transport variant hides its concrete source
-/// type so no dependency's error leaks through this crate's public API.
+/// This type is `pub(crate)` and never appears in the public API; the public
+/// boundary errors wrap and classify it. Marked `#[non_exhaustive]` so future
+/// variants are not a breaking change. The transport variant hides its concrete
+/// source type so no dependency's error leaks through the wrappers' `source()`.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum Error {
+pub(crate) enum Error {
     /// The prompt file could not be parsed (bad frontmatter, no sections, etc.).
-    #[error("parse error: {0}")]
+    ///
+    /// The message is the specific failure as a noun phrase; the public wrapper
+    /// already conveys that this is a parse failure, so no redundant `parse
+    /// error:` type label is prepended here (F8).
+    #[error("{0}")]
     Parse(String),
+
+    /// The prompt frontmatter was not valid YAML, preserving the parser cause.
+    ///
+    /// Unlike [`Error::Parse`], this retains the originating YAML decode failure
+    /// (a [`serde_yaml::Error`]) as the `#[source]` cause (F3) so
+    /// [`crate::ParseError::source`] can expose the frontmatter syntax location
+    /// instead of flattening it into the message.
+    #[error("invalid frontmatter: {message}")]
+    #[non_exhaustive]
+    ParseFrontmatter {
+        /// The human-readable diagnostic (no raw source dump).
+        message: String,
+        /// The originating YAML parse failure, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// A structurally-classified parse failure carrying a stable kind and an
+    /// optional source byte span, so [`crate::ParseError`] can expose the
+    /// classification and location from stored fields instead of inferring them
+    /// from message text.
+    #[error("{message}")]
+    #[non_exhaustive]
+    ParseStructured {
+        /// The stable classification of this parse failure.
+        kind: crate::parser::ParseErrorKind,
+        /// The byte span of the offending region within the source, when known.
+        span: Option<(usize, usize)>,
+        /// The human-readable diagnostic.
+        message: String,
+    },
 
     /// A required environment variable was missing.
     #[error("missing environment variable: {0}")]
     MissingEnv(String),
+
+    /// An environment variable was set but its value was not valid Unicode.
+    #[error("environment variable is set but not valid Unicode: {0}")]
+    InvalidEnv(String),
+
+    /// A client or endpoint configuration input was invalid, retaining the
+    /// concrete cause (a secret or URL validation failure) as a private
+    /// `#[source]` (client F13 / AUDIT-DISCARDED-SOURCE) instead of flattening
+    /// it into the message.
+    #[error("{message}")]
+    #[non_exhaustive]
+    Config {
+        /// The human-readable configuration diagnostic (no raw source dump).
+        message: String,
+        /// The originating validation failure (secret or URL parse), kept as
+        /// the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     /// Gateway access was explicitly disabled by the host.
     #[error("gateway access is disabled")]
     GatewayDisabled,
 
     /// The HTTP request to the model backend failed at the transport layer.
-    #[error("http transport error")]
+    #[error("http transport failure")]
     Http(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// The backend returned a non-success status.
-    #[error("backend returned {status}: {body}")]
+    ///
+    /// The `Display` is deliberately body-free (F5): the bounded, control-escaped
+    /// body rides only in the private `body` field, reachable through the
+    /// explicit [`crate::CompletionError::backend_body`] opt-in, so a raw or
+    /// hostile payload cannot forge log lines or leak into an error message.
+    #[error("non-success backend status {status}")]
     Backend {
         /// The HTTP status code returned by the backend.
         status: u16,
-        /// The (truncated) response body, for diagnostics.
+        /// The bounded, control-escaped response body, for opt-in diagnostics.
         body: String,
     },
 
     /// The backend response could not be understood (missing choices, etc.).
     #[error("malformed response: {0}")]
     MalformedResponse(String),
+
+    /// The backend response could not be decoded, preserving the decoder cause.
+    ///
+    /// Like [`Error::MalformedResponse`] but retains the underlying decode
+    /// failure (for example a [`serde_json::Error`]) as the `#[source]` cause
+    /// rather than flattening it into the message (MODEL-009 / client F11), so
+    /// the error chain survives through the public wrappers' `source()`.
+    #[error("malformed response: {message}")]
+    #[non_exhaustive]
+    MalformedResponseSource {
+        /// The human-readable diagnostic (no raw body).
+        message: String,
+        /// The originating decode failure, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Reading a non-success backend response body failed at the transport
+    /// layer.
+    ///
+    /// Retains the [`reqwest::Error`] as the `#[source]` cause (MODEL-010)
+    /// rather than flattening the read failure into display text, so the error
+    /// chain (timeout, connection reset) survives. The status the backend had
+    /// already returned is preserved for classification.
+    #[error("unreadable backend error body (status {status})")]
+    #[non_exhaustive]
+    BackendBodyRead {
+        /// The non-success HTTP status whose body could not be read.
+        status: u16,
+        /// The originating transport read failure, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     /// The model returned neither non-empty tool calls nor non-empty text.
     ///
@@ -77,12 +182,44 @@ pub enum Error {
     #[error("interrupted by Ctrl-C")]
     Interrupted,
 
-    /// A section's Lua phase failed to build, run, or return a usable value.
-    #[error("lua error: {0}")]
+    /// A section's Lua phase failed a host contract or hit a poisoned lock: a
+    /// runtime-internal condition with no originating `mlua` error to preserve
+    /// (for example "host values have not been injected" or a poisoned mutex).
+    ///
+    /// Failures that *do* carry an `mlua` cause use [`Error::LuaRuntime`], which
+    /// retains that cause as a private source (F4). The message is the specific
+    /// failure as a noun phrase; the public wrapper classifies this as a Lua
+    /// failure, so no redundant `lua error:` type label is prepended (F8).
+    #[error("{0}")]
     Lua(String),
 
+    /// A section's Lua phase failed at runtime or while bridging host values,
+    /// retaining the originating `mlua` error as the private `#[source]` cause
+    /// (F4) alongside the mapped prompt-location message.
+    ///
+    /// This is the source-bearing counterpart to [`Error::Lua`]: it is built
+    /// from a concrete `mlua::Error` (see [`Error::lua`] and
+    /// [`crate::lua::LuaProgram::map_runtime_error`]), so the failure chain
+    /// survives through the public wrappers' `source()` instead of being
+    /// flattened to a string.
+    #[error("{message}")]
+    #[non_exhaustive]
+    LuaRuntime {
+        /// The mapped, location-tagged diagnostic (no redundant type label).
+        message: String,
+        /// The originating Lua error, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     /// Lua source was not syntactically valid at its prompt location.
+    ///
+    /// Retains the originating `mlua` compile error as the private `#[source]`
+    /// cause (F4) alongside the location metadata, so the compiler diagnostic
+    /// chain survives through the public wrappers' `source()` instead of being
+    /// flattened into `message` alone.
     #[error("lua compilation error at {location} (line {source_line}): {message}")]
+    #[non_exhaustive]
     LuaCompile {
         /// The prompt region supplied by the parser, such as a section prologue.
         location: String,
@@ -92,16 +229,46 @@ pub enum Error {
         lua_source: String,
         /// The Lua 5.4 compiler diagnostic.
         message: String,
+        /// The originating `mlua` compile error, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 
     /// The concrete picker failed while resolving a capability declaration.
-    #[error("could not bind tool capability {capability:?}: {detail}")]
+    #[error("tool capability binding failure for {capability:?}: {detail}")]
     #[non_exhaustive]
     Bind {
         /// The exact capability description passed to `tools.need`.
         capability: String,
         /// The picker failure without exposing its concrete error type.
         detail: String,
+    },
+
+    /// Building a model-facing tool schema for a bound alias failed, retaining
+    /// the schema validation error as the private `#[source]` cause (F5) rather
+    /// than flattening it into `detail`.
+    #[error("model-facing schema build failure for tool alias {alias:?}")]
+    #[non_exhaustive]
+    BindSchema {
+        /// The prompt-local alias whose schema could not be built.
+        alias: String,
+        /// The originating schema validation failure, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// The picker's query failed while resolving a capability, retaining the
+    /// picker's own typed error as the private `#[source]` cause (resolve F4)
+    /// so the failure chain survives the resolution cache instead of being
+    /// flattened to a string.
+    #[error("tool capability binding failure for {capability:?}: {source}")]
+    #[non_exhaustive]
+    BindQuery {
+        /// The exact capability description passed to `tools.need`.
+        capability: String,
+        /// The picker's typed query failure, kept as a shareable cause.
+        #[source]
+        source: SharedSource,
     },
 
     /// No picker catalog entry matched a declared capability.
@@ -175,11 +342,22 @@ pub enum Error {
     },
 
     /// The picker could not analyze the selected tool identities.
-    #[error("could not analyze the selected tool scope: {detail}")]
+    #[error("selected tool-scope analysis failure: {detail}")]
     #[non_exhaustive]
     ToolScopeAnalysis {
         /// The picker failure without exposing its concrete error type.
         detail: String,
+    },
+
+    /// The picker's near-duplicate analysis of the selected tool scope failed,
+    /// retaining the picker's typed selection error as the private `#[source]`
+    /// cause (F5) rather than flattening it into a string.
+    #[error("selected tool-scope analysis failure")]
+    #[non_exhaustive]
+    ToolScopeAnalysisSource {
+        /// The picker's typed selection failure, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 
     /// Two tools in one model-visible scope are semantic near-duplicates.
@@ -194,17 +372,32 @@ pub enum Error {
     #[non_exhaustive]
     NearDuplicateTools {
         /// The complete pair diagnostic, boxed to keep every crate error small.
-        diagnostic: Box<NearDuplicateDiagnostic>,
+        /// The diagnostic vocabulary lives in tool-scope validation (F10).
+        diagnostic: Box<crate::tools::NearDuplicateDiagnostic>,
     },
 
     /// The concrete picker failed while resolving a model capability declaration.
-    #[error("could not bind model capability {capability:?}: {detail}")]
+    #[error("model capability binding failure for {capability:?}: {detail}")]
     #[non_exhaustive]
     ModelBind {
         /// The exact capability description passed to `models.need`.
         capability: String,
         /// The picker failure without exposing its concrete error type.
         detail: String,
+    },
+
+    /// The picker's rebuild or resolve failed while binding a model capability,
+    /// retaining the picker's own typed error as the private `#[source]` cause
+    /// (model/resolver F5) rather than flattening it into a `detail` string, so
+    /// the failure chain survives the resolution path.
+    #[error("model capability binding failure for {capability:?}: {source}")]
+    #[non_exhaustive]
+    ModelBindQuery {
+        /// The exact capability description passed to `models.need`.
+        capability: String,
+        /// The picker's typed rebuild/resolve failure, kept as a shareable cause.
+        #[source]
+        source: SharedSource,
     },
 
     /// No catalog entry matched a declared model capability under its constraints.
@@ -243,29 +436,17 @@ pub enum Error {
         alias: String,
     },
 
-    /// A picker-selected model identity is absent from the live catalog.
-    #[error(
-        "alias {alias:?} selected model identity {id:?}, which is absent from the live catalog"
-    )]
-    #[non_exhaustive]
-    PickedModelNotLive {
-        /// The prompt-local alias whose selection cannot be fulfilled.
-        alias: String,
-        /// The selected stable identity absent from the catalog.
-        id: crate::model::ModelId,
-    },
-
     /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
-    #[error("substitution error: {0}")]
-    Substitution(String),
+    ///
+    /// Carries a typed [`crate::subst::SubstitutionError`] with a stable kind,
+    /// the byte offset of the offending placeholder, a bounded preview, and any
+    /// preserved serialization source, rather than a flattened string.
+    #[error("{0}")]
+    Substitution(#[source] Box<crate::subst::SubstitutionError>),
 
     /// The tool-call loop ran its iteration cap without a final text reply.
     #[error("tool-call loop did not converge")]
     ToolLoopExhausted,
-
-    /// The model asked to call a tool that was not provided to the executor.
-    #[error("model called unknown tool {0}")]
-    UnknownTool(String),
 
     /// The model (or Lua) referenced a tool outside the VM's scoped aliases.
     #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (alias was declared by tools.need but not added to this section's scope)" } else { "" })]
@@ -314,15 +495,80 @@ pub enum Error {
     #[error("unknown tool dialect: {0}")]
     UnknownDialect(crate::dialects::ToolDialectId),
 
-    /// A dialect operation that is not yet implemented (step 1 stub).
-    #[error("dialect {dialect} has not implemented {operation}")]
-    #[non_exhaustive]
-    DialectNotImplemented {
-        /// Which dialect was called.
-        dialect: crate::dialects::ToolDialectId,
-        /// Which operation was attempted.
-        operation: &'static str,
+    /// A dispatched [`crate::tools::Tool`] returned a model-safe failure.
+    ///
+    /// The tool's own [`crate::tools::ToolError`] is preserved as the
+    /// `#[source]` cause, so the failure chain (and any transport/parse error the
+    /// tool wrapped) survives instead of being flattened to a string.
+    #[error("tool call failure: {message}")]
+    Tool {
+        /// The tool's model-safe failure message.
+        message: String,
+        /// The originating tool error, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
+
+    /// A spawned fanout arm task failed to join (it panicked or was aborted
+    /// abnormally rather than returning a normal `Result`).
+    ///
+    /// The [`tokio::task::JoinError`] is preserved as the `#[source]` cause so
+    /// the structured join failure survives; it is only stringified at the outer
+    /// Lua callback boundary, never here.
+    #[error("fanout arm join failed")]
+    FanoutArmJoin(#[source] tokio::task::JoinError),
+
+    /// An internal runtime invariant was violated (a state the surrounding code
+    /// has already guaranteed cannot occur). Surfaced as a concrete error rather
+    /// than silently skipping work, so an impossible state cannot masquerade as a
+    /// successful fall-through.
+    #[error("internal invariant violated: {0}")]
+    Internal(&'static str),
+
+    /// A supplied tool's transport wire name was not legal when binding the
+    /// live registry, retaining the structured [`crate::tools::ToolRegistryError`]
+    /// as the private `#[source]` cause (tools AUDIT-DISCARDED-SOURCE) so the
+    /// rejected name and reason survive instead of being flattened to a bare
+    /// `&'static str`.
+    #[error("internal invariant violated: invalid tool wire name")]
+    #[non_exhaustive]
+    InvalidToolWireName {
+        /// The originating registry validation failure, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// A Lua host resource quota (log events, log bytes, or instructions) was
+    /// exhausted. A stable typed error rather than a bare `Lua(String)` so hosts
+    /// can distinguish quota exhaustion from an authoring error.
+    #[error("lua {resource} quota exceeded")]
+    #[non_exhaustive]
+    LuaQuota {
+        /// The exhausted resource: `"log event"`, `"log byte"`, or `"instruction"`.
+        resource: &'static str,
+    },
+
+    /// Rendering the current time as an RFC 3339 string failed.
+    ///
+    /// Retains the [`time::error::Format`] failure as the private `#[source]`
+    /// cause (execute source-audit discarded-error-002) rather than mapping
+    /// every formatter failure to a source-free [`Error::Internal`], so the
+    /// concrete formatting cause survives.
+    #[error("could not format the current time as RFC 3339")]
+    TimestampFormat(#[source] time::error::Format),
+}
+
+/// Stable messages emitted by Lua host-quota refusals.
+///
+/// Kept as constants so [`crate::lua`] emits them and the runtime-error boundary
+/// recognizes them, mapping the refusal to the typed [`Error::LuaQuota`].
+pub(crate) mod lua_quota {
+    /// Log event-count budget exhausted.
+    pub(crate) const LOG_EVENT: &str = "lua log event budget exceeded";
+    /// Cumulative log byte budget exhausted.
+    pub(crate) const LOG_BYTE: &str = "lua log cumulative byte budget exceeded";
+    /// Per-VM instruction budget exhausted.
+    pub(crate) const INSTRUCTION: &str = "lua instruction budget exceeded";
 }
 
 impl Error {
@@ -330,7 +576,174 @@ impl Error {
     pub(crate) fn http(source: reqwest::Error) -> Error {
         Error::Http(Box::new(source))
     }
+
+    /// Wrap an `mlua` failure as [`Error::LuaRuntime`], preserving it as the
+    /// `#[source]` cause (F4) rather than flattening it to a string.
+    pub(crate) fn lua(source: mlua::Error) -> Error {
+        Error::LuaRuntime {
+            message: source.to_string(),
+            source: Box::new(source),
+        }
+    }
+
+    /// Wrap a tool failure, preserving the tool's own error as the `#[source]`
+    /// cause rather than discarding it.
+    pub(crate) fn tool(source: crate::tools::ToolError) -> Error {
+        Error::Tool {
+            message: source.to_string(),
+            source: Box::new(source),
+        }
+    }
 }
 
-/// Crate result alias.
-pub type Result<T> = std::result::Result<T, Error>;
+impl From<crate::subst::SubstitutionError> for Error {
+    fn from(error: crate::subst::SubstitutionError) -> Error {
+        Error::Substitution(Box::new(error))
+    }
+}
+
+/// Crate-internal result alias over the [`Error`] substrate.
+pub(crate) type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_bearing_binding_errors_preserve_their_cause() {
+        // F5: the binding and tool-scope failures keep the originating typed
+        // error as a private `source()` instead of flattening it to a string,
+        // and the chain survives through the public `RunError` wrapper.
+        let schema_error = crate::client::ToolSchemaError::NonObjectSchema {
+            name: "echo".to_owned(),
+        };
+        let bind = Error::BindSchema {
+            alias: "echo".to_owned(),
+            source: Box::new(schema_error),
+        };
+        assert!(
+            std::error::Error::source(&bind).is_some(),
+            "BindSchema must preserve the schema validation cause"
+        );
+        assert_eq!(
+            bind.to_string(),
+            "model-facing schema build failure for tool alias \"echo\""
+        );
+        assert!(
+            std::error::Error::source(&crate::RunError::from(bind)).is_some(),
+            "the public RunError wrapper must keep the binding cause reachable"
+        );
+
+        let analysis = Error::ToolScopeAnalysisSource {
+            source: Box::new(std::io::Error::other("picker selection failed")),
+        };
+        assert!(
+            std::error::Error::source(&analysis).is_some(),
+            "ToolScopeAnalysisSource must preserve the picker selection cause"
+        );
+        assert!(std::error::Error::source(&crate::RunError::from(analysis)).is_some());
+    }
+
+    #[test]
+    fn lua_compile_preserves_the_originating_compiler_error() {
+        // F4: a compile failure keeps the concrete `mlua` error as a private
+        // `source()` instead of flattening it into `message` alone, and the
+        // chain survives through the public `RunError` wrapper.
+        let compile = Error::LuaCompile {
+            location: "section `S` prologue".to_owned(),
+            source_line: 7,
+            lua_source: "x =".to_owned(),
+            message: "syntax error near '='".to_owned(),
+            source: Box::new(mlua::Error::SyntaxError {
+                message: "syntax error near '='".to_owned(),
+                incomplete_input: false,
+            }),
+        };
+        assert!(
+            std::error::Error::source(&compile).is_some(),
+            "LuaCompile must preserve the mlua compile cause"
+        );
+        assert!(std::error::Error::source(&crate::RunError::from(compile)).is_some());
+    }
+
+    #[test]
+    fn invalid_tool_wire_name_preserves_the_registry_error_and_its_context() {
+        // tools AUDIT-DISCARDED-SOURCE: converting the registry error keeps the
+        // rejected name and reason reachable through the private source instead
+        // of collapsing to a bare `&'static str`.
+        let registry = crate::tools::ToolRegistryError::InvalidWireName {
+            wire_name: "bad name!".to_owned(),
+            reason: "may contain only [A-Za-z0-9_.-]",
+        };
+        let error = Error::from(registry);
+        let source = std::error::Error::source(&error).expect("registry cause preserved");
+        assert!(
+            source.to_string().contains("bad name!"),
+            "the rejected wire name must survive on the source: {source}"
+        );
+        assert!(std::error::Error::source(&crate::RunError::from(error)).is_some());
+    }
+
+    #[test]
+    fn typed_error_survives_the_lua_external_boundary() {
+        // LUA-012: passing the typed error (not its `to_string()`) to
+        // `mlua::Error::external` keeps the original error as a downcastable
+        // source across the Lua boundary, rather than flattening it to text.
+        let original = Error::OutOfScopeToolCall {
+            name: "echo".to_owned(),
+            global_exists: false,
+            in_scope: vec!["other".to_owned()],
+        };
+        let display = original.to_string();
+        let external = mlua::Error::external(original);
+        match &external {
+            mlua::Error::ExternalError(cause) => {
+                let recovered = cause
+                    .downcast_ref::<Error>()
+                    .expect("the original typed Error is preserved, not stringified");
+                assert_eq!(recovered.to_string(), display);
+            }
+            other => panic!("expected an ExternalError carrying the typed error, got {other:?}"),
+        }
+        // Re-wrapping through the crate's Lua boundary keeps the chain reachable.
+        let wrapped = Error::lua(external);
+        assert!(std::error::Error::source(&wrapped).is_some());
+    }
+
+    #[test]
+    fn config_errors_preserve_the_secret_and_url_causes() {
+        // client :419 / AUDIT-DISCARDED-SOURCE: an unusable credential and a bad
+        // endpoint URL both retain their concrete cause through the public
+        // CompletionError::source, classified as Config.
+        use crate::client::{GatewayEndpoint, SecretString};
+        use crate::model::{CompletionError, CompletionErrorKind};
+
+        let secret_error = SecretString::new("").expect_err("blank key is rejected");
+        let completion = CompletionError::from(secret_error);
+        assert_eq!(completion.kind(), CompletionErrorKind::Config);
+        assert!(
+            std::error::Error::source(&completion).is_some(),
+            "the SecretError cause must survive"
+        );
+
+        let url_error = GatewayEndpoint::new("not a url").expect_err("malformed URL is rejected");
+        assert_eq!(url_error.kind(), CompletionErrorKind::Config);
+        assert!(
+            std::error::Error::source(&url_error).is_some(),
+            "the url::ParseError cause must survive"
+        );
+    }
+
+    #[test]
+    fn model_bind_query_preserves_the_picker_cause() {
+        // model/resolver F5: a picker rebuild/resolve failure keeps the concrete
+        // picker error as a shareable private source rather than a `detail`
+        // string.
+        let bind = Error::ModelBindQuery {
+            capability: "a fast model".to_owned(),
+            source: SharedSource::new(std::io::Error::other("picker rebuild failed")),
+        };
+        assert!(std::error::Error::source(&bind).is_some());
+        assert!(std::error::Error::source(&crate::RunError::from(bind)).is_some());
+    }
+}

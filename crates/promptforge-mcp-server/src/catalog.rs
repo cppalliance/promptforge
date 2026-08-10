@@ -67,8 +67,8 @@ impl Entry {
     /// Builds a healthy entry from a parsed prompt.
     pub(crate) fn healthy(path: PathBuf, source: String, prompt: Prompt) -> Entry {
         Entry {
-            name: prompt.frontmatter.name.clone(),
-            description: prompt.frontmatter.description.clone(),
+            name: prompt.frontmatter().name().to_owned(),
+            description: prompt.frontmatter().description().to_owned(),
             path,
             source: Some(source),
             prompt: Some(prompt),

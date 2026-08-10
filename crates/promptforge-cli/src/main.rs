@@ -7,11 +7,11 @@
 //! version - or the CLI declines to run it.
 
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use promptforge_core::CancelHandle;
-use promptforge_core::cancel;
 use promptforge_core::client::GatewayClient;
-use promptforge_core::execute::{ResolutionContext, RunOptions};
+use promptforge_core::execute::{ResolutionContext, RunConfig};
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::observe::{NullObserver, Observer};
 use promptforge_core::store::StoreRef;
@@ -33,38 +33,42 @@ async fn main() -> ExitCode {
 
     let mut args = std::env::args().skip(1);
     let command = args.next();
-    cancel::scope(cancel, async {
-        match command.as_deref() {
-            Some("run") => {
-                let Some(path) = args.next() else {
-                    eprintln!("usage: promptforge run <file.md> [input]");
-                    return ExitCode::FAILURE;
-                };
-                let input = args.next().unwrap_or_default();
-                run(&path, &input, &NullObserver).await
-            }
-            Some(other) => {
-                eprintln!("unknown command: {other}\nusage: promptforge run <file.md> [input]");
-                ExitCode::FAILURE
-            }
-            None => {
+    match command.as_deref() {
+        Some("run") => {
+            let Some(path) = args.next() else {
                 eprintln!("usage: promptforge run <file.md> [input]");
-                ExitCode::FAILURE
-            }
+                return ExitCode::FAILURE;
+            };
+            let input = args.next().unwrap_or_default();
+            let observer: Arc<dyn Observer> = Arc::new(NullObserver::default());
+            run(&path, &input, observer, cancel).await
         }
-    })
-    .await
+        Some(other) => {
+            eprintln!("unknown command: {other}\nusage: promptforge run <file.md> [input]");
+            ExitCode::FAILURE
+        }
+        None => {
+            eprintln!("usage: promptforge run <file.md> [input]");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Parse the file, execute its sections with `input` as `args`, and print the
 /// result.
-async fn run(path: &str, input: &str, observer: &dyn Observer) -> ExitCode {
+async fn run(
+    path: &str,
+    input: &str,
+    observer: Arc<dyn Observer>,
+    cancel: CancelHandle,
+) -> ExitCode {
     let gateway_key = std::env::var("PROMPTFORGE_GATEWAY_KEY").ok();
     let gateway_url = std::env::var("PROMPTFORGE_GATEWAY_URL").ok();
     run_with_gateway(
         path,
         input,
         observer,
+        cancel,
         Gateway::Environment {
             url: gateway_url.as_deref(),
             key: gateway_key.as_deref(),
@@ -85,7 +89,8 @@ enum Gateway<'a> {
 async fn run_with_gateway(
     path: &str,
     input: &str,
-    observer: &dyn Observer,
+    observer: Arc<dyn Observer>,
+    cancel: CancelHandle,
     gateway: Gateway<'_>,
 ) -> ExitCode {
     let execution = format!("cli-{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..));
@@ -104,7 +109,7 @@ async fn run_with_gateway(
         return ExitCode::FAILURE;
     }
 
-    let prompt = match Prompt::parse(&source, &execution, observer) {
+    let prompt = match Prompt::parse(&source, &execution, observer.as_ref()) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("error: {e}");
@@ -122,7 +127,13 @@ async fn run_with_gateway(
                 }
                 None => "",
             };
-            let available = tools::available_tools(base_url, key);
+            let available = match tools::available_tools(base_url, key) {
+                Ok(available) => available,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
             let picker =
                 match ToolPicker::build(available.catalog().clone(), PickerConfig::default()) {
                     Ok(picker) => picker,
@@ -145,6 +156,7 @@ async fn run_with_gateway(
                 &prompt,
                 input,
                 observer,
+                cancel,
                 &execution,
                 &picker,
                 &models,
@@ -169,6 +181,7 @@ async fn run_with_gateway(
                 &prompt,
                 input,
                 observer,
+                cancel,
                 &execution,
                 &picker,
                 &ModelCatalog::empty(),
@@ -187,29 +200,28 @@ async fn run_with_gateway(
 async fn execute_prompt(
     prompt: &Prompt,
     input: &str,
-    observer: &dyn Observer,
+    observer: Arc<dyn Observer>,
+    cancel: CancelHandle,
     execution: &str,
     picker: &ToolPicker,
     models: &ModelCatalog,
-    tools: &[std::sync::Arc<dyn promptforge_core::tools::Tool>],
+    tools: &[Arc<dyn promptforge_core::tools::Tool>],
     client: Option<GatewayClient>,
 ) -> ExitCode {
     let store = StoreRef::memory();
 
-    let options = RunOptions {
-        execution,
-        observer,
-        client,
-        debug: None,
-    };
+    let mut config = RunConfig::new(execution).observer(observer).cancel(cancel);
+    if let Some(client) = client {
+        config = config.client(client);
+    }
 
     match execute::run(
         prompt,
         input,
-        ResolutionContext { picker, models },
+        ResolutionContext::new(picker, models),
         tools,
         &store,
-        options,
+        config,
     )
     .await
     {
@@ -226,9 +238,10 @@ async fn execute_prompt(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
-    use promptforge_core::observe::{Observer, detail};
+    use promptforge_core::CancelHandle;
+    use promptforge_core::observe::{Observation, Observer};
 
     use super::{Gateway, run_with_gateway};
 
@@ -236,11 +249,11 @@ mod tests {
     struct Recorder(Mutex<Vec<(String, String, String)>>);
 
     impl Observer for Recorder {
-        fn observe(&self, execution: &str, section: &str, detail: &str) {
+        fn observe(&self, execution: &str, section: &str, event: Observation) {
             self.0
                 .lock()
                 .expect("the CLI recorder mutex must not be poisoned")
-                .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+                .push((execution.to_owned(), section.to_owned(), event.to_string()));
         }
     }
 
@@ -256,12 +269,13 @@ mod tests {
              # Lifecycle\n\n## Run\n\n```lua\nreturn 'done'\n```\n",
         )
         .expect("write the CLI lifecycle fixture");
-        let recorder = Recorder::default();
+        let recorder = Arc::new(Recorder::default());
 
         let status = run_with_gateway(
             path.to_str().expect("the fixture path must be UTF-8"),
             "",
-            &recorder,
+            Arc::clone(&recorder) as Arc<dyn Observer>,
+            CancelHandle::new(),
             Gateway::Disabled,
         )
         .await;
@@ -288,16 +302,16 @@ mod tests {
         );
         let details = records
             .iter()
-            .map(|(_, _, detail)| detail.as_str())
+            .map(|(_, _, detail)| detail.clone())
             .collect::<Vec<_>>();
         for expected in [
-            detail::PARSE_STARTED,
-            detail::PARSE_SUCCEEDED,
-            detail::RUN_STARTED,
-            detail::RUN_SUCCEEDED,
+            Observation::ParseStarted,
+            Observation::ParseSucceeded,
+            Observation::RunStarted,
+            Observation::RunSucceeded,
         ] {
             assert!(
-                details.contains(&expected),
+                details.contains(&expected.to_string()),
                 "the CLI lifecycle must include {expected:?}: {records:#?}"
             );
         }

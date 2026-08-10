@@ -1,31 +1,47 @@
 //! Tool-calling dialect detection, registry, and dispatch.
 //!
-//! A [`ToolDialect`] encapsulates the wire differences between backends that
+//! A tool dialect encapsulates the wire differences between backends that
 //! speak the same `/chat/completions` shape but vary in how tool calls are
 //! declared, returned, and echoed. The [`ToolDialectRegistry`] holds the
 //! builtin set and resolves evidence into a single dialect, hard-failing on
 //! ties or no-match so the runtime never silently guesses.
 
-#[path = "dialects/gemma3_tool_code.rs"]
+#[path = "dialects/gemma3_tool_code/mod.rs"]
 mod gemma3_tool_code;
 #[path = "dialects/openai.rs"]
 mod openai;
 
+mod dispatch;
+mod error;
+mod registry;
+
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
-use crate::client::{Message, ToolCall};
-use crate::normalize::NormalizedTurn;
-use crate::{Error, Result};
-
-pub use gemma3_tool_code::Gemma3ToolCodeDialect;
-pub use openai::OpenAiDialect;
+pub(crate) use dispatch::{
+    DetectScore, DialectRequest, FramedToolResult, ToolDialect, correlate_tool_results,
+};
+pub use error::{DialectError, DialectErrorKind};
+pub(crate) use gemma3_tool_code::Gemma3ToolCodeDialect;
+pub(crate) use openai::OpenAiDialect;
+pub use registry::ToolDialectRegistry;
 
 /// Identifies a registered tool dialect.
 ///
 /// Variants are `#[non_exhaustive]` so new backends can be added without a
 /// breaking change. Serializes to the same lowercase strings used in catalog
 /// JSON (`"openai"`, `"gemma3_tool_code"`).
+///
+/// ```
+/// use promptforge_core::dialects::ToolDialectId;
+///
+/// // Serializes to the catalog wire string and round-trips.
+/// let id = ToolDialectId::Gemma3ToolCode;
+/// let json = serde_json::to_string(&id)?;
+/// assert_eq!(json, "\"gemma3_tool_code\"");
+/// let back: ToolDialectId = serde_json::from_str(&json)?;
+/// assert_eq!(back, id);
+/// # Ok::<(), serde_json::Error>(())
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ToolDialectId {
@@ -48,6 +64,16 @@ impl std::fmt::Display for ToolDialectId {
 
 /// Whether tool calls are handled natively by the backend or emulated by the
 /// runtime through content-fence parsing.
+///
+/// ```
+/// use promptforge_core::dialects::{ToolDialectId, ToolsMode};
+///
+/// // The mode is always derived from the dialect, never stored independently.
+/// assert_eq!(ToolDialectId::OpenAi.tools_mode(), ToolsMode::Native);
+/// assert_eq!(ToolDialectId::Gemma3ToolCode.tools_mode(), ToolsMode::Emulated);
+/// assert_eq!(serde_json::to_string(&ToolsMode::Emulated)?, "\"emulated\"");
+/// # Ok::<(), serde_json::Error>(())
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ToolsMode {
@@ -71,6 +97,13 @@ impl std::fmt::Display for ToolsMode {
 
 impl ToolDialectId {
     /// The tools mode implied by this dialect.
+    ///
+    /// ```
+    /// use promptforge_core::dialects::{ToolDialectId, ToolsMode};
+    ///
+    /// assert_eq!(ToolDialectId::OpenAi.tools_mode(), ToolsMode::Native);
+    /// assert_eq!(ToolDialectId::Gemma3ToolCode.tools_mode(), ToolsMode::Emulated);
+    /// ```
     #[must_use]
     pub fn tools_mode(&self) -> ToolsMode {
         match self {
@@ -90,6 +123,14 @@ impl ToolDialectId {
 pub struct DialectEvidence {
     /// Whether the model endpoint advertises native tool-call support.
     pub supports_tool_calls: Option<bool>,
+    /// Whether [`Self::supports_tool_calls`] is authoritative.
+    ///
+    /// An authoritative `Some(false)` (the endpoint genuinely has no native
+    /// tool-call protocol) must never be overridden by template heuristics into
+    /// selecting a native dialect. An unreliable `Some(false)` - the default -
+    /// may be overridden, because sources like llama.cpp `/props` can deny tool
+    /// support that a GGUF chat template actually provides.
+    pub supports_tool_calls_authoritative: bool,
     /// The raw Jinja chat template string, when available from model metadata.
     pub chat_template: Option<String>,
     /// The model identifier from the catalog or endpoint metadata.
@@ -100,6 +141,16 @@ pub struct DialectEvidence {
 
 impl DialectEvidence {
     /// Builds evidence from the four optional axes.
+    ///
+    /// ```
+    /// use promptforge_core::dialects::{DialectEvidence, ToolDialectId, ToolDialectRegistry};
+    ///
+    /// // Authoritative native tool-call support resolves to the OpenAI dialect.
+    /// let evidence = DialectEvidence::new(Some(true), None, Some("gpt-4o".into()), None);
+    /// let registry = ToolDialectRegistry::builtin();
+    /// assert_eq!(registry.resolve(&evidence)?, ToolDialectId::OpenAi);
+    /// # Ok::<(), promptforge_core::dialects::DialectError>(())
+    /// ```
     #[must_use]
     pub fn new(
         supports_tool_calls: Option<bool>,
@@ -109,125 +160,19 @@ impl DialectEvidence {
     ) -> Self {
         Self {
             supports_tool_calls,
+            supports_tool_calls_authoritative: false,
             chat_template,
             model_id,
             source,
         }
     }
-}
 
-/// A dialect's confidence that it matches some [`DialectEvidence`].
-///
-/// Higher values win. The scale is arbitrary but values should stay in `0..=100`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DetectScore(pub u8);
-
-/// Mutable view of a request under construction, passed to
-/// [`ToolDialect::prepare_request`] so a dialect can reshape the payload.
-///
-/// Intentionally opaque for now; step 2 will add fields.
-#[derive(Debug)]
-#[non_exhaustive]
-pub struct DialectRequest<'a> {
-    /// The request JSON body being assembled.
-    pub body: &'a mut Value,
-}
-
-/// A tool-calling dialect that knows how to prepare requests, parse turns, and
-/// echo tool results in its wire format.
-///
-/// Implementors must be object-safe (`dyn`-compatible) and thread-safe.
-pub trait ToolDialect: Send + Sync {
-    /// The dialect's identity.
-    fn id(&self) -> ToolDialectId;
-
-    /// Score how well this dialect matches the provided evidence.
-    ///
-    /// Returns `None` when the evidence is insufficient or contradicts this
-    /// dialect.
-    fn detect(&self, evidence: &DialectEvidence) -> Option<DetectScore>;
-
-    /// Reshape a request body before it is sent to the backend.
-    ///
-    /// # Errors
-    /// Returns an error if the request cannot be prepared.
-    fn prepare_request(&self, request: &mut DialectRequest<'_>) -> Result<()>;
-
-    /// Parse the response body into a [`NormalizedTurn`].
-    ///
-    /// # Errors
-    /// Returns an error if the body cannot be understood.
-    fn parse_turn(&self, body: &Value) -> Result<NormalizedTurn>;
-
-    /// Echo tool-call results back into the conversation history.
-    fn echo_tool_results(
-        &self,
-        conversation: &mut Vec<Message>,
-        calls: &[ToolCall],
-        results: &[(String, String)],
-    );
-}
-
-/// Registry of builtin tool dialects with evidence-based resolution.
-pub struct ToolDialectRegistry {
-    dialects: Vec<Box<dyn ToolDialect>>,
-}
-
-impl std::fmt::Debug for ToolDialectRegistry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let ids: Vec<ToolDialectId> = self.dialects.iter().map(|d| d.id()).collect();
-        f.debug_struct("ToolDialectRegistry")
-            .field("dialects", &ids)
-            .finish()
-    }
-}
-
-impl ToolDialectRegistry {
-    /// Construct the registry populated with all builtin dialects.
+    /// Marks [`Self::supports_tool_calls`] as authoritative, so an authoritative
+    /// negative can never be overridden into a native dialect by template text.
     #[must_use]
-    pub fn builtin() -> ToolDialectRegistry {
-        ToolDialectRegistry {
-            dialects: vec![Box::new(OpenAiDialect), Box::new(Gemma3ToolCodeDialect)],
-        }
-    }
-
-    /// Look up a dialect by its [`ToolDialectId`].
-    #[must_use]
-    pub fn get(&self, id: ToolDialectId) -> Option<&dyn ToolDialect> {
-        self.dialects
-            .iter()
-            .find(|d| d.id() == id)
-            .map(std::convert::AsRef::as_ref)
-    }
-
-    /// Resolve evidence into a single dialect, failing on ties or no match.
-    ///
-    /// # Errors
-    /// - [`Error::DialectNone`] when no dialect scores on the evidence.
-    /// - [`Error::DialectTie`] when two or more dialects share the top score.
-    pub fn resolve(&self, evidence: &DialectEvidence) -> Result<ToolDialectId> {
-        let mut scored: Vec<(ToolDialectId, DetectScore)> = self
-            .dialects
-            .iter()
-            .filter_map(|d| d.detect(evidence).map(|s| (d.id(), s)))
-            .collect();
-
-        if scored.is_empty() {
-            return Err(Error::DialectNone);
-        }
-
-        scored.sort_by_key(|entry| std::cmp::Reverse(entry.1));
-
-        if scored.len() > 1 && scored[0].1 == scored[1].1 {
-            let tied: Vec<ToolDialectId> = scored
-                .iter()
-                .take_while(|(_, s)| *s == scored[0].1)
-                .map(|(id, _)| *id)
-                .collect();
-            return Err(Error::DialectTie { candidates: tied });
-        }
-
-        Ok(scored[0].0)
+    pub fn authoritative_tool_support(mut self, authoritative: bool) -> Self {
+        self.supports_tool_calls_authoritative = authoritative;
+        self
     }
 }
 
@@ -239,11 +184,10 @@ mod tests {
     fn empty_evidence_fails_resolve() {
         let registry = ToolDialectRegistry::builtin();
         let evidence = DialectEvidence::default();
-        let result = registry.resolve(&evidence);
-        assert!(
-            matches!(result, Err(Error::DialectNone)),
-            "expected DialectNone, got {result:?}"
-        );
+        let error = registry
+            .resolve(&evidence)
+            .expect_err("empty evidence must fail to resolve");
+        assert_eq!(error.kind(), DialectErrorKind::NoMatch);
     }
 
     #[test]
@@ -266,7 +210,7 @@ mod tests {
                 "<|im_start|>system\n{%- if tools %}<tool_call>{%- endif %}<|im_end|>".to_string(),
             ),
             model_id: Some("qwen3.5-9b".to_string()),
-            source: None,
+            ..Default::default()
         };
         let id = registry.resolve(&evidence).expect("should resolve");
         assert_eq!(id, ToolDialectId::OpenAi);
@@ -278,14 +222,59 @@ mod tests {
         let evidence = DialectEvidence {
             supports_tool_calls: Some(false),
             chat_template: Some(
-                "[SYSTEM_PROMPT]x[/SYSTEM_PROMPT][AVAILABLE_TOOLS][][/AVAILABLE_TOOLS][INST]"
+                "[SYSTEM_PROMPT]x[/SYSTEM_PROMPT][AVAILABLE_TOOLS][][/AVAILABLE_TOOLS][INST][TOOL_CALLS][TOOL_RESULTS]"
                     .to_string(),
             ),
             model_id: Some("mistral-small".to_string()),
-            source: None,
+            ..Default::default()
         };
         let id = registry.resolve(&evidence).expect("should resolve");
         assert_eq!(id, ToolDialectId::OpenAi);
+    }
+
+    #[test]
+    fn authoritative_negative_is_never_overridden_by_template() {
+        // F5: an authoritative `Some(false)` must not be overridden into the
+        // native dialect by tool-calling template markers.
+        let registry = ToolDialectRegistry::builtin();
+        let evidence = DialectEvidence {
+            supports_tool_calls: Some(false),
+            supports_tool_calls_authoritative: true,
+            chat_template: Some(
+                "<|im_start|>system\n<tool_call>{%- endif %}<|im_end|>".to_string(),
+            ),
+            model_id: Some("qwen-mystery".to_string()),
+            ..Default::default()
+        };
+        let error = registry
+            .resolve(&evidence)
+            .expect_err("authoritative negative must not select a native dialect");
+        assert_eq!(error.kind(), DialectErrorKind::NoMatch);
+    }
+
+    #[test]
+    fn single_marker_template_does_not_select_native() {
+        // F6: a lone marker (or a mere mention of "tool_call") must not select
+        // the native dialect; a conjunction of request + response markers is
+        // required.
+        let registry = ToolDialectRegistry::builtin();
+        for template in [
+            "<|im_start|>system\nplease tool_call something<|im_end|>", // mention only
+            "[AVAILABLE_TOOLS][]",                                      // request marker only
+            "[TOOL_CALLS]",                                             // response marker only
+        ] {
+            let evidence = DialectEvidence {
+                supports_tool_calls: Some(false),
+                chat_template: Some(template.to_string()),
+                model_id: Some("mystery".to_string()),
+                ..Default::default()
+            };
+            assert_eq!(
+                registry.resolve(&evidence).map_err(|e| e.kind()),
+                Err(DialectErrorKind::NoMatch),
+                "template {template:?} must not select a dialect",
+            );
+        }
     }
 
     #[test]
@@ -295,7 +284,7 @@ mod tests {
             supports_tool_calls: Some(false),
             chat_template: Some("<start_of_turn>user\n".to_string()),
             model_id: Some("gemma-3-27b-it".to_string()),
-            source: None,
+            ..Default::default()
         };
         let id = registry.resolve(&evidence).expect("should resolve");
         assert_eq!(id, ToolDialectId::Gemma3ToolCode);
