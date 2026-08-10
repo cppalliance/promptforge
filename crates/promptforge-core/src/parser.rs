@@ -9,6 +9,7 @@
 //!
 //! The parser does no execution. It turns bytes into a [`Prompt`] tree.
 
+use std::collections::BTreeSet;
 use std::ops::Range;
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
@@ -19,6 +20,7 @@ use crate::{Error, Result};
 
 /// The parsed frontmatter of a prompt file.
 #[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Frontmatter {
     /// The prompt's identifier, supplied explicitly by a caller.
@@ -34,8 +36,23 @@ pub struct Frontmatter {
     pub default_return: Option<String>,
     /// Maximum model round trips a section's tool-call loop may take. Optional;
     /// `None` means the runtime applies its default cap rather than zero.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_positive_usize")]
     pub max_tool_iterations: Option<usize>,
+}
+
+fn deserialize_positive_usize<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<usize>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = <Option<usize> as serde::Deserialize>::deserialize(deserializer)?;
+    if value == Some(0) {
+        return Err(serde::de::Error::custom(
+            "max_tool_iterations must be greater than zero",
+        ));
+    }
+    Ok(value)
 }
 
 /// One executable block inside a section: a compiled Lua fence or prose.
@@ -217,6 +234,11 @@ impl Prompt {
             .collect();
         if section_headings.is_empty() {
             return Err(Error::Parse("prompt has no ## sections".into()));
+        }
+        if section_headings[0].level != 2 {
+            return Err(Error::Parse(
+                "the first top-level section must use an H2 heading".into(),
+            ));
         }
         let mut pos = 0;
         let sections = build_sections(
@@ -726,6 +748,7 @@ fn build_sections(
     observer: &dyn Observer,
 ) -> Result<Vec<Section>> {
     let mut result = Vec::new();
+    let mut sibling_names = BTreeSet::new();
     while *pos < headings.len() {
         let level = headings[*pos].level;
         if level <= parent_level {
@@ -733,6 +756,14 @@ fn build_sections(
         }
         let h = &headings[*pos];
         let name = h.title.clone();
+        if name.trim().is_empty() {
+            return Err(Error::Parse("section heading must not be empty".into()));
+        }
+        if !sibling_names.insert(name.clone()) {
+            return Err(Error::Parse(format!(
+                "duplicate sibling section heading: {name}"
+            )));
+        }
         let content_abs_line = frontmatter_lines + h.content_start_line;
         let raw_blocks = split_section_blocks(&h.content, &name)?;
         let has_prose = raw_blocks

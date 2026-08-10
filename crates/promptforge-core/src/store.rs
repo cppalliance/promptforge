@@ -312,6 +312,12 @@ impl Store for MemStore {
     }
 
     fn str_replace(&mut self, path: &str, old: &str, new: &str) -> Result<(), StoreError> {
+        if old.is_empty() {
+            return Err(StoreError::AnchorNotFound {
+                path: path.to_owned(),
+                anchor: String::new(),
+            });
+        }
         let contents = self.files.get(path).ok_or_else(|| StoreError::NotFound {
             path: path.to_string(),
         })?;

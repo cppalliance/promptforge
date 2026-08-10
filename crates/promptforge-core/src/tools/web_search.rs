@@ -17,7 +17,7 @@ const MAX_ERROR_BODY: usize = 2000;
 /// The tool holds a reusable [`reqwest::Client`] plus the gateway base URL and
 /// the shared bearer token. Each call POSTs the search arguments to the
 /// gateway, which owns the search provider credential.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WebSearch {
     /// The HTTP client used for outbound requests.
     http: reqwest::Client,
@@ -25,6 +25,16 @@ pub struct WebSearch {
     base_url: String,
     /// The shared bearer token presented to the gateway.
     token: String,
+}
+
+impl std::fmt::Debug for WebSearch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WebSearch")
+            .field("base_url", &self.base_url)
+            .field("token", &"<redacted>")
+            .finish_non_exhaustive()
+    }
 }
 
 impl WebSearch {
@@ -144,6 +154,10 @@ impl Tool for WebSearch {
         }
 
         response.text().await.map_err(Error::http)
+    }
+
+    fn untrusted_output(&self) -> bool {
+        true
     }
 }
 

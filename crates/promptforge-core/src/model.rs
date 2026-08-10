@@ -375,6 +375,17 @@ impl ModelCatalog {
         }
     }
 
+    pub(crate) fn try_new(models: impl IntoIterator<Item = ModelDescriptor>) -> Result<Self> {
+        let models: Vec<_> = models.into_iter().collect();
+        let mut ids = std::collections::BTreeSet::new();
+        if models.iter().any(|model| !ids.insert(model.id().clone())) {
+            return Err(Error::MalformedResponse(
+                "model catalog contains duplicate identities".into(),
+            ));
+        }
+        Ok(Self { models })
+    }
+
     /// An empty catalog; every `models.need` resolves as absent.
     #[must_use]
     pub fn empty() -> Self {
@@ -575,7 +586,7 @@ pub async fn fetch_model_catalog(base_url: &str, token: &str) -> Result<ModelCat
         });
     }
     let list: ModelsListResponse = response.json().await.map_err(Error::http)?;
-    Ok(ModelCatalog::new(list.data.into_iter().map(|entry| {
+    ModelCatalog::try_new(list.data.into_iter().map(|entry| {
         ModelDescriptor::new(
             ModelId::gateway(entry.id),
             entry.description,
@@ -583,7 +594,7 @@ pub async fn fetch_model_catalog(base_url: &str, token: &str) -> Result<ModelCat
             entry.thinking,
         )
         .with_dialect(entry.tool_dialect)
-    })))
+    }))
 }
 
 /// Builds a [`ToolPicker`] over `catalog` by reusing `base`'s embedder.
@@ -631,10 +642,12 @@ impl ModelResolver for PickerModelResolver<'_> {
         match picker.resolve(description) {
             Ok(promptforge_tool_picker::Outcome::Bind(tool)) => {
                 let id = model_from_picker_id(tool.id());
-                let descriptor = filtered.get(&id);
-                let dialect =
-                    descriptor.map_or(ToolDialectId::OpenAi, ModelDescriptor::tool_dialect);
-                let context = descriptor.map_or(0, ModelDescriptor::context);
+                let descriptor = filtered.get(&id).ok_or_else(|| Error::PickedModelNotLive {
+                    alias: description.to_owned(),
+                    id: id.clone(),
+                })?;
+                let dialect = descriptor.tool_dialect();
+                let context = descriptor.context();
                 Ok(ResolvedModel {
                     id,
                     invocation: ModelInvocation::from(opts),

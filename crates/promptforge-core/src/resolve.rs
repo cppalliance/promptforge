@@ -87,6 +87,7 @@ impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
     }
 
     /// Returns a shared handle to bindings resolved by live H1 so far.
+    #[must_use]
     pub(crate) fn producer(&self) -> LiveBindingProducer {
         self.producer.clone()
     }

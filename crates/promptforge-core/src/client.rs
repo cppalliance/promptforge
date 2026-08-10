@@ -174,7 +174,7 @@ impl fmt::Debug for GatewayClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GatewayClient")
             .field("base_url", &self.base_url)
-            .field("key", &self.key)
+            .field("key", &"<redacted>")
             .finish_non_exhaustive()
     }
 }
@@ -186,7 +186,12 @@ impl GatewayClient {
     #[must_use]
     pub fn new(base_url: &str, key: impl Into<String>) -> GatewayClient {
         GatewayClient {
-            transport: GatewayTransport::Http(reqwest::Client::new()),
+            transport: GatewayTransport::Http(
+                reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(60))
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new()),
+            ),
             base_url: base_url.trim_end_matches('/').to_string(),
             key: key.into(),
             normalizer: OpenAiChatNormalizer::shared(),
@@ -303,21 +308,29 @@ impl GatewayClient {
             .map_err(Error::http)?;
 
         let status = response.status();
+        if response
+            .content_length()
+            .is_some_and(|length| length > 8 * 1024 * 1024)
+        {
+            return Err(Error::MalformedResponse(
+                "response body exceeded byte limit".into(),
+            ));
+        }
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            let body: String = body.chars().take(2000).collect();
-            let body = if body.is_empty() {
-                "(empty body)".to_string()
-            } else {
-                body
-            };
             return Err(Error::Backend {
                 status: status.as_u16(),
-                body,
+                body: "(body available only through sensitive capture)".to_owned(),
             });
         }
 
-        let response_body: Value = response.json().await.map_err(Error::http)?;
+        let bytes = response.bytes().await.map_err(Error::http)?;
+        if bytes.len() > 8 * 1024 * 1024 {
+            return Err(Error::MalformedResponse(
+                "response body exceeded byte limit".into(),
+            ));
+        }
+        let response_body: Value = serde_json::from_slice(&bytes)
+            .map_err(|_| Error::MalformedResponse("response body was not valid JSON".into()))?;
         let turn = dialect.parse_turn(&response_body)?;
         Ok(Completion {
             result: turn.outcome,
@@ -382,7 +395,7 @@ mod tests {
         let client = GatewayClient::new("http://127.0.0.1:8081/v1", "tok");
         assert_eq!(
             format!("{client:?}"),
-            "GatewayClient { base_url: \"http://127.0.0.1:8081/v1\", key: \"tok\", .. }"
+            "GatewayClient { base_url: \"http://127.0.0.1:8081/v1\", key: \"<redacted>\", .. }"
         );
     }
 

@@ -326,10 +326,8 @@ mod tests {
     }
 
     #[test]
-    fn trusted_tool_defaults_to_not_untrusted() {
-        // A tool that does not opt in (here the structured-snippet web search)
-        // inherits the defaulted `false`, so its result is appended verbatim.
-        assert!(!WebSearch::new("http://localhost", "test").untrusted_output());
+    fn web_search_output_is_untrusted() {
+        assert!(WebSearch::new("http://localhost", "test").untrusted_output());
     }
 
     #[test]

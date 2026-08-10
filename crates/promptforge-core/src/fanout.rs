@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 use serde_json::json;
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinSet;
 
 use crate::cancel;
@@ -25,6 +25,9 @@ use crate::parser::Section;
 use crate::store::StoreRef;
 use crate::tools::SharedTools;
 use crate::{Error, Result, subst};
+
+const MAX_FANOUT_ITEMS: usize = 256;
+const MAX_FANOUT_CONCURRENCY: usize = 8;
 
 /// Resolves a heading string like `"### Name"` against a list of sibling
 /// sections, returning the matching section.
@@ -97,6 +100,11 @@ pub(crate) async fn run_fanout_arms(
     items: &[String],
     ctx: &FanoutContext<'_>,
 ) -> Result<Vec<LuaFanoutResult>> {
+    if items.len() > MAX_FANOUT_ITEMS {
+        return Err(Error::Lua(format!(
+            "fanout item count exceeds limit of {MAX_FANOUT_ITEMS}"
+        )));
+    }
     let turns = Arc::new(AtomicU32::new(0));
     let (observe_tx, mut observe_rx) = mpsc::unbounded_channel::<(String, String)>();
     let (debug_tx, mut debug_rx) = mpsc::unbounded_channel::<DebugMsg>();
@@ -109,6 +117,7 @@ pub(crate) async fn run_fanout_arms(
 
     let mut join_set = JoinSet::new();
     let mut replies: Vec<Option<LuaFanoutResult>> = vec![None; items.len()];
+    let semaphore = Arc::new(Semaphore::new(MAX_FANOUT_CONCURRENCY));
 
     for (index, item_text) in items.iter().enumerate() {
         let payload = ArmPayload {
@@ -133,7 +142,16 @@ pub(crate) async fn run_fanout_arms(
             observer: Arc::clone(&proxy_observer),
             debug: proxy_debug.clone(),
         };
-        join_set.spawn(async move { run_one_arm(payload).await });
+        let semaphore = Arc::clone(&semaphore);
+        join_set.spawn(async move {
+            let permit = semaphore
+                .acquire_owned()
+                .await
+                .map_err(|_| Error::Lua("fanout scheduler closed".to_owned()))?;
+            let result = run_one_arm(payload).await;
+            drop(permit);
+            result
+        });
     }
 
     // Drop the unused sender clone so the debug channel can close when arms finish.

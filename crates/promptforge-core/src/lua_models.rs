@@ -246,6 +246,11 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
                 let mut guard = always_state
                     .lock()
                     .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
+                if guard.always.is_some() {
+                    return Err(mlua::Error::external(
+                        "models.always may be called at most once per prompt",
+                    ));
+                }
                 let binding =
                     record_need_binding(&mut guard, resolver, &alias, &description, &opts)?;
                 record_always_selection(&mut guard, alias)?;
@@ -510,7 +515,7 @@ fn value_as_bool(value: &Value, field: &str) -> mlua::Result<bool> {
 }
 
 fn value_as_u32(value: &Value, field: &str) -> mlua::Result<u32> {
-    match value {
+    let parsed = match value {
         Value::Integer(number) => u32::try_from(*number).map_err(|_| {
             mlua::Error::external(format!(
                 "models.need opts.{field} must be a non-negative integer"
@@ -534,19 +539,23 @@ fn value_as_u32(value: &Value, field: &str) -> mlua::Result<u32> {
         _ => Err(mlua::Error::external(format!(
             "models.need opts.{field} must be a non-negative integer"
         ))),
+    }?;
+    if parsed == 0 {
+        return Err(mlua::Error::external(format!(
+            "models.need opts.{field} must be greater than zero"
+        )));
     }
+    Ok(parsed)
 }
 
 fn value_as_f64(value: &Value, field: &str) -> mlua::Result<f64> {
     match value {
-        Value::Number(number) => Ok(*number),
-        Value::Integer(number) => i32::try_from(*number).map(f64::from).map_err(|_| {
-            mlua::Error::external(format!(
-                "models.need opts.{field} must be a number within i32 range"
-            ))
-        }),
+        Value::Number(number) if number.is_finite() && (0.0..=2.0).contains(number) => Ok(*number),
+        Value::Integer(0) => Ok(0.0),
+        Value::Integer(1) => Ok(1.0),
+        Value::Integer(2) => Ok(2.0),
         _ => Err(mlua::Error::external(format!(
-            "models.need opts.{field} must be a number"
+            "models.need opts.{field} must be a finite number from 0 through 2"
         ))),
     }
 }
