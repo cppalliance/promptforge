@@ -241,10 +241,63 @@ impl ToolCall {
         &self.name
     }
 
-    /// Returns the parsed arguments for the call.
+    /// Returns a typed, borrowed view of the call's arguments.
+    ///
+    /// F8: the public API no longer hands out a raw [`serde_json::Value`]. The
+    /// raw wire JSON stays crate-private; callers inspect the arguments through
+    /// [`ToolArguments`] (canonical JSON text, key presence, argument names).
     #[must_use]
-    pub fn arguments(&self) -> &Value {
-        &self.arguments
+    pub fn arguments(&self) -> ToolArguments<'_> {
+        ToolArguments {
+            value: &self.arguments,
+        }
+    }
+}
+
+/// A typed, borrowed view over one [`ToolCall`]'s arguments.
+///
+/// Tool-call arguments arrive as arbitrary wire JSON; this view exposes them
+/// without leaking a [`serde_json::Value`] into the public API (F8). The raw
+/// `Value` is confined to crate-private dialect/wire code.
+#[derive(Debug, Clone, Copy)]
+pub struct ToolArguments<'a> {
+    value: &'a Value,
+}
+
+impl ToolArguments<'_> {
+    /// Returns the arguments serialized as canonical JSON text.
+    #[must_use]
+    pub fn to_json_string(&self) -> String {
+        self.value.to_string()
+    }
+
+    /// Returns whether the call carried no arguments (a `null` payload or an
+    /// empty JSON object).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        match self.value {
+            Value::Null => true,
+            Value::Object(map) => map.is_empty(),
+            _ => false,
+        }
+    }
+
+    /// Returns whether a top-level argument named `key` is present, when the
+    /// arguments are a JSON object.
+    #[must_use]
+    pub fn contains(&self, key: &str) -> bool {
+        self.value
+            .as_object()
+            .is_some_and(|map| map.contains_key(key))
+    }
+
+    /// Returns the top-level argument names, when the arguments are a JSON
+    /// object (an empty iterator otherwise).
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.value
+            .as_object()
+            .into_iter()
+            .flat_map(|map| map.keys().map(String::as_str))
     }
 }
 
@@ -815,6 +868,35 @@ mod tests {
         assert_eq!(format!("{secret:?}"), "SecretString(<redacted>)");
         assert_eq!(format!("{secret}"), "<redacted>");
         assert_eq!(secret.expose(), "super-secret-token");
+    }
+
+    #[test]
+    fn tool_arguments_view_exposes_no_raw_value() {
+        // F8: the public arguments view surfaces typed accessors, never a
+        // serde_json::Value.
+        let call = ToolCall {
+            id: "call_1".to_owned(),
+            name: "search".to_owned(),
+            arguments: serde_json::json!({"query": "rust", "limit": 5}),
+        };
+        let args = call.arguments();
+        assert!(!args.is_empty());
+        assert!(args.contains("query"));
+        assert!(!args.contains("absent"));
+        let mut names: Vec<_> = args.names().collect();
+        names.sort_unstable();
+        assert_eq!(names, ["limit", "query"]);
+        let json = args.to_json_string();
+        assert!(json.contains("\"query\":\"rust\""), "got {json}");
+
+        // A null payload reads as empty.
+        let empty = ToolCall {
+            id: "c2".to_owned(),
+            name: "noop".to_owned(),
+            arguments: Value::Null,
+        };
+        assert!(empty.arguments().is_empty());
+        assert!(!empty.arguments().contains("anything"));
     }
 
     #[test]
