@@ -727,13 +727,19 @@ impl Tool for SlowTool {
         ToolId::new("test", "slow").expect("valid slow tool id")
     }
 
-    #[expect(clippy::unnecessary_literal_bound, reason = "the Tool trait fixes this to &str")]
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this to &str"
+    )]
     fn wire_name(&self) -> &str {
         // Matches the function name the mock gateway asks for.
         "echo"
     }
 
-    #[expect(clippy::unnecessary_literal_bound, reason = "the Tool trait fixes this to &str")]
+    #[expect(
+        clippy::unnecessary_literal_bound,
+        reason = "the Tool trait fixes this to &str"
+    )]
     fn description(&self) -> &str {
         "a deliberately slow tool"
     }

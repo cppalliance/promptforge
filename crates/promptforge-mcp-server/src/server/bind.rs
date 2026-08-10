@@ -53,7 +53,7 @@ impl PreparedTools {
                 ModelCatalog::empty()
             }
         };
-        Ok(Self::new(gateway, models)?)
+        Self::new(gateway, models)
     }
 
     /// Builds the live registry and picker over an already-fetched model catalog.
@@ -64,8 +64,8 @@ impl PreparedTools {
     pub fn new(
         gateway: &GatewayConfig,
         models: ModelCatalog,
-    ) -> Result<Self, promptforge_tool_picker::BuildError> {
-        let live = live_tools(gateway);
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let live = live_tools(gateway)?;
         let catalog = catalog(&live);
         let picker = ToolPicker::build(catalog, PickerConfig::default())?;
         Ok(Self {
@@ -84,8 +84,8 @@ impl PreparedTools {
     pub(crate) fn rebuild(
         &self,
         gateway: &GatewayConfig,
-    ) -> Result<Self, promptforge_tool_picker::IndexError> {
-        let live = live_tools(gateway);
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let live = live_tools(gateway)?;
         let picker = self.picker.rebuild(catalog(&live))?;
         Ok(Self {
             live,
@@ -113,11 +113,13 @@ impl PreparedTools {
     }
 }
 
-fn live_tools(gateway: &GatewayConfig) -> Vec<std::sync::Arc<dyn Tool>> {
-    vec![
+fn live_tools(
+    gateway: &GatewayConfig,
+) -> Result<Vec<std::sync::Arc<dyn Tool>>, promptforge_core::tools::ToolError> {
+    Ok(vec![
         std::sync::Arc::new(WebFetch::new()),
-        std::sync::Arc::new(WebSearch::new(&gateway.url, gateway.key.expose())),
-    ]
+        std::sync::Arc::new(WebSearch::new(&gateway.url, gateway.key.expose())?),
+    ])
 }
 
 fn catalog(live: &[std::sync::Arc<dyn Tool>]) -> Catalog {

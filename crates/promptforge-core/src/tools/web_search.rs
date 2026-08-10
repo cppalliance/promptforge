@@ -6,7 +6,7 @@
 //! server. The gateway's JSON results are returned verbatim as a string, ready
 //! to hand back to the model.
 
-use crate::client::SecretString;
+use crate::client::{GatewayEndpoint, SecretString};
 use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
 
 /// The largest error body kept for diagnostics, in characters.
@@ -35,18 +35,54 @@ pub struct WebSearch {
 }
 
 impl WebSearch {
-    /// Construct a `WebSearch` bound to a gateway base URL and bearer token.
+    /// Construct a `WebSearch` bound to a validated gateway base URL and a
+    /// non-empty bearer token.
     ///
-    /// A trailing slash on `base_url` is trimmed, matching
-    /// [`crate::client::GatewayClient::new`].
-    #[must_use]
-    pub fn new(base_url: &str, token: impl Into<String>) -> WebSearch {
-        WebSearch {
+    /// The URL is parsed and normalized by [`GatewayEndpoint`] (rejecting an
+    /// empty or non-`http(s)` URL), and an empty token is rejected, so an
+    /// invalid endpoint or credential fails here rather than during a tool call.
+    ///
+    /// # Errors
+    /// Returns a [`ToolError`] with `InvalidArguments` kind when `base_url` is
+    /// not a valid gateway URL or `token` is empty.
+    pub fn new(base_url: &str, token: impl Into<String>) -> Result<WebSearch, ToolError> {
+        let endpoint = GatewayEndpoint::new(base_url).map_err(|error| {
+            ToolError::message(format!("web_search: invalid gateway URL: {error}"))
+                .with_kind(ToolErrorKind::InvalidArguments)
+        })?;
+        let token = token.into();
+        if token.is_empty() {
+            return Err(
+                ToolError::message("web_search: gateway token must not be empty")
+                    .with_kind(ToolErrorKind::InvalidArguments),
+            );
+        }
+        Ok(WebSearch {
             http: reqwest::Client::new(),
-            base_url: base_url.trim_end_matches('/').to_string(),
+            base_url: endpoint.url().to_owned(),
             token: SecretString::new(token),
+        })
+    }
+}
+
+/// Escapes control characters in an external diagnostic body so a hostile
+/// gateway cannot inject terminal/log control sequences or forge multiline
+/// records through an error `Display`.
+fn sanitize_diagnostic(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    for c in body.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(out, "\\u{{{:04x}}}", u32::from(c));
+            }
+            c => out.push(c),
         }
     }
+    out
 }
 
 /// Reads at most `limit` bytes of a response body, stopping early once the cap
@@ -160,18 +196,19 @@ impl Tool for WebSearch {
 
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            let body: String = body.chars().take(MAX_ERROR_BODY).collect();
-            let body = if body.is_empty() {
-                "(empty body)".to_string()
-            } else {
-                body
+            let code = status.as_u16();
+            // The error body is external gateway content: bound the read (same
+            // streaming cap as the success path), sanitize control characters,
+            // and preserve a read failure instead of masking it as empty.
+            let body = match read_bounded(response, MAX_ERROR_BODY).await {
+                Ok(body) if body.is_empty() => "(empty body)".to_owned(),
+                Ok(body) => sanitize_diagnostic(&body),
+                Err(_) => "(backend response body could not be read)".to_owned(),
             };
-            return Err(ToolError::message(format!(
-                "web_search: backend returned {}: {body}",
-                status.as_u16()
-            ))
-            .with_kind(ToolErrorKind::Backend));
+            return Err(
+                ToolError::message(format!("web_search: backend returned {code}: {body}"))
+                    .with_kind(ToolErrorKind::Backend),
+            );
         }
 
         // Search results embed third-party titles, URLs, and descriptions, so
@@ -184,7 +221,7 @@ impl Tool for WebSearch {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_RESPONSE_BODY, WebSearch};
+    use super::{MAX_ERROR_BODY, MAX_RESPONSE_BODY, WebSearch};
     use crate::tools::{OutputTrust, Tool, ToolId};
 
     use std::net::SocketAddr;
@@ -197,7 +234,8 @@ mod tests {
 
     #[test]
     fn debug_never_leaks_the_bearer_token() {
-        let tool = WebSearch::new("http://localhost", "super-secret-token");
+        let tool = WebSearch::new("http://localhost", "super-secret-token")
+            .expect("valid web search configuration");
         let rendered = format!("{tool:?}");
         assert!(
             !rendered.contains("super-secret-token"),
@@ -211,7 +249,8 @@ mod tests {
 
     #[test]
     fn descriptor_is_stable_and_faithful() {
-        let tool = WebSearch::new("http://localhost", "test");
+        let tool =
+            WebSearch::new("http://localhost", "test").expect("valid web search configuration");
 
         assert_eq!(
             tool.id(),
@@ -303,7 +342,8 @@ mod tests {
     #[tokio::test]
     async fn forwards_query_and_returns_untrusted_results() {
         let addr = spawn_mock().await;
-        let tool = WebSearch::new(&format!("http://{addr}"), "tok");
+        let tool = WebSearch::new(&format!("http://{addr}"), "tok")
+            .expect("valid web search configuration");
 
         let raw = tool
             .call(serde_json::json!({ "query": "hi" }))
@@ -339,10 +379,64 @@ mod tests {
         addr
     }
 
+    /// Spawn a mock gateway that fails with an oversized error body.
+    async fn spawn_oversized_error_mock() -> SocketAddr {
+        async fn web_search() -> (axum::http::StatusCode, String) {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "e".repeat(MAX_ERROR_BODY * 4),
+            )
+        }
+
+        let router = Router::new().route("/tools/web_search", post(web_search));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn oversized_error_body_is_bounded() {
+        let addr = spawn_oversized_error_mock().await;
+        let tool = WebSearch::new(&format!("http://{addr}"), "tok")
+            .expect("valid web search configuration");
+
+        let err = tool
+            .call(serde_json::json!({ "query": "hi" }))
+            .await
+            .expect_err("a 500 response must surface as an error");
+        let message = err.to_string();
+        assert!(
+            message.contains("backend returned 500"),
+            "error must name the status: {message}"
+        );
+        // The bounded error body plus the fixed prefix must stay small; the raw
+        // body was MAX_ERROR_BODY * 4 bytes.
+        assert!(
+            message.len() < MAX_ERROR_BODY + 128,
+            "the error-path body must be bounded, got {} bytes",
+            message.len()
+        );
+    }
+
+    #[test]
+    fn constructor_rejects_invalid_url_and_empty_token() {
+        assert!(WebSearch::new("not-a-url", "tok").is_err(), "invalid URL");
+        assert!(WebSearch::new("", "tok").is_err(), "empty URL");
+        assert!(
+            WebSearch::new("http://localhost", "").is_err(),
+            "empty token must be rejected"
+        );
+        assert!(WebSearch::new("http://localhost", "tok").is_ok());
+    }
+
     #[tokio::test]
     async fn oversized_response_body_is_bounded_and_untrusted() {
         let addr = spawn_oversized_mock().await;
-        let tool = WebSearch::new(&format!("http://{addr}"), "tok");
+        let tool = WebSearch::new(&format!("http://{addr}"), "tok")
+            .expect("valid web search configuration");
 
         let raw = tool
             .call(serde_json::json!({ "query": "hi" }))
@@ -363,7 +457,8 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_query() {
-        let tool = WebSearch::new("http://127.0.0.1:0", "tok");
+        let tool =
+            WebSearch::new("http://127.0.0.1:0", "tok").expect("valid web search configuration");
         let err = tool
             .call(serde_json::json!({ "count": 3 }))
             .await

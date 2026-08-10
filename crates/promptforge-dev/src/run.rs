@@ -168,7 +168,8 @@ pub(crate) async fn run_once_with(
     let prompt = Prompt::parse(&source, &execution, observer.as_ref())
         .with_context(|| format!("parse {}", prompt_path.display()))?;
 
-    let available = tools::available_tools(&gateway.base_url, Some(gateway.key.as_str()));
+    let available = tools::available_tools(&gateway.base_url, Some(gateway.key.as_str()))
+        .context("build the live tool set")?;
     let picker = ToolPicker::build(available.catalog().clone(), PickerConfig::default())
         .context("build the live tool picker")?;
     let endpoint = GatewayEndpoint::new(&gateway.base_url)

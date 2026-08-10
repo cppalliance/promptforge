@@ -269,8 +269,10 @@ fn parse_tool_code_args(tool_name: &str, src: &str) -> Option<Value> {
     if src.is_empty() {
         return Some(Value::Object(Map::new()));
     }
-    // Keyword form `query="..."` wins when any part contains `=`.
-    let parts = split_top_level_commas(src);
+    // Keyword form `query="..."` wins when any part contains `=`. A malformed
+    // argument list (unbalanced delimiters, open quote, dangling escape) is
+    // rejected here rather than parsed into corrupted arguments.
+    let parts = split_top_level_commas(src)?;
     let keyword = parts.iter().any(|part| part.contains('='));
     if keyword {
         let mut map = Map::new();
@@ -430,7 +432,12 @@ fn strip_quotes(raw: &str, quote: char) -> Option<&str> {
     Some(raw)
 }
 
-fn split_top_level_commas(src: &str) -> Vec<&str> {
+/// Splits `src` on top-level commas, rejecting malformed argument syntax.
+///
+/// Returns `None` when a closing delimiter is unmatched, the final delimiter
+/// depth is non-zero, a quote is left open, or an escape is left dangling, so a
+/// corrupted argument list can never be split into valid-looking parts.
+fn split_top_level_commas(src: &str) -> Option<Vec<&str>> {
     let mut parts = Vec::new();
     let mut start = 0;
     let mut depth: i32 = 0;
@@ -450,7 +457,12 @@ fn split_top_level_commas(src: &str) -> Vec<&str> {
         match ch {
             '"' | '\'' => in_quote = Some(ch),
             '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            ')' | ']' | '}' => {
+                depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
+            }
             ',' if depth == 0 => {
                 parts.push(&src[start..idx]);
                 start = idx + ch.len_utf8();
@@ -458,8 +470,11 @@ fn split_top_level_commas(src: &str) -> Vec<&str> {
             _ => {}
         }
     }
+    if depth != 0 || in_quote.is_some() || escaped {
+        return None;
+    }
     parts.push(&src[start..]);
-    parts
+    Some(parts)
 }
 
 /// Parse the OpenAI `message.tool_calls` array into runtime [`ToolCall`]s.
@@ -553,6 +568,32 @@ fn extract_reasoning(message: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use crate::client::CompletionResult;
+
+    #[test]
+    fn split_top_level_commas_rejects_malformed_syntax() {
+        assert_eq!(
+            split_top_level_commas("a, b"),
+            Some(vec!["a", " b"]),
+            "balanced input splits"
+        );
+        assert_eq!(
+            split_top_level_commas("query=\"a\""),
+            Some(vec!["query=\"a\""])
+        );
+        // Unbalanced / malformed forms must be rejected, not silently accepted.
+        assert_eq!(split_top_level_commas("a, (b"), None, "open delimiter");
+        assert_eq!(split_top_level_commas("a)b"), None, "unmatched close");
+        assert_eq!(split_top_level_commas("\"unterminated"), None, "open quote");
+        assert_eq!(split_top_level_commas("\"a\\"), None, "dangling escape");
+    }
+
+    #[test]
+    fn parse_tool_code_call_rejects_malformed_argument_syntax() {
+        // A call whose arguments have an unbalanced delimiter must not parse
+        // into a ToolCall with corrupted arguments.
+        assert!(parse_tool_code_call("search(query=\"a\", nested(b)", 0).is_none());
+        assert!(parse_tool_code_call("search(a, (b)", 0).is_none());
+    }
 
     #[test]
     fn sole_tool_code_fence_becomes_tool_calls() {

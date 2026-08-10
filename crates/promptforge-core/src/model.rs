@@ -748,6 +748,35 @@ struct ModelsListResponse {
     data: Vec<ModelsListEntry>,
 }
 
+/// The largest gateway error body kept for a catalog-fetch diagnostic, in bytes.
+const MAX_CATALOG_ERROR_BODY: usize = 2000;
+
+/// Reads at most `limit` bytes of a non-success response body, stopping early so
+/// an oversized error body cannot exhaust memory, and preserving a read failure
+/// as an explicit diagnostic rather than an empty string.
+async fn read_error_body_bounded(mut response: reqwest::Response, limit: usize) -> String {
+    let mut buffer: Vec<u8> = Vec::new();
+    while buffer.len() < limit {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                let take = (limit - buffer.len()).min(chunk.len());
+                buffer.extend_from_slice(&chunk[..take]);
+                if take < chunk.len() {
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(source) => {
+                return format!("(backend response body could not be read: {source})");
+            }
+        }
+    }
+    if buffer.is_empty() {
+        return "(empty body)".to_owned();
+    }
+    String::from_utf8_lossy(&buffer).into_owned()
+}
+
 /// Fetches a [`ModelCatalog`] from a bearer-authed gateway `/models` endpoint.
 ///
 /// `base_url` is the OpenAI-shaped API root (for example `http://127.0.0.1:8081/v1`).
@@ -770,15 +799,12 @@ pub async fn fetch_model_catalog(
         .map_err(Error::http)?;
     let status = response.status();
     if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        let body: String = body.chars().take(2000).collect();
+        // The error body is external, so bound the read (MODEL-010: no unbounded
+        // buffering) and preserve a read failure instead of masking it as empty.
+        let body = read_error_body_bounded(response, MAX_CATALOG_ERROR_BODY).await;
         return Err(CompletionError::from(Error::Backend {
             status: status.as_u16(),
-            body: if body.is_empty() {
-                "(empty body)".to_owned()
-            } else {
-                body
-            },
+            body,
         }));
     }
     // A body that does not decode as a model list is a malformed response, not a
@@ -1921,6 +1947,36 @@ mod tests {
         assert_eq!(
             entry.tool_dialect.tools_mode(),
             crate::dialects::ToolsMode::Native
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_model_catalog_bounds_and_reports_non_success_body() {
+        use axum::Router;
+        use axum::routing::get;
+
+        async fn models() -> (axum::http::StatusCode, String) {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "e".repeat(MAX_CATALOG_ERROR_BODY * 4),
+            )
+        }
+        let app = Router::new().route("/models", get(models));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
+            .await
+            .expect_err("a 500 response must surface as an error");
+        assert_eq!(err.kind(), CompletionErrorKind::Backend);
+        let msg = err.to_string();
+        assert!(
+            msg.len() < MAX_CATALOG_ERROR_BODY + 128,
+            "the error-path body must be bounded, got {} bytes",
+            msg.len()
         );
     }
 }

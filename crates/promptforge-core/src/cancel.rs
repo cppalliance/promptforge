@@ -16,7 +16,11 @@ tokio::task_local! {
 }
 
 /// A cloneable flag that wakes waiters when cancelled.
+///
+/// `#[non_exhaustive]` so the crate can add internal state without a breaking
+/// change; construct one with [`CancelHandle::new`] or [`Default`].
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct CancelHandle {
     cancelled: Arc<AtomicBool>,
     notify: Arc<Notify>,
@@ -101,6 +105,20 @@ pub(crate) fn is_cancelled() -> bool {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn cancel_handle_public_construction_surface() {
+        // The public constructors remain usable under `#[non_exhaustive]`.
+        let a = CancelHandle::new();
+        let b = CancelHandle::default();
+        let c = a.clone();
+        assert!(!a.is_cancelled() && !b.is_cancelled() && !c.is_cancelled());
+        a.cancel();
+        assert!(
+            a.is_cancelled() && c.is_cancelled(),
+            "clones share the flag"
+        );
+    }
 
     #[tokio::test]
     async fn cancel_wakes_waiter() {

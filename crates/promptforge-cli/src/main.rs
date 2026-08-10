@@ -127,7 +127,13 @@ async fn run_with_gateway(
                 }
                 None => "",
             };
-            let available = tools::available_tools(base_url, key);
+            let available = match tools::available_tools(base_url, key) {
+                Ok(available) => available,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
             let picker =
                 match ToolPicker::build(available.catalog().clone(), PickerConfig::default()) {
                     Ok(picker) => picker,
