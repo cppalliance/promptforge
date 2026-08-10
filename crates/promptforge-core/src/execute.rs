@@ -115,7 +115,7 @@ impl RunError {
     #[must_use]
     pub fn kind(&self) -> RunErrorKind {
         match &self.inner {
-            Error::Parse(_) => RunErrorKind::Parse,
+            Error::Parse(_) | Error::ParseStructured { .. } => RunErrorKind::Parse,
             Error::LuaQuota { .. } => RunErrorKind::Quota,
             Error::LuaCompile { .. } | Error::Lua(_) => RunErrorKind::Lua,
             Error::UnsupportedVersion(_) => RunErrorKind::Version,

@@ -43,37 +43,50 @@ pub enum ParseErrorKind {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ParseError {
-    inner: Error,
+    kind: ParseErrorKind,
+    span: Option<(usize, usize)>,
+    inner: Box<Error>,
+}
+
+/// Classify a substrate error into a stable [`ParseErrorKind`] and optional
+/// source span.
+///
+/// A structured parse fault carries both directly; older string parse errors
+/// are classified by message once, here, rather than on every `kind()` call.
+fn classify_parse_error(inner: &Error) -> (ParseErrorKind, Option<(usize, usize)>) {
+    match inner {
+        Error::ParseStructured { kind, span, .. } => (*kind, *span),
+        Error::LuaCompile { .. } => (ParseErrorKind::Lua, None),
+        Error::Parse(message) => {
+            let kind = if message.contains("frontmatter") {
+                ParseErrorKind::Frontmatter
+            } else if message.contains("fence") {
+                ParseErrorKind::Fence
+            } else if message.contains("list section") || message.contains("bullet item") {
+                ParseErrorKind::List
+            } else {
+                ParseErrorKind::Structure
+            };
+            (kind, None)
+        }
+        _ => (ParseErrorKind::Structure, None),
+    }
 }
 
 impl ParseError {
     /// Returns the stable classification of this failure.
     #[must_use]
     pub fn kind(&self) -> ParseErrorKind {
-        match &self.inner {
-            Error::LuaCompile { .. } => ParseErrorKind::Lua,
-            Error::Parse(message) => {
-                if message.contains("frontmatter") {
-                    ParseErrorKind::Frontmatter
-                } else if message.contains("fence") {
-                    ParseErrorKind::Fence
-                } else if message.contains("list section") || message.contains("bullet item") {
-                    ParseErrorKind::List
-                } else {
-                    ParseErrorKind::Structure
-                }
-            }
-            _ => ParseErrorKind::Structure,
-        }
+        self.kind
     }
 
     /// Returns the byte span of the offending region, when one is available.
     ///
-    /// The current parser does not attach byte spans, so this is always `None`;
-    /// it is part of the stable surface for future span-carrying diagnostics.
+    /// Structural failures that can locate the offending region (for example a
+    /// duplicate sibling section) carry a byte span; others return `None`.
     #[must_use]
     pub fn span(&self) -> Option<(usize, usize)> {
-        None
+        self.span
     }
 }
 
@@ -91,13 +104,18 @@ impl std::error::Error for ParseError {
 
 impl From<Error> for ParseError {
     fn from(inner: Error) -> Self {
-        ParseError { inner }
+        let (kind, span) = classify_parse_error(&inner);
+        ParseError {
+            kind,
+            span,
+            inner: Box::new(inner),
+        }
     }
 }
 
 impl From<ParseError> for Error {
     fn from(error: ParseError) -> Self {
-        error.inner
+        *error.inner
     }
 }
 
@@ -552,6 +570,10 @@ struct Heading {
     content: String,
     /// 1-based line number within `body` where `content` begins.
     content_start_line: u32,
+    /// 1-based line number within `body` of the heading line itself.
+    source_line: u32,
+    /// Byte range of the heading within `body`, carried for span diagnostics.
+    span: Range<usize>,
 }
 
 /// Split a file into its YAML frontmatter, its markdown body, and the
@@ -688,11 +710,14 @@ fn collect_headings(body: &str) -> Result<Vec<Heading>> {
         // +1 because newlines_before gives 0-based offset, and we want
         // the 1-based line number of the first content line.
         let content_start_line = line_add(newlines_before(body, start)?, 1)?;
+        let source_line = line_add(newlines_before(body, raws[i].range.start)?, 1)?;
         headings.push(Heading {
             level: raws[i].level,
             title: raws[i].title.clone(),
             content: content.to_string(),
             content_start_line,
+            source_line,
+            span: raws[i].range.clone(),
         });
     }
     Ok(headings)
@@ -1072,6 +1097,9 @@ fn build_sections(
     observer: &dyn Observer,
 ) -> Result<Vec<Section>> {
     let mut result = Vec::new();
+    // Parallel to `result`: each sibling's name and its 1-based heading line, so
+    // a duplicate can name both the first and the offending location.
+    let mut sibling_lines: Vec<(String, u32)> = Vec::new();
     while *pos < headings.len() {
         let level = headings[*pos].level;
         if level <= parent_level {
@@ -1098,6 +1126,8 @@ fn build_sections(
             )));
         }
         let content_abs_line = line_add(frontmatter_lines, h.content_start_line)?;
+        let heading_abs_line = line_add(frontmatter_lines, h.source_line)?;
+        let heading_span = h.span.clone();
         let raw_blocks = split_section_blocks(&h.content, &name)?;
         let has_prose = raw_blocks
             .iter()
@@ -1156,13 +1186,18 @@ fn build_sections(
 
         // Sibling sections must have unique names: sections are addressed by
         // name (jumps, lookups), so two siblings sharing a name would make the
-        // target ambiguous. Reject the duplicate at parse rather than silently
-        // resolving to the first match.
-        if result.iter().any(|sibling: &Section| sibling.name == name) {
-            return Err(Error::Parse(format!(
-                "duplicate sibling section name `{name}`: sibling section names must be unique"
-            )));
+        // target ambiguous. Reject the duplicate at parse, naming BOTH heading
+        // locations so the author can find each one.
+        if let Some((_, first_line)) = sibling_lines.iter().find(|(n, _)| *n == name) {
+            return Err(Error::ParseStructured {
+                kind: ParseErrorKind::Structure,
+                span: Some((heading_span.start, heading_span.end)),
+                message: format!(
+                    "duplicate sibling section name `{name}`: first declared at line {first_line}, again at line {heading_abs_line}; sibling section names must be unique"
+                ),
+            });
         }
+        sibling_lines.push((name.clone(), heading_abs_line));
 
         result.push(Section {
             name,
@@ -1943,9 +1978,24 @@ Prose for the second section.\n";
         let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\na\n\n## S\n\nb\n";
         let err = Prompt::parse(src, "test", &NullObserver)
             .expect_err("duplicate sibling section names must be rejected");
+        let message = err.to_string();
         assert!(
-            err.to_string().contains("duplicate sibling section name"),
+            message.contains("duplicate sibling section name"),
             "expected a duplicate-sibling error, got: {err}"
+        );
+        // PF-PARSER-002: both duplicate locations are named. The first `## S` is
+        // at body line 3 (line 8 overall) and the second at body line 7 (line 12).
+        assert!(
+            message.contains("first declared at line 8") && message.contains("again at line 12"),
+            "both duplicate locations must be reported, got: {message}"
+        );
+        // PF-PARSER-008: a structured parse error carries a stable kind and a
+        // byte span rather than inferring them from the message.
+        assert_eq!(err.kind(), ParseErrorKind::Structure);
+        let (start, end) = err.span().expect("duplicate section carries a span");
+        assert!(
+            start < end,
+            "span must be a non-empty range, got {start}..{end}"
         );
 
         // The same name under DIFFERENT parents (not siblings) is allowed.

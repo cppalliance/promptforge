@@ -37,6 +37,21 @@ pub(crate) enum Error {
     #[error("parse error: {0}")]
     Parse(String),
 
+    /// A structurally-classified parse failure carrying a stable kind and an
+    /// optional source byte span, so [`crate::ParseError`] can expose the
+    /// classification and location from stored fields instead of inferring them
+    /// from message text.
+    #[error("{message}")]
+    #[non_exhaustive]
+    ParseStructured {
+        /// The stable classification of this parse failure.
+        kind: crate::parser::ParseErrorKind,
+        /// The byte span of the offending region within the source, when known.
+        span: Option<(usize, usize)>,
+        /// The human-readable diagnostic.
+        message: String,
+    },
+
     /// A required environment variable was missing.
     #[error("missing environment variable: {0}")]
     MissingEnv(String),
