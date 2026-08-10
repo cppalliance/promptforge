@@ -18,8 +18,8 @@ use crate::client::{Message, ToolCall};
 use crate::normalize::NormalizedTurn;
 use crate::{Error, Result};
 
-pub use gemma3_tool_code::Gemma3ToolCodeDialect;
-pub use openai::OpenAiDialect;
+pub(crate) use gemma3_tool_code::Gemma3ToolCodeDialect;
+pub(crate) use openai::OpenAiDialect;
 
 /// Identifies a registered tool dialect.
 ///
@@ -120,24 +120,23 @@ impl DialectEvidence {
 ///
 /// Higher values win. The scale is arbitrary but values should stay in `0..=100`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DetectScore(pub u8);
+pub(crate) struct DetectScore(pub(crate) u8);
 
 /// Mutable view of a request under construction, passed to
 /// [`ToolDialect::prepare_request`] so a dialect can reshape the payload.
 ///
 /// Intentionally opaque for now; step 2 will add fields.
 #[derive(Debug)]
-#[non_exhaustive]
-pub struct DialectRequest<'a> {
+pub(crate) struct DialectRequest<'a> {
     /// The request JSON body being assembled.
-    pub body: &'a mut Value,
+    pub(crate) body: &'a mut Value,
 }
 
 /// A tool-calling dialect that knows how to prepare requests, parse turns, and
 /// echo tool results in its wire format.
 ///
 /// Implementors must be object-safe (`dyn`-compatible) and thread-safe.
-pub trait ToolDialect: Send + Sync {
+pub(crate) trait ToolDialect: Send + Sync {
     /// The dialect's identity.
     fn id(&self) -> ToolDialectId;
 
@@ -193,7 +192,7 @@ impl ToolDialectRegistry {
 
     /// Look up a dialect by its [`ToolDialectId`].
     #[must_use]
-    pub fn get(&self, id: ToolDialectId) -> Option<&dyn ToolDialect> {
+    pub(crate) fn get(&self, id: ToolDialectId) -> Option<&dyn ToolDialect> {
         self.dialects
             .iter()
             .find(|d| d.id() == id)

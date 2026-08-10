@@ -29,7 +29,7 @@ use crate::{Error, Result};
 /// Returns [`Error::Substitution`] for an unclosed `{{`, an unknown namespace, a
 /// missing key, a null value, `{{ reply }}` when `reply` is `None`, or
 /// `{{ item }}` when `item` is `None`.
-pub fn substitute(
+pub(crate) fn substitute(
     prose: &str,
     args: &str,
     reply: Option<&str>,

@@ -32,9 +32,9 @@ pub mod observe;
 pub mod parser;
 mod resolve;
 pub mod store;
-pub mod subst;
+pub(crate) mod subst;
 pub mod tools;
-pub mod untrusted;
+pub(crate) mod untrusted;
 
 pub use crate::cancel::CancelHandle;
 pub use crate::error::{Error, NearDuplicateDiagnostic, Result};

@@ -19,7 +19,7 @@ const PREFACE: &str =
 /// inside `content` is defanged (its leading `<` replaced with `&lt;`) so a
 /// page cannot forge the closing delimiter.
 #[must_use]
-pub fn wrap(content: &str, nonce: &str) -> String {
+pub(crate) fn wrap(content: &str, nonce: &str) -> String {
     let preface = PREFACE.replace("{nonce}", nonce);
     let open = format!("<untrusted_input_{nonce}>");
     let close = format!("</untrusted_input_{nonce}>");
@@ -38,7 +38,7 @@ pub fn wrap(content: &str, nonce: &str) -> String {
 /// The value need only be unguessable by fetched content, not cryptographic,
 /// so a single random `u64` rendered as 16 hex digits is sufficient.
 #[must_use]
-pub fn nonce() -> String {
+pub(crate) fn nonce() -> String {
     format!("{:016x}", fastrand::u64(..))
 }
 

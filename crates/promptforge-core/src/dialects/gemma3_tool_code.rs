@@ -28,7 +28,7 @@ use super::{DetectScore, DialectEvidence, DialectRequest, ToolDialect, ToolDiale
 /// - `echo_tool_results`: pushes the assistant's rendered `tool_code` fence
 ///   then a user message with `TOOL RESULT` blocks and a continue trailer.
 #[derive(Debug, Clone, Copy)]
-pub struct Gemma3ToolCodeDialect;
+pub(crate) struct Gemma3ToolCodeDialect;
 
 impl ToolDialect for Gemma3ToolCodeDialect {
     fn id(&self) -> ToolDialectId {

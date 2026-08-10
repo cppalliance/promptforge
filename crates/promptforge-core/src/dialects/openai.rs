@@ -23,7 +23,7 @@ use super::{DetectScore, DialectEvidence, DialectRequest, ToolDialect, ToolDiale
 /// - `echo_tool_results` pushes the assistant's `tool_calls` turn followed
 ///   by one `role=tool` message per result, matching the OpenAI wire shape.
 #[derive(Debug, Clone, Copy)]
-pub struct OpenAiDialect;
+pub(crate) struct OpenAiDialect;
 
 impl ToolDialect for OpenAiDialect {
     fn id(&self) -> ToolDialectId {
