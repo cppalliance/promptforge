@@ -503,7 +503,7 @@ fn parse_opts_table(table: &Table) -> mlua::Result<ModelNeedOpts> {
                 opts.context = Some(value_as_u32(&value, "context")?);
             }
             "temperature" => {
-                opts.temperature = Some(value_as_f64(&value, "temperature")?);
+                opts.temperature = Some(value_as_temperature(&value)?);
             }
             "max_tokens" => {
                 opts.max_tokens = Some(value_as_u32(&value, "max_tokens")?);
@@ -516,6 +516,24 @@ fn parse_opts_table(table: &Table) -> mlua::Result<ModelNeedOpts> {
         }
     }
     Ok(opts)
+}
+
+/// The inclusive domain of a sampling temperature.
+const TEMPERATURE_RANGE: std::ops::RangeInclusive<f64> = 0.0..=2.0;
+
+/// Parses and validates a sampling temperature at the Lua trust boundary.
+///
+/// It must be a finite number within [`TEMPERATURE_RANGE`]. Non-finite (`NaN`,
+/// infinity) or out-of-domain values are rejected here rather than forwarded to
+/// the gateway as an invalid request.
+fn value_as_temperature(value: &Value) -> mlua::Result<f64> {
+    let temperature = value_as_f64(value, "temperature")?;
+    if !temperature.is_finite() || !TEMPERATURE_RANGE.contains(&temperature) {
+        return Err(mlua::Error::external(format!(
+            "models.need opts.temperature must be a finite number in [0.0, 2.0], got {temperature}"
+        )));
+    }
+    Ok(temperature)
 }
 
 fn value_as_bool(value: &Value, field: &str) -> mlua::Result<bool> {
@@ -587,8 +605,25 @@ fn validate_alias(alias: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::reject_infer_options;
+    use super::{reject_infer_options, value_as_temperature};
     use mlua::Value;
+
+    #[test]
+    fn temperature_accepts_finite_in_domain_and_rejects_the_rest() {
+        for good in [0.0, 0.7, 1.0, 2.0] {
+            let got = value_as_temperature(&Value::Number(good)).expect("in-domain temperature");
+            assert!(
+                (got - good).abs() <= f64::EPSILON,
+                "temperature {good} must pass through unchanged, got {got}"
+            );
+        }
+        for bad in [-0.1, 2.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                value_as_temperature(&Value::Number(bad)).is_err(),
+                "temperature {bad} must be rejected"
+            );
+        }
+    }
 
     #[test]
     fn infer_options_absent_or_nil_are_accepted() {
