@@ -498,17 +498,23 @@ mod tests {
     fn unsafe_store_paths_are_skipped_with_a_status_report() {
         let directory = tempfile::tempdir().expect("create dump fixture directory");
         let store = StoreRef::memory();
-        let unsafe_paths = [
-            "/absolute.txt",
-            "../escape.txt",
-            "a/../traversal.txt",
-            "C:/drive.txt",
-            "back\\slash.txt",
-            "nul.txt",
-            "trailing. /x",
-        ];
-        for path in unsafe_paths {
-            store.write(path, "must not land on disk").expect("write");
+        // Absolute and traversal paths never enter the store: `StoreRef`
+        // validates every path at the boundary and rejects them before any
+        // backend write, so they can never reach a dump in the first place.
+        for rejected in ["/absolute.txt", "../escape.txt", "a/../traversal.txt"] {
+            assert!(
+                store.write(rejected, "must not land on disk").is_err(),
+                "the store must reject the unsafe path {rejected:?} at the boundary"
+            );
+        }
+        // These pass the store's path rules but are unsafe to mirror onto this
+        // host's filesystem (drive letters, backslash separators, reserved
+        // names, trailing space/dot), so the dump skips them and reports it.
+        let dump_skipped = ["C:/drive.txt", "back\\slash.txt", "nul.txt", "trailing. /x"];
+        for path in dump_skipped {
+            store
+                .write(path, "must not land on disk")
+                .expect("the store accepts the path; the dump is what refuses it");
         }
         store.write("safe.txt", "kept").expect("write");
 
@@ -520,7 +526,7 @@ mod tests {
             vec![dump_dir.join("safe.txt")],
             "only the safe path may be written: {entries:?}"
         );
-        for path in unsafe_paths {
+        for path in dump_skipped {
             assert!(
                 status.contains(&format!("store dump skipped unsafe path {path:?}")),
                 "the skip of {path:?} must be reported: {status}"
