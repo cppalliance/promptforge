@@ -2201,6 +2201,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fetch_model_catalog_rejects_a_wire_tools_mode_that_contradicts_the_dialect() {
+        use axum::Router;
+        use axum::routing::get;
+
+        // MODEL-008: a wire `tools_mode` is validated against the mode derived
+        // from `tool_dialect`. An OpenAI (native) dialect paired with an
+        // `emulated` wire mode is contradictory and must be refused as malformed
+        // rather than silently keeping one of the two.
+        async fn models() -> axum::Json<serde_json::Value> {
+            axum::Json(serde_json::json!({
+                "data": [{
+                    "id": "remote",
+                    "description": "a remote model",
+                    "context": 8192,
+                    "thinking": "never",
+                    "tool_dialect": "openai",
+                    "tools_mode": "emulated"
+                }]
+            }))
+        }
+        let app = Router::new().route("/models", get(models));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
+            .await
+            .expect_err("a contradictory wire tools_mode must be rejected");
+        assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+        assert!(
+            err.to_string().contains("contradicts"),
+            "the rejection must name the contradiction, got {err}"
+        );
+    }
+
+    #[tokio::test]
     async fn fetch_model_catalog_bounds_and_reports_non_success_body() {
         use axum::Router;
         use axum::routing::get;
