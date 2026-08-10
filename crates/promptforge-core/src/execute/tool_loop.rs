@@ -1,0 +1,288 @@
+//! The per-section model tool loop and single prose-inference round driver.
+
+use std::collections::BTreeMap;
+use std::sync::atomic::AtomicU32;
+
+use crate::cancel;
+use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
+use crate::debug::{DebugCapture, DebugEvent};
+use crate::dialects::{ToolDialect, ToolDialectRegistry};
+use crate::lua::ToolCallCounts;
+use crate::model::CompletionOptions;
+use crate::observe::{Observer, detail};
+use crate::tools::{ToolId, ToolRegistry};
+use crate::untrusted;
+use crate::{Error, Result};
+
+use super::support::advance_turn;
+
+/// What one section's tool loop needs to report itself: where observations go, which
+/// section they belong to, and the run-wide turn counter it advances.
+///
+/// Bundled rather than passed as three parameters so the loop's signature stays
+/// readable, and so the counter is a run-wide total rather than a per-section
+/// one.
+pub(crate) struct SectionProgress<'a> {
+    /// The identifier every observation from this loop carries.
+    pub(crate) execution: &'a str,
+    /// Where the loop reports its turns and tool calls.
+    pub(crate) observer: &'a dyn Observer,
+    /// The heading text every observation from this loop carries.
+    pub(crate) section: &'a str,
+    /// The run's model-turn total, advanced once per round trip.
+    pub(crate) turns: &'a AtomicU32,
+    /// Opt-in raw request/response capture for each model turn.
+    pub(crate) debug: Option<&'a dyn DebugCapture>,
+    /// Per-call model fields from the section's selected binding.
+    pub(crate) completion_options: &'a CompletionOptions,
+}
+
+/// How many model rounds a prose block may take.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ProseMode {
+    /// One model round; tool calls for that round are dispatched, then control
+    /// returns even without a final text reply.
+    SingleShot,
+    /// Keep calling until text or `max_tool_iterations` is exhausted.
+    Loop { max_tool_iterations: usize },
+}
+
+/// Text and finish reason from one prose or tool-loop inference.
+#[derive(Debug, Clone)]
+pub(crate) struct ProseInferenceResult {
+    /// Model text when the round produced a reply; `None` for single-shot tool rounds.
+    pub text: Option<String>,
+    /// Backend `finish_reason` from the last completed model round, when present.
+    pub finish_reason: Option<String>,
+}
+
+/// Drive one section's model call to a final text reply, dispatching any tool
+/// calls the model requests along the way.
+///
+/// Starts a fresh conversation with `prose` as the user turn and runs the full
+/// tool loop. Returns the final text and the last round's finish reason.
+///
+/// # Errors
+/// Returns an out-of-scope tool error if the model calls an alias absent from
+/// `dispatch`, [`Error::ToolLoopExhausted`] if the cap is hit without a text
+/// reply, or any transport/backend error from a model call or a tool's own
+/// failure.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "counts and global_aliases extend the loop's borrowed context for per-VM call tracking"
+)]
+pub(crate) async fn run_tool_loop(
+    client: &GatewayClient,
+    schemas: &[ToolSchema],
+    dispatch: &BTreeMap<String, ToolId>,
+    registry: &ToolRegistry<'_>,
+    prose: String,
+    max_tool_iterations: usize,
+    progress: SectionProgress<'_>,
+    counts: Option<&ToolCallCounts>,
+    global_aliases: Option<&BTreeMap<String, ToolId>>,
+) -> Result<(String, Option<String>)> {
+    let mut conversation = Vec::new();
+    let outcome = run_prose_inference(
+        client,
+        schemas,
+        dispatch,
+        registry,
+        &mut conversation,
+        prose,
+        ProseMode::Loop {
+            max_tool_iterations,
+        },
+        progress,
+        counts,
+        global_aliases,
+    )
+    .await?;
+    match outcome.text {
+        Some(text) => Ok((text, outcome.finish_reason)),
+        None => Err(Error::ToolLoopExhausted),
+    }
+}
+
+/// Append `prose` to `conversation` and run model inference under `mode`.
+///
+/// Returns text when the model produces it. For [`ProseMode::SingleShot`],
+/// text may be `None` after one round that only issued tool calls.
+/// Conversation history accumulates for later prose blocks.
+///
+/// # Errors
+/// Same failure modes as [`run_tool_loop`], except single-shot does not report
+/// [`Error::ToolLoopExhausted`] when the sole round ends without text.
+#[expect(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "counts and global_aliases extend the loop's borrowed context for per-VM call tracking"
+)]
+pub(crate) async fn run_prose_inference(
+    client: &GatewayClient,
+    schemas: &[ToolSchema],
+    dispatch: &BTreeMap<String, ToolId>,
+    registry: &ToolRegistry<'_>,
+    conversation: &mut Vec<Message>,
+    prose: String,
+    mode: ProseMode,
+    progress: SectionProgress<'_>,
+    counts: Option<&ToolCallCounts>,
+    global_aliases: Option<&BTreeMap<String, ToolId>>,
+) -> Result<ProseInferenceResult> {
+    let SectionProgress {
+        execution,
+        observer,
+        section,
+        turns,
+        debug,
+        completion_options,
+    } = progress;
+
+    let dialect_registry = ToolDialectRegistry::builtin();
+    let dialect: &dyn ToolDialect = dialect_registry
+        .get(completion_options.tool_dialect)
+        .ok_or(Error::UnknownDialect(completion_options.tool_dialect))?;
+
+    conversation.push(Message::user(prose));
+    let tool_arg = if schemas.is_empty() {
+        None
+    } else {
+        Some(schemas)
+    };
+
+    let max_tool_iterations = match mode {
+        ProseMode::SingleShot => 1,
+        ProseMode::Loop {
+            max_tool_iterations,
+        } => max_tool_iterations,
+    };
+
+    for _ in 0..max_tool_iterations {
+        let completion = tokio::select! {
+            biased;
+            () = cancel::wait_cancelled() => Err(Error::Interrupted),
+            result = client.complete(conversation, tool_arg, completion_options) => result.map_err(Error::from),
+        };
+        if let Err(Error::Interrupted) = &completion {
+            return Err(Error::Interrupted);
+        }
+        if completion.is_err() {
+            observer.observe(execution, section, detail::MODEL_TURN_FAILED);
+        }
+        let completion = completion?;
+
+        // A round trip that produced a reply is a turn, whether the reply is
+        // the section's final text or a batch of tool calls.
+        let turn = advance_turn(turns);
+        if let Some(capture) = debug {
+            capture.on_event(
+                execution,
+                section,
+                turn,
+                DebugEvent::Request {
+                    body: completion.request_body,
+                },
+            );
+            capture.on_event(
+                execution,
+                section,
+                turn,
+                DebugEvent::Response {
+                    body: completion.response_body.clone(),
+                    finish_reason: completion.finish_reason.clone(),
+                    reasoning_content: completion.reasoning_content.clone(),
+                },
+            );
+        }
+        observer.observe(execution, section, detail::MODEL_TURN_COMPLETED);
+
+        match completion.result {
+            CompletionResult::Text(text) => {
+                if completion.finish_reason.as_deref() == Some("length") {
+                    observer.observe(execution, section, detail::MODEL_TURN_TRUNCATED);
+                }
+                return Ok(ProseInferenceResult {
+                    text: Some(text),
+                    finish_reason: completion.finish_reason,
+                });
+            }
+            CompletionResult::ToolCalls(calls) => {
+                let finish_reason = completion.finish_reason.clone();
+                // Dispatch each requested tool and collect already-framed results.
+                let mut results: Vec<crate::dialects::FramedToolResult> =
+                    Vec::with_capacity(calls.len());
+                for call in &calls {
+                    let Some(id) = dispatch.get(&call.name) else {
+                        observer.observe(execution, section, detail::TOOL_CALL_FAILED);
+                        let global_exists =
+                            global_aliases.is_some_and(|g| g.contains_key(&call.name));
+                        let in_scope: Vec<String> = dispatch.keys().cloned().collect();
+                        return Err(Error::OutOfScopeToolCall {
+                            name: call.name.clone(),
+                            global_exists,
+                            in_scope,
+                        });
+                    };
+                    let Some(tool) = registry.get(id) else {
+                        observer.observe(execution, section, detail::TOOL_CALL_FAILED);
+                        return Err(Error::UnknownScopedTool(call.name.clone()));
+                    };
+                    if let Some(counts) = counts {
+                        counts.increment(&call.name)?;
+                    }
+                    // Race the tool call against cancellation so a slow or stuck
+                    // tool cannot hold the run past a Ctrl-C. On cancel the tool
+                    // future is dropped and the run ends promptly.
+                    let call_result = tokio::select! {
+                        biased;
+                        () = cancel::wait_cancelled() => {
+                            observer.observe(execution, section, detail::TOOL_CALL_FAILED);
+                            return Err(Error::Interrupted);
+                        }
+                        result = tool.call(call.arguments.clone()) => result,
+                    };
+                    observer.observe(
+                        execution,
+                        section,
+                        if call_result.is_ok() {
+                            detail::TOOL_CALL_SUCCEEDED
+                        } else {
+                            detail::TOOL_CALL_FAILED
+                        },
+                    );
+                    let output = call_result.map_err(Error::tool)?;
+                    // Trust travels with the output: an untrusted result is
+                    // nonce-wrapped before it can reach the next model turn. A
+                    // FRESH CSPRNG nonce is drawn per wrap so a guard tag is
+                    // never reused across tool results or rounds; reuse would let
+                    // content seen under one nonce forge a later block's close tag.
+                    let result = match output.trust() {
+                        crate::tools::OutputTrust::Untrusted => untrusted::wrap(output.text()),
+                        crate::tools::OutputTrust::Trusted => output.text().to_owned(),
+                    };
+                    results.push(crate::dialects::FramedToolResult::new(
+                        call.id.clone(),
+                        result,
+                    ));
+                }
+
+                dialect.echo_tool_results(conversation, &calls, &results)?;
+                if matches!(mode, ProseMode::SingleShot) {
+                    return Ok(ProseInferenceResult {
+                        text: None,
+                        finish_reason,
+                    });
+                }
+            }
+        }
+    }
+
+    match mode {
+        ProseMode::SingleShot => Ok(ProseInferenceResult {
+            text: None,
+            finish_reason: None,
+        }),
+        ProseMode::Loop { .. } => Err(Error::ToolLoopExhausted),
+    }
+}

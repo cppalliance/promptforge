@@ -4,11 +4,11 @@
 //! the URL and address policies, redirects, DNS, the size caps, the timeouts,
 //! and the content-type and decoding refusals. It carries a model-facing
 //! rendering that withholds internal detail, and converts into
-//! [`promptforge_core::Error`], which is what the `Tool` trait returns.
+//! [`ToolError`], which is what the `Tool` trait returns.
 
 use std::net::IpAddr;
 
-use promptforge_core::Error;
+use promptforge_core::tools::{ToolError, ToolErrorKind};
 
 /// An error produced while fetching a URL.
 ///
@@ -219,13 +219,20 @@ impl FetchError {
     }
 }
 
-impl From<FetchError> for Error {
-    /// Maps a fetch failure onto the core error the `Tool` trait returns.
+impl From<FetchError> for ToolError {
+    /// Maps a fetch failure onto the narrow [`ToolError`] the `Tool` trait
+    /// returns, carrying only the model-facing text.
     ///
-    /// URL-policy rejections are input errors caught before any network access,
-    /// so they map to [`Error::Parse`] carrying the model-facing text.
-    fn from(err: FetchError) -> Error {
-        Error::Parse(err.model_facing())
+    /// A recoverable failure (target/network/content) becomes a transport-kind
+    /// error the model may retry; a hard URL-policy or SSRF rejection, caught
+    /// before any network access, becomes an invalid-arguments error.
+    fn from(err: FetchError) -> ToolError {
+        let kind = if err.is_recoverable() {
+            ToolErrorKind::Transport
+        } else {
+            ToolErrorKind::InvalidArguments
+        };
+        ToolError::message(err.model_facing()).with_kind(kind)
     }
 }
 

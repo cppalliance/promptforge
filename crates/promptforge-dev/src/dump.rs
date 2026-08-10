@@ -162,7 +162,7 @@ impl Store for MirrorStore {
         self.inner.glob(pattern)
     }
 
-    fn exists(&self, path: &str) -> bool {
+    fn exists(&self, path: &str) -> Result<bool, StoreError> {
         self.inner.exists(path)
     }
 }
@@ -185,7 +185,7 @@ impl TraceCapture {
 impl DebugCapture for TraceCapture {
     fn on_event(&self, _execution: &str, _section: &str, turn_index: u32, event: DebugEvent) {
         let (name, body) = match &event {
-            DebugEvent::Request { body } => (format!("turn-{turn_index}-request.json"), body),
+            DebugEvent::Request { body, .. } => (format!("turn-{turn_index}-request.json"), body),
             DebugEvent::Response { body, .. } => (format!("turn-{turn_index}-response.json"), body),
             _ => return,
         };
@@ -498,17 +498,32 @@ mod tests {
     fn unsafe_store_paths_are_skipped_with_a_status_report() {
         let directory = tempfile::tempdir().expect("create dump fixture directory");
         let store = StoreRef::memory();
-        let unsafe_paths = [
+        // These paths never enter the store: `StoreRef` validates every path at
+        // the boundary and rejects them before any backend write (STORE-003
+        // hardened this to also cover backslashes, reserved device names, and
+        // trailing dot/space), so they can never reach a dump in the first place.
+        for rejected in [
             "/absolute.txt",
             "../escape.txt",
             "a/../traversal.txt",
-            "C:/drive.txt",
             "back\\slash.txt",
             "nul.txt",
             "trailing. /x",
-        ];
-        for path in unsafe_paths {
-            store.write(path, "must not land on disk").expect("write");
+        ] {
+            assert!(
+                store.write(rejected, "must not land on disk").is_err(),
+                "the store must reject the unsafe path {rejected:?} at the boundary"
+            );
+        }
+        // These pass the store's path rules but carry characters Windows
+        // reserves in a filename (drive-letter colon, `* ? |`), so they are
+        // unsafe to mirror onto this host's filesystem: the dump skips them and
+        // reports it.
+        let dump_skipped = ["C:/drive.txt", "star*.txt", "q?.txt", "pipe|x.txt"];
+        for path in dump_skipped {
+            store
+                .write(path, "must not land on disk")
+                .expect("the store accepts the path; the dump is what refuses it");
         }
         store.write("safe.txt", "kept").expect("write");
 
@@ -520,7 +535,7 @@ mod tests {
             vec![dump_dir.join("safe.txt")],
             "only the safe path may be written: {entries:?}"
         );
-        for path in unsafe_paths {
+        for path in dump_skipped {
             assert!(
                 status.contains(&format!("store dump skipped unsafe path {path:?}")),
                 "the skip of {path:?} must be reported: {status}"
@@ -667,21 +682,19 @@ mod tests {
             "dev-1",
             "Only",
             1,
-            DebugEvent::Request {
-                body: json!({ "model": "test", "messages": [] }),
-            },
+            DebugEvent::request(json!({ "model": "test", "messages": [] })),
         );
         capture.on_event(
             "dev-1",
             "Only",
             1,
-            DebugEvent::Response {
-                body: json!({
+            DebugEvent::response(
+                json!({
                     "choices": [{ "message": { "role": "assistant", "content": "hi" } }]
                 }),
-                finish_reason: Some("stop".into()),
-                reasoning_content: None,
-            },
+                Some("stop".into()),
+                None,
+            ),
         );
 
         let trace_dir = dump_directory(&prompt).join(".trace");
@@ -705,19 +718,13 @@ mod tests {
             "dev-1",
             "Only",
             1,
-            DebugEvent::Request {
-                body: json!({ "model": "test" }),
-            },
+            DebugEvent::request(json!({ "model": "test" })),
         );
         capture.on_event(
             "dev-1",
             "Only",
             1,
-            DebugEvent::Response {
-                body: json!({ "choices": [] }),
-                finish_reason: Some("stop".into()),
-                reasoning_content: None,
-            },
+            DebugEvent::response(json!({ "choices": [] }), Some("stop".into()), None),
         );
 
         let store = StoreRef::memory();
@@ -776,9 +783,7 @@ mod tests {
             "dev-1",
             "Only",
             1,
-            DebugEvent::Request {
-                body: json!({ "model": "test" }),
-            },
+            DebugEvent::request(json!({ "model": "test" })),
         );
 
         let mut status = Vec::new();

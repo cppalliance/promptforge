@@ -159,13 +159,14 @@ fn read(path: &Path) -> Result<String, String> {
 
 /// Parses one candidate file, reporting the failure as a validation detail.
 fn parse(source: &str) -> Result<Prompt, String> {
-    Prompt::parse(source, "catalog", &NullObserver).map_err(|e| format!("does not parse: {e}"))
+    Prompt::parse(source, "catalog", &NullObserver::default())
+        .map_err(|e| format!("does not parse: {e}"))
 }
 
 /// Turns a parsed prompt into an entry, checking the frontmatter name and, for
 /// a named block, that the name is the one the block was keyed on.
 fn admit(path: PathBuf, source: String, prompt: Prompt, block_key: Option<&str>) -> Entry {
-    let name = prompt.frontmatter.name.clone();
+    let name = prompt.frontmatter().name().to_owned();
     if !is_valid_tool_name(&name) {
         let detail = format!(
             "tool name {name:?} is not ^[a-z][a-z0-9_]{{0,{}}}$",

@@ -55,7 +55,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use promptforge_core::observe::{Observer, detail};
+use promptforge_core::observe::{Observation, Observer};
 use rmcp::RoleServer;
 use rmcp::model::{ProgressNotificationParam, ProgressToken};
 use rmcp::service::Peer;
@@ -104,11 +104,11 @@ struct Frame {
 ///
 /// # Examples
 /// ```
-/// use promptforge_core::observe::{Observer, detail};
+/// use promptforge_core::observe::{Observation, Observer};
 /// use promptforge_mcp_server::McpObserver;
 ///
 /// let observer = McpObserver::silent();
-/// observer.observe("example-run", "Gather", detail::MODEL_TURN_COMPLETED);
+/// observer.observe("example-run", "Gather", Observation::ModelTurnCompleted);
 /// assert_eq!(observer.turns(), 1);
 /// ```
 #[derive(Debug)]
@@ -226,44 +226,44 @@ impl McpObserver {
 }
 
 impl Observer for McpObserver {
-    fn observe(&self, execution: &str, section: &str, report: &str) {
+    fn observe(&self, execution: &str, section: &str, event: Observation) {
         #[cfg(test)]
         self.records
             .lock()
             .expect("the MCP test recorder mutex must not be poisoned")
-            .push((execution.to_owned(), section.to_owned(), report.to_owned()));
-        match report {
-            detail::RUN_STARTED => {
+            .push((execution.to_owned(), section.to_owned(), event.to_string()));
+        match event {
+            Observation::RunStarted => {
                 tracing::info!(%execution, %section, "run started");
                 self.queue(0, section);
             }
-            detail::SECTION_STARTED => {
+            Observation::SectionStarted => {
                 self.queue(self.advance(), section);
             }
-            detail::SECTION_FINISHED => {
+            Observation::SectionFinished => {
                 tracing::debug!(%execution, %section, "section finished");
             }
-            detail::MODEL_TURN_COMPLETED => {
+            Observation::ModelTurnCompleted => {
                 let turn = self.turns.fetch_add(1, Ordering::Relaxed) + 1;
                 tracing::debug!(%execution, %section, turn, "model turn completed");
             }
-            detail::MODEL_TURN_FAILED => {
+            Observation::ModelTurnFailed => {
                 tracing::warn!(%execution, %section, "model turn failed");
             }
-            detail::TOOL_CALL_SUCCEEDED => {
+            Observation::ToolCallSucceeded => {
                 tracing::debug!(%execution, %section, "tool call succeeded");
             }
-            detail::TOOL_CALL_FAILED => {
+            Observation::ToolCallFailed => {
                 tracing::warn!(%execution, %section, "tool call failed");
             }
-            detail::RUN_SUCCEEDED => {
+            Observation::RunSucceeded => {
                 tracing::debug!(%execution, %section, "run success observed");
             }
-            detail::RUN_FAILED => {
+            Observation::RunFailed => {
                 tracing::debug!(%execution, %section, "run failure observed");
             }
-            unknown => {
-                tracing::debug!(%execution, %section, detail = %unknown, "unrecognized observation");
+            other => {
+                tracing::debug!(%execution, %section, detail = %other, "unrecognized observation");
             }
         }
     }
@@ -319,11 +319,13 @@ async fn pump(mut frames: Receiver<Frame>, peer: Peer<RoleServer>, token: Progre
 mod tests {
     use std::fmt::Write;
 
+    use std::sync::Arc;
+
     use super::{Frame, McpObserver, ProgressPump, Receiver};
     use crate::levels::Levels;
-    use promptforge_core::execute::{self, ResolutionContext, RunOptions};
+    use promptforge_core::execute::{self, ResolutionContext, RunConfig};
     use promptforge_core::model::ModelCatalog;
-    use promptforge_core::observe::{NullObserver, Observer, detail};
+    use promptforge_core::observe::{NullObserver, Observation, Observer};
     use promptforge_core::parser::Prompt;
     use promptforge_core::store::StoreRef;
     use promptforge_tool_picker::{Catalog, Config, ToolPicker};
@@ -368,18 +370,18 @@ mod tests {
 
     /// The observations a three-section run emits, one section of which takes a
     /// model turn and a tool call.
-    fn three_section_run() -> Vec<(&'static str, &'static str)> {
+    fn three_section_run() -> Vec<(&'static str, Observation)> {
         vec![
-            ("Trio", detail::RUN_STARTED),
-            ("First", detail::SECTION_STARTED),
-            ("First", detail::MODEL_TURN_COMPLETED),
-            ("First", detail::TOOL_CALL_SUCCEEDED),
-            ("First", detail::SECTION_FINISHED),
-            ("Second", detail::SECTION_STARTED),
-            ("Second", detail::SECTION_FINISHED),
-            ("Third", detail::SECTION_STARTED),
-            ("Third", detail::SECTION_FINISHED),
-            ("Trio", detail::RUN_SUCCEEDED),
+            ("Trio", Observation::RunStarted),
+            ("First", Observation::SectionStarted),
+            ("First", Observation::ModelTurnCompleted),
+            ("First", Observation::ToolCallSucceeded),
+            ("First", Observation::SectionFinished),
+            ("Second", Observation::SectionStarted),
+            ("Second", Observation::SectionFinished),
+            ("Third", Observation::SectionStarted),
+            ("Third", Observation::SectionFinished),
+            ("Trio", Observation::RunSucceeded),
         ]
     }
 
@@ -406,7 +408,7 @@ mod tests {
     fn progress_counts_recognized_section_starts() {
         let (observer, mut frames) = McpObserver::queued();
         for section in ["one", "two", "three"] {
-            observer.observe("test-run", section, detail::SECTION_STARTED);
+            observer.observe("test-run", section, Observation::SectionStarted);
         }
         let progress: Vec<u32> = drain(&mut frames).iter().map(|f| f.progress).collect();
         assert_eq!(progress, vec![1, 2, 3]);
@@ -418,29 +420,22 @@ mod tests {
         // stopped accepting: the queue fills, and the run must not notice.
         let sections = super::CAPACITY + 16;
         let source = long_prompt(sections);
-        let prompt =
-            Prompt::parse(&source, "test-run", &NullObserver).expect("the fixture prompt parses");
+        let prompt = Prompt::parse(&source, "test-run", &NullObserver::default())
+            .expect("the fixture prompt parses");
         let (observer, _frames) = McpObserver::queued();
+        let observer = Arc::new(observer);
 
         let store = StoreRef::memory();
-        let options = RunOptions {
-            execution: "test-run",
-            observer: &observer,
-            client: None,
-            debug: None,
-        };
+        let models = ModelCatalog::empty();
         let picker = ToolPicker::build(Catalog::default(), Config::default())
             .expect("empty picker must build");
         let value = execute::run(
             &prompt,
             "",
-            ResolutionContext {
-                picker: &picker,
-                models: &ModelCatalog::empty(),
-            },
+            ResolutionContext::new(&picker, &models),
             &[],
             &store,
-            options,
+            RunConfig::new("test-run").observer(Arc::clone(&observer) as Arc<dyn Observer>),
         )
         .await
         .expect("a Lua-only run reaches no model and finishes");
@@ -477,7 +472,7 @@ mod tests {
             for (section, report) in three_section_run() {
                 observer.observe("test-run", section, report);
             }
-            observer.observe("test-run", "First", detail::TOOL_CALL_FAILED);
+            observer.observe("test-run", "First", Observation::ToolCallFailed);
         });
         assert_eq!(
             levels.operator_visible(),
@@ -500,10 +495,10 @@ mod tests {
     fn unknown_details_are_tolerated_without_frames_or_counters() {
         let (observer, mut frames) = McpObserver::queued();
         for report in [
-            detail::TOOL_REGISTRY_VALIDATION_STARTED,
-            detail::TOOL_REGISTRY_VALIDATION_SUCCEEDED,
-            detail::TOOL_REGISTRY_VALIDATION_FAILED,
-            "A future detail",
+            Observation::ToolRegistryValidationStarted,
+            Observation::ToolRegistryValidationSucceeded,
+            Observation::ToolRegistryValidationFailed,
+            Observation::Other("A future detail".to_owned()),
         ] {
             observer.observe("test-run", "First", report);
         }

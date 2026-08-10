@@ -53,7 +53,7 @@ impl PreparedTools {
                 ModelCatalog::empty()
             }
         };
-        Ok(Self::new(gateway, models)?)
+        Self::new(gateway, models)
     }
 
     /// Builds the live registry and picker over an already-fetched model catalog.
@@ -64,8 +64,8 @@ impl PreparedTools {
     pub fn new(
         gateway: &GatewayConfig,
         models: ModelCatalog,
-    ) -> Result<Self, promptforge_tool_picker::BuildError> {
-        let live = live_tools(gateway);
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let live = live_tools(gateway)?;
         let catalog = catalog(&live);
         let picker = ToolPicker::build(catalog, PickerConfig::default())?;
         Ok(Self {
@@ -84,8 +84,8 @@ impl PreparedTools {
     pub(crate) fn rebuild(
         &self,
         gateway: &GatewayConfig,
-    ) -> Result<Self, promptforge_tool_picker::IndexError> {
-        let live = live_tools(gateway);
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let live = live_tools(gateway)?;
         let picker = self.picker.rebuild(catalog(&live))?;
         Ok(Self {
             live,
@@ -113,11 +113,13 @@ impl PreparedTools {
     }
 }
 
-fn live_tools(gateway: &GatewayConfig) -> Vec<std::sync::Arc<dyn Tool>> {
-    vec![
+fn live_tools(
+    gateway: &GatewayConfig,
+) -> Result<Vec<std::sync::Arc<dyn Tool>>, promptforge_core::tools::ToolError> {
+    Ok(vec![
         std::sync::Arc::new(WebFetch::new()),
-        std::sync::Arc::new(WebSearch::new(&gateway.url, gateway.key.expose())),
-    ]
+        std::sync::Arc::new(WebSearch::new(&gateway.url, gateway.key.expose())?),
+    ])
 }
 
 fn catalog(live: &[std::sync::Arc<dyn Tool>]) -> Catalog {
@@ -128,8 +130,12 @@ fn catalog(live: &[std::sync::Arc<dyn Tool>]) -> Catalog {
 /// rather than the environment: setting an environment variable is `unsafe`
 /// under edition 2024 and this workspace forbids unsafe, so a configured server
 /// hands the executor a client instead of arranging for one to be found.
-pub(super) fn gateway_client(gateway: &GatewayConfig) -> GatewayClient {
-    GatewayClient::new(&gateway.url, gateway.key.expose())
+pub(super) fn gateway_client(
+    gateway: &GatewayConfig,
+) -> Result<GatewayClient, promptforge_core::model::CompletionError> {
+    let endpoint = promptforge_core::client::GatewayEndpoint::new(&gateway.url)?;
+    let key = promptforge_core::client::SecretString::new(gateway.key.expose())?;
+    Ok(GatewayClient::new(endpoint, key))
 }
 
 /// Derives one abstract descriptor from its callable live instance.
@@ -145,12 +151,13 @@ fn descriptor(tool: &dyn Tool) -> ToolDescriptor {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::num::NonZeroU32;
     use std::path::Path;
 
-    use promptforge_core::execute::{self, ResolutionContext, RunOptions};
+    use promptforge_core::execute::{self, ResolutionContext, RunConfig};
     use promptforge_core::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
     use promptforge_core::observe::NullObserver;
-    use promptforge_core::parser::{Block, Prompt};
+    use promptforge_core::parser::Prompt;
     use promptforge_core::store::StoreRef;
     use promptforge_tool_picker::Outcome;
 
@@ -219,11 +226,12 @@ mod tests {
     async fn every_repository_prompt_parses_and_resolves_live_h1() {
         let config = gateway("");
         let models = ModelCatalog::new([ModelDescriptor::new(
-            ModelId::gateway("claude-sonnet-4-6"),
+            ModelId::gateway("claude-sonnet-4-6").expect("the test model alias is valid"),
             "A model suited for careful analysis, coding, and general assistance",
-            200_000,
+            NonZeroU32::new(200_000).expect("200000 is non-zero"),
             ThinkingMode::Never,
-        )]);
+        )])
+        .expect("the test catalog has a single unique model");
         let tools = PreparedTools::new(&config.gateway, models).expect("prepare repository tools");
         let prompts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts");
         let mut files = Vec::new();
@@ -255,28 +263,18 @@ return 'resolved'
 ```
 ",
             );
-            let mut prompt =
-                Prompt::parse(&probe, "test-run", &NullObserver).unwrap_or_else(|error| {
+            let mut prompt = Prompt::parse(&probe, "test-run", &NullObserver::default())
+                .unwrap_or_else(|error| {
                     panic!("{} must parse: {error}", path.display());
                 });
-            prompt
-                .h1_blocks
-                .retain(|block| matches!(block, Block::Lua(_)));
+            prompt.strip_h1_prose();
             let result = execute::run(
                 &prompt,
                 "",
-                ResolutionContext {
-                    picker: tools.picker(),
-                    models: tools.models(),
-                },
+                ResolutionContext::new(tools.picker(), tools.models()),
                 tools.tools(),
                 &StoreRef::memory(),
-                RunOptions {
-                    execution: "test-run",
-                    observer: &NullObserver,
-                    client: None,
-                    debug: None,
-                },
+                RunConfig::new("test-run"),
             )
             .await
             .unwrap_or_else(|error| panic!("{} must resolve live H1: {error}", path.display()));
@@ -285,11 +283,17 @@ return 'resolved'
     }
 
     #[test]
-    fn gateway_client_is_built_from_url_and_key() {
+    fn gateway_client_is_built_from_url_and_key_without_leaking_the_key() {
         let config = gateway("");
-        assert_eq!(
-            format!("{:?}", gateway_client(&config.gateway)),
-            "GatewayClient { base_url: \"http://127.0.0.1:8081/v1\", key: \"gw\", .. }"
+        let client = gateway_client(&config.gateway).expect("the fixture gateway URL is valid");
+        let rendered = format!("{client:?}");
+        assert!(
+            !rendered.contains("gw"),
+            "the bearer key must never appear in Debug output, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("http://127.0.0.1:8081/v1") && rendered.contains("<redacted>"),
+            "the client Debug must keep the base URL and redact the key, got: {rendered}"
         );
     }
 }

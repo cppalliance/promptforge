@@ -14,8 +14,11 @@ use std::sync::Arc;
 use readabilityrs::{Readability, ReadabilityOptions};
 use reqwest::header::CONTENT_TYPE;
 
-use promptforge_core::tools::{Tool, ToolId};
-use promptforge_core::{Error, Result};
+use promptforge_core::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
+
+/// The result the [`Tool::call`] boundary returns: untrusted page text on
+/// success, a narrow [`ToolError`] on a hard failure.
+type CallResult = std::result::Result<ToolOutput, ToolError>;
 
 pub mod address;
 pub mod config;
@@ -97,54 +100,49 @@ impl WebFetch {
     }
 }
 
-/// Converts a [`FetchError`] into a tool outcome: recoverable failures become
-/// successful tool text the model reads; policy/admission failures remain hard errors.
-fn soft_or_hard(err: FetchError) -> Result<String> {
+fn soft_or_hard(err: FetchError) -> CallResult {
     if err.is_recoverable() {
-        Ok(err.model_facing())
+        Ok(ToolOutput::untrusted(err.model_facing()))
     } else {
         Err(err.into())
     }
 }
 
-/// Maps a core [`Error`] from the body-read path into either a soft tool result
-/// (recoverable) or a hard `Err` (policy/admission).
+/// Maps a body-read [`FetchError`] into soft, untrusted tool text.
 ///
-/// At body-read time, `Error::Parse` comes only from [`FetchError`] (TooLarge or
-/// Undecodable), both recoverable. Transport errors during streaming are also
-/// recoverable since the model can try a different URL.
-fn body_read_outcome(err: Error) -> Result<String> {
-    match err {
-        Error::Parse(msg) => Ok(msg),
-        Error::Http(_) => {
-            Ok("fetch failed: network error during download; try a different URL".into())
-        }
-        other => Err(other),
-    }
+/// A body-read failure is always a size cap ([`FetchError::TooLarge`]) or a
+/// mid-stream transport failure (reported as [`FetchError::Timeout`], the
+/// existing recoverable transport variant); both are recoverable and returned
+/// as model-facing tool text so the model can try a different URL.
+fn body_read_outcome(err: &FetchError) -> ToolOutput {
+    ToolOutput::untrusted(err.model_facing())
 }
 
 /// Maps a reqwest send error into either a soft tool result (recoverable) or
 /// a hard `Err` (policy/admission).
-fn map_send_error_to_outcome(err: &reqwest::Error, url: &str) -> Result<String> {
+fn map_send_error_to_outcome(err: &reqwest::Error, url: &str) -> CallResult {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(err);
     while let Some(current) = source {
         if let Some(fetch_err) = current.downcast_ref::<FetchError>() {
             if fetch_err.is_recoverable() {
-                return Ok(fetch_err.model_facing());
+                return Ok(ToolOutput::untrusted(fetch_err.model_facing()));
             }
-            return Err(Error::Parse(fetch_err.model_facing()));
+            return Err(ToolError::message(fetch_err.model_facing())
+                .with_kind(ToolErrorKind::InvalidArguments));
         }
         source = current.source();
     }
     if err.is_timeout() {
-        return Ok(FetchError::Timeout {
-            url: url.to_string(),
-        }
-        .model_facing());
+        return Ok(ToolOutput::untrusted(
+            FetchError::Timeout {
+                url: url.to_string(),
+            }
+            .model_facing(),
+        ));
     }
-    Ok(format!(
+    Ok(ToolOutput::untrusted(format!(
         "fetch failed for {url}: network error; try a different URL"
-    ))
+    )))
 }
 
 impl Default for WebFetch {
@@ -327,8 +325,13 @@ fn extract_html(html: &str, base_url: Option<&str>, raw: bool) -> (String, Extra
 
 #[async_trait::async_trait]
 impl Tool for WebFetch {
+    #[expect(
+        clippy::expect_used,
+        reason = "the id components are compile-time constants that satisfy ToolId's validation"
+    )]
     fn id(&self) -> ToolId {
         ToolId::new("promptforge", "web_fetch")
+            .expect("`promptforge`/`web_fetch` is a valid tool id")
     }
 
     #[expect(
@@ -345,13 +348,6 @@ impl Tool for WebFetch {
     )]
     fn description(&self) -> &str {
         "Fetch a web page and return its main content as markdown."
-    }
-
-    /// Fetched page text is attacker-controllable, so it is untrusted external
-    /// data: the runtime wraps this tool's result in a guard block before it
-    /// reaches the model.
-    fn untrusted_output(&self) -> bool {
-        true
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -376,11 +372,18 @@ impl Tool for WebFetch {
         })
     }
 
-    async fn call(&self, args: serde_json::Value) -> Result<String> {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one linear fetch pipeline (parse args, admit URL, route content type, decode) reads better whole than split"
+    )]
+    async fn call(&self, args: serde_json::Value) -> CallResult {
         let url = args
             .get("url")
             .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| Error::Parse("web_fetch: missing url argument".into()))?;
+            .ok_or_else(|| {
+                ToolError::message("web_fetch: missing url argument")
+                    .with_kind(ToolErrorKind::InvalidArguments)
+            })?;
 
         // A per-call `max_chars` overrides the configured default for this
         // fetch; absent, the config default applies.
@@ -412,7 +415,7 @@ impl Tool for WebFetch {
                 url: final_url.to_string(),
                 status: status.as_u16(),
             };
-            return Ok(err.model_facing());
+            return Ok(ToolOutput::untrusted(err.model_facing()));
         }
 
         // Route on the response Content-Type, read before the body: a binary or
@@ -459,7 +462,7 @@ impl Tool for WebFetch {
                         .await
                     {
                         Ok(b) => b,
-                        Err(e) => return body_read_outcome(e),
+                        Err(e) => return Ok(body_read_outcome(&e)),
                     };
                 let decoded = match decode_body(&body, charset.as_deref(), final_url.as_str()) {
                     Ok(d) => d,
@@ -474,7 +477,7 @@ impl Tool for WebFetch {
                         .await
                     {
                         Ok(b) => b,
-                        Err(e) => return body_read_outcome(e),
+                        Err(e) => return Ok(body_read_outcome(&e)),
                     };
                 let decoded = match decode_body(&body, charset.as_deref(), final_url.as_str()) {
                     Ok(d) => d,
@@ -483,8 +486,11 @@ impl Tool for WebFetch {
                 (decoded, Extraction::Plain, false)
             }
             Route::Plain { structured: false } => {
-                let (body, size_truncated) =
-                    read_body_truncating(response, self.config.max_bytes).await?;
+                let (body, size_truncated) = read_body_truncating(response, self.config.max_bytes)
+                    .await
+                    .map_err(|e| {
+                        ToolError::message(e.to_string()).with_kind(ToolErrorKind::Transport)
+                    })?;
                 let decoded = match decode_body(&body, charset.as_deref(), final_url.as_str()) {
                     Ok(d) => d,
                     Err(e) => return soft_or_hard(e),
@@ -502,44 +508,48 @@ impl Tool for WebFetch {
         // Provenance header: a `url:` line naming the final URL, a `truncated:`
         // line, and an `extraction:` line naming how the text was produced, then
         // a blank line, then the content.
-        Ok(format!(
+        Ok(ToolOutput::untrusted(format!(
             "url: {final_url}\ntruncated: {truncated}\nextraction: {}\n\n{text}",
             extraction.label()
-        ))
+        )))
     }
 }
 
 /// Parses the optional `max_chars` argument, falling back to `default`.
 ///
 /// # Errors
-/// Returns [`Error::Parse`] if `max_chars` is present but is not a positive
-/// integer that fits in `usize`.
-fn parse_max_chars(args: &serde_json::Value, default: usize) -> Result<usize> {
+/// Returns an invalid-arguments [`ToolError`] if `max_chars` is present but is
+/// not a positive integer that fits in `usize`.
+fn parse_max_chars(
+    args: &serde_json::Value,
+    default: usize,
+) -> std::result::Result<usize, ToolError> {
     let Some(value) = args.get("max_chars") else {
         return Ok(default);
     };
     if value.is_null() {
         return Ok(default);
     }
-    let n = value
-        .as_u64()
-        .filter(|n| *n >= 1)
-        .ok_or_else(|| Error::Parse("web_fetch: max_chars must be a positive integer".into()))?;
+    let n = value.as_u64().filter(|n| *n >= 1).ok_or_else(|| {
+        ToolError::message("web_fetch: max_chars must be a positive integer")
+            .with_kind(ToolErrorKind::InvalidArguments)
+    })?;
     Ok(usize::try_from(n).unwrap_or(usize::MAX))
 }
 
 /// Parses the optional `raw` argument, defaulting to `false`.
 ///
 /// # Errors
-/// Returns [`Error::Parse`] if `raw` is present and is neither null nor a
-/// boolean.
-fn parse_raw(args: &serde_json::Value) -> Result<bool> {
+/// Returns an invalid-arguments [`ToolError`] if `raw` is present and is neither
+/// null nor a boolean.
+fn parse_raw(args: &serde_json::Value) -> std::result::Result<bool, ToolError> {
     match args.get("raw") {
         None => Ok(false),
         Some(value) if value.is_null() => Ok(false),
-        Some(value) => value
-            .as_bool()
-            .ok_or_else(|| Error::Parse("web_fetch: raw must be a boolean".into())),
+        Some(value) => value.as_bool().ok_or_else(|| {
+            ToolError::message("web_fetch: raw must be a boolean")
+                .with_kind(ToolErrorKind::InvalidArguments)
+        }),
     }
 }
 
@@ -551,17 +561,19 @@ fn parse_raw(args: &serde_json::Value) -> Result<bool> {
 /// compressed payload is measured on its expanded size.
 ///
 /// # Errors
-/// Returns [`Error::Http`] on a transport failure mid-stream.
+/// Returns [`FetchError::Timeout`] on a transport failure mid-stream.
 async fn read_body_truncating(
-    mut response: reqwest::Response,
+    response: reqwest::Response,
     max_bytes: usize,
-) -> Result<(Vec<u8>, bool)> {
+) -> std::result::Result<(Vec<u8>, bool), FetchError> {
+    let url = response.url().to_string();
+    let mut response = response;
     let mut body: Vec<u8> = Vec::new();
     let mut truncated = false;
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|source| Error::Http(Box::new(source)))?
+        .map_err(|_source| FetchError::Timeout { url: url.clone() })?
     {
         let remaining = max_bytes - body.len();
         if chunk.len() > remaining {
@@ -584,19 +596,16 @@ async fn read_body_truncating(
 /// body of exactly `max_bytes` is accepted.
 ///
 /// # Errors
-/// Returns [`FetchError::TooLarge`] (as [`Error::Parse`]) if the response
-/// exceeds `max_bytes`, or [`Error::Http`] on a transport failure mid-stream.
+/// Returns [`FetchError::TooLarge`] if the response exceeds `max_bytes`, or
+/// [`FetchError::Timeout`] on a transport failure mid-stream.
 async fn read_body_capped(
     mut response: reqwest::Response,
     url: &str,
     max_bytes: usize,
-) -> Result<Vec<u8>> {
-    let too_large = || -> Error {
-        FetchError::TooLarge {
-            url: url.to_string(),
-            limit: max_bytes,
-        }
-        .into()
+) -> std::result::Result<Vec<u8>, FetchError> {
+    let too_large = || FetchError::TooLarge {
+        url: url.to_string(),
+        limit: max_bytes,
     };
 
     // Precheck: an honest Content-Length over the cap is refused before any
@@ -612,7 +621,9 @@ async fn read_body_capped(
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|source| Error::Http(Box::new(source)))?
+        .map_err(|_source| FetchError::Timeout {
+            url: url.to_string(),
+        })?
     {
         if body.len() + chunk.len() > max_bytes {
             return Err(too_large());
@@ -653,8 +664,7 @@ mod tests {
 
     use super::{WebFetch, extract_html};
     use crate::config::FetchConfig;
-    use promptforge_core::Error;
-    use promptforge_core::tools::{Tool, ToolId};
+    use promptforge_core::tools::{Tool, ToolErrorKind, ToolId};
 
     /// An article page long enough for readability extraction to fire.
     const ARTICLE_HTML: &str = r"
@@ -687,7 +697,10 @@ mod tests {
     fn descriptor_is_stable_and_faithful() {
         let tool = WebFetch::new();
 
-        assert_eq!(tool.id(), ToolId::new("promptforge", "web_fetch"));
+        assert_eq!(
+            tool.id(),
+            ToolId::new("promptforge", "web_fetch").expect("valid id")
+        );
         assert_eq!(tool.wire_name(), "web_fetch");
         assert_eq!(
             tool.description(),
@@ -1071,7 +1084,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a timeout is now a soft (recoverable) return");
+            .expect("a timeout is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("timed out"),
@@ -1149,7 +1164,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a loopback fetch through allow_exact must succeed");
+            .expect("a loopback fetch through allow_exact must succeed")
+            .text()
+            .to_owned();
 
         let expected = format!("url: http://localhost:{port}/");
         assert!(
@@ -1171,7 +1188,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a redirect-target policy refusal is a soft (recoverable) return");
+            .expect("a redirect-target policy refusal is a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("refused") && result.contains("127.0.0.1"),
@@ -1212,8 +1231,8 @@ mod tests {
                 .await
                 .expect_err(&format!("expected {raw} to be refused before any network"));
             assert!(
-                matches!(err, Error::Parse(_)),
-                "expected a policy rejection (Error::Parse) for {raw}, got: {err:?}"
+                err.kind() == ToolErrorKind::InvalidArguments,
+                "expected a policy rejection (invalid arguments) for {raw}, got: {err:?}"
             );
             assert!(
                 err.to_string().contains(reason),
@@ -1226,7 +1245,9 @@ mod tests {
         let soft = tool
             .call(serde_json::json!({ "url": "http://example.com/" }))
             .await
-            .expect("blocked http scheme must be soft tool text");
+            .expect("blocked http scheme must be soft tool text")
+            .text()
+            .to_owned();
         assert!(
             soft.contains("scheme not allowed: http"),
             "expected soft scheme refusal, got: {soft}"
@@ -1255,7 +1276,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("an oversized HTML body is now a soft (recoverable) return");
+            .expect("an oversized HTML body is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("exceeds") && result.contains("4096"),
@@ -1276,7 +1299,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a declared Content-Length over the cap is now a soft return");
+            .expect("a declared Content-Length over the cap is now a soft return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("exceeds") && result.contains("4096"),
@@ -1297,7 +1322,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a gzip body that decompresses past the cap is now a soft return");
+            .expect("a gzip body that decompresses past the cap is now a soft return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("exceeds"),
@@ -1317,7 +1344,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url, "max_chars": max_chars }))
             .await
-            .expect("a unicode fetch through allow_exact must succeed");
+            .expect("a unicode fetch through allow_exact must succeed")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1354,7 +1383,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a body one byte under the cap must be accepted");
+            .expect("a body one byte under the cap must be accepted")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1376,7 +1407,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a loopback html fetch must succeed");
+            .expect("a loopback html fetch must succeed")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1398,7 +1431,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url, "raw": true }))
             .await
-            .expect("a raw table fetch must succeed");
+            .expect("a raw table fetch must succeed")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1420,7 +1455,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a json fetch must succeed");
+            .expect("a json fetch must succeed")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1446,7 +1483,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("an oversized json body is now a soft (recoverable) return");
+            .expect("an oversized json body is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("exceeds") && result.contains("4096"),
@@ -1463,7 +1502,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("an unrecognized charset is now a soft (recoverable) return");
+            .expect("an unrecognized charset is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("not-a-charset"),
@@ -1480,7 +1521,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a pdf response is now a soft (recoverable) return");
+            .expect("a pdf response is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("application/pdf"),
@@ -1497,7 +1540,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("an octet-stream response is now a soft (recoverable) return");
+            .expect("an octet-stream response is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("application/octet-stream"),
@@ -1514,7 +1559,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("an absent content type is now a soft (recoverable) return");
+            .expect("an absent content type is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("no content type"),
@@ -1531,7 +1578,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a latin-1 fetch must succeed");
+            .expect("a latin-1 fetch must succeed")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1561,7 +1610,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("an oversized flat-text body must be truncated, not refused");
+            .expect("an oversized flat-text body must be truncated, not refused")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1581,10 +1632,18 @@ mod tests {
     }
 
     #[test]
-    fn web_fetch_reports_untrusted_output() {
-        // Fetched page text is attacker-controllable, so the tool opts in to
-        // guard-wrapping by overriding the trait's defaulted `false`.
-        assert!(WebFetch::new().untrusted_output());
+    fn recoverable_failure_is_returned_as_untrusted_output() {
+        use promptforge_core::tools::OutputTrust;
+
+        use crate::error::FetchError;
+
+        // Fetched page text is attacker-controllable, so a recoverable failure
+        // that the model reads as tool text must carry `Untrusted` trust.
+        let outcome = super::soft_or_hard(FetchError::Timeout {
+            url: "https://example.test/".to_string(),
+        })
+        .expect("a recoverable failure is a soft, successful tool result");
+        assert_eq!(outcome.trust(), OutputTrust::Untrusted);
     }
 
     #[test]
@@ -1644,7 +1703,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a 404 must be a soft (recoverable) return, not a hard error");
+            .expect("a 404 must be a soft (recoverable) return, not a hard error")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("404"),
@@ -1661,7 +1722,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a 500 must be a soft (recoverable) return, not a hard error");
+            .expect("a 500 must be a soft (recoverable) return, not a hard error")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("500"),
@@ -1678,7 +1741,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a PDF content type must be a soft return, not a hard error");
+            .expect("a PDF content type must be a soft return, not a hard error")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("application/pdf"),
@@ -1696,7 +1761,7 @@ mod tests {
             .expect_err("a bare IP literal URL must still be a hard error");
 
         assert!(
-            matches!(&err, Error::Parse(msg) if msg.contains("ip literal")),
+            err.kind() == ToolErrorKind::InvalidArguments && err.to_string().contains("ip literal"),
             "expected a policy rejection for a bare IP literal, got: {err:?}"
         );
     }

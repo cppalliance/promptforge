@@ -3,14 +3,15 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use promptforge_core::Error;
-use promptforge_core::execute::{ResolutionContext, RunOptions, run as run_core};
-use promptforge_core::lua::LuaProgram;
+use promptforge_core::execute::{
+    ResolutionContext, RunConfig, RunError, RunErrorKind, run as run_core,
+};
 use promptforge_core::model::ModelCatalog;
-use promptforge_core::observe::{NullObserver, Observer};
-use promptforge_core::parser::Prompt;
+use promptforge_core::observe::{NullObserver, Observation, Observer};
+use promptforge_core::parser::{LuaProgram, MaxToolIterations, ParseErrorKind, Prompt};
 use promptforge_core::store::StoreRef;
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
+use std::num::NonZeroU32;
 
 type Record = (String, String, String);
 
@@ -40,25 +41,31 @@ const FANOUT_ARM_FAILURE: &str = include_str!("../prompts/execution/fanout-arm-f
 const ITEM_OUTSIDE_FANOUT: &str = include_str!("../prompts/invalid/item-outside-fanout.md");
 const LIST_H3_NON_LIST: &str = include_str!("../prompts/invalid/list-h3-non-list-content.md");
 
+/// Owned run inputs a fixture supplies. Mirrors the old borrowed `RunOptions`
+/// with an owned `Arc` observer so the local `run` helper can build a
+/// [`RunConfig`]. The fixtures are offline, so `client`/`debug` stay `None`.
+struct RunOptions {
+    execution: &'static str,
+    observer: Arc<dyn Observer>,
+}
+
 async fn run(
     prompt: &Prompt,
     args: &str,
     tools: &[Arc<dyn promptforge_core::tools::Tool>],
     store: &StoreRef,
-    options: RunOptions<'_>,
-) -> promptforge_core::Result<String> {
+    opts: RunOptions,
+) -> std::result::Result<String, RunError> {
     let picker = ToolPicker::build(Catalog::default(), Config::default())
         .expect("empty fixture picker must build");
+    let models = ModelCatalog::empty();
     run_core(
         prompt,
         args,
-        ResolutionContext {
-            picker: &picker,
-            models: &ModelCatalog::empty(),
-        },
+        ResolutionContext::new(&picker, &models),
         tools,
         store,
-        options,
+        RunConfig::new(opts.execution).observer(opts.observer),
     )
     .await
 }
@@ -136,7 +143,7 @@ const INVALID_FIXTURES: &[InvalidFixture] = &[
         name: "invalid/list-h3-non-list-content.md",
         source: LIST_H3_NON_LIST,
         kind: ErrorKind::Parse,
-        message_fragment: "non-list content",
+        message_fragment: "empty bullet item",
     },
 ];
 
@@ -162,11 +169,11 @@ const EXECUTION_ERROR_FIXTURES: &[ExecutionErrorFixture] = &[
 struct Recorder(Mutex<Vec<Record>>);
 
 impl Observer for Recorder {
-    fn observe(&self, execution: &str, section: &str, detail: &str) {
+    fn observe(&self, execution: &str, section: &str, event: Observation) {
         self.0
             .lock()
             .expect("the fixture recorder mutex must remain usable")
-            .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+            .push((execution.to_owned(), section.to_owned(), event.to_string()));
     }
 }
 
@@ -185,9 +192,8 @@ fn parse_execution_fixture(
     execution: &str,
     observer: &dyn Observer,
 ) -> Prompt {
-    let prompt = Prompt::parse(source, execution, observer)
-        .unwrap_or_else(|error| panic!("fixture {name} failed to parse: {error}"));
-    prompt
+    Prompt::parse(source, execution, observer)
+        .unwrap_or_else(|error| panic!("fixture {name} failed to parse: {error}"))
 }
 
 fn checkpoints(records: &[Record], execution: &str) -> Vec<Record> {
@@ -214,7 +220,7 @@ fn collect_markdown(directory: &Path, files: &mut Vec<std::path::PathBuf>) {
 #[test]
 fn valid_prompt_files_parse_through_the_public_api() {
     for fixture in VALID_FIXTURES {
-        let prompt = Prompt::parse(fixture.source, fixture.name, &NullObserver)
+        let prompt = Prompt::parse(fixture.source, fixture.name, &NullObserver::default())
             .unwrap_or_else(|error| panic!("fixture {} failed to parse: {error}", fixture.name));
         let verification = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             (fixture.verify)(&prompt);
@@ -230,14 +236,17 @@ fn valid_prompt_files_parse_through_the_public_api() {
 #[test]
 fn invalid_prompt_files_report_public_error_contracts() {
     for fixture in INVALID_FIXTURES {
-        let Err(error) = Prompt::parse(fixture.source, fixture.name, &NullObserver) else {
+        let Err(error) = Prompt::parse(fixture.source, fixture.name, &NullObserver::default())
+        else {
             panic!("fixture {} unexpectedly parsed", fixture.name);
         };
 
-        let variant_matches = matches!(
-            (fixture.kind, &error),
-            (ErrorKind::Parse, Error::Parse(_)) | (ErrorKind::LuaCompile, Error::LuaCompile { .. })
-        );
+        let variant_matches = match fixture.kind {
+            // A structural/frontmatter/fence/list parse failure is any parse
+            // error that is not a Lua compilation failure.
+            ErrorKind::Parse => error.kind() != ParseErrorKind::Lua,
+            ErrorKind::LuaCompile => error.kind() == ParseErrorKind::Lua,
+        };
         assert!(
             variant_matches,
             "fixture {} returned the wrong error variant: expected {:?}, got {error:?}",
@@ -253,78 +262,72 @@ fn invalid_prompt_files_report_public_error_contracts() {
 }
 
 fn verify_minimal(prompt: &Prompt) {
-    assert_eq!(prompt.frontmatter.name, "test");
-    assert_eq!(prompt.frontmatter.description, "minimum valid");
-    assert_eq!(prompt.frontmatter.promptforge, Some(1));
-    assert_eq!(prompt.title, "Test");
-    assert!(prompt.replay.is_none());
-    assert!(prompt.h1_blocks.is_empty());
-    assert!(prompt.description_text.is_empty());
-    assert_eq!(prompt.sections.len(), 1);
-    assert_eq!(prompt.entry().name, "Run");
-    assert_eq!(prompt.entry().level, 2);
+    assert_eq!(prompt.frontmatter().name(), "test");
+    assert_eq!(prompt.frontmatter().description(), "minimum valid");
+    assert_eq!(prompt.frontmatter().promptforge(), Some(1));
+    assert_eq!(prompt.title(), "Test");
+    assert!(prompt.replay().is_none());
+    assert!(prompt.h1_blocks().is_empty());
+    assert_eq!(prompt.sections().len(), 1);
+    assert_eq!(prompt.entry().name(), "Run");
+    assert_eq!(prompt.entry().level(), 2);
     assert_eq!(prompt.entry().prose(), "Done.");
     assert!(prompt.entry().prologue().is_none());
     assert!(prompt.entry().epilog().is_none());
 }
 
 fn verify_shared_library(prompt: &Prompt) {
-    assert_eq!(prompt.frontmatter.name, "shared_library");
+    assert_eq!(prompt.frontmatter().name(), "shared_library");
     assert_eq!(
-        prompt.frontmatter.description,
+        prompt.frontmatter().description(),
         "Exercise an H1 shared library and nested author prose"
     );
-    assert_eq!(prompt.frontmatter.promptforge, Some(1));
-    assert_eq!(prompt.title, "Shared Library");
+    assert_eq!(prompt.frontmatter().promptforge(), Some(1));
+    assert_eq!(prompt.title(), "Shared Library");
     assert_eq!(
-        prompt.replay.as_ref().map(LuaProgram::source),
+        prompt.replay().map(LuaProgram::source),
         Some("function normalize(value)\n    return string.lower(value)\nend")
     );
-    assert_eq!(
-        prompt.description_text,
-        "The shared helper is available to each executable section."
-    );
-    assert_eq!(prompt.sections.len(), 2);
+    assert_eq!(prompt.sections().len(), 2);
 
-    let prepare = &prompt.sections[0];
-    assert_eq!(prepare.name, "Prepare");
-    assert_eq!(prepare.level, 2);
+    let prepare = &prompt.sections()[0];
+    assert_eq!(prepare.name(), "Prepare");
+    assert_eq!(prepare.level(), 2);
     assert_eq!(prepare.prose(), "Normalize the supplied subject.");
     assert!(prepare.prologue().is_none());
     assert!(prepare.epilog().is_none());
-    assert_eq!(prepare.children.len(), 1);
-    assert_eq!(prepare.children[0].name, "Author note");
-    assert_eq!(prepare.children[0].level, 3);
+    assert_eq!(prepare.children().len(), 1);
+    assert_eq!(prepare.children()[0].name(), "Author note");
+    assert_eq!(prepare.children()[0].level(), 3);
     assert_eq!(
-        prepare.children[0].prose(),
+        prepare.children()[0].prose(),
         "This nested prose remains attached to Prepare."
     );
 
-    let finish = &prompt.sections[1];
-    assert_eq!(finish.name, "Finish");
+    let finish = &prompt.sections()[1];
+    assert_eq!(finish.name(), "Finish");
     assert_eq!(finish.prose(), "Return the normalized subject.");
-    assert!(finish.children.is_empty());
+    assert!(finish.children().is_empty());
 }
 
 fn verify_prologue_prose_epilog(prompt: &Prompt) {
-    assert_eq!(prompt.frontmatter.name, "phase_boundaries");
+    assert_eq!(prompt.frontmatter().name(), "phase_boundaries");
     assert_eq!(
-        prompt.frontmatter.description,
+        prompt.frontmatter().description(),
         "Exercise an author-shaped prologue, prose, and epilog"
     );
-    assert_eq!(prompt.frontmatter.promptforge, Some(1));
+    assert_eq!(prompt.frontmatter().promptforge(), Some(1));
+    assert_eq!(prompt.frontmatter().default_return(), Some("fallback"));
     assert_eq!(
-        prompt.frontmatter.default_return.as_deref(),
-        Some("fallback")
+        prompt.frontmatter().max_tool_iterations(),
+        MaxToolIterations::Limit(NonZeroU32::new(3).expect("3 is non-zero"))
     );
-    assert_eq!(prompt.frontmatter.max_tool_iterations, Some(3));
-    assert_eq!(prompt.title, "Phase Boundaries");
-    assert!(prompt.replay.is_none());
-    assert_eq!(prompt.description_text, "Transform one model response.");
-    assert_eq!(prompt.sections.len(), 2);
+    assert_eq!(prompt.title(), "Phase Boundaries");
+    assert!(prompt.replay().is_none());
+    assert_eq!(prompt.sections().len(), 2);
 
     let transform = prompt.entry();
-    assert_eq!(transform.name, "Transform");
+    assert_eq!(transform.name(), "Transform");
     assert_eq!(
         transform.prologue().map(LuaProgram::source),
         Some("var.subject = args")
@@ -334,10 +337,10 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
         transform.epilog().map(LuaProgram::source),
         Some("return reply")
     );
-    assert!(transform.children.is_empty());
+    assert!(transform.children().is_empty());
 
-    let fallback = &prompt.sections[1];
-    assert_eq!(fallback.name, "Fallback");
+    let fallback = &prompt.sections()[1];
+    assert_eq!(fallback.name(), "Fallback");
     assert_eq!(fallback.prose(), "This section has prose only.");
     assert!(fallback.prologue().is_none());
     assert!(fallback.epilog().is_none());
@@ -345,12 +348,12 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
 
 #[tokio::test]
 async fn log_fixture_reports_exact_author_checkpoints() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         LOG_CHECKPOINTS,
         "execution/log-checkpoints.md",
         LOG_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     let result = run(
@@ -360,9 +363,7 @@ async fn log_fixture_reports_exact_author_checkpoints() {
         &store,
         RunOptions {
             execution: LOG_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -404,12 +405,12 @@ async fn log_fixture_reports_exact_author_checkpoints() {
 
 #[tokio::test]
 async fn prologue_return_fixture_skips_model_and_epilog() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         PROLOGUE_RETURN,
         "execution/prologue-return.md",
         PROLOGUE_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     let result = run(
@@ -419,9 +420,7 @@ async fn prologue_return_fixture_skips_model_and_epilog() {
         &store,
         RunOptions {
             execution: PROLOGUE_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -444,12 +443,12 @@ async fn prologue_return_fixture_skips_model_and_epilog() {
 
 #[tokio::test]
 async fn store_fixture_persists_state_across_fall_through() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         STORE_FALLTHROUGH,
         "execution/store-fallthrough.md",
         STORE_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     let result = run(
@@ -459,9 +458,7 @@ async fn store_fixture_persists_state_across_fall_through() {
         &store,
         RunOptions {
             execution: STORE_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -522,9 +519,7 @@ async fn concurrent_runs_keep_execution_ids_separate() {
             &StoreRef::memory(),
             RunOptions {
                 execution: FIRST,
-                observer: first_recorder.as_ref(),
-                client: None,
-                debug: None,
+                observer: Arc::clone(&first_recorder) as Arc<dyn Observer>,
             },
         )
         .await
@@ -540,9 +535,7 @@ async fn concurrent_runs_keep_execution_ids_separate() {
             &StoreRef::memory(),
             RunOptions {
                 execution: SECOND,
-                observer: second_recorder.as_ref(),
-                client: None,
-                debug: None,
+                observer: Arc::clone(&second_recorder) as Arc<dyn Observer>,
             },
         )
         .await
@@ -596,12 +589,12 @@ async fn concurrent_runs_keep_execution_ids_separate() {
 
 #[tokio::test]
 async fn reply_nil_in_section_one() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         REPLY_NIL_SECTION_ONE,
         "execution/reply-nil-section-one.md",
         REPLY_NIL_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let result = run(
         &prompt,
@@ -610,9 +603,7 @@ async fn reply_nil_in_section_one() {
         &StoreRef::memory(),
         RunOptions {
             execution: REPLY_NIL_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -623,12 +614,12 @@ async fn reply_nil_in_section_one() {
 
 #[tokio::test]
 async fn store_triad_numbered_vs_verbatim_vs_inject() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         STORE_TRIAD,
         "execution/store-triad.md",
         STORE_TRIAD_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let result = run(
         &prompt,
@@ -637,9 +628,7 @@ async fn store_triad_numbered_vs_verbatim_vs_inject() {
         &StoreRef::memory(),
         RunOptions {
             execution: STORE_TRIAD_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -651,9 +640,13 @@ async fn store_triad_numbered_vs_verbatim_vs_inject() {
 #[tokio::test]
 async fn reply_substitution_nil_errors() {
     for fixture in EXECUTION_ERROR_FIXTURES {
-        let recorder = Recorder::default();
-        let prompt =
-            parse_execution_fixture(fixture.source, fixture.name, fixture.execution, &recorder);
+        let recorder = Arc::new(Recorder::default());
+        let prompt = parse_execution_fixture(
+            fixture.source,
+            fixture.name,
+            fixture.execution,
+            recorder.as_ref(),
+        );
         let error = run(
             &prompt,
             "",
@@ -661,18 +654,15 @@ async fn reply_substitution_nil_errors() {
             &StoreRef::memory(),
             RunOptions {
                 execution: fixture.execution,
-                observer: &recorder,
-                client: None,
-                debug: None,
+                observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             },
         )
         .await
         .expect_err(&format!("fixture {} must fail at execution", fixture.name));
 
-        let variant_matches = matches!(
-            (fixture.kind, &error),
-            (ExecutionErrorKind::Substitution, Error::Substitution(_))
-        );
+        let variant_matches = match fixture.kind {
+            ExecutionErrorKind::Substitution => error.kind() == RunErrorKind::Substitution,
+        };
         assert!(
             variant_matches,
             "fixture {} returned the wrong error variant: expected {:?}, got {error:?}",
@@ -689,12 +679,12 @@ async fn reply_substitution_nil_errors() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_basic_two_items_prologue_return() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         FANOUT_BASIC,
         "execution/fanout-basic.md",
         FANOUT_BASIC_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     let result = run(
@@ -704,9 +694,7 @@ async fn fanout_basic_two_items_prologue_return() {
         &store,
         RunOptions {
             execution: FANOUT_BASIC_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -721,20 +709,20 @@ async fn fanout_basic_two_items_prologue_return() {
         .collect();
     let arm_finished: Vec<_> = records
         .iter()
-        .filter(|(_, _, d)| d == "Fanout arm finished")
+        .filter(|(_, _, d)| d == "Fanout arm succeeded")
         .collect();
     assert_eq!(arm_started.len(), 2, "two arms must start");
-    assert_eq!(arm_finished.len(), 2, "two arms must finish");
+    assert_eq!(arm_finished.len(), 2, "two arms must succeed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_epilog_two_items() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         FANOUT_EPILOG,
         "execution/fanout-epilog.md",
         FANOUT_EPILOG_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     let result = run(
@@ -744,9 +732,7 @@ async fn fanout_epilog_two_items() {
         &store,
         RunOptions {
             execution: FANOUT_EPILOG_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -761,20 +747,20 @@ async fn fanout_epilog_two_items() {
         .collect();
     let arm_finished: Vec<_> = records
         .iter()
-        .filter(|(_, _, d)| d == "Fanout arm finished")
+        .filter(|(_, _, d)| d == "Fanout arm succeeded")
         .collect();
     assert_eq!(arm_started.len(), 2, "two arms must start");
-    assert_eq!(arm_finished.len(), 2, "two arms must finish");
+    assert_eq!(arm_finished.len(), 2, "two arms must succeed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_store_writes_persist_across_arms() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         FANOUT_STORE_WRITES,
         "execution/fanout-store-writes.md",
         FANOUT_STORE_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     // Arms rendezvous on ready-*.md; sequential fanout would hang here.
@@ -787,9 +773,7 @@ async fn fanout_store_writes_persist_across_arms() {
             &store,
             RunOptions {
                 execution: FANOUT_STORE_EXECUTION,
-                observer: &recorder,
-                client: None,
-                debug: None,
+                observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             },
         ),
     )
@@ -808,12 +792,12 @@ async fn fanout_store_writes_persist_across_arms() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_failure_propagates() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let prompt = parse_execution_fixture(
         FANOUT_ARM_FAILURE,
         "execution/fanout-arm-failure.md",
         FANOUT_FAILURE_EXECUTION,
-        &recorder,
+        recorder.as_ref(),
     );
     let store = StoreRef::memory();
     let error = run(
@@ -823,9 +807,7 @@ async fn fanout_arm_failure_propagates() {
         &store,
         RunOptions {
             execution: FANOUT_FAILURE_EXECUTION,
-            observer: &recorder,
-            client: None,
-            debug: None,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
         },
     )
     .await
@@ -852,7 +834,7 @@ fn every_shipped_prompt_parses_offline() {
             "{} must declare semantic capabilities, not concrete tools",
             path.display()
         );
-        Prompt::parse(&source, SHIPPED_PARSE, &NullObserver)
+        Prompt::parse(&source, SHIPPED_PARSE, &NullObserver::default())
             .unwrap_or_else(|error| panic!("{} must parse: {error}", path.display()));
     }
 }
