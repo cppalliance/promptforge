@@ -49,7 +49,7 @@ Final ask.\n\n\
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -134,7 +134,7 @@ return by_name\n\
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -234,7 +234,7 @@ Loop forever on {{ item }}.\n\n\
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -278,7 +278,7 @@ return 'done'\n\
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },

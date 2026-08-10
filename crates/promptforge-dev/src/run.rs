@@ -174,7 +174,8 @@ pub(crate) async fn run_once_with(
         .context("build the live tool picker")?;
     let endpoint = GatewayEndpoint::new(&gateway.base_url)
         .with_context(|| format!("gateway URL {:?}", gateway.base_url))?;
-    let client = GatewayClient::new(endpoint, SecretString::new(gateway.key.as_str()));
+    let key = SecretString::new(gateway.key.as_str()).context("gateway key must not be empty")?;
+    let client = GatewayClient::new(endpoint, key);
     let capture = Arc::new(dump::TraceCapture::new(prompt_path));
 
     // Clear the previous run's dump before starting so stale store files and

@@ -91,7 +91,7 @@ async fn happy_path_through_the_real_client() {
 
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{gateway}/v1")).expect("valid test endpoint"),
-        SecretString::new("test-token"),
+        SecretString::new("test-token").expect("non-empty test key"),
     );
     let options = CompletionOptions::new(
         "test-model",
@@ -765,7 +765,7 @@ n_predict = 64
 
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{gateway}/v1")).expect("valid test endpoint"),
-        SecretString::new("test-token"),
+        SecretString::new("test-token").expect("non-empty test key"),
     );
     let options = CompletionOptions::new(
         "qwen-tiny",

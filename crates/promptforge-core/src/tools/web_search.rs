@@ -50,17 +50,14 @@ impl WebSearch {
             ToolError::message(format!("web_search: invalid gateway URL: {error}"))
                 .with_kind(ToolErrorKind::InvalidArguments)
         })?;
-        let token = token.into();
-        if token.is_empty() {
-            return Err(
-                ToolError::message("web_search: gateway token must not be empty")
-                    .with_kind(ToolErrorKind::InvalidArguments),
-            );
-        }
+        let token = SecretString::new(token).map_err(|error| {
+            ToolError::message(format!("web_search: gateway token {error}"))
+                .with_kind(ToolErrorKind::InvalidArguments)
+        })?;
         Ok(WebSearch {
             http: reqwest::Client::new(),
             base_url: endpoint.url().to_owned(),
-            token: SecretString::new(token),
+            token,
         })
     }
 }

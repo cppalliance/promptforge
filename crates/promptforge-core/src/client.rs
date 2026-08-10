@@ -368,26 +368,59 @@ impl Completion {
 pub struct SecretString(String);
 
 impl SecretString {
-    /// Wraps a secret so it is redacted everywhere it is formatted.
+    /// Wraps a non-empty secret so it is redacted everywhere it is formatted.
+    ///
+    /// # Errors
+    /// Returns [`SecretError::Empty`] when `secret` is empty (F12), so a client
+    /// can never be built to authenticate with a blank bearer credential.
     ///
     /// # Examples
     ///
     /// ```
     /// use promptforge_core::client::SecretString;
     ///
-    /// let secret = SecretString::new("bearer-token");
+    /// let secret = SecretString::new("bearer-token")?;
     /// assert_eq!(format!("{secret:?}"), "SecretString(<redacted>)");
     /// assert_eq!(format!("{secret}"), "<redacted>");
+    /// assert!(SecretString::new("").is_err());
+    /// # Ok::<(), promptforge_core::client::SecretError>(())
     /// ```
-    #[must_use]
-    pub fn new(secret: impl Into<String>) -> SecretString {
-        SecretString(secret.into())
+    pub fn new(secret: impl Into<String>) -> std::result::Result<SecretString, SecretError> {
+        let secret = secret.into();
+        if secret.is_empty() {
+            return Err(SecretError::Empty);
+        }
+        Ok(SecretString(secret))
+    }
+
+    /// Builds the empty sentinel used only by the disabled client, which never
+    /// sends the credential. Crate-internal so no real credential path can
+    /// produce a blank secret.
+    pub(crate) fn disabled_placeholder() -> SecretString {
+        SecretString(String::new())
     }
 
     /// Borrows the raw secret. Crate-internal so no downstream code can read a
     /// credential back out of the type.
     pub(crate) fn expose(&self) -> &str {
         &self.0
+    }
+}
+
+/// The reason a [`SecretString`] could not be constructed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SecretError {
+    /// The supplied credential was empty.
+    #[error("secret must not be empty")]
+    Empty,
+}
+
+impl From<SecretError> for CompletionError {
+    fn from(error: SecretError) -> CompletionError {
+        // Classifies as `Config`: an unusable credential is a client
+        // configuration problem, not a transport or backend failure.
+        CompletionError::from(Error::MissingEnv(error.to_string()))
     }
 }
 
@@ -418,8 +451,11 @@ impl GatewayEndpoint {
     /// Validates and normalizes a gateway base URL.
     ///
     /// # Errors
-    /// Returns a `Config`-kind [`CompletionError`] when `url` is empty, lacks an
-    /// `http`/`https` scheme, or names no host.
+    /// Returns a `Config`-kind [`CompletionError`] when `url` is not a valid
+    /// absolute URL, does not use an `http`/`https` scheme, names no host,
+    /// embeds credentials (a `user:pass@` component), or carries a query or
+    /// fragment (an API root is a bare path). Parsing goes through a strict URL
+    /// type (F12) rather than a hand-rolled prefix/host scan.
     ///
     /// # Examples
     ///
@@ -429,26 +465,39 @@ impl GatewayEndpoint {
     /// let endpoint = GatewayEndpoint::new("https://gateway.example.com/v1/")?;
     /// assert_eq!(endpoint.url(), "https://gateway.example.com/v1");
     /// assert!(GatewayEndpoint::new("ftp://example.com").is_err());
+    /// assert!(GatewayEndpoint::new("http://user:pass@host/v1").is_err());
     /// # Ok::<(), promptforge_core::model::CompletionError>(())
     /// ```
     pub fn new(url: &str) -> std::result::Result<GatewayEndpoint, CompletionError> {
+        let reject = |detail: String| CompletionError::from(Error::MissingEnv(detail));
         let trimmed = url.trim();
-        let rest = trimmed
-            .strip_prefix("https://")
-            .or_else(|| trimmed.strip_prefix("http://"));
-        let Some(after_scheme) = rest else {
-            return Err(CompletionError::from(Error::MissingEnv(format!(
-                "gateway URL must begin with http:// or https://: {trimmed:?}"
-            ))));
-        };
-        let host = after_scheme.split(['/', '?', '#']).next().unwrap_or("");
-        if host.is_empty() {
-            return Err(CompletionError::from(Error::MissingEnv(format!(
-                "gateway URL names no host: {trimmed:?}"
-            ))));
+        let parsed = url::Url::parse(trimmed)
+            .map_err(|error| reject(format!("gateway URL is not a valid URL: {error}")))?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            return Err(reject(format!(
+                "gateway URL must use the http or https scheme: {trimmed:?}"
+            )));
+        }
+        match parsed.host_str() {
+            None | Some("") => {
+                return Err(reject(format!("gateway URL names no host: {trimmed:?}")));
+            }
+            Some(_) => {}
+        }
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Err(reject(
+                "gateway URL must not embed credentials (user:pass@)".to_owned(),
+            ));
+        }
+        if parsed.query().is_some() || parsed.fragment().is_some() {
+            return Err(reject(
+                "gateway URL must not carry a query or fragment".to_owned(),
+            ));
         }
         Ok(GatewayEndpoint {
-            url: trimmed.trim_end_matches('/').to_string(),
+            // Normalized by the URL parser; trim the trailing slash so request
+            // paths (`{base}/chat/completions`) join cleanly.
+            url: parsed.as_str().trim_end_matches('/').to_string(),
         })
     }
 
@@ -519,7 +568,7 @@ impl GatewayClient {
     ///
     /// let client = GatewayClient::new(
     ///     GatewayEndpoint::new("http://127.0.0.1:8081/v1")?,
-    ///     SecretString::new("bearer-token"),
+    ///     SecretString::new("bearer-token").expect("non-empty key"),
     /// );
     /// let options = CompletionOptions::new("analyst", ToolDialectId::OpenAi);
     /// let completion = client
@@ -568,7 +617,7 @@ impl GatewayClient {
         GatewayClient {
             transport: GatewayTransport::Disabled,
             base_url: String::new(),
-            key: SecretString::new(String::new()),
+            key: SecretString::disabled_placeholder(),
             dialect_registry: Arc::new(ToolDialectRegistry::builtin()),
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
@@ -780,7 +829,9 @@ fn from_env_with(
     let key = lookup("PROMPTFORGE_GATEWAY_KEY")?
         .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_KEY".into()))?;
     let endpoint = GatewayEndpoint::new(&base_url).map_err(Error::from)?;
-    Ok(GatewayClient::new(endpoint, SecretString::new(key)))
+    let key = SecretString::new(key)
+        .map_err(|_| Error::MissingEnv("PROMPTFORGE_GATEWAY_KEY must not be empty".into()))?;
+    Ok(GatewayClient::new(endpoint, key))
 }
 
 #[cfg(test)]
@@ -845,7 +896,7 @@ mod tests {
     fn debug_redacts_the_bearer_key_and_never_leaks_it() {
         let client = GatewayClient::new(
             GatewayEndpoint::new("http://127.0.0.1:8081/v1").expect("valid test endpoint"),
-            SecretString::new("super-secret-token"),
+            SecretString::new("super-secret-token").expect("non-empty test key"),
         );
         let rendered = format!("{client:?}");
         assert!(
@@ -864,7 +915,7 @@ mod tests {
 
     #[test]
     fn secret_string_never_prints_its_contents() {
-        let secret = SecretString::new("super-secret-token");
+        let secret = SecretString::new("super-secret-token").expect("non-empty test key");
         assert_eq!(format!("{secret:?}"), "SecretString(<redacted>)");
         assert_eq!(format!("{secret}"), "<redacted>");
         assert_eq!(secret.expose(), "super-secret-token");
@@ -969,7 +1020,7 @@ mod tests {
 
         let client = GatewayClient::new(
             GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid endpoint"),
-            SecretString::new("tok"),
+            SecretString::new("tok").expect("non-empty test key"),
         );
         let options = CompletionOptions::new("m", crate::dialects::ToolDialectId::OpenAi);
         let err = client
@@ -1002,8 +1053,32 @@ mod tests {
     fn gateway_endpoint_rejects_non_http_schemes_and_missing_host() {
         assert!(GatewayEndpoint::new("ftp://example.com/v1").is_err());
         assert!(GatewayEndpoint::new("not-a-url").is_err());
-        assert!(GatewayEndpoint::new("http:///v1").is_err());
+        assert!(GatewayEndpoint::new("http://").is_err());
         assert!(GatewayEndpoint::new("").is_err());
+    }
+
+    #[test]
+    fn gateway_endpoint_rejects_credentials_query_and_fragment() {
+        // F12: the strict URL parse rejects embedded credentials and the
+        // query/fragment ambiguity a hand-rolled prefix scan let through.
+        assert!(GatewayEndpoint::new("http://user:pass@host/v1").is_err());
+        assert!(GatewayEndpoint::new("http://user@host/v1").is_err());
+        assert!(GatewayEndpoint::new("http://host/v1?token=leak").is_err());
+        assert!(GatewayEndpoint::new("http://host/v1#frag").is_err());
+        // A clean http(s) API root is still accepted and normalized.
+        assert_eq!(
+            GatewayEndpoint::new("http://host:8080/v1/")
+                .expect("clean URL")
+                .url(),
+            "http://host:8080/v1"
+        );
+    }
+
+    #[test]
+    fn secret_string_construction_rejects_an_empty_credential() {
+        // F12: an empty bearer credential is unrepresentable.
+        assert!(matches!(SecretString::new(""), Err(SecretError::Empty)));
+        assert!(SecretString::new("tok").is_ok());
     }
 
     #[test]
@@ -1048,7 +1123,7 @@ mod tests {
 
         let client = GatewayClient::new(
             GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-            SecretString::new("tok"),
+            SecretString::new("tok").expect("non-empty test key"),
         );
         let options = CompletionOptions {
             model: "analyst".into(),
@@ -1099,7 +1174,7 @@ mod tests {
 
         let client = GatewayClient::new(
             GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-            SecretString::new("tok"),
+            SecretString::new("tok").expect("non-empty test key"),
         );
         let options = CompletionOptions {
             model: "m".into(),
@@ -1113,5 +1188,144 @@ mod tests {
             .await
             .expect_err("empty product must fail");
         assert!(matches!(Error::from(err), Error::EmptyModelReply { .. }));
+    }
+
+    fn openai_options() -> CompletionOptions {
+        CompletionOptions::new("m", crate::dialects::ToolDialectId::OpenAi)
+    }
+
+    /// Spawns a gateway that answers `/v1/chat/completions` with a fixed status
+    /// and raw body, returning its address.
+    async fn spawn_raw_gateway(status: axum::http::StatusCode, body: &'static str) -> String {
+        use axum::Router;
+        use axum::routing::post;
+        use tokio::net::TcpListener;
+
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move || async move { (status, body) }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}/v1")
+    }
+
+    #[tokio::test]
+    async fn complete_on_a_disabled_client_is_a_disabled_error() {
+        // F14: a disabled client never touches the network.
+        let client = GatewayClient::disabled();
+        let err = client
+            .complete(&[Message::user("hi")], None, &openai_options())
+            .await
+            .expect_err("a disabled client cannot complete");
+        assert_eq!(err.kind(), crate::model::CompletionErrorKind::Disabled);
+    }
+
+    #[tokio::test]
+    async fn complete_refuses_a_success_body_over_the_size_cap() {
+        // F14 (body-size, success path): a 200 body larger than the cap is
+        // refused before decoding.
+        let base = spawn_raw_gateway(
+            axum::http::StatusCode::OK,
+            "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"a long reply\"}}]}",
+        )
+        .await;
+        let client = GatewayClient::new(
+            GatewayEndpoint::new(&base).expect("valid endpoint"),
+            SecretString::new("tok").expect("non-empty test key"),
+        )
+        .with_request_limits(
+            DEFAULT_REQUEST_TIMEOUT,
+            NonZeroU64::new(8).expect("non-zero cap"),
+        );
+        let err = client
+            .complete(&[Message::user("hi")], None, &openai_options())
+            .await
+            .expect_err("an oversize body must be refused");
+        assert_eq!(
+            err.kind(),
+            crate::model::CompletionErrorKind::MalformedResponse
+        );
+    }
+
+    #[tokio::test]
+    async fn complete_refuses_a_backend_error_body_over_the_size_cap() {
+        // F14 (body-size, error path): a non-success body larger than the cap is
+        // also refused before it is buffered.
+        let base = spawn_raw_gateway(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "this backend error body is definitely longer than eight bytes",
+        )
+        .await;
+        let client = GatewayClient::new(
+            GatewayEndpoint::new(&base).expect("valid endpoint"),
+            SecretString::new("tok").expect("non-empty test key"),
+        )
+        .with_request_limits(
+            DEFAULT_REQUEST_TIMEOUT,
+            NonZeroU64::new(8).expect("non-zero cap"),
+        );
+        let err = client
+            .complete(&[Message::user("hi")], None, &openai_options())
+            .await
+            .expect_err("an oversize error body must be refused");
+        assert_eq!(
+            err.kind(),
+            crate::model::CompletionErrorKind::MalformedResponse
+        );
+    }
+
+    #[tokio::test]
+    async fn complete_refuses_malformed_successful_json() {
+        // F14: a 200 whose body is not valid JSON is MalformedResponse, and the
+        // decode failure is preserved as the error-chain source.
+        let base = spawn_raw_gateway(axum::http::StatusCode::OK, "{ not json").await;
+        let client = GatewayClient::new(
+            GatewayEndpoint::new(&base).expect("valid endpoint"),
+            SecretString::new("tok").expect("non-empty test key"),
+        );
+        let err = client
+            .complete(&[Message::user("hi")], None, &openai_options())
+            .await
+            .expect_err("undecodable body must fail");
+        assert_eq!(
+            err.kind(),
+            crate::model::CompletionErrorKind::MalformedResponse
+        );
+        let source =
+            std::error::Error::source(&err).expect("the decode error must be a preserved source");
+        assert!(
+            source.downcast_ref::<serde_json::Error>().is_some(),
+            "the preserved source must be the JSON decode error, got {source}"
+        );
+    }
+
+    #[tokio::test]
+    async fn complete_refuses_malformed_tool_call_arguments_at_the_boundary() {
+        // F14: a well-formed HTTP 200 whose tool-call arguments are not a JSON
+        // object string is rejected at the client boundary, not passed on.
+        let base = spawn_raw_gateway(
+            axum::http::StatusCode::OK,
+            "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null,\
+             \"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\",\
+             \"function\":{\"name\":\"t\",\"arguments\":123}}]},\
+             \"finish_reason\":\"tool_calls\"}]}",
+        )
+        .await;
+        let client = GatewayClient::new(
+            GatewayEndpoint::new(&base).expect("valid endpoint"),
+            SecretString::new("tok").expect("non-empty test key"),
+        );
+        let err = client
+            .complete(&[Message::user("hi")], None, &openai_options())
+            .await
+            .expect_err("malformed tool arguments must be rejected");
+        assert_eq!(
+            err.kind(),
+            crate::model::CompletionErrorKind::MalformedResponse
+        );
     }
 }

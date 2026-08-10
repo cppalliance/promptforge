@@ -8,11 +8,11 @@ use mlua::{Lua, Scope};
 use promptforge_tool_picker::ToolId as PickerToolId;
 use promptforge_tool_picker::{Outcome, ToolDescriptor, ToolPicker};
 
+use crate::error::SharedSource;
 use crate::lua::{LiveBindingProducer, ToolBindings, ToolResolver};
 use crate::model::{
     ModelBindings, ModelCatalog, ModelNeedOpts, ModelResolver, PickerModelResolver, ResolvedModel,
 };
-use crate::error::SharedSource;
 use crate::tools::{ToolId, ToolRegistry};
 use crate::{Error, Result};
 

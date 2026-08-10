@@ -612,7 +612,7 @@ async fn tool_loop_dispatches_then_returns_text() {
     let addr = spawn_mock_gateway().await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
 
     let echo = EchoTool;
@@ -689,7 +689,7 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
     let addr = spawn_mock_gateway().await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
     let slow = SlowTool;
     let tools: &[&dyn Tool] = &[&slow];
@@ -801,7 +801,7 @@ async fn spawn_text_finish_gateway(
 async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(String, String)>, u32) {
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
@@ -963,7 +963,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     let (addr, bodies) = spawn_recording_gateway().await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
 
     let echo = UntrustedEchoTool;
@@ -1089,7 +1089,7 @@ async fn untrusted_nonce_is_fresh_per_round() {
     let (addr, bodies) = spawn_two_round_recording_gateway().await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
 
     let echo = UntrustedEchoTool;
@@ -1131,7 +1131,7 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     let (addr, bodies) = spawn_recording_gateway().await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
 
     let echo = EchoTool;
@@ -1226,7 +1226,7 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
     let (addr, bodies) = spawn_content_fence_recording_gateway().await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
 
     let echo = EchoTool;

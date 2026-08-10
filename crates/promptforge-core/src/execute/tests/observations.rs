@@ -226,7 +226,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -276,7 +276,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     let addr = spawn_mock_gateway().await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
 
     let echo = EchoTool;

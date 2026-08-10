@@ -41,7 +41,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -86,7 +86,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -138,7 +138,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -204,7 +204,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },

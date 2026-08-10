@@ -48,7 +48,7 @@ async fn live_h1_infer_runs_once() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         }),
@@ -221,7 +221,7 @@ async fn live_h1_infer_sees_tools_resolved_in_the_same_block() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         }),
@@ -284,7 +284,7 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         }),

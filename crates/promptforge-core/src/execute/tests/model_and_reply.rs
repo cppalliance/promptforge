@@ -39,7 +39,7 @@ Ask the model.\n";
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -78,7 +78,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -161,7 +161,7 @@ async fn epilog_runs_after_reply_and_can_return() {
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -298,7 +298,7 @@ Ask using {{ var.question }}.\n\n\
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -479,7 +479,7 @@ async fn prose_substitution_sees_sys_model_catalog_id() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -535,7 +535,7 @@ async fn fanout_arm_epilog_sees_sys_model_catalog_id() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -561,7 +561,7 @@ async fn default_return_precedes_the_last_model_reply() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -590,7 +590,7 @@ async fn reply_carries_forward_to_next_section_prologue() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -618,7 +618,7 @@ async fn reply_substitution_in_prose_uses_previous_section_reply() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },

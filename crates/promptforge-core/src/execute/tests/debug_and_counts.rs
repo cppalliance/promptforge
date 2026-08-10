@@ -18,7 +18,7 @@ async fn debug_capture_receives_request_and_response_when_set() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: Some(Arc::clone(&capture) as Arc<dyn DebugCapture>),
         },
@@ -83,7 +83,7 @@ fn gateway_source_resolves_ready_and_preserves_the_env_error() {
     let limits = RunLimits::new();
     let client = GatewayClient::new(
         GatewayEndpoint::new("http://localhost/v1").expect("valid endpoint"),
-        SecretString::new("k"),
+        SecretString::new("k").expect("non-empty test key"),
     );
     let ready = GatewaySource::from_optional(Some(client), limits);
     assert!(
@@ -132,7 +132,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: Some(Arc::clone(&capture) as Arc<dyn DebugCapture>),
         },
@@ -175,7 +175,7 @@ async fn debug_capture_none_changes_nothing() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -215,7 +215,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -236,7 +236,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
     let (addr, _calls) = spawn_always_tool_call().await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
 
     let failing = FailingTool;
@@ -309,7 +309,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -344,7 +344,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -388,7 +388,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -442,7 +442,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },
@@ -503,7 +503,7 @@ async fn model_infer_single_shot_returns_text() {
             observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(
                 GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test"),
+                SecretString::new("test").expect("non-empty test key"),
             )),
             debug: None,
         },

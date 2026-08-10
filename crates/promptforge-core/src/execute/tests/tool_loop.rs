@@ -9,7 +9,7 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     let (addr, calls) = spawn_always_tool_call().await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
 
     let echo = EchoTool;
@@ -48,7 +48,7 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
     let (addr, calls) = spawn_always_tool_call().await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
 
     let echo = EchoTool;
@@ -107,7 +107,7 @@ async fn tool_loop_errors_on_unknown_tool() {
     let (addr, _calls) = spawn_always_tool_call().await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
 
     // Advertise schemas so the request carries tools, but pass no dispatch
@@ -153,7 +153,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     let (addr, _calls) = spawn_always_tool_call().await;
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test"),
+        SecretString::new("test").expect("non-empty test key"),
     );
 
     let failing = FailingTool;
@@ -241,7 +241,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
 
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("secret token"),
+        SecretString::new("secret token").expect("non-empty test key"),
     );
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);

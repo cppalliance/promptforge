@@ -156,7 +156,7 @@ async fn run_text(base_url: &str, api_key: &str) -> Result<()> {
     let models = pinned_qwen_dev_catalog("writer")?;
     let client = GatewayClient::new(
         GatewayEndpoint::new(base_url).context("gateway base URL must be valid")?,
-        SecretString::new(api_key),
+        SecretString::new(api_key).context("gateway key must not be empty")?,
     );
     let result = run(
         &prompt,
@@ -211,7 +211,7 @@ async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
 
     let client = GatewayClient::new(
         GatewayEndpoint::new(base_url).context("gateway base URL must be valid")?,
-        SecretString::new(api_key),
+        SecretString::new(api_key).context("gateway key must not be empty")?,
     );
     let result = run(
         &prompt,

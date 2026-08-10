@@ -134,7 +134,7 @@ pub(super) fn gateway_client(
     gateway: &GatewayConfig,
 ) -> Result<GatewayClient, promptforge_core::model::CompletionError> {
     let endpoint = promptforge_core::client::GatewayEndpoint::new(&gateway.url)?;
-    let key = promptforge_core::client::SecretString::new(gateway.key.expose());
+    let key = promptforge_core::client::SecretString::new(gateway.key.expose())?;
     Ok(GatewayClient::new(endpoint, key))
 }
 
