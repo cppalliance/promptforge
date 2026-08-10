@@ -987,8 +987,13 @@ fn strip_ordered_marker(line: &str) -> Option<&str> {
 ///
 /// Recursion consumes headings whose level is deeper than `parent_level`; a
 /// heading at or above `parent_level` belongs to an ancestor and stops the
-/// current level. Skipped heading levels are tolerated: an H4 following an H2
-/// simply becomes a child of the H2.
+/// current level. A heading that skips a level (an orphan deep heading, such as
+/// an H4 directly under an H2, or an H3 top-level section with no parent H2) is
+/// rejected: every heading must be exactly one level deeper than its parent.
+///
+/// # Errors
+/// Returns [`Error::Parse`] when a heading is more than one level deeper than
+/// its parent.
 fn build_sections(
     headings: &[Heading],
     pos: &mut usize,
@@ -1002,6 +1007,17 @@ fn build_sections(
         let level = headings[*pos].level;
         if level <= parent_level {
             break;
+        }
+        // An orphan deep heading skips a level (e.g. an H4 under an H2 with no
+        // intervening H3, or an H3/H4 top-level section with no parent H2). Such
+        // a heading has no well-defined parent, so reject it rather than
+        // silently reparenting it to a shallower ancestor.
+        if level > parent_level + 1 {
+            return Err(Error::Parse(format!(
+                "section `{}` is an orphan H{level} heading with no parent H{}",
+                headings[*pos].title.trim(),
+                parent_level + 1
+            )));
         }
         let h = &headings[*pos];
         let name = h.title.clone();
@@ -1694,14 +1710,35 @@ Prose for the second section.\n";
     }
 
     #[test]
-    fn skipped_heading_level_tolerated() {
-        // H4 directly under H2 (no H3) becomes a direct child of the H2.
+    fn skipped_heading_level_is_rejected_as_orphan() {
+        // H4 directly under H2 (no intervening H3) is an orphan deep heading:
+        // it has no parent H3, so it must be rejected, not reparented to the H2.
         let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## A\n\na\n\n#### D\n\nd\n";
-        let p = Prompt::parse(src, "test", &NullObserver).unwrap();
-        let a = &p.sections[0];
-        assert_eq!(a.children.len(), 1);
-        assert_eq!(a.children[0].name, "D");
-        assert_eq!(a.children[0].level, 4);
+        let err = Prompt::parse(src, "test", &NullObserver)
+            .expect_err("an H4 with no parent H3 must be rejected");
+        assert!(
+            err.to_string().contains("orphan"),
+            "expected an orphan-heading error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn orphan_top_level_deep_heading_is_rejected() {
+        // The first section heading is an H3 with no parent H2: an orphan.
+        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n### A\n\na\n";
+        let err = Prompt::parse(src, "test", &NullObserver)
+            .expect_err("an H3 top-level section with no parent H2 must be rejected");
+        assert!(
+            err.to_string().contains("orphan"),
+            "expected an orphan-heading error, got: {err}"
+        );
+
+        // An H4 top-level section (double skip) is likewise rejected.
+        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n#### A\n\na\n";
+        assert!(
+            Prompt::parse(src, "test", &NullObserver).is_err(),
+            "an H4 top-level section must be rejected"
+        );
     }
 
     #[test]
