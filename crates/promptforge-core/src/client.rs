@@ -453,7 +453,7 @@ impl GatewayClient {
             request_body["temperature"] = serde_json::json!(temperature.get());
         }
         if let Some(max_tokens) = options.max_tokens {
-            request_body["max_tokens"] = serde_json::json!(max_tokens);
+            request_body["max_tokens"] = serde_json::json!(max_tokens.get());
         }
         if let Some(thinking) = options.thinking {
             request_body["chat_template_kwargs"] = serde_json::json!({
@@ -684,7 +684,7 @@ mod tests {
         let options = CompletionOptions {
             model: "analyst".into(),
             temperature: Some(crate::model::Temperature::new(0.0).expect("0.0 is valid")),
-            max_tokens: Some(128),
+            max_tokens: Some(std::num::NonZeroU32::new(128).expect("128 is non-zero")),
             thinking: Some(false),
             tool_dialect: crate::dialects::ToolDialectId::OpenAi,
         };

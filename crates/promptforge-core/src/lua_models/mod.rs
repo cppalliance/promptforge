@@ -117,9 +117,14 @@ fn record_need_binding(
             return Err(mlua::Error::external("model capability resolution failed"));
         }
     };
-    let binding = ModelBinding::new(alias, description, selection.id, selection.invocation)
-        .with_dialect(selection.tool_dialect)
-        .with_context(selection.context);
+    let binding = ModelBinding::new(
+        alias,
+        description,
+        selection.id,
+        selection.invocation,
+        selection.tool_dialect,
+        selection.context,
+    );
     state.bindings.push(binding.clone());
     Ok(binding)
 }

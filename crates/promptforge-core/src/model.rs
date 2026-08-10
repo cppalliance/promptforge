@@ -399,7 +399,10 @@ pub(crate) struct ModelNeedOpts {
     /// When set, filters models by thinking capability and freezes the switch.
     pub(crate) thinking: Option<bool>,
     /// Minimum context window size in tokens.
-    pub(crate) context: Option<u32>,
+    ///
+    /// A [`NonZeroU32`] (MODEL-003): a zero-token minimum is a nonsensical
+    /// constraint and is unrepresentable, rejected at the parse boundary.
+    pub(crate) context: Option<NonZeroU32>,
     /// Sampling temperature for every complete under this binding.
     ///
     /// A validated [`Temperature`] (PF-LM-004): a non-finite or out-of-range
@@ -407,7 +410,10 @@ pub(crate) struct ModelNeedOpts {
     /// binding or the wire.
     pub(crate) temperature: Option<Temperature>,
     /// Maximum generation tokens for every complete under this binding.
-    pub(crate) max_tokens: Option<u32>,
+    ///
+    /// A [`NonZeroU32`] (MODEL-003): a zero-token generation cap would forbid
+    /// all output, so it is unrepresentable and rejected at the parse boundary.
+    pub(crate) max_tokens: Option<NonZeroU32>,
 }
 
 // No `Eq`: `temperature` is a `Temperature` (an `f64` newtype), so equality is
@@ -418,8 +424,8 @@ pub(crate) struct ModelNeedOpts {
 pub(crate) struct ModelInvocation {
     /// Sampling temperature, when the need declared one.
     pub(crate) temperature: Option<Temperature>,
-    /// Maximum generation tokens, when the need declared one.
-    pub(crate) max_tokens: Option<u32>,
+    /// Maximum generation tokens, when the need declared one (always non-zero).
+    pub(crate) max_tokens: Option<NonZeroU32>,
     /// Thinking switch for `chat_template_kwargs.enable_thinking`, when set.
     pub(crate) thinking: Option<bool>,
 }
@@ -445,43 +451,33 @@ pub(crate) struct ModelBinding {
     id: ModelId,
     invocation: ModelInvocation,
     tool_dialect: ToolDialectId,
-    context: u32,
+    context: NonZeroU32,
 }
 
 impl ModelBinding {
-    /// Builds a binding from its parts (tests and resolvers).
+    /// Builds a binding atomically from every part a resolved model requires.
     ///
-    /// Defaults `tool_dialect` to [`ToolDialectId::OpenAi`] and `context` to
-    /// `0`. Use [`Self::with_dialect`] and [`Self::with_context`] to override.
+    /// The `tool_dialect` and the non-zero `context` window are required
+    /// arguments (MODEL-006): there is no fabricated OpenAI default and no
+    /// zero-context sentinel patched in by a later setter, so a binding cannot
+    /// exist in a half-initialized state.
     #[must_use]
     pub(crate) fn new(
         alias: impl Into<String>,
         description: impl Into<String>,
         id: ModelId,
         invocation: ModelInvocation,
+        tool_dialect: ToolDialectId,
+        context: NonZeroU32,
     ) -> Self {
         Self {
             alias: alias.into(),
             description: description.into(),
             id,
             invocation,
-            tool_dialect: ToolDialectId::OpenAi,
-            context: 0,
+            tool_dialect,
+            context,
         }
-    }
-
-    /// Sets the tool dialect on this binding.
-    #[must_use]
-    pub(crate) fn with_dialect(mut self, dialect: ToolDialectId) -> Self {
-        self.tool_dialect = dialect;
-        self
-    }
-
-    /// Sets the catalog context window size on this binding.
-    #[must_use]
-    pub(crate) fn with_context(mut self, context: u32) -> Self {
-        self.context = context;
-        self
     }
 
     /// Returns the exact prompt-local alias.
@@ -514,9 +510,9 @@ impl ModelBinding {
         self.tool_dialect
     }
 
-    /// Returns the catalog context window size in tokens.
+    /// Returns the catalog context window size in tokens (always non-zero).
     #[must_use]
-    pub(crate) fn context(&self) -> u32 {
+    pub(crate) fn context(&self) -> NonZeroU32 {
         self.context
     }
 
@@ -544,8 +540,8 @@ pub struct CompletionOptions {
     pub(crate) model: String,
     /// Sampling temperature (a validated [`Temperature`]).
     pub(crate) temperature: Option<Temperature>,
-    /// Maximum generation tokens.
-    pub(crate) max_tokens: Option<u32>,
+    /// Maximum generation tokens (always non-zero).
+    pub(crate) max_tokens: Option<NonZeroU32>,
     /// When set, emits `chat_template_kwargs.enable_thinking`.
     pub(crate) thinking: Option<bool>,
     /// Which tool-calling dialect to use for this completion.
@@ -585,8 +581,11 @@ impl CompletionOptions {
     }
 
     /// Sets the maximum generation tokens.
+    ///
+    /// Takes a [`NonZeroU32`] (MODEL-003) so a zero generation cap, which would
+    /// forbid all output, cannot be placed into a request.
     #[must_use]
-    pub fn with_max_tokens(mut self, max_tokens: u32) -> CompletionOptions {
+    pub fn with_max_tokens(mut self, max_tokens: NonZeroU32) -> CompletionOptions {
         self.max_tokens = Some(max_tokens);
         self
     }
@@ -782,8 +781,8 @@ pub(crate) struct ResolvedModel {
     pub(crate) invocation: ModelInvocation,
     /// The tool dialect from the catalog entry.
     pub(crate) tool_dialect: ToolDialectId,
-    /// The catalog context window size in tokens.
-    pub(crate) context: u32,
+    /// The catalog context window size in tokens (always non-zero).
+    pub(crate) context: NonZeroU32,
 }
 
 /// Wire shape of one entry from gateway `GET /v1/models`.
@@ -1013,7 +1012,7 @@ impl ModelResolver for PickerModelResolver<'_> {
                     id,
                     invocation: ModelInvocation::from(opts),
                     tool_dialect: descriptor.tool_dialect(),
-                    context: descriptor.context().get(),
+                    context: descriptor.context(),
                 })
             }
             Ok(promptforge_tool_picker::Outcome::Absent) => Err(Error::ModelAbsent {
@@ -1047,7 +1046,7 @@ impl ModelResolver for PickerModelResolver<'_> {
 
 fn satisfies_constraints(model: &ModelDescriptor, opts: &ModelNeedOpts) -> bool {
     if let Some(min_context) = opts.context
-        && model.context.get() < min_context
+        && model.context < min_context
     {
         return false;
     }
@@ -1125,7 +1124,7 @@ mod tests {
             id: hit.id().clone(),
             invocation: ModelInvocation::from(opts),
             tool_dialect: hit.tool_dialect(),
-            context: hit.context().get(),
+            context: hit.context(),
         })
     }
 
@@ -1167,7 +1166,7 @@ mod tests {
     #[test]
     fn context_filter_drops_small_windows() {
         let filtered = catalog().filter(&ModelNeedOpts {
-            context: Some(40_000),
+            context: Some(ctx(40_000)),
             ..ModelNeedOpts::default()
         });
         let names: Vec<_> = filtered.models().iter().map(|m| m.id().name()).collect();
@@ -1206,6 +1205,8 @@ mod tests {
                 max_tokens: None,
                 thinking: Some(false),
             },
+            ToolDialectId::OpenAi,
+            ctx(131_072),
         );
         let b = ModelBinding::new(
             "warm",
@@ -1216,6 +1217,8 @@ mod tests {
                 max_tokens: None,
                 thinking: Some(false),
             },
+            ToolDialectId::OpenAi,
+            ctx(131_072),
         );
         assert_eq!(a.id(), b.id());
         assert_ne!(a.invocation(), b.invocation());
@@ -1453,7 +1456,7 @@ mod tests {
         )
         .expect("models.need/always must return an inspectable Model object");
         assert_eq!(models.always(), Some("writer"));
-        assert_eq!(models.bindings()[0].context(), 8_192);
+        assert_eq!(models.bindings()[0].context().get(), 8_192);
 
         let vm = section_vm_with_model_bindings(
             &shared,
@@ -2062,7 +2065,7 @@ mod tests {
     }
 
     #[test]
-    fn binding_with_dialect_propagates_to_completion_options() {
+    fn binding_dialect_propagates_to_completion_options() {
         let binding = ModelBinding::new(
             "gemma",
             "a local gemma model",
@@ -2072,14 +2075,15 @@ mod tests {
                 max_tokens: None,
                 thinking: None,
             },
-        )
-        .with_dialect(ToolDialectId::Gemma3ToolCode);
+            ToolDialectId::Gemma3ToolCode,
+            ctx(8_192),
+        );
         let opts = binding.completion_options();
         assert_eq!(opts.tool_dialect, ToolDialectId::Gemma3ToolCode);
     }
 
     #[test]
-    fn binding_default_dialect_is_openai() {
+    fn binding_construction_is_atomic_with_dialect_and_context() {
         let binding = ModelBinding::new(
             "remote",
             "a remote model",
@@ -2089,9 +2093,12 @@ mod tests {
                 max_tokens: None,
                 thinking: None,
             },
+            ToolDialectId::OpenAi,
+            ctx(64_000),
         );
         let opts = binding.completion_options();
         assert_eq!(opts.tool_dialect, ToolDialectId::OpenAi);
+        assert_eq!(binding.context().get(), 64_000);
     }
 
     #[test]

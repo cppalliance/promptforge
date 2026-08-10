@@ -57,9 +57,12 @@ impl LuaModelHandle {
     }
 
     /// Returns the catalog context window size in tokens.
+    ///
+    /// The binding stores a [`NonZeroU32`](std::num::NonZeroU32); the raw `u32`
+    /// is exposed only here, at the Lua presentation boundary.
     #[must_use]
     pub(crate) fn context(&self) -> u32 {
-        self.binding.context()
+        self.binding.context().get()
     }
 
     /// Returns the frozen thinking switch, when the need declared one.
@@ -81,9 +84,15 @@ impl LuaModelHandle {
     }
 
     /// Returns the frozen max generation tokens, when the need declared one.
+    ///
+    /// The binding stores a [`NonZeroU32`](std::num::NonZeroU32); the raw `u32`
+    /// is exposed only here, at the Lua presentation boundary.
     #[must_use]
     pub(crate) fn max_tokens(&self) -> Option<u32> {
-        self.binding.invocation().max_tokens
+        self.binding
+            .invocation()
+            .max_tokens
+            .map(std::num::NonZeroU32::get)
     }
 
     /// Returns the tool-calling dialect id.

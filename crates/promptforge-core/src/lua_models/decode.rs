@@ -3,6 +3,8 @@
 //! Parses Lua argument shapes (`models.need`/`models.always` args and the opts
 //! table) and validates scalar option values at the Lua trust boundary.
 
+use std::num::NonZeroU32;
+
 use mlua::{MultiValue, Table, Value};
 
 use crate::model::{ModelNeedOpts, Temperature};
@@ -82,13 +84,13 @@ pub(crate) fn parse_opts_table(table: &Table) -> mlua::Result<ModelNeedOpts> {
                 opts.thinking = Some(value_as_bool(&value, "thinking")?);
             }
             "context" => {
-                opts.context = Some(value_as_u32(&value, "context")?);
+                opts.context = Some(value_as_nonzero_u32(&value, "context")?);
             }
             "temperature" => {
                 opts.temperature = Some(value_as_temperature(&value)?);
             }
             "max_tokens" => {
-                opts.max_tokens = Some(value_as_u32(&value, "max_tokens")?);
+                opts.max_tokens = Some(value_as_nonzero_u32(&value, "max_tokens")?);
             }
             other => {
                 return Err(mlua::Error::external(format!(
@@ -150,6 +152,19 @@ pub(crate) fn value_as_u32(value: &Value, field: &str) -> mlua::Result<u32> {
             "models.need opts.{field} must be a non-negative integer"
         ))),
     }
+}
+
+/// Decodes a positive Lua count into a [`NonZeroU32`], rejecting zero.
+///
+/// Domain counts (`context`, `max_tokens`) must be non-zero (MODEL-003): a zero
+/// context minimum is a nonsensical constraint and a zero generation cap would
+/// forbid all output. Both are rejected here, at the Lua parse boundary, rather
+/// than travelling as an ambiguous `0` toward the wire.
+pub(crate) fn value_as_nonzero_u32(value: &Value, field: &str) -> mlua::Result<NonZeroU32> {
+    let raw = value_as_u32(value, field)?;
+    NonZeroU32::new(raw).ok_or_else(|| {
+        mlua::Error::external(format!("models.need opts.{field} must be greater than zero"))
+    })
 }
 
 /// Decodes a Lua integer or number into an `f64` through a single path.

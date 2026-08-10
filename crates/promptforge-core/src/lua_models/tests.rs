@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use super::decode::{
     decode_lua_number, parse_need_args, parse_opts_table, parse_single_alias, validate_alias,
-    value_as_bool, value_as_temperature, value_as_u32,
+    value_as_bool, value_as_nonzero_u32, value_as_temperature, value_as_u32,
 };
 use super::userdata::{LuaModelHandle, reject_infer_options};
 use super::{ModelBindingState, ModelRuntime, close_model_scope_inner, record_always_binding};
@@ -17,9 +17,9 @@ fn test_binding(alias: &str, dialect: ToolDialectId) -> ModelBinding {
         "a test capability",
         ModelId::from_validated("gateway", "m1"),
         ModelInvocation::from(&ModelNeedOpts::default()),
+        dialect,
+        std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
     )
-    .with_dialect(dialect)
-    .with_context(8192)
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn always_multi_arg_rolls_back_when_already_selected() {
             id: ModelId::from_validated("gateway", "m1"),
             invocation: ModelInvocation::from(&ModelNeedOpts::default()),
             tool_dialect: ToolDialectId::OpenAi,
-            context: 8192,
+            context: std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
         })
     };
     let mut state = ModelBindingState::default();
@@ -216,12 +216,26 @@ fn parse_opts_table_covers_each_key_and_rejects_unknown() {
     table.set("max_tokens", 256).expect("set max_tokens");
     let opts = parse_opts_table(&table).expect("all known keys parse");
     assert_eq!(opts.thinking, Some(true));
-    assert_eq!(opts.context, Some(8192));
+    assert_eq!(opts.context.map(std::num::NonZeroU32::get), Some(8192));
     assert_eq!(
         opts.temperature.map(crate::model::Temperature::get),
         Some(0.5)
     );
-    assert_eq!(opts.max_tokens, Some(256));
+    assert_eq!(opts.max_tokens.map(std::num::NonZeroU32::get), Some(256));
+
+    // MODEL-003: a zero count is rejected at the parse boundary, not stored.
+    let zero_context = lua.create_table().expect("table");
+    zero_context.set("context", 0).expect("set context");
+    assert!(
+        parse_opts_table(&zero_context).is_err(),
+        "a zero context minimum must be rejected"
+    );
+    let zero_max = lua.create_table().expect("table");
+    zero_max.set("max_tokens", 0).expect("set max_tokens");
+    assert!(
+        parse_opts_table(&zero_max).is_err(),
+        "a zero max_tokens cap must be rejected"
+    );
 
     let unknown = lua.create_table().expect("table");
     unknown.set("bogus", 1).expect("set bogus");
@@ -251,6 +265,18 @@ fn scalar_decoders_cover_valid_and_invalid_inputs() {
     assert!(value_as_u32(&Value::Integer(-1), "context").is_err());
     assert!(value_as_u32(&Value::Number(1.5), "context").is_err());
     assert!(value_as_u32(&Value::Boolean(true), "context").is_err());
+
+    // MODEL-003: the non-zero decoder accepts positive counts and rejects zero.
+    assert_eq!(
+        value_as_nonzero_u32(&Value::Integer(7), "context")
+            .expect("positive count")
+            .get(),
+        7
+    );
+    assert!(
+        value_as_nonzero_u32(&Value::Integer(0), "context").is_err(),
+        "a zero count must be rejected"
+    );
 
     assert!((decode_lua_number(&Value::Integer(2), "t").expect("int") - 2.0).abs() < f64::EPSILON);
     assert!(decode_lua_number(&Value::Boolean(true), "t").is_err());
