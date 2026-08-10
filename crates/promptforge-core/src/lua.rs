@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use mlua::{
     Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, MetaMethod, MultiValue, Scope, StdLib,
@@ -57,6 +57,15 @@ const LUA_LOG_CHARACTER_LIMIT: usize = 256;
 const DEFAULT_LUA_MEMORY_BYTES: usize = 64 * 1024 * 1024;
 /// Default per-VM `log()` event budget, matching [`crate::execute::RunLimits`].
 const DEFAULT_LUA_LOG_EVENTS: u32 = 1024;
+
+/// Cumulative `log()` byte ceiling derived from the event budget.
+///
+/// Bounds total log volume (bytes) even when each event is under the per-event
+/// character ceiling. Derived as `events * LUA_LOG_CHARACTER_LIMIT` so it scales
+/// with the configured event budget.
+fn default_log_byte_budget(log_events: u32) -> usize {
+    (log_events as usize).saturating_mul(LUA_LOG_CHARACTER_LIMIT)
+}
 
 /// Resolves one plain-English capability description to one stable live tool.
 ///
@@ -991,6 +1000,9 @@ pub(crate) struct SectionVm {
     host_injected: bool,
     /// Remaining `log()` events this VM may emit before the budget is exhausted.
     log_budget: Arc<AtomicU32>,
+    /// Remaining cumulative `log()` message bytes this VM may emit. Bounds total
+    /// log volume even when each event is under the per-event ceilings.
+    log_byte_budget: Arc<AtomicUsize>,
 }
 
 impl SectionVm {
@@ -1063,6 +1075,9 @@ impl SectionVm {
             store: None,
             host_injected: false,
             log_budget: Arc::new(AtomicU32::new(DEFAULT_LUA_LOG_EVENTS)),
+            log_byte_budget: Arc::new(AtomicUsize::new(default_log_byte_budget(
+                DEFAULT_LUA_LOG_EVENTS,
+            ))),
         };
         if let Err(error) = harden(&vm.lua) {
             return vm.construction_failed(error, observer, section);
@@ -1812,6 +1827,8 @@ impl SectionVm {
             .set_memory_limit(memory_bytes)
             .map_err(|error| Error::Lua(error.to_string()))?;
         self.log_budget.store(log_events, Ordering::Relaxed);
+        self.log_byte_budget
+            .store(default_log_byte_budget(log_events), Ordering::Relaxed);
         Ok(())
     }
 
@@ -1887,6 +1904,7 @@ impl SectionVm {
                     observer,
                     section,
                     &self.log_budget,
+                    &self.log_byte_budget,
                 )
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
                 let result = program
@@ -1926,6 +1944,7 @@ impl SectionVm {
                     observer,
                     section,
                     &self.log_budget,
+                    &self.log_byte_budget,
                 )
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
                 install_store_table(
@@ -1985,6 +2004,7 @@ impl SectionVm {
                 observer,
                 section,
                 &self.log_budget,
+                &self.log_byte_budget,
             )
             .map_err(|error| mlua::Error::external(error.to_string()))?;
             install_store_table(
@@ -2084,6 +2104,7 @@ impl SectionVm {
                     observer,
                     section,
                     &self.log_budget,
+                    &self.log_byte_budget,
                 )
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
                 install_store_table(
@@ -2456,6 +2477,7 @@ fn install_log<'scope, 'env: 'scope>(
     observer: &'env dyn Observer,
     section: &'env str,
     log_budget: &'env AtomicU32,
+    log_byte_budget: &'env AtomicUsize,
 ) -> Result<()> {
     let log = scope
         .create_function(move |_, arguments: MultiValue| {
@@ -2484,6 +2506,19 @@ fn install_log<'scope, 'env: 'scope>(
             if message.chars().any(is_log_line_break_or_control) {
                 return Err(mlua::Error::external(
                     "log message must not contain newline or control characters",
+                ));
+            }
+            // Enforce a cumulative byte ceiling in addition to the event count,
+            // so many small events cannot emit unbounded total log volume
+            // (lua 002).
+            if log_byte_budget
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
+                    remaining.checked_sub(message.len())
+                })
+                .is_err()
+            {
+                return Err(mlua::Error::external(
+                    "lua log cumulative byte budget exceeded",
                 ));
             }
             observer.observe(execution, section, Observation::Lua(message.to_owned()));
@@ -3379,6 +3414,46 @@ mod tests {
                 Observation::Lua(maximum.clone()),
             )]
         );
+    }
+
+    #[test]
+    fn log_cumulative_byte_budget_is_enforced_before_the_event_budget() {
+        // LUA-002: many small events must not emit unbounded total log bytes.
+        // With a 4-event budget the byte budget is 4 * 256 = 1024 bytes; three
+        // 400-byte messages (200 two-byte chars each) exceed it on the third
+        // call, while only three of the four events have been spent - so the
+        // BYTE ceiling, not the event ceiling, is what refuses the call.
+        let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Budget").expect("VM builds");
+        vm.apply_lua_limits(DEFAULT_LUA_MEMORY_BYTES, 4)
+            .expect("limits apply");
+        vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+            .expect("host injects");
+        let program = program(
+            "log(string.rep('é', 200))\n\
+             log(string.rep('é', 200))\n\
+             log(string.rep('é', 200))\n\
+             return 'unreached'",
+        );
+        let recorder = Recorder::default();
+        let error = vm
+            .run_prologue(&program, &recorder, "Budget")
+            .expect_err("the cumulative byte budget must refuse the third message");
+        assert!(
+            error
+                .to_string()
+                .contains("cumulative byte budget exceeded"),
+            "the byte ceiling must be the refusal reason: {error}"
+        );
+        let logged = recorder
+            .records()
+            .into_iter()
+            .filter(|(_, _, event)| matches!(event, Observation::Lua(_)))
+            .count();
+        assert_eq!(
+            logged, 2,
+            "the first two messages fit under the byte budget; the third is refused"
+        );
+        vm.teardown(&NullObserver, "Budget");
     }
 
     #[test]
