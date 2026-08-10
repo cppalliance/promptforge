@@ -106,7 +106,7 @@ impl From<ParseError> for Error {
 /// Unknown keys are rejected (`deny_unknown_fields`): a misspelled or
 /// unsupported frontmatter field is a prompt authoring error, so it fails at
 /// parse rather than being silently ignored.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Frontmatter {
@@ -135,10 +135,26 @@ pub const MAX_TOOL_ITERATIONS: u32 = 1000;
 
 /// Wraps a computed 1-based source line for [`LuaProgram::compile`].
 ///
-/// Line numbers computed during parsing are always at least 1; the defensive
-/// floor keeps the value non-zero without silently masking a real bug.
-fn nz_source_line(line: u32) -> std::num::NonZeroU32 {
-    std::num::NonZeroU32::new(line).unwrap_or(std::num::NonZeroU32::MIN)
+/// Line numbers computed during parsing are always at least 1. A zero here means
+/// a broken source-position invariant; rather than silently coercing it to line
+/// one, this reports a structured internal parse error.
+///
+/// # Errors
+/// Returns [`Error::Internal`] when `line` is zero.
+fn nz_source_line(line: u32) -> Result<std::num::NonZeroU32> {
+    std::num::NonZeroU32::new(line).ok_or(Error::Internal(
+        "parser: computed 1-based source line was zero",
+    ))
+}
+
+/// Adds two 1-based line components with overflow checking.
+///
+/// # Errors
+/// Returns [`Error::Internal`] when the sum overflows `u32`, rather than
+/// saturating and hiding a broken position.
+fn line_add(a: u32, b: u32) -> Result<u32> {
+    a.checked_add(b)
+        .ok_or(Error::Internal("parser: source line arithmetic overflowed"))
 }
 
 /// A frontmatter tool-loop cap that cannot encode zero.
@@ -235,7 +251,7 @@ impl Frontmatter {
 }
 
 /// One executable block inside a section: a compiled Lua fence or prose.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Block {
     /// An exact `lua` fence compiled at parse time.
@@ -252,7 +268,7 @@ pub enum Block {
 }
 
 /// One section of a prompt: a heading, ordered blocks, and children.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Section {
     /// The heading text (the section's address).
@@ -345,7 +361,7 @@ impl Section {
 }
 
 /// A fully parsed prompt file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Prompt {
     /// The parsed YAML frontmatter.
@@ -446,7 +462,7 @@ impl Prompt {
         let frontmatter: Frontmatter = serde_yaml::from_str(&yaml)
             .map_err(|e| Error::Parse(format!("invalid frontmatter: {e}")))?;
 
-        let headings = collect_headings(&body);
+        let headings = collect_headings(&body)?;
 
         let h1_positions: Vec<usize> = headings
             .iter()
@@ -465,7 +481,7 @@ impl Prompt {
             return Err(Error::Parse("prompt H1 title must not be empty".into()));
         }
         let title = h1.title.clone();
-        let h1_content_abs_line = frontmatter_lines + h1.content_start_line;
+        let h1_content_abs_line = line_add(frontmatter_lines, h1.content_start_line)?;
         let shared_fences = exact_shared_openings(&body);
         let h1_shared_fences = exact_shared_openings(&h1.content);
         if shared_fences.len() > 1 {
@@ -603,8 +619,13 @@ pub fn promptforge_version(source: &str) -> Option<u32> {
 }
 
 /// Counts the number of `\n` characters in `text[..byte_offset]`.
-fn newlines_before(text: &str, byte_offset: usize) -> u32 {
-    u32::try_from(text[..byte_offset].matches('\n').count()).unwrap_or(u32::MAX)
+///
+/// # Errors
+/// Returns [`Error::Internal`] when the newline count exceeds `u32`, rather than
+/// saturating to `u32::MAX` and hiding an implausibly large source position.
+fn newlines_before(text: &str, byte_offset: usize) -> Result<u32> {
+    u32::try_from(text[..byte_offset].matches('\n').count())
+        .map_err(|_| Error::Internal("parser: newline count exceeded u32 range"))
 }
 
 /// Convert a `HeadingLevel` to its numeric level.
@@ -621,7 +642,7 @@ fn level_num(level: HeadingLevel) -> u8 {
 
 /// Walk the markdown body and collect every heading with the content that
 /// follows it, up to the next heading of any level.
-fn collect_headings(body: &str) -> Vec<Heading> {
+fn collect_headings(body: &str) -> Result<Vec<Heading>> {
     // First pass: find each heading's level, title, and source byte range.
     struct Raw {
         level: u8,
@@ -663,7 +684,7 @@ fn collect_headings(body: &str) -> Vec<Heading> {
         let content = &body[start..end];
         // +1 because newlines_before gives 0-based offset, and we want
         // the 1-based line number of the first content line.
-        let content_start_line = newlines_before(body, start) + 1;
+        let content_start_line = line_add(newlines_before(body, start)?, 1)?;
         headings.push(Heading {
             level: raws[i].level,
             title: raws[i].title.clone(),
@@ -671,7 +692,7 @@ fn collect_headings(body: &str) -> Vec<Heading> {
             content_start_line,
         });
     }
-    headings
+    Ok(headings)
 }
 
 /// Extracts the optional exact `lua shared` library from H1 and compiles the
@@ -709,7 +730,10 @@ fn split_h1(
         Some(LuaProgram::compile(
             &source,
             "prompt shared library",
-            nz_source_line(content_abs_line + newlines_before(content, opening) + 1),
+            nz_source_line(line_add(
+                line_add(content_abs_line, newlines_before(content, opening)?)?,
+                1,
+            )?)?,
             execution,
             observer,
             title,
@@ -740,7 +764,7 @@ fn split_h1(
                 blocks.push(Block::Lua(LuaProgram::compile(
                     &source,
                     &location,
-                    nz_source_line(content_abs_line + line_offset),
+                    nz_source_line(line_add(content_abs_line, line_offset)?)?,
                     execution,
                     observer,
                     title,
@@ -898,7 +922,7 @@ fn split_section_blocks(content: &str, section: &str) -> Result<Vec<RawBlock>> {
             blocks.push(RawBlock::Prose(content[pos..opening].trim().to_string()));
         }
 
-        let line_offset = newlines_before(content, opening) + 1;
+        let line_offset = line_add(newlines_before(content, opening)?, 1)?;
         blocks.push(RawBlock::Lua {
             source,
             line_offset,
@@ -1034,7 +1058,7 @@ fn build_sections(
                 "an H{level} section heading must not be empty"
             )));
         }
-        let content_abs_line = frontmatter_lines + h.content_start_line;
+        let content_abs_line = line_add(frontmatter_lines, h.content_start_line)?;
         let raw_blocks = split_section_blocks(&h.content, &name)?;
         let has_prose = raw_blocks
             .iter()
@@ -1054,12 +1078,12 @@ fn build_sections(
                     source,
                     line_offset,
                 } => {
-                    let abs_line = content_abs_line + line_offset;
+                    let abs_line = line_add(content_abs_line, line_offset)?;
                     let location = lua_block_location(&name, index, total, has_prose);
                     let program = LuaProgram::compile(
                         &source,
                         &location,
-                        nz_source_line(abs_line),
+                        nz_source_line(abs_line)?,
                         execution,
                         observer,
                         &name,
@@ -1125,6 +1149,23 @@ mod tests {
 
     use super::*;
     use crate::observe::{NullObserver, Observation, detail};
+
+    #[test]
+    fn parsed_prompt_value_types_are_equatable() {
+        // PF-PARSER-011: parsing the same source twice yields equal values, and
+        // a differing source yields unequal values, across the finalized parser
+        // value types (`Prompt`, `Frontmatter`, `Section`, `Block`).
+        let src = "---\nname: p\ndescription: d\n---\n\n# Title\n\n## One\n\ndo a thing\n";
+        let a = Prompt::parse(src, "test", &NullObserver).unwrap();
+        let b = Prompt::parse(src, "test", &NullObserver).unwrap();
+        assert_eq!(a, b, "identical sources must parse equal");
+        assert_eq!(a.frontmatter, b.frontmatter);
+        assert_eq!(a.sections, b.sections);
+
+        let other = "---\nname: p\ndescription: d\n---\n\n# Title\n\n## Two\n\ndo a thing\n";
+        let c = Prompt::parse(other, "test", &NullObserver).unwrap();
+        assert_ne!(a, c, "differing section headings must parse unequal");
+    }
 
     #[derive(Default)]
     struct Recorder(Mutex<Vec<(String, String, String)>>);
