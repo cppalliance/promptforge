@@ -1,9 +1,10 @@
 //! Real-model PromptForge text and aliased tool-call scenarios.
 
+use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, ensure};
-use promptforge_core::client::GatewayClient;
+use promptforge_core::client::{GatewayClient, GatewayEndpoint, SecretString};
 use promptforge_core::execute::{ResolutionContext, RunConfig, run};
 use promptforge_core::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use promptforge_core::observe::{Observation, Observer};
@@ -30,13 +31,16 @@ const REAL_TOOL_CALL: &str = include_str!("../prompts/execution/real-tool-call.m
 /// Catalog entry for scenario fixtures: a large switchable-context model so
 /// `models.need` can filter and request thinking without a live `/v1/models`
 /// fetch. Defined here (not in core) because it is only test scaffolding.
-fn pinned_qwen_dev_catalog(model_alias: &str) -> ModelCatalog {
+fn pinned_qwen_dev_catalog(model_alias: &str) -> Result<ModelCatalog> {
+    let context = NonZeroU32::new(131_072).context("131072 is a non-zero context window")?;
+    let id = ModelId::gateway(model_alias).context("pinned model alias must be valid")?;
     ModelCatalog::new([ModelDescriptor::new(
-        ModelId::gateway(model_alias),
+        id,
         "A careful analysis model suited to structured reasoning and long-context review",
-        131_072,
+        context,
         ThinkingMode::Switchable,
     )])
+    .context("pinned catalog must have a single unique model")
 }
 
 type Record = (String, String, String);
@@ -149,8 +153,11 @@ async fn run_text(base_url: &str, api_key: &str) -> Result<()> {
         .context("parse execution/real-text.md")?;
     let picker = ToolPicker::build(Catalog::default(), Config::default())
         .context("build empty tool picker")?;
-    let models = pinned_qwen_dev_catalog("writer");
-    let client = GatewayClient::new(base_url, api_key);
+    let models = pinned_qwen_dev_catalog("writer")?;
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(base_url).context("gateway base URL must be valid")?,
+        SecretString::new(api_key),
+    );
     let result = run(
         &prompt,
         "",
@@ -200,9 +207,12 @@ async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
     )
     .context("build deterministic one-tool fixture picker")?;
     let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];
-    let models = pinned_qwen_dev_catalog("writer");
+    let models = pinned_qwen_dev_catalog("writer")?;
 
-    let client = GatewayClient::new(base_url, api_key);
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(base_url).context("gateway base URL must be valid")?,
+        SecretString::new(api_key),
+    );
     let result = run(
         &prompt,
         "",

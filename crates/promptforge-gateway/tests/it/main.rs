@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use axum::Json;
 use axum::Router;
 use axum::routing::post;
-use promptforge_core::client::GatewayClient;
+use promptforge_core::client::{GatewayClient, GatewayEndpoint, SecretString};
 use promptforge_core::model::CompletionOptions;
 use promptforge_gateway::config::Config;
 use promptforge_gateway::routing::Routing;
@@ -89,7 +89,10 @@ async fn happy_path_through_the_real_client() {
     let backend = fake_backend().await;
     let gateway = gateway_for(backend).await;
 
-    let client = GatewayClient::new(&format!("http://{gateway}/v1"), "test-token");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{gateway}/v1")).expect("valid test endpoint"),
+        SecretString::new("test-token"),
+    );
     let options = CompletionOptions::new(
         "test-model",
         promptforge_core::dialects::ToolDialectId::OpenAi,
@@ -760,7 +763,10 @@ n_predict = 64
         Some(description.as_str())
     );
 
-    let client = GatewayClient::new(&format!("http://{gateway}/v1"), "test-token");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{gateway}/v1")).expect("valid test endpoint"),
+        SecretString::new("test-token"),
+    );
     let options = CompletionOptions::new(
         "qwen-tiny",
         promptforge_core::dialects::ToolDialectId::OpenAi,

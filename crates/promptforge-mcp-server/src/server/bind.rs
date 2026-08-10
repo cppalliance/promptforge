@@ -128,8 +128,12 @@ fn catalog(live: &[std::sync::Arc<dyn Tool>]) -> Catalog {
 /// rather than the environment: setting an environment variable is `unsafe`
 /// under edition 2024 and this workspace forbids unsafe, so a configured server
 /// hands the executor a client instead of arranging for one to be found.
-pub(super) fn gateway_client(gateway: &GatewayConfig) -> GatewayClient {
-    GatewayClient::new(&gateway.url, gateway.key.expose())
+pub(super) fn gateway_client(
+    gateway: &GatewayConfig,
+) -> Result<GatewayClient, promptforge_core::model::CompletionError> {
+    let endpoint = promptforge_core::client::GatewayEndpoint::new(&gateway.url)?;
+    let key = promptforge_core::client::SecretString::new(gateway.key.expose());
+    Ok(GatewayClient::new(endpoint, key))
 }
 
 /// Derives one abstract descriptor from its callable live instance.
@@ -145,6 +149,7 @@ fn descriptor(tool: &dyn Tool) -> ToolDescriptor {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::num::NonZeroU32;
     use std::path::Path;
 
     use promptforge_core::execute::{self, ResolutionContext, RunConfig};
@@ -219,11 +224,12 @@ mod tests {
     async fn every_repository_prompt_parses_and_resolves_live_h1() {
         let config = gateway("");
         let models = ModelCatalog::new([ModelDescriptor::new(
-            ModelId::gateway("claude-sonnet-4-6"),
+            ModelId::gateway("claude-sonnet-4-6").expect("the test model alias is valid"),
             "A model suited for careful analysis, coding, and general assistance",
-            200_000,
+            NonZeroU32::new(200_000).expect("200000 is non-zero"),
             ThinkingMode::Never,
-        )]);
+        )])
+        .expect("the test catalog has a single unique model");
         let tools = PreparedTools::new(&config.gateway, models).expect("prepare repository tools");
         let prompts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts");
         let mut files = Vec::new();
@@ -277,7 +283,8 @@ return 'resolved'
     #[test]
     fn gateway_client_is_built_from_url_and_key_without_leaking_the_key() {
         let config = gateway("");
-        let rendered = format!("{:?}", gateway_client(&config.gateway));
+        let client = gateway_client(&config.gateway).expect("the fixture gateway URL is valid");
+        let rendered = format!("{client:?}");
         assert!(
             !rendered.contains("gw"),
             "the bearer key must never appear in Debug output, got: {rendered}"

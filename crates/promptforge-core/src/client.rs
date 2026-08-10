@@ -208,12 +208,100 @@ impl Completion {
     }
 }
 
+/// A bearer credential whose contents never appear in `Debug`, `Display`, or
+/// logs.
+///
+/// Wrap any secret (the gateway bearer key) in a `SecretString` at the boundary
+/// so an accidental `{:?}` or log line cannot leak it; only crate-internal
+/// transport code reads the exposed value to set the `Authorization` header.
+#[derive(Clone)]
+pub struct SecretString(String);
+
+impl SecretString {
+    /// Wraps a secret so it is redacted everywhere it is formatted.
+    #[must_use]
+    pub fn new(secret: impl Into<String>) -> SecretString {
+        SecretString(secret.into())
+    }
+
+    /// Borrows the raw secret. Crate-internal so no downstream code can read a
+    /// credential back out of the type.
+    pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for SecretString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SecretString(<redacted>)")
+    }
+}
+
+impl fmt::Display for SecretString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
+/// A validated gateway API base URL (the OpenAI-shaped `/v1` root).
+///
+/// Construction rejects a URL without an `http`/`https` scheme or host, so a
+/// client can never be pointed at an unusable endpoint. A trailing slash is
+/// trimmed so request paths join cleanly.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GatewayEndpoint {
+    url: String,
+}
+
+impl GatewayEndpoint {
+    /// Validates and normalizes a gateway base URL.
+    ///
+    /// # Errors
+    /// Returns a `Config`-kind [`CompletionError`] when `url` is empty, lacks an
+    /// `http`/`https` scheme, or names no host.
+    pub fn new(url: &str) -> std::result::Result<GatewayEndpoint, CompletionError> {
+        let trimmed = url.trim();
+        let rest = trimmed
+            .strip_prefix("https://")
+            .or_else(|| trimmed.strip_prefix("http://"));
+        let Some(after_scheme) = rest else {
+            return Err(CompletionError::from(Error::MissingEnv(format!(
+                "gateway URL must begin with http:// or https://: {trimmed:?}"
+            ))));
+        };
+        let host = after_scheme.split(['/', '?', '#']).next().unwrap_or("");
+        if host.is_empty() {
+            return Err(CompletionError::from(Error::MissingEnv(format!(
+                "gateway URL names no host: {trimmed:?}"
+            ))));
+        }
+        Ok(GatewayEndpoint {
+            url: trimmed.trim_end_matches('/').to_string(),
+        })
+    }
+
+    /// Returns the normalized base URL.
+    #[must_use]
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+}
+
+impl TryFrom<&str> for GatewayEndpoint {
+    type Error = CompletionError;
+
+    fn try_from(url: &str) -> std::result::Result<GatewayEndpoint, CompletionError> {
+        GatewayEndpoint::new(url)
+    }
+}
+
 /// A chat completions client bound to one gateway URL and shared bearer key.
 #[derive(Clone)]
 pub struct GatewayClient {
     transport: GatewayTransport,
     base_url: String,
-    key: String,
+    key: SecretString,
     dialect_registry: Arc<ToolDialectRegistry>,
     /// Wall-clock cap applied to each completion request.
     request_timeout: Duration,
@@ -245,15 +333,16 @@ impl fmt::Debug for GatewayClient {
 }
 
 impl GatewayClient {
-    /// Build a client from explicit parts (used by tests and by
-    /// [`GatewayClient::from_env`]). A trailing slash on `base_url` is trimmed.
-    /// Responses are parsed through the resolved tool dialect.
+    /// Build a client from a validated [`GatewayEndpoint`] and a redacted
+    /// [`SecretString`] bearer key (used by tests and by
+    /// [`GatewayClient::from_env`]). Responses are parsed through the resolved
+    /// tool dialect.
     #[must_use]
-    pub fn new(base_url: &str, key: impl Into<String>) -> GatewayClient {
+    pub fn new(endpoint: GatewayEndpoint, key: SecretString) -> GatewayClient {
         GatewayClient {
             transport: GatewayTransport::Http(reqwest::Client::new()),
-            base_url: base_url.trim_end_matches('/').to_string(),
-            key: key.into(),
+            base_url: endpoint.url,
+            key,
             dialect_registry: Arc::new(ToolDialectRegistry::builtin()),
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
@@ -269,7 +358,7 @@ impl GatewayClient {
         GatewayClient {
             transport: GatewayTransport::Disabled,
             base_url: String::new(),
-            key: String::new(),
+            key: SecretString::new(String::new()),
             dialect_registry: Arc::new(ToolDialectRegistry::builtin()),
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
@@ -372,7 +461,7 @@ impl GatewayClient {
 
         let response = http
             .post(format!("{}/chat/completions", self.base_url))
-            .bearer_auth(&self.key)
+            .bearer_auth(self.key.expose())
             .timeout(self.request_timeout)
             .json(&request_body)
             .send()
@@ -438,7 +527,8 @@ fn from_env_with(lookup: impl Fn(&str) -> Option<String>) -> Result<GatewayClien
         .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_URL".into()))?;
     let key = lookup("PROMPTFORGE_GATEWAY_KEY")
         .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_KEY".into()))?;
-    Ok(GatewayClient::new(&base_url, key))
+    let endpoint = GatewayEndpoint::new(&base_url).map_err(Error::from)?;
+    Ok(GatewayClient::new(endpoint, SecretString::new(key)))
 }
 
 #[cfg(test)]
@@ -483,7 +573,10 @@ mod tests {
 
     #[test]
     fn debug_redacts_the_bearer_key_and_never_leaks_it() {
-        let client = GatewayClient::new("http://127.0.0.1:8081/v1", "super-secret-token");
+        let client = GatewayClient::new(
+            GatewayEndpoint::new("http://127.0.0.1:8081/v1").expect("valid test endpoint"),
+            SecretString::new("super-secret-token"),
+        );
         let rendered = format!("{client:?}");
         assert!(
             !rendered.contains("super-secret-token"),
@@ -497,6 +590,29 @@ mod tests {
             rendered.contains("http://127.0.0.1:8081/v1"),
             "the base URL is not a secret and should still appear, got: {rendered}"
         );
+    }
+
+    #[test]
+    fn secret_string_never_prints_its_contents() {
+        let secret = SecretString::new("super-secret-token");
+        assert_eq!(format!("{secret:?}"), "SecretString(<redacted>)");
+        assert_eq!(format!("{secret}"), "<redacted>");
+        assert_eq!(secret.expose(), "super-secret-token");
+    }
+
+    #[test]
+    fn gateway_endpoint_rejects_non_http_schemes_and_missing_host() {
+        assert!(GatewayEndpoint::new("ftp://example.com/v1").is_err());
+        assert!(GatewayEndpoint::new("not-a-url").is_err());
+        assert!(GatewayEndpoint::new("http:///v1").is_err());
+        assert!(GatewayEndpoint::new("").is_err());
+    }
+
+    #[test]
+    fn gateway_endpoint_trims_trailing_slash_and_keeps_valid_urls() {
+        let endpoint = GatewayEndpoint::new("https://gateway.example.com/v1/")
+            .expect("a well-formed https URL is accepted");
+        assert_eq!(endpoint.url(), "https://gateway.example.com/v1");
     }
 
     #[tokio::test]
@@ -532,7 +648,10 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        let client = GatewayClient::new(&format!("http://{addr}/v1"), "tok");
+        let client = GatewayClient::new(
+            GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+            SecretString::new("tok"),
+        );
         let options = CompletionOptions {
             model: "analyst".into(),
             temperature: Some(0.0),
@@ -580,7 +699,10 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        let client = GatewayClient::new(&format!("http://{addr}/v1"), "tok");
+        let client = GatewayClient::new(
+            GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+            SecretString::new("tok"),
+        );
         let options = CompletionOptions {
             model: "m".into(),
             temperature: None,

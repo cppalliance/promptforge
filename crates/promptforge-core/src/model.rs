@@ -9,6 +9,8 @@
 //! that omit `models.use`. Model-facing sections with neither binding fail with
 //! a model-binding failure surfaced through [`crate::RunError`].
 
+use std::num::NonZeroU32;
+
 use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId, ToolPicker};
 use serde::Deserialize;
 use serde_json::Value;
@@ -135,27 +137,66 @@ impl ModelId {
 
     /// Builds an identity from its server namespace and model name.
     ///
+    /// # Errors
+    /// Returns [`ModelIdError`] if `server` or `name` is empty or contains a
+    /// control character, so an unusable identity is unrepresentable.
+    ///
     /// # Examples
     ///
     /// ```
     /// use promptforge_core::model::ModelId;
     ///
-    /// let id = ModelId::new(ModelId::GATEWAY, "claude-sonnet-4-6");
+    /// let id = ModelId::new(ModelId::GATEWAY, "claude-sonnet-4-6")?;
     /// assert_eq!(id.server(), "gateway");
     /// assert_eq!(id.name(), "claude-sonnet-4-6");
+    /// # Ok::<(), promptforge_core::model::ModelIdError>(())
     /// ```
-    #[must_use]
-    pub fn new(server: impl Into<String>, name: impl Into<String>) -> Self {
-        Self {
+    pub fn new(
+        server: impl Into<String>,
+        name: impl Into<String>,
+    ) -> std::result::Result<ModelId, ModelIdError> {
+        let server = server.into();
+        let name = name.into();
+        Self::validate("server", &server)?;
+        Self::validate("name", &name)?;
+        Ok(Self { server, name })
+    }
+
+    /// Builds a gateway-namespaced identity from a caller-facing model name.
+    ///
+    /// # Errors
+    /// Returns [`ModelIdError`] if `name` is empty or contains a control
+    /// character.
+    pub fn gateway(name: impl Into<String>) -> std::result::Result<ModelId, ModelIdError> {
+        Self::new(Self::GATEWAY, name)
+    }
+
+    /// Builds an identity from components already known to be valid.
+    ///
+    /// For internal callers reconstructing an identity from an existing
+    /// [`ModelId`]'s parts, where [`ModelId::new`]'s validation is redundant.
+    pub(crate) fn from_validated(server: impl Into<String>, name: impl Into<String>) -> ModelId {
+        ModelId {
             server: server.into(),
             name: name.into(),
         }
     }
 
-    /// Builds a gateway-namespaced identity from a caller-facing model name.
-    #[must_use]
-    pub fn gateway(name: impl Into<String>) -> Self {
-        Self::new(Self::GATEWAY, name)
+    /// Validates one identity component, naming the field in any error.
+    fn validate(field: &'static str, value: &str) -> std::result::Result<(), ModelIdError> {
+        if value.is_empty() {
+            return Err(ModelIdError {
+                field,
+                reason: "must not be empty",
+            });
+        }
+        if value.bytes().any(|b| b < 0x20 || b == 0x7f) {
+            return Err(ModelIdError {
+                field,
+                reason: "must not contain a control character",
+            });
+        }
+        Ok(())
     }
 
     /// Returns the identity namespace.
@@ -169,6 +210,33 @@ impl ModelId {
     pub fn name(&self) -> &str {
         &self.name
     }
+}
+
+/// The reason a [`ModelId`] could not be built from its components.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("invalid model id: {field} {reason}")]
+#[non_exhaustive]
+pub struct ModelIdError {
+    /// Which component was rejected (`server` or `name`).
+    field: &'static str,
+    /// Why it was rejected.
+    reason: &'static str,
+}
+
+/// The reason a [`ModelCatalog`] could not be built from its descriptors.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ModelCatalogError {
+    /// Two descriptors shared one stable [`ModelId`], which would make lookups
+    /// ambiguous.
+    #[error("duplicate model identity in catalog: {server}/{name}")]
+    #[non_exhaustive]
+    DuplicateId {
+        /// The repeated identity's server namespace.
+        server: String,
+        /// The repeated identity's model name.
+        name: String,
+    },
 }
 
 /// Whether a catalogued model can emit thinking tokens.
@@ -189,7 +257,7 @@ pub enum ThinkingMode {
 pub struct ModelDescriptor {
     id: ModelId,
     description: String,
-    context: u32,
+    context: NonZeroU32,
     thinking: ThinkingMode,
     tool_dialect: ToolDialectId,
     tools_mode: ToolsMode,
@@ -198,13 +266,15 @@ pub struct ModelDescriptor {
 impl ModelDescriptor {
     /// Builds a descriptor from its identity and catalog fields.
     ///
-    /// Defaults `tool_dialect` to [`ToolDialectId::OpenAi`] and `tools_mode` to
-    /// [`ToolsMode::Native`]. Use [`Self::with_dialect`] to override.
+    /// The context window is a [`NonZeroU32`], so a zero-token window is
+    /// unrepresentable. Defaults `tool_dialect` to [`ToolDialectId::OpenAi`] and
+    /// `tools_mode` to [`ToolsMode::Native`]. Use [`Self::with_dialect`] to
+    /// override.
     #[must_use]
     pub fn new(
         id: ModelId,
         description: impl Into<String>,
-        context: u32,
+        context: NonZeroU32,
         thinking: ThinkingMode,
     ) -> Self {
         Self {
@@ -237,9 +307,9 @@ impl ModelDescriptor {
         &self.description
     }
 
-    /// Returns the context window size in tokens.
+    /// Returns the context window size in tokens (always non-zero).
     #[must_use]
-    pub fn context(&self) -> u32 {
+    pub fn context(&self) -> NonZeroU32 {
         self.context
     }
 
@@ -506,17 +576,38 @@ pub struct ModelCatalog {
 
 impl ModelCatalog {
     /// Builds a catalog from descriptors in host order.
-    #[must_use]
-    pub fn new(models: impl IntoIterator<Item = ModelDescriptor>) -> Self {
-        Self {
-            models: models.into_iter().collect(),
+    ///
+    /// # Errors
+    /// Returns [`ModelCatalogError::DuplicateId`] when two descriptors share one
+    /// stable [`ModelId`], so an ambiguous catalog is unrepresentable.
+    pub fn new(
+        models: impl IntoIterator<Item = ModelDescriptor>,
+    ) -> std::result::Result<ModelCatalog, ModelCatalogError> {
+        let models: Vec<ModelDescriptor> = models.into_iter().collect();
+        for (index, model) in models.iter().enumerate() {
+            if models[..index].iter().any(|prior| prior.id() == model.id()) {
+                return Err(ModelCatalogError::DuplicateId {
+                    server: model.id().server().to_owned(),
+                    name: model.id().name().to_owned(),
+                });
+            }
         }
+        Ok(Self { models })
+    }
+
+    /// Builds a catalog from descriptors already known to be collision-free.
+    ///
+    /// Used by internal callers (like the catalog `filter`) whose inputs are a
+    /// subset of an already-validated catalog, where duplicate checking is
+    /// redundant.
+    pub(crate) fn from_validated(models: Vec<ModelDescriptor>) -> ModelCatalog {
+        Self { models }
     }
 
     /// An empty catalog; every `models.need` resolves as absent.
     #[must_use]
     pub fn empty() -> Self {
-        Self::new(std::iter::empty())
+        Self::from_validated(Vec::new())
     }
 
     /// Returns every descriptor.
@@ -552,7 +643,7 @@ impl ModelCatalog {
             .filter(|model| satisfies_constraints(model, opts))
             .cloned()
             .collect();
-        Self { models }
+        Self::from_validated(models)
     }
 
     /// Builds a tool-picker [`Catalog`] from model descriptions for semantic resolve.
@@ -594,9 +685,9 @@ fn model_to_picker_id(id: &ModelId) -> PickerToolId {
 fn model_from_picker_id(id: &PickerToolId) -> ModelId {
     match id.server().split_once(PICKER_ID_SEPARATOR) {
         Some((server, name)) if !server.is_empty() && !name.is_empty() => {
-            ModelId::new(server, name)
+            ModelId::from_validated(server, name)
         }
-        _ => ModelId::new(id.server(), id.name()),
+        _ => ModelId::from_validated(id.server(), id.name()),
     }
 }
 
@@ -696,15 +787,29 @@ pub async fn fetch_model_catalog(
         }));
     }
     let list: ModelsListResponse = response.json().await.map_err(Error::http)?;
-    Ok(ModelCatalog::new(list.data.into_iter().map(|entry| {
-        ModelDescriptor::new(
-            ModelId::gateway(entry.id),
-            entry.description,
-            entry.context,
-            entry.thinking,
-        )
-        .with_dialect(entry.tool_dialect)
-    })))
+    let mut descriptors = Vec::with_capacity(list.data.len());
+    for entry in list.data {
+        let id = ModelId::gateway(entry.id).map_err(|error| {
+            CompletionError::from(Error::MalformedResponse(format!(
+                "model catalog entry has an invalid id: {error}"
+            )))
+        })?;
+        let context = NonZeroU32::new(entry.context).ok_or_else(|| {
+            CompletionError::from(Error::MalformedResponse(format!(
+                "model {} declares a zero-token context window",
+                id.name()
+            )))
+        })?;
+        descriptors.push(
+            ModelDescriptor::new(id, entry.description, context, entry.thinking)
+                .with_dialect(entry.tool_dialect),
+        );
+    }
+    ModelCatalog::new(descriptors).map_err(|error| {
+        CompletionError::from(Error::MalformedResponse(format!(
+            "gateway returned an inconsistent model catalog: {error}"
+        )))
+    })
 }
 
 /// Builds a [`ToolPicker`] over `catalog` by reusing `base`'s embedder.
@@ -755,7 +860,7 @@ impl ModelResolver for PickerModelResolver<'_> {
                 let descriptor = filtered.get(&id);
                 let dialect =
                     descriptor.map_or(ToolDialectId::OpenAi, ModelDescriptor::tool_dialect);
-                let context = descriptor.map_or(0, ModelDescriptor::context);
+                let context = descriptor.map_or(0, |d| d.context().get());
                 Ok(ResolvedModel {
                     id,
                     invocation: ModelInvocation::from(opts),
@@ -794,7 +899,7 @@ impl ModelResolver for PickerModelResolver<'_> {
 
 fn satisfies_constraints(model: &ModelDescriptor, opts: &ModelNeedOpts) -> bool {
     if let Some(min_context) = opts.context
-        && model.context < min_context
+        && model.context.get() < min_context
     {
         return false;
     }
@@ -824,27 +929,36 @@ mod tests {
 
     const EXECUTION: &str = "model-bind-test";
 
+    fn ctx(window: u32) -> NonZeroU32 {
+        NonZeroU32::new(window).expect("test context window is non-zero")
+    }
+
+    fn gateway_id(name: &str) -> ModelId {
+        ModelId::gateway(name).expect("test model alias is valid")
+    }
+
     fn catalog() -> ModelCatalog {
         ModelCatalog::new([
             ModelDescriptor::new(
-                ModelId::gateway("small"),
+                gateway_id("small"),
                 "A tiny model",
-                8_192,
+                ctx(8_192),
                 ThinkingMode::Never,
             ),
             ModelDescriptor::new(
-                ModelId::gateway("analyst"),
+                gateway_id("analyst"),
                 "A careful analysis model",
-                131_072,
+                ctx(131_072),
                 ThinkingMode::Switchable,
             ),
             ModelDescriptor::new(
-                ModelId::gateway("always-think"),
+                gateway_id("always-think"),
                 "Always thinks aloud",
-                64_000,
+                ctx(64_000),
                 ThinkingMode::Always,
             ),
         ])
+        .expect("test catalog has unique model ids")
     }
 
     fn fixture_resolver(description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel> {
@@ -863,7 +977,7 @@ mod tests {
             id: hit.id().clone(),
             invocation: ModelInvocation::from(opts),
             tool_dialect: hit.tool_dialect(),
-            context: hit.context(),
+            context: hit.context().get(),
         })
     }
 
@@ -934,7 +1048,7 @@ mod tests {
 
     #[test]
     fn same_weights_different_invocation_compare_unequal() {
-        let id = ModelId::gateway("analyst");
+        let id = gateway_id("analyst");
         let a = ModelBinding::new(
             "cool",
             "careful analysis",
@@ -1677,9 +1791,9 @@ mod tests {
     #[test]
     fn descriptor_with_dialect_sets_tools_mode() {
         let descriptor = ModelDescriptor::new(
-            ModelId::gateway("gemma-local"),
+            gateway_id("gemma-local"),
             "A Gemma model",
-            32_768,
+            ctx(32_768),
             ThinkingMode::Never,
         )
         .with_dialect(ToolDialectId::Gemma3ToolCode);
@@ -1693,9 +1807,9 @@ mod tests {
     #[test]
     fn descriptor_default_dialect_is_openai_native() {
         let descriptor = ModelDescriptor::new(
-            ModelId::gateway("remote"),
+            gateway_id("remote"),
             "A remote model",
-            8_192,
+            ctx(8_192),
             ThinkingMode::Never,
         );
         assert_eq!(descriptor.tool_dialect(), ToolDialectId::OpenAi);
@@ -1703,11 +1817,31 @@ mod tests {
     }
 
     #[test]
+    fn model_id_rejects_empty_and_control_characters() {
+        assert!(ModelId::gateway("").is_err());
+        assert!(ModelId::new("", "name").is_err());
+        assert!(ModelId::new("server", "").is_err());
+        assert!(ModelId::new("server", "na\nme").is_err());
+        assert!(ModelId::gateway("valid-alias").is_ok());
+    }
+
+    #[test]
+    fn model_catalog_rejects_duplicate_ids() {
+        let descriptor = |name: &str| {
+            ModelDescriptor::new(gateway_id(name), "d", ctx(8_192), ThinkingMode::Never)
+        };
+        let err = ModelCatalog::new([descriptor("dup"), descriptor("dup")])
+            .expect_err("a catalog with duplicate ids must be rejected");
+        assert!(matches!(err, ModelCatalogError::DuplicateId { .. }));
+        assert!(ModelCatalog::new([descriptor("a"), descriptor("b")]).is_ok());
+    }
+
+    #[test]
     fn binding_with_dialect_propagates_to_completion_options() {
         let binding = ModelBinding::new(
             "gemma",
             "a local gemma model",
-            ModelId::gateway("gemma-local"),
+            gateway_id("gemma-local"),
             ModelInvocation {
                 temperature: None,
                 max_tokens: None,
@@ -1724,7 +1858,7 @@ mod tests {
         let binding = ModelBinding::new(
             "remote",
             "a remote model",
-            ModelId::gateway("remote"),
+            gateway_id("remote"),
             ModelInvocation {
                 temperature: None,
                 max_tokens: None,

@@ -1,6 +1,7 @@
 //! Unit tests for section execution, tool scoping, and the tool-call loop.
 
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -16,7 +17,7 @@ use promptforge_tool_picker::{
 use serde_json::Value;
 
 use super::*;
-use crate::client::GatewayClient;
+use crate::client::{GatewayClient, GatewayEndpoint, SecretString};
 use crate::debug::DebugCapture;
 use crate::lua::{LuaProgram, SectionVm, ToolCallCounts};
 use crate::model::{
@@ -66,12 +67,14 @@ fn fixture(md: &str) -> TestPrompt {
 }
 
 fn test_model_catalog() -> ModelCatalog {
+    let context = NonZeroU32::new(131_072).expect("131072 is non-zero");
     ModelCatalog::new([ModelDescriptor::new(
-        ModelId::gateway("claude-sonnet-4-6"),
+        ModelId::gateway("claude-sonnet-4-6").expect("the test model alias is valid"),
         "A general model for tests",
-        131_072,
+        context,
         ThinkingMode::Switchable,
     )])
+    .expect("the test catalog has a single unique model")
 }
 
 fn test_completion_options() -> CompletionOptions {
@@ -680,7 +683,10 @@ async fn tool_loop_dispatches_then_returns_text() {
     // `run_tool_loop` takes the client explicitly, so no process-global env
     // is needed (the crate forbids `unsafe`, which `env::set_var` requires).
     let addr = spawn_mock_gateway().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -752,7 +758,10 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     // trips against a never-converging model, then exhaust.
     let cap = 3;
     let (addr, calls) = spawn_always_tool_call().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -788,7 +797,10 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
     // Threading `DEFAULT_MAX_TOOL_ITERATIONS` (what `run` passes when a
     // prompt declares no budget) makes exactly that many round trips.
     let (addr, calls) = spawn_always_tool_call().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -844,7 +856,10 @@ fn run_resolves_cap_from_frontmatter_else_default() {
 async fn tool_loop_errors_on_unknown_tool() {
     // The model asks for "echo" but no tools are provided to the loop.
     let (addr, _calls) = spawn_always_tool_call().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
 
     // Advertise schemas so the request carries tools, but pass no dispatch
     // targets, so the returned call resolves to no tool.
@@ -887,7 +902,10 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     // still reported: the recorder must see `ToolCalled { ok: false }` and
     // the tool's own error must still end the loop.
     let (addr, _calls) = spawn_always_tool_call().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
 
     let failing = FailingTool;
     let tools: &[&dyn Tool] = &[&failing];
@@ -961,7 +979,10 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
         axum::serve(listener, router).await.unwrap();
     });
 
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "secret token");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("secret token"),
+    );
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -1031,7 +1052,10 @@ async fn spawn_text_finish_gateway(
 }
 
 async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(String, String)>, u32) {
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -1190,7 +1214,10 @@ fn last_tool_turn_content(bodies: &Arc<Mutex<Vec<Value>>>) -> String {
 #[tokio::test]
 async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     let (addr, bodies) = spawn_recording_gateway().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
 
     let echo = UntrustedEchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -1233,7 +1260,10 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
 #[tokio::test]
 async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     let (addr, bodies) = spawn_recording_gateway().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -1325,7 +1355,10 @@ async fn spawn_content_fence_recording_gateway() -> (SocketAddr, Arc<Mutex<Vec<V
 #[tokio::test]
 async fn content_fence_tool_loop_echoes_user_tool_result() {
     let (addr, bodies) = spawn_content_fence_recording_gateway().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -1630,7 +1663,10 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -1677,7 +1713,10 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
 #[tokio::test]
 async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     let addr = spawn_mock_gateway().await;
-    let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -1794,7 +1833,10 @@ async fn live_h1_infer_runs_once() {
         to_config(RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         }),
     )
@@ -1964,7 +2006,10 @@ async fn live_h1_infer_sees_tools_resolved_in_the_same_block() {
         to_config(RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         }),
     )
@@ -2024,7 +2069,10 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
         to_config(RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         }),
     )
@@ -2066,11 +2114,12 @@ async fn models_use_forwards_binding_completion_options_to_the_gateway() {
     // the binding's model and sampling fields on the chat body.
     let (addr, captured) = spawn_capturing_text_gateway().await;
     let catalog = ModelCatalog::new([ModelDescriptor::new(
-        ModelId::gateway("analyst"),
+        ModelId::gateway("analyst").expect("the test model alias is valid"),
         "A careful analysis model",
-        131_072,
+        NonZeroU32::new(131_072).expect("131072 is non-zero"),
         ThinkingMode::Switchable,
-    )]);
+    )])
+    .expect("the test catalog has a single unique model");
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # T\n\n\
 ```lua\n\
@@ -2094,7 +2143,10 @@ Ask the model.\n";
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -2130,7 +2182,10 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -2210,7 +2265,10 @@ async fn epilog_runs_after_reply_and_can_return() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -2344,7 +2402,10 @@ Ask using {{ var.question }}.\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -2522,7 +2583,10 @@ async fn prose_substitution_sees_sys_model_catalog_id() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -2575,7 +2639,10 @@ async fn fanout_arm_epilog_sees_sys_model_catalog_id() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -2598,7 +2665,10 @@ async fn default_return_precedes_the_last_model_reply() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -2624,7 +2694,10 @@ async fn reply_carries_forward_to_next_section_prologue() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -2649,7 +2722,10 @@ async fn reply_substitution_in_prose_uses_previous_section_reply() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -2830,7 +2906,10 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -2873,7 +2952,10 @@ models.always('writer', 'A general model for tests')\n```\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -2923,7 +3005,10 @@ models.always('writer', 'A general model for tests')\n```\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -2987,7 +3072,10 @@ models.always('writer', 'A general model for tests')\n```\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -3104,7 +3192,10 @@ async fn debug_capture_receives_request_and_response_when_set() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: Some(Arc::clone(&capture) as Arc<dyn DebugCapture>),
         },
     )
@@ -3154,7 +3245,10 @@ async fn debug_capture_none_changes_nothing() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -3195,7 +3289,10 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -3239,7 +3336,10 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -3275,7 +3375,10 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -3326,7 +3429,10 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -3381,7 +3487,10 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -3443,7 +3552,10 @@ async fn model_infer_single_shot_returns_text() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -3775,7 +3887,10 @@ Final ask.\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -3857,7 +3972,10 @@ return by_name\n\
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -3958,7 +4076,10 @@ Loop forever on {{ item }}.\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )
@@ -3999,7 +4120,10 @@ return 'done'\n\
         RunOptions {
             execution: EXECUTION,
             observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
             debug: None,
         },
     )

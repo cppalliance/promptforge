@@ -163,6 +163,14 @@ async fn run_observed(
     // live H1 resolution and execution but not the admission wait.
     let started = Instant::now();
 
+    let client = match bind::gateway_client(&config.gateway) {
+        Ok(client) => client,
+        Err(error) => {
+            drop(slot);
+            return preparation_failed(run_id, entry, error.to_string(), observer, pump).await;
+        }
+    };
+
     registry.started(&run_id, entry.name());
     let task = tokio::spawn(execute_run(
         Arc::clone(registry),
@@ -173,7 +181,7 @@ async fn run_observed(
             args: args.to_owned(),
             tools,
             observer,
-            client: bind::gateway_client(&config.gateway),
+            client,
             started,
             slot,
         },

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::{Context as _, Result, bail};
 use promptforge_core::CancelHandle;
-use promptforge_core::client::GatewayClient;
+use promptforge_core::client::{GatewayClient, GatewayEndpoint, SecretString};
 use promptforge_core::execute::{ResolutionContext, RunConfig, run};
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::observe::{Observation, Observer};
@@ -171,7 +171,9 @@ pub(crate) async fn run_once_with(
     let available = tools::available_tools(&gateway.base_url, Some(gateway.key.as_str()));
     let picker = ToolPicker::build(available.catalog().clone(), PickerConfig::default())
         .context("build the live tool picker")?;
-    let client = GatewayClient::new(&gateway.base_url, gateway.key.as_str());
+    let endpoint = GatewayEndpoint::new(&gateway.base_url)
+        .with_context(|| format!("gateway URL {:?}", gateway.base_url))?;
+    let client = GatewayClient::new(endpoint, SecretString::new(gateway.key.as_str()));
     let capture = Arc::new(dump::TraceCapture::new(prompt_path));
 
     // Clear the previous run's dump before starting so stale store files and
