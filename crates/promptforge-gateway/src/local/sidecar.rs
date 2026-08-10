@@ -205,18 +205,41 @@ fn parse_hf_url(url: &str) -> Option<(String, String)> {
 }
 
 /// Returns the current UTC timestamp as an ISO-8601 string suitable for the
-/// `fetched` frontmatter field. Uses a simple format without external crate
-/// dependencies.
+/// `fetched` frontmatter field, formatted from [`std::time::SystemTime`] with no
+/// external crate or subprocess.
 pub(crate) fn utc_now_iso() -> String {
-    // std::time alone cannot produce wall-clock; use a minimal approach
-    // that works in our blocking context.
-    let output = std::process::Command::new("date")
-        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
-        .output();
-    match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_owned(),
-        _ => "unknown".to_owned(),
-    }
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    format_unix_utc(secs)
+}
+
+/// Format a Unix timestamp (seconds since 1970-01-01 UTC) as `YYYY-MM-DDThh:mm:ssZ`.
+///
+/// Uses Howard Hinnant's days-to-civil algorithm; valid for all dates at or
+/// after the Unix epoch.
+fn format_unix_utc(secs: u64) -> String {
+    let days = secs / 86_400;
+    let second_of_day = secs % 86_400;
+    let (hour, minute, second) = (
+        second_of_day / 3_600,
+        (second_of_day % 3_600) / 60,
+        second_of_day % 60,
+    );
+
+    let z = days + 719_468;
+    let era = z / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let mp = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { year + 1 } else { year };
+
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
 #[cfg(test)]
@@ -234,6 +257,15 @@ mod tests {
             chat_template: Some("{{ bos_token }}{% for message in messages %}<start_of_turn>{{ message['role'] }}\n{{ message['content'] }}<end_of_turn>\n{% endfor %}".to_owned()),
             card: Some("Gemma 3 27B instruction-tuned model.".to_owned()),
         }
+    }
+
+    #[test]
+    fn formats_unix_epoch_boundaries() {
+        assert_eq!(super::format_unix_utc(0), "1970-01-01T00:00:00Z");
+        // 2021-01-01T00:00:00Z == 1609459200
+        assert_eq!(super::format_unix_utc(1_609_459_200), "2021-01-01T00:00:00Z");
+        // 2000-02-29T12:34:56Z (leap day) == 951827696
+        assert_eq!(super::format_unix_utc(951_827_696), "2000-02-29T12:34:56Z");
     }
 
     #[test]

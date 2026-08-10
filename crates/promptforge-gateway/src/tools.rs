@@ -74,7 +74,7 @@ impl WebSearchState {
             api_key: cfg.api_key.clone(),
             base_url: cfg.base_url.trim_end_matches('/').to_string(),
             settings: WebSearchSettings::from_config(cfg),
-            http: reqwest::Client::new(),
+            http: crate::http_util::bounded_client(),
         }
     }
 }
@@ -318,7 +318,8 @@ async fn brave_search(
 
     let status = response.status();
     if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
+        let body =
+            crate::http_util::read_body_capped(response, crate::http_util::MAX_ERROR_BODY).await;
         let body: String = body.chars().take(2000).collect();
         return Err(prefix_web_search_upstream(GatewayError::UpstreamStatus {
             status: status.as_u16(),

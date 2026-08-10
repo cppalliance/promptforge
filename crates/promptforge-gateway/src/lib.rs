@@ -19,6 +19,7 @@
 mod api_error;
 mod config;
 mod error;
+mod http_util;
 mod local;
 mod profile;
 mod queue;
