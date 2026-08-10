@@ -130,19 +130,14 @@ impl ToolDialect for Gemma3ToolCodeDialect {
     }
 
     fn parse_turn(&self, body: &Value) -> Result<NormalizedTurn> {
-        let choice = body
-            .get("choices")
-            .and_then(Value::as_array)
-            .and_then(|choices| choices.first())
-            .ok_or_else(|| Error::MalformedResponse("no choices in response".into()))?;
-        let finish_reason = choice
-            .get("finish_reason")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let message = choice
-            .get("message")
-            .ok_or_else(|| Error::MalformedResponse("choice had no message".into()))?;
-        let reasoning_content = crate::normalize::extract_reasoning(message)?;
+        // Choice/message/finish_reason/reasoning extraction is shared with the
+        // OpenAI normalizer; only the content-fence recognition below is
+        // dialect-specific (PF-NORM-006).
+        let crate::normalize::TurnContext {
+            message,
+            finish_reason,
+            reasoning_content,
+        } = crate::normalize::turn_context(body)?;
 
         // Gemma never emits wire tool_calls; go straight to content parsing.
         if let Some(content) = message
@@ -173,13 +168,9 @@ impl ToolDialect for Gemma3ToolCodeDialect {
             }
         }
 
-        Err(Error::EmptyModelReply {
-            detail: if reasoning_content.is_some() {
-                "empty model reply: reasoning content was present but ignored"
-            } else {
-                "empty model reply"
-            },
-        })
+        Err(crate::normalize::empty_reply_error(
+            reasoning_content.is_some(),
+        ))
     }
 
     /// Echo tool-call results in the Gemma content-fence style.

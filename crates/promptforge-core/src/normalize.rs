@@ -51,45 +51,90 @@ pub(crate) trait CompletionNormalizer: Send + Sync {
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct OpenAiChatNormalizer;
 
+/// The shared per-turn context extracted from a chat-completions body.
+///
+/// Crate-private and shared: both [`OpenAiChatNormalizer`] and the Gemma
+/// dialect derive the first choice's `message`, `finish_reason`, and reasoning
+/// side channel through [`turn_context`], so only fence recognition stays
+/// dialect-specific (PF-NORM-006).
+pub(crate) struct TurnContext<'a> {
+    /// The first choice's `message` object.
+    pub(crate) message: &'a Value,
+    /// The choice's `finish_reason`, when the backend supplied a string one.
+    pub(crate) finish_reason: Option<String>,
+    /// Reasoning side-channel text, never promoted into the answer.
+    pub(crate) reasoning_content: Option<String>,
+}
+
+/// Extract and shape-validate the first choice's per-turn context.
+///
+/// # Errors
+/// Returns [`Error::MalformedResponse`] when `choices` is missing or not a
+/// non-empty array of objects, `finish_reason` is a present non-string,
+/// `message` is missing or not an object, or a reasoning field has the wrong
+/// type.
+pub(crate) fn turn_context(body: &Value) -> Result<TurnContext<'_>> {
+    let choices = match body.get("choices") {
+        None => return Err(Error::MalformedResponse("no choices in response".into())),
+        Some(Value::Array(choices)) => choices,
+        Some(_) => {
+            return Err(Error::MalformedResponse(
+                "`choices` was present but not an array".into(),
+            ));
+        }
+    };
+    let choice = choices
+        .first()
+        .ok_or_else(|| Error::MalformedResponse("response had zero choices".into()))?;
+    if !choice.is_object() {
+        return Err(Error::MalformedResponse(
+            "`choices[0]` was not an object".into(),
+        ));
+    }
+    let finish_reason = match choice.get("finish_reason") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(reason)) => Some(reason.clone()),
+        Some(_) => {
+            return Err(Error::MalformedResponse(
+                "`finish_reason` was present but not a string".into(),
+            ));
+        }
+    };
+    let message = choice
+        .get("message")
+        .ok_or_else(|| Error::MalformedResponse("choice had no message".into()))?;
+    if !message.is_object() {
+        return Err(Error::MalformedResponse(
+            "`message` was present but not an object".into(),
+        ));
+    }
+    let reasoning_content = extract_reasoning(message)?;
+    Ok(TurnContext {
+        message,
+        finish_reason,
+        reasoning_content,
+    })
+}
+
+/// The empty-reply error for a turn with no product, noting whether an ignored
+/// reasoning side channel was present.
+pub(crate) fn empty_reply_error(reasoning_present: bool) -> Error {
+    Error::EmptyModelReply {
+        detail: if reasoning_present {
+            EMPTY_REPLY_REASONING_IGNORED
+        } else {
+            EMPTY_REPLY
+        },
+    }
+}
+
 impl CompletionNormalizer for OpenAiChatNormalizer {
     fn normalize(&self, body: &Value) -> Result<NormalizedTurn> {
-        let choices = match body.get("choices") {
-            None => return Err(Error::MalformedResponse("no choices in response".into())),
-            Some(Value::Array(choices)) => choices,
-            Some(_) => {
-                return Err(Error::MalformedResponse(
-                    "`choices` was present but not an array".into(),
-                ));
-            }
-        };
-        let choice = choices
-            .first()
-            .ok_or_else(|| Error::MalformedResponse("response had zero choices".into()))?;
-        if !choice.is_object() {
-            return Err(Error::MalformedResponse(
-                "`choices[0]` was not an object".into(),
-            ));
-        }
-
-        let finish_reason = match choice.get("finish_reason") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(reason)) => Some(reason.clone()),
-            Some(_) => {
-                return Err(Error::MalformedResponse(
-                    "`finish_reason` was present but not a string".into(),
-                ));
-            }
-        };
-
-        let message = choice
-            .get("message")
-            .ok_or_else(|| Error::MalformedResponse("choice had no message".into()))?;
-        if !message.is_object() {
-            return Err(Error::MalformedResponse(
-                "`message` was present but not an object".into(),
-            ));
-        }
-        let reasoning_content = extract_reasoning(message)?;
+        let TurnContext {
+            message,
+            finish_reason,
+            reasoning_content,
+        } = turn_context(body)?;
 
         // `tool_calls`, when present, must be an array; a present non-array is a
         // malformed shape, not an absence.
@@ -132,13 +177,7 @@ impl CompletionNormalizer for OpenAiChatNormalizer {
             });
         }
 
-        Err(Error::EmptyModelReply {
-            detail: if reasoning_content.is_some() {
-                EMPTY_REPLY_REASONING_IGNORED
-            } else {
-                EMPTY_REPLY
-            },
-        })
+        Err(empty_reply_error(reasoning_content.is_some()))
     }
 }
 
