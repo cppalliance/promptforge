@@ -150,6 +150,43 @@ mod tests {
     }
 
     #[test]
+    fn parse_turn_rejects_malformed_tool_calls() {
+        let dialect = OpenAiDialect;
+        // Wrong `type`.
+        let wrong_type = serde_json::json!({
+            "choices": [{ "message": { "content": null, "tool_calls": [
+                { "id": "a", "type": "tool", "function": { "name": "x", "arguments": "{}" } }
+            ] } }]
+        });
+        assert!(dialect.parse_turn(&wrong_type).is_err());
+
+        // Blank id.
+        let blank_id = serde_json::json!({
+            "choices": [{ "message": { "content": null, "tool_calls": [
+                { "id": "", "type": "function", "function": { "name": "x", "arguments": "{}" } }
+            ] } }]
+        });
+        assert!(dialect.parse_turn(&blank_id).is_err());
+
+        // Duplicate ids within one turn.
+        let dup = serde_json::json!({
+            "choices": [{ "message": { "content": null, "tool_calls": [
+                { "id": "d", "type": "function", "function": { "name": "x", "arguments": "{}" } },
+                { "id": "d", "type": "function", "function": { "name": "y", "arguments": "{}" } }
+            ] } }]
+        });
+        assert!(dialect.parse_turn(&dup).is_err());
+
+        // Missing arguments.
+        let missing_args = serde_json::json!({
+            "choices": [{ "message": { "content": null, "tool_calls": [
+                { "id": "m", "type": "function", "function": { "name": "x" } }
+            ] } }]
+        });
+        assert!(dialect.parse_turn(&missing_args).is_err());
+    }
+
+    #[test]
     fn parse_turn_text_reply() {
         let dialect = OpenAiDialect;
         let body = serde_json::json!({
