@@ -10,7 +10,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Context as _, Result};
 
 use crate::gateway::{GatewayGuard, GatewayProfile};
 
@@ -37,7 +37,7 @@ impl std::fmt::Display for UsageError {
 
 impl std::error::Error for UsageError {}
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let command = match parse_args(std::env::args().skip(1)) {
         Ok(command) => command,
@@ -98,18 +98,26 @@ async fn start_gateway(interrupted: Arc<AtomicBool>) -> Result<GatewayGuard> {
     })
     .await
     .context("join promptforge-gateway startup")??;
-    println!("promptforge-gateway is ready at {}", server.base_url());
     Ok(server)
 }
 
 /// Runs the fixed deterministic scenario suite against the scenario profile.
 async fn run_explicit_suite(interrupted: Arc<AtomicBool>) -> Result<()> {
-    let server = start_gateway(interrupted).await?;
-    let result =
-        scenarios::run_all(&server.base_url(), server.api_key(), server.model_alias()).await;
-    if let Err(error) = result {
-        bail!("{error:#}\n{}", server.diagnostics());
-    }
+    let mut server = start_gateway(interrupted).await?;
+    // Build the endpoint once and reuse it for the status line and the run.
+    let base_url = server.base_url();
+    println!("promptforge-gateway is ready at {base_url}");
+    let outcome = scenarios::run_all(&base_url, server.api_key(), server.model_alias())
+        .await
+        // Preserve the scenario error as the source and attach the gateway's
+        // bounded diagnostics as a context layer, rather than flattening the
+        // typed chain into rendered text.
+        .with_context(|| server.diagnostics());
+    // Explicit async teardown before leaving the runtime; `Drop` remains only a
+    // best-effort fallback for the Ctrl-C cancellation path.
+    let shutdown = server.shutdown().await;
+    outcome?;
+    shutdown.context("shut down promptforge-gateway")?;
     println!("real-model suite passed");
     Ok(())
 }
