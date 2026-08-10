@@ -838,7 +838,7 @@ fn run_resolves_cap_from_frontmatter_else_default() {
     assert_eq!(
         p.frontmatter
             .max_tool_iterations
-            .unwrap_or(DEFAULT_MAX_TOOL_ITERATIONS),
+            .resolve(DEFAULT_MAX_TOOL_ITERATIONS),
         5
     );
 
@@ -847,7 +847,7 @@ fn run_resolves_cap_from_frontmatter_else_default() {
     assert_eq!(
         p.frontmatter
             .max_tool_iterations
-            .unwrap_or(DEFAULT_MAX_TOOL_ITERATIONS),
+            .resolve(DEFAULT_MAX_TOOL_ITERATIONS),
         DEFAULT_MAX_TOOL_ITERATIONS
     );
 }
@@ -3638,7 +3638,7 @@ fn tool_bag_caches_on_unchanged_generation() {
     let add_echo = LuaProgram::compile(
         "tools.add('echo')",
         "prologue",
-        1,
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
         &NullObserver,
         "Bag",
@@ -3690,7 +3690,7 @@ fn tool_bag_caches_on_unchanged_generation() {
     let add_fetch = LuaProgram::compile(
         "tools.add('fetch')",
         "prologue-2",
-        1,
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
         &NullObserver,
         "Bag",
@@ -3765,7 +3765,7 @@ fn tool_description_override_appears_in_model_schema() {
     let add_default = LuaProgram::compile(
         "tools.add(echo)",
         "prologue",
-        1,
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
         &NullObserver,
         "Override",
@@ -3813,7 +3813,7 @@ fn tool_description_override_appears_in_model_schema() {
          assert(echo.description == 'Author override for the model')\n\
          tools.add(echo)",
         "prologue",
-        1,
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
         &NullObserver,
         "Override",

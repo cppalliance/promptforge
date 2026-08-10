@@ -116,10 +116,85 @@ pub struct Frontmatter {
     /// Value returned when the run falls off the last section. Optional.
     #[serde(default)]
     pub(crate) default_return: Option<String>,
-    /// Maximum model round trips a section's tool-call loop may take. Optional;
-    /// `None` means the runtime applies its default cap rather than zero.
+    /// Maximum model round trips a section's tool-call loop may take.
+    ///
+    /// A non-optional [`MaxToolIterations`]: an absent value deserializes to
+    /// [`MaxToolIterations::Default`] (the runtime applies its own cap) and any
+    /// explicit value is a positive, bounded count. Zero is unrepresentable.
     #[serde(default)]
-    pub(crate) max_tool_iterations: Option<usize>,
+    pub(crate) max_tool_iterations: MaxToolIterations,
+}
+
+/// The largest explicit `max_tool_iterations` a prompt may declare.
+pub const MAX_TOOL_ITERATIONS: u32 = 1000;
+
+/// Wraps a computed 1-based source line for [`LuaProgram::compile`].
+///
+/// Line numbers computed during parsing are always at least 1; the defensive
+/// floor keeps the value non-zero without silently masking a real bug.
+fn nz_source_line(line: u32) -> std::num::NonZeroU32 {
+    std::num::NonZeroU32::new(line).unwrap_or(std::num::NonZeroU32::MIN)
+}
+
+/// A frontmatter tool-loop cap that cannot encode zero.
+///
+/// Frontmatter either omits the cap (the runtime applies its default) or sets a
+/// positive, bounded count. Deserialization rejects `0`, negatives, and values
+/// above [`MAX_TOOL_ITERATIONS`], so no invalid cap can reach execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum MaxToolIterations {
+    /// No explicit cap; the runtime applies its own default.
+    #[default]
+    Default,
+    /// An explicit, positive, bounded cap.
+    Limit(std::num::NonZeroU32),
+}
+
+impl MaxToolIterations {
+    /// Resolves to a concrete iteration cap, using `default` when none was set.
+    #[must_use]
+    pub fn resolve(self, default: usize) -> usize {
+        match self {
+            MaxToolIterations::Default => default,
+            MaxToolIterations::Limit(limit) => limit.get() as usize,
+        }
+    }
+
+    /// Returns the explicit limit when one was declared.
+    #[must_use]
+    pub fn limit(self) -> Option<std::num::NonZeroU32> {
+        match self {
+            MaxToolIterations::Default => None,
+            MaxToolIterations::Limit(limit) => Some(limit),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MaxToolIterations {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Deserialize as i64 so negatives and > u32 values are caught, not wrapped.
+        let raw = i64::deserialize(deserializer)?;
+        if raw <= 0 {
+            return Err(serde::de::Error::custom(format!(
+                "max_tool_iterations must be a positive integer (>= 1), got {raw}"
+            )));
+        }
+        if raw > i64::from(MAX_TOOL_ITERATIONS) {
+            return Err(serde::de::Error::custom(format!(
+                "max_tool_iterations must be <= {MAX_TOOL_ITERATIONS}, got {raw}"
+            )));
+        }
+        // 1 <= raw <= MAX_TOOL_ITERATIONS, so both conversions are infallible.
+        let value = u32::try_from(raw)
+            .map_err(|_| serde::de::Error::custom("max_tool_iterations is out of range"))?;
+        let limit = std::num::NonZeroU32::new(value)
+            .ok_or_else(|| serde::de::Error::custom("max_tool_iterations must be non-zero"))?;
+        Ok(MaxToolIterations::Limit(limit))
+    }
 }
 
 impl Frontmatter {
@@ -147,9 +222,9 @@ impl Frontmatter {
         self.default_return.as_deref()
     }
 
-    /// Returns the per-section tool-loop cap, when the author set one.
+    /// Returns the per-section tool-loop cap declared in frontmatter.
     #[must_use]
-    pub fn max_tool_iterations(&self) -> Option<usize> {
+    pub fn max_tool_iterations(&self) -> MaxToolIterations {
         self.max_tool_iterations
     }
 }
@@ -628,7 +703,7 @@ fn split_h1(
         Some(LuaProgram::compile(
             &source,
             "prompt shared library",
-            content_abs_line + newlines_before(content, opening) + 1,
+            nz_source_line(content_abs_line + newlines_before(content, opening) + 1),
             execution,
             observer,
             title,
@@ -659,7 +734,7 @@ fn split_h1(
                 blocks.push(Block::Lua(LuaProgram::compile(
                     &source,
                     &location,
-                    content_abs_line + line_offset,
+                    nz_source_line(content_abs_line + line_offset),
                     execution,
                     observer,
                     title,
@@ -953,7 +1028,12 @@ fn build_sections(
                     let abs_line = content_abs_line + line_offset;
                     let location = lua_block_location(&name, index, total, has_prose);
                     let program = LuaProgram::compile(
-                        &source, &location, abs_line, execution, observer, &name,
+                        &source,
+                        &location,
+                        nz_source_line(abs_line),
+                        execution,
+                        observer,
+                        &name,
                     )?;
                     blocks.push(Block::Lua(program));
                 }
@@ -1625,15 +1705,60 @@ Prose for the second section.\n";
     }
 
     #[test]
-    fn max_tool_iterations_parses_when_declared_and_defaults_to_none() {
+    fn max_tool_iterations_parses_positive_and_defaults_when_absent() {
         let declared =
             "---\nname: x\ndescription: d\nmax_tool_iterations: 20\n---\n\n# T\n\n## S\n\np\n";
         let p = Prompt::parse(declared, "test", &NullObserver).unwrap();
-        assert_eq!(p.frontmatter.max_tool_iterations, Some(20));
+        assert_eq!(
+            p.frontmatter.max_tool_iterations,
+            MaxToolIterations::Limit(std::num::NonZeroU32::new(20).unwrap())
+        );
 
         let absent = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
         let p = Prompt::parse(absent, "test", &NullObserver).unwrap();
-        assert_eq!(p.frontmatter.max_tool_iterations, None);
+        assert_eq!(
+            p.frontmatter.max_tool_iterations,
+            MaxToolIterations::Default
+        );
+    }
+
+    #[test]
+    fn max_tool_iterations_rejects_zero_negative_and_overflow() {
+        let body = |value: &str| {
+            format!(
+                "---\nname: x\ndescription: d\nmax_tool_iterations: {value}\n---\n\n# T\n\n## S\n\np\n"
+            )
+        };
+        for bad in ["0", "-1", "1001", "100000000000"] {
+            let error = Prompt::parse(&body(bad), "test", &NullObserver)
+                .expect_err(&format!("max_tool_iterations {bad} must be rejected"));
+            assert_eq!(
+                error.kind(),
+                ParseErrorKind::Frontmatter,
+                "value {bad}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn max_tool_iterations_accepts_the_upper_boundary() {
+        let body = format!(
+            "---\nname: x\ndescription: d\nmax_tool_iterations: {MAX_TOOL_ITERATIONS}\n---\n\n# T\n\n## S\n\np\n"
+        );
+        let p = Prompt::parse(&body, "test", &NullObserver).unwrap();
+        assert_eq!(
+            p.frontmatter.max_tool_iterations,
+            MaxToolIterations::Limit(std::num::NonZeroU32::new(MAX_TOOL_ITERATIONS).unwrap())
+        );
+    }
+
+    #[test]
+    fn max_tool_iterations_resolve_uses_default_only_when_absent() {
+        assert_eq!(MaxToolIterations::Default.resolve(24), 24);
+        assert_eq!(
+            MaxToolIterations::Limit(std::num::NonZeroU32::new(3).unwrap()).resolve(24),
+            3
+        );
     }
 
     #[test]
@@ -1775,7 +1900,11 @@ Prose for the second section.\n";
         let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
         let epilog = prompt.entry().epilog().expect("epilog must exist");
 
-        assert_eq!(epilog.source_line(), 13, "epilog Lua starts on line 13");
+        assert_eq!(
+            epilog.source_line().get(),
+            13,
+            "epilog Lua starts on line 13"
+        );
         assert_eq!(epilog.source(), "local a = 1\nassert(false)");
 
         // Simulate a runtime error: assert(false) is on chunk line 2.
@@ -1814,7 +1943,11 @@ Prose for the second section.\n";
         let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
         let prologue = prompt.entry().prologue().expect("prologue must exist");
 
-        assert_eq!(prologue.source_line(), 11, "prologue Lua starts on line 11");
+        assert_eq!(
+            prologue.source_line().get(),
+            11,
+            "prologue Lua starts on line 11"
+        );
 
         let lua = mlua::Lua::new();
         let function = prologue.load(&lua).expect("bytecode must load");
@@ -1849,7 +1982,7 @@ Prose for the second section.\n";
         let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
         let epilog = prompt.entry().epilog().expect("epilog must exist");
 
-        assert_eq!(epilog.source_line(), 13);
+        assert_eq!(epilog.source_line().get(), 13);
 
         let lua = mlua::Lua::new();
         let function = epilog.load(&lua).expect("bytecode must load");
@@ -1885,6 +2018,6 @@ Prose for the second section.\n";
         let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua shared\nfunction f()\nend\n```\n\n## S\n\np\n";
         let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
         let replay = prompt.replay.as_ref().expect("replay must exist");
-        assert_eq!(replay.source_line(), 9, "shared Lua starts on line 9");
+        assert_eq!(replay.source_line().get(), 9, "shared Lua starts on line 9");
     }
 }

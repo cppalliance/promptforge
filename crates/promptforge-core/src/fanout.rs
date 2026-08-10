@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 use serde_json::json;
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use crate::cancel;
@@ -80,6 +80,8 @@ pub(crate) struct FanoutContext<'a> {
     pub max_tool_iterations: usize,
     /// Maximum number of arms permitted to execute concurrently.
     pub fanout_concurrency: NonZeroUsize,
+    /// Maximum number of items a single fanout may map over.
+    pub max_fanout_items: NonZeroUsize,
     /// Per-arm Lua heap ceiling.
     pub lua_memory_bytes: usize,
     /// Per-arm Lua `log()` event budget.
@@ -99,11 +101,25 @@ pub(crate) struct FanoutContext<'a> {
 ///
 /// # Errors
 /// Fatal arm errors abort siblings; tool-loop exhaustion soft-degrades.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the scheduler is one cohesive unit: item-cap check, arm spawner, windowed dispatch, and the select! drain loop"
+)]
 pub(crate) async fn run_fanout_arms(
     worker: &Section,
     items: &[String],
     ctx: &FanoutContext<'_>,
 ) -> Result<Vec<LuaFanoutResult>> {
+    // Reject an oversized list before scheduling anything, so a pathological
+    // prompt cannot allocate an unbounded number of arms.
+    if items.len() > ctx.max_fanout_items.get() {
+        return Err(Error::Lua(format!(
+            "fanout list has {} items, exceeding the maximum of {}",
+            items.len(),
+            ctx.max_fanout_items.get()
+        )));
+    }
+
     let turns = Arc::new(AtomicU32::new(0));
     let (observe_tx, mut observe_rx) = mpsc::unbounded_channel::<(String, Observation)>();
     let (debug_tx, mut debug_rx) = mpsc::unbounded_channel::<DebugMsg>();
@@ -114,18 +130,15 @@ pub(crate) async fn run_fanout_arms(
         }) as Arc<dyn DebugCapture>
     });
 
-    let mut join_set = JoinSet::new();
-    let mut replies: Vec<Option<LuaFanoutResult>> = vec![None; items.len()];
+    let mut join_set: JoinSet<Result<(usize, LuaFanoutResult)>> = JoinSet::new();
+    let mut replies: Vec<Option<LuaFanoutResult>> = (0..items.len()).map(|_| None).collect();
 
-    // Bound how many arms run at once. Every arm acquires a permit before it
-    // touches its VM or the network; the surplus stays parked on the semaphore
-    // rather than all being resident at once.
-    let semaphore = Arc::new(Semaphore::new(ctx.fanout_concurrency.get()));
-
-    for (index, item_text) in items.iter().enumerate() {
+    // Spawns arm `index`, cloning only that arm's inputs. Concurrency is bounded
+    // by only ever having `ArmWindow`-approved arms resident in the `JoinSet`.
+    let spawn_arm = |index: usize, join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>| {
         let payload = ArmPayload {
             worker: worker.clone(),
-            item_text: item_text.clone(),
+            item_text: items[index].clone(),
             index,
             store: ctx.store.clone(),
             client: ctx.client.clone(),
@@ -147,15 +160,14 @@ pub(crate) async fn run_fanout_arms(
             observer: Arc::clone(&proxy_observer),
             debug: proxy_debug.clone(),
         };
-        let permit_source = Arc::clone(&semaphore);
-        join_set.spawn(async move {
-            let _permit = permit_source.acquire_owned().await.map_err(|_| {
-                Error::Lua(
-                    "fanout concurrency semaphore closed before an arm could start".to_owned(),
-                )
-            })?;
-            run_one_arm(payload).await
-        });
+        join_set.spawn(run_one_arm(payload));
+    };
+
+    // At most `fanout_concurrency` arms are resident at once: seed the initial
+    // window, then schedule the next queued item whenever one completes.
+    let mut window = ArmWindow::new(items.len(), ctx.fanout_concurrency);
+    while let Some(index) = window.take_next() {
+        spawn_arm(index, &mut join_set);
     }
 
     // Drop the unused sender clone so the debug channel can close when arms finish.
@@ -181,6 +193,10 @@ pub(crate) async fn run_fanout_arms(
                     None => break,
                     Some(Ok(Ok((index, reply)))) => {
                         replies[index] = Some(reply);
+                        window.complete_one();
+                        while let Some(next) = window.take_next() {
+                            spawn_arm(next, &mut join_set);
+                        }
                     }
                     Some(Ok(Err(error))) => {
                         abort_fanout_arms(&mut join_set, ctx, &mut observe_rx, &mut debug_rx).await;
@@ -213,6 +229,46 @@ pub(crate) async fn run_fanout_arms(
         }
     }
     Ok(ordered)
+}
+
+/// Windowed fan-out scheduler state: never lets more than `concurrency` arms be
+/// outstanding, and hands out each item index exactly once.
+///
+/// Kept as a small, pure type so the concurrency bound can be tested directly
+/// without spinning up real arm futures.
+struct ArmWindow {
+    next: usize,
+    count: usize,
+    outstanding: usize,
+    concurrency: usize,
+}
+
+impl ArmWindow {
+    fn new(count: usize, concurrency: NonZeroUsize) -> Self {
+        Self {
+            next: 0,
+            count,
+            outstanding: 0,
+            concurrency: concurrency.get(),
+        }
+    }
+
+    /// Returns the next index to spawn when a slot is free, else `None`.
+    fn take_next(&mut self) -> Option<usize> {
+        if self.next < self.count && self.outstanding < self.concurrency {
+            let index = self.next;
+            self.next += 1;
+            self.outstanding += 1;
+            Some(index)
+        } else {
+            None
+        }
+    }
+
+    /// Records that one outstanding arm has finished, freeing a slot.
+    fn complete_one(&mut self) {
+        self.outstanding = self.outstanding.saturating_sub(1);
+    }
 }
 
 async fn abort_fanout_arms(
@@ -534,6 +590,8 @@ async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
+
     use super::*;
     use crate::parser::Block;
 
@@ -613,7 +671,7 @@ mod tests {
         let prologue = LuaProgram::compile(
             "return item",
             "test prologue",
-            1,
+            NonZeroU32::new(1).expect("compile source line is non-zero"),
             "fanout-cancel-test",
             &NullObserver,
             "Worker",
@@ -648,6 +706,7 @@ mod tests {
             shared_tools: &shared_tools,
             max_tool_iterations: 24,
             fanout_concurrency: NonZeroUsize::new(8).expect("8 is non-zero"),
+            max_fanout_items: NonZeroUsize::new(1024).expect("1024 is non-zero"),
             lua_memory_bytes: 64 * 1024 * 1024,
             lua_log_events: 1024,
             last_reply: None,
@@ -664,6 +723,120 @@ mod tests {
         assert!(
             matches!(error, Error::Interrupted),
             "expected Interrupted, got {error}"
+        );
+    }
+
+    #[test]
+    fn arm_window_never_exceeds_the_concurrency_limit() {
+        // Drive the pure scheduler through every completion order for a few
+        // sizes and prove the invariant that gates real arms: outstanding never
+        // exceeds the limit, and each index is dispatched exactly once.
+        for &limit in &[1usize, 2, 3, 5] {
+            for &count in &[0usize, 1, 4, 9, 20] {
+                let concurrency = NonZeroUsize::new(limit).expect("limit is non-zero");
+                let mut window = ArmWindow::new(count, concurrency);
+                let mut in_flight: Vec<usize> = Vec::new();
+                let mut dispatched: Vec<usize> = Vec::new();
+                let mut max_outstanding = 0usize;
+
+                while let Some(index) = window.take_next() {
+                    in_flight.push(index);
+                    dispatched.push(index);
+                }
+                assert!(
+                    in_flight.len() <= limit,
+                    "initial window {} exceeded limit {limit}",
+                    in_flight.len()
+                );
+                let mut toggle = false;
+                while !in_flight.is_empty() {
+                    assert!(
+                        in_flight.len() <= limit,
+                        "outstanding {} exceeded limit {limit}",
+                        in_flight.len()
+                    );
+                    max_outstanding = max_outstanding.max(in_flight.len());
+                    // Complete arms from alternating ends to vary the order.
+                    let done = if toggle {
+                        in_flight.remove(0)
+                    } else {
+                        in_flight.pop().expect("non-empty")
+                    };
+                    toggle = !toggle;
+                    let _ = done;
+                    window.complete_one();
+                    while let Some(index) = window.take_next() {
+                        in_flight.push(index);
+                        dispatched.push(index);
+                    }
+                }
+
+                assert!(max_outstanding <= limit);
+                dispatched.sort_unstable();
+                assert_eq!(
+                    dispatched,
+                    (0..count).collect::<Vec<_>>(),
+                    "every item index must be dispatched exactly once"
+                );
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fanout_rejects_a_list_over_the_item_cap() {
+        use crate::client::GatewayClient;
+        use crate::model::ModelBindings;
+        use crate::observe::NullObserver;
+        use crate::parser::Section;
+        use crate::store::StoreRef;
+
+        let worker = Section {
+            name: "Worker".to_string(),
+            level: 3,
+            blocks: vec![Block::Prose {
+                text: "irrelevant".to_string(),
+                loop_capable: true,
+            }],
+            children: Vec::new(),
+            items: Vec::new(),
+        };
+        let items: Vec<String> = (0..5).map(|i| i.to_string()).collect();
+        let store = StoreRef::memory();
+        let bindings = ToolBindings::default();
+        let models = ModelBindings::default();
+        let analysis = crate::execute::ToolAnalysis::default();
+        let shared_tools = SharedTools::default();
+        let client: Option<GatewayClient> = None;
+        let observer = NullObserver;
+        let ctx = FanoutContext {
+            args: "",
+            store: &store,
+            execution: "fanout-cap-test",
+            observer: &observer,
+            client: &client,
+            debug: None,
+            shared: None,
+            bindings: &bindings,
+            models: &models,
+            analysis: &analysis,
+            shared_tools: &shared_tools,
+            max_tool_iterations: 24,
+            fanout_concurrency: NonZeroUsize::new(8).expect("8 is non-zero"),
+            max_fanout_items: NonZeroUsize::new(3).expect("3 is non-zero"),
+            lua_memory_bytes: 64 * 1024 * 1024,
+            lua_log_events: 1024,
+            last_reply: None,
+            when: "2026-08-08",
+            parent_id: 1,
+            section_count: 1,
+        };
+
+        let error = run_fanout_arms(&worker, &items, &ctx)
+            .await
+            .expect_err("a list longer than max_fanout_items must be rejected");
+        assert!(
+            error.to_string().contains("exceeding the maximum of 3"),
+            "error must explain the item cap: {error}"
         );
     }
 
@@ -708,6 +881,7 @@ mod tests {
             shared_tools: &shared_tools,
             max_tool_iterations: 24,
             fanout_concurrency: NonZeroUsize::new(8).expect("8 is non-zero"),
+            max_fanout_items: NonZeroUsize::new(1024).expect("1024 is non-zero"),
             lua_memory_bytes: 64 * 1024 * 1024,
             lua_log_events: 1024,
             last_reply: None,

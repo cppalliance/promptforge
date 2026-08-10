@@ -42,12 +42,21 @@ impl CancelHandle {
     }
 
     /// Completes when this handle is cancelled.
+    ///
+    /// Registers this waiter (via tokio's `Notified::enable`) *before* re-reading
+    /// the flag, so a [`Self::cancel`] that stores `true` and calls
+    /// `notify_waiters()` between the check and the await cannot be lost: the
+    /// waiter is already queued and the broadcast wakes it.
     pub async fn cancelled(&self) {
         if self.is_cancelled() {
             return;
         }
         loop {
             let notified = self.notify.notified();
+            tokio::pin!(notified);
+            // Enqueue as a waiter now; any notify_waiters() after this point
+            // wakes us, closing the check-then-wait race window.
+            notified.as_mut().enable();
             if self.is_cancelled() {
                 return;
             }
@@ -98,6 +107,42 @@ mod tests {
             .expect("waiter must finish after cancel")
             .expect("join ok");
         assert!(handle.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn cancel_between_check_and_wait_is_not_lost() {
+        // Reproduces the exact wait/notify sequence `cancelled()` uses. A
+        // waiter that has passed its flag check and holds a `Notified` future
+        // must still observe a cancel that fires before it awaits.
+        //
+        // Under the OLD sequence (create `notified`, then cancel, then await
+        // WITHOUT `enable()`), `notify_waiters()` finds no registered waiter,
+        // the permit is dropped, and the final `await` below hangs until the
+        // timeout fails. `enable()` registers first, so the wakeup is kept.
+        let handle = CancelHandle::new();
+        let notified = handle.notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        handle.cancel();
+        tokio::time::timeout(Duration::from_secs(1), notified)
+            .await
+            .expect("an enabled waiter must observe a cancel signaled before it awaited");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_cancel_never_hangs_a_waiter() {
+        // Stress the real method: a cancel raced from another thread against a
+        // fresh waiter must always complete. The old lost-wakeup would flake.
+        for _ in 0..200 {
+            let handle = CancelHandle::new();
+            let waiter = handle.clone();
+            let join = tokio::spawn(async move { waiter.cancelled().await });
+            handle.cancel();
+            tokio::time::timeout(Duration::from_secs(1), join)
+                .await
+                .expect("a waiter racing cancel must never hang")
+                .expect("join ok");
+        }
     }
 
     #[tokio::test]

@@ -24,6 +24,7 @@
 //! [`run_chunk`] as [`Error::Lua`].
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -497,9 +498,10 @@ pub struct LuaProgram {
     location: String,
     /// 1-based line number in the prompt source where this Lua region begins.
     ///
-    /// Used together with chunk-relative line numbers from Lua runtime errors
-    /// to produce an absolute prompt-source line: `source_line + chunk_line - 1`.
-    source_line: u32,
+    /// A [`NonZeroU32`] so line zero is unrepresentable. Used together with
+    /// chunk-relative line numbers from Lua runtime errors to produce an
+    /// absolute prompt-source line: `source_line + chunk_line - 1`.
+    source_line: NonZeroU32,
 }
 
 impl LuaProgram {
@@ -537,7 +539,7 @@ impl LuaProgram {
     pub(crate) fn compile(
         source: &str,
         location: &str,
-        source_line: u32,
+        source_line: NonZeroU32,
         execution: &str,
         observer: &dyn Observer,
         section: &str,
@@ -561,7 +563,7 @@ impl LuaProgram {
                 observer.observe(execution, section, detail::LUA_COMPILATION_FAILED);
                 return Err(Error::LuaCompile {
                     location: location.to_owned(),
-                    source_line,
+                    source_line: source_line.get(),
                     lua_source: source.to_owned(),
                     message: error.to_string(),
                 });
@@ -588,7 +590,7 @@ impl LuaProgram {
 
     /// Returns the 1-based prompt-source line where this Lua region begins.
     #[must_use]
-    pub fn source_line(&self) -> u32 {
+    pub fn source_line(&self) -> NonZeroU32 {
         self.source_line
     }
 
@@ -633,11 +635,13 @@ impl LuaProgram {
 ///
 /// Only `[string "{location}"]:N:` occurrences are rewritten, so a parent
 /// prologue that surfaces a fanout child's already-mapped error does not
-/// corrupt the child's absolute line. When `source_line` is 0 or the pattern
-/// is absent, the message passes through unchanged except for a leading
-/// `{location}:` tag when an absolute line can still be inferred.
-fn map_chunk_line_to_absolute(message: &str, source_line: u32, location: &str) -> String {
-    if source_line == 0 || location.is_empty() {
+/// corrupt the child's absolute line. When the pattern is absent, the message
+/// passes through unchanged except for a leading `{location}:` tag when an
+/// absolute line can still be inferred. A chunk line whose absolute mapping
+/// would overflow `u32` is left as its original digits (the finding's
+/// "return the original diagnostic on overflow").
+fn map_chunk_line_to_absolute(message: &str, source_line: NonZeroU32, location: &str) -> String {
+    if location.is_empty() {
         return message.to_owned();
     }
     let marker = format!("[string \"{location}\"]:");
@@ -656,11 +660,21 @@ fn map_chunk_line_to_absolute(message: &str, source_line: u32, location: &str) -
             continue;
         }
         if let Ok(chunk_line) = after[..digit_end].parse::<u32>() {
-            let absolute = source_line + chunk_line - 1;
-            if first_absolute.is_none() {
-                first_absolute = Some(absolute);
+            // absolute = source_line + chunk_line - 1, with overflow guarded so
+            // a pathological line count cannot wrap into a wrong number.
+            let absolute = source_line
+                .get()
+                .checked_add(chunk_line)
+                .and_then(|sum| sum.checked_sub(1));
+            match absolute {
+                Some(absolute) => {
+                    if first_absolute.is_none() {
+                        first_absolute = Some(absolute);
+                    }
+                    result.push_str(&absolute.to_string());
+                }
+                None => result.push_str(&after[..digit_end]),
             }
-            result.push_str(&absolute.to_string());
             rest = &after[digit_end..];
         } else {
             rest = after;
@@ -3028,8 +3042,15 @@ mod tests {
     }
 
     fn program(source: &str) -> LuaProgram {
-        LuaProgram::compile(source, "test program", 1, EXECUTION, &NullObserver, "Test")
-            .expect("test Lua must compile")
+        LuaProgram::compile(
+            source,
+            "test program",
+            NonZeroU32::new(1).expect("compile source line is non-zero"),
+            EXECUTION,
+            &NullObserver,
+            "Test",
+        )
+        .expect("test Lua must compile")
     }
 
     #[derive(Debug)]
@@ -4238,7 +4259,7 @@ mod tests {
         let program = LuaProgram::compile(
             source,
             "section Gather prologue",
-            1,
+            NonZeroU32::new(1).expect("compile source line is non-zero"),
             EXECUTION,
             &NullObserver,
             "Gather",
@@ -4263,7 +4284,7 @@ mod tests {
         let program = LuaProgram::compile(
             "local x = 1\nassert(false)\nreturn x",
             location,
-            1,
+            NonZeroU32::new(1).expect("compile source line is non-zero"),
             EXECUTION,
             &NullObserver,
             "Web Search",
@@ -4293,7 +4314,8 @@ mod tests {
     fn map_chunk_line_to_absolute_rewrites_line_numbers() {
         let location = "section `Web Search` epilog";
         let msg = r#"[string "section `Web Search` epilog"]:2: assertion failed!"#;
-        let result = map_chunk_line_to_absolute(msg, 50, location);
+        let result =
+            map_chunk_line_to_absolute(msg, NonZeroU32::new(50).expect("50 is non-zero"), location);
         assert_eq!(
             result,
             r#"section `Web Search` epilog:51: [string "section `Web Search` epilog"]:51: assertion failed!"#
@@ -4305,7 +4327,11 @@ mod tests {
         let msg = r#"[string "section `Web Search` epilog"]:51: assertion failed!
 stack traceback:
         [string "section `Main` prologue"]:3: in main chunk"#;
-        let result = map_chunk_line_to_absolute(msg, 22, "section `Main` prologue");
+        let result = map_chunk_line_to_absolute(
+            msg,
+            NonZeroU32::new(22).expect("22 is non-zero"),
+            "section `Main` prologue",
+        );
         assert!(
             result.contains("[string \"section `Web Search` epilog\"]:51:"),
             "child absolute line must stay intact: {result}"
@@ -4322,23 +4348,36 @@ stack traceback:
     }
 
     #[test]
-    fn map_chunk_line_to_absolute_passthrough_when_source_line_zero() {
+    fn map_chunk_line_to_absolute_keeps_original_digits_on_overflow() {
+        // source_line + chunk_line - 1 must not wrap; on overflow the original
+        // chunk-relative digits are preserved rather than a wrong absolute line.
         let msg = r#"[string "x"]:5: boom"#;
-        let result = map_chunk_line_to_absolute(msg, 0, "x");
-        assert_eq!(result, msg);
+        let result = map_chunk_line_to_absolute(msg, NonZeroU32::MAX, "x");
+        assert!(
+            result.contains(r#"[string "x"]:5:"#),
+            "overflowing mapping must keep the original line 5: {result}"
+        );
+        assert!(
+            !result.contains(":4294967300:"),
+            "no wrapped absolute line may appear: {result}"
+        );
     }
 
     #[test]
     fn map_chunk_line_to_absolute_no_match_passthrough() {
         let msg = "some other error without chunk info";
-        let result = map_chunk_line_to_absolute(msg, 10, "section `Main` prologue");
+        let result = map_chunk_line_to_absolute(
+            msg,
+            NonZeroU32::new(10).expect("10 is non-zero"),
+            "section `Main` prologue",
+        );
         assert_eq!(result, msg);
     }
 
     #[test]
     fn runtime_error_maps_to_absolute_prompt_line() {
         let location = "section `Web Search` epilog";
-        let source_line: u32 = 50;
+        let source_line = NonZeroU32::new(50).expect("50 is non-zero");
         let program = LuaProgram::compile(
             "local x = 1\nassert(false)\nreturn x",
             location,
@@ -4372,8 +4411,15 @@ stack traceback:
     fn malformed_lua_reports_location_and_retains_source_diagnostic() {
         let source = "local secret =\nreturn secret";
         let location = "section Gather prologue";
-        let error = LuaProgram::compile(source, location, 1, EXECUTION, &NullObserver, "Gather")
-            .expect_err("malformed Lua must not compile");
+        let error = LuaProgram::compile(
+            source,
+            location,
+            NonZeroU32::new(1).expect("compile source line is non-zero"),
+            EXECUTION,
+            &NullObserver,
+            "Gather",
+        )
+        .expect_err("malformed Lua must not compile");
 
         match &error {
             Error::LuaCompile {
@@ -4402,8 +4448,15 @@ stack traceback:
         let recorder = Recorder::default();
         let source = "return 'private source payload'";
         let location = "private/location";
-        LuaProgram::compile(source, location, 1, EXECUTION, &recorder, "Gather")
-            .expect("valid Lua must compile");
+        LuaProgram::compile(
+            source,
+            location,
+            NonZeroU32::new(1).expect("compile source line is non-zero"),
+            EXECUTION,
+            &recorder,
+            "Gather",
+        )
+        .expect("valid Lua must compile");
         assert_eq!(
             recorder.observations(),
             vec![
@@ -4419,7 +4472,7 @@ stack traceback:
         LuaProgram::compile(
             "local private =",
             location,
-            1,
+            NonZeroU32::new(1).expect("compile source line is non-zero"),
             EXECUTION,
             &recorder,
             "Gather",

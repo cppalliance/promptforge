@@ -104,7 +104,10 @@ impl UserData for LuaModelHandle {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method(
             "infer",
-            |lua, this, (prompt, _opts): (String, Option<Value>)| {
+            |lua, this, (prompt, opts): (String, Option<Value>)| {
+                // Per-call options are not supported. Reject them explicitly so
+                // an author-supplied table can never be silently discarded.
+                reject_infer_options(opts.as_ref())?;
                 let hook = lua
                     .app_data_ref::<ModelInferHook>()
                     .ok_or_else(|| {
@@ -116,6 +119,21 @@ impl UserData for LuaModelHandle {
                 hook(lua, this.binding(), &prompt)
             },
         );
+    }
+}
+
+/// Rejects any per-call `model:infer` options argument.
+///
+/// `model:infer` takes only a prompt string. A second argument (a table of
+/// options, or anything non-nil) has no supported effect, so it is rejected
+/// rather than silently dropped. An absent or `nil` second argument is allowed.
+fn reject_infer_options(opts: Option<&Value>) -> mlua::Result<()> {
+    match opts {
+        None | Some(Value::Nil) => Ok(()),
+        Some(_) => Err(mlua::Error::external(
+            "model:infer(prompt) does not accept a second argument; \
+             per-call inference options are not supported",
+        )),
     }
 }
 
@@ -564,5 +582,33 @@ fn validate_alias(alias: &str) -> Result<()> {
         Err(Error::Lua(format!(
             "invalid model alias {alias:?}: expected [A-Za-z][A-Za-z0-9_-]{{0,63}}"
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reject_infer_options;
+    use mlua::Value;
+
+    #[test]
+    fn infer_options_absent_or_nil_are_accepted() {
+        assert!(reject_infer_options(None).is_ok());
+        assert!(reject_infer_options(Some(&Value::Nil)).is_ok());
+    }
+
+    #[test]
+    fn infer_options_reject_a_table_or_any_non_nil_value() {
+        let boolean = Value::Boolean(true);
+        let integer = Value::Integer(1);
+        for value in [&boolean, &integer] {
+            let error = reject_infer_options(Some(value))
+                .expect_err("a non-nil infer options argument must be rejected");
+            assert!(
+                error
+                    .to_string()
+                    .contains("does not accept a second argument"),
+                "error must explain the rejection, got: {error}"
+            );
+        }
     }
 }

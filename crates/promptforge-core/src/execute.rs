@@ -535,6 +535,7 @@ fn attach_infer_hook(
 pub struct RunLimits {
     max_tool_iterations: NonZeroU32,
     fanout_concurrency: NonZeroUsize,
+    max_fanout_items: NonZeroUsize,
     max_response_bytes: NonZeroU64,
     lua_memory_bytes: NonZeroUsize,
     lua_log_events: NonZeroU32,
@@ -556,6 +557,7 @@ impl RunLimits {
         RunLimits {
             max_tool_iterations: nz_u32(24),
             fanout_concurrency: nz_usize(8),
+            max_fanout_items: nz_usize(1024),
             max_response_bytes: nz_u64(16 * 1024 * 1024),
             lua_memory_bytes: nz_usize(64 * 1024 * 1024),
             lua_log_events: nz_u32(1024),
@@ -574,6 +576,15 @@ impl RunLimits {
     #[must_use]
     pub fn fanout_concurrency(mut self, value: NonZeroUsize) -> RunLimits {
         self.fanout_concurrency = value;
+        self
+    }
+
+    /// Sets the maximum number of items a single fanout may map over.
+    ///
+    /// A list longer than this is rejected before any arm is scheduled.
+    #[must_use]
+    pub fn max_fanout_items(mut self, value: NonZeroUsize) -> RunLimits {
+        self.max_fanout_items = value;
         self
     }
 
@@ -617,6 +628,12 @@ impl RunLimits {
     #[must_use]
     pub fn fanout(&self) -> NonZeroUsize {
         self.fanout_concurrency
+    }
+
+    /// Returns the maximum number of items a single fanout may map over.
+    #[must_use]
+    pub fn fanout_items(&self) -> NonZeroUsize {
+        self.max_fanout_items
     }
 
     /// Returns the maximum accepted model response body size, in bytes.
@@ -1021,7 +1038,7 @@ async fn execute_live_h1(
             prompt
                 .frontmatter
                 .max_tool_iterations
-                .unwrap_or(default_max_tool_iterations),
+                .resolve(default_max_tool_iterations),
             &turns,
             None,
             Some(runtime.producer()),
@@ -1099,7 +1116,7 @@ async fn execute_live_h1(
                         max_tool_iterations: prompt
                             .frontmatter
                             .max_tool_iterations
-                            .unwrap_or(default_max_tool_iterations),
+                            .resolve(default_max_tool_iterations),
                     }
                 } else {
                     ProseMode::SingleShot
@@ -1186,7 +1203,7 @@ async fn run_sections(
     let max_tool_iterations = prompt
         .frontmatter
         .max_tool_iterations
-        .unwrap_or(default_max_tool_iterations);
+        .resolve(default_max_tool_iterations);
 
     let task_handles = section_handles(&prompt.sections);
     let mut index = 0usize;
@@ -2024,6 +2041,7 @@ fn make_fanout_callback(
         shared_tools,
         max_tool_iterations,
         fanout_concurrency: limits.fanout(),
+        max_fanout_items: limits.fanout_items(),
         lua_memory_bytes: limits.lua_memory().get(),
         lua_log_events: limits.lua_logs().get(),
         last_reply,
