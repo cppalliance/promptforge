@@ -4,7 +4,7 @@
 //! the URL and address policies, redirects, DNS, the size caps, the timeouts,
 //! and the content-type and decoding refusals. It carries a model-facing
 //! rendering that withholds internal detail, and converts into
-//! [`promptforge_core::Error`], which is what the `Tool` trait returns.
+//! [`ToolError`], which is what the `Tool` trait returns.
 
 use std::net::IpAddr;
 
@@ -173,6 +173,17 @@ pub enum FetchError {
         /// The HTTP status code.
         status: u16,
     },
+
+    /// The response body could not be read to completion.
+    ///
+    /// A transport failure mid-stream leaves the body incomplete. The model can
+    /// retry or fetch a different URL, so this is recoverable.
+    #[non_exhaustive]
+    #[error("reading the response body from {url} failed; try again or use a different URL")]
+    BodyRead {
+        /// The URL whose response body could not be fully read.
+        url: String,
+    },
 }
 
 impl FetchError {
@@ -215,6 +226,7 @@ impl FetchError {
                 | FetchError::Dns { .. }
                 | FetchError::RedirectRefused { .. }
                 | FetchError::BlockedScheme(_)
+                | FetchError::BodyRead { .. }
         )
     }
 }
