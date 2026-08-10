@@ -1,9 +1,10 @@
 //! Guarded `llama-server` child process for gateway-owned local inference.
 
-use std::collections::VecDeque;
+mod support;
+#[cfg(test)]
+mod tests;
+
 use std::ffi::OsString;
-use std::io::Read;
-use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,10 +12,12 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
-
 use crate::config::Secret;
 use crate::local::error::LocalError;
+use support::{
+    SharedCapture, capture_reader, display_invocation, free_port, listener_is_present, new_capture,
+    random_identity, readiness_belongs_to, server_args,
+};
 
 type Result<T> = std::result::Result<T, LocalError>;
 
@@ -25,6 +28,11 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(1);
 const STARTUP_ATTEMPTS: usize = 4;
 const LOOPBACK: &str = "127.0.0.1";
 const API_KEY_REDACTION: &str = "<per-attempt-secret>";
+/// Upper bound on how long an explicit or drop-time teardown waits for a killed
+/// child to be reaped before giving up. Keeps teardown bounded, never unbounded.
+const TEARDOWN_DEADLINE: Duration = Duration::from_secs(5);
+/// Poll interval while reaping a killed child during bounded teardown.
+const TEARDOWN_POLL: Duration = Duration::from_millis(10);
 
 #[derive(Clone, Copy, Debug)]
 struct StartupPolicy {
@@ -64,43 +72,6 @@ enum WaitOutcome {
     Ready,
     PortCollision(ExitStatus),
 }
-
-#[derive(Debug)]
-struct BoundedCapture {
-    bytes: VecDeque<u8>,
-    dropped: usize,
-    limit: usize,
-}
-
-impl BoundedCapture {
-    fn new(limit: usize) -> Self {
-        Self {
-            bytes: VecDeque::with_capacity(limit),
-            dropped: 0,
-            limit,
-        }
-    }
-
-    fn append(&mut self, bytes: &[u8]) {
-        self.bytes.extend(bytes);
-        while self.bytes.len() > self.limit {
-            self.bytes.pop_front();
-            self.dropped = self.dropped.saturating_add(1);
-        }
-    }
-
-    fn render(&self) -> String {
-        let bytes = self.bytes.iter().copied().collect::<Vec<_>>();
-        let text = String::from_utf8_lossy(&bytes);
-        if self.dropped == 0 {
-            text.into_owned()
-        } else {
-            format!("[{} earlier bytes omitted]\n{text}", self.dropped)
-        }
-    }
-}
-
-type SharedCapture = Arc<Mutex<BoundedCapture>>;
 
 type SpawnFn = Box<dyn FnMut(&SpawnRequest<'_>) -> Result<Child> + Send>;
 
@@ -246,8 +217,8 @@ impl ServerGuard {
                 api_key: &identity.api_key,
             };
             let child = spawner.spawn(&request)?;
-            let stdout = Arc::new(Mutex::new(BoundedCapture::new(CAPTURE_LIMIT)));
-            let stderr = Arc::new(Mutex::new(BoundedCapture::new(CAPTURE_LIMIT)));
+            let stdout = new_capture();
+            let stderr = new_capture();
             let mut guard = Self {
                 child,
                 port,
@@ -433,8 +404,7 @@ impl ServerGuard {
         model: &Path,
         options: &LaunchOptions,
     ) -> Result<()> {
-        let _ignored = self.child.kill();
-        let _ignored = self.child.wait();
+        self.terminate_child()?;
         self.join_readers();
 
         let args = server_args(
@@ -456,8 +426,8 @@ impl ServerGuard {
         };
         let child = self.spawner.spawn(&request)?;
         self.child = child;
-        self.stdout = Arc::new(Mutex::new(BoundedCapture::new(CAPTURE_LIMIT)));
-        self.stderr = Arc::new(Mutex::new(BoundedCapture::new(CAPTURE_LIMIT)));
+        self.stdout = new_capture();
+        self.stderr = new_capture();
         self.readers = Vec::with_capacity(2);
         self.start_capture()?;
 
@@ -494,755 +464,40 @@ impl ServerGuard {
             let _ignored = reader.join();
         }
     }
+
+    /// Best-effort bounded termination of the current child.
+    ///
+    /// Checks `try_wait` first so an already-exited child is never re-signalled,
+    /// then kills and reaps within [`TEARDOWN_DEADLINE`] so teardown can never
+    /// block unbounded. Kill and reap-timeout failures are surfaced to callers.
+    fn terminate_child(&mut self) -> Result<()> {
+        if self.child_status()?.is_some() {
+            return Ok(());
+        }
+        self.child
+            .kill()
+            .map_err(|source| LocalError::Server(format!("kill llama-server child: {source}")))?;
+        let deadline = Instant::now() + TEARDOWN_DEADLINE;
+        loop {
+            if self.child_status()?.is_some() {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(LocalError::Server(
+                    "llama-server child did not exit within the teardown deadline".to_owned(),
+                ));
+            }
+            thread::sleep(TEARDOWN_POLL);
+        }
+    }
 }
 
 impl Drop for ServerGuard {
     fn drop(&mut self) {
-        let _ignored = self.child.kill();
-        let _ignored = self.child.wait();
+        // Best-effort, bounded teardown; the graceful, error-surfacing path is
+        // `shutdown`. `terminate_child` caps its reap at `TEARDOWN_DEADLINE`, so
+        // this never waits unbounded even if the child ignores the kill signal.
+        let _ignored = self.terminate_child();
         self.join_readers();
-    }
-}
-
-fn free_port() -> Result<u16> {
-    let listener = TcpListener::bind((LOOPBACK, 0))
-        .map_err(|source| LocalError::Server(format!("select free llama-server port: {source}")))?;
-    listener
-        .local_addr()
-        .map(|address| address.port())
-        .map_err(|source| LocalError::Server(format!("read selected llama-server port: {source}")))
-}
-
-fn random_identity() -> AttemptIdentity {
-    // The loopback bearer token guards the local llama-server; use the OS-seeded
-    // cryptographic RNG (`rand::rng`, a ChaCha-based CSPRNG) rather than a fast
-    // non-cryptographic generator.
-    use rand::Rng;
-    let mut rng = rand::rng();
-    let model_nonce = format!("{:016x}{:016x}", rng.random::<u64>(), rng.random::<u64>());
-    let key_nonce = format!("{:016x}{:016x}", rng.random::<u64>(), rng.random::<u64>());
-    AttemptIdentity {
-        model_alias: format!("promptforge-local-{model_nonce}"),
-        api_key: format!("promptforge-local-{key_nonce}"),
-    }
-}
-
-fn listener_is_present(port: u16, timeout: Duration) -> bool {
-    let Ok(address) = format!("{LOOPBACK}:{port}").parse() else {
-        return false;
-    };
-    TcpStream::connect_timeout(&address, timeout).is_ok()
-}
-
-fn readiness_belongs_to(
-    client: &reqwest::blocking::Client,
-    port: u16,
-    api_key: &str,
-    model_alias: &str,
-) -> bool {
-    let base = format!("http://{LOOPBACK}:{port}");
-    let Ok(health) = client
-        .get(format!("{base}/health"))
-        .bearer_auth(api_key)
-        .send()
-    else {
-        return false;
-    };
-    if !health.status().is_success() {
-        return false;
-    }
-    let Ok(models) = client
-        .get(format!("{base}/v1/models"))
-        .bearer_auth(api_key)
-        .send()
-    else {
-        return false;
-    };
-    if !models.status().is_success() {
-        return false;
-    }
-    let Ok(body) = models.json::<Value>() else {
-        return false;
-    };
-    body.get("data")
-        .and_then(Value::as_array)
-        .is_some_and(|models| {
-            models
-                .iter()
-                .any(|model| model.get("id").and_then(Value::as_str) == Some(model_alias))
-        })
-}
-
-/// Builds the full `llama-server` argument vector for one launch attempt.
-fn server_args(
-    model: &Path,
-    port: u16,
-    model_alias: &str,
-    api_key: &str,
-    options: &LaunchOptions,
-) -> Vec<OsString> {
-    let mut args = vec![
-        OsString::from("--model"),
-        model.as_os_str().to_owned(),
-        OsString::from("--alias"),
-        OsString::from(model_alias),
-        OsString::from("--api-key"),
-        OsString::from(api_key),
-        OsString::from("--host"),
-        OsString::from(LOOPBACK),
-        OsString::from("--port"),
-        OsString::from(port.to_string()),
-        OsString::from("--ctx-size"),
-        OsString::from(options.ctx_size.to_string()),
-        OsString::from("--n-predict"),
-        OsString::from(options.n_predict.to_string()),
-        OsString::from("--parallel"),
-        OsString::from(options.parallel.to_string()),
-        OsString::from("--cache-type-k"),
-        OsString::from(&options.cache_type_k),
-        OsString::from("--cache-type-v"),
-        OsString::from(&options.cache_type_v),
-        OsString::from("-ngl"),
-        OsString::from(options.gpu_layers.to_string()),
-        OsString::from("--jinja"),
-    ];
-    if let Some(template) = &options.chat_template_file {
-        args.extend([
-            OsString::from("--chat-template-file"),
-            template.as_os_str().to_owned(),
-        ]);
-    }
-    if options.flash_attention {
-        args.extend([OsString::from("--flash-attn"), OsString::from("on")]);
-    }
-    if !options.think {
-        args.extend([OsString::from("--reasoning"), OsString::from("off")]);
-    }
-    args.extend([OsString::from("--reasoning-format"), OsString::from("auto")]);
-    let (temp, top_p) = if options.think {
-        ("1.0", "0.95")
-    } else {
-        ("0.7", "0.8")
-    };
-    args.extend([
-        OsString::from("--temp"),
-        OsString::from(temp),
-        OsString::from("--top-p"),
-        OsString::from(top_p),
-        OsString::from("--top-k"),
-        OsString::from("20"),
-        OsString::from("--presence-penalty"),
-        OsString::from("1.5"),
-    ]);
-    args
-}
-
-fn display_invocation(executable: &Path, args: &[OsString]) -> String {
-    let mut pieces = Vec::with_capacity(args.len() + 1);
-    pieces.push(executable.display().to_string());
-    let mut redact_next = false;
-    for argument in args {
-        if redact_next {
-            pieces.push(API_KEY_REDACTION.to_owned());
-            redact_next = false;
-        } else {
-            let rendered = argument.to_string_lossy().into_owned();
-            redact_next = rendered == "--api-key";
-            pieces.push(rendered);
-        }
-    }
-    pieces.join(" ")
-}
-
-fn capture_reader<R>(
-    name: &'static str,
-    mut reader: R,
-    capture: SharedCapture,
-) -> Result<JoinHandle<()>>
-where
-    R: Read + Send + 'static,
-{
-    thread::Builder::new()
-        .name(name.to_owned())
-        .spawn(move || {
-            let mut buffer = [0_u8; 4096];
-            loop {
-                match reader.read(&mut buffer) {
-                    Ok(0) | Err(_) => break,
-                    Ok(count) => capture
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .append(&buffer[..count]),
-                }
-            }
-        })
-        .map_err(|source| LocalError::Server(format!("start {name} capture thread: {source}")))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::io::{Read as _, Write as _};
-    use std::net::TcpStream;
-    use std::path::PathBuf;
-
-    use super::*;
-
-    const TEST_PORT: &str = "PROMPTFORGE_GATEWAY_TEST_LLAMA_PORT";
-    const TEST_MODEL_ALIAS: &str = "PROMPTFORGE_GATEWAY_TEST_LLAMA_MODEL_ALIAS";
-    const TEST_API_KEY: &str = "PROMPTFORGE_GATEWAY_TEST_LLAMA_API_KEY";
-    const TEST_POLICY: StartupPolicy = StartupPolicy {
-        attempts: 2,
-        deadline: Duration::from_secs(5),
-        interval: Duration::from_millis(10),
-        http_timeout: Duration::from_millis(100),
-    };
-
-    fn options(think: bool) -> LaunchOptions {
-        LaunchOptions {
-            ctx_size: 65_536,
-            n_predict: 8192,
-            parallel: 1,
-            gpu_layers: 99,
-            flash_attention: true,
-            cache_type_k: "q8_0".to_owned(),
-            cache_type_v: "q4_0".to_owned(),
-            think,
-            chat_template_file: None,
-        }
-    }
-
-    fn expected_args(pieces: &[&str]) -> Vec<OsString> {
-        pieces.iter().map(OsString::from).collect()
-    }
-
-    struct FakeHttpServer {
-        port: u16,
-        shutdown: Arc<AtomicBool>,
-        thread: Option<JoinHandle<()>>,
-    }
-
-    impl FakeHttpServer {
-        fn start(model_alias: &str) -> Self {
-            let listener = TcpListener::bind((LOOPBACK, 0)).expect("bind unrelated fake listener");
-            listener
-                .set_nonblocking(true)
-                .expect("make unrelated fake listener nonblocking");
-            let port = listener
-                .local_addr()
-                .expect("read unrelated fake listener address")
-                .port();
-            let shutdown = Arc::new(AtomicBool::new(false));
-            let thread_shutdown = Arc::clone(&shutdown);
-            let model_alias = model_alias.to_owned();
-            let thread = thread::spawn(move || {
-                while !thread_shutdown.load(Ordering::Acquire) {
-                    match listener.accept() {
-                        Ok((stream, _)) => respond(stream, &model_alias, None),
-                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(5));
-                        }
-                        Err(_) => break,
-                    }
-                }
-            });
-            Self {
-                port,
-                shutdown,
-                thread: Some(thread),
-            }
-        }
-    }
-
-    impl Drop for FakeHttpServer {
-        fn drop(&mut self) {
-            self.shutdown.store(true, Ordering::Release);
-            let _ignored = TcpStream::connect((LOOPBACK, self.port));
-            if let Some(thread) = self.thread.take() {
-                let result = thread.join();
-                if !std::thread::panicking() {
-                    result.expect("join unrelated fake listener");
-                }
-            }
-        }
-    }
-
-    fn respond(mut stream: TcpStream, model_alias: &str, required_api_key: Option<&str>) {
-        let _ignored = stream.set_read_timeout(Some(Duration::from_millis(250)));
-        let mut request = [0_u8; 4096];
-        let Ok(count) = stream.read(&mut request) else {
-            return;
-        };
-        let request = String::from_utf8_lossy(&request[..count]);
-        let authorized = required_api_key.is_none_or(|api_key| {
-            request
-                .lines()
-                .any(|line| line.eq_ignore_ascii_case(&format!("authorization: Bearer {api_key}")))
-        });
-        let (status, body) = if !authorized {
-            ("401 Unauthorized", r#"{"error":"unauthorized"}"#.to_owned())
-        } else if request.starts_with("GET /health ") {
-            ("200 OK", r#"{"status":"ok"}"#.to_owned())
-        } else if request.starts_with("GET /v1/models ") {
-            (
-                "200 OK",
-                format!(r#"{{"data":[{{"id":"{model_alias}"}}]}}"#),
-            )
-        } else if request.starts_with("POST /v1/chat/completions ")
-            || request.starts_with("POST /chat/completions ")
-        {
-            (
-                "200 OK",
-                format!(
-                    r#"{{"model":"{model_alias}","choices":[{{"index":0,"message":{{"role":"assistant","content":"ok"}}}}]}}"#
-                ),
-            )
-        } else {
-            ("404 Not Found", r#"{"error":"not found"}"#.to_owned())
-        };
-        let response = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        let _ignored = stream.write_all(response.as_bytes());
-    }
-
-    fn deterministic_identity(index: usize) -> AttemptIdentity {
-        AttemptIdentity {
-            model_alias: format!("promptforge-test-model-{index}"),
-            api_key: format!("promptforge-test-key-{index}"),
-        }
-    }
-
-    fn spawn_fake_child(request: &SpawnRequest<'_>) -> Result<Child> {
-        let executable = std::env::current_exe()
-            .map_err(|source| LocalError::Server(format!("locate test executable: {source}")))?;
-        Command::new(executable)
-            .args([
-                "--exact",
-                "local::server::tests::fake_llama_server_worker",
-                "--ignored",
-                "--nocapture",
-            ])
-            .env(TEST_PORT, request.port.to_string())
-            .env(TEST_MODEL_ALIAS, request.model_alias)
-            .env(TEST_API_KEY, request.api_key)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|source| {
-                LocalError::Server(format!("spawn fake llama-server child: {source}"))
-            })
-    }
-
-    #[test]
-    #[ignore = "subprocess worker invoked by startup regression tests"]
-    fn fake_llama_server_worker() {
-        let (Ok(port), Ok(model_alias), Ok(api_key)) = (
-            std::env::var(TEST_PORT),
-            std::env::var(TEST_MODEL_ALIAS),
-            std::env::var(TEST_API_KEY),
-        ) else {
-            return;
-        };
-        let Ok(port) = port.parse::<u16>() else {
-            return;
-        };
-        let Ok(listener) = TcpListener::bind((LOOPBACK, port)) else {
-            return;
-        };
-        for stream in listener.incoming() {
-            let Ok(stream) = stream else {
-                break;
-            };
-            respond(stream, &model_alias, Some(&api_key));
-        }
-    }
-
-    #[test]
-    fn launch_args_match_local_model_defaults() {
-        let args = server_args(
-            Path::new("model.gguf"),
-            12345,
-            "qwen-local",
-            "private-key",
-            &options(false),
-        );
-        assert_eq!(
-            args,
-            expected_args(&[
-                "--model",
-                "model.gguf",
-                "--alias",
-                "qwen-local",
-                "--api-key",
-                "private-key",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "12345",
-                "--ctx-size",
-                "65536",
-                "--n-predict",
-                "8192",
-                "--parallel",
-                "1",
-                "--cache-type-k",
-                "q8_0",
-                "--cache-type-v",
-                "q4_0",
-                "-ngl",
-                "99",
-                "--jinja",
-                "--flash-attn",
-                "on",
-                "--reasoning",
-                "off",
-                "--reasoning-format",
-                "auto",
-                "--temp",
-                "0.7",
-                "--top-p",
-                "0.8",
-                "--top-k",
-                "20",
-                "--presence-penalty",
-                "1.5",
-            ])
-        );
-        let rendered = display_invocation(Path::new("llama-server"), &args);
-        assert!(rendered.contains("--api-key <per-attempt-secret>"));
-        assert!(!rendered.contains("private-key"));
-    }
-
-    #[test]
-    fn launch_args_emit_chat_template_file() {
-        let mut opts = options(false);
-        opts.chat_template_file = Some(PathBuf::from("mistral-tools.jinja"));
-        let args = server_args(Path::new("model.gguf"), 1, "alias", "key", &opts);
-        let rendered = display_invocation(Path::new("llama-server"), &args);
-        assert!(rendered.contains("--chat-template-file"));
-        assert!(rendered.contains("mistral-tools.jinja"));
-    }
-
-    #[test]
-    fn launch_args_emit_lane_parallel() {
-        let mut opts = options(false);
-        opts.parallel = 3;
-        let args = server_args(Path::new("model.gguf"), 1, "alias", "key", &opts);
-        let rendered = display_invocation(Path::new("llama-server"), &args);
-        assert!(rendered.contains("--parallel 3"));
-        assert!(!rendered.contains("--parallel 1"));
-    }
-
-    #[test]
-    fn thinking_preset_omits_reasoning_off() {
-        let args = server_args(Path::new("model.gguf"), 1, "alias", "key", &options(true));
-        let rendered = display_invocation(Path::new("llama-server"), &args);
-        assert!(!rendered.contains("--reasoning off"));
-        assert!(rendered.contains("--temp 1.0"));
-        assert!(rendered.contains("--top-p 0.95"));
-    }
-
-    #[test]
-    fn captured_diagnostics_keep_only_the_bounded_tail() {
-        let mut capture = BoundedCapture::new(8);
-        capture.append(b"abcdef");
-        capture.append(b"ghijkl");
-        assert_eq!(capture.render(), "[4 earlier bytes omitted]\nefghijkl");
-    }
-
-    #[test]
-    fn debug_redacts_api_key() {
-        let port = free_port().expect("select free port");
-        let mut ports = VecDeque::from([port]);
-        let mut select_port = || {
-            ports
-                .pop_front()
-                .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
-        };
-        let mut make_identity = || deterministic_identity(0);
-        let interrupted = AtomicBool::new(false);
-        let guard = ServerGuard::start_with(
-            Path::new("fake-llama-server"),
-            Path::new("pinned-model.gguf"),
-            &options(false),
-            &interrupted,
-            TEST_POLICY,
-            &mut select_port,
-            &mut make_identity,
-            &ChildSpawner::new(spawn_fake_child),
-        )
-        .expect("fake child should become ready");
-        let key = guard.api_key().to_owned();
-        let rendered = format!("{guard:?}");
-        assert!(!rendered.contains(&key));
-        assert!(rendered.contains("Secret(redacted)"));
-    }
-
-    #[test]
-    fn retries_after_foreign_health_listener_wins_selected_port() {
-        let foreign = FakeHttpServer::start("Qwen3-0.6B-Q8_0.gguf");
-        let fresh_port = free_port().expect("select retry port");
-        let mut ports = VecDeque::from([foreign.port, fresh_port]);
-        let mut select_port = || {
-            ports
-                .pop_front()
-                .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
-        };
-        let mut identity_index = 0;
-        let mut make_identity = || {
-            let identity = deterministic_identity(identity_index);
-            identity_index += 1;
-            identity
-        };
-        let attempted_ports = Arc::new(Mutex::new(Vec::new()));
-        let recorded_ports = Arc::clone(&attempted_ports);
-        let interrupted = AtomicBool::new(false);
-
-        let guard = ServerGuard::start_with(
-            Path::new("fake-llama-server"),
-            Path::new("pinned-model.gguf"),
-            &options(false),
-            &interrupted,
-            TEST_POLICY,
-            &mut select_port,
-            &mut make_identity,
-            &ChildSpawner::new(move |request: &SpawnRequest<'_>| {
-                recorded_ports
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(request.port);
-                spawn_fake_child(request)
-            }),
-        )
-        .expect("retry should reach the spawned fake server");
-
-        assert_eq!(
-            *attempted_ports
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-            [foreign.port, fresh_port]
-        );
-        assert_eq!(guard.port, fresh_port);
-        assert_eq!(guard.model_alias(), "promptforge-test-model-1");
-        assert_eq!(guard.api_key(), "promptforge-test-key-1");
-    }
-
-    #[test]
-    fn drop_kills_the_child_process() {
-        let port = free_port().expect("select free port");
-        let mut ports = VecDeque::from([port]);
-        let mut select_port = || {
-            ports
-                .pop_front()
-                .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
-        };
-        let mut make_identity = || deterministic_identity(0);
-        let child_id = Arc::new(Mutex::new(None));
-        let recorded_id = Arc::clone(&child_id);
-        let interrupted = AtomicBool::new(false);
-
-        let guard = ServerGuard::start_with(
-            Path::new("fake-llama-server"),
-            Path::new("pinned-model.gguf"),
-            &options(false),
-            &interrupted,
-            TEST_POLICY,
-            &mut select_port,
-            &mut make_identity,
-            &ChildSpawner::new(move |request: &SpawnRequest<'_>| {
-                let child = spawn_fake_child(request)?;
-                *recorded_id
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(child.id());
-                Ok(child)
-            }),
-        )
-        .expect("fake child should become ready");
-        assert!(listener_is_present(port, Duration::from_millis(100)));
-        let id = child_id
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .expect("child id recorded");
-        drop(guard);
-
-        assert!(
-            !process_is_alive(id),
-            "ServerGuard Drop must kill the llama-server child"
-        );
-        assert!(!listener_is_present(port, Duration::from_millis(100)));
-    }
-
-    #[test]
-    fn respawn_reuses_port_and_identity_after_child_death() {
-        let port = free_port().expect("select free port");
-        let mut ports = VecDeque::from([port]);
-        let mut select_port = || {
-            ports
-                .pop_front()
-                .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
-        };
-        let mut make_identity = || deterministic_identity(0);
-        let spawn_log = Arc::new(Mutex::new(Vec::new()));
-        let recorded = Arc::clone(&spawn_log);
-        let interrupted = AtomicBool::new(false);
-
-        let mut guard = ServerGuard::start_with(
-            Path::new("fake-llama-server"),
-            Path::new("pinned-model.gguf"),
-            &options(false),
-            &interrupted,
-            TEST_POLICY,
-            &mut select_port,
-            &mut make_identity,
-            &ChildSpawner::new(move |request: &SpawnRequest<'_>| {
-                recorded
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push((
-                        request.port,
-                        request.model_alias.to_owned(),
-                        request.api_key.to_owned(),
-                    ));
-                spawn_fake_child(request)
-            }),
-        )
-        .expect("fake child should become ready");
-
-        let alias = guard.model_alias().to_owned();
-        let key = guard.api_key().to_owned();
-        let _ignored = guard.child.kill();
-        let _ignored = guard.child.wait();
-        assert!(!guard.is_running().expect("inspect dead child"));
-
-        guard
-            .respawn(
-                Path::new("fake-llama-server"),
-                Path::new("pinned-model.gguf"),
-                &options(false),
-            )
-            .expect("respawn should become ready on the same port");
-
-        assert_eq!(guard.port(), port);
-        assert_eq!(guard.model_alias(), alias);
-        assert_eq!(guard.api_key(), key);
-        assert!(guard.is_running().expect("inspect respawned child"));
-        let log = spawn_log
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        assert_eq!(log.len(), 2);
-        assert_eq!(log[0], (port, alias.clone(), key.clone()));
-        assert_eq!(log[1], (port, alias, key));
-    }
-
-    #[test]
-    fn local_upstream_send_respawns_dead_child_once() {
-        use crate::local::upstream::LocalUpstream;
-        use crate::upstream::Upstream;
-        use crate::wire::ChatRequest;
-        use serde_json::Map;
-
-        let port = free_port().expect("select free port");
-        let mut ports = VecDeque::from([port]);
-        let mut select_port = || {
-            ports
-                .pop_front()
-                .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
-        };
-        let mut make_identity = || deterministic_identity(0);
-        let spawn_count = Arc::new(Mutex::new(0_usize));
-        let counted = Arc::clone(&spawn_count);
-        let spawn_log = Arc::new(Mutex::new(Vec::new()));
-        let recorded = Arc::clone(&spawn_log);
-        let interrupted = AtomicBool::new(false);
-
-        // Blocking readiness must run outside a Tokio async context.
-        let mut guard = ServerGuard::start_with(
-            Path::new("fake-llama-server"),
-            Path::new("pinned-model.gguf"),
-            &options(false),
-            &interrupted,
-            TEST_POLICY,
-            &mut select_port,
-            &mut make_identity,
-            &ChildSpawner::new(move |request: &SpawnRequest<'_>| {
-                *counted
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
-                recorded
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push((
-                        request.port,
-                        request.model_alias.to_owned(),
-                        request.api_key.to_owned(),
-                    ));
-                spawn_fake_child(request)
-            }),
-        )
-        .expect("fake child should become ready");
-
-        let alias = guard.model_alias().to_owned();
-        let key = guard.api_key().to_owned();
-        let _ignored = guard.child.kill();
-        let _ignored = guard.child.wait();
-        assert!(!guard.is_running().expect("inspect dead child"));
-
-        let upstream = LocalUpstream::new(
-            guard,
-            PathBuf::from("fake-llama-server"),
-            PathBuf::from("pinned-model.gguf"),
-            options(false),
-            "qwen-local".to_owned(),
-        );
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("build test runtime");
-        let response = runtime
-            .block_on(upstream.send(
-                ChatRequest {
-                    model: "qwen-local".to_owned(),
-                    messages: Vec::new(),
-                    rest: Map::new(),
-                },
-                &alias,
-            ))
-            .expect("send should respawn and succeed");
-
-        assert_eq!(response.model, "qwen-local");
-        assert_eq!(
-            *spawn_count
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-            2
-        );
-        let log = spawn_log
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        assert_eq!(log[0], (port, alias.clone(), key.clone()));
-        assert_eq!(log[1], (port, alias, key));
-    }
-
-    fn process_is_alive(pid: u32) -> bool {
-        #[cfg(windows)]
-        {
-            Command::new("tasklist")
-                .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-                .output()
-                .map_or(true, |output| {
-                    let text = String::from_utf8_lossy(&output.stdout);
-                    text.contains(&pid.to_string())
-                })
-        }
-        #[cfg(not(windows))]
-        {
-            Command::new("kill")
-                .args(["-0", &pid.to_string()])
-                .status()
-                .map_or(true, |status| status.success())
-        }
     }
 }
