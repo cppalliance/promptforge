@@ -17,7 +17,16 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+/// The backend lock was poisoned by a panicked holder.
+///
+/// Kept private and surfaced only as an opaque [`StoreError::Backend`] source
+/// (STORE-004), so a poisoned lock is a visible backend failure rather than a
+/// silent recovery of state this handle cannot vouch for.
+#[derive(Debug, thiserror::Error)]
+#[error("store backend lock was poisoned by a panicked holder")]
+struct StorePoisoned;
 
 /// Why a logical store path was rejected before any backend saw it.
 ///
@@ -36,6 +45,17 @@ pub enum PathReason {
     Control,
     /// The path contained an empty segment (a `//` run, or a trailing `/`).
     EmptySegment,
+    /// The path contained a backslash, which is ambiguous across backends (a
+    /// literal byte to one, a separator to another).
+    Backslash,
+    /// A segment was a platform-reserved device name (for example `CON`,
+    /// `NUL`, `COM1`), which some backends cannot represent as a plain file.
+    ReservedName,
+    /// A segment ended in a byte some backends silently strip (a trailing `.`
+    /// or space), so the stored name would not round-trip.
+    UnsafeSuffix,
+    /// The path exceeded the maximum supported length in bytes.
+    TooLong,
 }
 
 impl std::fmt::Display for PathReason {
@@ -46,6 +66,10 @@ impl std::fmt::Display for PathReason {
             PathReason::Traversal => "path contains a traversal segment",
             PathReason::Control => "path contains a control character",
             PathReason::EmptySegment => "path contains an empty segment",
+            PathReason::Backslash => "path contains a backslash",
+            PathReason::ReservedName => "path contains a reserved device name",
+            PathReason::UnsafeSuffix => "path segment ends in an unsafe character",
+            PathReason::TooLong => "path is too long",
         };
         formatter.write_str(text)
     }
@@ -62,6 +86,10 @@ pub enum StoreErrorKind {
     NotFound,
     /// A `str_replace` anchor did not occur, or occurred more than once.
     Anchor,
+    /// A `str_replace` anchor was itself invalid (for example empty), so it was
+    /// refused before any backend search rather than being reported as merely
+    /// "not found".
+    InvalidAnchor,
     /// A caller-supplied path failed validation.
     InvalidPath,
     /// A caller-supplied glob pattern failed validation.
@@ -86,6 +114,17 @@ pub enum StoreError {
     NotFound {
         /// The logical path that did not resolve to a file.
         path: String,
+    },
+
+    /// A `str_replace` anchor was itself invalid (for example empty) and was
+    /// refused before any backend search.
+    #[error("invalid anchor for {path}: {reason}")]
+    #[non_exhaustive]
+    InvalidAnchor {
+        /// The logical path the edit targeted.
+        path: String,
+        /// A short human-readable reason the anchor was rejected.
+        reason: &'static str,
     },
 
     /// The `str_replace` anchor did not occur in the file.
@@ -155,6 +194,7 @@ impl StoreError {
     pub fn kind(&self) -> StoreErrorKind {
         match self {
             StoreError::NotFound { .. } => StoreErrorKind::NotFound,
+            StoreError::InvalidAnchor { .. } => StoreErrorKind::InvalidAnchor,
             StoreError::AnchorNotFound { .. } | StoreError::AnchorAmbiguous { .. } => {
                 StoreErrorKind::Anchor
             }
@@ -191,6 +231,7 @@ impl StoreError {
     pub fn path(&self) -> Option<&str> {
         match self {
             StoreError::NotFound { path }
+            | StoreError::InvalidAnchor { path, .. }
             | StoreError::AnchorNotFound { path, .. }
             | StoreError::AnchorAmbiguous { path, .. }
             | StoreError::InvalidPath { path, .. } => Some(path),
@@ -225,6 +266,33 @@ impl StoreError {
 /// cheap denial-of-service lever, so an over-long pattern is refused outright.
 const MAX_GLOB_PATTERN_BYTES: usize = 1024;
 
+/// The largest logical store path, in bytes, accepted before dispatch.
+///
+/// Bounds both the validated path itself and, transitively, the text the glob
+/// matcher can be asked to scan (STORE-003/005), so neither is an unbounded
+/// denial-of-service lever.
+const MAX_STORE_PATH_BYTES: usize = 1024;
+
+/// Returns whether `segment` is a platform-reserved device name.
+///
+/// Windows treats names like `CON`, `NUL`, `COM1`, and `LPT1` as devices even
+/// with an extension (`con.txt`), so the base name before the first `.` is
+/// checked case-insensitively (STORE-003).
+fn is_reserved_device_name(segment: &str) -> bool {
+    let base = segment.split('.').next().unwrap_or(segment);
+    let upper = base.to_ascii_uppercase();
+    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || is_numbered_device(&upper, "COM")
+        || is_numbered_device(&upper, "LPT")
+}
+
+/// Returns whether `name` is `<prefix>N` for a single digit `1..=9`.
+fn is_numbered_device(name: &str, prefix: &str) -> bool {
+    name.strip_prefix(prefix)
+        .and_then(|rest| rest.parse::<u8>().ok().filter(|_| rest.len() == 1))
+        .is_some_and(|n| (1..=9).contains(&n))
+}
+
 /// A validated logical store path in one canonical form.
 ///
 /// `StoreRef` parses every caller-supplied `&str` into this before dispatch, so
@@ -245,11 +313,20 @@ impl StorePath {
         if raw.is_empty() {
             return reject(PathReason::Empty);
         }
+        if raw.len() > MAX_STORE_PATH_BYTES {
+            return reject(PathReason::TooLong);
+        }
         if raw.starts_with('/') {
             return reject(PathReason::Absolute);
         }
         if raw.bytes().any(|b| b < 0x20 || b == 0x7f) {
             return reject(PathReason::Control);
+        }
+        // A backslash is a separator on some backends and a literal on others;
+        // refuse it so a canonical `/`-separated path cannot be reinterpreted
+        // (STORE-003).
+        if raw.contains('\\') {
+            return reject(PathReason::Backslash);
         }
         let mut segments = 0usize;
         for segment in raw.split('/') {
@@ -258,6 +335,14 @@ impl StorePath {
             }
             if segment == "." || segment == ".." {
                 return reject(PathReason::Traversal);
+            }
+            // Trailing `.`/space are stripped by some backends, so the stored
+            // name would not round-trip (STORE-003).
+            if segment.ends_with('.') || segment.ends_with(' ') {
+                return reject(PathReason::UnsafeSuffix);
+            }
+            if is_reserved_device_name(segment) {
+                return reject(PathReason::ReservedName);
             }
             segments += 1;
         }
@@ -640,10 +725,19 @@ impl StoreRef {
         StoreRef::new(Box::new(MemStore::new()))
     }
 
-    /// Recovers the guard even if a prior holder panicked; the stored map stays
-    /// consistent, so poisoning is not a fatal condition here.
-    fn lock(&self) -> MutexGuard<'_, Box<dyn Store + Send>> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    /// Locks the shared backend, or reports it unavailable if a prior holder
+    /// panicked while mutating it.
+    ///
+    /// STORE-004: the backend behind this handle is an arbitrary [`Store`] trait
+    /// object, not a known-consistent [`MemStore`]. A panic mid-mutation can
+    /// leave a filesystem/network backend in a half-applied state, so we do NOT
+    /// blindly `PoisonError::into_inner` and hand back state we cannot vouch
+    /// for. Absent an explicit backend recovery contract, a poisoned lock is a
+    /// backend failure the caller must see.
+    fn lock(&self) -> Result<MutexGuard<'_, Box<dyn Store + Send>>, StoreError> {
+        self.inner
+            .lock()
+            .map_err(|_| StoreError::backend(StorePoisoned))
     }
 
     /// Creates or overwrites the file at `path`. See [`Store::write`].
@@ -661,7 +755,7 @@ impl StoreRef {
     /// ```
     pub fn write(&self, path: &str, contents: &str) -> Result<(), StoreError> {
         let path = StorePath::parse(path)?;
-        self.lock().write(path.as_str(), contents)
+        self.lock()?.write(path.as_str(), contents)
     }
 
     /// Appends to the file at `path`, creating it if absent. See
@@ -680,7 +774,7 @@ impl StoreRef {
     /// ```
     pub fn append(&self, path: &str, contents: &str) -> Result<(), StoreError> {
         let path = StorePath::parse(path)?;
-        self.lock().append(path.as_str(), contents)
+        self.lock()?.append(path.as_str(), contents)
     }
 
     /// Reads the file at `path` as numbered lines. See
@@ -700,7 +794,7 @@ impl StoreRef {
     /// ```
     pub fn read_lines(&self, path: &str) -> Result<String, StoreError> {
         let path = StorePath::parse(path)?;
-        self.lock().read_lines(path.as_str())
+        self.lock()?.read_lines(path.as_str())
     }
 
     /// Reads the file at `path` exactly as stored, with no line numbering.
@@ -720,7 +814,7 @@ impl StoreRef {
     /// ```
     pub fn read(&self, path: &str) -> Result<String, StoreError> {
         let path = StorePath::parse(path)?;
-        self.lock().read(path.as_str())
+        self.lock()?.read(path.as_str())
     }
 
     /// Reads the file at `path` verbatim and wraps it in an untrusted guard
@@ -743,7 +837,7 @@ impl StoreRef {
     /// ```
     pub fn inject(&self, path: &str) -> Result<String, StoreError> {
         let path = StorePath::parse(path)?;
-        let contents = self.lock().read(path.as_str())?;
+        let contents = self.lock()?.read(path.as_str())?;
         Ok(crate::untrusted::wrap(&contents))
     }
 
@@ -767,12 +861,15 @@ impl StoreRef {
     pub fn str_replace(&self, path: &str, old: &str, new: &str) -> Result<(), StoreError> {
         let path = StorePath::parse(path)?;
         if old.is_empty() {
-            return Err(StoreError::AnchorNotFound {
+            // STORE-007: an empty anchor is a malformed edit request, not an
+            // anchor that merely failed to match; refuse it with a dedicated
+            // invalid-anchor condition before any backend search.
+            return Err(StoreError::InvalidAnchor {
                 path: path.as_str().to_owned(),
-                anchor: String::new(),
+                reason: "anchor must not be empty",
             });
         }
-        self.lock().str_replace(path.as_str(), old, new)
+        self.lock()?.str_replace(path.as_str(), old, new)
     }
 
     /// Removes the file at `path`. See [`Store::delete`].
@@ -791,7 +888,7 @@ impl StoreRef {
     /// ```
     pub fn delete(&self, path: &str) -> Result<(), StoreError> {
         let path = StorePath::parse(path)?;
-        self.lock().delete(path.as_str())
+        self.lock()?.delete(path.as_str())
     }
 
     /// Returns stored paths matching `pattern`, sorted. See [`Store::glob`].
@@ -828,7 +925,13 @@ impl StoreRef {
                 reason: "pattern contains a control character".to_owned(),
             });
         }
-        self.lock().glob(pattern)
+        if let Err(reason) = validate_glob_grammar(pattern) {
+            return Err(StoreError::InvalidPattern {
+                pattern: pattern.to_owned(),
+                reason: reason.to_owned(),
+            });
+        }
+        self.lock()?.glob(pattern)
     }
 
     /// Returns whether a file exists at `path`. See [`Store::exists`].
@@ -851,7 +954,7 @@ impl StoreRef {
     /// ```
     pub fn exists(&self, path: &str) -> Result<bool, StoreError> {
         let path = StorePath::parse(path)?;
-        self.lock().exists(path.as_str())
+        self.lock()?.exists(path.as_str())
     }
 }
 
@@ -874,37 +977,149 @@ fn number_lines(content: &str) -> String {
     out
 }
 
+/// One unit of a validated glob pattern.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GlobToken {
+    /// A literal byte that must match exactly.
+    Literal(u8),
+    /// `*`: zero or more bytes, none of them `/` (stays within one segment).
+    Star,
+    /// `**` not bounded by a `/`: zero or more bytes of any kind.
+    DoubleStar,
+    /// `**/`: zero or more whole path segments (empty, or any run ending `/`).
+    DoubleStarSlash,
+}
+
+/// Validates the glob grammar (STORE-006), rejecting unsupported forms.
+///
+/// The grammar is: literal bytes, `*` (within a segment), and `**` occupying a
+/// whole segment (`**`, `**/...`, `.../**`, `.../**/...`). There is no escape
+/// syntax, so a backslash is unsupported and runs of three or more `*` are
+/// rejected rather than silently reinterpreted.
+fn validate_glob_grammar(pattern: &str) -> Result<(), &'static str> {
+    if pattern.contains('\\') {
+        return Err("pattern does not support backslash escapes");
+    }
+    let bytes = pattern.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'*' {
+            index += 1;
+            continue;
+        }
+        let run_start = index;
+        while index < bytes.len() && bytes[index] == b'*' {
+            index += 1;
+        }
+        let run_len = index - run_start;
+        if run_len > 2 {
+            return Err("more than two consecutive '*' are not supported");
+        }
+        if run_len == 2 {
+            let before_ok = run_start == 0 || bytes[run_start - 1] == b'/';
+            let after_ok = index == bytes.len() || bytes[index] == b'/';
+            if !before_ok || !after_ok {
+                return Err("'**' must occupy a whole path segment");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Tokenizes an already-grammar-validated pattern into [`GlobToken`]s.
+fn tokenize_glob(pattern: &[u8]) -> Vec<GlobToken> {
+    let mut tokens = Vec::with_capacity(pattern.len());
+    let mut index = 0;
+    while index < pattern.len() {
+        match pattern[index] {
+            b'*' => {
+                if pattern.get(index + 1) == Some(&b'*') {
+                    if pattern.get(index + 2) == Some(&b'/') {
+                        tokens.push(GlobToken::DoubleStarSlash);
+                        index += 3;
+                    } else {
+                        tokens.push(GlobToken::DoubleStar);
+                        index += 2;
+                    }
+                } else {
+                    tokens.push(GlobToken::Star);
+                    index += 1;
+                }
+            }
+            byte => {
+                tokens.push(GlobToken::Literal(byte));
+                index += 1;
+            }
+        }
+    }
+    tokens
+}
+
 /// Matches `text` against a glob `pattern` where `*` stays within a segment and
 /// `**` spans `/`.
+///
+/// STORE-005: bounded iterative dynamic programming over reachable text
+/// positions, with no recursion and no suffix backtracking, so a hostile
+/// pattern cannot drive exponential time or blow the stack. Runs in
+/// `O(tokens * text_len)` time and `O(text_len)` space.
 fn glob_match(pattern: &[u8], text: &[u8]) -> bool {
-    let Some((&first, pattern_rest)) = pattern.split_first() else {
-        return text.is_empty();
-    };
-    if first == b'*' {
-        if let Some((&b'*', double_rest)) = pattern_rest.split_first() {
-            // `**/` also matches zero path segments, so `a/**/b` matches `a/b`.
-            if let Some((&b'/', after_slash)) = double_rest.split_first()
-                && glob_match(after_slash, text)
-            {
-                return true;
-            }
-            return (0..=text.len()).any(|skip| glob_match(double_rest, &text[skip..]));
+    let tokens = tokenize_glob(pattern);
+    let len = text.len();
+    // `reachable[j]` is true when some prefix of the pattern consumed so far
+    // matches exactly `text[..j]`.
+    let mut reachable = vec![false; len + 1];
+    reachable[0] = true;
+    let mut next = vec![false; len + 1];
+
+    for token in tokens {
+        for slot in &mut next {
+            *slot = false;
         }
-        let mut cursor = 0;
-        loop {
-            if glob_match(pattern_rest, &text[cursor..]) {
-                return true;
+        match token {
+            GlobToken::Literal(byte) => {
+                for j in 0..len {
+                    if reachable[j] && text[j] == byte {
+                        next[j + 1] = true;
+                    }
+                }
             }
-            match text.get(cursor) {
-                Some(&byte) if byte != b'/' => cursor += 1,
-                _ => return false,
+            GlobToken::Star => {
+                // Zero or more non-`/` bytes: sweep left to right, carrying
+                // reachability forward across each non-slash byte.
+                let mut carry = false;
+                for j in 0..=len {
+                    let here = reachable[j] || carry;
+                    next[j] = here;
+                    carry = here && j < len && text[j] != b'/';
+                }
+            }
+            GlobToken::DoubleStar => {
+                // Zero or more bytes of any kind: once any position is
+                // reachable, every later position is too.
+                let mut seen = false;
+                for j in 0..=len {
+                    seen |= reachable[j];
+                    next[j] = seen;
+                }
+            }
+            GlobToken::DoubleStarSlash => {
+                // Empty, or any run ending in `/` (whole path segments).
+                let mut seen = false;
+                for j in 0..=len {
+                    let mut here = reachable[j];
+                    if seen && j > 0 && text[j - 1] == b'/' {
+                        here = true;
+                    }
+                    next[j] = here;
+                    if reachable[j] {
+                        seen = true;
+                    }
+                }
             }
         }
+        std::mem::swap(&mut reachable, &mut next);
     }
-    match text.split_first() {
-        Some((&head, text_rest)) if head == first => glob_match(pattern_rest, text_rest),
-        _ => false,
-    }
+    reachable[len]
 }
 
 #[cfg(test)]
@@ -1172,7 +1387,114 @@ mod tests {
         let err = store
             .str_replace("a.txt", "", "x")
             .expect_err("empty anchor");
-        assert_eq!(err.kind(), StoreErrorKind::Anchor);
+        // STORE-007: an empty anchor is a dedicated invalid-anchor condition,
+        // distinct from an anchor that was searched for and not found.
+        assert_eq!(err.kind(), StoreErrorKind::InvalidAnchor);
+        assert!(matches!(err, StoreError::InvalidAnchor { .. }));
+    }
+
+    #[test]
+    fn str_replace_reports_empty_ascii_and_multibyte_contents() {
+        // STORE-007 coverage: empty, ASCII, and multibyte file contents.
+        let store = StoreRef::memory();
+
+        store.write("empty.txt", "").expect("write empty");
+        let empty_err = store
+            .str_replace("empty.txt", "x", "y")
+            .expect_err("anchor absent in empty file");
+        assert!(matches!(empty_err, StoreError::AnchorNotFound { .. }));
+
+        store.write("ascii.txt", "one two three").expect("write ascii");
+        store
+            .str_replace("ascii.txt", "two", "TWO")
+            .expect("ascii anchor replaced");
+        assert_eq!(store.read("ascii.txt").expect("read"), "one TWO three");
+
+        store.write("multi.txt", "café résumé café").expect("write");
+        let ambiguous = store
+            .str_replace("multi.txt", "café", "COFFEE")
+            .expect_err("multibyte anchor occurs twice");
+        assert!(matches!(ambiguous, StoreError::AnchorAmbiguous { count: 2, .. }));
+        store
+            .str_replace("multi.txt", "résumé", "CV")
+            .expect("unique multibyte anchor replaced");
+        assert_eq!(store.read("multi.txt").expect("read"), "café CV café");
+    }
+
+    #[test]
+    fn platform_unsafe_paths_are_rejected_before_dispatch() {
+        let store = StoreRef::memory();
+        for (path, reason) in [
+            ("a\\b.txt", PathReason::Backslash),
+            ("CON", PathReason::ReservedName),
+            ("dir/nul.txt", PathReason::ReservedName),
+            ("com1", PathReason::ReservedName),
+            ("LPT9.log", PathReason::ReservedName),
+            ("trailing.", PathReason::UnsafeSuffix),
+            ("trailing ", PathReason::UnsafeSuffix),
+        ] {
+            let err = store.read(path).expect_err("path must be rejected");
+            assert_eq!(err.kind(), StoreErrorKind::InvalidPath, "{path}");
+            match err {
+                StoreError::InvalidPath { reason: got, .. } => assert_eq!(got, reason, "{path}"),
+                other => panic!("expected InvalidPath for {path:?}, got {other:?}"),
+            }
+        }
+        // A path at the byte limit is fine; one byte over is rejected.
+        let long = format!("{}.txt", "a".repeat(MAX_STORE_PATH_BYTES));
+        assert_eq!(
+            store.read(&long).expect_err("too long").kind(),
+            StoreErrorKind::InvalidPath
+        );
+        // Names that merely contain a device substring are allowed.
+        store.write("console.txt", "ok").expect("console is not CON");
+        store.write("com10.txt", "ok").expect("com10 is not com1");
+    }
+
+    #[test]
+    fn glob_grammar_rejects_unsupported_forms() {
+        let store = StoreRef::memory();
+        for bad in ["a**b", "***", "a/***/b", "a\\*.txt"] {
+            assert_eq!(
+                store.glob(bad).expect_err(bad).kind(),
+                StoreErrorKind::InvalidPattern,
+                "{bad}"
+            );
+        }
+        // Well-formed `**` placements are accepted.
+        for good in ["**", "**/x", "a/**", "a/**/b", "src/*.rs"] {
+            store.glob(good).expect(good);
+        }
+    }
+
+    #[test]
+    fn glob_matcher_is_bounded_against_adversarial_patterns() {
+        // STORE-005: a pattern packed with single-segment stars against a long
+        // non-matching name completes promptly (the old recursive/backtracking
+        // matcher would blow up here). The iterative matcher is O(tokens*len).
+        let store = StoreRef::memory();
+        let name = "a".repeat(200);
+        store.write(&name, "").expect("write");
+        // A grammar-valid pattern of many single `*` separated by literals: the
+        // classic exponential-backtracking trap for a naive recursive matcher.
+        // With no trailing 'b' in the text it cannot match, and the iterative
+        // matcher must still return promptly.
+        let pattern = format!("{}*b", "*a".repeat(40));
+        assert!(store.glob(&pattern).expect("bounded glob").is_empty());
+
+        // `**` spanning slashes and `**/` matching zero segments both hold.
+        store.write("x/y/z.rs", "").expect("write nested");
+        assert_eq!(store.glob("x/**/z.rs").expect("glob"), vec!["x/y/z.rs"]);
+        store.write("z2.rs", "").expect("write top");
+        assert!(store.glob("**/z2.rs").expect("glob").contains(&"z2.rs".to_owned()));
+    }
+
+    #[test]
+    fn glob_double_star_slash_matches_zero_segments() {
+        let store = StoreRef::memory();
+        store.write("a/b.rs", "").expect("write");
+        // `a/**/b.rs` matches `a/b.rs` (zero intermediate segments).
+        assert_eq!(store.glob("a/**/b.rs").expect("glob"), vec!["a/b.rs"]);
     }
 
     #[test]
@@ -1184,9 +1506,28 @@ mod tests {
     }
 
     #[test]
-    fn store_ref_is_send_and_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<StoreRef>();
+    fn store_ref_is_send_sync_and_static() {
+        // STORE-009: the handle must also be `'static` (it is shared across
+        // spawned tasks that outlive the caller), so the assertion carries the
+        // promised `'static` bound, not just `Send + Sync`.
+        fn assert_send_sync_static<T: Send + Sync + 'static>() {}
+        assert_send_sync_static::<StoreRef>();
+    }
+
+    #[test]
+    fn a_poisoned_backend_lock_surfaces_as_a_backend_error() {
+        let store = StoreRef::memory();
+        let clone = store.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = clone.inner.lock().expect("lock");
+            panic!("poison the store lock");
+        })
+        .join();
+        // STORE-004: after a holder panicked mid-hold, operations report a
+        // backend failure rather than trusting the possibly half-mutated state.
+        let err = store.read("a.txt").expect_err("a poisoned lock must error");
+        assert_eq!(err.kind(), StoreErrorKind::Backend);
+        assert!(std::error::Error::source(&err).is_some());
     }
 
     #[test]
