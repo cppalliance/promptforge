@@ -434,13 +434,18 @@ fn strip_quotes(raw: &str, quote: char) -> Option<&str> {
 
 /// Splits `src` on top-level commas, rejecting malformed argument syntax.
 ///
-/// Returns `None` when a closing delimiter is unmatched, the final delimiter
-/// depth is non-zero, a quote is left open, or an escape is left dangling, so a
-/// corrupted argument list can never be split into valid-looking parts.
+/// Returns `None` when a closer does not match its most recent opener (for
+/// example `[` closed by `)`), when a closer is unmatched, when an opener is
+/// left unclosed, when a quote is left open, or when an escape is left dangling,
+/// so a corrupted argument list can never be split into valid-looking parts.
+///
+/// Delimiter nesting is tracked with a stack of expected closers rather than a
+/// single depth counter, so a mismatched pair like `foo(a=[1)]` is rejected even
+/// though its opener and closer counts happen to balance.
 fn split_top_level_commas(src: &str) -> Option<Vec<&str>> {
     let mut parts = Vec::new();
     let mut start = 0;
-    let mut depth: i32 = 0;
+    let mut expected_closers: Vec<char> = Vec::new();
     let mut in_quote: Option<char> = None;
     let mut escaped = false;
     for (idx, ch) in src.char_indices() {
@@ -456,21 +461,24 @@ fn split_top_level_commas(src: &str) -> Option<Vec<&str>> {
         }
         match ch {
             '"' | '\'' => in_quote = Some(ch),
-            '(' | '[' | '{' => depth += 1,
+            '(' => expected_closers.push(')'),
+            '[' => expected_closers.push(']'),
+            '{' => expected_closers.push('}'),
             ')' | ']' | '}' => {
-                depth -= 1;
-                if depth < 0 {
+                // A closer must match the most recent unmatched opener; a bare
+                // or mismatched closer corrupts the argument structure.
+                if expected_closers.pop() != Some(ch) {
                     return None;
                 }
             }
-            ',' if depth == 0 => {
+            ',' if expected_closers.is_empty() => {
                 parts.push(&src[start..idx]);
                 start = idx + ch.len_utf8();
             }
             _ => {}
         }
     }
-    if depth != 0 || in_quote.is_some() || escaped {
+    if !expected_closers.is_empty() || in_quote.is_some() || escaped {
         return None;
     }
     parts.push(&src[start..]);
@@ -585,6 +593,30 @@ mod tests {
         assert_eq!(split_top_level_commas("a)b"), None, "unmatched close");
         assert_eq!(split_top_level_commas("\"unterminated"), None, "open quote");
         assert_eq!(split_top_level_commas("\"a\\"), None, "dangling escape");
+        // Mismatched delimiters whose open/close counts balance must still be
+        // rejected: a single depth counter would wrongly accept these.
+        assert_eq!(
+            split_top_level_commas("(a=[1)]"),
+            None,
+            "paren closed by bracket"
+        );
+        assert_eq!(
+            split_top_level_commas("[a}"),
+            None,
+            "bracket closed by brace"
+        );
+        assert_eq!(split_top_level_commas("{a)"), None, "brace closed by paren");
+        assert_eq!(
+            split_top_level_commas("([)]"),
+            None,
+            "interleaved delimiters"
+        );
+        // A correctly nested list must still split at top level.
+        assert_eq!(
+            split_top_level_commas("a=[1, 2], b={x: 1}"),
+            Some(vec!["a=[1, 2]", " b={x: 1}"]),
+            "correctly nested delimiters split only at top level"
+        );
     }
 
     #[test]
