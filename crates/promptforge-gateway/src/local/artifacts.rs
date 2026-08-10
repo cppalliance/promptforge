@@ -1305,6 +1305,5 @@ fn write_synced(path: &Path, contents: &[u8]) -> Result<()> {
     })
 }
 
-
 #[cfg(test)]
 mod tests;
