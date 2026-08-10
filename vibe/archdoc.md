@@ -39,7 +39,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A35. The H1 program executes exactly once with live host resolution; no separate declaration or bind replay phase exists.
 - A36. Shared Lua libraries load into each section VM before host capability injection and have no load-time effects.
 
+- A37. A clean workspace build requires no secret environment variable or manually provisioned artifact.
+
 ## Principles
 
 - Before adding configuration, public API, or resolution machinery, prefer sandboxed Lua, the run-scoped store, or the catalog when one already carries the work.
-- Formatting, warnings-free lint, and workspace tests are the minimum integration gate.
