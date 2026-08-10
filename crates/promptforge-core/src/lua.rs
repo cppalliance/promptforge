@@ -1534,7 +1534,12 @@ impl SectionVm {
     /// vm.teardown(&NullObserver, "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
-    pub(crate) fn bind_reply(&self, reply: &str, observer: &dyn Observer, section: &str) -> Result<()> {
+    pub(crate) fn bind_reply(
+        &self,
+        reply: &str,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<()> {
         observer.observe(&self.execution, section, detail::LUA_REPLY_BINDING_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
@@ -1798,7 +1803,11 @@ impl SectionVm {
     /// Returns [`Error::Lua`] for a poisoned declaration runtime, a closure
     /// attempt before host injection, or a second closure attempt.
     #[cfg(test)]
-    pub(crate) fn close_tool_scope(&self, observer: &dyn Observer, section: &str) -> Result<ToolScope> {
+    pub(crate) fn close_tool_scope(
+        &self,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<ToolScope> {
         Ok(self.close_scopes(observer, section)?.tools)
     }
 
@@ -1807,7 +1816,11 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] for a poisoned declaration runtime, a closure
     /// attempt before host injection, or a second closure attempt.
-    pub(crate) fn close_scopes(&self, observer: &dyn Observer, section: &str) -> Result<ClosedScopes> {
+    pub(crate) fn close_scopes(
+        &self,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<ClosedScopes> {
         observer.observe(&self.execution, section, detail::TOOL_SCOPE_CLOSING);
         let tools = self.close_tool_scope_inner();
         observer.observe(
@@ -1918,11 +1931,7 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the underlying VM rejects the memory limit.
-    pub(crate) fn apply_lua_limits(
-        &self,
-        memory_bytes: usize,
-        log_events: u32,
-    ) -> Result<()> {
+    pub(crate) fn apply_lua_limits(&self, memory_bytes: usize, log_events: u32) -> Result<()> {
         self.lua
             .set_memory_limit(memory_bytes)
             .map_err(|error| Error::Lua(error.to_string()))?;
@@ -1995,8 +2004,15 @@ impl SectionVm {
         let returned: MultiValue = self
             .lua
             .scope(|scope| {
-                install_log(&self.lua, scope, &self.execution, observer, section, &self.log_budget)
-                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+                install_log(
+                    &self.lua,
+                    scope,
+                    &self.execution,
+                    observer,
+                    section,
+                    &self.log_budget,
+                )
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
                 let result = program
                     .load(&self.lua)
                     .map_err(|error| mlua::Error::external(error.to_string()))?
@@ -2027,8 +2043,15 @@ impl SectionVm {
         let returned: MultiValue = self
             .lua
             .scope(|scope| {
-                install_log(&self.lua, scope, &self.execution, observer, section, &self.log_budget)
-                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+                install_log(
+                    &self.lua,
+                    scope,
+                    &self.execution,
+                    observer,
+                    section,
+                    &self.log_budget,
+                )
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
                 install_store_table(
                     &self.lua,
                     scope,
@@ -2079,8 +2102,15 @@ impl SectionVm {
         }
         let jump_slot = Arc::clone(&self.jump_slot);
         let result = self.lua.scope(|scope| {
-            install_log(&self.lua, scope, &self.execution, observer, section, &self.log_budget)
-                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            install_log(
+                &self.lua,
+                scope,
+                &self.execution,
+                observer,
+                section,
+                &self.log_budget,
+            )
+            .map_err(|error| mlua::Error::external(error.to_string()))?;
             install_store_table(
                 &self.lua,
                 scope,
@@ -2171,8 +2201,15 @@ impl SectionVm {
         let returned: MultiValue = self
             .lua
             .scope(|scope| {
-                install_log(&self.lua, scope, &self.execution, observer, section, &self.log_budget)
-                    .map_err(|error| mlua::Error::external(error.to_string()))?;
+                install_log(
+                    &self.lua,
+                    scope,
+                    &self.execution,
+                    observer,
+                    section,
+                    &self.log_budget,
+                )
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
                 install_store_table(
                     &self.lua,
                     scope,
@@ -2807,9 +2844,7 @@ fn install_store_table<'scope, 'env: 'scope>(
 
     let handle = store.clone();
     let exists = scope
-        .create_function(move |_, path: String| {
-            handle.exists(&path).map_err(mlua::Error::external)
-        })
+        .create_function(move |_, path: String| handle.exists(&path).map_err(mlua::Error::external))
         .map_err(|e| Error::Lua(e.to_string()))?;
     table
         .set("exists", exists)

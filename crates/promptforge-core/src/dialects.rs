@@ -21,6 +21,66 @@ use crate::{Error, Result};
 pub(crate) use gemma3_tool_code::Gemma3ToolCodeDialect;
 pub(crate) use openai::OpenAiDialect;
 
+/// A stable, matchable classification of a [`DialectError`].
+///
+/// `#[non_exhaustive]` so new kinds do not break a caller's `match`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DialectErrorKind {
+    /// No registered dialect scored on the provided evidence.
+    NoMatch,
+    /// Two or more dialects tied for the highest detection score.
+    Tie,
+    /// A named dialect was not present in the registry.
+    Unknown,
+}
+
+/// The error returned by [`ToolDialectRegistry::resolve`].
+///
+/// Carries a stable [`kind`](DialectError::kind) classifier. `#[non_exhaustive]`
+/// and not constructible outside the crate.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct DialectError {
+    inner: Error,
+}
+
+impl DialectError {
+    /// Returns the stable classification of this failure.
+    #[must_use]
+    pub fn kind(&self) -> DialectErrorKind {
+        match &self.inner {
+            Error::DialectTie { .. } => DialectErrorKind::Tie,
+            Error::UnknownDialect(_) => DialectErrorKind::Unknown,
+            _ => DialectErrorKind::NoMatch,
+        }
+    }
+}
+
+impl std::fmt::Display for DialectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.inner)
+    }
+}
+
+impl std::error::Error for DialectError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        std::error::Error::source(&self.inner)
+    }
+}
+
+impl From<Error> for DialectError {
+    fn from(inner: Error) -> Self {
+        DialectError { inner }
+    }
+}
+
+impl From<DialectError> for Error {
+    fn from(error: DialectError) -> Self {
+        error.inner
+    }
+}
+
 /// Identifies a registered tool dialect.
 ///
 /// Variants are `#[non_exhaustive]` so new backends can be added without a
@@ -202,9 +262,12 @@ impl ToolDialectRegistry {
     /// Resolve evidence into a single dialect, failing on ties or no match.
     ///
     /// # Errors
-    /// - [`Error::DialectNone`] when no dialect scores on the evidence.
-    /// - [`Error::DialectTie`] when two or more dialects share the top score.
-    pub fn resolve(&self, evidence: &DialectEvidence) -> Result<ToolDialectId> {
+    /// Returns a [`DialectError`] classified `NoMatch` when no dialect scores on
+    /// the evidence, and `Tie` when two or more dialects share the top score.
+    pub fn resolve(
+        &self,
+        evidence: &DialectEvidence,
+    ) -> std::result::Result<ToolDialectId, DialectError> {
         let mut scored: Vec<(ToolDialectId, DetectScore)> = self
             .dialects
             .iter()
@@ -212,7 +275,7 @@ impl ToolDialectRegistry {
             .collect();
 
         if scored.is_empty() {
-            return Err(Error::DialectNone);
+            return Err(DialectError::from(Error::DialectNone));
         }
 
         scored.sort_by_key(|entry| std::cmp::Reverse(entry.1));
@@ -223,7 +286,7 @@ impl ToolDialectRegistry {
                 .take_while(|(_, s)| *s == scored[0].1)
                 .map(|(id, _)| *id)
                 .collect();
-            return Err(Error::DialectTie { candidates: tied });
+            return Err(DialectError::from(Error::DialectTie { candidates: tied }));
         }
 
         Ok(scored[0].0)

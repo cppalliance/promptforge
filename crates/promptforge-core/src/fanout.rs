@@ -150,7 +150,9 @@ pub(crate) async fn run_fanout_arms(
         let permit_source = Arc::clone(&semaphore);
         join_set.spawn(async move {
             let _permit = permit_source.acquire_owned().await.map_err(|_| {
-                Error::Lua("fanout concurrency semaphore closed before an arm could start".to_owned())
+                Error::Lua(
+                    "fanout concurrency semaphore closed before an arm could start".to_owned(),
+                )
             })?;
             run_one_arm(payload).await
         });

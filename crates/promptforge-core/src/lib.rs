@@ -36,6 +36,10 @@ pub(crate) mod subst;
 pub mod tools;
 pub(crate) mod untrusted;
 
+pub(crate) use crate::error::{Error, NearDuplicateDiagnostic, Result};
+
 pub use crate::cancel::CancelHandle;
-pub use crate::error::{Error, NearDuplicateDiagnostic, Result};
-pub use crate::parser::promptforge_version;
+pub use crate::dialects::{DialectError, DialectErrorKind};
+pub use crate::execute::{RunError, RunErrorKind};
+pub use crate::model::{CompletionError, CompletionErrorKind};
+pub use crate::parser::{ParseError, ParseErrorKind, promptforge_version};

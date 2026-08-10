@@ -1,38 +1,38 @@
-//! The crate's error type and result alias.
+//! The crate's internal error substrate.
+//!
+//! [`Error`] is a `pub(crate)` substrate: it is never part of the public API.
+//! Every public boundary returns its own typed error ([`crate::RunError`],
+//! [`crate::ParseError`], [`crate::CompletionError`], [`crate::DialectError`],
+//! [`crate::tools::ToolError`], [`crate::store::StoreError`]); those wrappers
+//! classify this substrate and preserve its source. See the module wrappers for
+//! the `From` bridges that let internal `?` keep flowing through the substrate.
 
 /// Diagnostics for two semantic near-duplicates exposed in one model turn.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct NearDuplicateDiagnostic {
+pub(crate) struct NearDuplicateDiagnostic {
     /// The first prompt-local alias in picker catalog pair order.
-    pub first_alias: String,
+    pub(crate) first_alias: String,
     /// The first stable identity.
-    pub first_id: crate::tools::ToolId,
-    /// The first concrete picker description.
-    pub first_description: String,
-    /// The first concrete picker behavioural hints.
-    pub first_annotations: promptforge_tool_picker::ToolAnnotations,
+    pub(crate) first_id: crate::tools::ToolId,
     /// The second prompt-local alias in picker catalog pair order.
-    pub second_alias: String,
+    pub(crate) second_alias: String,
     /// The second stable identity.
-    pub second_id: crate::tools::ToolId,
-    /// The second concrete picker description.
-    pub second_description: String,
-    /// The second concrete picker behavioural hints.
-    pub second_annotations: promptforge_tool_picker::ToolAnnotations,
+    pub(crate) second_id: crate::tools::ToolId,
     /// The cosine similarity reported by the picker.
-    pub similarity: f32,
+    pub(crate) similarity: f32,
 }
 
-/// The crate's error type, spanning parsing, HTTP, and execution failures.
+/// The crate's internal error substrate, spanning parsing, HTTP, and execution
+/// failures.
 ///
-/// Marked `#[non_exhaustive]` so future variants are not a breaking change. The
-/// data-carrying tool-binding variants are likewise non-exhaustive so fields can
-/// be added compatibly, and the transport variant hides its concrete source
-/// type so no dependency's error leaks through this crate's public API.
+/// This type is `pub(crate)` and never appears in the public API; the public
+/// boundary errors wrap and classify it. Marked `#[non_exhaustive]` so future
+/// variants are not a breaking change. The transport variant hides its concrete
+/// source type so no dependency's error leaks through the wrappers' `source()`.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum Error {
+pub(crate) enum Error {
     /// The prompt file could not be parsed (bad frontmatter, no sections, etc.).
     #[error("parse error: {0}")]
     Parse(String),
@@ -243,18 +243,6 @@ pub enum Error {
         alias: String,
     },
 
-    /// A picker-selected model identity is absent from the live catalog.
-    #[error(
-        "alias {alias:?} selected model identity {id:?}, which is absent from the live catalog"
-    )]
-    #[non_exhaustive]
-    PickedModelNotLive {
-        /// The prompt-local alias whose selection cannot be fulfilled.
-        alias: String,
-        /// The selected stable identity absent from the catalog.
-        id: crate::model::ModelId,
-    },
-
     /// A `{{ }}` prose substitution failed (unknown/missing path, unclosed).
     #[error("substitution error: {0}")]
     Substitution(String),
@@ -262,10 +250,6 @@ pub enum Error {
     /// The tool-call loop ran its iteration cap without a final text reply.
     #[error("tool-call loop did not converge")]
     ToolLoopExhausted,
-
-    /// The model asked to call a tool that was not provided to the executor.
-    #[error("model called unknown tool {0}")]
-    UnknownTool(String),
 
     /// The model (or Lua) referenced a tool outside the VM's scoped aliases.
     #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (alias was declared by tools.need but not added to this section's scope)" } else { "" })]
@@ -314,16 +298,6 @@ pub enum Error {
     #[error("unknown tool dialect: {0}")]
     UnknownDialect(crate::dialects::ToolDialectId),
 
-    /// A dialect operation that is not yet implemented (step 1 stub).
-    #[error("dialect {dialect} has not implemented {operation}")]
-    #[non_exhaustive]
-    DialectNotImplemented {
-        /// Which dialect was called.
-        dialect: crate::dialects::ToolDialectId,
-        /// Which operation was attempted.
-        operation: &'static str,
-    },
-
     /// A dispatched [`crate::tools::Tool`] returned a model-safe failure.
     ///
     /// Transitional during the API redesign: the orchestration boundary error
@@ -341,5 +315,5 @@ impl Error {
     }
 }
 
-/// Crate result alias.
-pub type Result<T> = std::result::Result<T, Error>;
+/// Crate-internal result alias over the [`Error`] substrate.
+pub(crate) type Result<T> = std::result::Result<T, Error>;

@@ -77,10 +77,7 @@ impl ToolId {
     /// assert_eq!(id.name(), "web_fetch");
     /// # Ok::<(), promptforge_core::tools::ToolIdError>(())
     /// ```
-    pub fn new(
-        server: impl Into<String>,
-        name: impl Into<String>,
-    ) -> Result<ToolId, ToolIdError> {
+    pub fn new(server: impl Into<String>, name: impl Into<String>) -> Result<ToolId, ToolIdError> {
         let server = server.into();
         let name = name.into();
         Self::validate("server", &server)?;

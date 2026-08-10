@@ -17,7 +17,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crate::dialects::{DialectRequest, ToolDialectRegistry};
-use crate::model::CompletionOptions;
+use crate::model::{CompletionError, CompletionOptions};
 use crate::{Error, Result};
 
 /// A single chat message.
@@ -242,9 +242,10 @@ impl GatewayClient {
     /// - Key: `PROMPTFORGE_GATEWAY_KEY`, the gateway's shared bearer. Required.
     ///
     /// # Errors
-    /// Returns [`Error::MissingEnv`] when either variable is not set.
-    pub fn from_env() -> Result<GatewayClient> {
-        from_env_with(|name| std::env::var(name).ok())
+    /// Returns a [`CompletionError`] with `Config` kind when either variable is
+    /// not set.
+    pub fn from_env() -> std::result::Result<GatewayClient, CompletionError> {
+        from_env_with(|name| std::env::var(name).ok()).map_err(CompletionError::from)
     }
 
     /// Send a list of messages and return the model's outcome.
@@ -258,19 +259,18 @@ impl GatewayClient {
     /// `max_tokens`, and `thinking` extend the request when present.
     ///
     /// # Errors
-    /// Returns [`Error::Http`] on a transport failure, [`Error::Backend`] when
-    /// the gateway responds with a non-success status,
-    /// [`Error::MalformedResponse`] when the response shape is unusable, and
-    /// [`Error::EmptyModelReply`] when the turn has neither non-empty tool
-    /// calls nor non-empty text.
+    /// Returns a [`CompletionError`] classified `Transport` on a transport
+    /// failure, `Backend` when the gateway responds with a non-success status,
+    /// `MalformedResponse` when the response shape is unusable, and `EmptyReply`
+    /// when the turn has neither non-empty tool calls nor non-empty text.
     pub async fn complete(
         &self,
         messages: &[Message],
         tools: Option<&[ToolSchema]>,
         options: &CompletionOptions,
-    ) -> Result<Completion> {
+    ) -> std::result::Result<Completion, CompletionError> {
         let GatewayTransport::Http(http) = &self.transport else {
-            return Err(Error::GatewayDisabled);
+            return Err(CompletionError::from(Error::GatewayDisabled));
         };
         let mut request_body = serde_json::json!({
             "model": options.model,
@@ -333,10 +333,10 @@ impl GatewayClient {
             } else {
                 body
             };
-            return Err(Error::Backend {
+            return Err(CompletionError::from(Error::Backend {
                 status: status.as_u16(),
                 body,
-            });
+            }));
         }
 
         let response_body: Value = serde_json::from_slice(&raw_body)

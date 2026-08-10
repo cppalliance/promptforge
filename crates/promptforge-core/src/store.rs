@@ -1168,7 +1168,9 @@ mod tests {
     fn empty_anchor_is_refused() {
         let store = StoreRef::memory();
         store.write("a.txt", "body").expect("write");
-        let err = store.str_replace("a.txt", "", "x").expect_err("empty anchor");
+        let err = store
+            .str_replace("a.txt", "", "x")
+            .expect_err("empty anchor");
         assert_eq!(err.kind(), StoreErrorKind::Anchor);
     }
 

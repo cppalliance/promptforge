@@ -17,6 +17,90 @@ pub use crate::lua::LuaProgram;
 use crate::observe::{Observer, detail};
 use crate::{Error, Result};
 
+/// A stable, matchable classification of a [`ParseError`].
+///
+/// `#[non_exhaustive]` so new kinds do not break a caller's `match`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ParseErrorKind {
+    /// The YAML frontmatter block was missing, unclosed, or invalid.
+    Frontmatter,
+    /// The document structure was invalid (missing/duplicate H1, no sections).
+    Structure,
+    /// A reserved `lua`/`lua shared` fence was misplaced or not closed exactly.
+    Fence,
+    /// A list-only section contained non-list or empty items.
+    List,
+    /// A compiled Lua region was not syntactically valid.
+    Lua,
+}
+
+/// The error returned by [`Prompt::parse`].
+///
+/// Carries a stable [`kind`](ParseError::kind) classifier and preserves the
+/// underlying cause through [`std::error::Error::source`]. `#[non_exhaustive]`
+/// and not constructible outside the crate.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct ParseError {
+    inner: Error,
+}
+
+impl ParseError {
+    /// Returns the stable classification of this failure.
+    #[must_use]
+    pub fn kind(&self) -> ParseErrorKind {
+        match &self.inner {
+            Error::LuaCompile { .. } => ParseErrorKind::Lua,
+            Error::Parse(message) => {
+                if message.contains("frontmatter") {
+                    ParseErrorKind::Frontmatter
+                } else if message.contains("fence") {
+                    ParseErrorKind::Fence
+                } else if message.contains("list section") || message.contains("bullet item") {
+                    ParseErrorKind::List
+                } else {
+                    ParseErrorKind::Structure
+                }
+            }
+            _ => ParseErrorKind::Structure,
+        }
+    }
+
+    /// Returns the byte span of the offending region, when one is available.
+    ///
+    /// The current parser does not attach byte spans, so this is always `None`;
+    /// it is part of the stable surface for future span-carrying diagnostics.
+    #[must_use]
+    pub fn span(&self) -> Option<(usize, usize)> {
+        None
+    }
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.inner)
+    }
+}
+
+impl std::error::Error for ParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        std::error::Error::source(&self.inner)
+    }
+}
+
+impl From<Error> for ParseError {
+    fn from(inner: Error) -> Self {
+        ParseError { inner }
+    }
+}
+
+impl From<ParseError> for Error {
+    fn from(error: ParseError) -> Self {
+        error.inner
+    }
+}
+
 /// The parsed frontmatter of a prompt file.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[non_exhaustive]
@@ -250,13 +334,18 @@ impl Prompt {
     /// `execution` identifier unchanged.
     ///
     /// # Errors
-    /// Returns [`Error::Parse`] when the frontmatter delimiters are missing, the
-    /// frontmatter is invalid, the required H1 is missing, the H1 opens with the
-    /// removed `lua prompt` fence form, a reserved fence is not closed exactly,
-    /// more than one `lua shared` fence exists, a `lua shared` fence is outside
-    /// H1, or the body has no `##` sections. Returns [`Error::LuaCompile`] when
-    /// the shared library or an H1 or section Lua block is not valid Lua.
-    pub fn parse(input: &str, execution: &str, observer: &dyn Observer) -> Result<Prompt> {
+    /// Returns a [`ParseError`] classified `Frontmatter` when the frontmatter
+    /// delimiters are missing or the frontmatter is invalid; `Structure` when
+    /// the required H1 is missing or the body has no `##` sections; `Fence` when
+    /// the H1 opens with the removed `lua prompt` fence form, a reserved fence
+    /// is not closed exactly, more than one `lua shared` fence exists, or a
+    /// `lua shared` fence is outside H1; and `Lua` when the shared library or an
+    /// H1 or section Lua block is not valid Lua.
+    pub fn parse(
+        input: &str,
+        execution: &str,
+        observer: &dyn Observer,
+    ) -> std::result::Result<Prompt, ParseError> {
         observer.observe(execution, "Prompt", detail::PARSE_STARTED);
         let result = Self::parse_inner(input, execution, observer);
         observer.observe(
@@ -268,7 +357,7 @@ impl Prompt {
                 detail::PARSE_FAILED
             },
         );
-        result
+        result.map_err(ParseError::from)
     }
 
     fn parse_inner(input: &str, execution: &str, observer: &dyn Observer) -> Result<Prompt> {

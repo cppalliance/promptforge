@@ -65,6 +65,132 @@ use crate::untrusted;
 use crate::{Error, NearDuplicateDiagnostic, Result};
 use mlua::Value as LuaValue;
 
+/// A stable, matchable classification of a [`RunError`].
+///
+/// The variant identifies the phase of the run that failed without exposing the
+/// internal error substrate. It is `#[non_exhaustive]`, so new kinds can be
+/// added without breaking a caller's `match`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RunErrorKind {
+    /// The prompt could not be parsed or a compiled Lua region was invalid.
+    Parse,
+    /// The prompt declared a `promptforge:` major this build does not support.
+    Version,
+    /// A tool or model capability could not be bound, was absent, or clashed.
+    Binding,
+    /// A model completion failed at the transport, backend, or decode layer.
+    Completion,
+    /// A dispatched tool failed, was unknown, or the tool loop did not converge.
+    Tool,
+    /// A run-scoped store operation failed.
+    Store,
+    /// A section's Lua phase failed to run or return a usable value.
+    Lua,
+    /// A `{{ }}` prose substitution failed.
+    Substitution,
+    /// The host cancelled the run.
+    Cancelled,
+    /// An unexpected internal invariant failure.
+    Internal,
+}
+
+/// The error returned by [`run`], the orchestration boundary of a prompt run.
+///
+/// A `RunError` carries a stable [`kind`](RunError::kind) classifier plus the
+/// `is_cancelled`/`is_retryable` predicates, and preserves the underlying cause
+/// through [`std::error::Error::source`]. It is `#[non_exhaustive]` and cannot
+/// be constructed outside the crate.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct RunError {
+    inner: Error,
+}
+
+impl RunError {
+    /// Returns the stable classification of this failure.
+    #[must_use]
+    pub fn kind(&self) -> RunErrorKind {
+        match &self.inner {
+            Error::Parse(_) => RunErrorKind::Parse,
+            Error::LuaCompile { .. } | Error::Lua(_) => RunErrorKind::Lua,
+            Error::UnsupportedVersion(_) => RunErrorKind::Version,
+            Error::MissingEnv(_)
+            | Error::GatewayDisabled
+            | Error::Http(_)
+            | Error::Backend { .. }
+            | Error::MalformedResponse(_)
+            | Error::EmptyModelReply { .. }
+            | Error::DialectNone
+            | Error::DialectTie { .. }
+            | Error::UnknownDialect(_) => RunErrorKind::Completion,
+            Error::Interrupted => RunErrorKind::Cancelled,
+            Error::Substitution(_) => RunErrorKind::Substitution,
+            Error::ToolLoopExhausted
+            | Error::OutOfScopeToolCall { .. }
+            | Error::UnknownScopedTool(_)
+            | Error::Tool(_) => RunErrorKind::Tool,
+            Error::Bind { .. }
+            | Error::Absent { .. }
+            | Error::Duplicate { .. }
+            | Error::Ambiguous { .. }
+            | Error::DuplicateAlias { .. }
+            | Error::DuplicateLiveToolId { .. }
+            | Error::ToolIdSelectedTwice { .. }
+            | Error::PickedToolNotLive { .. }
+            | Error::ToolScopeAnalysis { .. }
+            | Error::NearDuplicateTools { .. }
+            | Error::ModelBind { .. }
+            | Error::ModelAbsent { .. }
+            | Error::ModelDuplicate { .. }
+            | Error::ModelAmbiguous { .. }
+            | Error::DuplicateModelAlias { .. }
+            | Error::ModelRequired { .. } => RunErrorKind::Binding,
+        }
+    }
+
+    /// Returns `true` when the run failed because the host cancelled it.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self.inner, Error::Interrupted)
+    }
+
+    /// Returns `true` when retrying the run may succeed (transient transport or
+    /// backend failures).
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        match &self.inner {
+            Error::Http(_) | Error::MalformedResponse(_) => true,
+            Error::Backend { status, .. } => *status >= 500,
+            _ => false,
+        }
+    }
+}
+
+impl fmt::Display for RunError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.inner)
+    }
+}
+
+impl std::error::Error for RunError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        std::error::Error::source(&self.inner)
+    }
+}
+
+impl From<Error> for RunError {
+    fn from(inner: Error) -> Self {
+        RunError { inner }
+    }
+}
+
+impl From<RunError> for Error {
+    fn from(error: RunError) -> Self {
+        error.inner
+    }
+}
+
 /// Builds a [`NonZeroU32`] from a compile-time-known non-zero value.
 const fn nz_u32(value: u32) -> NonZeroU32 {
     match NonZeroU32::new(value) {
@@ -655,6 +781,7 @@ impl fmt::Debug for ResolutionContext<'_> {
 fn env_client_with_limits(limits: RunLimits) -> Result<GatewayClient> {
     GatewayClient::from_env()
         .map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()))
+        .map_err(Error::from)
 }
 
 /// Execute a parsed prompt through the single-pass live H1 path.
@@ -673,14 +800,14 @@ pub async fn run(
     tools: &[Arc<dyn Tool>],
     store: &StoreRef,
     config: RunConfig,
-) -> Result<String> {
+) -> std::result::Result<String, RunError> {
     match prompt.frontmatter.promptforge {
         Some(SUPPORTED_MAJOR) => {}
-        Some(other) => return Err(Error::UnsupportedVersion(other)),
+        Some(other) => return Err(RunError::from(Error::UnsupportedVersion(other))),
         None => {
-            return Err(Error::Parse(
+            return Err(RunError::from(Error::Parse(
                 "not a promptforge prompt: no promptforge version".into(),
-            ));
+            )));
         }
     }
 
@@ -762,7 +889,7 @@ pub async fn run(
             detail::RUN_FAILED
         },
     );
-    result
+    result.map_err(RunError::from)
 }
 
 struct LiveH1State {
@@ -780,11 +907,7 @@ struct LiveH1State {
 #[derive(Debug, Clone)]
 struct OwnedNearDuplicate {
     first_id: ToolId,
-    first_description: String,
-    first_annotations: promptforge_tool_picker::ToolAnnotations,
     second_id: ToolId,
-    second_description: String,
-    second_annotations: promptforge_tool_picker::ToolAnnotations,
     similarity: f32,
 }
 
@@ -819,12 +942,14 @@ impl ToolAnalysis {
             })?
             .iter()
             .map(|pair| OwnedNearDuplicate {
-                first_id: ToolId::from_validated(pair.first().id().server(), pair.first().id().name()),
-                first_description: pair.first().description().to_owned(),
-                first_annotations: pair.first().annotations(),
-                second_id: ToolId::from_validated(pair.second().id().server(), pair.second().id().name()),
-                second_description: pair.second().description().to_owned(),
-                second_annotations: pair.second().annotations(),
+                first_id: ToolId::from_validated(
+                    pair.first().id().server(),
+                    pair.first().id().name(),
+                ),
+                second_id: ToolId::from_validated(
+                    pair.second().id().server(),
+                    pair.second().id().name(),
+                ),
                 similarity: pair.similarity(),
             })
             .collect();
@@ -1967,12 +2092,8 @@ fn validate_effective_scope_inner(analysis: &ToolAnalysis, scope: &ToolScope) ->
             diagnostic: Box::new(NearDuplicateDiagnostic {
                 first_alias,
                 first_id: pair.first_id.clone(),
-                first_description: pair.first_description.clone(),
-                first_annotations: pair.first_annotations,
                 second_alias,
                 second_id: pair.second_id.clone(),
-                second_description: pair.second_description.clone(),
-                second_annotations: pair.second_annotations,
                 similarity: pair.similarity,
             }),
         });
@@ -2054,10 +2175,10 @@ pub(crate) struct ProseInferenceResult {
 /// tool loop. Returns the final text and the last round's finish reason.
 ///
 /// # Errors
-/// Returns [`Error::UnknownTool`] if the model calls an alias absent from
-/// `dispatch`,
-/// [`Error::ToolLoopExhausted`] if the cap is hit without a text reply, or any
-/// transport/backend error from a model call or a tool's own failure.
+/// Returns an out-of-scope tool error if the model calls an alias absent from
+/// `dispatch`, [`Error::ToolLoopExhausted`] if the cap is hit without a text
+/// reply, or any transport/backend error from a model call or a tool's own
+/// failure.
 #[expect(
     clippy::too_many_arguments,
     reason = "counts and global_aliases extend the loop's borrowed context for per-VM call tracking"
@@ -2157,7 +2278,7 @@ pub(crate) async fn run_prose_inference(
         let completion = tokio::select! {
             biased;
             () = cancel::wait_cancelled() => Err(Error::Interrupted),
-            result = client.complete(conversation, tool_arg, completion_options) => result,
+            result = client.complete(conversation, tool_arg, completion_options) => result.map_err(Error::from),
         };
         if let Err(Error::Interrupted) = &completion {
             return Err(Error::Interrupted);

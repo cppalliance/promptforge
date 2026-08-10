@@ -6,7 +6,7 @@
 //! in [`ModelBindings`]. H2 `models.use` selects at most one binding per
 //! section; H1 `models.always` supplies the prompt-wide default for sections
 //! that omit `models.use`. Model-facing sections with neither binding fail with
-//! [`crate::Error::ModelRequired`].
+//! a model-binding failure surfaced through [`crate::RunError`].
 
 use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId, ToolPicker};
 use serde::Deserialize;
@@ -14,6 +14,109 @@ use serde_json::Value;
 
 use crate::dialects::{ToolDialectId, ToolsMode};
 use crate::{Error, Result};
+
+/// A stable, matchable classification of a [`CompletionError`].
+///
+/// `#[non_exhaustive]` so new kinds do not break a caller's `match`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CompletionErrorKind {
+    /// The HTTP request failed at the transport layer (connection, timeout).
+    Transport,
+    /// The backend returned a non-success status.
+    Backend,
+    /// The backend response could not be decoded or was structurally invalid.
+    MalformedResponse,
+    /// The model returned neither non-empty tool calls nor non-empty text.
+    EmptyReply,
+    /// Gateway access was explicitly disabled by the host.
+    Disabled,
+    /// The client could not be configured (missing environment, bad endpoint,
+    /// or dialect selection).
+    Config,
+}
+
+/// The error returned by the gateway transport ([`crate::client::GatewayClient`]
+/// completion and catalog calls) and [`fetch_model_catalog`].
+///
+/// Carries a stable [`kind`](CompletionError::kind) classifier plus the
+/// `is_retryable`/`is_timeout`/`status` predicates, and preserves the underlying
+/// transport cause through [`std::error::Error::source`]. `#[non_exhaustive]`
+/// and not constructible outside the crate.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct CompletionError {
+    inner: Error,
+}
+
+impl CompletionError {
+    /// Returns the stable classification of this failure.
+    #[must_use]
+    pub fn kind(&self) -> CompletionErrorKind {
+        match &self.inner {
+            Error::Http(_) => CompletionErrorKind::Transport,
+            Error::Backend { .. } => CompletionErrorKind::Backend,
+            Error::MalformedResponse(_) => CompletionErrorKind::MalformedResponse,
+            Error::EmptyModelReply { .. } => CompletionErrorKind::EmptyReply,
+            Error::GatewayDisabled => CompletionErrorKind::Disabled,
+            _ => CompletionErrorKind::Config,
+        }
+    }
+
+    /// Returns the backend HTTP status, when the failure was a backend status.
+    #[must_use]
+    pub fn status(&self) -> Option<u16> {
+        match &self.inner {
+            Error::Backend { status, .. } => Some(*status),
+            _ => None,
+        }
+    }
+
+    /// Returns `true` when the transport failure was a timeout.
+    #[must_use]
+    pub fn is_timeout(&self) -> bool {
+        match &self.inner {
+            Error::Http(source) => source
+                .downcast_ref::<reqwest::Error>()
+                .is_some_and(reqwest::Error::is_timeout),
+            _ => false,
+        }
+    }
+
+    /// Returns `true` when retrying may succeed (transient transport or 5xx).
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        match &self.inner {
+            Error::Http(_) | Error::MalformedResponse(_) => true,
+            Error::Backend { status, .. } => *status >= 500,
+            _ => false,
+        }
+    }
+}
+
+impl std::fmt::Display for CompletionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.inner)
+    }
+}
+
+impl std::error::Error for CompletionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        std::error::Error::source(&self.inner)
+    }
+}
+
+impl From<Error> for CompletionError {
+    fn from(inner: Error) -> Self {
+        CompletionError { inner }
+    }
+}
+
+impl From<CompletionError> for Error {
+    fn from(error: CompletionError) -> Self {
+        error.inner
+    }
+}
 
 /// Stable identity of one catalogued model.
 ///
@@ -483,7 +586,7 @@ impl<'a> ModelRegistry<'a> {
 }
 
 /// Resolves one `models.need` description under optional hard constraints.
-pub trait ModelResolver: Send + Sync {
+pub(crate) trait ModelResolver: Send + Sync {
     /// Resolves `description` with `opts` to a binding identity and invocation.
     ///
     /// # Errors
@@ -549,10 +652,13 @@ struct ModelsListResponse {
 /// `base_url` is the OpenAI-shaped API root (for example `http://127.0.0.1:8081/v1`).
 ///
 /// # Errors
-/// Returns [`Error::Http`] on transport failure, [`Error::Backend`] on a
-/// non-success status, and [`Error::MalformedResponse`] when the body is not a
-/// model list.
-pub async fn fetch_model_catalog(base_url: &str, token: &str) -> Result<ModelCatalog> {
+/// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
+/// `Transport` on transport failure, `Backend` on a non-success status, and
+/// `MalformedResponse` when the body is not a model list.
+pub async fn fetch_model_catalog(
+    base_url: &str,
+    token: &str,
+) -> std::result::Result<ModelCatalog, CompletionError> {
     let base = base_url.trim_end_matches('/');
     let http = reqwest::Client::new();
     let response = http
@@ -565,14 +671,14 @@ pub async fn fetch_model_catalog(base_url: &str, token: &str) -> Result<ModelCat
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         let body: String = body.chars().take(2000).collect();
-        return Err(Error::Backend {
+        return Err(CompletionError::from(Error::Backend {
             status: status.as_u16(),
             body: if body.is_empty() {
                 "(empty body)".to_owned()
             } else {
                 body
             },
-        });
+        }));
     }
     let list: ModelsListResponse = response.json().await.map_err(Error::http)?;
     Ok(ModelCatalog::new(list.data.into_iter().map(|entry| {
@@ -590,7 +696,7 @@ pub async fn fetch_model_catalog(base_url: &str, token: &str) -> Result<ModelCat
 ///
 /// # Errors
 /// Returns [`Error::ModelBind`] when the picker cannot index the catalog.
-pub fn model_picker_from(base: &ToolPicker, catalog: &ModelCatalog) -> Result<ToolPicker> {
+pub(crate) fn model_picker_from(base: &ToolPicker, catalog: &ModelCatalog) -> Result<ToolPicker> {
     base.rebuild(catalog.to_picker_catalog())
         .map_err(|error| Error::ModelBind {
             capability: String::new(),
@@ -600,7 +706,7 @@ pub fn model_picker_from(base: &ToolPicker, catalog: &ModelCatalog) -> Result<To
 
 /// Resolver that filters the catalog, then semantically resolves via a picker.
 #[derive(Debug)]
-pub struct PickerModelResolver<'a> {
+pub(crate) struct PickerModelResolver<'a> {
     catalog: &'a ModelCatalog,
     picker: &'a ToolPicker,
 }
@@ -608,7 +714,7 @@ pub struct PickerModelResolver<'a> {
 impl<'a> PickerModelResolver<'a> {
     /// Borrows a catalog and a picker built over that catalog's descriptors.
     #[must_use]
-    pub fn new(catalog: &'a ModelCatalog, picker: &'a ToolPicker) -> Self {
+    pub(crate) fn new(catalog: &'a ModelCatalog, picker: &'a ToolPicker) -> Self {
         Self { catalog, picker }
     }
 }
