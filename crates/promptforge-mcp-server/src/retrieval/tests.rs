@@ -56,22 +56,17 @@ fn descriptors_carry_the_name_the_description_and_the_args_schema() {
     let prompts = fixture::catalog(&[("alpha", "Do the alpha thing.")]);
     let descriptors = super::index::descriptors(&prompts.catalog);
 
-    let [descriptor] = descriptors.tools() else {
+    let all: Vec<_> = descriptors.iter().collect();
+    let [descriptor] = all.as_slice() else {
         panic!("one prompt is one descriptor");
     };
     assert_eq!(descriptor.server(), "promptforge");
     assert_eq!(descriptor.name(), "alpha");
-    assert_eq!(descriptor.description, "Do the alpha thing.");
+    assert_eq!(descriptor.description(), "Do the alpha thing.");
     assert_eq!(
-        descriptor.input_schema,
-        json!({"type": "object", "properties": {"args": {"type": "string"}}}),
+        descriptor.input_schema(),
+        &json!({"type": "object", "properties": {"args": {"type": "string"}}}),
         "the descriptor declares what a run of the prompt takes"
-    );
-    assert_eq!(descriptor.parameter_names(), ["args"]);
-    assert_eq!(
-        descriptor.enriched_text(),
-        "alpha. Do the alpha thing.. parameters: args",
-        "the embedded text is the name and description, plus a tail every prompt shares"
     );
 }
 
@@ -90,7 +85,10 @@ fn a_broken_prompt_is_not_a_descriptor_and_so_is_never_recommended() {
     let descriptors = super::index::descriptors(&catalog);
 
     assert_eq!(descriptors.len(), 1, "and out of what retrieval ranks");
-    assert_eq!(descriptors.tools()[0].name(), "alpha");
+    assert_eq!(
+        descriptors.iter().next().expect("one descriptor").name(),
+        "alpha"
+    );
 }
 
 #[test]
@@ -134,8 +132,9 @@ fn a_capability_the_engine_default_would_abstain_on_still_returns_candidates() {
     let capability = "I need to know where Herb Sutter stands on ABI stability.";
 
     // The engine's own default floor, which was tuned for author-register prose.
-    let strict = ToolPicker::build_with(fixture::embedder(), descriptors, PickerConfig::default())
-        .expect("the strict engine indexes the fixture");
+    let strict =
+        ToolPicker::build_with_model(&fixture::model(), descriptors, PickerConfig::default())
+            .expect("the strict engine indexes the fixture");
     assert!(
         strict
             .shortlist(capability, 3)

@@ -10,8 +10,8 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
 use promptforge_tool_picker::{
-    Catalog, Config as PickerConfig, NearDuplicate, ToolAnnotations, ToolDescriptor,
-    ToolId as PickerToolId, ToolPicker,
+    Catalog, Config as PickerConfig, ToolAnnotations, ToolDescriptor, ToolId as PickerToolId,
+    ToolPicker,
 };
 use serde_json::Value;
 
@@ -122,7 +122,7 @@ fn bound_for_model(md: &str) -> TestPrompt {
 fn bound_with_tools(
     md: &str,
     resolver: &dyn crate::lua::ToolResolver,
-    near_duplicates: Vec<NearDuplicate>,
+    near_duplicates: Vec<(ToolDescriptor, ToolDescriptor)>,
 ) -> TestPrompt {
     let _ = resolver;
     let mut live_source = md.to_owned();
@@ -140,7 +140,7 @@ fn bound_with_tools(
         Some(Catalog::new(
             near_duplicates
                 .into_iter()
-                .flat_map(|pair| [pair.first, pair.second])
+                .flat_map(|pair| [pair.0, pair.1])
                 .collect(),
         ))
     };
@@ -195,15 +195,11 @@ async fn run(
                 .collect(),
         )
     });
-    let picker = ToolPicker::build(
-        catalog,
-        PickerConfig {
-            similarity_floor: 0.0,
-            margin: 0.0,
-            ..PickerConfig::default()
-        },
-    )
-    .expect("test picker must build");
+    let config = PickerConfig::default()
+        .with_similarity_floor(0.0)
+        .and_then(|config| config.with_margin(0.0))
+        .expect("test thresholds are in the supported domain");
+    let picker = ToolPicker::build(catalog, config).expect("test picker must build");
     super::run(
         &test.prompt,
         args,
@@ -1569,7 +1565,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         tool.parameters_schema(),
     );
     let capability =
-        serde_json::to_string(&descriptor.enriched_text()).expect("serialize fixture capability");
+        serde_json::to_string(&capability_for(&descriptor)).expect("serialize fixture capability");
     let source = format!(
         "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 1\n---\n\n\
          # Lifecycle\n\n```lua\n\
@@ -1861,7 +1857,7 @@ async fn captured_bindings_reach_section_execute_and_fanout_vms() {
         echo.parameters_schema(),
     );
     let capability =
-        serde_json::to_string(&descriptor.enriched_text()).expect("serialize tool capability");
+        serde_json::to_string(&capability_for(&descriptor)).expect("serialize tool capability");
     let source = format!(
         "---\nname: captured-bindings\ndescription: d\npromptforge: 1\n---\n\n\
          # Captured Bindings\n\n\
@@ -1922,7 +1918,7 @@ async fn live_h1_infer_sees_tools_resolved_in_the_same_block() {
         echo.parameters_schema(),
     );
     let capability =
-        serde_json::to_string(&descriptor.enriched_text()).expect("serialize tool capability");
+        serde_json::to_string(&capability_for(&descriptor)).expect("serialize tool capability");
     let source = format!(
         "---\nname: live-h1-tools\ndescription: d\npromptforge: 1\n---\n\n\
          # Live H1 Tools\n\n\
@@ -1973,7 +1969,7 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
         echo.parameters_schema(),
     );
     let capability =
-        serde_json::to_string(&descriptor.enriched_text()).expect("serialize tool capability");
+        serde_json::to_string(&capability_for(&descriptor)).expect("serialize tool capability");
     let source = format!(
         "---\nname: live-h1-prose\ndescription: d\npromptforge: 1\n---\n\n\
          # Live H1 Prose\n\n\
@@ -2740,11 +2736,39 @@ fn picker_descriptor(name: &str, description: &str) -> ToolDescriptor {
         description,
         json!({"type": "object"}),
     )
-    .with_annotations(ToolAnnotations {
-        read_only: Some(true),
-        destructive: Some(false),
-        idempotent: Some(true),
-    })
+    .with_annotations(
+        ToolAnnotations::new()
+            .with_read_only(true)
+            .with_destructive(false)
+            .with_idempotent(true),
+    )
+}
+
+/// The picker's calibrated enriched text for a descriptor.
+///
+/// The engine's own derivation is crate-private, so this test mirror lets a
+/// need equal a tool's embedded text and bind it under any threshold.
+fn capability_for(descriptor: &ToolDescriptor) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let name = descriptor.name().replace('_', " ");
+    if !name.is_empty() {
+        parts.push(name);
+    }
+    if !descriptor.description().is_empty() {
+        parts.push(descriptor.description().to_owned());
+    }
+    let mut params: Vec<&str> = descriptor
+        .input_schema()
+        .as_object()
+        .and_then(|schema| schema.get("properties"))
+        .and_then(serde_json::Value::as_object)
+        .map(|properties| properties.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    params.sort_unstable();
+    if !params.is_empty() {
+        parts.push(format!("parameters: {}", params.join(", ")));
+    }
+    parts.join(". ")
 }
 
 #[tokio::test]
@@ -2931,11 +2955,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
 ## First\n\n```lua\ntools.add('first_local')\n```\n\nFirst model turn.\n\n\
 ## Second\n\n```lua\ntools.add('second_local')\n```\n\nSecond model turn.\n",
         &|capability: &str| Ok(ToolId::new("tests", capability)),
-        vec![NearDuplicate {
-            first: first_descriptor,
-            second: second_descriptor,
-            similarity: 0.97,
-        }],
+        vec![(first_descriptor, second_descriptor)],
     );
 
     let out = run(
@@ -2981,9 +3001,13 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
             (first_id.clone(), "first_local".to_owned()),
             (second_id.clone(), "second_local".to_owned()),
         ]),
-        near_duplicates: vec![NearDuplicate {
-            first: first_descriptor,
-            second: second_descriptor,
+        near_duplicates: vec![OwnedNearDuplicate {
+            first_id: first_id.clone(),
+            first_description: first_descriptor.description().to_owned(),
+            first_annotations: first_descriptor.annotations(),
+            second_id: second_id.clone(),
+            second_description: second_descriptor.description().to_owned(),
+            second_annotations: second_descriptor.annotations(),
             similarity: 0.98,
         }],
     };
@@ -3000,11 +3024,11 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
         } if diagnostic.first_alias == "first_local"
             && diagnostic.first_id == ToolId::new("tests", "first")
             && diagnostic.first_description == "Private similar description one."
-            && diagnostic.first_annotations.read_only == Some(true)
+            && diagnostic.first_annotations.read_only() == Some(true)
             && diagnostic.second_alias == "second_local"
             && diagnostic.second_id == ToolId::new("tests", "second")
             && diagnostic.second_description == "Private similar description two."
-            && diagnostic.second_annotations.idempotent == Some(true)
+            && diagnostic.second_annotations.idempotent() == Some(true)
             && (diagnostic.similarity - 0.98).abs() < f32::EPSILON
     ));
     let events = recorder.events();

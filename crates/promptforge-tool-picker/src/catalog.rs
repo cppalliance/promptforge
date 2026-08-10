@@ -1,39 +1,40 @@
-//! The tool catalog: the sole input contract of the engine.
+//! The tool catalog: immutable identity, descriptors, and the ordered set.
 //!
 //! A catalog is the set of tool descriptors the engine may choose from, each
 //! carrying the identity and prose that the embedding is derived from.
 //!
 //! Identity is the `(server, name)` pair, modelled as [`ToolId`]. The pair is
-//! kept as a pair rather than folded into one string, so a server or tool name
-//! containing any delimiter a caller might have chosen stays unambiguous.
+//! kept structural rather than folded into one string, so a server or tool name
+//! containing any delimiter stays unambiguous. There is no concatenated key.
 //!
-//! The prose an embedding sees is [`ToolDescriptor::enriched_text`]: the tool
-//! name with its underscores opened out, its description, and the names of its
-//! top-level parameters, joined in a fixed shape. That derivation is
-//! deterministic - the same descriptor always yields the same string - because
-//! ranking is only reproducible if the text behind each vector is, and the
-//! shape is fixed because the crate's calibrated thresholds were measured
-//! against text in exactly that shape.
+//! The prose an embedding sees is the descriptor's internal enriched text: the
+//! tool name with its underscores opened out, its description, and the names of
+//! its top-level parameters, joined in a fixed shape. That derivation is a
+//! private, calibrated internal encoding, not a caller operation.
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-/// The delimiter [`ToolId::qualified_key`] puts between server and tool name.
-///
-/// ASCII unit separator (`U+001F`). It is a C0 control character, so it cannot
-/// occur in a server or tool name that any protocol or filesystem would accept;
-/// that is the whole reason it is used, and it is what makes the qualified key
-/// unambiguous. A printable delimiter such as `/`, `.`, or `:` can legally
-/// appear inside either part and would let two distinct identities collide.
-pub const QUALIFIED_KEY_SEPARATOR: char = '\u{001f}';
 
 /// The stable identity of a tool: the server it lives on and its name there.
 ///
 /// Two descriptors denote the same tool exactly when their identities compare
 /// equal, and equality is structural over the pair - the parts are never
-/// concatenated to compare or hash them. A tool name is only unique within its
-/// server, so the server is part of the identity, not context around it.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+/// concatenated. A tool name is only unique within its server, so the server is
+/// part of the identity, not context around it.
+///
+/// # Examples
+///
+/// ```
+/// use promptforge_tool_picker::ToolId;
+///
+/// let id = ToolId::new("files", "read_file");
+/// assert_eq!(id.server(), "files");
+/// assert_eq!(id.name(), "read_file");
+/// // A delimiter inside either part never collides two identities.
+/// assert_ne!(ToolId::new("a/b", "c"), ToolId::new("a", "b/c"));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
 pub struct ToolId {
     /// The server the tool is served from.
     server: String,
@@ -51,60 +52,116 @@ impl ToolId {
         }
     }
 
-    /// The server the tool is served from.
+    /// Returns the server the tool is served from.
     #[must_use]
     pub fn server(&self) -> &str {
         &self.server
     }
 
-    /// The tool's name within its server.
+    /// Returns the tool's name within its server.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
-    }
-
-    /// A single-string form of the identity, for keying or logging.
-    ///
-    /// The two parts are joined by [`QUALIFIED_KEY_SEPARATOR`], which cannot
-    /// occur inside either part, so the key round-trips: distinct identities
-    /// always produce distinct keys and the key splits back into exactly the
-    /// pair it was built from. It is a machine key, not a label for a human -
-    /// the separator does not print.
-    #[must_use]
-    pub fn qualified_key(&self) -> String {
-        format!("{}{QUALIFIED_KEY_SEPARATOR}{}", self.server, self.name)
     }
 }
 
 /// The MCP behavioural hints a tool may advertise about itself.
 ///
-/// Every hint is optional and every one is advisory: a catalog producer that
-/// knows nothing about a tool's behaviour leaves them all `None`, which is the
-/// default. The engine uses them only to break a tie between candidates that
-/// are otherwise indistinguishable, so an absent hint never changes a ranking.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Every hint is optional and advisory: a catalog producer that knows nothing
+/// about a tool's behaviour leaves them all absent, which is the default. The
+/// engine uses them only to break a tie between otherwise indistinguishable
+/// candidates, so an absent hint never changes a ranking.
+///
+/// # Examples
+///
+/// ```
+/// use promptforge_tool_picker::ToolAnnotations;
+///
+/// let hints = ToolAnnotations::new().with_read_only(true);
+/// assert_eq!(hints.read_only(), Some(true));
+/// assert_eq!(hints.destructive(), None);
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
 pub struct ToolAnnotations {
     /// The tool does not modify its environment.
-    #[serde(
-        default,
-        rename = "readOnlyHint",
-        skip_serializing_if = "Option::is_none"
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            default,
+            rename = "readOnlyHint",
+            skip_serializing_if = "Option::is_none"
+        )
     )]
-    pub read_only: Option<bool>,
+    read_only: Option<bool>,
     /// The tool may perform destructive updates.
-    #[serde(
-        default,
-        rename = "destructiveHint",
-        skip_serializing_if = "Option::is_none"
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            default,
+            rename = "destructiveHint",
+            skip_serializing_if = "Option::is_none"
+        )
     )]
-    pub destructive: Option<bool>,
+    destructive: Option<bool>,
     /// Repeating the call with the same arguments has no additional effect.
-    #[serde(
-        default,
-        rename = "idempotentHint",
-        skip_serializing_if = "Option::is_none"
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            default,
+            rename = "idempotentHint",
+            skip_serializing_if = "Option::is_none"
+        )
     )]
-    pub idempotent: Option<bool>,
+    idempotent: Option<bool>,
+}
+
+impl ToolAnnotations {
+    /// Builds annotations with no hints claimed.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the read-only hint, if the tool claimed one.
+    #[must_use]
+    pub fn read_only(&self) -> Option<bool> {
+        self.read_only
+    }
+
+    /// Returns the destructive hint, if the tool claimed one.
+    #[must_use]
+    pub fn destructive(&self) -> Option<bool> {
+        self.destructive
+    }
+
+    /// Returns the idempotent hint, if the tool claimed one.
+    #[must_use]
+    pub fn idempotent(&self) -> Option<bool> {
+        self.idempotent
+    }
+
+    /// Returns these annotations with the read-only hint set.
+    #[must_use]
+    pub fn with_read_only(mut self, value: bool) -> Self {
+        self.read_only = Some(value);
+        self
+    }
+
+    /// Returns these annotations with the destructive hint set.
+    #[must_use]
+    pub fn with_destructive(mut self, value: bool) -> Self {
+        self.destructive = Some(value);
+        self
+    }
+
+    /// Returns these annotations with the idempotent hint set.
+    #[must_use]
+    pub fn with_idempotent(mut self, value: bool) -> Self {
+        self.idempotent = Some(value);
+        self
+    }
 }
 
 /// One tool the engine may resolve a need to.
@@ -113,26 +170,43 @@ pub struct ToolAnnotations {
 /// do, and what it takes, but carries nothing that could invoke it. Mapping a
 /// resolved descriptor onto something callable is the caller's job.
 ///
+/// The JSON Schema value is retained intentionally: an arbitrary schema is
+/// catalog input data, not an embedding-backend detail. The crate never
+/// validates or executes it.
+///
 /// In JSON the identity is flat, so a catalog entry reads as
-/// `{"server": ..., "name": ..., "description": ..., "input_schema": ...}`.
-/// The schema field also accepts its MCP spelling, `inputSchema`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// `{"server": ..., "name": ..., "description": ..., "input_schema": ...}`. The
+/// schema field also accepts its MCP spelling, `inputSchema`.
+///
+/// # Examples
+///
+/// ```
+/// use promptforge_tool_picker::{ToolDescriptor, ToolId};
+/// use serde_json::json;
+///
+/// let tool = ToolDescriptor::new(
+///     ToolId::new("files", "read_file"),
+///     "Read a file from disk",
+///     json!({"properties": {"path": {"type": "string"}}}),
+/// );
+/// assert_eq!(tool.name(), "read_file");
+/// assert_eq!(tool.description(), "Read a file from disk");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
 pub struct ToolDescriptor {
     /// The tool's stable identity.
-    #[serde(flatten)]
-    pub id: ToolId,
+    #[cfg_attr(feature = "serde", serde(flatten))]
+    id: ToolId,
     /// Prose describing what the tool does, as its author wrote it.
-    pub description: String,
+    description: String,
     /// The tool's JSON Schema for its arguments.
-    ///
-    /// Only the top-level `properties` keys are read, and only to enrich the
-    /// text that gets embedded; the schema is never validated or executed. Any
-    /// JSON value is accepted, including a non-object one.
-    #[serde(default, alias = "inputSchema")]
-    pub input_schema: Value,
+    #[cfg_attr(feature = "serde", serde(default, alias = "inputSchema"))]
+    input_schema: Value,
     /// Optional behavioural hints, used only as a tie-break.
-    #[serde(default)]
-    pub annotations: ToolAnnotations,
+    #[cfg_attr(feature = "serde", serde(default))]
+    annotations: ToolAnnotations,
 }
 
 impl ToolDescriptor {
@@ -154,34 +228,48 @@ impl ToolDescriptor {
         self
     }
 
-    /// The server the tool is served from.
+    /// Returns the tool's stable identity.
+    #[must_use]
+    pub fn id(&self) -> &ToolId {
+        &self.id
+    }
+
+    /// Returns the server the tool is served from.
     #[must_use]
     pub fn server(&self) -> &str {
         self.id.server()
     }
 
-    /// The tool's name within its server.
+    /// Returns the tool's name within its server.
     #[must_use]
     pub fn name(&self) -> &str {
         self.id.name()
     }
 
+    /// Returns the prose describing what the tool does.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the tool's JSON Schema for its arguments.
+    #[must_use]
+    pub fn input_schema(&self) -> &Value {
+        &self.input_schema
+    }
+
+    /// Returns the tool's behavioural hints.
+    #[must_use]
+    pub fn annotations(&self) -> ToolAnnotations {
+        self.annotations
+    }
+
     /// The names of the tool's top-level parameters, in ascending order.
     ///
-    /// The names are the keys of the `properties` object at the root of
-    /// [`ToolDescriptor::input_schema`]. A schema that is not an object, has no
-    /// `properties`, or whose `properties` is not an object yields no names -
-    /// a malformed or absent schema costs the tool its parameter names, never
-    /// an error.
-    ///
-    /// The order is ascending by byte value rather than the order the keys
-    /// happened to arrive in. A JSON object is an unordered set of members, and
-    /// the ordering the keys had in the source text is not recoverable once the
-    /// document is parsed, so sorting is the one ordering that can be produced
-    /// identically every time; the result does not depend on how the JSON was
-    /// parsed or which map the parser used.
-    #[must_use]
-    pub fn parameter_names(&self) -> Vec<&str> {
+    /// The names are the keys of the `properties` object at the root of the
+    /// input schema. A schema that is not an object, has no `properties`, or
+    /// whose `properties` is not an object yields no names.
+    pub(crate) fn parameter_names(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self
             .input_schema
             .as_object()
@@ -193,140 +281,149 @@ impl ToolDescriptor {
         names
     }
 
-    /// The text the engine embeds for this tool.
+    /// The calibrated text the engine embeds for this tool.
     ///
-    /// The text is built from up to three parts, in this order:
-    ///
-    /// 1. the tool's name with every `_` replaced by a single space, so
-    ///    `read_file` reads as `read file`;
-    /// 2. the description exactly as its author wrote it;
-    /// 3. the literal `parameters: ` followed by the parameter names joined
-    ///    with `, `, present only when there is at least one parameter.
-    ///
-    /// Empty parts are dropped, and the parts that remain are joined with
-    /// `. ` - a period and a space. A description that already ends in a
-    /// period therefore yields a doubled period before the parameter part;
-    /// that is intended and is not collapsed. Parameters are included because
-    /// a name and a one-line description often under-describe a tool, while
-    /// its argument names say concretely what it operates on, and the name is
-    /// de-underscored because the embedding model reads a snake_case
-    /// identifier as one opaque token rather than as its words.
-    ///
-    /// The exact shape matters beyond taste. The thresholds in
-    /// [`Config`](crate::Config) - the similarity floor above all - are
-    /// calibrated numbers, and they are only meaningful against vectors of
-    /// text in this shape. Changing the punctuation, the ordering, or the
-    /// `parameters: ` prefix moves every similarity score and silently
-    /// invalidates those defaults.
-    ///
-    /// The result is a pure function of the descriptor: parameter names are
-    /// ordered by [`ToolDescriptor::parameter_names`], so repeated calls, and
-    /// separate runs over the same catalog, produce byte-identical text and
-    /// therefore identical vectors.
-    #[must_use]
-    pub fn enriched_text(&self) -> String {
+    /// Built from the de-underscored name, the description, and a
+    /// `parameters: ` tail, joined with `. `. The exact shape is calibration
+    /// sensitive: the configured thresholds are only meaningful against text in
+    /// this shape.
+    pub(crate) fn enriched_text(&self) -> String {
         let parameters = self.parameter_names();
-        let mut parts: Vec<String> = Vec::with_capacity(3);
-        parts.push(self.name().replace('_', " "));
-        parts.push(self.description.clone());
-        if !parameters.is_empty() {
-            parts.push(format!("parameters: {}", parameters.join(", ")));
+        let mut text = String::with_capacity(
+            self.name().len() + self.description.len() + parameters.len() * 8,
+        );
+        let mut wrote = false;
+        let name = self.name().replace('_', " ");
+        if !name.is_empty() {
+            text.push_str(&name);
+            wrote = true;
         }
-        parts.retain(|part| !part.is_empty());
-        parts.join(". ")
+        if !self.description.is_empty() {
+            if wrote {
+                text.push_str(". ");
+            }
+            text.push_str(&self.description);
+            wrote = true;
+        }
+        if !parameters.is_empty() {
+            if wrote {
+                text.push_str(". ");
+            }
+            text.push_str("parameters: ");
+            for (index, parameter) in parameters.iter().enumerate() {
+                if index > 0 {
+                    text.push_str(", ");
+                }
+                text.push_str(parameter);
+            }
+        }
+        text
     }
 }
+
+/// A borrowed iterator over a catalog's descriptors.
+pub type CatalogIter<'a> = std::slice::Iter<'a, ToolDescriptor>;
+/// A mutable iterator over a catalog's descriptors.
+pub type CatalogIterMut<'a> = std::slice::IterMut<'a, ToolDescriptor>;
+/// An owning iterator over a catalog's descriptors.
+pub type CatalogIntoIter = std::vec::IntoIter<ToolDescriptor>;
 
 /// The set of tools the engine may choose from.
 ///
 /// This is the crate's sole input contract. A catalog is an ordered collection
-/// of descriptors; order is preserved as given so that a caller can reproduce
-/// a ranking's tie-breaks, and duplicates are not rejected here - two tools
-/// that describe the same capability are a result the engine reports, not an
-/// input it refuses.
+/// of descriptors; order is preserved, and duplicate identities are accepted
+/// because two tools describing the same capability are a result the engine
+/// reports, not an input it refuses.
 ///
 /// In JSON a catalog is simply an array of descriptors.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(transparent)]
+///
+/// # Examples
+///
+/// ```
+/// use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId};
+/// use serde_json::json;
+///
+/// let catalog = Catalog::new(vec![ToolDescriptor::new(
+///     ToolId::new("files", "read_file"),
+///     "Read a file from disk",
+///     json!({"properties": {"path": {"type": "string"}}}),
+/// )]);
+/// assert_eq!(catalog.len(), 1);
+/// assert_eq!(catalog.iter().next().map(ToolDescriptor::name), Some("read_file"));
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[non_exhaustive]
 pub struct Catalog {
+    /// The descriptors, in the order they were given.
     tools: Vec<ToolDescriptor>,
 }
 
 impl Catalog {
     /// Builds a catalog from descriptors, preserving their order.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId};
-    /// use serde_json::json;
-    ///
-    /// let catalog = Catalog::new(vec![
-    ///     ToolDescriptor::new(
-    ///         ToolId::new("files", "read_file"),
-    ///         "Read a file from disk",
-    ///         json!({"properties": {"path": {"type": "string"}}}),
-    ///     ),
-    ///     ToolDescriptor::new(
-    ///         ToolId::new("net", "fetch_url"),
-    ///         "Fetch a web page over HTTP",
-    ///         json!({"properties": {"url": {"type": "string"}}}),
-    ///     ),
-    /// ]);
-    ///
-    /// assert_eq!(catalog.len(), 2);
-    /// // The order given is the order kept, and it is the order every
-    /// // per-tool accessor on an engine is indexed by.
-    /// assert_eq!(catalog.tools()[0].name(), "read_file");
-    /// ```
     #[must_use]
     pub fn new(tools: Vec<ToolDescriptor>) -> Self {
         Self { tools }
     }
 
-    /// The number of tools in the catalog.
+    /// Returns the number of tools in the catalog.
     #[must_use]
     pub fn len(&self) -> usize {
         self.tools.len()
     }
 
-    /// Whether the catalog holds no tools.
+    /// Returns whether the catalog holds no tools.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }
 
-    /// The descriptors, in the order they were given.
-    #[must_use]
-    pub fn tools(&self) -> &[ToolDescriptor] {
-        &self.tools
-    }
-
     /// Iterates the descriptors in the order they were given.
     #[must_use = "iterators are lazy and visit nothing unless consumed"]
-    pub fn iter(&self) -> std::slice::Iter<'_, ToolDescriptor> {
+    pub fn iter(&self) -> CatalogIter<'_> {
         self.tools.iter()
     }
 
-    /// The first descriptor with the given identity, if the catalog has one.
+    /// Iterates the descriptors mutably, in the order they were given.
+    #[must_use = "iterators are lazy and visit nothing unless consumed"]
+    pub fn iter_mut(&mut self) -> CatalogIterMut<'_> {
+        self.tools.iter_mut()
+    }
+
+    /// Returns the first descriptor with the given identity, if any.
     #[must_use]
     pub fn get(&self, id: &ToolId) -> Option<&ToolDescriptor> {
-        self.tools.iter().find(|tool| &tool.id == id)
+        self.tools.iter().find(|tool| tool.id() == id)
+    }
+
+    /// The descriptors as a slice, for crate-internal indexing.
+    pub(crate) fn as_slice(&self) -> &[ToolDescriptor] {
+        &self.tools
     }
 }
 
 impl<'a> IntoIterator for &'a Catalog {
     type Item = &'a ToolDescriptor;
-    type IntoIter = std::slice::Iter<'a, ToolDescriptor>;
+    type IntoIter = CatalogIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+        self.tools.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Catalog {
+    type Item = &'a mut ToolDescriptor;
+    type IntoIter = CatalogIterMut<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.tools.iter_mut()
     }
 }
 
 impl IntoIterator for Catalog {
     type Item = ToolDescriptor;
-    type IntoIter = std::vec::IntoIter<ToolDescriptor>;
+    type IntoIter = CatalogIntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.tools.into_iter()
@@ -339,12 +436,17 @@ impl FromIterator<ToolDescriptor> for Catalog {
     }
 }
 
+impl From<Vec<ToolDescriptor>> for Catalog {
+    fn from(tools: Vec<ToolDescriptor>) -> Self {
+        Self::new(tools)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Catalog, QUALIFIED_KEY_SEPARATOR, ToolAnnotations, ToolDescriptor, ToolId};
+    use super::{Catalog, ToolAnnotations, ToolDescriptor, ToolId};
     use serde_json::{Value, json};
 
-    /// A descriptor with the given schema and fixed identity and prose.
     fn descriptor(schema: Value) -> ToolDescriptor {
         ToolDescriptor::new(
             ToolId::new("files", "read_file"),
@@ -411,37 +513,16 @@ mod tests {
     fn non_object_schema_yields_no_parameters() {
         for schema in [Value::Null, json!(true), json!("string"), json!([1, 2, 3])] {
             let tool = descriptor(schema);
-            assert!(
-                tool.parameter_names().is_empty(),
-                "a non-object schema must not produce parameter names"
-            );
+            assert!(tool.parameter_names().is_empty());
             assert_eq!(tool.enriched_text(), "read file. Read a file from disk");
         }
     }
 
     #[test]
-    fn non_object_properties_yield_no_parameters() {
-        let tool = descriptor(json!({"type": "object", "properties": ["path"]}));
-        assert!(tool.parameter_names().is_empty());
-    }
-
-    #[test]
-    fn enriched_text_is_stable_across_calls_and_key_order() {
-        let one = descriptor(json!({
-            "properties": {"zeta": {}, "alpha": {}, "mid": {}}
-        }));
-        let other = descriptor(json!({
-            "properties": {"mid": {}, "alpha": {}, "zeta": {}}
-        }));
-        let text = one.enriched_text();
-        for _ in 0..8 {
-            assert_eq!(one.enriched_text(), text);
-        }
-        assert_eq!(
-            other.enriched_text(),
-            text,
-            "key order in the schema must not change the embedded text"
-        );
+    fn enriched_text_is_stable_across_key_order() {
+        let one = descriptor(json!({"properties": {"zeta": {}, "alpha": {}, "mid": {}}}));
+        let other = descriptor(json!({"properties": {"mid": {}, "alpha": {}, "zeta": {}}}));
+        assert_eq!(one.enriched_text(), other.enriched_text());
     }
 
     #[test]
@@ -455,21 +536,26 @@ mod tests {
     }
 
     #[test]
-    fn qualified_key_separates_parts_unambiguously() {
-        let id = ToolId::new("files", "read_file");
-        let key = id.qualified_key();
-        assert_eq!(
-            key.split(QUALIFIED_KEY_SEPARATOR).collect::<Vec<_>>(),
-            vec!["files", "read_file"]
+    fn identities_with_a_delimiter_do_not_collide() {
+        assert_ne!(
+            ToolId::new("a\u{1f}b", "c"),
+            ToolId::new("a", "b\u{1f}c"),
+            "structural identity keeps a delimiter-bearing pair distinct"
         );
-        // Parts holding a delimiter a caller might have picked still key apart.
-        let left = ToolId::new("a/b", "c").qualified_key();
-        let right = ToolId::new("a", "b/c").qualified_key();
-        assert_ne!(left, right);
     }
 
     #[test]
-    fn catalog_reports_size_and_iterates_in_order() {
+    fn annotation_builders_and_accessors_cover_absent_true_and_false() {
+        let hints = ToolAnnotations::new()
+            .with_read_only(true)
+            .with_destructive(false);
+        assert_eq!(hints.read_only(), Some(true));
+        assert_eq!(hints.destructive(), Some(false));
+        assert_eq!(hints.idempotent(), None);
+    }
+
+    #[test]
+    fn catalog_reports_size_iterates_and_looks_up_first_match() {
         let empty = Catalog::default();
         assert!(empty.is_empty());
         assert_eq!(empty.len(), 0);
@@ -478,30 +564,33 @@ mod tests {
         let second = ToolDescriptor::new(ToolId::new("net", "fetch"), "Fetch a URL", json!({}));
         let catalog = Catalog::new(vec![first.clone(), second.clone()]);
         assert_eq!(catalog.len(), 2);
-        assert!(!catalog.is_empty());
         assert_eq!(catalog.iter().collect::<Vec<_>>(), vec![&first, &second]);
-        assert_eq!(catalog.get(&second.id), Some(&second));
+        assert_eq!(catalog.get(second.id()), Some(&second));
         assert_eq!(catalog.get(&ToolId::new("net", "missing")), None);
-        assert_eq!(catalog.tools().len(), 2);
     }
 
     #[test]
-    fn catalog_round_trips_through_json() {
-        let catalog = Catalog::new(vec![
-            descriptor(json!({"properties": {"path": {"type": "string"}}})).with_annotations(
-                ToolAnnotations {
-                    read_only: Some(true),
-                    ..ToolAnnotations::default()
-                },
-            ),
-            ToolDescriptor::new(ToolId::new("net", "fetch"), "Fetch a URL", json!({})),
+    fn catalog_iterates_mutably_and_owns_from_vec_and_from_iter() {
+        let mut catalog = Catalog::from(vec![
+            ToolDescriptor::new(ToolId::new("a", "one"), "one", json!({})),
+            ToolDescriptor::new(ToolId::new("b", "two"), "two", json!({})),
         ]);
+        for tool in &mut catalog {
+            *tool = tool
+                .clone()
+                .with_annotations(ToolAnnotations::new().with_read_only(true));
+        }
+        assert!(
+            catalog
+                .iter()
+                .all(|tool| tool.annotations().read_only() == Some(true))
+        );
 
-        let text = serde_json::to_string(&catalog).unwrap();
-        let parsed: Catalog = serde_json::from_str(&text).unwrap();
-        assert_eq!(parsed, catalog);
+        let collected: Catalog = catalog.clone().into_iter().collect();
+        assert_eq!(collected, catalog);
     }
 
+    #[cfg(feature = "serde")]
     #[test]
     fn descriptor_deserializes_from_a_flat_mcp_shaped_object() {
         let parsed: ToolDescriptor = serde_json::from_value(json!({
@@ -511,19 +600,13 @@ mod tests {
             "inputSchema": {"properties": {"path": {"type": "string"}}},
             "annotations": {"readOnlyHint": true}
         }))
-        .unwrap();
-
-        assert_eq!(parsed.id, ToolId::new("files", "read_file"));
-        assert_eq!(parsed.server(), "files");
-        assert_eq!(parsed.name(), "read_file");
-        assert_eq!(parsed.annotations.read_only, Some(true));
-        assert_eq!(parsed.annotations.destructive, None);
-        assert_eq!(
-            parsed.enriched_text(),
-            "read file. Read a file from disk. parameters: path"
-        );
+        .expect("flat MCP descriptor deserializes");
+        assert_eq!(parsed.id(), &ToolId::new("files", "read_file"));
+        assert_eq!(parsed.annotations().read_only(), Some(true));
+        assert_eq!(parsed.annotations().destructive(), None);
     }
 
+    #[cfg(feature = "serde")]
     #[test]
     fn absent_optional_fields_default() {
         let parsed: ToolDescriptor = serde_json::from_value(json!({
@@ -531,9 +614,22 @@ mod tests {
             "name": "read_file",
             "description": "Read a file from disk"
         }))
-        .unwrap();
+        .expect("descriptor with absent optionals deserializes");
+        assert_eq!(parsed.input_schema(), &Value::Null);
+        assert_eq!(parsed.annotations(), ToolAnnotations::default());
+    }
 
-        assert_eq!(parsed.input_schema, Value::Null);
-        assert_eq!(parsed.annotations, ToolAnnotations::default());
+    #[cfg(feature = "serde")]
+    #[test]
+    fn catalog_round_trips_as_an_array() {
+        let catalog = Catalog::new(vec![
+            descriptor(json!({"properties": {"path": {"type": "string"}}}))
+                .with_annotations(ToolAnnotations::new().with_read_only(true)),
+            ToolDescriptor::new(ToolId::new("net", "fetch"), "Fetch a URL", json!({})),
+        ]);
+        let text = serde_json::to_string(&catalog).expect("serialize");
+        assert!(text.starts_with('['), "a catalog serializes as an array");
+        let parsed: Catalog = serde_json::from_str(&text).expect("deserialize");
+        assert_eq!(parsed, catalog);
     }
 }

@@ -39,7 +39,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 
-use promptforge_tool_picker::{NearDuplicate, ToolId as PickerToolId, ToolPicker};
+use promptforge_tool_picker::{ToolId as PickerToolId, ToolPicker};
 
 use crate::cancel;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
@@ -525,11 +525,27 @@ struct LiveH1State {
     returned: Option<String>,
 }
 
+/// One near-duplicate pair copied out of the picker's borrowing result.
+///
+/// The picker's [`promptforge_tool_picker::NearDuplicate`] borrows the picker,
+/// but [`ToolAnalysis`] outlives one resolution and is cloned into fanout and
+/// execute closures, so the pair's diagnostic values are copied out here.
+#[derive(Debug, Clone)]
+struct OwnedNearDuplicate {
+    first_id: ToolId,
+    first_description: String,
+    first_annotations: promptforge_tool_picker::ToolAnnotations,
+    second_id: ToolId,
+    second_description: String,
+    second_annotations: promptforge_tool_picker::ToolAnnotations,
+    similarity: f32,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ToolAnalysis {
     pub(crate) alias_to_id: BTreeMap<String, ToolId>,
     id_to_alias: BTreeMap<ToolId, String>,
-    near_duplicates: Vec<NearDuplicate>,
+    near_duplicates: Vec<OwnedNearDuplicate>,
 }
 
 impl ToolAnalysis {
@@ -549,12 +565,22 @@ impl ToolAnalysis {
             .iter()
             .map(|binding| PickerToolId::new(binding.id().server(), binding.id().name()))
             .collect::<Vec<_>>();
-        let near_duplicates =
-            picker
-                .near_duplicates(&ids)
-                .map_err(|error| Error::ToolScopeAnalysis {
-                    detail: error.to_string(),
-                })?;
+        let near_duplicates = picker
+            .near_duplicates(&ids)
+            .map_err(|error| Error::ToolScopeAnalysis {
+                detail: error.to_string(),
+            })?
+            .iter()
+            .map(|pair| OwnedNearDuplicate {
+                first_id: ToolId::new(pair.first().id().server(), pair.first().id().name()),
+                first_description: pair.first().description().to_owned(),
+                first_annotations: pair.first().annotations(),
+                second_id: ToolId::new(pair.second().id().server(), pair.second().id().name()),
+                second_description: pair.second().description().to_owned(),
+                second_annotations: pair.second().annotations(),
+                similarity: pair.similarity(),
+            })
+            .collect();
         Ok(Self {
             alias_to_id,
             id_to_alias,
@@ -1645,21 +1671,19 @@ fn validate_effective_scope_inner(analysis: &ToolAnalysis, scope: &ToolScope) ->
         .map(crate::lua::ToolBinding::id)
         .collect::<BTreeSet<_>>();
     for pair in &analysis.near_duplicates {
-        let first_id = ToolId::new(pair.first.id.server(), pair.first.id.name());
-        let second_id = ToolId::new(pair.second.id.server(), pair.second.id.name());
-        if !effective.contains(&first_id) || !effective.contains(&second_id) {
+        if !effective.contains(&pair.first_id) || !effective.contains(&pair.second_id) {
             continue;
         }
         let first_alias = analysis
             .id_to_alias
-            .get(&first_id)
+            .get(&pair.first_id)
             .cloned()
             .ok_or_else(|| Error::ToolScopeAnalysis {
                 detail: "selected identity has no frozen alias".to_owned(),
             })?;
         let second_alias = analysis
             .id_to_alias
-            .get(&second_id)
+            .get(&pair.second_id)
             .cloned()
             .ok_or_else(|| Error::ToolScopeAnalysis {
                 detail: "selected identity has no frozen alias".to_owned(),
@@ -1667,13 +1691,13 @@ fn validate_effective_scope_inner(analysis: &ToolAnalysis, scope: &ToolScope) ->
         return Err(Error::NearDuplicateTools {
             diagnostic: Box::new(NearDuplicateDiagnostic {
                 first_alias,
-                first_id,
-                first_description: pair.first.description.clone(),
-                first_annotations: pair.first.annotations,
+                first_id: pair.first_id.clone(),
+                first_description: pair.first_description.clone(),
+                first_annotations: pair.first_annotations,
                 second_alias,
-                second_id,
-                second_description: pair.second.description.clone(),
-                second_annotations: pair.second.annotations,
+                second_id: pair.second_id.clone(),
+                second_description: pair.second_description.clone(),
+                second_annotations: pair.second_annotations,
                 similarity: pair.similarity,
             }),
         });

@@ -3,24 +3,24 @@
 //! The script downloads `BAAI/bge-small-en-v1.5` from the Hugging Face Hub,
 //! pinned to one immutable commit, checks every file against a hardcoded
 //! SHA-256 digest, downcasts the fp32 weights to fp16, and writes the result
-//! into `OUT_DIR`. `src/assets.rs` then `include_bytes!`-embeds what lands
-//! there, so a linked binary carries the model with no external file and no
-//! network at run time. The pinned revision is written into `OUT_DIR` too, so
-//! `src/assets.rs` can embed it rather than repeat it.
+//! into `OUT_DIR` via a temporary file renamed into place. `src/assets.rs` then
+//! `include_bytes!`-embeds what lands there. The pinned revision and source
+//! repository are written into `OUT_DIR` too, so `src/assets.rs` embeds one
+//! generated provenance record rather than repeating it.
 //!
 //! Nothing is written inside the crate source tree: `OUT_DIR` lives under
-//! `target/`, which is gitignored, so the weights never become git-visible.
+//! `target/`, which is gitignored.
 //!
 //! The first build needs network access. Later builds reuse the Hugging Face
-//! cache (`HF_HUB_CACHE`, or `HF_HOME`, default `~/.cache/huggingface`), and a
-//! stamp file in `OUT_DIR` skips the work entirely while the pinned revision
-//! and the download itself are unchanged.
+//! cache. A stamp file recording the pinned revision, the conversion version,
+//! and the SHA-256 of every generated output skips the work entirely while all
+//! three outputs still hash to what the stamp records.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context as _, Result, anyhow, bail};
 use half::f16;
 use hf_hub::HFClientSync;
 use safetensors::tensor::{Dtype, SafeTensors, TensorView, View, serialize};
@@ -32,9 +32,7 @@ const REPO_OWNER: &str = "BAAI";
 /// Name of the Hugging Face model repository.
 const REPO_NAME: &str = "bge-small-en-v1.5";
 
-/// The pinned revision: an immutable commit, not a branch. A branch name would
-/// let the upstream repository change what this crate embeds, which defeats
-/// both the digest check and reproducible builds.
+/// The pinned revision: an immutable commit, not a branch.
 const REVISION: &str = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a";
 
 /// Upstream filename of the fp32 weights.
@@ -58,45 +56,47 @@ const CONFIG_SHA256: &str = "094f8e891b932f2000c92cfc663bac4c62069f5d8af5b5278c4
 /// Name of the converted fp16 weights written into `OUT_DIR`.
 const WEIGHTS_OUT: &str = "model-fp16.safetensors";
 
-/// Name of the file in `OUT_DIR` holding [`REVISION`], with no trailing
-/// newline, so `src/assets.rs` can embed the pin instead of repeating it.
+/// Name of the file in `OUT_DIR` holding [`REVISION`].
 const REVISION_OUT: &str = "revision.txt";
 
-/// Name of the stamp recording which revision `OUT_DIR` already holds.
+/// Name of the file in `OUT_DIR` holding the source repository identity.
+const REPO_OUT: &str = "repo.txt";
+
+/// Name of the stamp recording which outputs `OUT_DIR` already holds.
 const STAMP_OUT: &str = "assets.stamp";
 
 /// Bumped whenever the conversion changes, so an existing `OUT_DIR` produced by
 /// an older script is rebuilt rather than trusted.
-const CONVERSION_VERSION: &str = "1";
+const CONVERSION_VERSION: &str = "2";
+
+/// The three generated outputs whose digests the stamp records.
+const OUTPUTS: [&str; 3] = [WEIGHTS_OUT, TOKENIZER_SRC, CONFIG_SRC];
 
 fn main() {
     if let Err(cause) = run() {
-        // Print rather than return the error. Every failure here already
-        // carries its own multi-line remediation text, and `Display` is the
-        // form that keeps those lines intact.
-        eprintln!("\npromptforge-tool-picker build script failed.\n\n{cause}\n");
+        // Debug formatting prints the whole context chain; each Hub failure
+        // still carries its own multi-line remediation text.
+        eprintln!("\npromptforge-tool-picker build script failed.\n\n{cause:?}\n");
         std::process::exit(1);
     }
 }
 
 /// Stage the model assets in `OUT_DIR`, doing nothing if they are already there.
-///
-/// # Errors
-///
-/// Fails if the Hub is unreachable with a cold cache, if a downloaded file does
-/// not match its pinned digest, or if the conversion or any write fails.
 fn run() -> Result<()> {
     println!("cargo::rerun-if-changed=build.rs");
 
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
+    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").context("OUT_DIR is unset")?);
 
-    // Written on every run, before the up-to-date shortcut: it is the single
-    // source of truth for the pin that `src/assets.rs` exposes, and it costs 40
-    // bytes to keep it in step with this script unconditionally.
-    std::fs::write(out_dir.join(REVISION_OUT), REVISION)?;
+    // Provenance is generated on every run, before the up-to-date shortcut, so
+    // it stays the single source of truth for what `src/assets.rs` exposes.
+    write_atomic(&out_dir, REVISION_OUT, REVISION.as_bytes())?;
+    write_atomic(
+        &out_dir,
+        REPO_OUT,
+        format!("{REPO_OWNER}/{REPO_NAME}").as_bytes(),
+    )?;
 
-    let stamp = format!("{REVISION} fp16 v{CONVERSION_VERSION}\n");
-    if is_up_to_date(&out_dir, &stamp) {
+    if is_up_to_date(&out_dir) {
         return Ok(());
     }
 
@@ -104,31 +104,55 @@ fn run() -> Result<()> {
     let tokenizer = fetch(TOKENIZER_SRC, TOKENIZER_SHA256)?;
     let config = fetch(CONFIG_SRC, CONFIG_SHA256)?;
 
-    std::fs::write(out_dir.join(WEIGHTS_OUT), to_fp16(&weights)?)?;
-    std::fs::write(out_dir.join(TOKENIZER_SRC), tokenizer)?;
-    std::fs::write(out_dir.join(CONFIG_SRC), config)?;
-    std::fs::write(out_dir.join(STAMP_OUT), stamp)?;
+    let weights_fp16 = to_fp16(&weights).context("downcast the weights to fp16")?;
+    write_atomic(&out_dir, WEIGHTS_OUT, &weights_fp16)?;
+    write_atomic(&out_dir, TOKENIZER_SRC, &tokenizer)?;
+    write_atomic(&out_dir, CONFIG_SRC, &config)?;
 
+    // The stamp is written last, after the outputs are in place, and records a
+    // digest of each so a truncated or replaced output is a cache miss.
+    write_atomic(&out_dir, STAMP_OUT, stamp(&out_dir)?.as_bytes())?;
     Ok(())
 }
 
-/// Whether `OUT_DIR` already holds converted assets for this exact revision.
-fn is_up_to_date(out_dir: &Path, stamp: &str) -> bool {
-    let recorded = std::fs::read_to_string(out_dir.join(STAMP_OUT)).unwrap_or_default();
-    if recorded != stamp {
-        return false;
+/// The stamp text: revision, conversion version, and each output's digest.
+fn stamp(out_dir: &Path) -> Result<String> {
+    let mut stamp = format!("{REVISION} fp16 v{CONVERSION_VERSION}\n");
+    for name in OUTPUTS {
+        let path = out_dir.join(name);
+        let bytes = std::fs::read(&path)
+            .with_context(|| format!("read generated output {}", path.display()))?;
+        let _ = writeln!(stamp, "{name} {}", hex(Sha256::digest(&bytes).as_slice()));
     }
-    [WEIGHTS_OUT, TOKENIZER_SRC, CONFIG_SRC]
-        .iter()
-        .all(|name| out_dir.join(name).is_file())
+    Ok(stamp)
+}
+
+/// Whether `OUT_DIR` already holds converted outputs matching the stamp.
+///
+/// Recomputes each output's digest and compares it to the stamp, so a
+/// truncated, corrupted, or locally replaced output is treated as a cache miss.
+fn is_up_to_date(out_dir: &Path) -> bool {
+    let Ok(recorded) = std::fs::read_to_string(out_dir.join(STAMP_OUT)) else {
+        return false;
+    };
+    match stamp(out_dir) {
+        Ok(current) => current == recorded,
+        Err(_) => false,
+    }
+}
+
+/// Write `bytes` to `dir/name` via a temporary file renamed into place.
+fn write_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
+    let final_path = dir.join(name);
+    let temp_path = dir.join(format!("{name}.tmp"));
+    std::fs::write(&temp_path, bytes)
+        .with_context(|| format!("write staged output {}", temp_path.display()))?;
+    std::fs::rename(&temp_path, &final_path)
+        .with_context(|| format!("commit output {}", final_path.display()))?;
+    Ok(())
 }
 
 /// Download one file from the pinned revision and check it against `expected`.
-///
-/// # Errors
-///
-/// Fails if the Hub is unreachable with a cold cache, if the file is missing,
-/// or if the bytes do not hash to `expected`.
 fn fetch(filename: &str, expected: &str) -> Result<Vec<u8>> {
     let client = HFClientSync::new().map_err(|e| unreachable_hub(filename, &e))?;
     let path = client
@@ -138,7 +162,8 @@ fn fetch(filename: &str, expected: &str) -> Result<Vec<u8>> {
         .revision(REVISION)
         .send()
         .map_err(|e| unreachable_hub(filename, &e))?;
-    let bytes = std::fs::read(&path)?;
+    let bytes =
+        std::fs::read(&path).with_context(|| format!("read cached download {}", path.display()))?;
 
     let actual = hex(Sha256::digest(&bytes).as_slice());
     if actual != expected {
@@ -200,20 +225,8 @@ impl View for &OwnedTensor {
 }
 
 /// Rewrite a safetensors blob with every fp32 tensor downcast to fp16.
-///
-/// Halving the weights halves what every linked binary carries (about 130MB
-/// down to 65MB). This is a storage decision only: fp16 is not asserted to be
-/// the right *compute* dtype, and the loader is free to upcast to f32 in memory,
-/// which is what Candle's uneven f16 CPU coverage will likely want.
-///
-/// Tensors of any other dtype are copied through unchanged.
-///
-/// # Errors
-///
-/// Fails if the input is not a valid safetensors file, if an fp32 tensor's byte
-/// length is not a multiple of four, or if the result cannot be serialized.
 fn to_fp16(bytes: &[u8]) -> Result<Vec<u8>> {
-    let source = SafeTensors::deserialize(bytes)?;
+    let source = SafeTensors::deserialize(bytes).context("parse the upstream safetensors blob")?;
     let converted: Vec<(String, OwnedTensor)> = source
         .tensors()
         .into_iter()
@@ -231,14 +244,10 @@ fn to_fp16(bytes: &[u8]) -> Result<Vec<u8>> {
     let named = converted
         .iter()
         .map(|(name, tensor)| (name.as_str(), tensor));
-    Ok(serialize(named, Some(metadata))?)
+    serialize(named, Some(metadata)).context("serialize the converted safetensors blob")
 }
 
 /// Downcast one tensor to fp16, or copy it through if it is not fp32.
-///
-/// # Errors
-///
-/// Fails if an fp32 tensor's byte length is not a multiple of four.
 fn convert(name: &str, view: &TensorView<'_>) -> Result<OwnedTensor> {
     let shape = view.shape().to_vec();
     if view.dtype() != Dtype::F32 {

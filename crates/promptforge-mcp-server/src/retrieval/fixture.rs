@@ -9,7 +9,7 @@
 
 use std::sync::{Arc, LazyLock};
 
-use promptforge_tool_picker::Embedder;
+use promptforge_tool_picker::Model;
 use tempfile::TempDir;
 
 use crate::catalog::{Catalog, OnBroken};
@@ -17,18 +17,18 @@ use crate::config::Config;
 use crate::retrieval::Retrieval;
 
 /// The test binary's one loaded model.
-static EMBEDDER: LazyLock<Arc<Embedder>> =
-    LazyLock::new(|| Arc::new(Embedder::new().expect("the compiled-in retrieval model loads")));
+static MODEL: LazyLock<Model> =
+    LazyLock::new(|| Model::load().expect("the compiled-in retrieval model loads"));
 
 /// The shared model, for a test that indexes something itself.
-pub(crate) fn embedder() -> Arc<Embedder> {
-    Arc::clone(&EMBEDDER)
+pub(crate) fn model() -> Model {
+    MODEL.clone()
 }
 
 /// Retrieval over `catalog`, over the shared model.
 pub(crate) fn retrieval(catalog: &Catalog) -> Retrieval {
     let retrieval = Retrieval::idle();
-    retrieval.install_with(embedder(), catalog);
+    retrieval.install_with(&model(), catalog);
     retrieval
 }
 
