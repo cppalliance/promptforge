@@ -324,6 +324,8 @@ pub(crate) struct InferContext {
     client: GatewayClient,
     shared_tools: SharedTools,
     observer: Arc<dyn Observer>,
+    /// Owned debug sink so nested `model:infer` capture is not lost (F4).
+    debug: Option<Arc<dyn DebugCapture>>,
     execution: String,
     section: String,
     max_tool_iterations: usize,
@@ -435,27 +437,26 @@ impl InferContext {
             .map_err(|error| mlua::Error::external(error.to_string()))?;
 
         let completion_options = binding.completion_options();
-        let handle = tokio::runtime::Handle::current();
-        let (text, finish_reason) = tokio::task::block_in_place(|| {
-            handle.block_on(run_tool_loop(
-                &self.client,
-                &prepared.schemas,
-                &prepared.dispatch,
-                &registry,
-                prompt.to_owned(),
-                self.max_tool_iterations,
-                SectionProgress {
-                    execution: &self.execution,
-                    observer: self.observer.as_ref(),
-                    section: &self.section,
-                    turns: self.turns.as_ref(),
-                    debug: None,
-                    completion_options: &completion_options,
-                },
-                Some(&counts),
-                Some(&prepared.dispatch),
-            ))
-        })
+        let (text, finish_reason) = bridge_blocking(run_tool_loop(
+            &self.client,
+            &prepared.schemas,
+            &prepared.dispatch,
+            &registry,
+            prompt.to_owned(),
+            self.max_tool_iterations,
+            SectionProgress {
+                execution: &self.execution,
+                observer: self.observer.as_ref(),
+                section: &self.section,
+                turns: self.turns.as_ref(),
+                // The run's owned debug sink reaches nested inference so its
+                // request/response capture is not lost (F4).
+                debug: self.debug.as_deref(),
+                completion_options: &completion_options,
+            },
+            Some(&counts),
+            Some(&prepared.dispatch),
+        ))
         .map_err(|error| mlua::Error::external(error.to_string()))?;
 
         lua.globals()
@@ -488,6 +489,7 @@ fn attach_infer_hook(
     client: &GatewayClient,
     shared_tools: &SharedTools,
     observer: Arc<dyn Observer>,
+    debug: Option<Arc<dyn DebugCapture>>,
     execution: &str,
     section: &str,
     max_tool_iterations: usize,
@@ -502,6 +504,8 @@ fn attach_infer_hook(
         // The run's owned observer reaches the nested `model:infer` hook, so
         // observations from nested inference are not lost (observe F1).
         observer,
+        // The run's owned debug sink likewise reaches nested inference (F4).
+        debug,
         execution: execution.to_owned(),
         section: section.to_owned(),
         max_tool_iterations,
@@ -849,7 +853,11 @@ pub async fn run(
     let execution = execution.as_str();
     let observer_arc = observer;
     let observer = observer_arc.as_ref();
-    let debug = debug.as_deref();
+    // Keep the owned debug Arc so it can reach the nested `model:infer` hook
+    // (F4), alongside the borrowed `&dyn DebugCapture` used for direct capture.
+    let owned_debug = debug;
+    let debug: Option<&dyn DebugCapture> = owned_debug.as_deref();
+    let debug_arc: Option<&Arc<dyn DebugCapture>> = owned_debug.as_ref();
     let client =
         client.map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
     let shared_tools =
@@ -871,6 +879,7 @@ pub async fn run(
             &observer_arc,
             client.as_ref(),
             debug,
+            debug_arc,
             limits,
             Arc::clone(&turns),
         )
@@ -894,6 +903,7 @@ pub async fn run(
             &observer_arc,
             client,
             debug,
+            debug_arc,
             limits,
             Arc::clone(&turns),
         )
@@ -1006,6 +1016,7 @@ async fn execute_live_h1(
     observer_arc: &Arc<dyn Observer>,
     client: Option<&GatewayClient>,
     debug: Option<&dyn DebugCapture>,
+    debug_arc: Option<&Arc<dyn DebugCapture>>,
     limits: RunLimits,
     turns: Arc<AtomicU32>,
 ) -> Result<LiveH1State> {
@@ -1044,6 +1055,7 @@ async fn execute_live_h1(
             infer_client,
             shared_tools,
             Arc::clone(observer_arc),
+            debug_arc.cloned(),
             execution,
             &prompt.title,
             prompt
@@ -1202,6 +1214,7 @@ async fn run_sections(
     observer_arc: &Arc<dyn Observer>,
     mut client: Option<GatewayClient>,
     debug: Option<&dyn DebugCapture>,
+    debug_arc: Option<&Arc<dyn DebugCapture>>,
     limits: RunLimits,
     turns: Arc<AtomicU32>,
 ) -> Result<String> {
@@ -1264,6 +1277,7 @@ async fn run_sections(
                 infer_client,
                 shared_tools,
                 Arc::clone(observer_arc),
+                debug_arc.cloned(),
                 execution,
                 &section.name,
                 max_tool_iterations,
@@ -1300,6 +1314,7 @@ async fn run_sections(
                         observer,
                         observer_arc,
                         debug,
+                        debug_arc,
                         prompt.replay.as_ref(),
                         bindings,
                         models,
@@ -1548,6 +1563,7 @@ fn run_section_lua(
     observer: &dyn Observer,
     observer_arc: &Arc<dyn Observer>,
     debug: Option<&dyn DebugCapture>,
+    debug_arc: Option<&Arc<dyn DebugCapture>>,
     shared: Option<&crate::lua::LuaProgram>,
     bindings: &ToolBindings,
     models: &ModelBindings,
@@ -1629,31 +1645,29 @@ fn run_section_lua(
             }
             let worker = resolve_h2_section(&heading, &exec_sections).map_err(|e| e.to_string())?;
             let call_args = input.as_deref().unwrap_or(&exec_args);
-            let handle = tokio::runtime::Handle::current();
-            tokio::task::block_in_place(|| {
-                handle.block_on(run_execute_section(
-                    worker,
-                    call_args,
-                    &exec_store,
-                    &exec_execution,
-                    observer,
-                    &exec_observer,
-                    debug,
-                    exec_shared.as_ref(),
-                    &exec_bindings,
-                    &exec_models,
-                    &exec_analysis,
-                    &exec_tools,
-                    exec_client.as_ref(),
-                    max_tool_iterations,
-                    limits,
-                    exec_last_reply.as_deref(),
-                    &exec_when,
-                    &exec_turns,
-                    next_depth,
-                    &exec_sections,
-                ))
-            })
+            bridge_blocking(run_execute_section(
+                worker,
+                call_args,
+                &exec_store,
+                &exec_execution,
+                observer,
+                &exec_observer,
+                debug,
+                debug_arc,
+                exec_shared.as_ref(),
+                &exec_bindings,
+                &exec_models,
+                &exec_analysis,
+                &exec_tools,
+                exec_client.as_ref(),
+                max_tool_iterations,
+                limits,
+                exec_last_reply.as_deref(),
+                &exec_when,
+                &exec_turns,
+                next_depth,
+                &exec_sections,
+            ))
             .map_err(|e| e.to_string())
         };
 
@@ -1742,6 +1756,7 @@ async fn run_execute_section(
     observer: &dyn Observer,
     observer_arc: &Arc<dyn Observer>,
     debug: Option<&dyn DebugCapture>,
+    debug_arc: Option<&Arc<dyn DebugCapture>>,
     shared: Option<&crate::lua::LuaProgram>,
     bindings: &ToolBindings,
     models: &ModelBindings,
@@ -1789,6 +1804,7 @@ async fn run_execute_section(
             infer_client,
             shared_tools,
             Arc::clone(observer_arc),
+            debug_arc.cloned(),
             execution,
             &section.name,
             max_tool_iterations,
@@ -1825,6 +1841,7 @@ async fn run_execute_section(
                     observer,
                     observer_arc,
                     debug,
+                    debug_arc,
                     shared,
                     bindings,
                     models,
@@ -2088,11 +2105,7 @@ fn make_fanout_callback(
         section_count,
     };
 
-    let handle = tokio::runtime::Handle::current();
-    tokio::task::block_in_place(|| {
-        handle.block_on(fanout::run_fanout_arms(worker, &list.items, &ctx))
-    })
-    .map_err(|e| e.to_string())
+    bridge_blocking(fanout::run_fanout_arms(worker, &list.items, &ctx)).map_err(|e| e.to_string())
 }
 
 pub(crate) fn prepare_effective_scope(
@@ -2449,6 +2462,30 @@ pub(crate) async fn run_prose_inference(
         }),
         ProseMode::Loop { .. } => Err(Error::ToolLoopExhausted),
     }
+}
+
+/// Bridges a section's synchronous Lua host call (`model:infer`, `execute`,
+/// `fanout`) into the async runtime.
+///
+/// The Lua VM runs synchronously on the worker thread, so a nested async host
+/// call must block that worker via [`tokio::task::block_in_place`] +
+/// [`tokio::runtime::Handle::block_on`]. `block_in_place` panics on a
+/// current-thread runtime; rather than let it panic, this detects that
+/// unsupported runtime and returns a concrete [`Error::Internal`] BEFORE
+/// entering the bridge (F3). The bridged future already yields
+/// [`Error::Interrupted`] on cancellation, so a typed interruption is preserved
+/// through this seam (F2's cancellation contract).
+fn bridge_blocking<F, T>(future: F) -> Result<T>
+where
+    F: std::future::Future<Output = Result<T>>,
+{
+    let handle = tokio::runtime::Handle::current();
+    if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread {
+        return Err(Error::Internal(
+            "a Lua host call (model:infer/execute/fanout) requires a multi-threaded Tokio runtime",
+        ));
+    }
+    tokio::task::block_in_place(|| handle.block_on(future))
 }
 
 /// Advances the shared turn counter with saturation, returning the 1-based

@@ -3492,6 +3492,85 @@ async fn debug_capture_receives_request_and_response_when_set() {
     }
 }
 
+#[test]
+fn bridge_blocking_rejects_a_current_thread_runtime_instead_of_panicking() {
+    // F3: the sync-to-async bridge must NOT panic on a current-thread runtime
+    // (as raw `block_in_place` would); it returns a concrete error first.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("current-thread runtime builds");
+    let result: Result<()> = rt.block_on(async { bridge_blocking(async { Ok::<(), Error>(()) }) });
+    match result {
+        Err(Error::Internal(message)) => assert!(
+            message.contains("multi-threaded"),
+            "the error must explain the runtime requirement: {message}"
+        ),
+        other => panic!("expected a concrete Internal error, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nested_model_infer_capture_reaches_the_debug_sink() {
+    // F4: a nested `model:infer` called from Lua must route its request/response
+    // capture to the run's owned debug sink instead of dropping it (was
+    // hard-coded to `None`).
+    let addr = spawn_mock_gateway().await;
+    let echo = Arc::new(EchoTool);
+    let capture = Arc::new(RecordingCapture::default());
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Test prompt\n\n```lua shared\n\
+        tools.need('echo', 'echo tool')\n\
+        tools.always('echo')\n\
+        writer = models.always('writer', 'A general model for tests')\n```\n\n\
+        ## Only\n\n\
+        ```lua\n\
+        local text = writer:infer('say hello')\n\
+        return text\n\
+        ```\n";
+    let prompt = bound_with_tools(
+        md,
+        &|_: &str| Ok(ToolId::new("tests", "echo").expect("valid id")),
+        Vec::new(),
+    );
+    let out = run(
+        &prompt,
+        "",
+        &[Arc::clone(&echo) as Arc<dyn Tool>],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: Arc::new(NullObserver),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test"),
+            )),
+            debug: Some(Arc::clone(&capture) as Arc<dyn DebugCapture>),
+        },
+    )
+    .await
+    .expect("model:infer must return text");
+    assert_eq!(out, "final answer");
+
+    let events = capture.events();
+    assert!(
+        !events.is_empty(),
+        "nested model:infer must reach the debug sink (F4), got no events"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event.3, crate::debug::DebugEvent::Request { .. })),
+        "nested inference must capture at least one request: {events:#?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event.3, crate::debug::DebugEvent::Response { .. })),
+        "nested inference must capture at least one response: {events:#?}"
+    );
+}
+
 #[tokio::test]
 async fn debug_capture_none_changes_nothing() {
     let addr = spawn_text_gateway().await;
