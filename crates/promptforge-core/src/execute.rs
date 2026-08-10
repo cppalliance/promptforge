@@ -848,23 +848,75 @@ impl GatewaySource {
     }
 }
 
-/// Execute a parsed prompt through the single-pass live H1 path.
+/// Executes a parsed prompt and returns its final text.
 ///
-/// H1 Lua and prose blocks run once in source order with full host access.
-/// Capability calls resolve when executed, and the resulting bindings plus the
-/// final H1 `var` snapshot are captured for the section walk.
+/// H1 Lua and prose blocks run once in source order with full host access;
+/// capability calls resolve when executed. If H1 does not return, the H2 section
+/// walk runs and its accumulated text is returned.
 ///
 /// # Errors
-/// Returns the same lifecycle errors as [`run`], plus live tool or model
-/// resolution failures raised by executed H1 code.
+/// Returns a [`RunError`] whose [`kind`](RunError::kind) classifies the failure
+/// by condition:
+/// - [`RunErrorKind::Parse`] - a prompt/frontmatter or compiled Lua region was
+///   invalid.
+/// - [`RunErrorKind::Version`] - the prompt declared an unsupported
+///   `promptforge:` major, or omitted it.
+/// - [`RunErrorKind::Binding`] - a `tools.need`/`models.need` capability could
+///   not be bound, was absent, or clashed.
+/// - [`RunErrorKind::Completion`] - a model completion failed at the transport,
+///   backend, decode, or dialect layer.
+/// - [`RunErrorKind::Tool`] - a dispatched tool failed, was out of scope, or the
+///   tool loop did not converge.
+/// - [`RunErrorKind::Lua`] - a section's Lua phase failed to run or return a
+///   usable value.
+/// - [`RunErrorKind::Quota`] - a Lua host resource quota (log events, log bytes,
+///   or instructions) was exhausted.
+/// - [`RunErrorKind::Substitution`] - a `{{ }}` prose substitution failed.
+/// - [`RunErrorKind::Store`] - a run-scoped store operation failed.
+/// - [`RunErrorKind::Cancelled`] - the host cancelled the run.
+/// - [`RunErrorKind::Internal`] - an internal invariant failed (for example a
+///   Lua host call reached on a current-thread runtime, which returns this
+///   rather than panicking).
 ///
-/// # Panics
+/// # Examples
+/// A no-network, Lua-only prompt whose H1 block returns a value:
+/// ```
+/// use promptforge_core::execute::{run, RunConfig, ResolutionContext};
+/// use promptforge_core::model::ModelCatalog;
+/// use promptforge_core::observe::NullObserver;
+/// use promptforge_core::parser::Prompt;
+/// use promptforge_core::store::StoreRef;
+/// use promptforge_tool_picker::{Catalog, Config, ToolPicker};
+///
+/// let source = concat!(
+///     "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n",
+///     "# Title\n\n",
+///     "```lua\nreturn 'hello'\n```\n\n",
+///     "## Only\n\ndone\n",
+/// );
+/// let prompt = Prompt::parse(source, "doc-example", &NullObserver)?;
+/// let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())?;
+/// let models = ModelCatalog::empty();
+///
+/// let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+/// let output = runtime.block_on(run(
+///     &prompt,
+///     "",
+///     ResolutionContext::new(&picker, &models),
+///     &[],
+///     &StoreRef::memory(),
+///     RunConfig::new("doc-example"),
+/// ))?;
+/// assert_eq!(output, "hello");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Runtime
 /// Nested Lua host calls (`model:infer`, `execute`, `fanout`) bridge synchronous
 /// Lua into async work via `tokio::task::block_in_place`, which requires the
-/// multi-threaded Tokio runtime. Calling `run` on a current-thread runtime and
-/// then reaching one of those host calls will panic. Drive `run` on a
-/// multi-threaded runtime (for example `#[tokio::main]` or
-/// `Runtime::new()`/`new_multi_thread`).
+/// multi-threaded Tokio runtime. Reaching such a call on a current-thread
+/// runtime returns [`RunErrorKind::Internal`] rather than panicking (a prompt
+/// with no nested host calls, like the example above, runs on either runtime).
 pub async fn run(
     prompt: &Prompt,
     args: &str,
