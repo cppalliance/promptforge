@@ -1,4 +1,14 @@
-use super::*;
+use super::{
+    Arc, AtomicU32, AtomicUsize, BTreeMap, ClosedScopes, DEFAULT_LUA_LOG_EVENTS,
+    DEFAULT_LUA_MEMORY_BYTES, Error, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle,
+    LuaOptions, LuaProgram, LuaSectionHandle, LuaSerdeExt, LuaToolHandle, ModelBindings,
+    ModelInferHook, ModelRuntime, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution,
+    StdLib, StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolPhase, ToolRuntime, ToolScope,
+    Value, close_model_scope, default_log_byte_budget, detail, finish_log_phase, harden,
+    install_h2_models, install_h2_tools, install_instruction_budget, install_log,
+    install_lua_tool_calls, install_store_table, install_tasks_table, resolve_section_target,
+    scalar_return, seal_sys,
+};
 
 /// One hardened, isolated Lua VM for a section's complete lifecycle.
 ///

@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    Arc, Error, Lua, LuaSectionHandle, LuaToolHandle, MultiValue, Mutex, Result, ToolBindings,
+    ToolCallCounts, ToolPhase, ToolRuntime, Value, Variadic, validate_alias,
+};
 
 pub(crate) fn install_lua_tool_calls(
     lua: &Lua,

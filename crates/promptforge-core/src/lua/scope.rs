@@ -1,4 +1,4 @@
-use super::*;
+use super::{Arc, BTreeMap, Error, ModelBinding, Mutex, Result, ToolBinding};
 
 /// Shared per-VM tool-call counts, pre-seeded at 0 for every in-scope alias.
 ///

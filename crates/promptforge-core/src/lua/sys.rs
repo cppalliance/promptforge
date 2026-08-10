@@ -1,4 +1,4 @@
-use super::*;
+use super::{Error, Json, Lua, LuaSerdeExt, ModelBinding, Result, Value};
 
 /// Returns a copy of `sys` with the bound catalog model id under `"model"`.
 pub(crate) fn enrich_sys_model(sys: &Json, binding: &ModelBinding) -> Json {

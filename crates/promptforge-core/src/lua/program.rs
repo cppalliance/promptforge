@@ -1,4 +1,4 @@
-use super::*;
+use super::{Error, Function, Lua, LuaOptions, NonZeroU32, Observer, Result, StdLib, detail};
 
 /// Compiled Lua 5.4 source that can be loaded into multiple process-local VMs.
 ///

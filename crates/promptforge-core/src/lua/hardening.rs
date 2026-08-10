@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    Arc, AtomicU64, Error, HOOK_BUDGET, HOOK_INTERVAL, HookTriggers, Lua, MultiValue, Ordering,
+    Result, Value, VmState,
+};
 
 /// Remove code-loading, direct output, and reflection globals the base library
 /// provides. The `io`, `os`, `package`, `coroutine`, and `debug` libraries are

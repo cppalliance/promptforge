@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    AtomicU32, AtomicUsize, Error, LUA_LOG_CHARACTER_LIMIT, Lua, MultiValue, Observation, Observer,
+    Ordering, Result, Scope, StoreRef, Value, detail,
+};
 
 pub(crate) fn install_log<'scope, 'env: 'scope>(
     lua: &Lua,
