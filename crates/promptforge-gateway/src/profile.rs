@@ -154,6 +154,10 @@ pub(crate) fn list_profiles(dir: &Path) -> Result<Vec<String>, ConfigError> {
         if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
             continue;
         }
+        // Only regular files are profiles; skip directories named `*.toml`.
+        if !path.is_file() {
+            continue;
+        }
         if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
             names.push(stem.to_owned());
         }
@@ -785,6 +789,8 @@ max_depth = 50
             "[server]\nbind=\"127.0.0.1:1\"\ntoken=\"t\"\n",
         );
         write(tmp.path(), "notes.txt", "ignore");
+        // A directory whose name ends in `.toml` is not a profile.
+        std::fs::create_dir(tmp.path().join("bogus.toml")).unwrap();
         let names = list_profiles(tmp.path()).unwrap();
         assert_eq!(names, vec!["analytical", "threat"]);
     }

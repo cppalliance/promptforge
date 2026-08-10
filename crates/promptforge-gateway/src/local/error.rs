@@ -53,7 +53,7 @@ pub(crate) enum LocalError {
     },
 
     /// A downloaded or cached blob did not match its pin.
-    #[error("SHA-256 mismatch for `{name}`: expected {expected}, got {actual}")]
+    #[error("sha-256 mismatch for `{name}`: expected {expected}, got {actual}")]
     DigestMismatch {
         /// Artifact display name.
         name: String,
