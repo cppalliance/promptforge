@@ -541,8 +541,10 @@ impl Tool for FailingTool {
         // Carry an inner cause so the executor's error can be checked for source
         // preservation (item 4): the tool error must not be flattened to a string.
         let cause = std::io::Error::other("upstream socket reset");
-        Err(ToolError::with_source("the tool's own backend failed", cause)
-            .with_kind(ToolErrorKind::Backend))
+        Err(
+            ToolError::with_source("the tool's own backend failed", cause)
+                .with_kind(ToolErrorKind::Backend),
+        )
     }
 }
 

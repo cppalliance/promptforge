@@ -1766,8 +1766,7 @@ Prose for the second section.\n";
 
     #[test]
     fn unknown_frontmatter_field_is_rejected() {
-        let src =
-            "---\nname: x\ndescription: d\nnot_a_real_field: 1\n---\n\n# T\n\n## S\n\np\n";
+        let src = "---\nname: x\ndescription: d\nnot_a_real_field: 1\n---\n\n# T\n\n## S\n\np\n";
         let err = Prompt::parse(src, "test", &NullObserver)
             .expect_err("an unknown frontmatter field must be rejected");
         assert!(
