@@ -780,6 +780,12 @@ impl Config {
                     local_model.name
                 )));
             }
+            if local_model.source.starts_with("http://") {
+                return Err(ConfigError::Validation(format!(
+                    "local_model {} source must use https, not plaintext http",
+                    local_model.name
+                )));
+            }
             if local_model.context < 1 {
                 return Err(ConfigError::Validation(format!(
                     "local_model {} context must be at least 1",
@@ -962,6 +968,29 @@ endpoints = ["e"]
 "#;
         assert!(matches!(
             Config::parse_toml(toml),
+            Err(ConfigError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_plaintext_http_local_model_source() {
+        let sha = "a".repeat(64);
+        let toml = format!(
+            r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[[local_model]]
+name = "m"
+description = "a local model"
+source = "http://example.com/m.gguf"
+sha256 = "{sha}"
+context = 4096
+"#
+        );
+        assert!(matches!(
+            Config::parse_toml(&toml),
             Err(ConfigError::Validation(_))
         ));
     }

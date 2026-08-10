@@ -21,6 +21,27 @@ const LLAMA_RELEASE: &str = "b10082";
 const INSTALL_MARKER: &str = ".promptforge-install";
 /// Non-TTY log cadence: every 64 MiB or 5% of Content-Length, whichever fires first.
 const LOG_PROGRESS_BYTES: u64 = 64 * 1024 * 1024;
+/// Connect timeout for artifact downloads (bounds a stalled connect).
+const DOWNLOAD_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Hard ceiling on a single artifact, guarding the cache volume against a
+/// malicious or mistaken endpoint. Generous enough for large GGUF weights.
+const MAX_ARTIFACT_BYTES: u64 = 256 * 1024 * 1024 * 1024;
+
+/// Whether `url` is an HTTPS Hugging Face host eligible for the hub bearer token.
+///
+/// The token is attached only to these hosts so an operator's `HF_TOKEN` is
+/// never disclosed to an arbitrary (or plaintext-HTTP) endpoint named in a
+/// `[[local_model]].source`.
+fn is_huggingface_https(url: &str) -> bool {
+    match url::Url::parse(url) {
+        Ok(parsed) => parsed.scheme() == "https" && parsed.host_str().is_some_and(is_hf_host),
+        Err(_) => false,
+    }
+}
+
+fn is_hf_host(host: &str) -> bool {
+    host == "huggingface.co" || host.ends_with(".huggingface.co")
+}
 
 type Result<T> = std::result::Result<T, LocalError>;
 
@@ -41,6 +62,7 @@ impl ArtifactStore {
         ensure_cache_directory(&cache, &cache)?;
         let client = Client::builder()
             .user_agent(concat!("promptforge-gateway/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
             .build()
             .map_err(LocalError::HttpClient)?;
         Ok(Self { cache, client })
@@ -247,7 +269,9 @@ impl ArtifactStore {
         progress: &dyn DownloadProgress,
     ) -> Result<String> {
         let mut request = self.client.get(url);
-        if let Some(token) = hub_bearer_token(env_var) {
+        if is_huggingface_https(url)
+            && let Some(token) = hub_bearer_token(env_var)
+        {
             request = request.bearer_auth(token);
         }
         let mut response = request
@@ -258,6 +282,13 @@ impl ArtifactStore {
                 source,
             })?;
         let total = response.content_length();
+        if let Some(total) = total
+            && total > MAX_ARTIFACT_BYTES
+        {
+            return Err(LocalError::Server(format!(
+                "artifact at {url} declares {total} bytes, exceeding the {MAX_ARTIFACT_BYTES}-byte limit"
+            )));
+        }
         progress.set_len(total);
         let file = File::create(destination).map_err(|source| LocalError::Io {
             operation: "create partial download",
@@ -267,6 +298,7 @@ impl ArtifactStore {
         let mut writer = BufWriter::new(file);
         let mut hasher = Sha256::new();
         let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
+        let mut downloaded: u64 = 0;
         loop {
             let count = response
                 .read(&mut buffer)
@@ -276,6 +308,12 @@ impl ArtifactStore {
                 })?;
             if count == 0 {
                 break;
+            }
+            downloaded = downloaded.saturating_add(count as u64);
+            if downloaded > MAX_ARTIFACT_BYTES {
+                return Err(LocalError::Server(format!(
+                    "artifact at {url} exceeded the {MAX_ARTIFACT_BYTES}-byte limit mid-stream"
+                )));
             }
             writer
                 .write_all(&buffer[..count])
@@ -1438,6 +1476,25 @@ mod tests {
         log.set_len(Some(10));
         log.inc(10);
         log.finish();
+    }
+
+    #[test]
+    fn hf_token_host_allowlist() {
+        assert!(is_huggingface_https(
+            "https://huggingface.co/org/repo/resolve/main/model.gguf"
+        ));
+        assert!(is_huggingface_https(
+            "https://cdn-lfs.huggingface.co/repo/model.gguf"
+        ));
+        // Plaintext HTTP, arbitrary hosts, and look-alikes get no token.
+        assert!(!is_huggingface_https(
+            "http://huggingface.co/org/repo/model.gguf"
+        ));
+        assert!(!is_huggingface_https("https://evil.example/model.gguf"));
+        assert!(!is_huggingface_https(
+            "https://huggingface.co.evil.example/model.gguf"
+        ));
+        assert!(!is_huggingface_https("not a url"));
     }
 
     #[test]
