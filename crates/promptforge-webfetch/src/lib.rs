@@ -655,8 +655,7 @@ mod tests {
 
     use super::{WebFetch, extract_html};
     use crate::config::FetchConfig;
-    use promptforge_core::Error;
-    use promptforge_core::tools::{Tool, ToolId};
+    use promptforge_core::tools::{Tool, ToolErrorKind, ToolId};
 
     /// An article page long enough for readability extraction to fire.
     const ARTICLE_HTML: &str = r"
@@ -689,7 +688,10 @@ mod tests {
     fn descriptor_is_stable_and_faithful() {
         let tool = WebFetch::new();
 
-        assert_eq!(tool.id(), ToolId::new("promptforge", "web_fetch"));
+        assert_eq!(
+            tool.id(),
+            ToolId::new("promptforge", "web_fetch").expect("valid id")
+        );
         assert_eq!(tool.wire_name(), "web_fetch");
         assert_eq!(
             tool.description(),
@@ -1073,7 +1075,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a timeout is now a soft (recoverable) return");
+            .expect("a timeout is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("timed out"),
@@ -1089,7 +1093,9 @@ mod tests {
         let url = format!("http://localhost:{port}/record");
         tool.call(serde_json::json!({ "url": url }))
             .await
-            .expect("a loopback fetch through allow_exact must succeed");
+            .expect("a loopback fetch through allow_exact must succeed")
+            .text()
+            .to_owned();
 
         let recorded = recorded
             .lock()
@@ -1121,7 +1127,9 @@ mod tests {
         let url = format!("http://localhost:{port}/redir-record");
         tool.call(serde_json::json!({ "url": url }))
             .await
-            .expect("a redirect between loopback paths must succeed");
+            .expect("a redirect between loopback paths must succeed")
+            .text()
+            .to_owned();
 
         let recorded = recorded
             .lock()
@@ -1151,7 +1159,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a loopback fetch through allow_exact must succeed");
+            .expect("a loopback fetch through allow_exact must succeed")
+            .text()
+            .to_owned();
 
         let expected = format!("url: http://localhost:{port}/");
         assert!(
@@ -1173,7 +1183,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a redirect-target policy refusal is a soft (recoverable) return");
+            .expect("a redirect-target policy refusal is a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("refused") && result.contains("127.0.0.1"),
@@ -1214,8 +1226,8 @@ mod tests {
                 .await
                 .expect_err(&format!("expected {raw} to be refused before any network"));
             assert!(
-                matches!(err, Error::Parse(_)),
-                "expected a policy rejection (Error::Parse) for {raw}, got: {err:?}"
+                err.kind() == ToolErrorKind::InvalidArguments,
+                "expected a policy rejection (invalid arguments) for {raw}, got: {err:?}"
             );
             assert!(
                 err.to_string().contains(reason),
@@ -1228,7 +1240,9 @@ mod tests {
         let soft = tool
             .call(serde_json::json!({ "url": "http://example.com/" }))
             .await
-            .expect("blocked http scheme must be soft tool text");
+            .expect("blocked http scheme must be soft tool text")
+            .text()
+            .to_owned();
         assert!(
             soft.contains("scheme not allowed: http"),
             "expected soft scheme refusal, got: {soft}"
@@ -1257,7 +1271,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("an oversized HTML body is now a soft (recoverable) return");
+            .expect("an oversized HTML body is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("exceeds") && result.contains("4096"),
@@ -1278,7 +1294,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a declared Content-Length over the cap is now a soft return");
+            .expect("a declared Content-Length over the cap is now a soft return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("exceeds") && result.contains("4096"),
@@ -1299,7 +1317,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a gzip body that decompresses past the cap is now a soft return");
+            .expect("a gzip body that decompresses past the cap is now a soft return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("exceeds"),
@@ -1319,7 +1339,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url, "max_chars": max_chars }))
             .await
-            .expect("a unicode fetch through allow_exact must succeed");
+            .expect("a unicode fetch through allow_exact must succeed")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1356,7 +1378,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a body one byte under the cap must be accepted");
+            .expect("a body one byte under the cap must be accepted")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1378,7 +1402,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a loopback html fetch must succeed");
+            .expect("a loopback html fetch must succeed")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1400,7 +1426,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url, "raw": true }))
             .await
-            .expect("a raw table fetch must succeed");
+            .expect("a raw table fetch must succeed")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1422,7 +1450,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a json fetch must succeed");
+            .expect("a json fetch must succeed")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1448,7 +1478,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("an oversized json body is now a soft (recoverable) return");
+            .expect("an oversized json body is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("exceeds") && result.contains("4096"),
@@ -1465,7 +1497,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("an unrecognized charset is now a soft (recoverable) return");
+            .expect("an unrecognized charset is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("not-a-charset"),
@@ -1482,7 +1516,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a pdf response is now a soft (recoverable) return");
+            .expect("a pdf response is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("application/pdf"),
@@ -1499,7 +1535,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("an octet-stream response is now a soft (recoverable) return");
+            .expect("an octet-stream response is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("application/octet-stream"),
@@ -1516,7 +1554,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("an absent content type is now a soft (recoverable) return");
+            .expect("an absent content type is now a soft (recoverable) return")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("no content type"),
@@ -1533,7 +1573,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a latin-1 fetch must succeed");
+            .expect("a latin-1 fetch must succeed")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1563,7 +1605,9 @@ mod tests {
         let out = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("an oversized flat-text body must be truncated, not refused");
+            .expect("an oversized flat-text body must be truncated, not refused")
+            .text()
+            .to_owned();
 
         let (header, body) = split_header(&out);
         assert!(
@@ -1654,7 +1698,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a 404 must be a soft (recoverable) return, not a hard error");
+            .expect("a 404 must be a soft (recoverable) return, not a hard error")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("404"),
@@ -1671,7 +1717,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a 500 must be a soft (recoverable) return, not a hard error");
+            .expect("a 500 must be a soft (recoverable) return, not a hard error")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("500"),
@@ -1688,7 +1736,9 @@ mod tests {
         let result = tool
             .call(serde_json::json!({ "url": url }))
             .await
-            .expect("a PDF content type must be a soft return, not a hard error");
+            .expect("a PDF content type must be a soft return, not a hard error")
+            .text()
+            .to_owned();
 
         assert!(
             result.contains("application/pdf"),
@@ -1706,7 +1756,7 @@ mod tests {
             .expect_err("a bare IP literal URL must still be a hard error");
 
         assert!(
-            matches!(&err, Error::Parse(msg) if msg.contains("ip literal")),
+            err.kind() == ToolErrorKind::InvalidArguments && err.to_string().contains("ip literal"),
             "expected a policy rejection for a bare IP literal, got: {err:?}"
         );
     }
