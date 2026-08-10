@@ -10,6 +10,48 @@ use std::sync::{Arc, Mutex};
 use serde::Deserialize;
 use tokio::sync::oneshot;
 
+/// A bounded scheduling identity parsed from the client header.
+///
+/// Callers name themselves via `X-PromptForge-Client` for fair queueing. The
+/// value is parsed at the boundary into a bounded id (max length, restricted
+/// charset); anything missing, empty, oversized, or containing other characters
+/// maps to the single documented `default` bucket so an authenticated caller
+/// cannot mint unbounded, attacker-chosen scheduler identities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ClientId(String);
+
+impl ClientId {
+    /// Maximum accepted client-id length, in bytes.
+    pub(crate) const MAX_LEN: usize = 64;
+    /// The fallback bucket for absent or invalid ids.
+    pub(crate) const DEFAULT: &'static str = "default";
+
+    /// Parse an optional header string into a bounded [`ClientId`].
+    pub(crate) fn from_header(value: Option<&str>) -> ClientId {
+        value.map_or_else(|| ClientId(Self::DEFAULT.to_owned()), Self::parse)
+    }
+
+    /// Parse a raw string into a bounded [`ClientId`], falling back to `default`.
+    pub(crate) fn parse(raw: &str) -> ClientId {
+        let trimmed = raw.trim();
+        let valid = !trimmed.is_empty()
+            && trimmed.len() <= Self::MAX_LEN
+            && trimmed
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'));
+        if valid {
+            ClientId(trimmed.to_owned())
+        } else {
+            ClientId(Self::DEFAULT.to_owned())
+        }
+    }
+
+    /// The validated id as a string slice.
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Waiting-queue settings shared by every limited endpoint lane.
 ///
 /// `max_depth` counts only requests waiting for a concurrency slot, not
@@ -364,6 +406,22 @@ mod tests {
         while lane.waiter_count() != n {
             tokio::task::yield_now().await;
         }
+    }
+
+    #[test]
+    fn client_id_accepts_bounded_identity() {
+        assert_eq!(ClientId::parse("agent-7").as_str(), "agent-7");
+        assert_eq!(ClientId::parse("  tenant.a:1  ").as_str(), "tenant.a:1");
+    }
+
+    #[test]
+    fn client_id_rejects_invalid_and_oversized() {
+        assert_eq!(ClientId::parse("").as_str(), ClientId::DEFAULT);
+        assert_eq!(ClientId::parse("has space").as_str(), ClientId::DEFAULT);
+        assert_eq!(ClientId::parse("bad/slash").as_str(), ClientId::DEFAULT);
+        let oversized = "x".repeat(ClientId::MAX_LEN + 1);
+        assert_eq!(ClientId::parse(&oversized).as_str(), ClientId::DEFAULT);
+        assert_eq!(ClientId::from_header(None).as_str(), ClientId::DEFAULT);
     }
 
     #[tokio::test]

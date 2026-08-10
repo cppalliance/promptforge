@@ -514,8 +514,13 @@ fn free_port() -> Result<u16> {
 }
 
 fn random_identity() -> AttemptIdentity {
-    let model_nonce = format!("{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..));
-    let key_nonce = format!("{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..));
+    // The loopback bearer token guards the local llama-server; use the OS-seeded
+    // cryptographic RNG (`rand::rng`, a ChaCha-based CSPRNG) rather than a fast
+    // non-cryptographic generator.
+    use rand::Rng;
+    let mut rng = rand::rng();
+    let model_nonce = format!("{:016x}{:016x}", rng.random::<u64>(), rng.random::<u64>());
+    let key_nonce = format!("{:016x}{:016x}", rng.random::<u64>(), rng.random::<u64>());
     AttemptIdentity {
         model_alias: format!("promptforge-local-{model_nonce}"),
         api_key: format!("promptforge-local-{key_nonce}"),

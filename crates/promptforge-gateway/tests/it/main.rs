@@ -136,7 +136,8 @@ endpoints = ["fake"]
 
 /// Start the gateway wired to the fake backend.
 async fn gateway_for(backend: SocketAddr) -> TestServer {
-    let gateway = Gateway::from_config(&gateway_config(backend), ProfilesContext::default()).unwrap();
+    let gateway =
+        Gateway::from_config(&gateway_config(backend), ProfilesContext::default()).unwrap();
     TestServer::start(gateway).await
 }
 
@@ -373,14 +374,20 @@ async fn models_catalog_returns_configured_entries() {
     assert_eq!(body.get("object").and_then(Value::as_str), Some("list"));
     let data = body.get("data").and_then(Value::as_array).unwrap();
     assert_eq!(data.len(), 1);
-    assert_eq!(data[0].get("id").and_then(Value::as_str), Some("test-model"));
+    assert_eq!(
+        data[0].get("id").and_then(Value::as_str),
+        Some("test-model")
+    );
     assert_eq!(data[0].get("object").and_then(Value::as_str), Some("model"));
     assert_eq!(
         data[0].get("description").and_then(Value::as_str),
         Some("a test model for integration")
     );
     assert_eq!(data[0].get("context").and_then(Value::as_u64), Some(8192));
-    assert_eq!(data[0].get("thinking").and_then(Value::as_str), Some("never"));
+    assert_eq!(
+        data[0].get("thinking").and_then(Value::as_str),
+        Some("never")
+    );
     assert_eq!(
         data[0].get("tool_dialect").and_then(Value::as_str),
         Some("openai")
@@ -609,8 +616,16 @@ endpoints = ["fake"]
 "#
         )
     };
-    fs::write(profiles.path().join("alpha.toml"), profile_toml("alpha-model", 8192)).unwrap();
-    fs::write(profiles.path().join("beta.toml"), profile_toml("beta-model", 4096)).unwrap();
+    fs::write(
+        profiles.path().join("alpha.toml"),
+        profile_toml("alpha-model", 8192),
+    )
+    .unwrap();
+    fs::write(
+        profiles.path().join("beta.toml"),
+        profile_toml("beta-model", 4096),
+    )
+    .unwrap();
 
     let alpha = ProfileName::parse("alpha").unwrap();
     let config = Config::load_profile(profiles.path(), &alpha).unwrap();

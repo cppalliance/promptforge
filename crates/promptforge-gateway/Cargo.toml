@@ -14,13 +14,14 @@ path = "src/main.rs"
 [dependencies]
 axum.workspace = true
 async-trait.workspace = true
-fastrand.workspace = true
 flate2.workspace = true
 indicatif.workspace = true
 promptforge-core.workspace = true
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+subtle.workspace = true
 tar.workspace = true
 toml.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }

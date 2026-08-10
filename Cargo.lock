@@ -2790,18 +2790,19 @@ dependencies = [
 
 [[package]]
 name = "promptforge-gateway"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "async-trait",
  "axum",
- "fastrand",
  "flate2",
  "indicatif",
  "promptforge-core",
+ "rand 0.9.5",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2",
+ "subtle",
  "tar",
  "tempfile",
  "thiserror 2.0.19",

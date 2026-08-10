@@ -141,11 +141,12 @@ async fn chat_completions(
         let live = state.live.read().await;
         live.routing.model(&request.model)?
     };
-    let client_key = headers
-        .get(CLIENT_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("default");
-    let _permit = model.endpoint.lane.admit(client_key).await?;
+    let client_id = crate::queue::ClientId::from_header(
+        headers
+            .get(CLIENT_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    );
+    let _permit = model.endpoint.lane.admit(client_id.as_str()).await?;
     let response = model
         .endpoint
         .upstream
@@ -312,21 +313,46 @@ pub(crate) async fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<
         .and_then(|value| value.strip_prefix("Bearer "))
         .unwrap_or("");
     let live = state.live.read().await;
-    if constant_time_eq(presented.as_bytes(), live.key.expose().as_bytes()) {
+    if secret_eq(presented.as_bytes(), live.key.expose().as_bytes()) {
         Ok(())
     } else {
         Err(GatewayError::Unauthorized)
     }
 }
 
-/// Length-checked constant-time byte comparison.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
+/// Constant-time credential comparison.
+///
+/// Both inputs are hashed to fixed-length SHA-256 digests before comparison, so
+/// the comparison operates on equal-length data (no early length-based
+/// short-circuit) and leaks neither the configured key's length nor its bytes.
+/// The digest comparison uses the `subtle` crate's constant-time primitive.
+fn secret_eq(presented: &[u8], configured: &[u8]) -> bool {
+    use sha2::{Digest, Sha256};
+    use subtle::ConstantTimeEq;
+
+    let presented = Sha256::digest(presented);
+    let configured = Sha256::digest(configured);
+    presented.ct_eq(&configured).into()
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::secret_eq;
+
+    #[test]
+    fn equal_secrets_match() {
+        assert!(secret_eq(b"s3cret-token", b"s3cret-token"));
     }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b) {
-        diff |= x ^ y;
+
+    #[test]
+    fn unequal_secrets_do_not_match() {
+        assert!(!secret_eq(b"s3cret-token", b"wrong-token"));
+        assert!(!secret_eq(b"", b"nonempty"));
+        assert!(!secret_eq(b"short", b"a-much-longer-token"));
     }
-    diff == 0
+
+    #[test]
+    fn empty_matches_empty() {
+        assert!(secret_eq(b"", b""));
+    }
 }
