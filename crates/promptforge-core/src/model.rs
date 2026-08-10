@@ -266,15 +266,15 @@ impl ModelDescriptor {
 /// `context` and `thinking` filter the catalog. `temperature`, `max_tokens`,
 /// and a requested `thinking` switch ride on each completion for the binding.
 #[derive(Debug, Clone, Default)]
-pub struct ModelNeedOpts {
+pub(crate) struct ModelNeedOpts {
     /// When set, filters models by thinking capability and freezes the switch.
-    pub thinking: Option<bool>,
+    pub(crate) thinking: Option<bool>,
     /// Minimum context window size in tokens.
-    pub context: Option<u32>,
+    pub(crate) context: Option<u32>,
     /// Sampling temperature for every complete under this binding.
-    pub temperature: Option<f64>,
+    pub(crate) temperature: Option<f64>,
     /// Maximum generation tokens for every complete under this binding.
-    pub max_tokens: Option<u32>,
+    pub(crate) max_tokens: Option<u32>,
 }
 
 impl PartialEq for ModelNeedOpts {
@@ -294,13 +294,13 @@ impl Eq for ModelNeedOpts {}
 
 /// Frozen per-request fields carried by a resolved model binding.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ModelInvocation {
+pub(crate) struct ModelInvocation {
     /// Sampling temperature, when the need declared one.
-    pub temperature: Option<f64>,
+    pub(crate) temperature: Option<f64>,
     /// Maximum generation tokens, when the need declared one.
-    pub max_tokens: Option<u32>,
+    pub(crate) max_tokens: Option<u32>,
     /// Thinking switch for `chat_template_kwargs.enable_thinking`, when set.
-    pub thinking: Option<bool>,
+    pub(crate) thinking: Option<bool>,
 }
 
 impl Eq for ModelInvocation {}
@@ -317,7 +317,7 @@ impl From<&ModelNeedOpts> for ModelInvocation {
 
 /// One prompt-local alias bound to a model identity and frozen invocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelBinding {
+pub(crate) struct ModelBinding {
     alias: String,
     description: String,
     id: ModelId,
@@ -332,7 +332,7 @@ impl ModelBinding {
     /// Defaults `tool_dialect` to [`ToolDialectId::OpenAi`] and `context` to
     /// `0`. Use [`Self::with_dialect`] and [`Self::with_context`] to override.
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         alias: impl Into<String>,
         description: impl Into<String>,
         id: ModelId,
@@ -350,57 +350,57 @@ impl ModelBinding {
 
     /// Sets the tool dialect on this binding.
     #[must_use]
-    pub fn with_dialect(mut self, dialect: ToolDialectId) -> Self {
+    pub(crate) fn with_dialect(mut self, dialect: ToolDialectId) -> Self {
         self.tool_dialect = dialect;
         self
     }
 
     /// Sets the catalog context window size on this binding.
     #[must_use]
-    pub fn with_context(mut self, context: u32) -> Self {
+    pub(crate) fn with_context(mut self, context: u32) -> Self {
         self.context = context;
         self
     }
 
     /// Returns the exact prompt-local alias.
     #[must_use]
-    pub fn alias(&self) -> &str {
+    pub(crate) fn alias(&self) -> &str {
         &self.alias
     }
 
     /// Returns the declared capability description.
     #[must_use]
-    pub fn description(&self) -> &str {
+    pub(crate) fn description(&self) -> &str {
         &self.description
     }
 
     /// Returns the selected stable identity.
     #[must_use]
-    pub fn id(&self) -> &ModelId {
+    pub(crate) fn id(&self) -> &ModelId {
         &self.id
     }
 
     /// Returns the frozen per-request fields.
     #[must_use]
-    pub fn invocation(&self) -> &ModelInvocation {
+    pub(crate) fn invocation(&self) -> &ModelInvocation {
         &self.invocation
     }
 
     /// Returns the tool dialect for this binding.
     #[must_use]
-    pub fn tool_dialect(&self) -> ToolDialectId {
+    pub(crate) fn tool_dialect(&self) -> ToolDialectId {
         self.tool_dialect
     }
 
     /// Returns the catalog context window size in tokens.
     #[must_use]
-    pub fn context(&self) -> u32 {
+    pub(crate) fn context(&self) -> u32 {
         self.context
     }
 
     /// Builds [`CompletionOptions`] for every complete under this binding.
     #[must_use]
-    pub fn completion_options(&self) -> CompletionOptions {
+    pub(crate) fn completion_options(&self) -> CompletionOptions {
         CompletionOptions {
             model: self.id.name().to_owned(),
             temperature: self.invocation.temperature,
@@ -430,7 +430,7 @@ impl Eq for CompletionOptions {}
 
 /// Immutable prompt-level model bindings from live H1 execution.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ModelBindings {
+pub(crate) struct ModelBindings {
     bindings: Vec<ModelBinding>,
     always: Option<String>,
 }
@@ -438,19 +438,13 @@ pub struct ModelBindings {
 impl ModelBindings {
     /// Returns bindings in declaration order.
     #[must_use]
-    pub fn bindings(&self) -> &[ModelBinding] {
+    pub(crate) fn bindings(&self) -> &[ModelBinding] {
         &self.bindings
-    }
-
-    /// Returns whether any model was declared.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.bindings.is_empty()
     }
 
     /// Returns the prompt-wide default alias set by `models.always`, if any.
     #[must_use]
-    pub fn always(&self) -> Option<&str> {
+    pub(crate) fn always(&self) -> Option<&str> {
         self.always.as_deref()
     }
 
@@ -502,9 +496,15 @@ impl ModelCatalog {
         self.models.iter().find(|model| model.id() == id)
     }
 
+    /// Returns whether the catalog contains a descriptor with `id`.
+    #[must_use]
+    pub fn contains(&self, id: &ModelId) -> bool {
+        self.get(id).is_some()
+    }
+
     /// Filters by hard constraints from `opts`.
     #[must_use]
-    pub fn filter(&self, opts: &ModelNeedOpts) -> Self {
+    pub(crate) fn filter(&self, opts: &ModelNeedOpts) -> Self {
         let models = self
             .models
             .iter()
@@ -521,7 +521,7 @@ impl ModelCatalog {
     /// Identity is encoded in the picker id's server field; every entry uses a
     /// single neutral, crate-private label.
     #[must_use]
-    pub fn to_picker_catalog(&self) -> Catalog {
+    pub(crate) fn to_picker_catalog(&self) -> Catalog {
         Catalog::new(
             self.models
                 .iter()
@@ -559,32 +559,6 @@ fn model_from_picker_id(id: &PickerToolId) -> ModelId {
     }
 }
 
-/// Registry view of the live catalog for membership checks after resolve.
-#[derive(Debug, Clone)]
-pub struct ModelRegistry<'a> {
-    catalog: &'a ModelCatalog,
-}
-
-impl<'a> ModelRegistry<'a> {
-    /// Borrows a catalog as the live registry.
-    #[must_use]
-    pub fn new(catalog: &'a ModelCatalog) -> Self {
-        Self { catalog }
-    }
-
-    /// Returns whether `id` is present in the live catalog.
-    #[must_use]
-    pub fn contains(&self, id: &ModelId) -> bool {
-        self.catalog.get(id).is_some()
-    }
-
-    /// Returns the borrowed catalog.
-    #[must_use]
-    pub fn catalog(&self) -> &'a ModelCatalog {
-        self.catalog
-    }
-}
-
 /// Resolves one `models.need` description under optional hard constraints.
 pub(crate) trait ModelResolver: Send + Sync {
     /// Resolves `description` with `opts` to a binding identity and invocation.
@@ -606,15 +580,15 @@ where
 
 /// The identity and invocation produced by a successful model resolve.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedModel {
+pub(crate) struct ResolvedModel {
     /// The selected catalog identity.
-    pub id: ModelId,
+    pub(crate) id: ModelId,
     /// Frozen per-request fields from the need's opts.
-    pub invocation: ModelInvocation,
+    pub(crate) invocation: ModelInvocation,
     /// The tool dialect from the catalog entry.
-    pub tool_dialect: ToolDialectId,
+    pub(crate) tool_dialect: ToolDialectId,
     /// The catalog context window size in tokens.
-    pub context: u32,
+    pub(crate) context: u32,
 }
 
 /// Wire shape of one entry from gateway `GET /v1/models`.
@@ -794,20 +768,6 @@ fn satisfies_constraints(model: &ModelDescriptor, opts: &ModelNeedOpts) -> bool 
         ),
         None => true,
     }
-}
-
-/// Catalog entry used by core-tests scenario fixtures for model binding.
-///
-/// Context is a large switchable window so `models.need` can filter and
-/// request thinking without depending on a live `/v1/models` fetch.
-#[must_use]
-pub fn pinned_qwen_dev_catalog(model_alias: &str) -> ModelCatalog {
-    ModelCatalog::new([ModelDescriptor::new(
-        ModelId::gateway(model_alias),
-        "A careful analysis model suited to structured reasoning and long-context review",
-        131_072,
-        ThinkingMode::Switchable,
-    )])
 }
 
 #[cfg(test)]
