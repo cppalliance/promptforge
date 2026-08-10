@@ -19,12 +19,64 @@ use std::fmt;
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+/// Why a logical store path was rejected before any backend saw it.
+///
+/// `StoreRef` validates every caller-supplied path into one canonical form
+/// before dispatch; this names the rule the path broke.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PathReason {
+    /// The path was empty or contained only separators.
+    Empty,
+    /// The path began with `/`, so it addressed outside the run's namespace.
+    Absolute,
+    /// The path contained a `.` or `..` segment (parent or current traversal).
+    Traversal,
+    /// The path contained a control character (below `0x20`, or `0x7f`).
+    Control,
+    /// The path contained an empty segment (a `//` run, or a trailing `/`).
+    EmptySegment,
+}
+
+impl std::fmt::Display for PathReason {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            PathReason::Empty => "path is empty",
+            PathReason::Absolute => "path is absolute",
+            PathReason::Traversal => "path contains a traversal segment",
+            PathReason::Control => "path contains a control character",
+            PathReason::EmptySegment => "path contains an empty segment",
+        };
+        formatter.write_str(text)
+    }
+}
+
+/// A stable, matchable classification of a [`StoreError`].
+///
+/// A caller matches on this instead of the private error representation, so new
+/// error causes can be added without breaking a `match`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StoreErrorKind {
+    /// No file exists at the requested path.
+    NotFound,
+    /// A `str_replace` anchor did not occur, or occurred more than once.
+    Anchor,
+    /// A caller-supplied path failed validation.
+    InvalidPath,
+    /// A caller-supplied glob pattern failed validation.
+    InvalidPattern,
+    /// The backend itself failed.
+    Backend,
+}
+
 /// An error from a virtual-file operation.
 ///
 /// Marked `#[non_exhaustive]` so a future backend (real filesystem, network)
 /// can add variants without a breaking change; each data-carrying variant is
 /// likewise `#[non_exhaustive]`. `Display` messages are lowercase noun phrases
 /// with no trailing period, so a caller supplies the surrounding context.
+/// Match on [`StoreError::kind`] rather than the variants directly.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StoreError {
@@ -58,6 +110,167 @@ pub enum StoreError {
         /// The number of times the anchor matched.
         count: usize,
     },
+
+    /// A caller-supplied path was rejected before any backend saw it.
+    #[error("invalid path {path:?}: {reason}")]
+    #[non_exhaustive]
+    InvalidPath {
+        /// The rejected path, exactly as supplied.
+        path: String,
+        /// The validation rule the path broke.
+        reason: PathReason,
+    },
+
+    /// A caller-supplied glob pattern was rejected before matching.
+    #[error("invalid glob pattern {pattern:?}: {reason}")]
+    #[non_exhaustive]
+    InvalidPattern {
+        /// The rejected pattern, exactly as supplied.
+        pattern: String,
+        /// A short human-readable reason.
+        reason: String,
+    },
+
+    /// The backend failed for a reason of its own, kept as an opaque source.
+    #[error("store backend failure")]
+    #[non_exhaustive]
+    Backend {
+        /// The backend's own error, hidden behind `#[source]`.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+impl StoreError {
+    /// Returns the stable classification of this error.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::store::{StoreErrorKind, StoreRef};
+    ///
+    /// let err = StoreRef::memory().read("missing.txt").unwrap_err();
+    /// assert_eq!(err.kind(), StoreErrorKind::NotFound);
+    /// ```
+    #[must_use]
+    pub fn kind(&self) -> StoreErrorKind {
+        match self {
+            StoreError::NotFound { .. } => StoreErrorKind::NotFound,
+            StoreError::AnchorNotFound { .. } | StoreError::AnchorAmbiguous { .. } => {
+                StoreErrorKind::Anchor
+            }
+            StoreError::InvalidPath { .. } => StoreErrorKind::InvalidPath,
+            StoreError::InvalidPattern { .. } => StoreErrorKind::InvalidPattern,
+            StoreError::Backend { .. } => StoreErrorKind::Backend,
+        }
+    }
+
+    /// Returns whether this error means the addressed file was absent.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::store::StoreRef;
+    ///
+    /// let err = StoreRef::memory().read("missing.txt").unwrap_err();
+    /// assert!(err.is_not_found());
+    /// ```
+    #[must_use]
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, StoreError::NotFound { .. })
+    }
+
+    /// Returns the logical path this error concerns, when it names one.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::store::StoreRef;
+    ///
+    /// let err = StoreRef::memory().read("missing.txt").unwrap_err();
+    /// assert_eq!(err.path(), Some("missing.txt"));
+    /// ```
+    #[must_use]
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            StoreError::NotFound { path }
+            | StoreError::AnchorNotFound { path, .. }
+            | StoreError::AnchorAmbiguous { path, .. }
+            | StoreError::InvalidPath { path, .. } => Some(path),
+            StoreError::InvalidPattern { .. } | StoreError::Backend { .. } => None,
+        }
+    }
+
+    /// Wraps a backend's own error as an opaque [`StoreError::Backend`] source.
+    ///
+    /// A downstream [`Store`] implementation uses this so its concrete error
+    /// type never leaks through this crate's public API.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::store::{StoreError, StoreErrorKind};
+    ///
+    /// let io = std::io::Error::other("disk gone");
+    /// let err = StoreError::backend(io);
+    /// assert_eq!(err.kind(), StoreErrorKind::Backend);
+    /// ```
+    #[must_use]
+    pub fn backend(source: impl std::error::Error + Send + Sync + 'static) -> StoreError {
+        StoreError::Backend {
+            source: Box::new(source),
+        }
+    }
+}
+
+/// The largest glob pattern, in bytes, the store will attempt to match.
+///
+/// The recursive-free matcher is linear, but an unbounded pattern is still a
+/// cheap denial-of-service lever, so an over-long pattern is refused outright.
+const MAX_GLOB_PATTERN_BYTES: usize = 1024;
+
+/// A validated logical store path in one canonical form.
+///
+/// `StoreRef` parses every caller-supplied `&str` into this before dispatch, so
+/// a backend never sees an empty, absolute, traversing, control-bearing, or
+/// empty-segment path. The trait boundary keeps `&str`; this type is internal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StorePath(String);
+
+impl StorePath {
+    /// Validates `raw` into one canonical path, or reports why it was rejected.
+    fn parse(raw: &str) -> Result<StorePath, StoreError> {
+        let reject = |reason| {
+            Err(StoreError::InvalidPath {
+                path: raw.to_owned(),
+                reason,
+            })
+        };
+        if raw.is_empty() {
+            return reject(PathReason::Empty);
+        }
+        if raw.starts_with('/') {
+            return reject(PathReason::Absolute);
+        }
+        if raw.bytes().any(|b| b < 0x20 || b == 0x7f) {
+            return reject(PathReason::Control);
+        }
+        let mut segments = 0usize;
+        for segment in raw.split('/') {
+            if segment.is_empty() {
+                return reject(PathReason::EmptySegment);
+            }
+            if segment == "." || segment == ".." {
+                return reject(PathReason::Traversal);
+            }
+            segments += 1;
+        }
+        if segments == 0 {
+            return reject(PathReason::Empty);
+        }
+        Ok(StorePath(raw.to_owned()))
+    }
+
+    /// Borrows the canonical path string for backend dispatch.
+    fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// A backend for run-scoped virtual files addressed by logical string paths.
@@ -77,7 +290,11 @@ pub enum StoreError {
 /// assert_eq!(fs.read("greeting.txt")?, "hello");
 /// # Ok::<(), promptforge_core::store::StoreError>(())
 /// ```
-pub trait Store {
+///
+/// The `Send` bound lets a backend cross a `spawn_blocking` boundary; `Sync` is
+/// deliberately not required, since the runtime serializes access behind a
+/// [`StoreRef`] mutex.
+pub trait Store: Send {
     /// Creates the file at `path`, or overwrites it if it already exists.
     ///
     /// # Errors
@@ -226,21 +443,24 @@ pub trait Store {
 
     /// Returns whether a file exists at `path`.
     ///
-    /// Missing paths return `false`; this never raises [`StoreError::NotFound`].
+    /// This is fallible so a backend distinguishes a confirmed absence
+    /// (`Ok(false)`) from an inability to answer (`Err`), rather than
+    /// collapsing a backend failure into "does not exist".
+    ///
+    /// # Errors
+    /// Returns a [`StoreError`] if the backend cannot determine existence.
     ///
     /// # Examples
     /// ```
     /// use promptforge_core::store::{Store, MemStore};
     ///
     /// let mut fs = MemStore::new();
-    /// assert!(!fs.exists("a.txt"));
+    /// assert!(!fs.exists("a.txt")?);
     /// fs.write("a.txt", "hi")?;
-    /// assert!(fs.exists("a.txt"));
+    /// assert!(fs.exists("a.txt")?);
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
-    fn exists(&self, path: &str) -> bool {
-        self.read(path).is_ok()
-    }
+    fn exists(&self, path: &str) -> Result<bool, StoreError>;
 }
 
 /// An in-memory [`Store`] backend.
@@ -353,8 +573,8 @@ impl Store for MemStore {
             .collect())
     }
 
-    fn exists(&self, path: &str) -> bool {
-        self.files.contains_key(path)
+    fn exists(&self, path: &str) -> Result<bool, StoreError> {
+        Ok(self.files.contains_key(path))
     }
 }
 
@@ -380,7 +600,7 @@ impl Store for MemStore {
 /// ```
 #[derive(Clone)]
 pub struct StoreRef {
-    inner: Arc<Mutex<Box<dyn Store + Send + Sync>>>,
+    inner: Arc<Mutex<Box<dyn Store + Send>>>,
 }
 
 impl fmt::Debug for StoreRef {
@@ -400,7 +620,7 @@ impl StoreRef {
     /// # let _ = store;
     /// ```
     #[must_use]
-    pub fn new(backend: Box<dyn Store + Send + Sync>) -> StoreRef {
+    pub fn new(backend: Box<dyn Store + Send>) -> StoreRef {
         StoreRef {
             inner: Arc::new(Mutex::new(backend)),
         }
@@ -422,7 +642,7 @@ impl StoreRef {
 
     /// Recovers the guard even if a prior holder panicked; the stored map stays
     /// consistent, so poisoning is not a fatal condition here.
-    fn lock(&self) -> MutexGuard<'_, Box<dyn Store + Send + Sync>> {
+    fn lock(&self) -> MutexGuard<'_, Box<dyn Store + Send>> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -440,7 +660,8 @@ impl StoreRef {
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     pub fn write(&self, path: &str, contents: &str) -> Result<(), StoreError> {
-        self.lock().write(path, contents)
+        let path = StorePath::parse(path)?;
+        self.lock().write(path.as_str(), contents)
     }
 
     /// Appends to the file at `path`, creating it if absent. See
@@ -458,7 +679,8 @@ impl StoreRef {
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     pub fn append(&self, path: &str, contents: &str) -> Result<(), StoreError> {
-        self.lock().append(path, contents)
+        let path = StorePath::parse(path)?;
+        self.lock().append(path.as_str(), contents)
     }
 
     /// Reads the file at `path` as numbered lines. See
@@ -477,7 +699,8 @@ impl StoreRef {
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     pub fn read_lines(&self, path: &str) -> Result<String, StoreError> {
-        self.lock().read_lines(path)
+        let path = StorePath::parse(path)?;
+        self.lock().read_lines(path.as_str())
     }
 
     /// Reads the file at `path` exactly as stored, with no line numbering.
@@ -496,7 +719,8 @@ impl StoreRef {
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     pub fn read(&self, path: &str) -> Result<String, StoreError> {
-        self.lock().read(path)
+        let path = StorePath::parse(path)?;
+        self.lock().read(path.as_str())
     }
 
     /// Reads the file at `path` verbatim and wraps it in an untrusted guard
@@ -518,7 +742,8 @@ impl StoreRef {
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     pub fn inject(&self, path: &str) -> Result<String, StoreError> {
-        let contents = self.lock().read(path)?;
+        let path = StorePath::parse(path)?;
+        let contents = self.lock().read(path.as_str())?;
         Ok(crate::untrusted::wrap(
             &contents,
             &crate::untrusted::nonce(),
@@ -543,7 +768,14 @@ impl StoreRef {
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     pub fn str_replace(&self, path: &str, old: &str, new: &str) -> Result<(), StoreError> {
-        self.lock().str_replace(path, old, new)
+        let path = StorePath::parse(path)?;
+        if old.is_empty() {
+            return Err(StoreError::AnchorNotFound {
+                path: path.as_str().to_owned(),
+                anchor: String::new(),
+            });
+        }
+        self.lock().str_replace(path.as_str(), old, new)
     }
 
     /// Removes the file at `path`. See [`Store::delete`].
@@ -561,7 +793,8 @@ impl StoreRef {
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     pub fn delete(&self, path: &str) -> Result<(), StoreError> {
-        self.lock().delete(path)
+        let path = StorePath::parse(path)?;
+        self.lock().delete(path.as_str())
     }
 
     /// Returns stored paths matching `pattern`, sorted. See [`Store::glob`].
@@ -580,26 +813,48 @@ impl StoreRef {
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     pub fn glob(&self, pattern: &str) -> Result<Vec<String>, StoreError> {
+        if pattern.is_empty() {
+            return Err(StoreError::InvalidPattern {
+                pattern: pattern.to_owned(),
+                reason: "pattern is empty".to_owned(),
+            });
+        }
+        if pattern.len() > MAX_GLOB_PATTERN_BYTES {
+            return Err(StoreError::InvalidPattern {
+                pattern: pattern.to_owned(),
+                reason: format!("pattern exceeds {MAX_GLOB_PATTERN_BYTES} bytes"),
+            });
+        }
+        if pattern.bytes().any(|b| b < 0x20 || b == 0x7f) {
+            return Err(StoreError::InvalidPattern {
+                pattern: pattern.to_owned(),
+                reason: "pattern contains a control character".to_owned(),
+            });
+        }
         self.lock().glob(pattern)
     }
 
     /// Returns whether a file exists at `path`. See [`Store::exists`].
     ///
-    /// Missing paths return `false` with no error.
+    /// A confirmed absence is `Ok(false)`; a backend failure is `Err`.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::InvalidPath`] if `path` fails validation, or any
+    /// [`StoreError`] the backend reports.
     ///
     /// # Examples
     /// ```
     /// use promptforge_core::store::StoreRef;
     ///
     /// let store = StoreRef::memory();
-    /// assert!(!store.exists("a.txt"));
+    /// assert!(!store.exists("a.txt")?);
     /// store.write("a.txt", "hi")?;
-    /// assert!(store.exists("a.txt"));
+    /// assert!(store.exists("a.txt")?);
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
-    #[must_use]
-    pub fn exists(&self, path: &str) -> bool {
-        self.lock().exists(path)
+    pub fn exists(&self, path: &str) -> Result<bool, StoreError> {
+        let path = StorePath::parse(path)?;
+        self.lock().exists(path.as_str())
     }
 }
 
@@ -861,6 +1116,74 @@ mod tests {
         store.write("a/b.txt", "").expect("write");
         assert!(store.glob("*.txt").expect("glob").is_empty());
         assert_eq!(store.glob("a/*.txt").expect("glob"), vec!["a/b.txt"]);
+    }
+
+    #[test]
+    fn invalid_paths_are_rejected_before_dispatch() {
+        let store = StoreRef::memory();
+        for (path, reason) in [
+            ("", PathReason::Empty),
+            ("/abs.txt", PathReason::Absolute),
+            ("../escape.txt", PathReason::Traversal),
+            ("a/./b.txt", PathReason::Traversal),
+            ("a//b.txt", PathReason::EmptySegment),
+            ("a\u{0}b.txt", PathReason::Control),
+        ] {
+            let err = store.read(path).expect_err("path must be rejected");
+            assert_eq!(err.kind(), StoreErrorKind::InvalidPath, "{path}");
+            match err {
+                StoreError::InvalidPath { reason: got, .. } => assert_eq!(got, reason, "{path}"),
+                other => panic!("expected InvalidPath for {path:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn exists_reports_confirmed_absence_and_presence() {
+        let store = StoreRef::memory();
+        assert!(!store.exists("a.txt").expect("absence is not an error"));
+        store.write("a.txt", "hi").expect("write");
+        assert!(store.exists("a.txt").expect("presence is not an error"));
+    }
+
+    #[test]
+    fn glob_rejects_empty_and_oversized_and_control_patterns() {
+        let store = StoreRef::memory();
+        assert_eq!(
+            store.glob("").expect_err("empty").kind(),
+            StoreErrorKind::InvalidPattern
+        );
+        let huge = "a".repeat(MAX_GLOB_PATTERN_BYTES + 1);
+        assert_eq!(
+            store.glob(&huge).expect_err("oversize").kind(),
+            StoreErrorKind::InvalidPattern
+        );
+        assert_eq!(
+            store.glob("a\u{0}b").expect_err("control").kind(),
+            StoreErrorKind::InvalidPattern
+        );
+    }
+
+    #[test]
+    fn empty_anchor_is_refused() {
+        let store = StoreRef::memory();
+        store.write("a.txt", "body").expect("write");
+        let err = store.str_replace("a.txt", "", "x").expect_err("empty anchor");
+        assert_eq!(err.kind(), StoreErrorKind::Anchor);
+    }
+
+    #[test]
+    fn backend_ctor_classifies_and_hides_source() {
+        let err = StoreError::backend(std::io::Error::other("disk gone"));
+        assert_eq!(err.kind(), StoreErrorKind::Backend);
+        assert!(err.path().is_none());
+        assert!(std::error::Error::source(&err).is_some());
+    }
+
+    #[test]
+    fn store_ref_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<StoreRef>();
     }
 
     #[test]

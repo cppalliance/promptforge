@@ -2748,7 +2748,9 @@ fn install_store_table<'scope, 'env: 'scope>(
 
     let handle = store.clone();
     let exists = scope
-        .create_function(move |_, path: String| Ok(handle.exists(&path)))
+        .create_function(move |_, path: String| {
+            handle.exists(&path).map_err(mlua::Error::external)
+        })
         .map_err(|e| Error::Lua(e.to_string()))?;
     table
         .set("exists", exists)
@@ -3041,6 +3043,10 @@ mod tests {
 
         fn glob(&self, pattern: &str) -> std::result::Result<Vec<String>, StoreError> {
             Err(Self::error(pattern))
+        }
+
+        fn exists(&self, path: &str) -> std::result::Result<bool, StoreError> {
+            Err(Self::error(path))
         }
     }
 
