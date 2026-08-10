@@ -3,13 +3,18 @@
 //! Core-tests no longer downloads GGUFs or spawns `llama-server`. It writes a
 //! temporary profile TOML (model URL + sha256 pin + launch knobs), starts the
 //! gateway binary, waits until `/health` and authenticated `/v1/models` show
-//! the local model, and kills the gateway process tree on drop.
+//! the local model, and kills the gateway process tree on shutdown or drop.
+//!
+//! Readiness classification lives in [`readiness`] and process-tree teardown in
+//! [`process`]; this module owns the guard and its lifecycle orchestration.
+
+mod process;
+mod readiness;
 
 use std::collections::VecDeque;
 use std::fs;
 use std::io::Read;
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,7 +22,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, bail};
-use serde_json::Value;
+
+use self::readiness::Readiness;
 
 /// Pins copied from `promptforge-gateway::local` (gateway is the source of truth).
 const SCENARIO_MODEL_URL: &str =
@@ -31,10 +37,10 @@ const CAPTURE_LIMIT: usize = 64 * 1024;
 const READINESS_DEADLINE: Duration = Duration::from_secs(1_800);
 const READINESS_INTERVAL: Duration = Duration::from_millis(200);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(2);
-/// Fresh port/token/profile attempts when the child exits before readiness
-/// (typically a stolen bind after the long LocalRuntime start window).
+/// Fresh port/token/profile attempts when the child exits before readiness and
+/// a listener still owns the port (a genuine stolen bind).
 const STARTUP_ATTEMPTS: usize = 4;
-const LOOPBACK: &str = "127.0.0.1";
+pub(crate) const LOOPBACK: &str = "127.0.0.1";
 const API_KEY_REDACTION: &str = "<per-attempt-secret>";
 
 /// Profile shape written into the temporary TOML the gateway loads.
@@ -84,14 +90,17 @@ type SharedCapture = Arc<Mutex<BoundedCapture>>;
 #[derive(Debug)]
 enum WaitOutcome {
     Ready,
-    /// Child died before readiness; retry with a fresh port/token/profile.
+    /// Child died before readiness and a listener owns the port; retry with a
+    /// fresh port/token/profile.
     BindCollision(ExitStatus),
 }
 
-/// A running `promptforge-gateway` that is killed (process tree) on drop.
+/// A running `promptforge-gateway` that is killed (process tree) on shutdown or
+/// drop. Prefer [`GatewayGuard::shutdown`] for deterministic async teardown;
+/// `Drop` is a best-effort fallback for the cancellation path.
 #[derive(Debug)]
 pub(crate) struct GatewayGuard {
-    child: Child,
+    child: Option<Child>,
     port: u16,
     model_name: String,
     api_key: String,
@@ -106,11 +115,12 @@ impl GatewayGuard {
     /// the local model appears in `/v1/models`.
     ///
     /// Retries up to [`STARTUP_ATTEMPTS`] times with a fresh port, token, and
-    /// profile when the child exits before readiness (bind stolen after the
-    /// long LocalRuntime start window).
+    /// profile only when the child exits before readiness and a listener still
+    /// owns the chosen port (a stolen bind). Any other early exit or a terminal
+    /// readiness failure returns an error immediately.
     pub(crate) fn start(profile: GatewayProfile, interrupted: &AtomicBool) -> Result<Self> {
         let model_name = model_name(profile).to_owned();
-        let executable = gateway_bin()?;
+        let executable = process::gateway_bin()?;
         let mut collisions = Vec::new();
 
         for attempt in 1..=STARTUP_ATTEMPTS {
@@ -133,7 +143,7 @@ impl GatewayGuard {
             #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt as _;
-                // Own process group so Drop can kill gateway + llama-server children.
+                // Own process group so teardown can kill gateway + llama-server.
                 command.process_group(0);
             }
             let child = command.spawn().with_context(|| {
@@ -143,7 +153,7 @@ impl GatewayGuard {
             let stdout = Arc::new(Mutex::new(BoundedCapture::new(CAPTURE_LIMIT)));
             let stderr = Arc::new(Mutex::new(BoundedCapture::new(CAPTURE_LIMIT)));
             let mut guard = Self {
-                child,
+                child: Some(child),
                 port,
                 model_name: model_name.clone(),
                 api_key,
@@ -163,10 +173,7 @@ impl GatewayGuard {
                     ));
                 }
                 Err(error) => {
-                    return Err(error).context(format!(
-                        "promptforge-gateway startup failed\n{}",
-                        guard.diagnostics()
-                    ));
+                    return Err(error).context("promptforge-gateway startup failed");
                 }
             }
         }
@@ -178,21 +185,17 @@ impl GatewayGuard {
     }
 
     fn start_capture(&mut self) -> Result<()> {
-        let child_stdout = self
+        let child = self
             .child
-            .stdout
-            .take()
-            .context("capture promptforge-gateway stdout")?;
+            .as_mut()
+            .context("gateway child missing before capture start")?;
+        let child_stdout = child.stdout.take().context("capture gateway stdout")?;
+        let child_stderr = child.stderr.take().context("capture gateway stderr")?;
         self.readers.push(capture_reader(
             "promptforge-gateway-stdout",
             child_stdout,
             Arc::clone(&self.stdout),
         )?);
-        let child_stderr = self
-            .child
-            .stderr
-            .take()
-            .context("capture promptforge-gateway stderr")?;
         self.readers.push(capture_reader(
             "promptforge-gateway-stderr",
             child_stderr,
@@ -245,131 +248,105 @@ impl GatewayGuard {
         )
     }
 
+    /// Terminates the gateway process tree and joins the reader threads,
+    /// performing the blocking teardown off the async worker via
+    /// [`tokio::task::spawn_blocking`]. Returns an error if the child cannot be
+    /// reaped or its descendants may survive.
+    pub(crate) async fn shutdown(&mut self) -> Result<()> {
+        let readers = std::mem::take(&mut self.readers);
+        let Some(child) = self.child.take() else {
+            join_reader_handles(readers);
+            return Ok(());
+        };
+        tokio::task::spawn_blocking(move || {
+            let result = process::terminate(child);
+            join_reader_handles(readers);
+            result
+        })
+        .await
+        .context("join promptforge-gateway shutdown task")?
+    }
+
     fn wait_until_ready(&mut self, interrupted: &AtomicBool) -> Result<WaitOutcome> {
-        let health = format!("http://{LOOPBACK}:{}/health", self.port);
         let deadline = Instant::now() + READINESS_DEADLINE;
-        let client = reqwest::blocking::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(HTTP_TIMEOUT)
-            .timeout(HTTP_TIMEOUT)
-            .build()
-            .context("build promptforge-gateway readiness client")?;
+        let client = readiness::build_client(HTTP_TIMEOUT)?;
 
         loop {
             if interrupted.load(Ordering::Acquire) {
                 bail!("promptforge-gateway startup interrupted by Ctrl-C");
             }
-            if let Some(status) = self
-                .child
-                .try_wait()
-                .context("inspect promptforge-gateway during readiness")?
-            {
+            if let Some(status) = self.try_wait_child()? {
                 self.join_readers();
-                return Ok(WaitOutcome::BindCollision(status));
-            }
-            if readiness_belongs_to(&client, self.port, &self.api_key, &self.model_name) {
-                if let Some(status) = self
-                    .child
-                    .try_wait()
-                    .context("inspect promptforge-gateway after readiness")?
-                {
-                    bail!("promptforge-gateway exited immediately after readiness with {status}");
+                // Only a genuine bind collision (a listener still owns the port)
+                // is retryable; any other early exit is a real startup defect.
+                if process::port_has_listener(self.port) {
+                    return Ok(WaitOutcome::BindCollision(status));
                 }
-                return Ok(WaitOutcome::Ready);
+                bail!(
+                    "promptforge-gateway exited before readiness with {status} and left port {} unowned\n{}",
+                    self.port,
+                    self.diagnostics()
+                );
+            }
+            match readiness::probe(&client, self.port, &self.api_key, &self.model_name) {
+                Readiness::Ready => {
+                    if let Some(status) = self.try_wait_child()? {
+                        bail!(
+                            "promptforge-gateway exited immediately after readiness with {status}"
+                        );
+                    }
+                    return Ok(WaitOutcome::Ready);
+                }
+                Readiness::Terminal(message) => {
+                    bail!(
+                        "promptforge-gateway readiness failed terminally: {message}\n{}",
+                        self.diagnostics()
+                    );
+                }
+                Readiness::Pending => {}
             }
             if Instant::now() >= deadline {
                 bail!(
-                    "promptforge-gateway did not expose model `{}` at {health} within {} seconds",
+                    "promptforge-gateway did not expose model `{}` within {} seconds\n{}",
                     self.model_name,
-                    READINESS_DEADLINE.as_secs()
+                    READINESS_DEADLINE.as_secs(),
+                    self.diagnostics()
                 );
             }
             thread::sleep(READINESS_INTERVAL);
         }
     }
 
-    fn join_readers(&mut self) {
-        for reader in self.readers.drain(..) {
-            let _ignored = reader.join();
-        }
+    fn try_wait_child(&mut self) -> Result<Option<ExitStatus>> {
+        self.child
+            .as_mut()
+            .context("gateway child missing during readiness")?
+            .try_wait()
+            .context("inspect promptforge-gateway during readiness")
     }
 
-    fn kill_tree(&mut self) {
-        let pid = self.child.id();
-        #[cfg(windows)]
-        {
-            let _ignored = Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
-        #[cfg(unix)]
-        {
-            // Negative PID kills the process group started with process_group(0).
-            let _ignored = Command::new("kill")
-                .args(["-KILL", &format!("-{pid}")])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
-        let _ignored = self.child.kill();
-        let _ignored = self.child.wait();
+    fn join_readers(&mut self) {
+        join_reader_handles(std::mem::take(&mut self.readers));
     }
 }
 
 impl Drop for GatewayGuard {
     fn drop(&mut self) {
-        self.kill_tree();
-        self.join_readers();
-    }
-}
-
-/// Resolves the `promptforge-gateway` binary path.
-///
-/// Order: `PROMPTFORGE_GATEWAY_BIN`, then `target/debug`, then `target/release`
-/// relative to the workspace (two levels above this crate's manifest).
-pub(crate) fn gateway_bin() -> Result<PathBuf> {
-    let override_path = std::env::var_os("PROMPTFORGE_GATEWAY_BIN").map(PathBuf::from);
-    let workspace_target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
-    resolve_gateway_bin(override_path.as_deref(), &workspace_target)
-}
-
-/// Testable binary resolution used by [`gateway_bin`].
-fn resolve_gateway_bin(env_override: Option<&Path>, workspace_target: &Path) -> Result<PathBuf> {
-    if let Some(path) = env_override {
-        if path.is_file() {
-            return Ok(path.to_owned());
+        if let Some(child) = self.child.take() {
+            process::best_effort_terminate(child);
         }
-        bail!(
-            "PROMPTFORGE_GATEWAY_BIN points at missing file {}",
-            path.display()
-        );
+        // Detach the capture readers rather than joining. Once the process tree
+        // is killed the pipes reach EOF and the reader threads exit on their
+        // own; joining here could block the dropping thread (possibly a runtime
+        // worker) unboundedly if a surviving descendant still holds a pipe open.
+        // The async `shutdown` path joins them, but inside `spawn_blocking`.
+        self.readers.clear();
     }
-
-    let name = gateway_executable_name();
-    for profile in ["debug", "release"] {
-        let candidate = workspace_target.join(profile).join(name);
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-
-    bail!(
-        "promptforge-gateway binary not found under {}/{{debug,release}}/{name}; \
-         build it with `cargo build -p promptforge-gateway` or set PROMPTFORGE_GATEWAY_BIN",
-        workspace_target.display()
-    )
 }
 
-fn gateway_executable_name() -> &'static str {
-    if cfg!(windows) {
-        "promptforge-gateway.exe"
-    } else {
-        "promptforge-gateway"
+fn join_reader_handles(readers: Vec<JoinHandle<()>>) {
+    for reader in readers {
+        let _ignored = reader.join();
     }
 }
 
@@ -430,47 +407,17 @@ fn free_port() -> Result<u16> {
         .context("read selected gateway port")
 }
 
+/// A per-attempt bearer token drawn from the OS-seeded cryptographic `ThreadRng`
+/// so a local process cannot predict the credential guarding the loopback
+/// gateway during a real-model run.
 fn random_token() -> String {
+    use rand::RngCore as _;
+    let mut rng = rand::rng();
     format!(
         "promptforge-local-{:016x}{:016x}",
-        fastrand::u64(..),
-        fastrand::u64(..)
+        rng.next_u64(),
+        rng.next_u64()
     )
-}
-
-fn readiness_belongs_to(
-    client: &reqwest::blocking::Client,
-    port: u16,
-    api_key: &str,
-    model_name: &str,
-) -> bool {
-    let base = format!("http://{LOOPBACK}:{port}");
-    let Ok(health) = client.get(format!("{base}/health")).send() else {
-        return false;
-    };
-    if !health.status().is_success() {
-        return false;
-    }
-    let Ok(models) = client
-        .get(format!("{base}/v1/models"))
-        .bearer_auth(api_key)
-        .send()
-    else {
-        return false;
-    };
-    if !models.status().is_success() {
-        return false;
-    }
-    let Ok(body) = models.json::<Value>() else {
-        return false;
-    };
-    body.get("data")
-        .and_then(Value::as_array)
-        .is_some_and(|models| {
-            models
-                .iter()
-                .any(|model| model.get("id").and_then(Value::as_str) == Some(model_name))
-        })
 }
 
 fn capture_reader<R>(
@@ -523,28 +470,19 @@ mod tests {
     }
 
     #[test]
-    fn resolve_gateway_bin_reports_missing_override_and_missing_target() {
-        let missing = Path::new("/nonexistent/promptforge-gateway");
-        let error = resolve_gateway_bin(Some(missing), Path::new("/no-such-target"))
-            .expect_err("missing override must fail");
-        assert!(
-            format!("{error:#}").contains("PROMPTFORGE_GATEWAY_BIN"),
-            "unexpected error: {error:#}"
-        );
-
-        let error = resolve_gateway_bin(None, Path::new("/no-such-target"))
-            .expect_err("empty target tree must fail");
-        assert!(
-            format!("{error:#}").contains("promptforge-gateway binary not found"),
-            "unexpected error: {error:#}"
-        );
-    }
-
-    #[test]
     fn captured_diagnostics_keep_only_the_bounded_tail() {
         let mut capture = BoundedCapture::new(8);
         capture.append(b"abcdef");
         capture.append(b"ghijkl");
         assert_eq!(capture.render(), "[4 earlier bytes omitted]\nefghijkl");
+    }
+
+    #[test]
+    fn a_random_token_is_long_and_unpredictable() {
+        let first = random_token();
+        let second = random_token();
+        assert!(first.starts_with("promptforge-local-"));
+        assert_eq!(first.len(), "promptforge-local-".len() + 32);
+        assert_ne!(first, second, "two draws must not collide");
     }
 }
