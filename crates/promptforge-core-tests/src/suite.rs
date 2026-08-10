@@ -191,9 +191,8 @@ fn parse_execution_fixture(
     execution: &str,
     observer: &dyn Observer,
 ) -> Prompt {
-    let prompt = Prompt::parse(source, execution, observer)
-        .unwrap_or_else(|error| panic!("fixture {name} failed to parse: {error}"));
-    prompt
+    Prompt::parse(source, execution, observer)
+        .unwrap_or_else(|error| panic!("fixture {name} failed to parse: {error}"))
 }
 
 fn checkpoints(records: &[Record], execution: &str) -> Vec<Record> {

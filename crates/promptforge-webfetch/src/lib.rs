@@ -108,13 +108,13 @@ fn soft_or_hard(err: FetchError) -> CallResult {
     }
 }
 
-/// Maps a body-read [`FetchError`] into a soft tool result.
+/// Maps a body-read [`FetchError`] into soft, untrusted tool text.
 ///
 /// A body-read failure is always a size cap ([`FetchError::TooLarge`]) or a
 /// mid-stream transport failure ([`FetchError::BodyRead`]); both are recoverable
 /// and returned as model-facing tool text so the model can try a different URL.
-fn body_read_outcome(err: FetchError) -> CallResult {
-    Ok(ToolOutput::untrusted(err.model_facing()))
+fn body_read_outcome(err: &FetchError) -> ToolOutput {
+    ToolOutput::untrusted(err.model_facing())
 }
 
 /// Maps a reqwest send error into either a soft tool result (recoverable) or
@@ -324,6 +324,10 @@ fn extract_html(html: &str, base_url: Option<&str>, raw: bool) -> (String, Extra
 
 #[async_trait::async_trait]
 impl Tool for WebFetch {
+    #[expect(
+        clippy::expect_used,
+        reason = "the id components are compile-time constants that satisfy ToolId's validation"
+    )]
     fn id(&self) -> ToolId {
         ToolId::new("promptforge", "web_fetch")
             .expect("`promptforge`/`web_fetch` is a valid tool id")
@@ -367,6 +371,10 @@ impl Tool for WebFetch {
         })
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one linear fetch pipeline (parse args, admit URL, route content type, decode) reads better whole than split"
+    )]
     async fn call(&self, args: serde_json::Value) -> CallResult {
         let url = args
             .get("url")
@@ -453,7 +461,7 @@ impl Tool for WebFetch {
                         .await
                     {
                         Ok(b) => b,
-                        Err(e) => return body_read_outcome(e),
+                        Err(e) => return Ok(body_read_outcome(&e)),
                     };
                 let decoded = match decode_body(&body, charset.as_deref(), final_url.as_str()) {
                     Ok(d) => d,
@@ -468,7 +476,7 @@ impl Tool for WebFetch {
                         .await
                     {
                         Ok(b) => b,
-                        Err(e) => return body_read_outcome(e),
+                        Err(e) => return Ok(body_read_outcome(&e)),
                     };
                 let decoded = match decode_body(&body, charset.as_deref(), final_url.as_str()) {
                     Ok(d) => d,
@@ -1093,9 +1101,7 @@ mod tests {
         let url = format!("http://localhost:{port}/record");
         tool.call(serde_json::json!({ "url": url }))
             .await
-            .expect("a loopback fetch through allow_exact must succeed")
-            .text()
-            .to_owned();
+            .expect("a loopback fetch through allow_exact must succeed");
 
         let recorded = recorded
             .lock()
@@ -1127,9 +1133,7 @@ mod tests {
         let url = format!("http://localhost:{port}/redir-record");
         tool.call(serde_json::json!({ "url": url }))
             .await
-            .expect("a redirect between loopback paths must succeed")
-            .text()
-            .to_owned();
+            .expect("a redirect between loopback paths must succeed");
 
         let recorded = recorded
             .lock()

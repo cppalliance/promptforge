@@ -95,6 +95,10 @@ impl StringFixtureTool {
 
 #[async_trait::async_trait]
 impl Tool for StringFixtureTool {
+    #[expect(
+        clippy::expect_used,
+        reason = "the fixture id components are compile-time constants that satisfy ToolId's validation"
+    )]
     fn id(&self) -> ToolId {
         ToolId::new("real-model-fixtures", "string_fixture")
             .expect("the fixture tool identity is valid")

@@ -3,7 +3,8 @@
 //! A host builds a [`ModelCatalog`] from gateway `GET /v1/models` (or a pinned
 //! offline entry). H1 `models.need` resolves a description against that catalog
 //! under hard constraints, freezes invocation parameters, and stores the result
-//! in [`ModelBindings`]. H2 `models.use` selects at most one binding per
+//! in the run's crate-private model bindings. H2 `models.use` selects at most
+//! one binding per
 //! section; H1 `models.always` supplies the prompt-wide default for sections
 //! that omit `models.use`. Model-facing sections with neither binding fail with
 //! a model-binding failure surfaced through [`crate::RunError`].
