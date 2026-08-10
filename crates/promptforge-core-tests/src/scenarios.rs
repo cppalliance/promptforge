@@ -43,13 +43,17 @@ fn pinned_qwen_dev_catalog(model_alias: &str) -> Result<ModelCatalog> {
     .context("pinned catalog must have a single unique model")
 }
 
-type Record = (String, String, String);
+/// One correlated observation: the execution id, section, and the typed event.
+type Record = (String, String, Observation);
 
 /// Runs both explicit scenarios against one ready local server.
+///
+/// `model_alias` is the gateway model identity from `/v1/models`; it becomes
+/// each scenario catalog's model id so resolution requests the model the server
+/// actually exposes rather than a prompt-local binding name.
 pub(crate) async fn run_all(base_url: &str, api_key: &str, model_alias: &str) -> Result<()> {
-    let _ = model_alias;
-    run_text(base_url, api_key).await?;
-    run_tool_call(base_url, api_key).await
+    run_text(base_url, api_key, model_alias).await?;
+    run_tool_call(base_url, api_key, model_alias).await
 }
 
 #[derive(Debug, Default)]
@@ -64,11 +68,10 @@ impl Recorder {
     }
 
     fn detail_count(&self, execution: &str, expected: &Observation) -> usize {
-        let expected = expected.to_string();
         self.records()
             .iter()
             .filter(|(record_execution, _, found)| {
-                record_execution == execution && *found == expected
+                record_execution == execution && found == expected
             })
             .count()
     }
@@ -79,7 +82,7 @@ impl Observer for Recorder {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push((execution.to_owned(), section.to_owned(), event.to_string()));
+            .push((execution.to_owned(), section.to_owned(), event));
     }
 }
 
@@ -147,13 +150,13 @@ impl Tool for StringFixtureTool {
     }
 }
 
-async fn run_text(base_url: &str, api_key: &str) -> Result<()> {
+async fn run_text(base_url: &str, api_key: &str, model_alias: &str) -> Result<()> {
     let observer = Arc::new(Recorder::default());
     let prompt = Prompt::parse(REAL_TEXT, TEXT_EXECUTION, observer.as_ref())
         .context("parse execution/real-text.md")?;
     let picker = ToolPicker::build(Catalog::default(), Config::default())
         .context("build empty tool picker")?;
-    let models = pinned_qwen_dev_catalog("writer")?;
+    let models = pinned_qwen_dev_catalog(model_alias)?;
     let client = GatewayClient::new(
         GatewayEndpoint::new(base_url).context("gateway base URL must be valid")?,
         SecretString::new(api_key).context("gateway key must not be empty")?,
@@ -174,10 +177,9 @@ async fn run_text(base_url: &str, api_key: &str) -> Result<()> {
     let reply = result
         .strip_prefix(TEXT_EPILOG)
         .context("real-text result did not prove epilog visibility")?;
-    ensure!(!reply.trim().is_empty(), "real-text model reply was empty");
     ensure!(
-        reply.contains("PF_TEXT_OK"),
-        "real-text reply omitted its requested behavioral marker: {reply:?}"
+        reply == "PF_TEXT_OK",
+        "real-text reply must be exactly its behavioral marker, got: {reply:?}"
     );
     ensure!(
         observer.detail_count(TEXT_EXECUTION, &Observation::ModelTurnCompleted) == 1,
@@ -187,7 +189,7 @@ async fn run_text(base_url: &str, api_key: &str) -> Result<()> {
     Ok(())
 }
 
-async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
+async fn run_tool_call(base_url: &str, api_key: &str, model_alias: &str) -> Result<()> {
     let observer = Arc::new(Recorder::default());
     let tool = Arc::new(StringFixtureTool::default());
     let prompt = Prompt::parse(REAL_TOOL_CALL, TOOL_EXECUTION, observer.as_ref())
@@ -207,7 +209,7 @@ async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
     )
     .context("build deterministic one-tool fixture picker")?;
     let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];
-    let models = pinned_qwen_dev_catalog("writer")?;
+    let models = pinned_qwen_dev_catalog(model_alias)?;
 
     let client = GatewayClient::new(
         GatewayEndpoint::new(base_url).context("gateway base URL must be valid")?,
@@ -229,13 +231,10 @@ async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
     let reply = result
         .strip_prefix(TOOL_EPILOG)
         .context("real-tool-call result did not prove epilog visibility")?;
+    let expected_final = format!("PF_TOOL_FINAL: {TOOL_RESULT_MARKER}");
     ensure!(
-        !reply.trim().is_empty(),
-        "tool continuation reply was empty"
-    );
-    ensure!(
-        reply.contains("PF_TOOL_FINAL") && reply.contains(TOOL_RESULT_MARKER),
-        "tool continuation did not produce the requested final answer: {reply:?}"
+        reply == expected_final,
+        "tool continuation reply must be exactly {expected_final:?}, got: {reply:?}"
     );
     let calls = tool.calls();
     ensure!(
