@@ -243,10 +243,13 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
 /// A reasoning synonym that is present but neither a string nor JSON null is a
 /// malformed shape; whitespace-only strings are treated as absent.
 ///
+/// Crate-private and shared so the OpenAI normalizer and the Gemma dialect
+/// extract reasoning through one implementation (see PF-NORM-006).
+///
 /// # Errors
 /// Returns [`Error::MalformedResponse`] when a present reasoning field is not a
 /// string or null.
-fn extract_reasoning(message: &Value) -> Result<Option<String>> {
+pub(crate) fn extract_reasoning(message: &Value) -> Result<Option<String>> {
     for key in ["reasoning_content", "reasoning", "thinking"] {
         match message.get(key) {
             None | Some(Value::Null) => {}

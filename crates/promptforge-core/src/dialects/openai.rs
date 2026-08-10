@@ -9,7 +9,10 @@ use crate::Result;
 use crate::client::{Message, ToolCall};
 use crate::normalize::{CompletionNormalizer, NormalizedTurn, OpenAiChatNormalizer};
 
-use super::{DetectScore, DialectEvidence, DialectRequest, ToolDialect, ToolDialectId};
+use super::{
+    DetectScore, DialectEvidence, DialectRequest, ToolDialect, ToolDialectId,
+    correlate_tool_results,
+};
 
 /// The standard OpenAI function-calling dialect.
 ///
@@ -67,12 +70,17 @@ impl ToolDialect for OpenAiDialect {
     /// `calls` and `results` are parallel: `results[i]` is `(id, content)`
     /// answering `calls[i]`. The assistant turn echoes the raw wire shape so
     /// the backend sees exactly the `tool_calls` array it emitted.
+    ///
+    /// # Errors
+    /// Returns an error, leaving the conversation unmodified, when `calls` and
+    /// `results` fail [`correlate_tool_results`].
     fn echo_tool_results(
         &self,
         conversation: &mut Vec<Message>,
         calls: &[ToolCall],
         results: &[(String, String)],
-    ) {
+    ) -> Result<()> {
+        correlate_tool_results(calls, results)?;
         let raw_calls: Vec<Value> = calls
             .iter()
             .map(|call| {
@@ -91,6 +99,7 @@ impl ToolDialect for OpenAiDialect {
         for (id, content) in results {
             conversation.push(Message::tool(id.clone(), content.clone()));
         }
+        Ok(())
     }
 }
 
@@ -176,7 +185,9 @@ mod tests {
             ("call_2".into(), "result 2".into()),
         ];
         let mut conversation = Vec::new();
-        dialect.echo_tool_results(&mut conversation, &calls, &results);
+        dialect
+            .echo_tool_results(&mut conversation, &calls, &results)
+            .expect("correlated results echo cleanly");
 
         assert_eq!(conversation.len(), 3);
         assert_eq!(conversation[0].role, "assistant");
@@ -192,5 +203,44 @@ mod tests {
         assert_eq!(conversation[2].role, "tool");
         assert_eq!(conversation[2].tool_call_id.as_deref(), Some("call_2"));
         assert_eq!(conversation[2].content, "result 2");
+    }
+
+    #[test]
+    fn echo_rejects_count_and_order_mismatch() {
+        let dialect = OpenAiDialect;
+        let calls = vec![
+            ToolCall {
+                id: "call_1".into(),
+                name: "a".into(),
+                arguments: serde_json::json!({}),
+            },
+            ToolCall {
+                id: "call_2".into(),
+                name: "b".into(),
+                arguments: serde_json::json!({}),
+            },
+        ];
+
+        // Count mismatch.
+        let mut conversation = Vec::new();
+        assert!(
+            dialect
+                .echo_tool_results(&mut conversation, &calls, &[("call_1".into(), "r".into())])
+                .is_err()
+        );
+        assert!(conversation.is_empty());
+
+        // Order/id mismatch.
+        let swapped = vec![
+            ("call_2".to_string(), "r2".to_string()),
+            ("call_1".to_string(), "r1".to_string()),
+        ];
+        let mut conversation = Vec::new();
+        assert!(
+            dialect
+                .echo_tool_results(&mut conversation, &calls, &swapped)
+                .is_err()
+        );
+        assert!(conversation.is_empty());
     }
 }

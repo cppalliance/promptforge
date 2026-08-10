@@ -23,7 +23,17 @@ pub(crate) use openai::OpenAiDialect;
 
 /// A stable, matchable classification of a [`DialectError`].
 ///
-/// `#[non_exhaustive]` so new kinds do not break a caller's `match`.
+/// `#[non_exhaustive]` so new kinds do not break a caller's `match`. Obtain one
+/// from [`DialectError::kind`] and match on it instead of parsing the message.
+///
+/// ```
+/// use promptforge_core::dialects::{DialectEvidence, DialectErrorKind, ToolDialectRegistry};
+///
+/// // Empty evidence matches no dialect, so resolution fails with `NoMatch`.
+/// let registry = ToolDialectRegistry::builtin();
+/// let error = registry.resolve(&DialectEvidence::default()).unwrap_err();
+/// assert_eq!(error.kind(), DialectErrorKind::NoMatch);
+/// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DialectErrorKind {
@@ -38,7 +48,18 @@ pub enum DialectErrorKind {
 /// The error returned by [`ToolDialectRegistry::resolve`].
 ///
 /// Carries a stable [`kind`](DialectError::kind) classifier. `#[non_exhaustive]`
-/// and not constructible outside the crate.
+/// and not constructible outside the crate; obtain one only from a failed
+/// [`ToolDialectRegistry::resolve`] and inspect it through
+/// [`kind`](DialectError::kind) and [`Display`](std::fmt::Display).
+///
+/// ```
+/// use promptforge_core::dialects::{DialectEvidence, DialectErrorKind, ToolDialectRegistry};
+///
+/// let registry = ToolDialectRegistry::builtin();
+/// let error = registry.resolve(&DialectEvidence::default()).unwrap_err();
+/// assert_eq!(error.kind(), DialectErrorKind::NoMatch);
+/// assert!(!error.to_string().is_empty());
+/// ```
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct DialectError {
@@ -47,6 +68,17 @@ pub struct DialectError {
 
 impl DialectError {
     /// Returns the stable classification of this failure.
+    ///
+    /// ```
+    /// use promptforge_core::dialects::{DialectEvidence, DialectErrorKind, ToolDialectRegistry};
+    ///
+    /// let registry = ToolDialectRegistry::builtin();
+    /// let evidence = DialectEvidence::new(Some(true), None, None, None);
+    /// // A single strong match resolves cleanly; a miss classifies as `NoMatch`.
+    /// assert!(registry.resolve(&evidence).is_ok());
+    /// let miss = registry.resolve(&DialectEvidence::default()).unwrap_err();
+    /// assert_eq!(miss.kind(), DialectErrorKind::NoMatch);
+    /// ```
     #[must_use]
     pub fn kind(&self) -> DialectErrorKind {
         match &self.inner {
@@ -86,6 +118,17 @@ impl From<DialectError> for Error {
 /// Variants are `#[non_exhaustive]` so new backends can be added without a
 /// breaking change. Serializes to the same lowercase strings used in catalog
 /// JSON (`"openai"`, `"gemma3_tool_code"`).
+///
+/// ```
+/// use promptforge_core::dialects::ToolDialectId;
+///
+/// // Serializes to the catalog wire string and round-trips.
+/// let id = ToolDialectId::Gemma3ToolCode;
+/// let json = serde_json::to_string(&id).unwrap();
+/// assert_eq!(json, "\"gemma3_tool_code\"");
+/// let back: ToolDialectId = serde_json::from_str(&json).unwrap();
+/// assert_eq!(back, id);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ToolDialectId {
@@ -108,6 +151,15 @@ impl std::fmt::Display for ToolDialectId {
 
 /// Whether tool calls are handled natively by the backend or emulated by the
 /// runtime through content-fence parsing.
+///
+/// ```
+/// use promptforge_core::dialects::{ToolDialectId, ToolsMode};
+///
+/// // The mode is always derived from the dialect, never stored independently.
+/// assert_eq!(ToolDialectId::OpenAi.tools_mode(), ToolsMode::Native);
+/// assert_eq!(ToolDialectId::Gemma3ToolCode.tools_mode(), ToolsMode::Emulated);
+/// assert_eq!(serde_json::to_string(&ToolsMode::Emulated).unwrap(), "\"emulated\"");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ToolsMode {
@@ -131,6 +183,13 @@ impl std::fmt::Display for ToolsMode {
 
 impl ToolDialectId {
     /// The tools mode implied by this dialect.
+    ///
+    /// ```
+    /// use promptforge_core::dialects::{ToolDialectId, ToolsMode};
+    ///
+    /// assert_eq!(ToolDialectId::OpenAi.tools_mode(), ToolsMode::Native);
+    /// assert_eq!(ToolDialectId::Gemma3ToolCode.tools_mode(), ToolsMode::Emulated);
+    /// ```
     #[must_use]
     pub fn tools_mode(&self) -> ToolsMode {
         match self {
@@ -160,6 +219,15 @@ pub struct DialectEvidence {
 
 impl DialectEvidence {
     /// Builds evidence from the four optional axes.
+    ///
+    /// ```
+    /// use promptforge_core::dialects::{DialectEvidence, ToolDialectId, ToolDialectRegistry};
+    ///
+    /// // Authoritative native tool-call support resolves to the OpenAI dialect.
+    /// let evidence = DialectEvidence::new(Some(true), None, Some("gpt-4o".into()), None);
+    /// let registry = ToolDialectRegistry::builtin();
+    /// assert_eq!(registry.resolve(&evidence).unwrap(), ToolDialectId::OpenAi);
+    /// ```
     #[must_use]
     pub fn new(
         supports_tool_calls: Option<bool>,
@@ -219,15 +287,63 @@ pub(crate) trait ToolDialect: Send + Sync {
     fn parse_turn(&self, body: &Value) -> Result<NormalizedTurn>;
 
     /// Echo tool-call results back into the conversation history.
+    ///
+    /// # Errors
+    /// Returns an error when `calls` and `results` do not form a validated
+    /// one-to-one correlation (see [`correlate_tool_results`]); the conversation
+    /// is left unmodified in that case.
     fn echo_tool_results(
         &self,
         conversation: &mut Vec<Message>,
         calls: &[ToolCall],
         results: &[(String, String)],
-    );
+    ) -> Result<()>;
+}
+
+/// Validates that `results` correlate one-to-one with `calls` before any dialect
+/// echoes them into the conversation.
+///
+/// Enforces, in every build (not just debug), that the two slices have equal
+/// length (count), that every call id is unique (uniqueness), and that
+/// `results[i].0 == calls[i].id` (order and id correlation). A violation is an
+/// internal invariant failure - the executor builds `results` in call order -
+/// surfaced as a concrete error rather than a truncating `zip` that could echo
+/// a result under the wrong call id.
+///
+/// # Errors
+/// Returns [`Error::Internal`] when the count, ordering, id correlation, or call
+/// id uniqueness invariant does not hold.
+pub(crate) fn correlate_tool_results(
+    calls: &[ToolCall],
+    results: &[(String, String)],
+) -> Result<()> {
+    if calls.len() != results.len() {
+        return Err(Error::Internal(
+            "tool-result echo: result count does not match call count",
+        ));
+    }
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for (call, (result_id, _)) in calls.iter().zip(results.iter()) {
+        if !seen.insert(call.id.as_str()) {
+            return Err(Error::Internal(
+                "tool-result echo: duplicate tool call id within one turn",
+            ));
+        }
+        if call.id != *result_id {
+            return Err(Error::Internal(
+                "tool-result echo: result id does not correlate with its call id in order",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Registry of builtin tool dialects with evidence-based resolution.
+///
+/// `#[non_exhaustive]` so future fields (or a change away from the builtin-only
+/// constructor) are not a breaking change; it is only constructible through
+/// [`ToolDialectRegistry::builtin`].
+#[non_exhaustive]
 pub struct ToolDialectRegistry {
     dialects: Vec<Box<dyn ToolDialect>>,
 }
@@ -243,6 +359,14 @@ impl std::fmt::Debug for ToolDialectRegistry {
 
 impl ToolDialectRegistry {
     /// Construct the registry populated with all builtin dialects.
+    ///
+    /// ```
+    /// use promptforge_core::dialects::{DialectEvidence, ToolDialectId, ToolDialectRegistry};
+    ///
+    /// let registry = ToolDialectRegistry::builtin();
+    /// let evidence = DialectEvidence::new(Some(true), None, None, None);
+    /// assert_eq!(registry.resolve(&evidence).unwrap(), ToolDialectId::OpenAi);
+    /// ```
     #[must_use]
     pub fn builtin() -> ToolDialectRegistry {
         ToolDialectRegistry {
@@ -261,6 +385,36 @@ impl ToolDialectRegistry {
 
     /// Resolve evidence into a single dialect, failing on ties or no match.
     ///
+    /// Scans the registry once, keeping the highest detection score and every
+    /// id tied at it. A unique top score resolves; a shared top score is a
+    /// [`DialectErrorKind::Tie`]; no score at all is a
+    /// [`DialectErrorKind::NoMatch`].
+    ///
+    /// ```
+    /// use promptforge_core::dialects::{
+    ///     DialectEvidence, DialectErrorKind, ToolDialectId, ToolDialectRegistry,
+    /// };
+    ///
+    /// let registry = ToolDialectRegistry::builtin();
+    ///
+    /// // Authoritative native support -> OpenAI.
+    /// let native = DialectEvidence::new(Some(true), None, None, None);
+    /// assert_eq!(registry.resolve(&native).unwrap(), ToolDialectId::OpenAi);
+    ///
+    /// // A Gemma template without native tools -> Gemma tool_code.
+    /// let gemma = DialectEvidence::new(
+    ///     Some(false),
+    ///     Some("<start_of_turn>user\n".into()),
+    ///     Some("gemma-3-27b-it".into()),
+    ///     None,
+    /// );
+    /// assert_eq!(registry.resolve(&gemma).unwrap(), ToolDialectId::Gemma3ToolCode);
+    ///
+    /// // No evidence -> NoMatch.
+    /// let miss = registry.resolve(&DialectEvidence::default()).unwrap_err();
+    /// assert_eq!(miss.kind(), DialectErrorKind::NoMatch);
+    /// ```
+    ///
     /// # Errors
     /// Returns a [`DialectError`] classified `NoMatch` when no dialect scores on
     /// the evidence, and `Tie` when two or more dialects share the top score.
@@ -268,28 +422,35 @@ impl ToolDialectRegistry {
         &self,
         evidence: &DialectEvidence,
     ) -> std::result::Result<ToolDialectId, DialectError> {
-        let mut scored: Vec<(ToolDialectId, DetectScore)> = self
-            .dialects
-            .iter()
-            .filter_map(|d| d.detect(evidence).map(|s| (d.id(), s)))
-            .collect();
-
-        if scored.is_empty() {
-            return Err(DialectError::from(Error::DialectNone));
+        // Single scan tracking the best score and every id tied at it, in
+        // registry order - no intermediate collection or sort.
+        let mut best: Option<DetectScore> = None;
+        let mut leader: Option<ToolDialectId> = None;
+        let mut tied: Vec<ToolDialectId> = Vec::new();
+        for dialect in &self.dialects {
+            let Some(score) = dialect.detect(evidence) else {
+                continue;
+            };
+            let id = dialect.id();
+            match best {
+                Some(current) if score < current => {}
+                Some(current) if score == current => tied.push(id),
+                _ => {
+                    best = Some(score);
+                    leader = Some(id);
+                    tied.clear();
+                    tied.push(id);
+                }
+            }
         }
 
-        scored.sort_by_key(|entry| std::cmp::Reverse(entry.1));
-
-        if scored.len() > 1 && scored[0].1 == scored[1].1 {
-            let tied: Vec<ToolDialectId> = scored
-                .iter()
-                .take_while(|(_, s)| *s == scored[0].1)
-                .map(|(id, _)| *id)
-                .collect();
+        let Some(leader) = leader else {
+            return Err(DialectError::from(Error::DialectNone));
+        };
+        if tied.len() > 1 {
             return Err(DialectError::from(Error::DialectTie { candidates: tied }));
         }
-
-        Ok(scored[0].0)
+        Ok(leader)
     }
 }
 

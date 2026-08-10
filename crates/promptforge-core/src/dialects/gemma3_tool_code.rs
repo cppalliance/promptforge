@@ -15,7 +15,10 @@ use crate::client::{Message, ToolCall};
 use crate::normalize::NormalizedTurn;
 use crate::{Error, Result};
 
-use super::{DetectScore, DialectEvidence, DialectRequest, ToolDialect, ToolDialectId};
+use super::{
+    DetectScore, DialectEvidence, DialectRequest, ToolDialect, ToolDialectId,
+    correlate_tool_results,
+};
 
 /// The Gemma-3 `tool_code` fence dialect.
 ///
@@ -107,7 +110,7 @@ impl ToolDialect for Gemma3ToolCodeDialect {
         let message = choice
             .get("message")
             .ok_or_else(|| Error::MalformedResponse("choice had no message".into()))?;
-        let reasoning_content = extract_reasoning(message);
+        let reasoning_content = crate::normalize::extract_reasoning(message)?;
 
         // Gemma never emits wire tool_calls; go straight to content parsing.
         if let Some(content) = message
@@ -142,22 +145,23 @@ impl ToolDialect for Gemma3ToolCodeDialect {
     ///
     /// Pushes an assistant message with the rendered `tool_code` fence, then a
     /// user message containing `TOOL RESULT` blocks and a continue trailer.
+    ///
+    /// # Errors
+    /// Returns an error, leaving the conversation unmodified, when `calls` and
+    /// `results` fail [`correlate_tool_results`]. Correlation is validated in
+    /// every build (not just debug) before either message is appended, so a
+    /// count, ordering, or id-correlation break can never silently truncate or
+    /// mislabel a result via `zip`.
     fn echo_tool_results(
         &self,
         conversation: &mut Vec<Message>,
         calls: &[ToolCall],
         results: &[(String, String)],
-    ) {
+    ) -> Result<()> {
+        correlate_tool_results(calls, results)?;
+
         conversation.push(Message::assistant(render_tool_code_fence(calls)));
 
-        // The sole caller (the tool-call loop) pushes exactly one result per
-        // call, in call order, so the positional pairing below is correct. This
-        // asserts that crate-internal invariant rather than silently truncating.
-        debug_assert_eq!(
-            calls.len(),
-            results.len(),
-            "echo_tool_results requires one result per call, in order"
-        );
         let mut parts: Vec<String> = Vec::with_capacity(results.len());
         for (call, (id, content)) in calls.iter().zip(results.iter()) {
             parts.push(format!("TOOL RESULT {} ({}):\n{}", call.name, id, content));
@@ -167,6 +171,7 @@ impl ToolDialect for Gemma3ToolCodeDialect {
             "\n\nContinue the protocol. Call another tool with a tool_code fence, or write the final evidence from fetch bodies only.",
         );
         conversation.push(Message::user(follow_up));
+        Ok(())
     }
 }
 
@@ -179,8 +184,12 @@ impl ToolDialect for Gemma3ToolCodeDialect {
 fn parse_content_tool_dialect(content: &str) -> Option<Vec<ToolCall>> {
     let mut rest = content.trim();
     let mut calls = Vec::new();
+    // One monotonic counter threads across every `tool_code` fence so synthetic
+    // ids stay unique instead of restarting at zero per fence (which would make
+    // two calls collide on `call_tool_code_0`).
+    let mut next_id = 0usize;
     while !rest.is_empty() {
-        if let Some((parsed, remain)) = peel_tool_code_fence(rest) {
+        if let Some((parsed, remain)) = peel_tool_code_fence(rest, &mut next_id) {
             if parsed.is_empty() {
                 return None;
             }
@@ -202,16 +211,23 @@ fn parse_content_tool_dialect(content: &str) -> Option<Vec<ToolCall>> {
 }
 
 /// Peel one leading ` ```tool_code ` fence into Python-style `name(k=v)` calls.
-fn peel_tool_code_fence(input: &str) -> Option<(Vec<ToolCall>, &str)> {
+///
+/// `next_id` is a run-wide monotonic counter used to mint each call's synthetic
+/// id; it is advanced once per parsed call so ids stay unique across fences.
+fn peel_tool_code_fence<'a>(
+    input: &'a str,
+    next_id: &mut usize,
+) -> Option<(Vec<ToolCall>, &'a str)> {
     let rest = strip_fence_open(input, "tool_code")?;
     let (body, after) = split_fence_close(rest)?;
     let mut calls = Vec::new();
-    for (index, line) in body.lines().enumerate() {
+    for line in body.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        let call = parse_tool_code_call(line, index)?;
+        let call = parse_tool_code_call(line, *next_id)?;
+        *next_id += 1;
         calls.push(call);
     }
     Some((calls, after))
@@ -226,7 +242,7 @@ fn peel_json_tool_calls_fence(input: &str) -> Option<(Vec<ToolCall>, &str)> {
         .get("tool_calls")
         .and_then(Value::as_array)
         .filter(|calls| !calls.is_empty())?;
-    let calls = parse_openai_tool_calls(raw_calls).ok()?;
+    let calls = crate::normalize::parse_openai_tool_calls(raw_calls).ok()?;
     Some((calls, after))
 }
 
@@ -350,7 +366,8 @@ fn render_tool_guide(tools: &Value) -> Option<String> {
     let mut lines = Vec::new();
     lines.push(
         "You call tools by emitting a sole ```tool_code fence (no other prose) \
-         with one call per line. Prefer keyword arguments."
+         with one call per line. Prefer keyword arguments. A trailing ? marks an \
+         optional argument."
             .to_owned(),
     );
     lines.push("Available tools:".to_owned());
@@ -383,13 +400,15 @@ fn render_tool_guide(tools: &Value) -> Option<String> {
             .unwrap_or_default();
         let mut arg_bits = Vec::new();
         if let Some(params) = params {
-            let keys: Vec<&str> = if required.is_empty() {
-                params.keys().map(String::as_str).collect()
-            } else {
-                required.clone()
-            };
-            for key in keys {
-                arg_bits.push(format!("{key}=..."));
+            // List every property, not just the required ones: a schema with any
+            // required parameter must still advertise its optional parameters,
+            // marked with a trailing `?`, so they never vanish from the guide.
+            for key in params.keys() {
+                if required.contains(&key.as_str()) {
+                    arg_bits.push(format!("{key}=..."));
+                } else {
+                    arg_bits.push(format!("{key}=...?"));
+                }
             }
         }
         let sig = if arg_bits.is_empty() {
@@ -488,52 +507,6 @@ fn split_top_level_commas(src: &str) -> Option<Vec<&str>> {
     Some(parts)
 }
 
-/// Parse the OpenAI `message.tool_calls` array into runtime [`ToolCall`]s.
-fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCall>> {
-    let mut calls = Vec::with_capacity(raw_calls.len());
-    for raw in raw_calls {
-        let id = raw
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Error::MalformedResponse("tool call had no id".into()))?
-            .to_string();
-        let function = raw
-            .get("function")
-            .ok_or_else(|| Error::MalformedResponse("tool call had no function".into()))?;
-        let name = function
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Error::MalformedResponse("tool call had no name".into()))?
-            .to_string();
-        // OpenAI encodes `function.arguments` as a JSON string. A missing or
-        // JSON-null field means "no arguments"; anything else must parse as JSON
-        // or the turn is malformed. Coercing invalid JSON into a string `Value`
-        // (the old behavior) would hand the tool arguments it never agreed to
-        // accept, so it is rejected instead.
-        let arguments = match function.get("arguments") {
-            None | Some(Value::Null) => Value::Null,
-            Some(Value::String(raw_args)) => {
-                serde_json::from_str::<Value>(raw_args).map_err(|error| {
-                    Error::MalformedResponse(format!(
-                        "tool call arguments were not valid JSON: {error}"
-                    ))
-                })?
-            }
-            Some(_) => {
-                return Err(Error::MalformedResponse(
-                    "tool call arguments were not a JSON-encoded string".into(),
-                ));
-            }
-        };
-        calls.push(ToolCall {
-            id,
-            name,
-            arguments,
-        });
-    }
-    Ok(calls)
-}
-
 // --- Rendering helpers ---
 
 /// Render parsed tool calls as the Gemma ` ```tool_code ` content dialect.
@@ -574,20 +547,6 @@ fn render_tool_code_arg(value: &Value) -> String {
         Value::Null => "null".into(),
         other => format!("\"{other}\""),
     }
-}
-
-/// First non-empty string among the known reasoning field synonyms.
-fn extract_reasoning(message: &Value) -> Option<String> {
-    for key in ["reasoning_content", "reasoning", "thinking"] {
-        if let Some(text) = message
-            .get(key)
-            .and_then(Value::as_str)
-            .filter(|text| !text.is_empty())
-        {
-            return Some(text.to_owned());
-        }
-    }
-    None
 }
 
 #[cfg(test)]
@@ -761,41 +720,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_openai_tool_calls_rejects_malformed_arguments() {
-        // Invalid-JSON arguments must be rejected, never coerced into a string.
-        let invalid = serde_json::json!([{
-            "id": "1",
-            "type": "function",
-            "function": { "name": "fetch", "arguments": "not json" }
-        }]);
-        assert!(matches!(
-            parse_openai_tool_calls(invalid.as_array().unwrap()),
-            Err(Error::MalformedResponse(_))
-        ));
-
-        // Non-string arguments (a JSON object) are also rejected.
-        let non_string = serde_json::json!([{
-            "id": "1",
-            "type": "function",
-            "function": { "name": "fetch", "arguments": { "url": "x" } }
-        }]);
-        assert!(matches!(
-            parse_openai_tool_calls(non_string.as_array().unwrap()),
-            Err(Error::MalformedResponse(_))
-        ));
-
-        // Absent arguments default to JSON null (no arguments), not an error.
-        let absent = serde_json::json!([{
-            "id": "1",
-            "type": "function",
-            "function": { "name": "fetch" }
-        }]);
-        let calls = parse_openai_tool_calls(absent.as_array().unwrap())
-            .expect("absent arguments are valid");
-        assert_eq!(calls[0].arguments, Value::Null);
-    }
-
-    #[test]
     fn fenced_json_with_malformed_arguments_is_not_parsed_as_tool_calls() {
         // A fenced tool_calls blob whose arguments are invalid JSON must fall
         // back to text rather than fabricating a call with coerced arguments.
@@ -887,6 +811,80 @@ mod tests {
     }
 
     #[test]
+    fn consecutive_fences_mint_unique_ids() {
+        let dialect = Gemma3ToolCodeDialect;
+        let content =
+            "```tool_code\nsearch(query=\"a\")\n```\n\n```tool_code\nfetch(\"https://x\")\n```";
+        let body = serde_json::json!({
+            "choices": [{ "message": { "role": "assistant", "content": content } }]
+        });
+        let turn = dialect.parse_turn(&body).unwrap();
+        match turn.outcome {
+            CompletionResult::ToolCalls(calls) => {
+                assert_eq!(calls.len(), 2);
+                assert_eq!(calls[0].id, "call_tool_code_0");
+                assert_eq!(
+                    calls[1].id, "call_tool_code_1",
+                    "ids must not restart per fence"
+                );
+            }
+            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
+        }
+    }
+
+    #[test]
+    fn echo_rejects_uncorrelated_results() {
+        let dialect = Gemma3ToolCodeDialect;
+        let calls = vec![ToolCall {
+            id: "call_tool_code_0".into(),
+            name: "search".into(),
+            arguments: serde_json::json!({ "query": "rust" }),
+        }];
+        // Wrong id breaks correlation; the conversation must stay untouched.
+        let results = vec![("mismatched_id".to_string(), "text".to_string())];
+        let mut conversation = Vec::new();
+        let error = dialect
+            .echo_tool_results(&mut conversation, &calls, &results)
+            .expect_err("uncorrelated results must be rejected");
+        assert!(matches!(error, Error::Internal(_)));
+        assert!(
+            conversation.is_empty(),
+            "no message may be appended on failure"
+        );
+    }
+
+    #[test]
+    fn optional_params_survive_in_guide() {
+        let dialect = Gemma3ToolCodeDialect;
+        let mut body = serde_json::json!({
+            "model": "gemma-3",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "search",
+                    "parameters": {
+                        "type": "object",
+                        "properties": { "query": { "type": "string" }, "count": { "type": "number" } },
+                        "required": ["query"]
+                    }
+                }
+            }]
+        });
+        let mut req = DialectRequest { body: &mut body };
+        dialect.prepare_request(&mut req).unwrap();
+        let guide = body["messages"][0]["content"].as_str().unwrap();
+        assert!(
+            guide.contains("query=..."),
+            "required param present: {guide}"
+        );
+        assert!(
+            guide.contains("count=...?"),
+            "optional param must survive marked: {guide}"
+        );
+    }
+
+    #[test]
     fn echo_tool_results_produces_user_turn() {
         let dialect = Gemma3ToolCodeDialect;
         let calls = vec![ToolCall {
@@ -896,7 +894,9 @@ mod tests {
         }];
         let results = vec![("call_tool_code_0".into(), "result text".into())];
         let mut conversation = Vec::new();
-        dialect.echo_tool_results(&mut conversation, &calls, &results);
+        dialect
+            .echo_tool_results(&mut conversation, &calls, &results)
+            .expect("correlated results echo cleanly");
 
         assert_eq!(conversation.len(), 2);
         assert_eq!(conversation[0].role, "assistant");

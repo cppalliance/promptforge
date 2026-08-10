@@ -2525,7 +2525,7 @@ pub(crate) async fn run_prose_inference(
                     results.push((call.id.clone(), result));
                 }
 
-                dialect.echo_tool_results(conversation, &calls, &results);
+                dialect.echo_tool_results(conversation, &calls, &results)?;
                 if matches!(mode, ProseMode::SingleShot) {
                     return Ok(ProseInferenceResult {
                         text: None,

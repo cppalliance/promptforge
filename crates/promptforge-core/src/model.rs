@@ -318,16 +318,15 @@ pub struct ModelDescriptor {
     context: NonZeroU32,
     thinking: ThinkingMode,
     tool_dialect: ToolDialectId,
-    tools_mode: ToolsMode,
 }
 
 impl ModelDescriptor {
     /// Builds a descriptor from its identity and catalog fields.
     ///
     /// The context window is a [`NonZeroU32`], so a zero-token window is
-    /// unrepresentable. Defaults `tool_dialect` to [`ToolDialectId::OpenAi`] and
-    /// `tools_mode` to [`ToolsMode::Native`]. Use [`Self::with_dialect`] to
-    /// override.
+    /// unrepresentable. Defaults `tool_dialect` to [`ToolDialectId::OpenAi`].
+    /// Use [`Self::with_dialect`] to override; the tools mode is always derived
+    /// from the dialect, never stored independently.
     #[must_use]
     pub fn new(
         id: ModelId,
@@ -341,15 +340,13 @@ impl ModelDescriptor {
             context,
             thinking,
             tool_dialect: ToolDialectId::OpenAi,
-            tools_mode: ToolsMode::Native,
         }
     }
 
-    /// Sets the tool dialect and derives `tools_mode` from it.
+    /// Sets the tool dialect. The tools mode is derived from it on demand.
     #[must_use]
     pub fn with_dialect(mut self, dialect: ToolDialectId) -> Self {
         self.tool_dialect = dialect;
-        self.tools_mode = dialect.tools_mode();
         self
     }
 
@@ -384,9 +381,12 @@ impl ModelDescriptor {
     }
 
     /// Returns whether tool calls are native or emulated.
+    ///
+    /// Derived from [`Self::tool_dialect`]; the mode is never stored separately,
+    /// so it cannot drift from the canonical dialect.
     #[must_use]
     pub fn tools_mode(&self) -> ToolsMode {
-        self.tools_mode
+        self.tool_dialect.tools_mode()
     }
 }
 
@@ -795,6 +795,11 @@ struct ModelsListEntry {
     thinking: ThinkingMode,
     #[serde(default = "default_tool_dialect")]
     tool_dialect: ToolDialectId,
+    /// Legacy wire field. Read only to validate against the dialect-derived
+    /// mode; never retained, since [`ToolDialectId`] is the sole source of
+    /// truth for the tools mode.
+    #[serde(default)]
+    tools_mode: Option<ToolsMode>,
 }
 
 fn default_tool_dialect() -> ToolDialectId {
@@ -924,6 +929,18 @@ pub async fn fetch_model_catalog(
                 id.name()
             )))
         })?;
+        // A legacy `tools_mode` on the wire is validated against the mode the
+        // dialect derives, then discarded. A contradiction is a malformed
+        // catalog, not a second stored value that could drift.
+        if let Some(wire_mode) = entry.tools_mode {
+            let derived = entry.tool_dialect.tools_mode();
+            if wire_mode != derived {
+                return Err(CompletionError::from(Error::MalformedResponse(format!(
+                    "model {} wire tools_mode {wire_mode} contradicts dialect-derived {derived}",
+                    id.name()
+                ))));
+            }
+        }
         descriptors.push(
             ModelDescriptor::new(id, entry.description, context, entry.thinking)
                 .with_dialect(entry.tool_dialect),
