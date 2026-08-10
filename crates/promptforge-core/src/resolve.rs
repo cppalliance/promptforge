@@ -258,7 +258,7 @@ mod tests {
     use super::*;
     use crate::lua::LiveBindingProducer;
     use crate::model::ModelNeedOpts;
-    use crate::tools::Tool;
+    use crate::tools::{Tool, ToolError, ToolOutput};
 
     fn descriptor(name: &str) -> ToolDescriptor {
         ToolDescriptor::new(
@@ -316,8 +316,8 @@ mod tests {
             json!({})
         }
 
-        async fn call(&self, _arguments: Value) -> Result<String> {
-            Ok(String::new())
+        async fn call(&self, _arguments: Value) -> std::result::Result<ToolOutput, ToolError> {
+            Ok(ToolOutput::trusted(String::new()))
         }
     }
 
@@ -354,8 +354,8 @@ mod tests {
             Error::Duplicate { capability, candidates }
                 if capability == "duplicate"
                     && candidates == [
-                        ToolId::new("tests", "first"),
-                        ToolId::new("tests", "second")
+                        ToolId::new("tests", "first").expect("valid id"),
+                        ToolId::new("tests", "second").expect("valid id")
                     ]
         ));
         assert!(matches!(
@@ -392,14 +392,14 @@ mod tests {
                 "tools.need('missing', 'first')"
             ),
             Error::PickedToolNotLive { alias, id }
-                if alias == "missing" && id == ToolId::new("tests", "first")
+                if alias == "missing" && id == ToolId::new("tests", "first").expect("valid id")
         ));
     }
 
     #[test]
     fn live_callbacks_reject_duplicate_aliases_and_identities() {
         let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(FixtureTool {
-            id: ToolId::new("tests", "first"),
+            id: ToolId::new("tests", "first").expect("valid id"),
         })];
         assert!(matches!(
             callback_error(
@@ -416,7 +416,7 @@ mod tests {
                 "tools.need('one', 'same-one'); tools.need('two', 'same-two')"
             ),
             Error::ToolIdSelectedTwice { id, first_alias, second_alias }
-                if id == ToolId::new("tests", "first")
+                if id == ToolId::new("tests", "first").expect("valid id")
                     && first_alias == "one"
                     && second_alias == "two"
         ));
@@ -428,16 +428,16 @@ mod tests {
             ToolPicker::build(Catalog::default(), Config::default()).expect("empty picker builds");
         let tools: Vec<Arc<dyn Tool>> = vec![
             Arc::new(FixtureTool {
-                id: ToolId::new("tests", "same"),
+                id: ToolId::new("tests", "same").expect("valid id"),
             }),
             Arc::new(FixtureTool {
-                id: ToolId::new("tests", "same"),
+                id: ToolId::new("tests", "same").expect("valid id"),
             }),
         ];
         let registry = ToolRegistry::new(tools.iter().map(AsRef::as_ref));
         assert!(matches!(
             RuntimeResolution::new(&picker, &registry, &ModelCatalog::empty()),
-            Err(Error::DuplicateLiveToolId { id }) if id == ToolId::new("tests", "same")
+            Err(Error::DuplicateLiveToolId { id }) if id == ToolId::new("tests", "same").expect("valid id")
         ));
     }
 
@@ -446,11 +446,11 @@ mod tests {
         let resolver = PickerResolver::new(&FixtureSource);
         assert_eq!(
             resolver.resolve("second").expect("second resolves"),
-            ToolId::new("tests", "second")
+            ToolId::new("tests", "second").expect("valid id")
         );
         assert_eq!(
             resolver.resolve("first").expect("first resolves"),
-            ToolId::new("tests", "first")
+            ToolId::new("tests", "first").expect("valid id")
         );
         let keys = resolver
             .diagnostics()
@@ -460,8 +460,8 @@ mod tests {
         assert_eq!(
             keys,
             [
-                ToolId::new("tests", "first"),
-                ToolId::new("tests", "second")
+                ToolId::new("tests", "first").expect("valid id"),
+                ToolId::new("tests", "second").expect("valid id")
             ]
         );
 

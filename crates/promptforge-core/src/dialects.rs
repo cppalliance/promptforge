@@ -301,11 +301,10 @@ mod tests {
     fn empty_evidence_fails_resolve() {
         let registry = ToolDialectRegistry::builtin();
         let evidence = DialectEvidence::default();
-        let result = registry.resolve(&evidence);
-        assert!(
-            matches!(result, Err(Error::DialectNone)),
-            "expected DialectNone, got {result:?}"
-        );
+        let error = registry
+            .resolve(&evidence)
+            .expect_err("empty evidence must fail to resolve");
+        assert_eq!(error.kind(), DialectErrorKind::NoMatch);
     }
 
     #[test]

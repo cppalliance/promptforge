@@ -1005,20 +1005,20 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
-    use crate::observe::{NullObserver, detail};
+    use crate::observe::{NullObserver, Observation, detail};
 
     #[derive(Default)]
     struct Recorder(Mutex<Vec<(String, String, String)>>);
 
     impl Observer for Recorder {
-        fn observe(&self, execution: &str, section: &str, detail: &str) {
+        fn observe(&self, execution: &str, section: &str, event: Observation) {
             self.0
                 .lock()
                 .expect("recording lock must remain usable")
                 .push((
                     execution.to_string(),
                     section.to_string(),
-                    detail.to_string(),
+                    event.to_string(),
                 ));
         }
     }
@@ -1306,7 +1306,7 @@ Prose for the second section.\n";
         );
         let error = Prompt::parse(&src, "parse-failure", &recorder)
             .expect_err("malformed shared Lua must fail");
-        match error {
+        match Error::from(error) {
             Error::LuaCompile {
                 location,
                 lua_source,
@@ -1321,16 +1321,16 @@ Prose for the second section.\n";
         assert_eq!(
             observations,
             vec![
-                ("Prompt".into(), detail::PARSE_STARTED.into()),
+                ("Prompt".into(), detail::PARSE_STARTED.to_string()),
                 (
                     "Private title".into(),
-                    detail::LUA_COMPILATION_STARTED.into()
+                    detail::LUA_COMPILATION_STARTED.to_string()
                 ),
                 (
                     "Private title".into(),
-                    detail::LUA_COMPILATION_FAILED.into()
+                    detail::LUA_COMPILATION_FAILED.to_string()
                 ),
-                ("Prompt".into(), detail::PARSE_FAILED.into()),
+                ("Prompt".into(), detail::PARSE_FAILED.to_string()),
             ]
         );
         assert!(
@@ -1354,10 +1354,10 @@ Prose for the second section.\n";
         assert_eq!(
             recorder.observations(),
             vec![
-                ("Prompt".into(), detail::PARSE_STARTED.into()),
-                ("T".into(), detail::LUA_COMPILATION_STARTED.into()),
-                ("T".into(), detail::LUA_COMPILATION_SUCCEEDED.into()),
-                ("Prompt".into(), detail::PARSE_SUCCEEDED.into()),
+                ("Prompt".into(), detail::PARSE_STARTED.to_string()),
+                ("T".into(), detail::LUA_COMPILATION_STARTED.to_string()),
+                ("T".into(), detail::LUA_COMPILATION_SUCCEEDED.to_string()),
+                ("Prompt".into(), detail::PARSE_SUCCEEDED.to_string()),
             ]
         );
     }
@@ -1525,7 +1525,7 @@ Prose for the second section.\n";
             let Err(error) = Prompt::parse(&src, "test", &recorder) else {
                 panic!("malformed {phase} unexpectedly parsed");
             };
-            match error {
+            match Error::from(error) {
                 Error::LuaCompile {
                     location,
                     lua_source,
@@ -1541,9 +1541,12 @@ Prose for the second section.\n";
             assert_eq!(
                 observations
                     .iter()
-                    .map(|(_, detail)| detail.as_str())
+                    .map(|(_, detail)| detail.clone())
                     .collect::<Vec<_>>(),
                 expected_details
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect::<Vec<_>>()
             );
             assert!(
                 observations
@@ -1576,12 +1579,12 @@ Prose for the second section.\n";
         assert_eq!(
             recorder.observations(),
             vec![
-                ("Prompt".into(), detail::PARSE_STARTED.into()),
-                ("S".into(), detail::LUA_COMPILATION_STARTED.into()),
-                ("S".into(), detail::LUA_COMPILATION_SUCCEEDED.into()),
-                ("S".into(), detail::LUA_COMPILATION_STARTED.into()),
-                ("S".into(), detail::LUA_COMPILATION_SUCCEEDED.into()),
-                ("Prompt".into(), detail::PARSE_SUCCEEDED.into()),
+                ("Prompt".into(), detail::PARSE_STARTED.to_string()),
+                ("S".into(), detail::LUA_COMPILATION_STARTED.to_string()),
+                ("S".into(), detail::LUA_COMPILATION_SUCCEEDED.to_string()),
+                ("S".into(), detail::LUA_COMPILATION_STARTED.to_string()),
+                ("S".into(), detail::LUA_COMPILATION_SUCCEEDED.to_string()),
+                ("Prompt".into(), detail::PARSE_SUCCEEDED.to_string()),
             ]
         );
     }

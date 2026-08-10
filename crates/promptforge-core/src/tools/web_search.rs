@@ -174,7 +174,10 @@ mod tests {
     fn descriptor_is_stable_and_faithful() {
         let tool = WebSearch::new("http://localhost", "test");
 
-        assert_eq!(tool.id(), ToolId::new("promptforge", "web_search"));
+        assert_eq!(
+            tool.id(),
+            ToolId::new("promptforge", "web_search").expect("valid id")
+        );
         assert_eq!(tool.wire_name(), "web_search");
         assert_eq!(
             tool.description(),
@@ -268,7 +271,8 @@ mod tests {
             .await
             .expect("call should succeed");
 
-        let parsed: Value = serde_json::from_str(&raw).expect("response should be valid JSON");
+        let parsed: Value =
+            serde_json::from_str(raw.text()).expect("response should be valid JSON");
         assert_eq!(
             parsed["results"][0]["title"].as_str(),
             Some("T"),

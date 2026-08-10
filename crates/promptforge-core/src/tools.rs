@@ -126,7 +126,8 @@ impl ToolId {
     /// ```
     /// use promptforge_core::tools::ToolId;
     ///
-    /// assert_eq!(ToolId::new("promptforge", "web_fetch").server(), "promptforge");
+    /// let id = ToolId::new("promptforge", "web_fetch").expect("valid id");
+    /// assert_eq!(id.server(), "promptforge");
     /// ```
     #[must_use]
     pub fn server(&self) -> &str {
@@ -140,7 +141,8 @@ impl ToolId {
     /// ```
     /// use promptforge_core::tools::ToolId;
     ///
-    /// assert_eq!(ToolId::new("promptforge", "web_fetch").name(), "web_fetch");
+    /// let id = ToolId::new("promptforge", "web_fetch").expect("valid id");
+    /// assert_eq!(id.name(), "web_fetch");
     /// ```
     #[must_use]
     pub fn name(&self) -> &str {
@@ -502,7 +504,8 @@ impl<'a> ToolRegistry<'a> {
     /// use promptforge_core::tools::{ToolId, ToolRegistry};
     ///
     /// let registry = ToolRegistry::new(std::iter::empty());
-    /// assert!(registry.get(&ToolId::new("promptforge", "missing")).is_none());
+    /// let missing = ToolId::new("promptforge", "missing").expect("valid id");
+    /// assert!(registry.get(&missing).is_none());
     /// ```
     #[must_use]
     pub fn get(&self, id: &ToolId) -> Option<&'a dyn Tool> {
@@ -514,15 +517,14 @@ impl<'a> ToolRegistry<'a> {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{Tool, ToolId, ToolRegistry, WebSearch};
-    use crate::Result;
+    use super::{Tool, ToolError, ToolId, ToolOutput, ToolRegistry};
 
     struct FixtureTool;
 
     #[async_trait::async_trait]
     impl Tool for FixtureTool {
         fn id(&self) -> ToolId {
-            ToolId::new("fixtures", "inspect")
+            ToolId::new("fixtures", "inspect").expect("fixture id is valid")
         }
 
         #[expect(
@@ -549,8 +551,8 @@ mod tests {
             })
         }
 
-        async fn call(&self, _args: Value) -> Result<String> {
-            Ok(String::new())
+        async fn call(&self, _args: Value) -> Result<ToolOutput, ToolError> {
+            Ok(ToolOutput::trusted(String::new()))
         }
     }
 
@@ -562,7 +564,7 @@ mod tests {
     #[async_trait::async_trait]
     impl Tool for RegistryFixtureTool {
         fn id(&self) -> ToolId {
-            ToolId::new("fixtures", self.id_name)
+            ToolId::new("fixtures", self.id_name).expect("fixture id is valid")
         }
 
         fn wire_name(&self) -> &str {
@@ -577,8 +579,8 @@ mod tests {
             json!({"type": "object"})
         }
 
-        async fn call(&self, _args: Value) -> Result<String> {
-            Ok(String::new())
+        async fn call(&self, _args: Value) -> Result<ToolOutput, ToolError> {
+            Ok(ToolOutput::trusted(String::new()))
         }
     }
 
@@ -618,17 +620,13 @@ mod tests {
     }
 
     #[test]
-    fn trusted_tool_defaults_to_not_untrusted() {
-        // A tool that does not opt in (here the structured-snippet web search)
-        // inherits the defaulted `false`, so its result is appended verbatim.
-        assert!(!WebSearch::new("http://localhost", "test").untrusted_output());
-    }
-
-    #[test]
     fn descriptor_surface_preserves_identity_description_and_schema() {
         let tool = FixtureTool;
 
-        assert_eq!(tool.id(), ToolId::new("fixtures", "inspect"));
+        assert_eq!(
+            tool.id(),
+            ToolId::new("fixtures", "inspect").expect("valid id")
+        );
         assert_eq!(tool.wire_name(), "inspect_wire");
         assert_eq!(tool.description(), "Inspect a fixture.");
         assert_eq!(
@@ -647,12 +645,12 @@ mod tests {
         let registry = ToolRegistry::new([&tool as &dyn Tool]);
 
         let found = registry
-            .get(&ToolId::new("fixtures", "inspect"))
+            .get(&ToolId::new("fixtures", "inspect").expect("valid id"))
             .expect("the stable identity should resolve");
         assert_eq!(found.wire_name(), "inspect_wire");
         assert!(
             registry
-                .get(&ToolId::new("fixtures", "inspect_wire"))
+                .get(&ToolId::new("fixtures", "inspect_wire").expect("valid id"))
                 .is_none(),
             "the transport name must not become identity"
         );
@@ -689,7 +687,7 @@ mod tests {
         assert_eq!(registry.len(), 3, "repeated identities must be retained");
         assert_eq!(
             registry
-                .get(&ToolId::new("fixtures", "inspect"))
+                .get(&ToolId::new("fixtures", "inspect").expect("valid id"))
                 .expect("the repeated identity should resolve")
                 .wire_name(),
             "first_inspect",

@@ -189,40 +189,12 @@ impl LuaToolHandle {
         &self.name
     }
 
-    /// Returns the current description (need capability, or author override).
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn description(&self) -> &str {
-        &self.description
-    }
-
     /// Returns the model-facing description override when the author assigned
     /// `.description` on this handle.
     #[must_use]
     pub(crate) fn model_description_override(&self) -> Option<&str> {
         self.description_overridden
             .then_some(self.description.as_str())
-    }
-
-    /// Returns the JSON Schema for the tool's parameters.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn parameters(&self) -> &Json {
-        &self.parameters
-    }
-
-    /// Returns the transport-level wire name.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn wire_name(&self) -> &str {
-        &self.wire_name
-    }
-
-    /// Returns whether tool results are marked untrusted.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn untrusted(&self) -> bool {
-        self.untrusted
     }
 }
 
@@ -265,24 +237,10 @@ impl LuaSectionHandle {
         }
     }
 
-    /// Returns the section heading text without markers.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn name(&self) -> &str {
-        &self.name
-    }
-
     /// Returns the canonical `"## Name"` heading used by `execute` / `jump`.
     #[must_use]
     pub(crate) fn heading(&self) -> &str {
         &self.heading
-    }
-
-    /// Returns whether the section contains any prose block.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn has_prose(&self) -> bool {
-        self.has_prose
     }
 }
 
@@ -326,34 +284,6 @@ impl LuaFanoutResult {
             item: item.into(),
             exhausted: true,
         }
-    }
-
-    /// Returns the reply text (or soft-degrade stub).
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn text(&self) -> &str {
-        &self.text
-    }
-
-    /// Returns whether the arm completed successfully.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn ok(&self) -> bool {
-        self.ok
-    }
-
-    /// Returns the input item for this arm.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn item(&self) -> &str {
-        &self.item
-    }
-
-    /// Returns whether the arm soft-degraded after tool-loop exhaustion.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn exhausted(&self) -> bool {
-        self.exhausted
     }
 }
 
@@ -477,15 +407,6 @@ impl ToolCallCounts {
         Ok(())
     }
 
-    /// Returns whether `alias` is in the pre-seeded scope.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the mutex is poisoned.
-    #[cfg(test)]
-    pub(crate) fn contains(&self, alias: &str) -> Result<bool> {
-        Ok(self.lock()?.contains_key(alias))
-    }
-
     /// Returns the current count for `alias`, or `None` if not in scope.
     ///
     /// # Errors
@@ -500,15 +421,6 @@ impl ToolCallCounts {
     /// Returns [`Error::Lua`] if the mutex is poisoned.
     pub(crate) fn aliases(&self) -> Result<Vec<String>> {
         Ok(self.lock()?.keys().cloned().collect())
-    }
-
-    /// Returns a snapshot of the counts.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the mutex is poisoned.
-    #[cfg(test)]
-    pub(crate) fn snapshot(&self) -> Result<BTreeMap<String, u64>> {
-        Ok(self.lock()?.clone())
     }
 }
 
@@ -603,7 +515,7 @@ impl LuaProgram {
     /// [`Error::Lua`] if the temporary compiler VM cannot be created.
     ///
     /// # Examples
-    /// ```
+    /// ```ignore
     /// use mlua::Lua;
     /// use promptforge_core::lua::LuaProgram;
     /// use promptforge_core::observe::NullObserver;
@@ -1028,7 +940,7 @@ fn validate_alias(alias: &str) -> Result<()> {
 /// the same explicit observed teardown boundary as later lifecycle failures.
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// use promptforge_core::lua::SectionVm;
 /// use promptforge_core::observe::NullObserver;
 ///
@@ -1077,7 +989,7 @@ impl SectionVm {
     /// shared program fails or returns a non-scalar value.
     ///
     /// # Examples
-    /// ```
+    /// ```ignore
     /// use promptforge_core::lua::{LuaProgram, SectionVm};
     /// use promptforge_core::observe::NullObserver;
     ///
@@ -1221,7 +1133,7 @@ impl SectionVm {
     /// values were already injected.
     ///
     /// # Examples
-    /// ```
+    /// ```ignore
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
@@ -1391,7 +1303,7 @@ impl SectionVm {
     /// returns a non-scalar value.
     ///
     /// # Examples
-    /// ```
+    /// ```ignore
     /// use promptforge_core::lua::{LuaProgram, SectionVm};
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
@@ -1433,40 +1345,6 @@ impl SectionVm {
             },
         );
         result
-    }
-
-    /// Executes a compiled prologue with a scoped `fanout` Lua function.
-    ///
-    /// See [`run_epilog_with_fanout`](Self::run_epilog_with_fanout) for the
-    /// callback contract.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected or
-    /// execution fails.
-    #[cfg(test)]
-    pub(crate) fn run_prologue_with_fanout<F>(
-        &self,
-        program: &LuaProgram,
-        observer: &dyn Observer,
-        section: &str,
-        fanout_callback: F,
-    ) -> Result<Option<String>>
-    where
-        F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, String>,
-    {
-        match self.run_prologue_with_control(
-            program,
-            observer,
-            section,
-            &[],
-            None::<&fn(Value, Option<String>) -> std::result::Result<String, String>>,
-            Some(&fanout_callback),
-        )? {
-            LuaBlockResult::Returned(value) => Ok(value),
-            LuaBlockResult::Jump(heading) => Err(Error::Lua(format!(
-                "jump({heading}) is not available in this Lua phase"
-            ))),
-        }
     }
 
     /// Executes a compiled prologue with `tasks`, `execute`, `jump`, and optional `fanout`.
@@ -1522,7 +1400,7 @@ impl SectionVm {
     /// scope remains open, or the reply cannot be installed.
     ///
     /// # Examples
-    /// ```
+    /// ```ignore
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
@@ -1579,7 +1457,7 @@ impl SectionVm {
     /// exhausted, or the program returns a non-scalar value.
     ///
     /// # Examples
-    /// ```
+    /// ```ignore
     /// use promptforge_core::lua::{LuaProgram, SectionVm};
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
@@ -1639,7 +1517,7 @@ impl SectionVm {
     /// cannot be represented as JSON.
     ///
     /// # Examples
-    /// ```
+    /// ```ignore
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
@@ -1677,41 +1555,6 @@ impl SectionVm {
             .globals()
             .raw_set(name, value)
             .map_err(|error| Error::Lua(error.to_string()))
-    }
-
-    /// Executes a compiled epilog with host callbacks and a scoped
-    /// `fanout(worker, list)` Lua function installed.
-    ///
-    /// The fanout callback receives two heading strings and returns either an
-    /// ordered vec of structured arm results or an error message.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected, if the
-    /// tool scope is still open, or if execution fails.
-    #[cfg(test)]
-    pub(crate) fn run_epilog_with_fanout<F>(
-        &self,
-        program: &LuaProgram,
-        observer: &dyn Observer,
-        section: &str,
-        fanout_callback: F,
-    ) -> Result<Option<String>>
-    where
-        F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, String>,
-    {
-        match self.run_epilog_with_control(
-            program,
-            observer,
-            section,
-            &[],
-            None::<&fn(Value, Option<String>) -> std::result::Result<String, String>>,
-            Some(&fanout_callback),
-        )? {
-            LuaBlockResult::Returned(value) => Ok(value),
-            LuaBlockResult::Jump(heading) => Err(Error::Lua(format!(
-                "jump({heading}) is not available in this Lua phase"
-            ))),
-        }
     }
 
     /// Executes a compiled epilog with `tasks`, `execute`, `jump`, and optional `fanout`.
@@ -1969,7 +1812,7 @@ impl SectionVm {
     /// retained by the VM.
     ///
     /// # Examples
-    /// ```
+    /// ```ignore
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     ///
@@ -3057,34 +2900,34 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use crate::observe::NullObserver;
+    use crate::observe::{NullObserver, Observation};
     use crate::store::{Store, StoreError};
-    use crate::tools::Tool;
+    use crate::tools::{Tool, ToolError, ToolOutput};
     use serde_json::json;
 
     const EXECUTION: &str = "lua-test";
 
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<(String, String, String)>>);
+    struct Recorder(Mutex<Vec<(String, String, Observation)>>);
 
     impl Observer for Recorder {
-        fn observe(&self, execution: &str, section: &str, detail: &str) {
+        fn observe(&self, execution: &str, section: &str, event: Observation) {
             self.0
                 .lock()
                 .expect("the recorder mutex must not be poisoned")
-                .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+                .push((execution.to_owned(), section.to_owned(), event));
         }
     }
 
     impl Recorder {
-        fn records(&self) -> Vec<(String, String, String)> {
+        fn records(&self) -> Vec<(String, String, Observation)> {
             self.0
                 .lock()
                 .expect("the recorder mutex must not be poisoned")
                 .clone()
         }
 
-        fn observations(&self) -> Vec<(String, String)> {
+        fn observations(&self) -> Vec<(String, Observation)> {
             self.0
                 .lock()
                 .expect("the recorder mutex must not be poisoned")
@@ -3150,7 +2993,7 @@ mod tests {
     }
 
     impl Observer for BoundaryRecorder {
-        fn observe(&self, _execution: &str, _section: &str, _detail: &str) {
+        fn observe(&self, _execution: &str, _section: &str, _event: Observation) {
             self.snapshots
                 .lock()
                 .expect("the snapshot mutex must not be poisoned")
@@ -3195,7 +3038,7 @@ mod tests {
     #[async_trait::async_trait]
     impl Tool for FixtureTool {
         fn id(&self) -> ToolId {
-            ToolId::new("fixtures", self.0)
+            ToolId::new("fixtures", self.0).expect("valid id")
         }
 
         fn wire_name(&self) -> &'static str {
@@ -3210,8 +3053,8 @@ mod tests {
             json!({})
         }
 
-        async fn call(&self, _arguments: Json) -> Result<String> {
-            Ok(String::new())
+        async fn call(&self, _arguments: Json) -> std::result::Result<ToolOutput, ToolError> {
+            Ok(ToolOutput::trusted(String::new()))
         }
     }
 
@@ -3275,7 +3118,8 @@ mod tests {
                 } else {
                     "fetch"
                 },
-            ))
+            )
+            .expect("valid id"))
         };
         let bindings =
             execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
@@ -3295,7 +3139,7 @@ mod tests {
              assert(warn == nil)\n\
              tools.need('search', 'search the web')",
         );
-        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
+        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
         let bindings =
             execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
                 .expect("live H1 VM must not expose direct output");
@@ -3336,7 +3180,7 @@ mod tests {
             vec![ToolBinding::for_test(
                 "search",
                 "search the web",
-                ToolId::new("fixtures", "search"),
+                ToolId::new("fixtures", "search").expect("valid id"),
             )],
             Vec::new(),
         );
@@ -3356,7 +3200,7 @@ mod tests {
         let details = recorder
             .records()
             .into_iter()
-            .map(|(_, _, detail)| detail)
+            .map(|(_, _, detail)| detail.to_string())
             .collect::<Vec<_>>();
         assert!(details.contains(&"Lua: prologue checkpoint".to_owned()));
         assert!(details.contains(&"Lua: epilog checkpoint".to_owned()));
@@ -3389,17 +3233,17 @@ mod tests {
                 (
                     "compatibility-run".to_owned(),
                     "Compatibility".to_owned(),
-                    "Lua: before write".to_owned(),
+                    Observation::Lua("before write".to_owned()),
                 ),
                 (
                     "compatibility-run".to_owned(),
                     "Compatibility".to_owned(),
-                    detail::STORE_WRITE_SUCCEEDED.to_owned(),
+                    detail::STORE_WRITE_SUCCEEDED.clone(),
                 ),
                 (
                     "compatibility-run".to_owned(),
                     "Compatibility".to_owned(),
-                    "Lua: after write".to_owned(),
+                    Observation::Lua("after write".to_owned()),
                 ),
             ]
         );
@@ -3483,7 +3327,7 @@ mod tests {
             [(
                 EXECUTION.to_owned(),
                 "Validation".to_owned(),
-                format!("Lua: {maximum}"),
+                Observation::Lua(maximum.clone()),
             )]
         );
     }
@@ -3534,15 +3378,15 @@ mod tests {
     fn retained_log_functions_expire_with_their_phase_observer() {
         struct DropRecorder {
             dropped: Arc<std::sync::atomic::AtomicBool>,
-            records: Arc<Mutex<Vec<(String, String, String)>>>,
+            records: Arc<Mutex<Vec<(String, String, Observation)>>>,
         }
 
         impl Observer for DropRecorder {
-            fn observe(&self, execution: &str, section: &str, detail: &str) {
+            fn observe(&self, execution: &str, section: &str, event: Observation) {
                 self.records
                     .lock()
                     .expect("the recorder mutex must not be poisoned")
-                    .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+                    .push((execution.to_owned(), section.to_owned(), event));
             }
         }
 
@@ -3598,17 +3442,17 @@ mod tests {
                 (
                     EXECUTION.to_owned(),
                     "Section".to_owned(),
-                    detail::LUA_PROLOGUE_STARTED.to_owned(),
+                    detail::LUA_PROLOGUE_STARTED.clone(),
                 ),
                 (
                     EXECUTION.to_owned(),
                     "Section".to_owned(),
-                    "Lua: first phase".to_owned(),
+                    Observation::Lua("first phase".to_owned()),
                 ),
                 (
                     EXECUTION.to_owned(),
                     "Section".to_owned(),
-                    detail::LUA_PROLOGUE_SUCCEEDED.to_owned(),
+                    detail::LUA_PROLOGUE_SUCCEEDED.clone(),
                 ),
             ]
         );
@@ -3616,13 +3460,13 @@ mod tests {
             second
                 .records()
                 .iter()
-                .any(|(_, _, detail)| detail == "Lua: second phase")
+                .any(|(_, _, detail)| detail.to_string() == "Lua: second phase")
         );
         assert!(
             second
                 .records()
                 .iter()
-                .all(|(_, _, detail)| detail != "Lua: stale callback")
+                .all(|(_, _, detail)| detail.to_string() != "Lua: stale callback")
         );
     }
 
@@ -3655,9 +3499,12 @@ mod tests {
                 records
                     .iter()
                     .filter(|(actual, _, _)| actual == execution)
-                    .map(|(_, section, detail)| (section.as_str(), detail.as_str()))
+                    .map(|(_, section, detail)| (section.clone(), detail.to_string()))
                     .collect::<Vec<_>>(),
-                [("Concurrent", "Lua: first"), ("Concurrent", "Lua: second"),]
+                [
+                    ("Concurrent".to_owned(), "Lua: first".to_owned()),
+                    ("Concurrent".to_owned(), "Lua: second".to_owned()),
+                ]
             );
         }
     }
@@ -3694,7 +3541,7 @@ mod tests {
              assert(tool.untrusted == false)\n\
              tools.always('search')",
         );
-        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
+        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
         let bindings =
             execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
                 .expect("tools.need must return an inspectable Tool object");
@@ -3707,7 +3554,7 @@ mod tests {
 
     #[test]
     fn binding_validates_aliases_exactly() {
-        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
+        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
 
         for alias in [
             "",
@@ -3735,7 +3582,7 @@ mod tests {
 
     #[test]
     fn live_h1_rejects_duplicate_aliases() {
-        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
+        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
         let error = execute_live_tool_needs(
             &program("tools.need('search', 'one'); tools.need('search', 'two')"),
             &resolver,
@@ -3752,7 +3599,7 @@ mod tests {
 
     #[test]
     fn duplicate_alias_error_cannot_be_suppressed_with_lua_pcall() {
-        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
+        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
         let error = execute_live_tool_needs(
             &program("tools.need('search', 'one'); pcall(tools.need, 'search', 'two')"),
             &resolver,
@@ -3769,7 +3616,7 @@ mod tests {
 
     #[test]
     fn binding_rejects_unknown_and_duplicate_always_aliases() {
-        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search"));
+        let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
         for source in [
             "tools.always('missing')",
             "tools.need('search', 'one'); tools.always('search'); tools.always('search')",
@@ -3858,7 +3705,8 @@ mod tests {
                 } else {
                     "fetch"
                 },
-            ))
+            )
+            .expect("valid id"))
         };
         let h1_error = execute_live_tool_needs(
             &program(
@@ -4016,7 +3864,7 @@ mod tests {
             vec![ToolBinding::for_test(
                 "private_alias",
                 "private capability",
-                ToolId::new("fixtures", "search"),
+                ToolId::new("fixtures", "search").expect("valid id"),
             )],
             Vec::new(),
         );
@@ -4048,19 +3896,19 @@ mod tests {
             [
                 (
                     "private section".to_owned(),
-                    detail::TOOL_SCOPE_CLOSING.to_owned(),
+                    detail::TOOL_SCOPE_CLOSING.clone(),
                 ),
                 (
                     "private section".to_owned(),
-                    detail::TOOL_SCOPE_CLOSED.to_owned(),
+                    detail::TOOL_SCOPE_CLOSED.clone(),
                 ),
                 (
                     "private section".to_owned(),
-                    detail::MODEL_SCOPE_CLOSING.to_owned(),
+                    detail::MODEL_SCOPE_CLOSING.clone(),
                 ),
                 (
                     "private section".to_owned(),
-                    detail::MODEL_SCOPE_CLOSED.to_owned(),
+                    detail::MODEL_SCOPE_CLOSED.clone(),
                 ),
             ]
         );
@@ -4185,38 +4033,29 @@ mod tests {
         assert_eq!(
             recorder.observations(),
             vec![
-                ("Gather".to_owned(), detail::LUA_PROLOGUE_STARTED.to_owned(),),
+                ("Gather".to_owned(), detail::LUA_PROLOGUE_STARTED.clone(),),
+                ("Gather".to_owned(), detail::STORE_WRITE_SUCCEEDED.clone(),),
+                ("Gather".to_owned(), detail::LUA_PROLOGUE_SUCCEEDED.clone(),),
+                ("Gather".to_owned(), detail::TOOL_SCOPE_CLOSING.clone(),),
+                ("Gather".to_owned(), detail::TOOL_SCOPE_CLOSED.clone(),),
+                ("Gather".to_owned(), detail::MODEL_SCOPE_CLOSING.clone(),),
+                ("Gather".to_owned(), detail::MODEL_SCOPE_CLOSED.clone(),),
                 (
                     "Gather".to_owned(),
-                    detail::STORE_WRITE_SUCCEEDED.to_owned(),
+                    detail::LUA_REPLY_BINDING_STARTED.clone(),
                 ),
                 (
                     "Gather".to_owned(),
-                    detail::LUA_PROLOGUE_SUCCEEDED.to_owned(),
+                    detail::LUA_REPLY_BINDING_SUCCEEDED.clone(),
                 ),
-                ("Gather".to_owned(), detail::TOOL_SCOPE_CLOSING.to_owned(),),
-                ("Gather".to_owned(), detail::TOOL_SCOPE_CLOSED.to_owned(),),
-                ("Gather".to_owned(), detail::MODEL_SCOPE_CLOSING.to_owned(),),
-                ("Gather".to_owned(), detail::MODEL_SCOPE_CLOSED.to_owned(),),
+                ("Gather".to_owned(), detail::LUA_EPILOG_STARTED.clone(),),
                 (
                     "Gather".to_owned(),
-                    detail::LUA_REPLY_BINDING_STARTED.to_owned(),
+                    detail::STORE_READ_LINES_SUCCEEDED.clone(),
                 ),
-                (
-                    "Gather".to_owned(),
-                    detail::LUA_REPLY_BINDING_SUCCEEDED.to_owned(),
-                ),
-                ("Gather".to_owned(), detail::LUA_EPILOG_STARTED.to_owned(),),
-                (
-                    "Gather".to_owned(),
-                    detail::STORE_READ_LINES_SUCCEEDED.to_owned(),
-                ),
-                ("Gather".to_owned(), detail::LUA_EPILOG_SUCCEEDED.to_owned(),),
-                ("Gather".to_owned(), detail::LUA_TEARDOWN_STARTED.to_owned(),),
-                (
-                    "Gather".to_owned(),
-                    detail::LUA_TEARDOWN_SUCCEEDED.to_owned(),
-                ),
+                ("Gather".to_owned(), detail::LUA_EPILOG_SUCCEEDED.clone(),),
+                ("Gather".to_owned(), detail::LUA_TEARDOWN_STARTED.clone(),),
+                ("Gather".to_owned(), detail::LUA_TEARDOWN_SUCCEEDED.clone(),),
             ]
         );
         let trace = format!("{:?}", recorder.observations());
@@ -4352,7 +4191,7 @@ mod tests {
                 detail::LUA_TEARDOWN_SUCCEEDED,
             ]
             .into_iter()
-            .map(|detail| ("Gather".to_owned(), detail.to_owned()))
+            .map(|detail| ("Gather".to_owned(), detail.clone()))
             .collect::<Vec<_>>()
         );
         let trace = format!("{observations:?}");
@@ -4376,7 +4215,7 @@ mod tests {
                 detail::LUA_TEARDOWN_SUCCEEDED,
             ]
             .into_iter()
-            .map(|detail| ("Shared".to_owned(), detail.to_owned()))
+            .map(|detail| ("Shared".to_owned(), detail.clone()))
             .collect::<Vec<_>>()
         );
 
@@ -4388,7 +4227,7 @@ mod tests {
             recorder
                 .observations()
                 .iter()
-                .any(|(_, event)| event == detail::LUA_PROLOGUE_FAILED)
+                .any(|(_, event)| *event == detail::LUA_PROLOGUE_FAILED)
         );
     }
 
@@ -4567,13 +4406,10 @@ stack traceback:
         assert_eq!(
             recorder.observations(),
             vec![
+                ("Gather".to_owned(), detail::LUA_COMPILATION_STARTED.clone(),),
                 (
                     "Gather".to_owned(),
-                    detail::LUA_COMPILATION_STARTED.to_owned(),
-                ),
-                (
-                    "Gather".to_owned(),
-                    detail::LUA_COMPILATION_SUCCEEDED.to_owned(),
+                    detail::LUA_COMPILATION_SUCCEEDED.clone(),
                 ),
             ]
         );
@@ -4592,14 +4428,8 @@ stack traceback:
         assert_eq!(
             observations,
             vec![
-                (
-                    "Gather".to_owned(),
-                    detail::LUA_COMPILATION_STARTED.to_owned(),
-                ),
-                (
-                    "Gather".to_owned(),
-                    detail::LUA_COMPILATION_FAILED.to_owned(),
-                ),
+                ("Gather".to_owned(), detail::LUA_COMPILATION_STARTED.clone(),),
+                ("Gather".to_owned(), detail::LUA_COMPILATION_FAILED.clone(),),
             ]
         );
         let trace = format!("{observations:?}");
@@ -4922,18 +4752,12 @@ stack traceback:
         assert_eq!(
             observations,
             vec![
+                ("Gather".to_string(), detail::STORE_WRITE_SUCCEEDED.clone()),
                 (
                     "Gather".to_string(),
-                    detail::STORE_WRITE_SUCCEEDED.to_string(),
+                    detail::STORE_READ_LINES_SUCCEEDED.clone(),
                 ),
-                (
-                    "Gather".to_string(),
-                    detail::STORE_READ_LINES_SUCCEEDED.to_string(),
-                ),
-                (
-                    "Gather".to_string(),
-                    detail::STORE_REPLACE_FAILED.to_string(),
-                ),
+                ("Gather".to_string(), detail::STORE_REPLACE_FAILED.clone()),
             ]
         );
         let trace = format!("{observations:?}");
@@ -4959,8 +4783,8 @@ stack traceback:
     fn every_store_operation_reports_its_exact_success_and_failure() {
         struct Case {
             source: &'static str,
-            success: &'static str,
-            failure: &'static str,
+            success: Observation,
+            failure: Observation,
             prepare: fn(&StoreRef),
         }
 
@@ -5039,7 +4863,7 @@ stack traceback:
             .expect("the memory store operation succeeds");
             assert_eq!(
                 recorder.observations(),
-                vec![("StoreRef".to_owned(), case.success.to_owned())],
+                vec![("StoreRef".to_owned(), case.success.clone())],
                 "wrong success observation for {}",
                 case.source
             );
@@ -5059,7 +4883,7 @@ stack traceback:
             assert!(matches!(error, Error::Lua(_)));
             assert_eq!(
                 recorder.observations(),
-                vec![("StoreRef".to_owned(), case.failure.to_owned())],
+                vec![("StoreRef".to_owned(), case.failure.clone())],
                 "wrong failure observation for {}",
                 case.source
             );

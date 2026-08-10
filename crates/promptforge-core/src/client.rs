@@ -527,6 +527,6 @@ mod tests {
             .complete(&[Message::user("hi")], None, &options)
             .await
             .expect_err("empty product must fail");
-        assert!(matches!(err, Error::EmptyModelReply { .. }));
+        assert!(matches!(Error::from(err), Error::EmptyModelReply { .. }));
     }
 }

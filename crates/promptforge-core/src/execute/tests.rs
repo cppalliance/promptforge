@@ -16,14 +16,20 @@ use promptforge_tool_picker::{
 use serde_json::Value;
 
 use super::*;
+use crate::client::GatewayClient;
+use crate::debug::DebugCapture;
 use crate::lua::{LuaProgram, SectionVm, ToolCallCounts};
 use crate::model::{
     CompletionOptions, ModelBindings, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode,
 };
-use crate::observe::{NullObserver, detail};
-use crate::tools::{Tool, ToolId, ToolRegistry};
+use crate::observe::{NullObserver, Observation, detail};
+use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput, ToolRegistry};
 
 const EXECUTION: &str = "execute-test";
+
+/// The runtime's default per-section tool-loop cap, mirrored for tests after the
+/// `DEFAULT_MAX_TOOL_ITERATIONS` constant was folded into `RunLimits`.
+const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 
 const MODEL_ALWAYS_SHARED: &str =
     "```lua shared\nmodels.always('writer', 'A general model for tests')\n```\n\n";
@@ -155,12 +161,35 @@ fn bound_with_tools(
     }
 }
 
+/// Owned run inputs a test supplies: the execution id, the progress observer,
+/// and optional client/capture sinks. Mirrors the old borrowed `RunOptions`
+/// with owned `Arc` instrumentation so it can build a [`RunConfig`].
+struct RunOptions {
+    execution: &'static str,
+    observer: Arc<dyn Observer>,
+    client: Option<GatewayClient>,
+    debug: Option<Arc<dyn DebugCapture>>,
+}
+
+/// Builds a [`RunConfig`] from the test-local [`RunOptions`], for the tests that
+/// call [`super::run`] directly with a custom picker and model catalog.
+fn to_config(opts: RunOptions) -> RunConfig {
+    let mut config = RunConfig::new(opts.execution).observer(opts.observer);
+    if let Some(client) = opts.client {
+        config = config.client(client);
+    }
+    if let Some(debug) = opts.debug {
+        config = config.debug(debug);
+    }
+    config
+}
+
 /// Options that report nowhere and build no client - what a Lua-only,
 /// offline test wants.
-fn silent() -> RunOptions<'static> {
+fn silent() -> RunOptions {
     RunOptions {
         execution: EXECUTION,
-        observer: &NullObserver,
+        observer: Arc::new(NullObserver),
         client: None,
         debug: None,
     }
@@ -178,7 +207,7 @@ async fn run(
     args: &str,
     tools: &[Arc<dyn Tool>],
     store: &StoreRef,
-    opts: RunOptions<'_>,
+    opts: RunOptions,
 ) -> Result<String> {
     let catalog = test.picker_catalog.clone().unwrap_or_else(|| {
         Catalog::new(
@@ -200,18 +229,23 @@ async fn run(
         .and_then(|config| config.with_margin(0.0))
         .expect("test thresholds are in the supported domain");
     let picker = ToolPicker::build(catalog, config).expect("test picker must build");
+    let mut run_config = RunConfig::new(opts.execution).observer(opts.observer);
+    if let Some(client) = opts.client {
+        run_config = run_config.client(client);
+    }
+    if let Some(debug) = opts.debug {
+        run_config = run_config.debug(debug);
+    }
     super::run(
         &test.prompt,
         args,
-        ResolutionContext {
-            picker: &picker,
-            models: &test.models,
-        },
+        ResolutionContext::new(&picker, &test.models),
         tools,
         store,
-        opts,
+        run_config,
     )
     .await
+    .map_err(Error::from)
 }
 
 /// An [`Observer`] that keeps every observation it is handed, in order, so a test
@@ -220,11 +254,11 @@ async fn run(
 struct Recorder(Mutex<Vec<(String, String, String)>>);
 
 impl Observer for Recorder {
-    fn observe(&self, execution: &str, section: &str, detail: &str) {
+    fn observe(&self, execution: &str, section: &str, event: Observation) {
         self.0
             .lock()
             .expect("the recorder mutex must not be poisoned")
-            .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+            .push((execution.to_owned(), section.to_owned(), event.to_string()));
     }
 }
 
@@ -251,7 +285,7 @@ impl Recorder {
 /// Run `md` offline under a fresh recorder and return the result together
 /// with every complete correlated record the recorder saw.
 async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String, String)>) {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let result = run(
         &fixture(md),
         "",
@@ -259,7 +293,7 @@ async fn run_recorded(md: &str) -> (Result<String>, Vec<(String, String, String)
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &recorder,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             client: None,
             debug: None,
         },
@@ -397,7 +431,7 @@ struct EchoTool;
 #[async_trait::async_trait]
 impl Tool for EchoTool {
     fn id(&self) -> ToolId {
-        ToolId::new("tests", "echo")
+        ToolId::new("tests", "echo").expect("valid id")
     }
 
     #[expect(
@@ -424,9 +458,9 @@ impl Tool for EchoTool {
         })
     }
 
-    async fn call(&self, args: Value) -> Result<String> {
+    async fn call(&self, args: Value) -> std::result::Result<ToolOutput, ToolError> {
         let value = args.get("value").and_then(Value::as_str).unwrap_or("");
-        Ok(format!("echoed: {value}"))
+        Ok(ToolOutput::trusted(format!("echoed: {value}")))
     }
 }
 
@@ -437,7 +471,7 @@ struct UntrustedEchoTool;
 #[async_trait::async_trait]
 impl Tool for UntrustedEchoTool {
     fn id(&self) -> ToolId {
-        ToolId::new("tests", "untrusted_echo")
+        ToolId::new("tests", "untrusted_echo").expect("valid id")
     }
 
     #[expect(
@@ -464,13 +498,9 @@ impl Tool for UntrustedEchoTool {
         })
     }
 
-    async fn call(&self, args: Value) -> Result<String> {
+    async fn call(&self, args: Value) -> std::result::Result<ToolOutput, ToolError> {
         let value = args.get("value").and_then(Value::as_str).unwrap_or("");
-        Ok(format!("echoed: {value}"))
-    }
-
-    fn untrusted_output(&self) -> bool {
-        true
+        Ok(ToolOutput::untrusted(format!("echoed: {value}")))
     }
 }
 
@@ -481,7 +511,7 @@ struct FailingTool;
 #[async_trait::async_trait]
 impl Tool for FailingTool {
     fn id(&self) -> ToolId {
-        ToolId::new("tests", "failing")
+        ToolId::new("tests", "failing").expect("valid id")
     }
 
     #[expect(
@@ -504,11 +534,8 @@ impl Tool for FailingTool {
         json!({ "type": "object", "properties": {} })
     }
 
-    async fn call(&self, _args: Value) -> Result<String> {
-        Err(Error::Backend {
-            status: 500,
-            body: "the tool's own backend failed".to_string(),
-        })
+    async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
+        Err(ToolError::message("the tool's own backend failed").with_kind(ToolErrorKind::Backend))
     }
 }
 
@@ -522,7 +549,7 @@ struct ScopedFixtureTool {
 impl ScopedFixtureTool {
     fn new(name: &str, wire_name: &'static str, description: &'static str) -> Self {
         Self {
-            id: ToolId::new("tests", name),
+            id: ToolId::new("tests", name).expect("valid id"),
             wire_name,
             description,
             calls: Arc::new(AtomicUsize::new(0)),
@@ -552,13 +579,13 @@ impl Tool for ScopedFixtureTool {
         })
     }
 
-    async fn call(&self, args: Value) -> Result<String> {
+    async fn call(&self, args: Value) -> std::result::Result<ToolOutput, ToolError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(format!(
+        Ok(ToolOutput::trusted(format!(
             "called {} with {}",
             self.id.name(),
             args["value"].as_str().unwrap_or_default()
-        ))
+        )))
     }
 }
 
@@ -868,7 +895,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     let dispatch = dispatch_for(tools);
     let registry = ToolRegistry::new(tools.iter().copied());
 
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let err = run_tool_loop(
@@ -880,7 +907,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
             execution: EXECUTION,
-            observer: &recorder,
+            observer: recorder.as_ref(),
             section: "Gather",
             turns: &turns,
             debug: None,
@@ -892,7 +919,10 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     .await
     .expect_err("a tool whose call fails must fail the loop");
     match err {
-        Error::Backend { status, .. } => assert_eq!(status, 500, "the tool's own error propagates"),
+        Error::Tool(message) => assert!(
+            message.contains("the tool's own backend failed"),
+            "the tool's own error propagates: {message}"
+        ),
         other => panic!("expected the tool's own error, got {other:?}"),
     }
 
@@ -932,7 +962,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
     });
 
     let client = GatewayClient::new(&format!("http://{addr}/v1"), "secret token");
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let error = run_tool_loop(
@@ -944,7 +974,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
             execution: EXECUTION,
-            observer: &recorder,
+            observer: recorder.as_ref(),
             section: "Gather",
             turns: &turns,
             debug: None,
@@ -1002,7 +1032,7 @@ async fn spawn_text_finish_gateway(
 
 async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(String, String)>, u32) {
     let client = GatewayClient::new(&format!("http://{addr}/v1"), "test");
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let out = run_tool_loop(
@@ -1014,7 +1044,7 @@ async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(Strin
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
             execution: EXECUTION,
-            observer: &recorder,
+            observer: recorder.as_ref(),
             section: "Gather",
             turns: &turns,
             debug: None,
@@ -1444,7 +1474,7 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
 async fn recording_and_null_observers_produce_the_same_result_and_store_state() {
     let prompt = fixture(STORE_SECTIONS);
     let recorded_store = StoreRef::memory();
-    let sink = Recorder::default();
+    let sink = Arc::new(Recorder::default());
     let observed_result = run(
         &prompt,
         "",
@@ -1452,7 +1482,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         &recorded_store,
         RunOptions {
             execution: EXECUTION,
-            observer: &sink,
+            observer: Arc::clone(&sink) as Arc<dyn Observer>,
             client: None,
             debug: None,
         },
@@ -1477,7 +1507,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
          ## Only\n\n```lua\nerror('expected failure')\n```\n",
     );
-    let sink = Recorder::default();
+    let sink = Arc::new(Recorder::default());
     let observed_error = run(
         &failing,
         "",
@@ -1485,7 +1515,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &sink,
+            observer: Arc::clone(&sink) as Arc<dyn Observer>,
             client: None,
             debug: None,
         },
@@ -1576,9 +1606,9 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
          Use the echo tool.\n\n\
          ```lua\nstore.append('state.txt', '\\nafter')\nreturn reply\n```\n"
     );
-    let recorder = Recorder::default();
-    let prompt =
-        Prompt::parse(&source, EXECUTION, &recorder).expect("the lifecycle fixture must parse");
+    let recorder = Arc::new(Recorder::default());
+    let prompt = Prompt::parse(&source, EXECUTION, recorder.as_ref())
+        .expect("the lifecycle fixture must parse");
     let _picker = ToolPicker::build(
         Catalog::new(vec![descriptor.clone()]),
         PickerConfig::default(),
@@ -1599,7 +1629,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         &store,
         RunOptions {
             execution: EXECUTION,
-            observer: &recorder,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -1623,7 +1653,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     );
     let details = records
         .iter()
-        .map(|(_, _, detail)| detail.as_str())
+        .map(|(_, _, detail)| detail.clone())
         .collect::<Vec<_>>();
     for expected in [
         detail::PARSE_STARTED,
@@ -1638,7 +1668,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         detail::RUN_SUCCEEDED,
     ] {
         assert!(
-            details.contains(&expected),
+            details.contains(&expected.to_string()),
             "the complete lifecycle must include {expected:?}: {records:#?}"
         );
     }
@@ -1655,7 +1685,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     let dispatch = dispatch_for(tools);
     let registry = ToolRegistry::new(tools.iter().copied());
 
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let (out, _) = run_tool_loop(
@@ -1667,7 +1697,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
             execution: EXECUTION,
-            observer: &recorder,
+            observer: recorder.as_ref(),
             section: "Gather",
             turns: &turns,
             debug: None,
@@ -1758,18 +1788,15 @@ async fn live_h1_infer_runs_once() {
     let out = super::run(
         &prompt,
         "",
-        ResolutionContext {
-            picker: &picker,
-            models: &models,
-        },
+        ResolutionContext::new(&picker, &models),
         &[],
         &StoreRef::memory(),
-        RunOptions {
+        to_config(RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
-        },
+        }),
     )
     .await
     .expect("live H1 path must run");
@@ -1794,13 +1821,10 @@ async fn shared_library_loads_before_host_and_resolves_host_when_called() {
     let out = super::run(
         &prompt,
         "later host value",
-        ResolutionContext {
-            picker: &picker,
-            models: &models,
-        },
+        ResolutionContext::new(&picker, &models),
         &[],
         &StoreRef::memory(),
-        silent(),
+        to_config(silent()),
     )
     .await
     .expect("shared function must resolve host globals when called");
@@ -1830,13 +1854,10 @@ async fn shared_library_cannot_call_host_at_load_time() {
         let error = super::run(
             &prompt,
             "",
-            ResolutionContext {
-                picker: &picker,
-                models: &models,
-            },
+            ResolutionContext::new(&picker, &models),
             &[],
             &StoreRef::memory(),
-            silent(),
+            to_config(silent()),
         )
         .await
         .expect_err("top-level shared host call must fail");
@@ -1891,13 +1912,10 @@ async fn captured_bindings_reach_section_execute_and_fanout_vms() {
     let out = super::run(
         &prompt,
         "",
-        ResolutionContext {
-            picker: &picker,
-            models: &models,
-        },
+        ResolutionContext::new(&picker, &models),
         &tools,
         &StoreRef::memory(),
-        silent(),
+        to_config(silent()),
     )
     .await
     .expect("captured bindings must be installed in every section VM");
@@ -1940,18 +1958,15 @@ async fn live_h1_infer_sees_tools_resolved_in_the_same_block() {
     let out = super::run(
         &prompt,
         "",
-        ResolutionContext {
-            picker: &picker,
-            models: &models,
-        },
+        ResolutionContext::new(&picker, &models),
         &tools,
         &StoreRef::memory(),
-        RunOptions {
+        to_config(RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
-        },
+        }),
     )
     .await
     .expect("live H1 infer must use its resolved always tool");
@@ -2003,18 +2018,15 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
     let out = super::run(
         &prompt,
         "",
-        ResolutionContext {
-            picker: &picker,
-            models: &models,
-        },
+        ResolutionContext::new(&picker, &models),
         &tools,
         &StoreRef::memory(),
-        RunOptions {
+        to_config(RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
-        },
+        }),
     )
     .await
     .expect("live H1 prose must preserve block semantics");
@@ -2081,7 +2093,7 @@ Ask the model.\n";
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2109,7 +2121,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
     let addr = spawn_text_gateway().await;
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\nSay something.\n";
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let out = run(
         &bound_for_model(md),
         "",
@@ -2117,7 +2129,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &recorder,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2188,7 +2200,7 @@ async fn epilog_runs_after_reply_and_can_return() {
     assert!(prompt.prompt().entry().prologue().is_none());
     assert!(prompt.prompt().entry().epilog().is_some());
 
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let store = StoreRef::memory();
     let out = run(
         &prompt,
@@ -2197,7 +2209,7 @@ async fn epilog_runs_after_reply_and_can_return() {
         &store,
         RunOptions {
             execution: EXECUTION,
-            observer: &recorder,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2323,7 +2335,7 @@ async fn shared_helper_survives_prologue_model_and_epilog() {
 ## Only\n\n```lua\nvar.question = decorate(args)\n```\n\n\
 Ask using {{ var.question }}.\n\n\
 ```lua\nreturn decorate(reply)\n```\n";
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let out = run(
         &bound_for_model(md),
         "input",
@@ -2331,7 +2343,7 @@ Ask using {{ var.question }}.\n\n\
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &recorder,
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2343,61 +2355,67 @@ Ask using {{ var.question }}.\n\n\
     assert_eq!(
         recorder.events(),
         [
-            ("Test prompt".to_owned(), detail::RUN_STARTED.to_owned()),
+            ("Test prompt".to_owned(), detail::RUN_STARTED.to_string()),
             (
                 "Test prompt".to_owned(),
-                detail::LUA_PROLOGUE_STARTED.to_owned(),
-            ),
-            (
-                "Test prompt".to_owned(),
-                detail::LUA_PROLOGUE_SUCCEEDED.to_owned(),
+                detail::LUA_PROLOGUE_STARTED.to_string(),
             ),
             (
                 "Test prompt".to_owned(),
-                detail::LUA_TEARDOWN_STARTED.to_owned(),
+                detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
             ),
             (
                 "Test prompt".to_owned(),
-                detail::LUA_TEARDOWN_SUCCEEDED.to_owned(),
-            ),
-            ("Only".to_owned(), detail::SECTION_STARTED.to_owned()),
-            (
-                "Only".to_owned(),
-                detail::LUA_SHARED_LOAD_STARTED.to_owned(),
+                detail::LUA_TEARDOWN_STARTED.to_string(),
             ),
             (
-                "Only".to_owned(),
-                detail::LUA_SHARED_LOAD_SUCCEEDED.to_owned(),
+                "Test prompt".to_owned(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
             ),
-            ("Only".to_owned(), detail::LUA_PROLOGUE_STARTED.to_owned()),
-            ("Only".to_owned(), detail::LUA_PROLOGUE_SUCCEEDED.to_owned(),),
-            ("Only".to_owned(), detail::TOOL_SCOPE_CLOSING.to_owned()),
-            ("Only".to_owned(), detail::TOOL_SCOPE_CLOSED.to_owned()),
-            ("Only".to_owned(), detail::MODEL_SCOPE_CLOSING.to_owned()),
-            ("Only".to_owned(), detail::MODEL_SCOPE_CLOSED.to_owned()),
+            ("Only".to_owned(), detail::SECTION_STARTED.to_string()),
             (
                 "Only".to_owned(),
-                detail::TOOL_SCOPE_VALIDATION_STARTED.to_owned(),
+                detail::LUA_SHARED_LOAD_STARTED.to_string(),
             ),
             (
                 "Only".to_owned(),
-                detail::TOOL_SCOPE_VALIDATION_SUCCEEDED.to_owned(),
+                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
             ),
-            ("Only".to_owned(), detail::MODEL_TURN_COMPLETED.to_owned(),),
+            ("Only".to_owned(), detail::LUA_PROLOGUE_STARTED.to_string()),
             (
                 "Only".to_owned(),
-                detail::LUA_REPLY_BINDING_STARTED.to_owned(),
+                detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
+            ),
+            ("Only".to_owned(), detail::TOOL_SCOPE_CLOSING.to_string()),
+            ("Only".to_owned(), detail::TOOL_SCOPE_CLOSED.to_string()),
+            ("Only".to_owned(), detail::MODEL_SCOPE_CLOSING.to_string()),
+            ("Only".to_owned(), detail::MODEL_SCOPE_CLOSED.to_string()),
+            (
+                "Only".to_owned(),
+                detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
             ),
             (
                 "Only".to_owned(),
-                detail::LUA_REPLY_BINDING_SUCCEEDED.to_owned(),
+                detail::TOOL_SCOPE_VALIDATION_SUCCEEDED.to_string(),
             ),
-            ("Only".to_owned(), detail::LUA_EPILOG_STARTED.to_owned()),
-            ("Only".to_owned(), detail::LUA_EPILOG_SUCCEEDED.to_owned(),),
-            ("Only".to_owned(), detail::LUA_TEARDOWN_STARTED.to_owned()),
-            ("Only".to_owned(), detail::LUA_TEARDOWN_SUCCEEDED.to_owned(),),
-            ("Only".to_owned(), detail::SECTION_FINISHED.to_owned()),
-            ("Test prompt".to_owned(), detail::RUN_SUCCEEDED.to_owned()),
+            ("Only".to_owned(), detail::MODEL_TURN_COMPLETED.to_string(),),
+            (
+                "Only".to_owned(),
+                detail::LUA_REPLY_BINDING_STARTED.to_string(),
+            ),
+            (
+                "Only".to_owned(),
+                detail::LUA_REPLY_BINDING_SUCCEEDED.to_string(),
+            ),
+            ("Only".to_owned(), detail::LUA_EPILOG_STARTED.to_string()),
+            ("Only".to_owned(), detail::LUA_EPILOG_SUCCEEDED.to_string(),),
+            ("Only".to_owned(), detail::LUA_TEARDOWN_STARTED.to_string()),
+            (
+                "Only".to_owned(),
+                detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
+            ),
+            ("Only".to_owned(), detail::SECTION_FINISHED.to_string()),
+            ("Test prompt".to_owned(), detail::RUN_SUCCEEDED.to_string()),
         ]
     );
 }
@@ -2503,7 +2521,7 @@ async fn prose_substitution_sees_sys_model_catalog_id() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2556,7 +2574,7 @@ async fn fanout_arm_epilog_sees_sys_model_catalog_id() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2579,7 +2597,7 @@ async fn default_return_precedes_the_last_model_reply() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2605,7 +2623,7 @@ async fn reply_carries_forward_to_next_section_prologue() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2630,7 +2648,7 @@ async fn reply_substitution_in_prose_uses_previous_section_reply() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2801,7 +2819,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
 ## Only\n\nAsk without tools.\n";
     let prompt = bound_with_tools(
         md,
-        &|_: &str| Ok(ToolId::new("tests", "concrete")),
+        &|_: &str| Ok(ToolId::new("tests", "concrete").expect("valid id")),
         Vec::new(),
     );
     let out = run(
@@ -2811,7 +2829,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2843,7 +2861,7 @@ tools.need('local_alias', 'capability')\n\
 tools.always('local_alias')\n\
 models.always('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\nUse the tool.\n",
-        &|_: &str| Ok(ToolId::new("tests", "concrete")),
+        &|_: &str| Ok(ToolId::new("tests", "concrete").expect("valid id")),
         Vec::new(),
     );
 
@@ -2854,7 +2872,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2893,7 +2911,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
 tools.need('section_tool', 'capability')\n\
 models.always('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\n```lua\ntools.add('section_tool')\n```\n\nUse the tool.\n",
-        &|_: &str| Ok(ToolId::new("tests", "concrete")),
+        &|_: &str| Ok(ToolId::new("tests", "concrete").expect("valid id")),
         Vec::new(),
     );
 
@@ -2904,7 +2922,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2954,7 +2972,7 @@ tools.need('second_local', 'second')\n\
 models.always('writer', 'A general model for tests')\n```\n\n\
 ## First\n\n```lua\ntools.add('first_local')\n```\n\nFirst model turn.\n\n\
 ## Second\n\n```lua\ntools.add('second_local')\n```\n\nSecond model turn.\n",
-        &|capability: &str| Ok(ToolId::new("tests", capability)),
+        &|capability: &str| Ok(ToolId::new("tests", capability).expect("valid id")),
         vec![(first_descriptor, second_descriptor)],
     );
 
@@ -2968,7 +2986,7 @@ models.always('writer', 'A general model for tests')\n```\n\n\
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -2984,10 +3002,8 @@ models.always('writer', 'A general model for tests')\n```\n\n\
 fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports() {
     let first = ScopedFixtureTool::new("first", "first_wire", "First concrete.");
     let second = ScopedFixtureTool::new("second", "second_wire", "Second concrete.");
-    let first_descriptor = picker_descriptor("first", "Private similar description one.");
-    let second_descriptor = picker_descriptor("second", "Private similar description two.");
-    let first_id = ToolId::new("tests", "first");
-    let second_id = ToolId::new("tests", "second");
+    let first_id = ToolId::new("tests", "first").expect("valid id");
+    let second_id = ToolId::new("tests", "second").expect("valid id");
     let scope = crate::lua::ToolScope::from_bindings(vec![
         crate::lua::ToolBinding::for_test("first_local", "first", first_id.clone()),
         crate::lua::ToolBinding::for_test("second_local", "second", second_id.clone()),
@@ -3003,42 +3019,42 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
         ]),
         near_duplicates: vec![OwnedNearDuplicate {
             first_id: first_id.clone(),
-            first_description: first_descriptor.description().to_owned(),
-            first_annotations: first_descriptor.annotations(),
             second_id: second_id.clone(),
-            second_description: second_descriptor.description().to_owned(),
-            second_annotations: second_descriptor.annotations(),
             similarity: 0.98,
         }],
     };
     let registry = ToolRegistry::new([&first as &dyn Tool, &second as &dyn Tool]);
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
 
-    let error = prepare_effective_scope(&analysis, &scope, &registry, EXECUTION, &recorder, "Only")
-        .unwrap_err();
+    let error = prepare_effective_scope(
+        &analysis,
+        &scope,
+        &registry,
+        EXECUTION,
+        recorder.as_ref(),
+        "Only",
+    )
+    .unwrap_err();
 
     assert!(matches!(
         error,
         Error::NearDuplicateTools {
             diagnostic,
         } if diagnostic.first_alias == "first_local"
-            && diagnostic.first_id == ToolId::new("tests", "first")
-            && diagnostic.first_description == "Private similar description one."
-            && diagnostic.first_annotations.read_only() == Some(true)
+            && diagnostic.first_id == ToolId::new("tests", "first").expect("valid id")
             && diagnostic.second_alias == "second_local"
-            && diagnostic.second_id == ToolId::new("tests", "second")
-            && diagnostic.second_description == "Private similar description two."
-            && diagnostic.second_annotations.idempotent() == Some(true)
+            && diagnostic.second_id == ToolId::new("tests", "second").expect("valid id")
             && (diagnostic.similarity - 0.98).abs() < f32::EPSILON
     ));
     let events = recorder.events();
     assert!(
         events
             .iter()
-            .any(|(_, detail)| { detail == detail::TOOL_SCOPE_VALIDATION_FAILED })
+            .any(|(_, detail)| { *detail == detail::TOOL_SCOPE_VALIDATION_FAILED.to_string() })
     );
     assert!(!events.iter().any(|(_, detail)| {
-        detail == detail::MODEL_TURN_COMPLETED || detail == detail::MODEL_TURN_FAILED
+        *detail == detail::MODEL_TURN_COMPLETED.to_string()
+            || *detail == detail::MODEL_TURN_FAILED.to_string()
     }));
     let trace = format!("{events:?}");
     for payload in ["first_local", "second_local", "Private similar description"] {
@@ -3077,7 +3093,7 @@ impl RecordingCapture {
 #[tokio::test]
 async fn debug_capture_receives_request_and_response_when_set() {
     let addr = spawn_text_gateway().await;
-    let capture = RecordingCapture::default();
+    let capture = Arc::new(RecordingCapture::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\nAsk the model.\n";
     let out = run(
@@ -3087,9 +3103,9 @@ async fn debug_capture_receives_request_and_response_when_set() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
-            debug: Some(&capture),
+            debug: Some(Arc::clone(&capture) as Arc<dyn DebugCapture>),
         },
     )
     .await
@@ -3137,7 +3153,7 @@ async fn debug_capture_none_changes_nothing() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -3166,7 +3182,11 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         ```lua\nassert(tools.calls['echo'] == 1, \
         'expected 1 call, got ' .. tostring(tools.calls['echo']))\n\
         return 'ok'\n```\n";
-    let prompt = bound_with_tools(md, &|_: &str| Ok(ToolId::new("tests", "echo")), Vec::new());
+    let prompt = bound_with_tools(
+        md,
+        &|_: &str| Ok(ToolId::new("tests", "echo").expect("valid id")),
+        Vec::new(),
+    );
     let out = run(
         &prompt,
         "",
@@ -3174,7 +3194,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -3208,7 +3228,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
     let addr = spawn_text_gateway().await;
     let prompt = bound_with_tools(
         md,
-        &|_: &str| Ok(ToolId::new("tests", "search")),
+        &|_: &str| Ok(ToolId::new("tests", "search").expect("valid id")),
         Vec::new(),
     );
     let error = run(
@@ -3218,7 +3238,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -3244,7 +3264,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
     let addr = spawn_text_gateway().await;
     let prompt = bound_with_tools(
         md,
-        &|_: &str| Ok(ToolId::new("tests", "search")),
+        &|_: &str| Ok(ToolId::new("tests", "search").expect("valid id")),
         Vec::new(),
     );
     let error = run(
@@ -3254,7 +3274,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -3288,9 +3308,9 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
         md,
         &|capability: &str| {
             if capability.contains("scoped") {
-                Ok(ToolId::new("tests", "scoped"))
+                Ok(ToolId::new("tests", "scoped").expect("valid id"))
             } else {
-                Ok(ToolId::new("tests", "global_tool"))
+                Ok(ToolId::new("tests", "global_tool").expect("valid id"))
             }
         },
         Vec::new(),
@@ -3305,7 +3325,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -3348,7 +3368,11 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
         tools.always('echo')\n\
         models.always('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\nUse the tool.\n";
-    let prompt = bound_with_tools(md, &|_: &str| Ok(ToolId::new("tests", "echo")), Vec::new());
+    let prompt = bound_with_tools(
+        md,
+        &|_: &str| Ok(ToolId::new("tests", "echo").expect("valid id")),
+        Vec::new(),
+    );
     let error = run(
         &prompt,
         "",
@@ -3356,7 +3380,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -3406,7 +3430,11 @@ async fn model_infer_single_shot_returns_text() {
         assert(tools.calls['echo'] == 1, 'infer tool loop must increment tools.calls')\n\
         return text\n\
         ```\n";
-    let prompt = bound_with_tools(md, &|_: &str| Ok(ToolId::new("tests", "echo")), Vec::new());
+    let prompt = bound_with_tools(
+        md,
+        &|_: &str| Ok(ToolId::new("tests", "echo").expect("valid id")),
+        Vec::new(),
+    );
     let out = run(
         &prompt,
         "",
@@ -3414,7 +3442,7 @@ async fn model_infer_single_shot_returns_text() {
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -3430,7 +3458,7 @@ struct FetchTool;
 #[async_trait::async_trait]
 impl Tool for FetchTool {
     fn id(&self) -> ToolId {
-        ToolId::new("tests", "fetch")
+        ToolId::new("tests", "fetch").expect("valid id")
     }
 
     #[expect(
@@ -3457,8 +3485,8 @@ impl Tool for FetchTool {
         })
     }
 
-    async fn call(&self, _args: Value) -> Result<String> {
-        Ok("fetched".to_owned())
+    async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
+        Ok(ToolOutput::trusted("fetched"))
     }
 }
 
@@ -3470,8 +3498,16 @@ impl Tool for FetchTool {
 fn tool_bag_caches_on_unchanged_generation() {
     let bindings = crate::lua::ToolBindings::for_test(
         vec![
-            crate::lua::ToolBinding::for_test("echo", "echo tool", ToolId::new("tests", "echo")),
-            crate::lua::ToolBinding::for_test("fetch", "fetch tool", ToolId::new("tests", "fetch")),
+            crate::lua::ToolBinding::for_test(
+                "echo",
+                "echo tool",
+                ToolId::new("tests", "echo").expect("valid id"),
+            ),
+            crate::lua::ToolBinding::for_test(
+                "fetch",
+                "fetch tool",
+                ToolId::new("tests", "fetch").expect("valid id"),
+            ),
         ],
         Vec::new(),
     );
@@ -3592,7 +3628,7 @@ fn tool_description_override_appears_in_model_schema() {
         vec![crate::lua::ToolBinding::for_test(
             "echo",
             "echo capability for live matching",
-            ToolId::new("tests", "echo"),
+            ToolId::new("tests", "echo").expect("valid id"),
         )],
         Vec::new(),
     );
@@ -3738,7 +3774,7 @@ Final ask.\n\n\
         &store,
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -3820,7 +3856,7 @@ return by_name\n\
         &store,
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -3909,7 +3945,11 @@ return 'ok'\n\
 Loop forever on {{ item }}.\n\n\
 ### Items\n\n\
 - alpha\n";
-    let prompt = bound_with_tools(md, &|_: &str| Ok(ToolId::new("tests", "echo")), Vec::new());
+    let prompt = bound_with_tools(
+        md,
+        &|_: &str| Ok(ToolId::new("tests", "echo").expect("valid id")),
+        Vec::new(),
+    );
     let out = run(
         &prompt,
         "",
@@ -3917,7 +3957,7 @@ Loop forever on {{ item }}.\n\n\
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
@@ -3958,7 +3998,7 @@ return 'done'\n\
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
-            observer: &NullObserver,
+            observer: Arc::new(NullObserver),
             client: Some(GatewayClient::new(&format!("http://{addr}/v1"), "test")),
             debug: None,
         },
