@@ -1,160 +1,330 @@
 //! Report-only observation for a run in flight.
 //!
-//! [`Observer`] receives borrowed `(execution, section, detail)` strings at
-//! operational boundaries. The strings are the complete trace record. Fixed
-//! runtime details contain no raw prompt prose, model input or output, tool
-//! arguments or results, store paths or contents, credentials, or fetched
-//! content. The sole author-controlled exception is a validated `Lua:
-//! <message>` checkpoint from the phase-local Lua `log(message)` callback.
-//! Reports are synchronous and never consulted for a decision.
-//! [`NullObserver`] provides silence without a second execution path.
+//! [`Observer`] receives a borrowed `(execution, section)` pair and one typed
+//! [`Observation`] at operational boundaries. The observation is the complete
+//! trace record. Fixed runtime observations carry no raw prompt prose, model
+//! input or output, tool arguments or results, store paths or contents,
+//! credentials, or fetched content. The sole author-controlled exception is a
+//! validated [`Observation::Lua`] checkpoint from the phase-local Lua
+//! `log(message)` callback. Reports are synchronous and never consulted for a
+//! decision. [`NullObserver`] provides silence without a second execution path.
 
-/// Stable detail strings emitted by the currently shipped runtime.
+use std::fmt;
+
+/// One typed operational observation emitted by the runtime.
 ///
-/// Consumers may recognize individual constants for cosmetic presentation, but
-/// must tolerate unknown details and must never use a report to steer execution.
-/// Accepted Lua checkpoints are dynamic `Lua: <message>` details and therefore
-/// have no constant in this module.
-pub mod detail {
+/// Every fixed variant maps 1:1 to a fixed lifecycle boundary; its
+/// [`Display`](fmt::Display) rendering is the stable trace string. A consumer
+/// may match individual variants for cosmetic presentation, but must tolerate
+/// unknown variants (this enum is `#[non_exhaustive]`) and must never use an
+/// observation to steer execution.
+///
+/// [`Observation::Lua`] carries the one intentionally author-controlled
+/// checkpoint (the Lua `log(message)` callback); [`Observation::Other`] is a
+/// forward-compatible escape hatch. Both own their message, so an observation
+/// crosses a thread boundary (fanout arms report through a channel) without
+/// borrowing the emitting frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Observation {
     /// Prompt parsing began.
-    pub const PARSE_STARTED: &str = "Parse started";
+    ParseStarted,
     /// Prompt parsing and parse-time compilation completed successfully.
-    pub const PARSE_SUCCEEDED: &str = "Parse succeeded";
+    ParseSucceeded,
     /// Prompt parsing or parse-time compilation returned an error.
-    pub const PARSE_FAILED: &str = "Parse failed";
+    ParseFailed,
     /// A run passed its version gate and began.
-    pub const RUN_STARTED: &str = "Run started";
+    RunStarted,
     /// A run returned a value.
-    pub const RUN_SUCCEEDED: &str = "Run succeeded";
+    RunSucceeded,
     /// A run returned an error.
-    pub const RUN_FAILED: &str = "Run failed";
+    RunFailed,
     /// A top-level section began.
-    pub const SECTION_STARTED: &str = "Section started";
+    SectionStarted,
     /// A top-level section completed successfully.
-    pub const SECTION_FINISHED: &str = "Section finished";
+    SectionFinished,
     /// A model round trip completed successfully.
-    pub const MODEL_TURN_COMPLETED: &str = "Model turn completed";
+    ModelTurnCompleted,
     /// A model round trip returned an error.
-    pub const MODEL_TURN_FAILED: &str = "Model turn failed";
-    /// Formerly reported when a successful parse bound empty final text.
-    ///
-    /// Empty model product now fails the turn via [`crate::Error::EmptyModelReply`]
-    /// and [`MODEL_TURN_FAILED`]; this constant is retained for host compatibility.
-    pub const MODEL_REPLY_EMPTY: &str = "Model reply was empty";
+    ModelTurnFailed,
     /// A successful parse ended because the model hit its length limit.
-    pub const MODEL_TURN_TRUNCATED: &str = "Model turn truncated";
+    ModelTurnTruncated,
     /// A tool dispatch completed successfully.
-    pub const TOOL_CALL_SUCCEEDED: &str = "Tool call succeeded";
+    ToolCallSucceeded,
     /// A tool dispatch returned an error.
-    pub const TOOL_CALL_FAILED: &str = "Tool call failed";
+    ToolCallFailed,
     /// Lua source compilation began.
-    pub const LUA_COMPILATION_STARTED: &str = "Lua compilation started";
+    LuaCompilationStarted,
     /// Lua source compilation completed successfully.
-    pub const LUA_COMPILATION_SUCCEEDED: &str = "Lua compilation succeeded";
+    LuaCompilationSucceeded,
     /// Lua source compilation returned an error.
-    pub const LUA_COMPILATION_FAILED: &str = "Lua compilation failed";
+    LuaCompilationFailed,
     /// A section VM began loading and executing its shared program.
-    pub const LUA_SHARED_LOAD_STARTED: &str = "Lua shared load started";
+    LuaSharedLoadStarted,
     /// A section VM loaded and executed its shared program successfully.
-    pub const LUA_SHARED_LOAD_SUCCEEDED: &str = "Lua shared load succeeded";
+    LuaSharedLoadSucceeded,
     /// A section VM failed to load or execute its shared program.
-    pub const LUA_SHARED_LOAD_FAILED: &str = "Lua shared load failed";
+    LuaSharedLoadFailed,
     /// A section VM began executing its prologue.
-    pub const LUA_PROLOGUE_STARTED: &str = "Lua prologue started";
+    LuaPrologueStarted,
     /// A section VM executed its prologue successfully.
-    pub const LUA_PROLOGUE_SUCCEEDED: &str = "Lua prologue succeeded";
+    LuaPrologueSucceeded,
     /// A section VM failed to execute its prologue.
-    pub const LUA_PROLOGUE_FAILED: &str = "Lua prologue failed";
+    LuaPrologueFailed,
     /// A section VM began binding a model reply.
-    pub const LUA_REPLY_BINDING_STARTED: &str = "Lua reply binding started";
+    LuaReplyBindingStarted,
     /// A section VM bound a model reply successfully.
-    pub const LUA_REPLY_BINDING_SUCCEEDED: &str = "Lua reply binding succeeded";
+    LuaReplyBindingSucceeded,
     /// A section VM failed to bind a model reply.
-    pub const LUA_REPLY_BINDING_FAILED: &str = "Lua reply binding failed";
+    LuaReplyBindingFailed,
     /// A section VM began executing its epilog.
-    pub const LUA_EPILOG_STARTED: &str = "Lua epilog started";
+    LuaEpilogStarted,
     /// A section VM executed its epilog successfully.
-    pub const LUA_EPILOG_SUCCEEDED: &str = "Lua epilog succeeded";
+    LuaEpilogSucceeded,
     /// A section VM failed to execute its epilog.
-    pub const LUA_EPILOG_FAILED: &str = "Lua epilog failed";
+    LuaEpilogFailed,
     /// A section VM began teardown.
-    pub const LUA_TEARDOWN_STARTED: &str = "Lua teardown started";
+    LuaTeardownStarted,
     /// A section VM completed teardown.
-    pub const LUA_TEARDOWN_SUCCEEDED: &str = "Lua teardown succeeded";
+    LuaTeardownSucceeded,
     /// Live-registry and one-to-one binding validation began.
-    pub const TOOL_REGISTRY_VALIDATION_STARTED: &str = "Tool registry validation started";
+    ToolRegistryValidationStarted,
     /// Live-registry and one-to-one binding validation succeeded.
-    pub const TOOL_REGISTRY_VALIDATION_SUCCEEDED: &str = "Tool registry validation succeeded";
+    ToolRegistryValidationSucceeded,
     /// Live-registry or one-to-one binding validation failed.
-    pub const TOOL_REGISTRY_VALIDATION_FAILED: &str = "Tool registry validation failed";
+    ToolRegistryValidationFailed,
     /// A section began closing its effective tool scope.
-    pub const TOOL_SCOPE_CLOSING: &str = "Tool scope closing";
+    ToolScopeClosing,
     /// A section's effective tool scope was closed successfully.
-    pub const TOOL_SCOPE_CLOSED: &str = "Tool scope closed";
+    ToolScopeClosed,
     /// A section's effective tool scope could not be closed.
-    pub const TOOL_SCOPE_FAILED: &str = "Tool scope failed";
+    ToolScopeFailed,
     /// Semantic validation of a model-visible tool scope began.
-    pub const TOOL_SCOPE_VALIDATION_STARTED: &str = "Tool scope validation started";
+    ToolScopeValidationStarted,
     /// A model-visible tool scope passed semantic validation.
-    pub const TOOL_SCOPE_VALIDATION_SUCCEEDED: &str = "Tool scope validation succeeded";
+    ToolScopeValidationSucceeded,
     /// A model-visible tool scope failed semantic validation.
-    pub const TOOL_SCOPE_VALIDATION_FAILED: &str = "Tool scope validation failed";
+    ToolScopeValidationFailed,
     /// Live-catalog model binding validation began.
-    pub const MODEL_CATALOG_VALIDATION_STARTED: &str = "Model catalog validation started";
+    ModelCatalogValidationStarted,
     /// Live-catalog model binding validation succeeded.
-    pub const MODEL_CATALOG_VALIDATION_SUCCEEDED: &str = "Model catalog validation succeeded";
+    ModelCatalogValidationSucceeded,
     /// Live-catalog model binding validation failed.
-    pub const MODEL_CATALOG_VALIDATION_FAILED: &str = "Model catalog validation failed";
+    ModelCatalogValidationFailed,
     /// A section began closing its model selection.
-    pub const MODEL_SCOPE_CLOSING: &str = "Model scope closing";
+    ModelScopeClosing,
     /// A section's model selection was closed successfully.
-    pub const MODEL_SCOPE_CLOSED: &str = "Model scope closed";
+    ModelScopeClosed,
     /// A section's model selection could not be closed.
-    pub const MODEL_SCOPE_FAILED: &str = "Model scope failed";
+    ModelScopeFailed,
     /// A harness-mediated store write succeeded.
-    pub const STORE_WRITE_SUCCEEDED: &str = "Store write succeeded";
+    StoreWriteSucceeded,
     /// A harness-mediated store write failed.
-    pub const STORE_WRITE_FAILED: &str = "Store write failed";
+    StoreWriteFailed,
     /// A harness-mediated store append succeeded.
-    pub const STORE_APPEND_SUCCEEDED: &str = "Store append succeeded";
+    StoreAppendSucceeded,
     /// A harness-mediated store append failed.
-    pub const STORE_APPEND_FAILED: &str = "Store append failed";
+    StoreAppendFailed,
     /// A harness-mediated store read_lines succeeded.
-    pub const STORE_READ_LINES_SUCCEEDED: &str = "Store read_lines succeeded";
+    StoreReadLinesSucceeded,
     /// A harness-mediated store read_lines failed.
-    pub const STORE_READ_LINES_FAILED: &str = "Store read_lines failed";
+    StoreReadLinesFailed,
     /// A harness-mediated store read (verbatim) succeeded.
-    pub const STORE_READ_SUCCEEDED: &str = "Store read succeeded";
+    StoreReadSucceeded,
     /// A harness-mediated store read (verbatim) failed.
-    pub const STORE_READ_FAILED: &str = "Store read failed";
+    StoreReadFailed,
     /// A harness-mediated store inject succeeded.
-    pub const STORE_INJECT_SUCCEEDED: &str = "Store inject succeeded";
+    StoreInjectSucceeded,
     /// A harness-mediated store inject failed.
-    pub const STORE_INJECT_FAILED: &str = "Store inject failed";
+    StoreInjectFailed,
     /// A harness-mediated store replacement succeeded.
-    pub const STORE_REPLACE_SUCCEEDED: &str = "Store replace succeeded";
+    StoreReplaceSucceeded,
     /// A harness-mediated store replacement failed.
-    pub const STORE_REPLACE_FAILED: &str = "Store replace failed";
+    StoreReplaceFailed,
     /// A harness-mediated store deletion succeeded.
-    pub const STORE_DELETE_SUCCEEDED: &str = "Store delete succeeded";
+    StoreDeleteSucceeded,
     /// A harness-mediated store deletion failed.
-    pub const STORE_DELETE_FAILED: &str = "Store delete failed";
+    StoreDeleteFailed,
     /// A harness-mediated store glob succeeded.
-    pub const STORE_GLOB_SUCCEEDED: &str = "Store glob succeeded";
+    StoreGlobSucceeded,
     /// A harness-mediated store glob failed.
-    pub const STORE_GLOB_FAILED: &str = "Store glob failed";
+    StoreGlobFailed,
     /// A fanout arm began execution.
-    pub const FANOUT_ARM_STARTED: &str = "Fanout arm started";
+    FanoutArmStarted,
     /// A fanout arm completed execution.
-    pub const FANOUT_ARM_FINISHED: &str = "Fanout arm finished";
+    FanoutArmFinished,
+    /// The one author-controlled checkpoint: a validated Lua `log(message)`.
+    ///
+    /// Prompt authors must never place arguments, replies, tool data,
+    /// credentials, paths, or store contents in this message.
+    Lua(String),
+    /// A forward-compatible escape hatch for an observation with no fixed
+    /// variant.
+    Other(String),
+}
+
+impl Observation {
+    /// Returns the fixed trace label for a fixed variant, or `None` for the
+    /// message-carrying [`Observation::Lua`] / [`Observation::Other`].
+    #[must_use]
+    pub fn label(&self) -> Option<&'static str> {
+        let label = match self {
+            Observation::ParseStarted => "Parse started",
+            Observation::ParseSucceeded => "Parse succeeded",
+            Observation::ParseFailed => "Parse failed",
+            Observation::RunStarted => "Run started",
+            Observation::RunSucceeded => "Run succeeded",
+            Observation::RunFailed => "Run failed",
+            Observation::SectionStarted => "Section started",
+            Observation::SectionFinished => "Section finished",
+            Observation::ModelTurnCompleted => "Model turn completed",
+            Observation::ModelTurnFailed => "Model turn failed",
+            Observation::ModelTurnTruncated => "Model turn truncated",
+            Observation::ToolCallSucceeded => "Tool call succeeded",
+            Observation::ToolCallFailed => "Tool call failed",
+            Observation::LuaCompilationStarted => "Lua compilation started",
+            Observation::LuaCompilationSucceeded => "Lua compilation succeeded",
+            Observation::LuaCompilationFailed => "Lua compilation failed",
+            Observation::LuaSharedLoadStarted => "Lua shared load started",
+            Observation::LuaSharedLoadSucceeded => "Lua shared load succeeded",
+            Observation::LuaSharedLoadFailed => "Lua shared load failed",
+            Observation::LuaPrologueStarted => "Lua prologue started",
+            Observation::LuaPrologueSucceeded => "Lua prologue succeeded",
+            Observation::LuaPrologueFailed => "Lua prologue failed",
+            Observation::LuaReplyBindingStarted => "Lua reply binding started",
+            Observation::LuaReplyBindingSucceeded => "Lua reply binding succeeded",
+            Observation::LuaReplyBindingFailed => "Lua reply binding failed",
+            Observation::LuaEpilogStarted => "Lua epilog started",
+            Observation::LuaEpilogSucceeded => "Lua epilog succeeded",
+            Observation::LuaEpilogFailed => "Lua epilog failed",
+            Observation::LuaTeardownStarted => "Lua teardown started",
+            Observation::LuaTeardownSucceeded => "Lua teardown succeeded",
+            Observation::ToolRegistryValidationStarted => "Tool registry validation started",
+            Observation::ToolRegistryValidationSucceeded => "Tool registry validation succeeded",
+            Observation::ToolRegistryValidationFailed => "Tool registry validation failed",
+            Observation::ToolScopeClosing => "Tool scope closing",
+            Observation::ToolScopeClosed => "Tool scope closed",
+            Observation::ToolScopeFailed => "Tool scope failed",
+            Observation::ToolScopeValidationStarted => "Tool scope validation started",
+            Observation::ToolScopeValidationSucceeded => "Tool scope validation succeeded",
+            Observation::ToolScopeValidationFailed => "Tool scope validation failed",
+            Observation::ModelCatalogValidationStarted => "Model catalog validation started",
+            Observation::ModelCatalogValidationSucceeded => "Model catalog validation succeeded",
+            Observation::ModelCatalogValidationFailed => "Model catalog validation failed",
+            Observation::ModelScopeClosing => "Model scope closing",
+            Observation::ModelScopeClosed => "Model scope closed",
+            Observation::ModelScopeFailed => "Model scope failed",
+            Observation::StoreWriteSucceeded => "Store write succeeded",
+            Observation::StoreWriteFailed => "Store write failed",
+            Observation::StoreAppendSucceeded => "Store append succeeded",
+            Observation::StoreAppendFailed => "Store append failed",
+            Observation::StoreReadLinesSucceeded => "Store read_lines succeeded",
+            Observation::StoreReadLinesFailed => "Store read_lines failed",
+            Observation::StoreReadSucceeded => "Store read succeeded",
+            Observation::StoreReadFailed => "Store read failed",
+            Observation::StoreInjectSucceeded => "Store inject succeeded",
+            Observation::StoreInjectFailed => "Store inject failed",
+            Observation::StoreReplaceSucceeded => "Store replace succeeded",
+            Observation::StoreReplaceFailed => "Store replace failed",
+            Observation::StoreDeleteSucceeded => "Store delete succeeded",
+            Observation::StoreDeleteFailed => "Store delete failed",
+            Observation::StoreGlobSucceeded => "Store glob succeeded",
+            Observation::StoreGlobFailed => "Store glob failed",
+            Observation::FanoutArmStarted => "Fanout arm started",
+            Observation::FanoutArmFinished => "Fanout arm finished",
+            Observation::Lua(_) | Observation::Other(_) => return None,
+        };
+        Some(label)
+    }
+}
+
+impl fmt::Display for Observation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Observation::Lua(message) => write!(f, "Lua: {message}"),
+            Observation::Other(message) => f.write_str(message),
+            fixed => f.write_str(fixed.label().unwrap_or_default()),
+        }
+    }
+}
+
+/// Fixed observations emitted by the currently shipped runtime.
+///
+/// These crate-private constants let emit sites name a lifecycle boundary
+/// (`detail::RUN_STARTED`) without repeating the enum path; each is exactly the
+/// matching [`Observation`] variant.
+pub(crate) mod detail {
+    use super::Observation;
+
+    pub(crate) const PARSE_STARTED: Observation = Observation::ParseStarted;
+    pub(crate) const PARSE_SUCCEEDED: Observation = Observation::ParseSucceeded;
+    pub(crate) const PARSE_FAILED: Observation = Observation::ParseFailed;
+    pub(crate) const RUN_STARTED: Observation = Observation::RunStarted;
+    pub(crate) const RUN_SUCCEEDED: Observation = Observation::RunSucceeded;
+    pub(crate) const RUN_FAILED: Observation = Observation::RunFailed;
+    pub(crate) const SECTION_STARTED: Observation = Observation::SectionStarted;
+    pub(crate) const SECTION_FINISHED: Observation = Observation::SectionFinished;
+    pub(crate) const MODEL_TURN_COMPLETED: Observation = Observation::ModelTurnCompleted;
+    pub(crate) const MODEL_TURN_FAILED: Observation = Observation::ModelTurnFailed;
+    pub(crate) const MODEL_TURN_TRUNCATED: Observation = Observation::ModelTurnTruncated;
+    pub(crate) const TOOL_CALL_SUCCEEDED: Observation = Observation::ToolCallSucceeded;
+    pub(crate) const TOOL_CALL_FAILED: Observation = Observation::ToolCallFailed;
+    pub(crate) const LUA_COMPILATION_STARTED: Observation = Observation::LuaCompilationStarted;
+    pub(crate) const LUA_COMPILATION_SUCCEEDED: Observation = Observation::LuaCompilationSucceeded;
+    pub(crate) const LUA_COMPILATION_FAILED: Observation = Observation::LuaCompilationFailed;
+    pub(crate) const LUA_SHARED_LOAD_STARTED: Observation = Observation::LuaSharedLoadStarted;
+    pub(crate) const LUA_SHARED_LOAD_SUCCEEDED: Observation = Observation::LuaSharedLoadSucceeded;
+    pub(crate) const LUA_SHARED_LOAD_FAILED: Observation = Observation::LuaSharedLoadFailed;
+    pub(crate) const LUA_PROLOGUE_STARTED: Observation = Observation::LuaPrologueStarted;
+    pub(crate) const LUA_PROLOGUE_SUCCEEDED: Observation = Observation::LuaPrologueSucceeded;
+    pub(crate) const LUA_PROLOGUE_FAILED: Observation = Observation::LuaPrologueFailed;
+    pub(crate) const LUA_REPLY_BINDING_STARTED: Observation = Observation::LuaReplyBindingStarted;
+    pub(crate) const LUA_REPLY_BINDING_SUCCEEDED: Observation =
+        Observation::LuaReplyBindingSucceeded;
+    pub(crate) const LUA_REPLY_BINDING_FAILED: Observation = Observation::LuaReplyBindingFailed;
+    pub(crate) const LUA_EPILOG_STARTED: Observation = Observation::LuaEpilogStarted;
+    pub(crate) const LUA_EPILOG_SUCCEEDED: Observation = Observation::LuaEpilogSucceeded;
+    pub(crate) const LUA_EPILOG_FAILED: Observation = Observation::LuaEpilogFailed;
+    pub(crate) const LUA_TEARDOWN_STARTED: Observation = Observation::LuaTeardownStarted;
+    pub(crate) const LUA_TEARDOWN_SUCCEEDED: Observation = Observation::LuaTeardownSucceeded;
+    pub(crate) const TOOL_SCOPE_CLOSING: Observation = Observation::ToolScopeClosing;
+    pub(crate) const TOOL_SCOPE_CLOSED: Observation = Observation::ToolScopeClosed;
+    pub(crate) const TOOL_SCOPE_FAILED: Observation = Observation::ToolScopeFailed;
+    pub(crate) const TOOL_SCOPE_VALIDATION_STARTED: Observation =
+        Observation::ToolScopeValidationStarted;
+    pub(crate) const TOOL_SCOPE_VALIDATION_SUCCEEDED: Observation =
+        Observation::ToolScopeValidationSucceeded;
+    pub(crate) const TOOL_SCOPE_VALIDATION_FAILED: Observation =
+        Observation::ToolScopeValidationFailed;
+    pub(crate) const MODEL_SCOPE_CLOSING: Observation = Observation::ModelScopeClosing;
+    pub(crate) const MODEL_SCOPE_CLOSED: Observation = Observation::ModelScopeClosed;
+    pub(crate) const MODEL_SCOPE_FAILED: Observation = Observation::ModelScopeFailed;
+    pub(crate) const STORE_WRITE_SUCCEEDED: Observation = Observation::StoreWriteSucceeded;
+    pub(crate) const STORE_WRITE_FAILED: Observation = Observation::StoreWriteFailed;
+    pub(crate) const STORE_APPEND_SUCCEEDED: Observation = Observation::StoreAppendSucceeded;
+    pub(crate) const STORE_APPEND_FAILED: Observation = Observation::StoreAppendFailed;
+    pub(crate) const STORE_READ_LINES_SUCCEEDED: Observation = Observation::StoreReadLinesSucceeded;
+    pub(crate) const STORE_READ_LINES_FAILED: Observation = Observation::StoreReadLinesFailed;
+    pub(crate) const STORE_READ_SUCCEEDED: Observation = Observation::StoreReadSucceeded;
+    pub(crate) const STORE_READ_FAILED: Observation = Observation::StoreReadFailed;
+    pub(crate) const STORE_INJECT_SUCCEEDED: Observation = Observation::StoreInjectSucceeded;
+    pub(crate) const STORE_INJECT_FAILED: Observation = Observation::StoreInjectFailed;
+    pub(crate) const STORE_REPLACE_SUCCEEDED: Observation = Observation::StoreReplaceSucceeded;
+    pub(crate) const STORE_REPLACE_FAILED: Observation = Observation::StoreReplaceFailed;
+    pub(crate) const STORE_DELETE_SUCCEEDED: Observation = Observation::StoreDeleteSucceeded;
+    pub(crate) const STORE_DELETE_FAILED: Observation = Observation::StoreDeleteFailed;
+    pub(crate) const STORE_GLOB_SUCCEEDED: Observation = Observation::StoreGlobSucceeded;
+    pub(crate) const STORE_GLOB_FAILED: Observation = Observation::StoreGlobFailed;
+    pub(crate) const FANOUT_ARM_STARTED: Observation = Observation::FanoutArmStarted;
+    pub(crate) const FANOUT_ARM_FINISHED: Observation = Observation::FanoutArmFinished;
 }
 
 /// A report-only sink for operational observations.
 ///
 /// The runtime calls [`observe`](Self::observe) synchronously from the task
 /// driving a run, so implementations must be `Send + Sync`, non-blocking, and
-/// non-panicking. A forwarding implementation should copy the borrowed strings
-/// into a queue and return rather than awaiting or performing I/O. Concrete
+/// non-panicking. A forwarding implementation should copy the observation into
+/// a queue and return rather than awaiting or performing I/O. Concrete
 /// observers own synchronization; core provides no global observer lock and
 /// holds no observer-owned guard across an await.
 ///
@@ -166,31 +336,30 @@ pub mod detail {
 /// ```
 /// use std::sync::atomic::{AtomicUsize, Ordering};
 ///
-/// use promptforge_core::observe::Observer;
+/// use promptforge_core::observe::{Observation, Observer};
 ///
 /// #[derive(Default)]
 /// struct Counter(AtomicUsize);
 ///
 /// impl Observer for Counter {
-///     fn observe(&self, _execution: &str, _section: &str, _detail: &str) {
+///     fn observe(&self, _execution: &str, _section: &str, _event: Observation) {
 ///         self.0.fetch_add(1, Ordering::Relaxed);
 ///     }
 /// }
 ///
 /// let counter = Counter::default();
-/// counter.observe("example-run", "Gather", "Section finished");
+/// counter.observe("example-run", "Gather", Observation::SectionFinished);
 /// assert_eq!(counter.0.load(Ordering::Relaxed), 1);
 /// ```
 pub trait Observer: Send + Sync {
-    /// Reports one deterministic statement for `execution` and `section`.
+    /// Reports one typed [`Observation`] for `execution` and `section`.
     ///
-    /// Fixed runtime reports contain no payloads or secrets. The only
-    /// author-controlled detail is a constrained `Lua: <message>` checkpoint;
-    /// prompt authors must never put arguments, replies, tool data,
-    /// credentials, paths, or store contents in it. Reports must not affect any
-    /// execution decision. Implementations must return promptly and must not
-    /// panic.
-    fn observe(&self, execution: &str, section: &str, detail: &str);
+    /// Fixed runtime observations carry no payloads or secrets. The only
+    /// author-controlled variant is [`Observation::Lua`]; prompt authors must
+    /// never put arguments, replies, tool data, credentials, paths, or store
+    /// contents in it. Reports must not affect any execution decision.
+    /// Implementations must return promptly and must not panic.
+    fn observe(&self, execution: &str, section: &str, event: Observation);
 }
 
 /// An [`Observer`] that discards every observation.
@@ -200,16 +369,16 @@ pub trait Observer: Send + Sync {
 ///
 /// # Examples
 /// ```
-/// use promptforge_core::observe::{NullObserver, Observer};
+/// use promptforge_core::observe::{Observation, NullObserver, Observer};
 ///
 /// let observer = NullObserver;
-/// observer.observe("example-run", "Example prompt", "Run succeeded");
+/// observer.observe("example-run", "Example prompt", Observation::RunSucceeded);
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NullObserver;
 
 impl Observer for NullObserver {
-    fn observe(&self, _execution: &str, _section: &str, _detail: &str) {}
+    fn observe(&self, _execution: &str, _section: &str, _event: Observation) {}
 }
 
 #[cfg(test)]
@@ -221,10 +390,23 @@ mod tests {
     #[test]
     fn null_observer_accepts_reports() {
         let observer = NullObserver;
-        observer.observe("example-run", "Prompt", "Run started");
-        observer.observe("example-run", "Gather", "Section started");
-        observer.observe("example-run", "Gather", "Section finished");
-        observer.observe("example-run", "Prompt", "Run succeeded");
+        observer.observe("example-run", "Prompt", Observation::RunStarted);
+        observer.observe("example-run", "Gather", Observation::SectionStarted);
+        observer.observe("example-run", "Gather", Observation::SectionFinished);
+        observer.observe("example-run", "Prompt", Observation::RunSucceeded);
+    }
+
+    #[test]
+    fn display_renders_stable_strings() {
+        assert_eq!(Observation::RunStarted.to_string(), "Run started");
+        assert_eq!(
+            Observation::StoreReadLinesSucceeded.to_string(),
+            "Store read_lines succeeded"
+        );
+        assert_eq!(Observation::Lua("hi".to_owned()).to_string(), "Lua: hi");
+        assert_eq!(Observation::Other("x".to_owned()).to_string(), "x");
+        assert_eq!(Observation::RunStarted.label(), Some("Run started"));
+        assert_eq!(Observation::Lua("hi".to_owned()).label(), None);
     }
 
     #[test]
@@ -233,20 +415,20 @@ mod tests {
         assert_send_sync::<dyn Observer>();
 
         let observer: &dyn Observer = &NullObserver;
-        observer.observe("example-run", "Gather", "Section finished");
+        observer.observe("example-run", "Gather", Observation::SectionFinished);
     }
 
     #[test]
     fn mutex_recorder_keeps_interleaved_execution_ids_ordered() {
         #[derive(Default)]
-        struct Recorder(Mutex<Vec<(String, String, String)>>);
+        struct Recorder(Mutex<Vec<(String, String, Observation)>>);
 
         impl Observer for Recorder {
-            fn observe(&self, execution: &str, section: &str, detail: &str) {
+            fn observe(&self, execution: &str, section: &str, event: Observation) {
                 self.0
                     .lock()
                     .expect("recorder mutex must remain usable")
-                    .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+                    .push((execution.to_owned(), section.to_owned(), event));
             }
         }
 
@@ -283,22 +465,22 @@ mod tests {
                 (
                     "execution-a".to_owned(),
                     "First".to_owned(),
-                    detail::SECTION_STARTED.to_owned(),
+                    Observation::SectionStarted,
                 ),
                 (
                     "execution-b".to_owned(),
                     "Second".to_owned(),
-                    detail::SECTION_STARTED.to_owned(),
+                    Observation::SectionStarted,
                 ),
                 (
                     "execution-a".to_owned(),
                     "First".to_owned(),
-                    detail::SECTION_FINISHED.to_owned(),
+                    Observation::SectionFinished,
                 ),
                 (
                     "execution-b".to_owned(),
                     "Second".to_owned(),
-                    detail::SECTION_FINISHED.to_owned(),
+                    Observation::SectionFinished,
                 ),
             ]
         );

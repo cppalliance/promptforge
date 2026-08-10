@@ -40,7 +40,7 @@ use crate::lua_models::{
     ModelBindingState, ModelRuntime, close_model_scope, install_h2_models, install_live_models,
 };
 use crate::model::{ModelBinding, ModelBindings, ModelResolver};
-use crate::observe::{Observer, detail};
+use crate::observe::{Observation, Observer, detail};
 use crate::resolve::RuntimeResolution;
 use crate::store::StoreRef;
 use crate::tools::{ToolId, ToolRegistry};
@@ -50,8 +50,6 @@ use crate::{Error, Result};
 const HOOK_INTERVAL: u32 = 10_000;
 /// Maximum number of hook firings before a block is aborted (~1e7 instructions).
 const HOOK_BUDGET: u64 = 1_000;
-/// Observer-detail prefix for the one intentionally author-controlled report.
-const LUA_LOG_PREFIX: &str = "Lua: ";
 /// Maximum number of Unicode scalar values accepted by `log`.
 const LUA_LOG_CHARACTER_LIMIT: usize = 256;
 
@@ -2515,8 +2513,7 @@ fn install_log<'scope, 'env: 'scope>(
                     "log message must not contain newline or control characters",
                 ));
             }
-            let detail = format!("{LUA_LOG_PREFIX}{message}");
-            observer.observe(execution, section, &detail);
+            observer.observe(execution, section, Observation::Lua(message.to_owned()));
             Ok(())
         })
         .map_err(|error| Error::Lua(error.to_string()))?;
@@ -2566,8 +2563,8 @@ fn observe_store_result(
     observer: &dyn Observer,
     section: &str,
     succeeded: bool,
-    success: &'static str,
-    failure: &'static str,
+    success: Observation,
+    failure: Observation,
 ) {
     observer.observe(
         execution,

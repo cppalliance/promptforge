@@ -21,7 +21,7 @@ use crate::client::GatewayClient;
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::lua::{LuaFanoutResult, LuaProgram, SectionVm, ToolBindings};
 use crate::model::ModelBindings;
-use crate::observe::{Observer, detail};
+use crate::observe::{Observation, Observer, detail};
 use crate::parser::Section;
 use crate::store::StoreRef;
 use crate::tools::SharedTools;
@@ -101,7 +101,7 @@ pub(crate) async fn run_fanout_arms(
     ctx: &FanoutContext<'_>,
 ) -> Result<Vec<LuaFanoutResult>> {
     let turns = Arc::new(AtomicU32::new(0));
-    let (observe_tx, mut observe_rx) = mpsc::unbounded_channel::<(String, String)>();
+    let (observe_tx, mut observe_rx) = mpsc::unbounded_channel::<(String, Observation)>();
     let (debug_tx, mut debug_rx) = mpsc::unbounded_channel::<DebugMsg>();
     let proxy_observer = Arc::new(ProxyObserver { tx: observe_tx });
     let proxy_debug = ctx.debug.map(|_| {
@@ -160,8 +160,8 @@ pub(crate) async fn run_fanout_arms(
                 abort_fanout_arms(&mut join_set, ctx, &mut observe_rx, &mut debug_rx).await;
                 return Err(Error::Interrupted);
             }
-            Some((section, detail)) = observe_rx.recv() => {
-                ctx.observer.observe(ctx.execution, &section, &detail);
+            Some((section, event)) = observe_rx.recv() => {
+                ctx.observer.observe(ctx.execution, &section, event);
             }
             Some(msg) = debug_rx.recv() => {
                 if let Some(capture) = ctx.debug {
@@ -210,7 +210,7 @@ pub(crate) async fn run_fanout_arms(
 async fn abort_fanout_arms(
     join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>,
     ctx: &FanoutContext<'_>,
-    observe_rx: &mut mpsc::UnboundedReceiver<(String, String)>,
+    observe_rx: &mut mpsc::UnboundedReceiver<(String, Observation)>,
     debug_rx: &mut mpsc::UnboundedReceiver<DebugMsg>,
 ) {
     join_set.abort_all();
@@ -220,11 +220,11 @@ async fn abort_fanout_arms(
 
 fn drain_side_channels(
     ctx: &FanoutContext<'_>,
-    observe_rx: &mut mpsc::UnboundedReceiver<(String, String)>,
+    observe_rx: &mut mpsc::UnboundedReceiver<(String, Observation)>,
     debug_rx: &mut mpsc::UnboundedReceiver<DebugMsg>,
 ) {
-    while let Ok((section, detail)) = observe_rx.try_recv() {
-        ctx.observer.observe(ctx.execution, &section, &detail);
+    while let Ok((section, event)) = observe_rx.try_recv() {
+        ctx.observer.observe(ctx.execution, &section, event);
     }
     while let Ok(msg) = debug_rx.try_recv() {
         if let Some(capture) = ctx.debug {
@@ -257,13 +257,13 @@ struct ArmPayload {
 }
 
 struct ProxyObserver {
-    tx: mpsc::UnboundedSender<(String, String)>,
+    tx: mpsc::UnboundedSender<(String, Observation)>,
 }
 
 impl Observer for ProxyObserver {
-    fn observe(&self, _execution: &str, section: &str, detail: &str) {
+    fn observe(&self, _execution: &str, section: &str, event: Observation) {
         // Parent may already have returned after fail-fast drain/drop.
-        let _ = self.tx.send((section.to_owned(), detail.to_owned()));
+        let _ = self.tx.send((section.to_owned(), event));
     }
 }
 
