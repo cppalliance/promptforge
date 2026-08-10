@@ -358,6 +358,7 @@ fn attach_infer_hook(
     client: &GatewayClient,
     shared_tools: &SharedTools,
     store: &StoreRef,
+    observer: Arc<dyn Observer>,
     execution: &str,
     section: &str,
     max_tool_iterations: usize,
@@ -370,10 +371,9 @@ fn attach_infer_hook(
         client: client.clone(),
         shared_tools: shared_tools.clone(),
         store: store.clone(),
-        // Section lifecycle still uses the borrowed observer; infer reports
-        // through a shared handle. Null keeps the seam Send+'static without
-        // changing RunOptions.
-        observer: Arc::new(NullObserver),
+        // The run's owned observer reaches the nested `model:infer` hook, so
+        // observations from nested inference are not lost (observe F1).
+        observer,
         execution: execution.to_owned(),
         section: section.to_owned(),
         max_tool_iterations,
@@ -693,7 +693,8 @@ pub async fn run(
         limits,
     } = config;
     let execution = execution.as_str();
-    let observer = observer.as_ref();
+    let observer_arc = observer;
+    let observer = observer_arc.as_ref();
     let debug = debug.as_deref();
     let client =
         client.map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
@@ -712,6 +713,7 @@ pub async fn run(
             store,
             execution,
             observer,
+            &observer_arc,
             client.as_ref(),
             debug,
             limits,
@@ -734,6 +736,7 @@ pub async fn run(
             store,
             execution,
             observer,
+            &observer_arc,
             client,
             debug,
             limits,
@@ -847,6 +850,7 @@ async fn execute_live_h1(
     store: &StoreRef,
     execution: &str,
     observer: &dyn Observer,
+    observer_arc: &Arc<dyn Observer>,
     client: Option<&GatewayClient>,
     debug: Option<&dyn DebugCapture>,
     limits: RunLimits,
@@ -885,6 +889,7 @@ async fn execute_live_h1(
             infer_client,
             shared_tools,
             store,
+            Arc::clone(observer_arc),
             execution,
             &prompt.title,
             prompt
@@ -1040,6 +1045,7 @@ async fn run_sections(
     store: &StoreRef,
     execution: &str,
     observer: &dyn Observer,
+    observer_arc: &Arc<dyn Observer>,
     mut client: Option<GatewayClient>,
     debug: Option<&dyn DebugCapture>,
     limits: RunLimits,
@@ -1102,6 +1108,7 @@ async fn run_sections(
                 infer_client,
                 shared_tools,
                 store,
+                Arc::clone(observer_arc),
                 execution,
                 &section.name,
                 max_tool_iterations,
@@ -1136,6 +1143,7 @@ async fn run_sections(
                         args,
                         execution,
                         observer,
+                        observer_arc,
                         debug,
                         prompt.replay.as_ref(),
                         bindings,
@@ -1371,6 +1379,7 @@ fn run_section_lua(
     args: &str,
     execution: &str,
     observer: &dyn Observer,
+    observer_arc: &Arc<dyn Observer>,
     debug: Option<&dyn DebugCapture>,
     shared: Option<&crate::lua::LuaProgram>,
     bindings: &ToolBindings,
@@ -1441,6 +1450,7 @@ fn run_section_lua(
     let exec_sections = top_sections.to_vec();
     let exec_turns = Arc::clone(turns);
     let exec_analysis = analysis.clone();
+    let exec_observer = Arc::clone(observer_arc);
     let execute_callback =
         move |target: LuaValue, input: Option<String>| -> std::result::Result<String, String> {
             let heading = resolve_section_target(target).map_err(|e| e.to_string())?;
@@ -1460,6 +1470,7 @@ fn run_section_lua(
                     &exec_store,
                     &exec_execution,
                     observer,
+                    &exec_observer,
                     debug,
                     exec_shared.as_ref(),
                     &exec_bindings,
@@ -1562,6 +1573,7 @@ async fn run_execute_section(
     store: &StoreRef,
     execution: &str,
     observer: &dyn Observer,
+    observer_arc: &Arc<dyn Observer>,
     debug: Option<&dyn DebugCapture>,
     shared: Option<&crate::lua::LuaProgram>,
     bindings: &ToolBindings,
@@ -1608,6 +1620,7 @@ async fn run_execute_section(
             infer_client,
             shared_tools,
             store,
+            Arc::clone(observer_arc),
             execution,
             &section.name,
             max_tool_iterations,
@@ -1642,6 +1655,7 @@ async fn run_execute_section(
                     args,
                     execution,
                     observer,
+                    observer_arc,
                     debug,
                     shared,
                     bindings,
