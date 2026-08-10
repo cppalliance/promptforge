@@ -465,9 +465,7 @@ impl GatewayClient {
             .dialect_registry
             .get(options.tool_dialect)
             .ok_or(Error::UnknownDialect(options.tool_dialect))?;
-        let mut dr = DialectRequest {
-            body: &mut request_body,
-        };
+        let mut dr = DialectRequest::new(&mut request_body);
         dialect.prepare_request(&mut dr)?;
 
         let response = http

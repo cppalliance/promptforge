@@ -85,14 +85,36 @@ impl ToolDialect for Gemma3ToolCodeDialect {
 
     /// Emulate tools: copy schemas into a leading system guide, then strip the
     /// native OpenAI `tools` / `tool_choice` fields Gemma rejects.
+    ///
+    /// The complete guide is validated and built *before* any mutation, so an
+    /// invalid request shape (non-object body, non-array `messages` or `tools`)
+    /// returns a preparation error instead of a silently half-mutated success.
+    ///
+    /// # Errors
+    /// Returns [`Error::MalformedResponse`] when the request body is not a JSON
+    /// object, or when `messages` or `tools` is present but not an array.
     fn prepare_request(&self, request: &mut DialectRequest<'_>) -> Result<()> {
-        let Some(obj) = request.body.as_object_mut() else {
-            return Ok(());
+        request.validate_shape()?;
+
+        // Build the guide first; only a validated, fully-built guide is applied.
+        let guide = match request.get("tools") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(tools)) => render_tool_guide(tools),
+            Some(_) => {
+                return Err(Error::MalformedResponse(
+                    "request `tools` was present but not an array".into(),
+                ));
+            }
         };
-        let tools = obj.remove("tools");
-        obj.remove("tool_choice");
-        if let Some(tools) = tools.as_ref() {
-            inject_tool_guide(obj, tools);
+
+        // Validation passed: mutate atomically.
+        request.remove("tools")?;
+        request.remove("tool_choice")?;
+        if let Some(guide) = guide {
+            request.prepend_message(serde_json::json!({
+                "role": "system",
+                "content": guide,
+            }))?;
         }
         Ok(())
     }
@@ -549,28 +571,12 @@ fn positional_arg_keys(tool_name: &str, count: usize) -> Option<&'static [&'stat
     }
 }
 
-/// Build a system guide from OpenAI-shaped `tools` and prepend it to messages.
-fn inject_tool_guide(body: &mut Map<String, Value>, tools: &Value) {
-    let Some(guide) = render_tool_guide(tools) else {
-        return;
-    };
-    let messages = body
-        .entry("messages")
-        .or_insert_with(|| Value::Array(Vec::new()));
-    let Some(list) = messages.as_array_mut() else {
-        return;
-    };
-    list.insert(
-        0,
-        serde_json::json!({
-            "role": "system",
-            "content": guide,
-        }),
-    );
-}
-
-fn render_tool_guide(tools: &Value) -> Option<String> {
-    let list = tools.as_array().filter(|list| !list.is_empty())?;
+/// Render a system guide from OpenAI-shaped `tools`, or `None` when the list is
+/// empty or lists no usable tool.
+fn render_tool_guide(list: &[Value]) -> Option<String> {
+    if list.is_empty() {
+        return None;
+    }
     let mut lines = Vec::new();
     lines.push(
         "You call tools by emitting a sole ```tool_code fence (no other prose) \
@@ -1118,7 +1124,7 @@ mod tests {
             }],
             "tool_choice": "auto"
         });
-        let mut req = DialectRequest { body: &mut body };
+        let mut req = DialectRequest::new(&mut body);
         dialect.prepare_request(&mut req).unwrap();
         assert!(body.get("tools").is_none());
         assert!(body.get("tool_choice").is_none());
@@ -1130,6 +1136,29 @@ mod tests {
         assert!(guide.contains("search(query=...)"));
         assert!(guide.contains("```tool_code"));
         assert_eq!(messages[1]["role"], "user");
+    }
+
+    #[test]
+    fn prepare_request_rejects_invalid_shapes() {
+        let dialect = Gemma3ToolCodeDialect;
+
+        // Non-object body.
+        let mut body = serde_json::json!([1, 2, 3]);
+        let mut req = DialectRequest::new(&mut body);
+        assert!(dialect.prepare_request(&mut req).is_err());
+
+        // Non-array messages.
+        let mut body = serde_json::json!({ "messages": "oops", "tools": [] });
+        let mut req = DialectRequest::new(&mut body);
+        assert!(dialect.prepare_request(&mut req).is_err());
+        // Body must be untouched on failure (validated before mutating).
+        assert!(body.get("tools").is_some(), "no mutation on rejected shape");
+
+        // Non-array tools.
+        let mut body = serde_json::json!({ "messages": [], "tools": {} });
+        let mut req = DialectRequest::new(&mut body);
+        assert!(dialect.prepare_request(&mut req).is_err());
+        assert!(body.get("tools").is_some(), "no mutation on rejected shape");
     }
 
     #[test]
@@ -1230,7 +1259,7 @@ mod tests {
                 }
             }]
         });
-        let mut req = DialectRequest { body: &mut body };
+        let mut req = DialectRequest::new(&mut body);
         dialect.prepare_request(&mut req).unwrap();
         let guide = body["messages"][0]["content"].as_str().unwrap();
         assert!(

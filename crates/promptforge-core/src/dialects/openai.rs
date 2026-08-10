@@ -112,7 +112,7 @@ mod tests {
     fn prepare_request_is_identity() {
         let dialect = OpenAiDialect;
         let mut body = serde_json::json!({"model": "gpt-4", "messages": []});
-        let mut req = DialectRequest { body: &mut body };
+        let mut req = DialectRequest::new(&mut body);
         dialect.prepare_request(&mut req).unwrap();
         assert_eq!(body["model"], "gpt-4");
     }

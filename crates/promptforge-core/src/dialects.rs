@@ -253,11 +253,78 @@ pub(crate) struct DetectScore(pub(crate) u8);
 /// Mutable view of a request under construction, passed to
 /// [`ToolDialect::prepare_request`] so a dialect can reshape the payload.
 ///
-/// Intentionally opaque for now; step 2 will add fields.
+/// The body is private: a dialect reshapes it only through the narrow,
+/// validated operations below, so a malformed (non-object) request cannot be
+/// silently mutated into a success and every reshape either applies cleanly or
+/// returns a preparation error.
 #[derive(Debug)]
 pub(crate) struct DialectRequest<'a> {
-    /// The request JSON body being assembled.
-    pub(crate) body: &'a mut Value,
+    body: &'a mut Value,
+}
+
+impl<'a> DialectRequest<'a> {
+    /// Wrap a request body under construction.
+    pub(crate) fn new(body: &'a mut Value) -> DialectRequest<'a> {
+        DialectRequest { body }
+    }
+
+    /// Borrow the body as a JSON object, or fail if the request is not one.
+    fn object_mut(&mut self) -> Result<&mut serde_json::Map<String, Value>> {
+        self.body
+            .as_object_mut()
+            .ok_or_else(|| Error::MalformedResponse("request body was not a JSON object".into()))
+    }
+
+    /// Validate that the body is a JSON object and, if present, `messages` is an
+    /// array. Call before mutating so an invalid shape is rejected, not mutated.
+    ///
+    /// # Errors
+    /// Returns [`Error::MalformedResponse`] when the body is not an object or
+    /// `messages` is present but not an array.
+    pub(crate) fn validate_shape(&mut self) -> Result<()> {
+        let obj = self.object_mut()?;
+        if let Some(messages) = obj.get("messages")
+            && !messages.is_array()
+        {
+            return Err(Error::MalformedResponse(
+                "request `messages` was present but not an array".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Read a top-level field without removing it.
+    pub(crate) fn get(&self, key: &str) -> Option<&Value> {
+        self.body.get(key)
+    }
+
+    /// Remove a top-level field, returning its prior value if present.
+    ///
+    /// # Errors
+    /// Returns [`Error::MalformedResponse`] when the body is not a JSON object.
+    pub(crate) fn remove(&mut self, key: &str) -> Result<Option<Value>> {
+        Ok(self.object_mut()?.remove(key))
+    }
+
+    /// Insert `message` at the front of the `messages` array (creating it when
+    /// absent).
+    ///
+    /// # Errors
+    /// Returns [`Error::MalformedResponse`] when the body is not a JSON object
+    /// or `messages` is present but not an array.
+    pub(crate) fn prepend_message(&mut self, message: Value) -> Result<()> {
+        let obj = self.object_mut()?;
+        let messages = obj
+            .entry("messages")
+            .or_insert_with(|| Value::Array(Vec::new()));
+        let Some(list) = messages.as_array_mut() else {
+            return Err(Error::MalformedResponse(
+                "request `messages` was present but not an array".into(),
+            ));
+        };
+        list.insert(0, message);
+        Ok(())
+    }
 }
 
 /// A tool-calling dialect that knows how to prepare requests, parse turns, and
