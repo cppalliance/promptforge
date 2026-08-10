@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-pub mod web_search;
+mod web_search;
 
 pub use web_search::WebSearch;
 

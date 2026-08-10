@@ -130,7 +130,7 @@ impl RunError {
             Error::ToolLoopExhausted
             | Error::OutOfScopeToolCall { .. }
             | Error::UnknownScopedTool(_)
-            | Error::Tool(_) => RunErrorKind::Tool,
+            | Error::Tool { .. } => RunErrorKind::Tool,
             Error::Bind { .. }
             | Error::Absent { .. }
             | Error::Duplicate { .. }
@@ -2295,10 +2295,6 @@ pub(crate) async fn run_prose_inference(
         } => max_tool_iterations,
     };
 
-    // One nonce per prose-inference invocation tags every untrusted result's
-    // guard block, so the close tag is unguessable by any fetched content.
-    let nonce = untrusted::nonce();
-
     for _ in 0..max_tool_iterations {
         let completion = tokio::select! {
             biased;
@@ -2391,12 +2387,15 @@ pub(crate) async fn run_prose_inference(
                             detail::TOOL_CALL_FAILED
                         },
                     );
-                    let output = call_result.map_err(|error| Error::Tool(error.to_string()))?;
+                    let output = call_result.map_err(Error::tool)?;
                     // Trust travels with the output: an untrusted result is
-                    // nonce-wrapped before it can reach the next model turn.
+                    // nonce-wrapped before it can reach the next model turn. A
+                    // FRESH CSPRNG nonce is drawn per wrap so a guard tag is
+                    // never reused across tool results or rounds; reuse would let
+                    // content seen under one nonce forge a later block's close tag.
                     let result = match output.trust() {
                         crate::tools::OutputTrust::Untrusted => {
-                            untrusted::wrap(output.text(), &nonce)
+                            untrusted::wrap(output.text(), &untrusted::nonce())
                         }
                         crate::tools::OutputTrust::Trusted => output.text().to_owned(),
                     };

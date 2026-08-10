@@ -239,6 +239,64 @@ pub enum ModelCatalogError {
     },
 }
 
+/// The largest sampling temperature the backend accepts.
+const TEMPERATURE_MAX: f64 = 2.0;
+
+/// A validated sampling temperature: finite and within `[0.0, 2.0]`.
+///
+/// Building a [`Temperature`] is the only in-crate way to place a temperature
+/// into a request, so a `NaN`, an infinity, or an out-of-range value is
+/// unrepresentable rather than serialized into a backend-invalid request.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Temperature(f64);
+
+impl Temperature {
+    /// Builds a temperature, rejecting non-finite and out-of-range values.
+    ///
+    /// # Errors
+    /// Returns [`TemperatureError`] when `value` is not finite or falls outside
+    /// `[0.0, 2.0]`.
+    pub(crate) fn new(value: f64) -> std::result::Result<Temperature, TemperatureError> {
+        if !value.is_finite() {
+            return Err(TemperatureError::NotFinite);
+        }
+        if !(0.0..=TEMPERATURE_MAX).contains(&value) {
+            return Err(TemperatureError::OutOfRange { value });
+        }
+        Ok(Temperature(value))
+    }
+
+    /// Returns the validated value.
+    #[must_use]
+    pub(crate) fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl TryFrom<f64> for Temperature {
+    type Error = TemperatureError;
+
+    fn try_from(value: f64) -> std::result::Result<Temperature, TemperatureError> {
+        Temperature::new(value)
+    }
+}
+
+/// The reason a sampling temperature was rejected.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[non_exhaustive]
+pub enum TemperatureError {
+    /// The temperature was `NaN` or an infinity.
+    #[error("temperature must be finite")]
+    NotFinite,
+    /// The temperature fell outside the supported `[0.0, 2.0]` range.
+    #[error("temperature {value} is outside the supported range [0.0, 2.0]")]
+    #[non_exhaustive]
+    OutOfRange {
+        /// The rejected value.
+        value: f64,
+    },
+}
+
 /// Whether a catalogued model can emit thinking tokens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -520,11 +578,18 @@ impl CompletionOptions {
         }
     }
 
-    /// Sets the sampling temperature.
-    #[must_use]
-    pub fn with_temperature(mut self, temperature: f64) -> CompletionOptions {
-        self.temperature = Some(temperature);
-        self
+    /// Sets the sampling temperature after validating it is finite and within
+    /// the backend-supported range `[0.0, 2.0]`.
+    ///
+    /// # Errors
+    /// Returns [`TemperatureError`] when `temperature` is not finite or falls
+    /// outside `[0.0, 2.0]`, so an invalid temperature never reaches the wire.
+    pub fn with_temperature(
+        mut self,
+        temperature: f64,
+    ) -> std::result::Result<CompletionOptions, TemperatureError> {
+        self.temperature = Some(Temperature::new(temperature)?.get());
+        Ok(self)
     }
 
     /// Sets the maximum generation tokens.
@@ -1907,10 +1972,60 @@ mod tests {
         // `CompletionOptions` carries an `Option<f64>` temperature, so it must
         // not implement `Eq`: a NaN temperature is not equal to itself, which
         // would violate the reflexivity `Eq` promises. This test would fail to
-        // compile if `Eq` were (re)added, and fails at runtime if the field were
-        // ever coerced into a total-equality comparison.
-        let options = CompletionOptions::new("m", ToolDialectId::OpenAi).with_temperature(f64::NAN);
+        // compile if `Eq` were (re)added. A NaN cannot enter through the public
+        // validated setter, so the field is set directly (in-crate) to prove the
+        // soundness reason `Eq` is withheld.
+        let options = CompletionOptions {
+            model: "m".to_owned(),
+            temperature: Some(f64::NAN),
+            max_tokens: None,
+            thinking: None,
+            tool_dialect: ToolDialectId::OpenAi,
+        };
         assert_ne!(options, options.clone());
+    }
+
+    #[test]
+    fn with_temperature_rejects_non_finite_and_out_of_range() {
+        let base = || CompletionOptions::new("m", ToolDialectId::OpenAi);
+        assert_eq!(
+            base().with_temperature(f64::NAN),
+            Err(TemperatureError::NotFinite)
+        );
+        assert_eq!(
+            base().with_temperature(f64::INFINITY),
+            Err(TemperatureError::NotFinite)
+        );
+        assert!(matches!(
+            base().with_temperature(-0.1),
+            Err(TemperatureError::OutOfRange { .. })
+        ));
+        assert!(matches!(
+            base().with_temperature(2.5),
+            Err(TemperatureError::OutOfRange { .. })
+        ));
+        // The range endpoints and an interior value are accepted.
+        assert_eq!(
+            base()
+                .with_temperature(0.0)
+                .expect("0.0 is valid")
+                .temperature,
+            Some(0.0)
+        );
+        assert_eq!(
+            base()
+                .with_temperature(TEMPERATURE_MAX)
+                .expect("2.0 is valid")
+                .temperature,
+            Some(TEMPERATURE_MAX)
+        );
+        assert_eq!(
+            base()
+                .with_temperature(0.7)
+                .expect("0.7 is valid")
+                .temperature,
+            Some(0.7)
+        );
     }
 
     #[test]

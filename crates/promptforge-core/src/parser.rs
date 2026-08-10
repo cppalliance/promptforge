@@ -102,7 +102,12 @@ impl From<ParseError> for Error {
 }
 
 /// The parsed frontmatter of a prompt file.
+///
+/// Unknown keys are rejected (`deny_unknown_fields`): a misspelled or
+/// unsupported frontmatter field is a prompt authoring error, so it fails at
+/// parse rather than being silently ignored.
 #[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Frontmatter {
     /// The prompt's identifier, supplied explicitly by a caller.
@@ -1075,6 +1080,16 @@ fn build_sections(
             Vec::new()
         };
 
+        // Sibling sections must have unique names: sections are addressed by
+        // name (jumps, lookups), so two siblings sharing a name would make the
+        // target ambiguous. Reject the duplicate at parse rather than silently
+        // resolving to the first match.
+        if result.iter().any(|sibling: &Section| sibling.name == name) {
+            return Err(Error::Parse(format!(
+                "duplicate sibling section name `{name}`: sibling section names must be unique"
+            )));
+        }
+
         result.push(Section {
             name,
             level,
@@ -1738,6 +1753,41 @@ Prose for the second section.\n";
         assert!(
             Prompt::parse(src, "test", &NullObserver).is_err(),
             "an H4 top-level section must be rejected"
+        );
+    }
+
+    #[test]
+    fn unknown_frontmatter_field_is_rejected() {
+        let src =
+            "---\nname: x\ndescription: d\nnot_a_real_field: 1\n---\n\n# T\n\n## S\n\np\n";
+        let err = Prompt::parse(src, "test", &NullObserver)
+            .expect_err("an unknown frontmatter field must be rejected");
+        assert!(
+            err.to_string().contains("not_a_real_field")
+                || err.to_string().contains("unknown field"),
+            "expected an unknown-field error, got: {err}"
+        );
+        // A known-field-only frontmatter still parses.
+        let ok = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
+        assert!(Prompt::parse(ok, "test", &NullObserver).is_ok());
+    }
+
+    #[test]
+    fn duplicate_sibling_section_names_are_rejected() {
+        // Two H2 siblings named `S` are ambiguous section targets.
+        let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\na\n\n## S\n\nb\n";
+        let err = Prompt::parse(src, "test", &NullObserver)
+            .expect_err("duplicate sibling section names must be rejected");
+        assert!(
+            err.to_string().contains("duplicate sibling section name"),
+            "expected a duplicate-sibling error, got: {err}"
+        );
+
+        // The same name under DIFFERENT parents (not siblings) is allowed.
+        let ok = "---\nname: x\ndescription: d\n---\n\n# T\n\n## A\n\na\n\n### S\n\nx\n\n## B\n\nb\n\n### S\n\ny\n";
+        assert!(
+            Prompt::parse(ok, "test", &NullObserver).is_ok(),
+            "the same name under different parents is not a sibling collision"
         );
     }
 

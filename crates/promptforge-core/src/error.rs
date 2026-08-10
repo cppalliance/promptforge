@@ -304,18 +304,32 @@ pub(crate) enum Error {
 
     /// A dispatched [`crate::tools::Tool`] returned a model-safe failure.
     ///
-    /// Transitional during the API redesign: the orchestration boundary error
-    /// (`RunError`) will carry the narrow [`crate::tools::ToolError`] behind a
-    /// `#[source]` classifier once `execute` is migrated off the crate-wide
-    /// `Error`.
-    #[error("tool call failed: {0}")]
-    Tool(String),
+    /// The tool's own [`crate::tools::ToolError`] is preserved as the
+    /// `#[source]` cause, so the failure chain (and any transport/parse error the
+    /// tool wrapped) survives instead of being flattened to a string.
+    #[error("tool call failed: {message}")]
+    Tool {
+        /// The tool's model-safe failure message.
+        message: String,
+        /// The originating tool error, kept as the cause.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 impl Error {
     /// Wrap a transport-layer error, hiding its concrete type from the API.
     pub(crate) fn http(source: reqwest::Error) -> Error {
         Error::Http(Box::new(source))
+    }
+
+    /// Wrap a tool failure, preserving the tool's own error as the `#[source]`
+    /// cause rather than discarding it.
+    pub(crate) fn tool(source: crate::tools::ToolError) -> Error {
+        Error::Tool {
+            message: source.to_string(),
+            source: Box::new(source),
+        }
     }
 }
 

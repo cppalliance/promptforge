@@ -19,8 +19,11 @@ use super::{DetectScore, DialectEvidence, DialectRequest, ToolDialect, ToolDiale
 
 /// The Gemma-3 `tool_code` fence dialect.
 ///
-/// - `detect`: scores when `supports_tool_calls == Some(false)` combined with
-///   Gemma template or model-id fingerprints.
+/// - `detect`: never matches an endpoint with explicit native tool-call support
+///   (`supports_tool_calls == Some(true)`); otherwise it scores a Gemma-
+///   fingerprinted model (template, model-id, or source), adding weight for an
+///   explicit `Some(false)`. Unknown capability plus a Gemma fingerprint still
+///   scores, since Gemma via llama.cpp never emits native `tool_calls`.
 /// - `prepare_request`: copies tool schemas into a system guide, then strips
 ///   `tools` / `tool_choice` (Gemma rejects the native OpenAI tool array).
 /// - `parse_turn`: recognizes sole `tool_code` fences and fenced JSON
@@ -502,10 +505,25 @@ fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCall>> {
             .and_then(Value::as_str)
             .ok_or_else(|| Error::MalformedResponse("tool call had no name".into()))?
             .to_string();
-        let arguments = match function.get("arguments").and_then(Value::as_str) {
-            Some(raw_args) => serde_json::from_str::<Value>(raw_args)
-                .unwrap_or_else(|_| Value::String(raw_args.to_string())),
-            None => Value::Null,
+        // OpenAI encodes `function.arguments` as a JSON string. A missing or
+        // JSON-null field means "no arguments"; anything else must parse as JSON
+        // or the turn is malformed. Coercing invalid JSON into a string `Value`
+        // (the old behavior) would hand the tool arguments it never agreed to
+        // accept, so it is rejected instead.
+        let arguments = match function.get("arguments") {
+            None | Some(Value::Null) => Value::Null,
+            Some(Value::String(raw_args)) => {
+                serde_json::from_str::<Value>(raw_args).map_err(|error| {
+                    Error::MalformedResponse(format!(
+                        "tool call arguments were not valid JSON: {error}"
+                    ))
+                })?
+            }
+            Some(_) => {
+                return Err(Error::MalformedResponse(
+                    "tool call arguments were not a JSON-encoded string".into(),
+                ));
+            }
         };
         calls.push(ToolCall {
             id,
@@ -740,6 +758,61 @@ mod tests {
             }
             CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
         }
+    }
+
+    #[test]
+    fn parse_openai_tool_calls_rejects_malformed_arguments() {
+        // Invalid-JSON arguments must be rejected, never coerced into a string.
+        let invalid = serde_json::json!([{
+            "id": "1",
+            "type": "function",
+            "function": { "name": "fetch", "arguments": "not json" }
+        }]);
+        assert!(matches!(
+            parse_openai_tool_calls(invalid.as_array().unwrap()),
+            Err(Error::MalformedResponse(_))
+        ));
+
+        // Non-string arguments (a JSON object) are also rejected.
+        let non_string = serde_json::json!([{
+            "id": "1",
+            "type": "function",
+            "function": { "name": "fetch", "arguments": { "url": "x" } }
+        }]);
+        assert!(matches!(
+            parse_openai_tool_calls(non_string.as_array().unwrap()),
+            Err(Error::MalformedResponse(_))
+        ));
+
+        // Absent arguments default to JSON null (no arguments), not an error.
+        let absent = serde_json::json!([{
+            "id": "1",
+            "type": "function",
+            "function": { "name": "fetch" }
+        }]);
+        let calls = parse_openai_tool_calls(absent.as_array().unwrap())
+            .expect("absent arguments are valid");
+        assert_eq!(calls[0].arguments, Value::Null);
+    }
+
+    #[test]
+    fn fenced_json_with_malformed_arguments_is_not_parsed_as_tool_calls() {
+        // A fenced tool_calls blob whose arguments are invalid JSON must fall
+        // back to text rather than fabricating a call with coerced arguments.
+        let dialect = Gemma3ToolCodeDialect;
+        let body = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "```json\n{\"tool_calls\":[{\"id\":\"1\",\"type\":\"function\",\"function\":{\"name\":\"fetch\",\"arguments\":\"not json\"}}]}\n```"
+                }
+            }]
+        });
+        let turn = dialect.parse_turn(&body).unwrap();
+        assert!(
+            matches!(turn.outcome, CompletionResult::Text(_)),
+            "malformed fenced arguments must not become tool calls"
+        );
     }
 
     #[test]

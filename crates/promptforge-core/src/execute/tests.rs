@@ -538,7 +538,11 @@ impl Tool for FailingTool {
     }
 
     async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
-        Err(ToolError::message("the tool's own backend failed").with_kind(ToolErrorKind::Backend))
+        // Carry an inner cause so the executor's error can be checked for source
+        // preservation (item 4): the tool error must not be flattened to a string.
+        let cause = std::io::Error::other("upstream socket reset");
+        Err(ToolError::with_source("the tool's own backend failed", cause)
+            .with_kind(ToolErrorKind::Backend))
     }
 }
 
@@ -1026,13 +1030,24 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     )
     .await
     .expect_err("a tool whose call fails must fail the loop");
-    match err {
-        Error::Tool(message) => assert!(
+    match &err {
+        Error::Tool { message, .. } => assert!(
             message.contains("the tool's own backend failed"),
             "the tool's own error propagates: {message}"
         ),
         other => panic!("expected the tool's own error, got {other:?}"),
     }
+    // The tool's error (and its own inner cause) must be preserved as the
+    // error's source chain, not discarded when bridged into the run error.
+    let source = std::error::Error::source(&err).expect("tool error is kept as the source");
+    let chain = std::iter::successors(Some(source), |error| error.source())
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(" -> ");
+    assert!(
+        chain.contains("upstream socket reset"),
+        "the tool's inner cause must survive in the source chain, got: {chain}"
+    );
 
     assert_eq!(
         recorder.events(),
@@ -1344,6 +1359,128 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     assert!(
         content.contains("echoed: hi"),
         "the wrapped block must still contain the tool output, got: {content}"
+    );
+}
+
+/// Spawn a mock gateway that asks for one `echo` tool call on each of the first
+/// two rounds, then returns final text on the third, recording every body.
+async fn spawn_two_round_recording_gateway() -> (SocketAddr, Arc<Mutex<Vec<Value>>>) {
+    #[derive(Clone)]
+    struct RecordingState {
+        calls: Arc<AtomicUsize>,
+        bodies: Arc<Mutex<Vec<Value>>>,
+    }
+
+    async fn completions(
+        State(state): State<RecordingState>,
+        Json(body): Json<Value>,
+    ) -> Json<Value> {
+        state
+            .bodies
+            .lock()
+            .expect("the recorded-bodies mutex must not be poisoned")
+            .push(body);
+        let n = state.calls.fetch_add(1, Ordering::SeqCst);
+        if n < 2 {
+            Json(json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": format!("call_{n}"),
+                            "type": "function",
+                            "function": { "name": "echo", "arguments": "{\"value\":\"hi\"}" }
+                        }]
+                    }
+                }]
+            }))
+        } else {
+            Json(json!({
+                "choices": [{
+                    "message": { "role": "assistant", "content": "final answer" }
+                }]
+            }))
+        }
+    }
+
+    let bodies = Arc::new(Mutex::new(Vec::new()));
+    let state = RecordingState {
+        calls: Arc::new(AtomicUsize::new(0)),
+        bodies: Arc::clone(&bodies),
+    };
+    let router = Router::new()
+        .route("/v1/chat/completions", post(completions))
+        .with_state(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    (addr, bodies)
+}
+
+/// Extracts the guard-tag nonce from every `tool`-role turn in the last body.
+fn tool_turn_nonces(bodies: &Arc<Mutex<Vec<Value>>>) -> Vec<String> {
+    let bodies = bodies
+        .lock()
+        .expect("the recorded-bodies mutex must not be poisoned");
+    let last = bodies.last().expect("the loop must send a final request");
+    last["messages"]
+        .as_array()
+        .expect("a request body must carry a messages array")
+        .iter()
+        .filter(|m| m["role"] == "tool")
+        .filter_map(|m| m["content"].as_str())
+        .filter_map(|content| {
+            let marker = "<untrusted_input_";
+            let start = content.find(marker)? + marker.len();
+            let rest = &content[start..];
+            let end = rest.find('>')?;
+            Some(rest[..end].to_string())
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn untrusted_nonce_is_fresh_per_round() {
+    let (addr, bodies) = spawn_two_round_recording_gateway().await;
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
+
+    let echo = UntrustedEchoTool;
+    let tools: &[&dyn Tool] = &[&echo];
+    let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    let (out, _) = run_tool_loop(
+        &client,
+        &schemas,
+        &dispatch,
+        &registry,
+        "ask".to_string(),
+        DEFAULT_MAX_TOOL_ITERATIONS,
+        silent_progress(&turns, &options),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, "final answer");
+
+    let nonces = tool_turn_nonces(&bodies);
+    assert!(
+        nonces.len() >= 2,
+        "expected two rounds of guard-wrapped tool output, got: {nonces:?}"
+    );
+    assert_ne!(
+        nonces[0], nonces[1],
+        "each round's untrusted wrap must use a fresh nonce, never a reused one"
     );
 }
 
