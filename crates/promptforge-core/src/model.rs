@@ -712,39 +712,47 @@ impl ModelCatalog {
         self.get(id).is_some()
     }
 
-    /// Filters by hard constraints from `opts`.
+    /// Returns the descriptors satisfying `opts` as borrowed references.
+    ///
+    /// Unlike [`Self::filter`] this clones nothing (MODEL-017): the semantic
+    /// resolver builds its picker directly from these borrowed matches and
+    /// selects the resolved descriptor back out of the same borrowed slice.
     #[must_use]
-    pub(crate) fn filter(&self, opts: &ModelNeedOpts) -> Self {
-        let models = self
-            .models
+    pub(crate) fn filtered(&self, opts: &ModelNeedOpts) -> Vec<&ModelDescriptor> {
+        self.models
             .iter()
             .filter(|model| satisfies_constraints(model, opts))
-            .cloned()
-            .collect();
-        Self::from_validated(models)
+            .collect()
     }
 
     /// Builds a tool-picker [`Catalog`] from model descriptions for semantic resolve.
-    ///
-    /// The picker's `enriched_text` prefixes the tool name, so vendor model ids
-    /// must not ride in that name or they drown the capability description.
-    /// Identity is encoded in the picker id's server field; every entry uses a
-    /// single neutral, crate-private label.
     #[must_use]
     pub(crate) fn to_picker_catalog(&self) -> Catalog {
-        Catalog::new(
-            self.models
-                .iter()
-                .map(|model| {
-                    ToolDescriptor::new(
-                        model_to_picker_id(model.id()),
-                        model.description.clone(),
-                        Value::Object(serde_json::Map::new()),
-                    )
-                })
-                .collect(),
-        )
+        picker_catalog_from(self.models.iter())
     }
+}
+
+/// Builds a tool-picker [`Catalog`] from borrowed model descriptors.
+///
+/// The picker's `enriched_text` prefixes the tool name, so vendor model ids
+/// must not ride in that name or they drown the capability description.
+/// Identity is encoded in the picker id's server field; every entry uses a
+/// single neutral, crate-private label. Accepting borrowed descriptors lets a
+/// filtered view build a picker without first cloning matches into an owned
+/// catalog (MODEL-017).
+fn picker_catalog_from<'a>(models: impl IntoIterator<Item = &'a ModelDescriptor>) -> Catalog {
+    Catalog::new(
+        models
+            .into_iter()
+            .map(|model| {
+                ToolDescriptor::new(
+                    model_to_picker_id(model.id()),
+                    model.description.clone(),
+                    Value::Object(serde_json::Map::new()),
+                )
+            })
+            .collect(),
+    )
 }
 
 /// Neutral picker name so `enriched_text` does not inject vendor model ids.
@@ -895,6 +903,17 @@ async fn read_error_body_bounded(
     Ok(String::from_utf8_lossy(&buffer).into_owned())
 }
 
+/// Returns the process-wide catalog HTTP client, building it once on first use.
+///
+/// A single reusable client (MODEL-018) lets catalog fetches share one
+/// connection pool and transport configuration rather than each constructing a
+/// throwaway client with its own pool. The returned handle is a cheap clone of
+/// the shared client (its state is reference-counted internally).
+fn catalog_client() -> reqwest::Client {
+    static CATALOG_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CATALOG_CLIENT.get_or_init(reqwest::Client::new).clone()
+}
+
 /// Fetches a [`ModelCatalog`] from a bearer-authed gateway `/models` endpoint.
 ///
 /// `base_url` is the OpenAI-shaped API root (for example `http://127.0.0.1:8081/v1`).
@@ -908,7 +927,10 @@ pub async fn fetch_model_catalog(
     token: &str,
 ) -> std::result::Result<ModelCatalog, CompletionError> {
     let base = base_url.trim_end_matches('/');
-    let http = reqwest::Client::new();
+    // MODEL-018: reuse one process-wide catalog client so its connection pool
+    // and TLS/transport state are shared across fetches, instead of building a
+    // fresh `reqwest::Client` (and a fresh pool) on every call.
+    let http = catalog_client();
     let response = http
         .get(format!("{base}/models"))
         .bearer_auth(token)
@@ -1014,15 +1036,17 @@ impl<'a> PickerModelResolver<'a> {
 
 impl ModelResolver for PickerModelResolver<'_> {
     fn resolve(&self, description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel> {
-        let filtered = self.catalog.filter(opts);
-        if filtered.is_empty() {
+        // Borrowed filtered view (MODEL-017): no full-descriptor clone, and the
+        // picker is built directly from these borrowed matches.
+        let matches = self.catalog.filtered(opts);
+        if matches.is_empty() {
             return Err(Error::ModelAbsent {
                 capability: description.to_owned(),
             });
         }
         let picker = self
             .picker
-            .rebuild(filtered.to_picker_catalog())
+            .rebuild(picker_catalog_from(matches.iter().copied()))
             .map_err(|error| Error::ModelBind {
                 capability: description.to_owned(),
                 detail: error.to_string(),
@@ -1030,17 +1054,21 @@ impl ModelResolver for PickerModelResolver<'_> {
         match picker.resolve(description) {
             Ok(promptforge_tool_picker::Outcome::Bind(tool)) => {
                 let id = model_from_picker_id(tool.id());
-                // The picker was rebuilt from `filtered`, so a selected id absent
+                // The picker was rebuilt from `matches`, so a selected id absent
                 // from it is an encoding/consistency fault, not a bind. Fail
                 // explicitly instead of fabricating OpenAI + zero-context metadata.
-                let descriptor = filtered.get(&id).ok_or_else(|| Error::ModelBind {
-                    capability: description.to_owned(),
-                    detail: format!(
-                        "picker selected model {}/{} which is absent from the filtered live catalog",
-                        id.server(),
-                        id.name()
-                    ),
-                })?;
+                let descriptor = matches
+                    .iter()
+                    .copied()
+                    .find(|model| *model.id() == id)
+                    .ok_or_else(|| Error::ModelBind {
+                        capability: description.to_owned(),
+                        detail: format!(
+                            "picker selected model {}/{} which is absent from the filtered live catalog",
+                            id.server(),
+                            id.name()
+                        ),
+                    })?;
                 Ok(ResolvedModel {
                     id,
                     invocation: ModelInvocation::from(opts),
@@ -1142,9 +1170,9 @@ mod tests {
     }
 
     fn fixture_resolver(description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel> {
-        let filtered = catalog().filter(opts);
-        let hit = filtered
-            .models()
+        let catalog = catalog();
+        let matches = catalog.filtered(opts);
+        let hit = matches
             .iter()
             .find(|model| {
                 (description.contains("analysis") && model.id().name() == "analyst")
@@ -1198,31 +1226,34 @@ mod tests {
 
     #[test]
     fn context_filter_drops_small_windows() {
-        let filtered = catalog().filter(&ModelNeedOpts {
+        let catalog = catalog();
+        let matches = catalog.filtered(&ModelNeedOpts {
             context: Some(ctx(40_000)),
             ..ModelNeedOpts::default()
         });
-        let names: Vec<_> = filtered.models().iter().map(|m| m.id().name()).collect();
+        let names: Vec<_> = matches.iter().map(|m| m.id().name()).collect();
         assert_eq!(names, ["analyst", "always-think"]);
     }
 
     #[test]
     fn thinking_false_keeps_never_and_switchable() {
-        let filtered = catalog().filter(&ModelNeedOpts {
+        let catalog = catalog();
+        let matches = catalog.filtered(&ModelNeedOpts {
             thinking: Some(false),
             ..ModelNeedOpts::default()
         });
-        let names: Vec<_> = filtered.models().iter().map(|m| m.id().name()).collect();
+        let names: Vec<_> = matches.iter().map(|m| m.id().name()).collect();
         assert_eq!(names, ["small", "analyst"]);
     }
 
     #[test]
     fn thinking_true_keeps_switchable_and_always() {
-        let filtered = catalog().filter(&ModelNeedOpts {
+        let catalog = catalog();
+        let matches = catalog.filtered(&ModelNeedOpts {
             thinking: Some(true),
             ..ModelNeedOpts::default()
         });
-        let names: Vec<_> = filtered.models().iter().map(|m| m.id().name()).collect();
+        let names: Vec<_> = matches.iter().map(|m| m.id().name()).collect();
         assert_eq!(names, ["analyst", "always-think"]);
     }
 
