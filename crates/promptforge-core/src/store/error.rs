@@ -222,7 +222,7 @@ impl StoreError {
 
     /// Wraps a backend's own error as an opaque [`StoreError::Backend`] source.
     ///
-    /// A downstream [`Store`] implementation uses this so its concrete error
+    /// A downstream [`Store`](crate::store::Store) implementation uses this so its concrete error
     /// type never leaks through this crate's public API.
     ///
     /// # Examples
