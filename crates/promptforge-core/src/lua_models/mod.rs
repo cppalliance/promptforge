@@ -6,141 +6,18 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use mlua::{Lua, MultiValue, Scope, Table, UserData, UserDataFields, UserDataMethods, Value};
+use mlua::{Lua, MultiValue, Scope, Table};
 
-use crate::dialects::ToolDialectId;
 use crate::model::{ModelBinding, ModelBindings, ModelNeedOpts, ModelResolver};
 use crate::observe::{Observer, detail};
 use crate::{Error, Result};
 
-/// Host hook that runs `model:infer` from Lua via the executor's shared context.
-///
-/// Installed as Lua app data for the duration of a section phase that may call
-/// infer. Absent app data means infer is unavailable in that context.
-pub(crate) type ModelInferHook =
-    Arc<dyn Fn(&Lua, &ModelBinding, &str) -> mlua::Result<String> + Send + Sync>;
+mod decode;
+mod userdata;
 
-/// Inspectable Lua userdata returned by `models.need` / `models.always`.
-#[derive(Debug, Clone)]
-pub(crate) struct LuaModelHandle {
-    binding: ModelBinding,
-}
+pub(crate) use userdata::{LuaModelHandle, ModelInferHook};
 
-impl LuaModelHandle {
-    /// Builds a handle from a frozen [`ModelBinding`].
-    #[must_use]
-    pub(crate) fn from_binding(binding: &ModelBinding) -> Self {
-        Self {
-            binding: binding.clone(),
-        }
-    }
-
-    /// Returns the frozen binding carried by this handle.
-    #[must_use]
-    pub(crate) fn binding(&self) -> &ModelBinding {
-        &self.binding
-    }
-
-    /// Returns the prompt-local alias.
-    #[must_use]
-    pub(crate) fn name(&self) -> &str {
-        self.binding.alias()
-    }
-
-    /// Returns the caller-facing catalog model id.
-    #[must_use]
-    pub(crate) fn model_id(&self) -> &str {
-        self.binding.id().name()
-    }
-
-    /// Returns the capability description supplied to `models.need`.
-    #[must_use]
-    pub(crate) fn description(&self) -> &str {
-        self.binding.description()
-    }
-
-    /// Returns the catalog context window size in tokens.
-    #[must_use]
-    pub(crate) fn context(&self) -> u32 {
-        self.binding.context()
-    }
-
-    /// Returns the frozen thinking switch, when the need declared one.
-    #[must_use]
-    pub(crate) fn thinking(&self) -> Option<bool> {
-        self.binding.invocation().thinking
-    }
-
-    /// Returns the frozen sampling temperature, when the need declared one.
-    #[must_use]
-    pub(crate) fn temperature(&self) -> Option<f64> {
-        self.binding.invocation().temperature
-    }
-
-    /// Returns the frozen max generation tokens, when the need declared one.
-    #[must_use]
-    pub(crate) fn max_tokens(&self) -> Option<u32> {
-        self.binding.invocation().max_tokens
-    }
-
-    /// Returns the tool-calling dialect id.
-    ///
-    /// Returns the closed [`ToolDialectId`] identity; the `String` allocation
-    /// happens only in the Lua userdata field callback, at the boundary that
-    /// actually needs a Lua string.
-    #[must_use]
-    pub(crate) fn dialect(&self) -> ToolDialectId {
-        self.binding.tool_dialect()
-    }
-}
-
-impl UserData for LuaModelHandle {
-    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("name", |_, this| Ok(this.name().to_owned()));
-        fields.add_field_method_get("model_id", |_, this| Ok(this.model_id().to_owned()));
-        fields.add_field_method_get("description", |_, this| Ok(this.description().to_owned()));
-        fields.add_field_method_get("context", |_, this| Ok(this.context()));
-        fields.add_field_method_get("thinking", |_, this| Ok(this.thinking()));
-        fields.add_field_method_get("temperature", |_, this| Ok(this.temperature()));
-        fields.add_field_method_get("max_tokens", |_, this| Ok(this.max_tokens()));
-        fields.add_field_method_get("dialect", |_, this| Ok(this.dialect().to_string()));
-    }
-
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method(
-            "infer",
-            |lua, this, (prompt, opts): (String, Option<Value>)| {
-                // Per-call options are not supported. Reject them explicitly so
-                // an author-supplied table can never be silently discarded.
-                reject_infer_options(opts.as_ref())?;
-                let hook = lua
-                    .app_data_ref::<ModelInferHook>()
-                    .ok_or_else(|| {
-                        mlua::Error::external(
-                            "model:infer is not available outside section execution",
-                        )
-                    })?
-                    .clone();
-                hook(lua, this.binding(), &prompt)
-            },
-        );
-    }
-}
-
-/// Rejects any per-call `model:infer` options argument.
-///
-/// `model:infer` takes only a prompt string. A second argument (a table of
-/// options, or anything non-nil) has no supported effect, so it is rejected
-/// rather than silently dropped. An absent or `nil` second argument is allowed.
-fn reject_infer_options(opts: Option<&Value>) -> mlua::Result<()> {
-    match opts {
-        None | Some(Value::Nil) => Ok(()),
-        Some(_) => Err(mlua::Error::external(
-            "model:infer(prompt) does not accept a second argument; \
-             per-call inference options are not supported",
-        )),
-    }
-}
+use decode::{parse_need_args, parse_single_alias, validate_alias};
 
 /// Phase of the section-local models table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,19 +119,6 @@ fn record_always_binding(
     let binding = record_need_binding(state, resolver, alias, description, opts)?;
     state.always = Some(alias.to_owned());
     Ok(binding)
-}
-
-/// Extracts a single string alias from a `MultiValue` (for the 1-arg form).
-fn parse_single_alias(args: &MultiValue, label: &str) -> mlua::Result<String> {
-    match args.iter().next() {
-        Some(Value::String(value)) => value
-            .to_str()
-            .map_err(|_| mlua::Error::external(format!("{label} alias must be a UTF-8 string")))
-            .map(|s| s.to_owned()),
-        _ => Err(mlua::Error::external(format!(
-            "{label} expects a string alias as first argument"
-        ))),
-    }
 }
 
 /// Installs live H1 `models.need` / `models.always` resolvers.
@@ -473,191 +337,17 @@ fn close_model_scope_inner(
     Ok(resolved)
 }
 
-fn parse_need_args(args: MultiValue) -> mlua::Result<(String, String, ModelNeedOpts)> {
-    let mut values = args.into_iter();
-    let alias = match values.next() {
-        Some(Value::String(value)) => value
-            .to_str()
-            .map_err(|_| mlua::Error::external("models.need alias must be a UTF-8 string"))?
-            .to_owned(),
-        _ => {
-            return Err(mlua::Error::external(
-                "models.need expects alias, description, and optional opts table",
-            ));
-        }
-    };
-    let description = match values.next() {
-        Some(Value::String(value)) => value
-            .to_str()
-            .map_err(|_| mlua::Error::external("models.need description must be a UTF-8 string"))?
-            .to_owned(),
-        _ => {
-            return Err(mlua::Error::external(
-                "models.need expects alias, description, and optional opts table",
-            ));
-        }
-    };
-    let opts = match values.next() {
-        None | Some(Value::Nil) => ModelNeedOpts::default(),
-        Some(Value::Table(table)) => parse_opts_table(&table)?,
-        Some(_) => {
-            return Err(mlua::Error::external(
-                "models.need opts must be a table when provided",
-            ));
-        }
-    };
-    if values.next().is_some() {
-        return Err(mlua::Error::external(
-            "models.need expects at most three arguments",
-        ));
-    }
-    Ok((alias, description, opts))
-}
-
-fn parse_opts_table(table: &Table) -> mlua::Result<ModelNeedOpts> {
-    let mut opts = ModelNeedOpts::default();
-    for pair in table.pairs::<Value, Value>() {
-        let (key, value) = pair.map_err(|error| mlua::Error::external(error.to_string()))?;
-        let key = match key {
-            Value::String(key) => key
-                .to_str()
-                .map_err(|_| mlua::Error::external("models.need opts key must be a UTF-8 string"))?
-                .to_owned(),
-            _ => {
-                return Err(mlua::Error::external(
-                    "models.need opts keys must be strings",
-                ));
-            }
-        };
-        match key.as_str() {
-            "thinking" => {
-                opts.thinking = Some(value_as_bool(&value, "thinking")?);
-            }
-            "context" => {
-                opts.context = Some(value_as_u32(&value, "context")?);
-            }
-            "temperature" => {
-                opts.temperature = Some(value_as_temperature(&value)?);
-            }
-            "max_tokens" => {
-                opts.max_tokens = Some(value_as_u32(&value, "max_tokens")?);
-            }
-            other => {
-                return Err(mlua::Error::external(format!(
-                    "unknown models.need opts key {other:?}"
-                )));
-            }
-        }
-    }
-    Ok(opts)
-}
-
-/// The inclusive domain of a sampling temperature.
-const TEMPERATURE_RANGE: std::ops::RangeInclusive<f64> = 0.0..=2.0;
-
-/// Parses and validates a sampling temperature at the Lua trust boundary.
-///
-/// Lua integer and number forms are decoded through ONE numeric path (no
-/// arbitrary `i32` gate), then validated by ONE domain check: the result must be
-/// a finite number within [`TEMPERATURE_RANGE`]. Non-finite (`NaN`, infinity) or
-/// out-of-domain values are rejected here rather than forwarded to the gateway
-/// as an invalid request.
-fn value_as_temperature(value: &Value) -> mlua::Result<f64> {
-    let temperature = decode_lua_number(value, "temperature")?;
-    if !temperature.is_finite() || !TEMPERATURE_RANGE.contains(&temperature) {
-        return Err(mlua::Error::external(format!(
-            "models.need opts.temperature must be a finite number in [0.0, 2.0], got {temperature}"
-        )));
-    }
-    Ok(temperature)
-}
-
-fn value_as_bool(value: &Value, field: &str) -> mlua::Result<bool> {
-    match value {
-        Value::Boolean(flag) => Ok(*flag),
-        _ => Err(mlua::Error::external(format!(
-            "models.need opts.{field} must be a boolean"
-        ))),
-    }
-}
-
-fn value_as_u32(value: &Value, field: &str) -> mlua::Result<u32> {
-    match value {
-        Value::Integer(number) => u32::try_from(*number).map_err(|_| {
-            mlua::Error::external(format!(
-                "models.need opts.{field} must be a non-negative integer"
-            ))
-        }),
-        Value::Number(number) if number.fract() == 0.0 => {
-            let truncated = number.trunc();
-            if (0.0..=f64::from(u32::MAX)).contains(&truncated) {
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    clippy::cast_sign_loss,
-                    reason = "range checked against u32::MAX and non-negative"
-                )]
-                Ok(truncated as u32)
-            } else {
-                Err(mlua::Error::external(format!(
-                    "models.need opts.{field} must be a non-negative integer"
-                )))
-            }
-        }
-        _ => Err(mlua::Error::external(format!(
-            "models.need opts.{field} must be a non-negative integer"
-        ))),
-    }
-}
-
-/// Decodes a Lua integer or number into an `f64` through a single path.
-///
-/// Both Lua numeric forms are accepted and converted uniformly; the caller's
-/// domain check (for example [`value_as_temperature`]) is the single place that
-/// bounds the result, so there is no separate, arbitrary integer-range gate.
-fn decode_lua_number(value: &Value, field: &str) -> mlua::Result<f64> {
-    match value {
-        Value::Number(number) => Ok(*number),
-        Value::Integer(number) => {
-            // Lua integers are i64. The caller bounds the domain (temperatures
-            // live in [0.0, 2.0]); any magnitude that would lose precision here
-            // is far outside that domain and rejected by the caller's check.
-            #[expect(
-                clippy::cast_precision_loss,
-                reason = "domain is bounded by the caller; large magnitudes are rejected there"
-            )]
-            Ok(*number as f64)
-        }
-        _ => Err(mlua::Error::external(format!(
-            "models.need opts.{field} must be a number"
-        ))),
-    }
-}
-
-fn validate_alias(alias: &str) -> Result<()> {
-    let bytes = alias.as_bytes();
-    let valid = (1..=64).contains(&bytes.len())
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1..]
-            .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'));
-    if valid {
-        Ok(())
-    } else {
-        Err(Error::Lua(format!(
-            "invalid model alias {alias:?}: expected [A-Za-z][A-Za-z0-9_-]{{0,63}}"
-        )))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use super::decode::{
+        decode_lua_number, parse_need_args, parse_opts_table, parse_single_alias, validate_alias,
+        value_as_bool, value_as_temperature, value_as_u32,
+    };
+    use super::userdata::{LuaModelHandle, reject_infer_options};
     use super::{
-        LuaModelHandle, ModelBindingState, ModelPhase, ModelRuntime, close_model_scope_inner,
-        decode_lua_number, parse_need_args, parse_opts_table, parse_single_alias,
-        record_always_binding, reject_infer_options, validate_alias, value_as_bool,
-        value_as_temperature, value_as_u32,
+        ModelBindingState, ModelPhase, ModelRuntime, close_model_scope_inner, record_always_binding,
     };
     use crate::dialects::ToolDialectId;
     use crate::model::{ModelBinding, ModelBindings, ModelId, ModelInvocation, ModelNeedOpts};
