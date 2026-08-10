@@ -667,21 +667,19 @@ mod tests {
             "dev-1",
             "Only",
             1,
-            DebugEvent::Request {
-                body: json!({ "model": "test", "messages": [] }),
-            },
+            DebugEvent::request(json!({ "model": "test", "messages": [] })),
         );
         capture.on_event(
             "dev-1",
             "Only",
             1,
-            DebugEvent::Response {
-                body: json!({
+            DebugEvent::response(
+                json!({
                     "choices": [{ "message": { "role": "assistant", "content": "hi" } }]
                 }),
-                finish_reason: Some("stop".into()),
-                reasoning_content: None,
-            },
+                Some("stop".into()),
+                None,
+            ),
         );
 
         let trace_dir = dump_directory(&prompt).join(".trace");
@@ -705,19 +703,13 @@ mod tests {
             "dev-1",
             "Only",
             1,
-            DebugEvent::Request {
-                body: json!({ "model": "test" }),
-            },
+            DebugEvent::request(json!({ "model": "test" })),
         );
         capture.on_event(
             "dev-1",
             "Only",
             1,
-            DebugEvent::Response {
-                body: json!({ "choices": [] }),
-                finish_reason: Some("stop".into()),
-                reasoning_content: None,
-            },
+            DebugEvent::response(json!({ "choices": [] }), Some("stop".into()), None),
         );
 
         let store = StoreRef::memory();
@@ -776,9 +768,7 @@ mod tests {
             "dev-1",
             "Only",
             1,
-            DebugEvent::Request {
-                body: json!({ "model": "test" }),
-            },
+            DebugEvent::request(json!({ "model": "test" })),
         );
 
         let mut status = Vec::new();

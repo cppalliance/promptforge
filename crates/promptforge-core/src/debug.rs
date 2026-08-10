@@ -57,3 +57,30 @@ pub enum DebugEvent {
         reasoning_content: Option<String>,
     },
 }
+
+impl DebugEvent {
+    /// Builds a [`DebugEvent::Request`] from a serialized request `body`.
+    ///
+    /// The variants are `#[non_exhaustive]` so fields can be added compatibly;
+    /// these constructors are the stable way for a host (or its tests) to build
+    /// an event without depending on the variant's exact field set.
+    #[must_use]
+    pub fn request(body: Value) -> DebugEvent {
+        DebugEvent::Request { body }
+    }
+
+    /// Builds a [`DebugEvent::Response`] from a response `body` and its parsed
+    /// `finish_reason`/`reasoning_content` metadata.
+    #[must_use]
+    pub fn response(
+        body: Value,
+        finish_reason: Option<String>,
+        reasoning_content: Option<String>,
+    ) -> DebugEvent {
+        DebugEvent::Response {
+            body,
+            finish_reason,
+            reasoning_content,
+        }
+    }
+}

@@ -255,8 +255,9 @@ mod tests {
             sender.send(()).expect("rerun loop must be receiving");
         });
 
+        let cancel = CancelHandle::new();
         let mut reruns = 0_u32;
-        rerun_on_changes(&mut receiver, Duration::from_millis(300), || {
+        rerun_on_changes(&mut receiver, Duration::from_millis(300), &cancel, || {
             reruns += 1;
             async {}
         })
@@ -272,8 +273,9 @@ mod tests {
         sender.send(()).expect("fresh channel accepts one event");
         drop(sender);
 
+        let cancel = CancelHandle::new();
         let mut reruns = 0_u32;
-        rerun_on_changes(&mut receiver, Duration::from_millis(300), || {
+        rerun_on_changes(&mut receiver, Duration::from_millis(300), &cancel, || {
             reruns += 1;
             async {}
         })
@@ -287,8 +289,9 @@ mod tests {
         let (sender, mut receiver) = mpsc::unbounded_channel::<()>();
         drop(sender);
 
+        let cancel = CancelHandle::new();
         let mut reruns = 0_u32;
-        rerun_on_changes(&mut receiver, Duration::from_millis(300), || {
+        rerun_on_changes(&mut receiver, Duration::from_millis(300), &cancel, || {
             reruns += 1;
             async {}
         })

@@ -252,8 +252,9 @@ mod tests {
     use std::io::Write;
     use std::sync::{Arc, Mutex, PoisonError};
 
+    use promptforge_core::CancelHandle;
     use promptforge_core::model::ModelCatalog;
-    use promptforge_core::observe::{Observer, detail};
+    use promptforge_core::observe::{Observation, Observer};
 
     use std::path::Path;
 
@@ -297,11 +298,11 @@ mod tests {
     struct Recorder(Mutex<Vec<(String, String, String)>>);
 
     impl Observer for Recorder {
-        fn observe(&self, execution: &str, section: &str, detail: &str) {
+        fn observe(&self, execution: &str, section: &str, event: Observation) {
             self.0.lock().unwrap_or_else(PoisonError::into_inner).push((
                 execution.to_owned(),
                 section.to_owned(),
-                detail.to_owned(),
+                event.to_string(),
             ));
         }
     }
@@ -316,7 +317,11 @@ mod tests {
     #[test]
     fn record_formats_as_one_bracketed_trace_line() {
         assert_eq!(
-            format_record("dev-00000000deadbeef", "Research", "Lua: checkpoint"),
+            format_record(
+                "dev-00000000deadbeef",
+                "Research",
+                &Observation::Lua("checkpoint".to_owned())
+            ),
             "[dev-00000000deadbeef] Research: Lua: checkpoint"
         );
     }
@@ -339,12 +344,12 @@ mod tests {
         let buffer = SharedBuffer::default();
         let observer = VerboseObserver::new(buffer.clone());
 
-        observer.observe("dev-1", "Prompt", "RunStarted");
-        observer.observe("dev-1", "Section", "Lua: step one");
+        observer.observe("dev-1", "Prompt", Observation::RunStarted);
+        observer.observe("dev-1", "Section", Observation::Lua("step one".to_owned()));
 
         assert_eq!(
             buffer.contents(),
-            "[dev-1] Prompt: RunStarted\n[dev-1] Section: Lua: step one\n"
+            "[dev-1] Prompt: Run started\n[dev-1] Section: Lua: step one\n"
         );
     }
 
@@ -429,7 +434,7 @@ mod tests {
              # Lifecycle\n\n## Run\n\n```lua\nreturn 'done'\n```\n",
         )
         .expect("write the lifecycle fixture");
-        let recorder = Recorder::default();
+        let recorder = Arc::new(Recorder::default());
         // The prologue returns a scalar, so no model turn happens and the
         // unreachable server address below is never contacted.
         let result = run_once_with(
@@ -437,7 +442,8 @@ mod tests {
             "",
             &fixture_gateway(),
             &ModelCatalog::empty(),
-            &recorder,
+            Arc::clone(&recorder) as Arc<dyn Observer>,
+            CancelHandle::new(),
         )
         .await
         .expect("the model-free lifecycle fixture must run offline");
@@ -463,16 +469,16 @@ mod tests {
         );
         let details = records
             .iter()
-            .map(|(_, _, detail)| detail.as_str())
+            .map(|(_, _, detail)| detail.clone())
             .collect::<Vec<_>>();
         for expected in [
-            detail::PARSE_STARTED,
-            detail::PARSE_SUCCEEDED,
-            detail::RUN_STARTED,
-            detail::RUN_SUCCEEDED,
+            Observation::ParseStarted,
+            Observation::ParseSucceeded,
+            Observation::RunStarted,
+            Observation::RunSucceeded,
         ] {
             assert!(
-                details.contains(&expected),
+                details.contains(&expected.to_string()),
                 "the lifecycle must include {expected:?}: {records:#?}"
             );
         }
@@ -493,7 +499,8 @@ mod tests {
             "",
             &fixture_gateway(),
             &ModelCatalog::empty(),
-            &Recorder::default(),
+            Arc::new(Recorder::default()),
+            CancelHandle::new(),
         )
         .await
     }
@@ -576,7 +583,8 @@ mod tests {
             "",
             &fixture_gateway(),
             &ModelCatalog::empty(),
-            &Recorder::default(),
+            Arc::new(Recorder::default()),
+            CancelHandle::new(),
         )
         .await
         .expect_err("a non-promptforge file must be refused");
@@ -597,7 +605,8 @@ mod tests {
             "",
             &fixture_gateway(),
             &ModelCatalog::empty(),
-            &Recorder::default(),
+            Arc::new(Recorder::default()),
+            CancelHandle::new(),
         )
         .await
         .expect_err("a missing prompt file must fail");

@@ -232,9 +232,10 @@ async fn execute_prompt(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
-    use promptforge_core::observe::{Observer, detail};
+    use promptforge_core::CancelHandle;
+    use promptforge_core::observe::{Observation, Observer};
 
     use super::{Gateway, run_with_gateway};
 
@@ -242,11 +243,11 @@ mod tests {
     struct Recorder(Mutex<Vec<(String, String, String)>>);
 
     impl Observer for Recorder {
-        fn observe(&self, execution: &str, section: &str, detail: &str) {
+        fn observe(&self, execution: &str, section: &str, event: Observation) {
             self.0
                 .lock()
                 .expect("the CLI recorder mutex must not be poisoned")
-                .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+                .push((execution.to_owned(), section.to_owned(), event.to_string()));
         }
     }
 
@@ -262,12 +263,13 @@ mod tests {
              # Lifecycle\n\n## Run\n\n```lua\nreturn 'done'\n```\n",
         )
         .expect("write the CLI lifecycle fixture");
-        let recorder = Recorder::default();
+        let recorder = Arc::new(Recorder::default());
 
         let status = run_with_gateway(
             path.to_str().expect("the fixture path must be UTF-8"),
             "",
-            &recorder,
+            Arc::clone(&recorder) as Arc<dyn Observer>,
+            CancelHandle::new(),
             Gateway::Disabled,
         )
         .await;
@@ -294,16 +296,16 @@ mod tests {
         );
         let details = records
             .iter()
-            .map(|(_, _, detail)| detail.as_str())
+            .map(|(_, _, detail)| detail.clone())
             .collect::<Vec<_>>();
         for expected in [
-            detail::PARSE_STARTED,
-            detail::PARSE_SUCCEEDED,
-            detail::RUN_STARTED,
-            detail::RUN_SUCCEEDED,
+            Observation::ParseStarted,
+            Observation::ParseSucceeded,
+            Observation::RunStarted,
+            Observation::RunSucceeded,
         ] {
             assert!(
-                details.contains(&expected),
+                details.contains(&expected.to_string()),
                 "the CLI lifecycle must include {expected:?}: {records:#?}"
             );
         }
