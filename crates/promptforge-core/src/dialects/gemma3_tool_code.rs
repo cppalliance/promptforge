@@ -116,20 +116,29 @@ impl ToolDialect for Gemma3ToolCodeDialect {
         if let Some(content) = message
             .get("content")
             .and_then(Value::as_str)
-            .filter(|content| !content.is_empty())
+            .filter(|content| !content.trim().is_empty())
         {
-            if let Some(calls) = parse_content_tool_dialect(content) {
-                return Ok(NormalizedTurn {
-                    outcome: crate::client::CompletionResult::ToolCalls(calls),
-                    finish_reason,
-                    reasoning_content,
-                });
+            // Three-way classification: recognized calls become a tool turn,
+            // ordinary prose stays text, and a recognized-but-malformed tool
+            // fence propagates as a concrete error instead of masquerading as
+            // final text.
+            match parse_content_tool_dialect(content) {
+                ContentParse::Calls(calls) => {
+                    return Ok(NormalizedTurn {
+                        outcome: crate::client::CompletionResult::ToolCalls(calls),
+                        finish_reason,
+                        reasoning_content,
+                    });
+                }
+                ContentParse::NotProtocol => {
+                    return Ok(NormalizedTurn {
+                        outcome: crate::client::CompletionResult::Text(content.to_string()),
+                        finish_reason,
+                        reasoning_content,
+                    });
+                }
+                ContentParse::Malformed(error) => return Err(error),
             }
-            return Ok(NormalizedTurn {
-                outcome: crate::client::CompletionResult::Text(content.to_string()),
-                finish_reason,
-                reasoning_content,
-            });
         }
 
         Err(Error::EmptyModelReply {
@@ -178,73 +187,148 @@ impl ToolDialect for Gemma3ToolCodeDialect {
 
 // --- Content-fence parsing (moved from normalize.rs) ---
 
-/// When `content` is entirely a known tool-call dialect, return the calls.
+/// The three-way outcome of classifying model content.
 ///
-/// Mixed prose (evidence text that happens to mention a fence) returns `None`
-/// so the turn stays ordinary text.
-fn parse_content_tool_dialect(content: &str) -> Option<Vec<ToolCall>> {
+/// Distinguishing malformed protocol from ordinary prose is the whole point: a
+/// recognized tool fence whose contents are invalid must surface as an error,
+/// not collapse to `None` alongside genuine prose and become final text.
+enum ContentParse {
+    /// The content is ordinary prose with no recognized tool fence.
+    NotProtocol,
+    /// The content is one or more well-formed tool fences.
+    Calls(Vec<ToolCall>),
+    /// The content opened a recognized tool fence but its contents are invalid.
+    Malformed(Error),
+}
+
+/// The outcome of peeling one leading fence.
+enum Peel<'a> {
+    /// A valid tool fence with its parsed calls and the remaining input.
+    Calls(Vec<ToolCall>, &'a str),
+    /// A recognized tool-protocol fence whose contents are invalid.
+    Malformed(Error),
+    /// No tool-protocol fence at this position (ordinary prose or data fence).
+    NotAFence,
+}
+
+/// Classify model content as prose, tool calls, or malformed protocol.
+///
+/// The content is protocol only when it begins with a recognized tool fence;
+/// prose that merely mentions a fence later stays text. Once protocol intent is
+/// established, every fence must parse and no trailing non-fence content may
+/// remain, or the whole turn is malformed.
+fn parse_content_tool_dialect(content: &str) -> ContentParse {
     let mut rest = content.trim();
     let mut calls = Vec::new();
     // One monotonic counter threads across every `tool_code` fence so synthetic
-    // ids stay unique instead of restarting at zero per fence (which would make
-    // two calls collide on `call_tool_code_0`).
+    // ids stay unique instead of restarting at zero per fence.
     let mut next_id = 0usize;
-    while !rest.is_empty() {
-        if let Some((parsed, remain)) = peel_tool_code_fence(rest, &mut next_id) {
-            if parsed.is_empty() {
-                return None;
-            }
-            calls.extend(parsed);
-            rest = remain.trim();
-            continue;
+    let mut saw_fence = false;
+    loop {
+        rest = rest.trim_start();
+        if rest.is_empty() {
+            break;
         }
-        if let Some((parsed, remain)) = peel_json_tool_calls_fence(rest) {
-            if parsed.is_empty() {
-                return None;
+        match peel_tool_code_fence(rest, &mut next_id) {
+            Peel::Calls(parsed, remain) => {
+                saw_fence = true;
+                calls.extend(parsed);
+                rest = remain;
+                continue;
             }
-            calls.extend(parsed);
-            rest = remain.trim();
-            continue;
+            Peel::Malformed(error) => return ContentParse::Malformed(error),
+            Peel::NotAFence => {}
         }
-        return None;
+        match peel_json_tool_calls_fence(rest) {
+            Peel::Calls(parsed, remain) => {
+                saw_fence = true;
+                calls.extend(parsed);
+                rest = remain;
+                continue;
+            }
+            Peel::Malformed(error) => return ContentParse::Malformed(error),
+            Peel::NotAFence => {}
+        }
+        // No tool fence here. If we already consumed one, this is trailing junk
+        // in an otherwise-protocol turn; otherwise it is ordinary prose.
+        if saw_fence {
+            return ContentParse::Malformed(Error::MalformedResponse(
+                "trailing content after tool_code fence".into(),
+            ));
+        }
+        return ContentParse::NotProtocol;
     }
-    if calls.is_empty() { None } else { Some(calls) }
+    if calls.is_empty() {
+        ContentParse::NotProtocol
+    } else {
+        ContentParse::Calls(calls)
+    }
 }
 
 /// Peel one leading ` ```tool_code ` fence into Python-style `name(k=v)` calls.
 ///
 /// `next_id` is a run-wide monotonic counter used to mint each call's synthetic
 /// id; it is advanced once per parsed call so ids stay unique across fences.
-fn peel_tool_code_fence<'a>(
-    input: &'a str,
-    next_id: &mut usize,
-) -> Option<(Vec<ToolCall>, &'a str)> {
-    let rest = strip_fence_open(input, "tool_code")?;
-    let (body, after) = split_fence_close(rest)?;
+/// A `tool_code` opener commits to protocol intent: an unterminated fence, a
+/// malformed call line, or an empty fence is [`Peel::Malformed`], never text.
+fn peel_tool_code_fence<'a>(input: &'a str, next_id: &mut usize) -> Peel<'a> {
+    let Some(rest) = strip_fence_open(input, "tool_code") else {
+        return Peel::NotAFence;
+    };
+    let Some((body, after)) = split_fence_close_standalone(rest) else {
+        return Peel::Malformed(Error::MalformedResponse(
+            "unterminated tool_code fence".into(),
+        ));
+    };
     let mut calls = Vec::new();
     for line in body.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        let call = parse_tool_code_call(line, *next_id)?;
+        let Some(call) = parse_tool_code_call(line, *next_id) else {
+            return Peel::Malformed(Error::MalformedResponse(
+                "malformed tool_code call line".into(),
+            ));
+        };
         *next_id += 1;
         calls.push(call);
     }
-    Some((calls, after))
+    if calls.is_empty() {
+        return Peel::Malformed(Error::MalformedResponse(
+            "tool_code fence contained no calls".into(),
+        ));
+    }
+    Peel::Calls(calls, after)
 }
 
 /// Peel one leading ` ```json ` / ` ``` ` fence that holds OpenAI `tool_calls`.
-fn peel_json_tool_calls_fence(input: &str) -> Option<(Vec<ToolCall>, &str)> {
-    let rest = strip_fence_open(input, "json").or_else(|| strip_fence_open(input, ""))?;
-    let (body, after) = split_fence_close(rest)?;
-    let value: Value = serde_json::from_str(body.trim()).ok()?;
-    let raw_calls = value
-        .get("tool_calls")
-        .and_then(Value::as_array)
-        .filter(|calls| !calls.is_empty())?;
-    let calls = crate::normalize::parse_openai_tool_calls(raw_calls).ok()?;
-    Some((calls, after))
+///
+/// A code fence is only tool protocol when its body decodes to a JSON object
+/// carrying a non-empty `tool_calls` array; anything else is an ordinary data
+/// fence ([`Peel::NotAFence`]) that stays text. Once the fence *is* recognized
+/// as tool protocol, malformed calls are [`Peel::Malformed`] and preserve the
+/// concrete decode error rather than falling back to text.
+fn peel_json_tool_calls_fence(input: &str) -> Peel<'_> {
+    let Some(rest) = strip_fence_open(input, "json").or_else(|| strip_fence_open(input, "")) else {
+        return Peel::NotAFence;
+    };
+    let Some((body, after)) = split_fence_close_standalone(rest) else {
+        return Peel::NotAFence;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(body.trim()) else {
+        return Peel::NotAFence;
+    };
+    let Some(raw_calls) = value.get("tool_calls").and_then(Value::as_array) else {
+        return Peel::NotAFence;
+    };
+    if raw_calls.is_empty() {
+        return Peel::NotAFence;
+    }
+    match crate::normalize::parse_openai_tool_calls(raw_calls) {
+        Ok(calls) => Peel::Calls(calls, after),
+        Err(error) => Peel::Malformed(error),
+    }
 }
 
 fn strip_fence_open<'a>(input: &'a str, language: &str) -> Option<&'a str> {
@@ -260,9 +344,46 @@ fn strip_fence_open<'a>(input: &'a str, language: &str) -> Option<&'a str> {
     Some(rest)
 }
 
-fn split_fence_close(input: &str) -> Option<(&str, &str)> {
-    let idx = input.find("```")?;
-    Some((&input[..idx], &input[idx + 3..]))
+/// Split `input` at the first standalone closing fence line (a line whose
+/// trimmed content is exactly ```` ``` ````), returning the body before it and
+/// the text after it.
+///
+/// Scanning is line-oriented and quote-aware: a ```` ``` ```` that appears
+/// inside a quoted argument value is not a close, so a value like
+/// `x="```"` cannot terminate the fence early. Returns `None` when no standalone
+/// closing line exists.
+fn split_fence_close_standalone(input: &str) -> Option<(&str, &str)> {
+    let mut offset = 0usize;
+    let mut in_quote: Option<char> = None;
+    for line in input.split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let content = content.strip_suffix('\r').unwrap_or(content);
+        // A standalone closing fence only counts outside any open quote.
+        if in_quote.is_none() && content.trim() == "```" {
+            return Some((&input[..line_start], &input[offset..]));
+        }
+        // Advance quote state across this line. JSON strings never span a raw
+        // newline, so quote state effectively resets at each line boundary for
+        // well-formed calls; an unterminated quote simply prevents an early
+        // close and yields an unterminated-fence error upstream.
+        let mut escaped = false;
+        for ch in content.chars() {
+            if let Some(q) = in_quote {
+                if escaped {
+                    escaped = false;
+                } else if ch == '\\' {
+                    escaped = true;
+                } else if ch == q {
+                    in_quote = None;
+                }
+            } else if ch == '"' || ch == '\'' {
+                in_quote = Some(ch);
+            }
+        }
+    }
+    None
 }
 
 /// True when `s` is a `tool_code` identifier: `[A-Za-z_][A-Za-z0-9_]*`.
@@ -894,9 +1015,10 @@ mod tests {
     }
 
     #[test]
-    fn fenced_json_with_malformed_arguments_is_not_parsed_as_tool_calls() {
-        // A fenced tool_calls blob whose arguments are invalid JSON must fall
-        // back to text rather than fabricating a call with coerced arguments.
+    fn fenced_json_with_malformed_arguments_is_malformed_not_text() {
+        // A fenced tool_calls blob (protocol intent) whose arguments are invalid
+        // must surface as a malformed error, preserving the concrete decode
+        // failure, rather than silently falling back to final text.
         let dialect = Gemma3ToolCodeDialect;
         let body = serde_json::json!({
             "choices": [{
@@ -906,11 +1028,74 @@ mod tests {
                 }
             }]
         });
-        let turn = dialect.parse_turn(&body).unwrap();
         assert!(
-            matches!(turn.outcome, CompletionResult::Text(_)),
-            "malformed fenced arguments must not become tool calls"
+            matches!(dialect.parse_turn(&body), Err(Error::MalformedResponse(_))),
+            "malformed fenced arguments must be a malformed error, not text"
         );
+    }
+
+    #[test]
+    fn malformed_tool_code_fence_is_malformed_not_text() {
+        let dialect = Gemma3ToolCodeDialect;
+        // Leading tool_code fence commits to protocol; a bad call line is an error.
+        let bad_call = serde_json::json!({
+            "choices": [{ "message": { "content": "```tool_code\nnot a call\n```" } }]
+        });
+        assert!(matches!(
+            dialect.parse_turn(&bad_call),
+            Err(Error::MalformedResponse(_))
+        ));
+
+        // Unterminated fence is malformed, not text.
+        let unterminated = serde_json::json!({
+            "choices": [{ "message": { "content": "```tool_code\nsearch(query=\"a\")" } }]
+        });
+        assert!(matches!(
+            dialect.parse_turn(&unterminated),
+            Err(Error::MalformedResponse(_))
+        ));
+
+        // Trailing prose after a valid fence in a protocol turn is malformed.
+        let trailing = serde_json::json!({
+            "choices": [{ "message": { "content": "```tool_code\nsearch(query=\"a\")\n```\nthen prose" } }]
+        });
+        assert!(matches!(
+            dialect.parse_turn(&trailing),
+            Err(Error::MalformedResponse(_))
+        ));
+    }
+
+    #[test]
+    fn backticks_inside_quoted_value_do_not_close_fence() {
+        // A ``` inside a quoted argument value must not terminate the fence at
+        // the first triple-backtick; only a standalone ``` line closes it.
+        let dialect = Gemma3ToolCodeDialect;
+        let body = serde_json::json!({
+            "choices": [{ "message": { "content": "```tool_code\necho(value=\"a ``` b\")\n```" } }]
+        });
+        let turn = dialect.parse_turn(&body).unwrap();
+        match turn.outcome {
+            CompletionResult::ToolCalls(calls) => {
+                assert_eq!(calls.len(), 1);
+                assert_eq!(
+                    calls[0].arguments,
+                    serde_json::json!({ "value": "a ``` b" })
+                );
+            }
+            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
+        }
+    }
+
+    #[test]
+    fn ordinary_json_data_fence_stays_text() {
+        // A ```json code block that is not a tool_calls blob is ordinary data.
+        let dialect = Gemma3ToolCodeDialect;
+        let content = "```json\n{\"answer\": 42}\n```";
+        let body = serde_json::json!({
+            "choices": [{ "message": { "content": content } }]
+        });
+        let turn = dialect.parse_turn(&body).unwrap();
+        assert!(matches!(turn.outcome, CompletionResult::Text(_)));
     }
 
     #[test]
