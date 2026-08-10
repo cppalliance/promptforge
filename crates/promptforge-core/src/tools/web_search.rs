@@ -44,7 +44,7 @@ impl WebSearch {
 #[async_trait::async_trait]
 impl Tool for WebSearch {
     fn id(&self) -> ToolId {
-        ToolId::new("promptforge", "web_search")
+        ToolId::from_validated("promptforge", "web_search")
     }
 
     #[expect(

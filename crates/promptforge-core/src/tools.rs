@@ -63,21 +63,63 @@ pub struct ToolId {
 impl ToolId {
     /// Builds an identity from its server and stable tool name.
     ///
+    /// # Errors
+    /// Returns [`ToolIdError`] if `server` or `name` is empty or contains the
+    /// `/` namespace separator or a control character.
+    ///
     /// # Examples
     ///
     /// ```
     /// use promptforge_core::tools::ToolId;
     ///
-    /// let id = ToolId::new("promptforge", "web_fetch");
+    /// let id = ToolId::new("promptforge", "web_fetch")?;
     /// assert_eq!(id.server(), "promptforge");
     /// assert_eq!(id.name(), "web_fetch");
+    /// # Ok::<(), promptforge_core::tools::ToolIdError>(())
     /// ```
-    #[must_use]
-    pub fn new(server: impl Into<String>, name: impl Into<String>) -> Self {
-        Self {
+    pub fn new(
+        server: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Result<ToolId, ToolIdError> {
+        let server = server.into();
+        let name = name.into();
+        Self::validate("server", &server)?;
+        Self::validate("name", &name)?;
+        Ok(Self { server, name })
+    }
+
+    /// Builds an identity from components already known to be valid.
+    ///
+    /// For internal callers whose inputs are static tool names or come from an
+    /// existing [`ToolId`], so the validation in [`ToolId::new`] is redundant.
+    pub(crate) fn from_validated(server: impl Into<String>, name: impl Into<String>) -> ToolId {
+        ToolId {
             server: server.into(),
             name: name.into(),
         }
+    }
+
+    /// Validates one identity component, naming the field in any error.
+    fn validate(field: &'static str, value: &str) -> Result<(), ToolIdError> {
+        if value.is_empty() {
+            return Err(ToolIdError {
+                field,
+                reason: "must not be empty",
+            });
+        }
+        if value.contains('/') {
+            return Err(ToolIdError {
+                field,
+                reason: "must not contain the '/' separator",
+            });
+        }
+        if value.bytes().any(|b| b < 0x20 || b == 0x7f) {
+            return Err(ToolIdError {
+                field,
+                reason: "must not contain a control character",
+            });
+        }
+        Ok(())
     }
 
     /// Returns the server that owns this identity namespace.
@@ -330,6 +372,17 @@ impl std::error::Error for ToolError {
             .as_ref()
             .map(|boxed| boxed.as_ref() as &(dyn std::error::Error + 'static))
     }
+}
+
+/// The reason a [`ToolId`] could not be built from its components.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("invalid tool id: {field} {reason}")]
+#[non_exhaustive]
+pub struct ToolIdError {
+    /// Which component was rejected (`server` or `name`).
+    field: &'static str,
+    /// Why it was rejected.
+    reason: &'static str,
 }
 
 /// A tool the executor can dispatch during a model's tool-call loop.

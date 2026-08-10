@@ -572,10 +572,10 @@ impl ToolAnalysis {
             })?
             .iter()
             .map(|pair| OwnedNearDuplicate {
-                first_id: ToolId::new(pair.first().id().server(), pair.first().id().name()),
+                first_id: ToolId::from_validated(pair.first().id().server(), pair.first().id().name()),
                 first_description: pair.first().description().to_owned(),
                 first_annotations: pair.first().annotations(),
-                second_id: ToolId::new(pair.second().id().server(), pair.second().id().name()),
+                second_id: ToolId::from_validated(pair.second().id().server(), pair.second().id().name()),
                 second_description: pair.second().description().to_owned(),
                 second_annotations: pair.second().annotations(),
                 similarity: pair.similarity(),

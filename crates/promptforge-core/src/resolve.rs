@@ -128,7 +128,7 @@ impl CachedDecision {
 
     fn result(&self, capability: &str) -> Result<ToolId> {
         match self {
-            Self::Bind(tool) => Ok(ToolId::new(tool.id().server(), tool.id().name())),
+            Self::Bind(tool) => Ok(ToolId::from_validated(tool.id().server(), tool.id().name())),
             Self::Absent => Err(Error::Absent {
                 capability: capability.to_owned(),
             }),
@@ -136,14 +136,14 @@ impl CachedDecision {
                 capability: capability.to_owned(),
                 candidates: tools
                     .iter()
-                    .map(|tool| ToolId::new(tool.id().server(), tool.id().name()))
+                    .map(|tool| ToolId::from_validated(tool.id().server(), tool.id().name()))
                     .collect(),
             }),
             Self::Ambiguous(tools) => Err(Error::Ambiguous {
                 capability: capability.to_owned(),
                 candidates: tools
                     .iter()
-                    .map(|tool| ToolId::new(tool.id().server(), tool.id().name()))
+                    .map(|tool| ToolId::from_validated(tool.id().server(), tool.id().name()))
                     .collect(),
             }),
             Self::Failed(detail) => Err(Error::Bind {
@@ -239,7 +239,7 @@ where
             .clone();
         if let CachedDecision::Bind(tool) = &decision {
             state.diagnostics.insert(
-                ToolId::new(tool.id().server(), tool.id().name()),
+                ToolId::from_validated(tool.id().server(), tool.id().name()),
                 tool.clone(),
             );
         }
