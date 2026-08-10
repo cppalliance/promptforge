@@ -87,6 +87,16 @@ pub(crate) async fn wait_cancelled() {
     }
 }
 
+/// Reads the task-local [`CancelHandle`] flag without awaiting.
+///
+/// Returns `false` when no handle is installed. Used by synchronous work (the
+/// Lua instruction hook) to poll cancellation cooperatively.
+pub(crate) fn is_cancelled() -> bool {
+    CURRENT
+        .try_with(CancelHandle::is_cancelled)
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

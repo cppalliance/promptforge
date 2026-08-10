@@ -2371,7 +2371,17 @@ pub(crate) async fn run_prose_inference(
                     if let Some(counts) = counts {
                         counts.increment(&call.name)?;
                     }
-                    let call_result = tool.call(call.arguments.clone()).await;
+                    // Race the tool call against cancellation so a slow or stuck
+                    // tool cannot hold the run past a Ctrl-C. On cancel the tool
+                    // future is dropped and the run ends promptly.
+                    let call_result = tokio::select! {
+                        biased;
+                        () = cancel::wait_cancelled() => {
+                            observer.observe(execution, section, detail::TOOL_CALL_FAILED);
+                            return Err(Error::Interrupted);
+                        }
+                        result = tool.call(call.arguments.clone()) => result,
+                    };
                     observer.observe(
                         execution,
                         section,

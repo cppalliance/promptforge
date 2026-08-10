@@ -717,6 +717,90 @@ async fn tool_loop_dispatches_then_returns_text() {
     );
 }
 
+/// A tool whose call blocks far longer than the test's cancel deadline, so the
+/// test can prove the tool-call loop honors cancellation mid-call.
+struct SlowTool;
+
+#[async_trait::async_trait]
+impl Tool for SlowTool {
+    fn id(&self) -> ToolId {
+        ToolId::new("test", "slow").expect("valid slow tool id")
+    }
+
+    #[expect(clippy::unnecessary_literal_bound, reason = "the Tool trait fixes this to &str")]
+    fn wire_name(&self) -> &str {
+        // Matches the function name the mock gateway asks for.
+        "echo"
+    }
+
+    #[expect(clippy::unnecessary_literal_bound, reason = "the Tool trait fixes this to &str")]
+    fn description(&self) -> &str {
+        "a deliberately slow tool"
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({ "type": "object" })
+    }
+
+    async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        Ok(ToolOutput::trusted("done"))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_during_in_flight_tool_call_returns_promptly() {
+    use crate::cancel::{self, CancelHandle};
+    use std::time::{Duration, Instant};
+
+    let addr = spawn_mock_gateway().await;
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test"),
+    );
+    let slow = SlowTool;
+    let tools: &[&dyn Tool] = &[&slow];
+    let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+
+    let handle = CancelHandle::new();
+    let canceller = handle.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        canceller.cancel();
+    });
+
+    let start = Instant::now();
+    let result = cancel::scope(
+        handle,
+        run_tool_loop(
+            &client,
+            &schemas,
+            &dispatch,
+            &registry,
+            "ask the model".to_string(),
+            DEFAULT_MAX_TOOL_ITERATIONS,
+            silent_progress(&turns, &options),
+            None,
+            None,
+        ),
+    )
+    .await;
+
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "cancel during an in-flight tool call must return promptly, took {:?}",
+        start.elapsed()
+    );
+    assert!(
+        matches!(result, Err(crate::Error::Interrupted)),
+        "expected Interrupted, got {result:?}"
+    );
+}
+
 /// A mock gateway that always asks for a tool call, never converging. The
 /// returned counter records how many completion requests it served, so a
 /// test can assert the loop stopped after exactly its cap of round trips.

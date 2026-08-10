@@ -619,6 +619,11 @@ impl LuaProgram {
     /// parsing Lua's `[string ...]` form. Nested errors from other chunks
     /// (for example a fanout arm) are left unchanged.
     pub(crate) fn map_runtime_error(&self, error: &mlua::Error) -> Error {
+        // A block aborted by the cancellation hook surfaces as an interruption,
+        // not a Lua authoring error.
+        if crate::cancel::is_cancelled() {
+            return Error::Interrupted;
+        }
         let raw = error.to_string();
         let mapped = map_chunk_line_to_absolute(&raw, self.source_line, self.location());
         Error::Lua(mapped)
@@ -2878,6 +2883,14 @@ fn install_instruction_budget(lua: &Lua) {
     lua.set_hook(
         HookTriggers::new().every_nth_instruction(HOOK_INTERVAL),
         move |_lua, _debug| {
+            // Cooperative cancellation: abort a long-running Lua block promptly
+            // when the run's CancelHandle is signaled (mapped to
+            // Error::Interrupted at the runtime-error boundary).
+            if crate::cancel::is_cancelled() {
+                return Err(mlua::Error::RuntimeError(
+                    "lua execution cancelled".to_string(),
+                ));
+            }
             if fired.fetch_add(1, Ordering::Relaxed) >= HOOK_BUDGET {
                 return Err(mlua::Error::RuntimeError(
                     "lua instruction budget exceeded".to_string(),
@@ -4345,6 +4358,50 @@ stack traceback:
         assert!(
             !result.contains("[string \"section `Main` prologue\"]:3:"),
             "parent chunk-relative line must be rewritten: {result}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn long_running_lua_block_cancels_cooperatively() {
+        use crate::cancel::{self, CancelHandle};
+        use std::time::{Duration, Instant};
+
+        // An unbounded loop that, without cooperative cancellation, would run to
+        // the instruction budget. With the cancel flag set, the very first
+        // instruction-hook firing aborts it and maps to `Error::Interrupted`.
+        let program = LuaProgram::compile(
+            "local n = 0\nwhile true do n = n + 1 end",
+            "cancel loop",
+            NonZeroU32::MIN,
+            EXECUTION,
+            &NullObserver,
+            "Loop",
+        )
+        .expect("an infinite loop still compiles");
+
+        let handle = CancelHandle::new();
+        handle.cancel();
+
+        let start = Instant::now();
+        let outcome = cancel::scope(handle, async {
+            tokio::task::block_in_place(|| {
+                let lua = Lua::new();
+                install_instruction_budget(&lua);
+                let func = program.load(&lua).expect("bytecode loads");
+                func.call::<()>(())
+                    .map_err(|e| program.map_runtime_error(&e))
+            })
+        })
+        .await;
+
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "a cancelled Lua block must abort promptly, took {:?}",
+            start.elapsed()
+        );
+        assert!(
+            matches!(outcome, Err(crate::Error::Interrupted)),
+            "expected Interrupted, got {outcome:?}"
         );
     }
 
