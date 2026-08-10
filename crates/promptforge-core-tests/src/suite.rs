@@ -708,10 +708,10 @@ async fn fanout_basic_two_items_prologue_return() {
         .collect();
     let arm_finished: Vec<_> = records
         .iter()
-        .filter(|(_, _, d)| d == "Fanout arm finished")
+        .filter(|(_, _, d)| d == "Fanout arm succeeded")
         .collect();
     assert_eq!(arm_started.len(), 2, "two arms must start");
-    assert_eq!(arm_finished.len(), 2, "two arms must finish");
+    assert_eq!(arm_finished.len(), 2, "two arms must succeed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -746,10 +746,10 @@ async fn fanout_epilog_two_items() {
         .collect();
     let arm_finished: Vec<_> = records
         .iter()
-        .filter(|(_, _, d)| d == "Fanout arm finished")
+        .filter(|(_, _, d)| d == "Fanout arm succeeded")
         .collect();
     assert_eq!(arm_started.len(), 2, "two arms must start");
-    assert_eq!(arm_finished.len(), 2, "two arms must finish");
+    assert_eq!(arm_finished.len(), 2, "two arms must succeed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

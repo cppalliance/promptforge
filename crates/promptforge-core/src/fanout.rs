@@ -1087,6 +1087,10 @@ mod tests {
         }
     }
 
+    #[expect(
+        clippy::ref_option,
+        reason = "FanoutContext.client borrows an Option<GatewayClient>, so the helper must too"
+    )]
     fn terminal_ctx<'a>(
         observer: &'a dyn Observer,
         store: &'a StoreRef,
