@@ -117,6 +117,12 @@ impl Config {
                             model.name
                         ))
                     })?;
+                if device.kind != DeviceKind::Local {
+                    return Err(ConfigError::Validation(format!(
+                        "local_model {} must reference a local device, but {device_id} is remote",
+                        model.name
+                    )));
+                }
                 let lane = device
                     .lanes
                     .iter()
@@ -267,6 +273,24 @@ impl Config {
                     "device {} concurrency must be at least 1",
                     device.id
                 )));
+            }
+            // Kind-incompatible payloads are rejected: remote devices use flat
+            // concurrency (no lanes); local devices use lanes (no flat
+            // concurrency). (CFG-004)
+            match device.kind {
+                DeviceKind::Remote if !device.lanes.is_empty() => {
+                    return Err(ConfigError::Validation(format!(
+                        "remote device {} must not declare lanes",
+                        device.id
+                    )));
+                }
+                DeviceKind::Local if device.concurrency.is_some() => {
+                    return Err(ConfigError::Validation(format!(
+                        "local device {} uses lanes, not flat concurrency",
+                        device.id
+                    )));
+                }
+                _ => {}
             }
             let mut lane_ids = HashSet::new();
             for lane in &device.lanes {
