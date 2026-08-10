@@ -137,6 +137,9 @@ async fn chat_completions(
     Json(request): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, GatewayError> {
     check_auth(&state, &headers).await?;
+    request
+        .validate()
+        .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
     let model = {
         let live = state.live.read().await;
         live.routing.model(&request.model)?
@@ -152,6 +155,12 @@ async fn chat_completions(
         .upstream
         .send(request, &model.upstream_name)
         .await?;
+    response
+        .validate()
+        .map_err(|reason| GatewayError::UpstreamStatus {
+            status: 502,
+            body: reason.to_owned(),
+        })?;
     Ok(Json(response))
 }
 
