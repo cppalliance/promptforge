@@ -502,6 +502,40 @@ impl ToolRuntime {
 ///
 /// `#[non_exhaustive]` so the crate can evolve the retained representation
 /// (fields are already private) without a breaking change before release.
+///
+/// # Sensitivity (LUA-015)
+/// A program retains the author's original prompt Lua source verbatim, and
+/// [`source`](Self::source) exposes it. Prompt source can embed
+/// author-sensitive material (system instructions, embedded credentials in a
+/// poorly written prompt, private policy text), so treat the value returned by
+/// [`source`](Self::source) as sensitive: it is a full-fidelity diagnostic
+/// accessor, not a value to log at info level, echo to untrusted sinks, or place
+/// in a model-facing message. [`location`](Self::location) and
+/// [`source_line`](Self::source_line) are safe positional metadata (a chunk name
+/// and a line number) and carry no source text. The crate itself never logs the
+/// retained source; compilation observations carry only fixed strings.
+///
+/// # Examples
+/// A program is obtained from the parser and exposes its source and position:
+/// ```
+/// use promptforge_core::observe::NullObserver;
+/// use promptforge_core::parser::Prompt;
+///
+/// let source = concat!(
+///     "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n",
+///     "# Title\n\nintro\n\n",
+///     "## Only\n\n",
+///     "```lua\nreturn 1\n```\n",
+/// );
+/// let prompt = Prompt::parse(source, "doc", &NullObserver)?;
+/// let program = prompt.sections()[0]
+///     .prologue()
+///     .expect("the section has a Lua prologue");
+/// assert_eq!(program.source(), "return 1");
+/// assert!(program.source_line().get() >= 1);
+/// assert!(program.location().contains("Only"));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct LuaProgram {
