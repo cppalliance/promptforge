@@ -2273,11 +2273,19 @@ fn prepare_scoped_tools(
             .model_description()
             .unwrap_or_else(|| tool.description())
             .to_owned();
-        schemas.push(ToolSchema {
-            name: binding.alias().to_owned(),
+        // F7: build every advertised schema through the validated constructor,
+        // so an unusable wire name or a non-object JSON Schema is refused here
+        // rather than sent to the model.
+        let schema = ToolSchema::new(
+            binding.alias().to_owned(),
             description,
-            parameters: tool.parameters_schema(),
-        });
+            tool.parameters_schema(),
+        )
+        .map_err(|error| Error::Bind {
+            capability: binding.alias().to_owned(),
+            detail: error.to_string(),
+        })?;
+        schemas.push(schema);
         dispatch.insert(binding.alias().to_owned(), binding.id().clone());
     }
     Ok((schemas, dispatch))

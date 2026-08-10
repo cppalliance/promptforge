@@ -25,7 +25,10 @@ use crate::{Error, Result};
 /// A plain `user` message serializes to just `{"role":..,"content":..}`; the
 /// optional `tool_call_id` and `tool_calls` fields are emitted only when set,
 /// which keeps the wire shape of ordinary messages unchanged.
-#[derive(Debug, Clone, serde::Serialize)]
+// `PartialEq` compares messages structurally (F9). No `Eq`: `tool_calls` is an
+// `Option<Vec<serde_json::Value>>`, and `Value` is not `Eq`, so a total
+// equivalence cannot be honored.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[non_exhaustive]
 pub struct Message {
     /// The role: `system`, `user`, `assistant`, or `tool`.
@@ -43,6 +46,16 @@ pub struct Message {
 
 impl Message {
     /// Construct a `user` message.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge_core::client::Message;
+    ///
+    /// let message = Message::user("hello");
+    /// assert_eq!(message.role(), "user");
+    /// assert_eq!(message.content(), "hello");
+    /// ```
     #[must_use]
     pub fn user(content: impl Into<String>) -> Message {
         Message {
@@ -108,7 +121,9 @@ impl Message {
 ///
 /// When serialized into a request the wrapping code turns this into
 /// `{"type":"function","function":{"name":..,"description":..,"parameters":..}}`.
-#[derive(Debug, Clone, serde::Serialize)]
+// `PartialEq` compares schemas structurally (F9). No `Eq`: `parameters` is a
+// `serde_json::Value`, which is not `Eq`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[non_exhaustive]
 pub struct ToolSchema {
     /// The tool's wire name.
@@ -117,6 +132,84 @@ pub struct ToolSchema {
     pub(crate) description: String,
     /// The JSON Schema for the tool's parameters.
     pub(crate) parameters: Value,
+}
+
+/// The reason a [`ToolSchema`] could not be built from its wire parts.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ToolSchemaError {
+    /// The wire name was empty or held a character outside `[A-Za-z0-9_.-]`.
+    #[error("invalid tool wire name {name:?}: {reason}")]
+    #[non_exhaustive]
+    InvalidName {
+        /// The rejected wire name.
+        name: String,
+        /// Why it was rejected.
+        reason: &'static str,
+    },
+    /// The parameters JSON Schema was not a JSON object.
+    #[error("tool {name:?} parameters schema must be a JSON object")]
+    #[non_exhaustive]
+    NonObjectSchema {
+        /// The tool whose schema was rejected.
+        name: String,
+    },
+}
+
+impl ToolSchema {
+    /// Builds a tool schema, validating the wire name and object-shaped schema.
+    ///
+    /// # Errors
+    /// Returns [`ToolSchemaError::InvalidName`] when `name` is empty or contains
+    /// a character outside `[A-Za-z0-9_.-]`, and
+    /// [`ToolSchemaError::NonObjectSchema`] when `parameters` is not a JSON
+    /// object, so a tool can never be advertised to the model with an unusable
+    /// name or a non-object JSON Schema (F7).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge_core::client::ToolSchema;
+    ///
+    /// let schema = ToolSchema::new(
+    ///     "search",
+    ///     "Search the web",
+    ///     serde_json::json!({"type": "object", "properties": {}}),
+    /// )?;
+    /// assert!(ToolSchema::new("", "d", serde_json::json!({})).is_err());
+    /// assert!(ToolSchema::new("ok", "d", serde_json::json!([])).is_err());
+    /// # Ok::<(), promptforge_core::client::ToolSchemaError>(())
+    /// ```
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        parameters: Value,
+    ) -> std::result::Result<ToolSchema, ToolSchemaError> {
+        let name = name.into();
+        if name.is_empty() {
+            return Err(ToolSchemaError::InvalidName {
+                name,
+                reason: "must not be empty",
+            });
+        }
+        if !name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+        {
+            return Err(ToolSchemaError::InvalidName {
+                name,
+                reason: "may contain only [A-Za-z0-9_.-]",
+            });
+        }
+        if !parameters.is_object() {
+            return Err(ToolSchemaError::NonObjectSchema { name });
+        }
+        Ok(ToolSchema {
+            name,
+            description: description.into(),
+            parameters,
+        })
+    }
 }
 
 /// A tool invocation requested by the model.
@@ -223,6 +316,16 @@ pub struct SecretString(String);
 
 impl SecretString {
     /// Wraps a secret so it is redacted everywhere it is formatted.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge_core::client::SecretString;
+    ///
+    /// let secret = SecretString::new("bearer-token");
+    /// assert_eq!(format!("{secret:?}"), "SecretString(<redacted>)");
+    /// assert_eq!(format!("{secret}"), "<redacted>");
+    /// ```
     #[must_use]
     pub fn new(secret: impl Into<String>) -> SecretString {
         SecretString(secret.into())
@@ -264,6 +367,17 @@ impl GatewayEndpoint {
     /// # Errors
     /// Returns a `Config`-kind [`CompletionError`] when `url` is empty, lacks an
     /// `http`/`https` scheme, or names no host.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge_core::client::GatewayEndpoint;
+    ///
+    /// let endpoint = GatewayEndpoint::new("https://gateway.example.com/v1/")?;
+    /// assert_eq!(endpoint.url(), "https://gateway.example.com/v1");
+    /// assert!(GatewayEndpoint::new("ftp://example.com").is_err());
+    /// # Ok::<(), promptforge_core::model::CompletionError>(())
+    /// ```
     pub fn new(url: &str) -> std::result::Result<GatewayEndpoint, CompletionError> {
         let trimmed = url.trim();
         let rest = trimmed
@@ -341,6 +455,27 @@ impl GatewayClient {
     /// [`SecretString`] bearer key (used by tests and by
     /// [`GatewayClient::from_env`]). Responses are parsed through the resolved
     /// tool dialect.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # async fn run() -> Result<(), promptforge_core::model::CompletionError> {
+    /// use promptforge_core::client::{GatewayClient, GatewayEndpoint, Message, SecretString};
+    /// use promptforge_core::model::CompletionOptions;
+    /// use promptforge_core::dialects::ToolDialectId;
+    ///
+    /// let client = GatewayClient::new(
+    ///     GatewayEndpoint::new("http://127.0.0.1:8081/v1")?,
+    ///     SecretString::new("bearer-token"),
+    /// );
+    /// let options = CompletionOptions::new("analyst", ToolDialectId::OpenAi);
+    /// let completion = client
+    ///     .complete(&[Message::user("hello")], None, &options)
+    ///     .await?;
+    /// let _ = completion.result();
+    /// # Ok(())
+    /// # }
+    /// ```
     #[must_use]
     pub fn new(endpoint: GatewayEndpoint, key: SecretString) -> GatewayClient {
         GatewayClient {
@@ -357,6 +492,24 @@ impl GatewayClient {
     ///
     /// Hosts use this explicit sentinel for hermetic execution paths. Any
     /// attempted model call fails with a `Disabled`-kind [`CompletionError`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # async fn run() {
+    /// use promptforge_core::client::{GatewayClient, Message};
+    /// use promptforge_core::model::{CompletionErrorKind, CompletionOptions};
+    /// use promptforge_core::dialects::ToolDialectId;
+    ///
+    /// let client = GatewayClient::disabled();
+    /// let options = CompletionOptions::new("m", ToolDialectId::OpenAi);
+    /// let error = client
+    ///     .complete(&[Message::user("hi")], None, &options)
+    ///     .await
+    ///     .expect_err("a disabled client cannot complete");
+    /// assert_eq!(error.kind(), CompletionErrorKind::Disabled);
+    /// # }
+    /// ```
     #[must_use]
     pub fn disabled() -> GatewayClient {
         GatewayClient {
@@ -415,10 +568,17 @@ impl GatewayClient {
     /// `max_tokens`, and `thinking` extend the request when present.
     ///
     /// # Errors
-    /// Returns a [`CompletionError`] classified `Transport` on a transport
-    /// failure, `Backend` when the gateway responds with a non-success status,
-    /// `MalformedResponse` when the response shape is unusable, and `EmptyReply`
-    /// when the turn has neither non-empty tool calls nor non-empty text.
+    /// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
+    /// (F11 - the full reachable set):
+    /// - `Disabled` when this client was built with [`GatewayClient::disabled`];
+    /// - `Config` when the selected tool dialect is unknown, or dialect request
+    ///   preparation fails;
+    /// - `Transport` on a transport-layer failure (connection, timeout);
+    /// - `Backend` when the gateway responds with a non-success status;
+    /// - `MalformedResponse` when the body exceeds the size cap or its shape is
+    ///   unusable (the JSON decode failure is retained as a private `#[source]`);
+    /// - `EmptyReply` when the turn has neither non-empty tool calls nor
+    ///   non-empty text.
     pub async fn complete(
         &self,
         messages: &[Message],
@@ -480,13 +640,12 @@ impl GatewayClient {
         let status = response.status();
         let raw_body = read_body_capped(response, self.max_response_bytes).await?;
         if !status.is_success() {
+            // F5: bound the body, then escape control characters so a hostile
+            // payload cannot forge log lines. The escaped body is kept only for
+            // the opt-in `CompletionError::backend_body` accessor, never the
+            // public `Display`.
             let body = String::from_utf8_lossy(&raw_body);
-            let body: String = body.chars().take(2000).collect();
-            let body = if body.is_empty() {
-                "(empty body)".to_string()
-            } else {
-                body
-            };
+            let body = escape_controls(&body, 2000);
             return Err(CompletionError::from(Error::Backend {
                 status: status.as_u16(),
                 body,
@@ -510,6 +669,29 @@ impl GatewayClient {
             response_body,
         })
     }
+}
+
+/// Escapes control characters in a diagnostic body and bounds it to `max` chars.
+///
+/// Control characters (including newlines and carriage returns) are rendered in
+/// their `\u{..}`/`\n` escaped form so a backend body cannot forge log lines or
+/// smuggle terminal control sequences into a diagnostic (F5). An empty body is
+/// reported as a fixed marker.
+fn escape_controls(body: &str, max: usize) -> String {
+    if body.is_empty() {
+        return "(empty body)".to_owned();
+    }
+    let mut escaped = String::with_capacity(body.len());
+    for ch in body.chars().take(max) {
+        if ch.is_control() {
+            for part in ch.escape_default() {
+                escaped.push(part);
+            }
+        } else {
+            escaped.push(ch);
+        }
+    }
+    escaped
 }
 
 /// Reads a response body, refusing it once it would exceed `cap` bytes.
@@ -633,6 +815,91 @@ mod tests {
         assert_eq!(format!("{secret:?}"), "SecretString(<redacted>)");
         assert_eq!(format!("{secret}"), "<redacted>");
         assert_eq!(secret.expose(), "super-secret-token");
+    }
+
+    #[test]
+    fn tool_schema_new_validates_wire_name_and_object_schema() {
+        // F7: a valid name and object schema are accepted.
+        let schema = ToolSchema::new("web.search-1", "desc", json_object())
+            .expect("a valid schema is accepted");
+        assert_eq!(schema.name, "web.search-1");
+        // An empty or malformed name is rejected.
+        assert!(matches!(
+            ToolSchema::new("", "d", json_object()),
+            Err(ToolSchemaError::InvalidName { .. })
+        ));
+        assert!(matches!(
+            ToolSchema::new("bad name", "d", json_object()),
+            Err(ToolSchemaError::InvalidName { .. })
+        ));
+        // A non-object JSON Schema is rejected.
+        assert!(matches!(
+            ToolSchema::new("ok", "d", serde_json::json!([1, 2, 3])),
+            Err(ToolSchemaError::NonObjectSchema { .. })
+        ));
+        assert!(matches!(
+            ToolSchema::new("ok", "d", serde_json::json!("scalar")),
+            Err(ToolSchemaError::NonObjectSchema { .. })
+        ));
+    }
+
+    fn json_object() -> Value {
+        serde_json::json!({"type": "object", "properties": {}})
+    }
+
+    #[test]
+    fn escape_controls_neutralizes_control_bytes_and_bounds_length() {
+        // F5: newlines and other control characters are escaped, not passed
+        // through, so a body cannot forge log lines.
+        let escaped = escape_controls("line1\nline2\r\u{7}end", 2000);
+        assert!(!escaped.contains('\n'), "raw newline must be escaped");
+        assert!(!escaped.contains('\r'), "raw carriage return must be escaped");
+        assert!(escaped.contains("\\n"), "escaped newline expected, got {escaped}");
+        assert_eq!(escape_controls("", 2000), "(empty body)");
+        assert_eq!(escape_controls("abcdef", 3), "abc");
+    }
+
+    #[tokio::test]
+    async fn backend_error_display_is_body_free_and_body_is_opt_in_and_escaped() {
+        use axum::Router;
+        use axum::routing::post;
+        use tokio::net::TcpListener;
+
+        // A non-success body carrying control characters and a would-be secret.
+        async fn handler() -> (axum::http::StatusCode, String) {
+            (
+                axum::http::StatusCode::BAD_GATEWAY,
+                "forged\nlog: super-secret".to_owned(),
+            )
+        }
+        let app = Router::new().route("/v1/chat/completions", post(handler));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = GatewayClient::new(
+            GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid endpoint"),
+            SecretString::new("tok"),
+        );
+        let options = CompletionOptions::new("m", crate::dialects::ToolDialectId::OpenAi);
+        let err = client
+            .complete(&[Message::user("hi")], None, &options)
+            .await
+            .expect_err("a 502 must surface as a backend error");
+
+        // F5: the public Display names only the status, never the raw body.
+        let shown = err.to_string();
+        assert!(shown.contains("502"), "status must appear, got {shown}");
+        assert!(
+            !shown.contains("super-secret") && !shown.contains('\n'),
+            "the raw body must not ride in Display, got {shown}"
+        );
+        // The bounded, control-escaped body is available only via the opt-in.
+        let body = err.backend_body().expect("backend body is available opt-in");
+        assert!(body.contains("\\n"), "control chars must be escaped, got {body}");
+        assert!(!body.contains('\n'), "no raw newline in the diagnostic body");
     }
 
     #[test]

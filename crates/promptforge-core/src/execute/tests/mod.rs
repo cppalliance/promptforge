@@ -586,10 +586,13 @@ fn silent_progress<'a>(
 fn schemas_for(tools: &[&dyn Tool]) -> Vec<ToolSchema> {
     tools
         .iter()
-        .map(|t| ToolSchema {
-            name: t.wire_name().to_string(),
-            description: t.description().to_string(),
-            parameters: t.parameters_schema(),
+        .map(|t| {
+            ToolSchema::new(
+                t.wire_name().to_string(),
+                t.description().to_string(),
+                t.parameters_schema(),
+            )
+            .expect("fixture tool schema is valid")
         })
         .collect()
 }

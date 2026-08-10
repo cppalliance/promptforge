@@ -69,11 +69,16 @@ pub(crate) enum Error {
     Http(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// The backend returned a non-success status.
-    #[error("backend returned {status}: {body}")]
+    ///
+    /// The `Display` is deliberately body-free (F5): the bounded, control-escaped
+    /// body rides only in the private `body` field, reachable through the
+    /// explicit [`crate::CompletionError::backend_body`] opt-in, so a raw or
+    /// hostile payload cannot forge log lines or leak into an error message.
+    #[error("backend returned {status}")]
     Backend {
         /// The HTTP status code returned by the backend.
         status: u16,
-        /// The (truncated) response body, for diagnostics.
+        /// The bounded, control-escaped response body, for opt-in diagnostics.
         body: String,
     },
 

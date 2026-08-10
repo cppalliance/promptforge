@@ -98,6 +98,21 @@ impl CompletionError {
         }
     }
 
+    /// Returns the bounded, control-escaped backend error body, when the failure
+    /// was a non-success backend status.
+    ///
+    /// This is an explicit opt-in diagnostic channel (F5): the raw body never
+    /// rides in the public [`Display`](std::fmt::Display), so a hostile or
+    /// sensitive payload cannot forge log lines or leak into an error message.
+    /// The returned text is bounded and has its control characters escaped.
+    #[must_use]
+    pub fn backend_body(&self) -> Option<&str> {
+        match &self.inner {
+            Error::Backend { body, .. } => Some(body),
+            _ => None,
+        }
+    }
+
     /// Returns the backend HTTP status, when the failure was a backend status.
     #[must_use]
     pub fn status(&self) -> Option<u16> {
@@ -1006,7 +1021,18 @@ async fn read_error_body_bounded(
     if buffer.is_empty() {
         return Ok("(empty body)".to_owned());
     }
-    Ok(String::from_utf8_lossy(&buffer).into_owned())
+    // F5: escape control characters so a hostile catalog error body cannot forge
+    // log lines or smuggle terminal control sequences into a diagnostic.
+    let lossy = String::from_utf8_lossy(&buffer);
+    let mut escaped = String::with_capacity(lossy.len());
+    for ch in lossy.chars() {
+        if ch.is_control() {
+            escaped.extend(ch.escape_default());
+        } else {
+            escaped.push(ch);
+        }
+    }
+    Ok(escaped)
 }
 
 /// Returns the process-wide catalog HTTP client, building it once on first use.
