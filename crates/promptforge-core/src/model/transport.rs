@@ -231,6 +231,7 @@ pub async fn fetch_model_catalog(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::CompletionErrorKind;
 
     #[test]
     fn models_list_entry_parses_dialect_fields() {
@@ -259,5 +260,167 @@ mod tests {
         let entry: ModelsListEntry = serde_json::from_value(json).unwrap();
         assert_eq!(entry.tool_dialect, ToolDialectId::OpenAi);
         assert_eq!(entry.tool_dialect.tools_mode(), ToolsMode::Native);
+    }
+
+    #[tokio::test]
+    async fn fetch_model_catalog_rejects_a_wire_tools_mode_that_contradicts_the_dialect() {
+        use axum::Router;
+        use axum::routing::get;
+
+        // MODEL-008: a wire `tools_mode` is validated against the mode derived
+        // from `tool_dialect`. An OpenAI (native) dialect paired with an
+        // `emulated` wire mode is contradictory and must be refused as malformed
+        // rather than silently keeping one of the two.
+        async fn models() -> axum::Json<serde_json::Value> {
+            axum::Json(serde_json::json!({
+                "data": [{
+                    "id": "remote",
+                    "description": "a remote model",
+                    "context": 8192,
+                    "thinking": "never",
+                    "tool_dialect": "openai",
+                    "tools_mode": "emulated"
+                }]
+            }))
+        }
+        let app = Router::new().route("/models", get(models));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
+            .await
+            .expect_err("a contradictory wire tools_mode must be rejected");
+        assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+        assert!(
+            err.to_string().contains("contradicts"),
+            "the rejection must name the contradiction, got {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_model_catalog_bounds_and_reports_non_success_body() {
+        use axum::Router;
+        use axum::routing::get;
+
+        async fn models() -> (axum::http::StatusCode, String) {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "e".repeat(MAX_CATALOG_ERROR_BODY * 4),
+            )
+        }
+        let app = Router::new().route("/models", get(models));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
+            .await
+            .expect_err("a 500 response must surface as an error");
+        assert_eq!(err.kind(), CompletionErrorKind::Backend);
+        let msg = err.to_string();
+        assert!(
+            msg.len() < MAX_CATALOG_ERROR_BODY + 128,
+            "the error-path body must be bounded, got {} bytes",
+            msg.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_model_catalog_bounds_an_oversized_success_body() {
+        use axum::Router;
+        use axum::routing::get;
+
+        // A 200 response whose body exceeds the success cap must be refused
+        // BEFORE decoding, not buffered unbounded. The body is deliberately not
+        // valid JSON: the bound must trip first, regardless of contents.
+        async fn models() -> (axum::http::StatusCode, String) {
+            let oversized = usize::try_from(MAX_CATALOG_BODY).unwrap() + 1;
+            (axum::http::StatusCode::OK, "e".repeat(oversized))
+        }
+        let app = Router::new().route("/models", get(models));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
+            .await
+            .expect_err("an oversized success body must be refused");
+        assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+        assert!(
+            err.to_string().contains("exceeds"),
+            "the bound must report the size limit, got {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_model_catalog_preserves_the_json_decode_source() {
+        use axum::Router;
+        use axum::routing::get;
+
+        // MODEL-009: a 200 body that is not a valid model list is classified as
+        // MalformedResponse, and the underlying `serde_json::Error` survives as
+        // the error-chain `#[source]` rather than being flattened into the text.
+        async fn models() -> (axum::http::StatusCode, String) {
+            (axum::http::StatusCode::OK, "{ this is not json".to_owned())
+        }
+        let app = Router::new().route("/models", get(models));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
+            .await
+            .expect_err("an undecodable body must surface as an error");
+        assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
+        let source =
+            std::error::Error::source(&err).expect("the decode error must be a preserved source");
+        assert!(
+            source.downcast_ref::<serde_json::Error>().is_some(),
+            "the preserved source must be the JSON decode error, got {source}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_model_catalog_preserves_a_body_read_failure_source() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // MODEL-010: a non-success response whose body cannot be fully read
+        // (the server promises a large body then drops the connection) must
+        // surface as a typed transport failure that keeps the `reqwest::Error`
+        // as its `#[source]`, not display text.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let header = "HTTP/1.1 500 Internal Server Error\r\n\
+                     Content-Length: 1000000\r\n\r\n";
+                let _ = sock.write_all(header.as_bytes()).await;
+                let _ = sock.write_all(b"abc").await;
+                // Socket drops here: the promised body never completes.
+            }
+        });
+
+        let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
+            .await
+            .expect_err("a truncated error body must surface as an error");
+        assert_eq!(err.kind(), CompletionErrorKind::Transport);
+        assert_eq!(err.status(), Some(500));
+        let source =
+            std::error::Error::source(&err).expect("the read failure must be a preserved source");
+        assert!(
+            source.downcast_ref::<reqwest::Error>().is_some(),
+            "the preserved source must be the reqwest read error, got {source}"
+        );
     }
 }
