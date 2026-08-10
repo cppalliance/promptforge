@@ -16,9 +16,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.89"
 license = "BSL-1.0"
+repository = "https://github.com/cppalliance/promptforge"
 
 [workspace.dependencies]
-promptforge-core = { path = "crates/promptforge-core", version = "0.1.0" }
+promptforge-core = { path = "crates/promptforge-core", version = "0.0.0" }
 promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.1.0" }
 promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.0.0" }
 pulldown-cmark = "0.12"
@@ -27,6 +28,7 @@ serde_yaml = "0.9"
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 fastrand = "2"
+rand = "0.9"
 readabilityrs = "0.1"
 htmd = "0.5"
 mime = "0.3"

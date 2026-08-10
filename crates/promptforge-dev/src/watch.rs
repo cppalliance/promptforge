@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 use notify::{RecursiveMode, Watcher as _};
-use promptforge_core::cancel;
+use promptforge_core::CancelHandle;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use crate::run;
@@ -37,7 +37,7 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 ///
 /// Returns an error when the prompt path has no file name or the filesystem
 /// watcher cannot be installed on its parent directory.
-pub(crate) async fn run(prompt: &Path, input: &str) -> Result<()> {
+pub(crate) async fn run(prompt: &Path, input: &str, cancel: &CancelHandle) -> Result<()> {
     let file_name = prompt
         .file_name()
         .with_context(|| format!("{} names no file to watch", prompt.display()))?
@@ -64,13 +64,13 @@ pub(crate) async fn run(prompt: &Path, input: &str) -> Result<()> {
         "watching {} for changes; press Ctrl-C to stop",
         prompt.display()
     );
-    run_and_report(prompt, input).await;
-    rerun_on_changes(&mut receiver, DEBOUNCE, move || async move {
+    run_and_report(prompt, input, cancel).await;
+    rerun_on_changes(&mut receiver, DEBOUNCE, cancel, move || async move {
         eprintln!("{} changed; rerunning", prompt.display());
-        run_and_report(prompt, input).await;
+        run_and_report(prompt, input, cancel).await;
     })
     .await;
-    if cancel::is_cancelled() {
+    if cancel.is_cancelled() {
         bail!("interrupted by Ctrl-C");
     }
     Ok(())
@@ -105,12 +105,13 @@ fn event_touches(event: &notify::Event, file_name: &OsStr) -> bool {
 async fn rerun_on_changes<F, Fut>(
     receiver: &mut UnboundedReceiver<()>,
     debounce: Duration,
+    cancel: &CancelHandle,
     mut rerun: F,
 ) where
     F: FnMut() -> Fut,
     Fut: Future<Output = ()>,
 {
-    while next_rerun(receiver, debounce).await {
+    while next_rerun(receiver, debounce, cancel).await {
         rerun().await;
     }
 }
@@ -121,10 +122,14 @@ async fn rerun_on_changes<F, Fut>(
 /// Returns `true` when a settled change awaits a rerun and `false` once the
 /// event source closes with nothing pending. A source that closes with a
 /// change already received still yields that final rerun first.
-async fn next_rerun(receiver: &mut UnboundedReceiver<()>, debounce: Duration) -> bool {
+async fn next_rerun(
+    receiver: &mut UnboundedReceiver<()>,
+    debounce: Duration,
+    cancel: &CancelHandle,
+) -> bool {
     tokio::select! {
         biased;
-        () = cancel::wait_cancelled() => return false,
+        () = cancel.cancelled() => return false,
         msg = receiver.recv() => {
             if msg.is_none() {
                 return false;
@@ -134,7 +139,7 @@ async fn next_rerun(receiver: &mut UnboundedReceiver<()>, debounce: Duration) ->
     loop {
         tokio::select! {
             biased;
-            () = cancel::wait_cancelled() => return false,
+            () = cancel.cancelled() => return false,
             timed = tokio::time::timeout(debounce, receiver.recv()) => {
                 match timed {
                     Ok(Some(())) => {}
@@ -146,8 +151,8 @@ async fn next_rerun(receiver: &mut UnboundedReceiver<()>, debounce: Duration) ->
 }
 
 /// Runs the prompt once, printing the result to stdout or the error to stderr.
-async fn run_and_report(prompt: &Path, input: &str) {
-    match run::run_once(prompt, input).await {
+async fn run_and_report(prompt: &Path, input: &str, cancel: &CancelHandle) {
+    match run::run_once(prompt, input, cancel.clone()).await {
         Ok(result) => println!("{result}"),
         Err(error) => {
             eprintln!("{}", run::format_dev_failure(prompt, &error));
@@ -250,8 +255,9 @@ mod tests {
             sender.send(()).expect("rerun loop must be receiving");
         });
 
+        let cancel = CancelHandle::new();
         let mut reruns = 0_u32;
-        rerun_on_changes(&mut receiver, Duration::from_millis(300), || {
+        rerun_on_changes(&mut receiver, Duration::from_millis(300), &cancel, || {
             reruns += 1;
             async {}
         })
@@ -267,8 +273,9 @@ mod tests {
         sender.send(()).expect("fresh channel accepts one event");
         drop(sender);
 
+        let cancel = CancelHandle::new();
         let mut reruns = 0_u32;
-        rerun_on_changes(&mut receiver, Duration::from_millis(300), || {
+        rerun_on_changes(&mut receiver, Duration::from_millis(300), &cancel, || {
             reruns += 1;
             async {}
         })
@@ -282,8 +289,9 @@ mod tests {
         let (sender, mut receiver) = mpsc::unbounded_channel::<()>();
         drop(sender);
 
+        let cancel = CancelHandle::new();
         let mut reruns = 0_u32;
-        rerun_on_changes(&mut receiver, Duration::from_millis(300), || {
+        rerun_on_changes(&mut receiver, Duration::from_millis(300), &cancel, || {
             reruns += 1;
             async {}
         })

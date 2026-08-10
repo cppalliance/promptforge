@@ -36,3 +36,5 @@
 
 ## 2026-08-09 Add chat_template_file and detect Mistral tool templates
 
+## 2026-08-10 Rebuild promptforge-core around a validated bounded API
+

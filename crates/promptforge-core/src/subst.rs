@@ -11,10 +11,109 @@
 //! hard error. `{{ reply }}` when nil is a hard error. `{{ item }}` outside a
 //! fanout arm is a hard error. Substitution does no arithmetic - compute in
 //! Lua and reference the result.
+//!
+//! # Escape grammar
+//!
+//! A backslash escapes the following character when it is `{`, `}`, or `\\`:
+//! the backslash is consumed and the next character is emitted literally.
+//! Everywhere else a backslash is an ordinary literal. This lets prose carry a
+//! literal opening delimiter (`\{{` emits `{{`), a literal closing delimiter
+//! (`\}}` emits `}}`), and a literal backslash (`\\` emits `\`). Escapes
+//! compose, so adjacent escaped delimiters resolve independently.
+//!
+//! Substitution is a single left-to-right pass over the *input* prose only:
+//! resolved output is appended to a separate buffer and never rescanned, so a
+//! replacement that itself contains `{{ ... }}` is emitted verbatim and never
+//! triggers a second round of substitution.
 
 use serde_json::Value;
 
-use crate::{Error, Result};
+use crate::Result;
+
+/// A stable classification of a [`SubstitutionError`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SubstErrorKind {
+    /// A `{{` was opened but never closed with `}}`.
+    Unclosed,
+    /// A bare namespace with no `.key` suffix where one is required.
+    BadPath,
+    /// A path segment was empty or whitespace-padded (`var.`, `var..x`).
+    EmptySegment,
+    /// The leading namespace is not one of the five known roots.
+    UnknownNamespace,
+    /// A scalar namespace (`args`/`reply`/`item`) was indexed like a table.
+    NotATable,
+    /// A `var`/`sys` lookup found no value at the requested key.
+    MissingKey,
+    /// The resolved value was JSON null.
+    NullValue,
+    /// `{{ reply }}` was used before any prior section reply existed.
+    NilReply,
+    /// `{{ item }}` was used outside a fanout arm.
+    NilItem,
+    /// A table/array value failed to serialize to JSON.
+    Serialize,
+}
+
+/// A typed substitution failure.
+///
+/// Carries a stable [`kind`](SubstitutionError::kind), the byte
+/// [`offset`](SubstitutionError::offset) of the offending placeholder within
+/// the prose, a `message` that embeds a bounded, control-escaped preview of the
+/// placeholder path, and - for the serialization case - the preserved
+/// underlying error as its [`source`](std::error::Error::source).
+#[derive(Debug)]
+pub(crate) struct SubstitutionError {
+    kind: SubstErrorKind,
+    offset: usize,
+    message: String,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl SubstitutionError {
+    fn new(kind: SubstErrorKind, offset: usize, message: String) -> Self {
+        SubstitutionError {
+            kind,
+            offset,
+            message,
+            source: None,
+        }
+    }
+
+    fn with_source(
+        kind: SubstErrorKind,
+        offset: usize,
+        message: String,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    ) -> Self {
+        SubstitutionError {
+            kind,
+            offset,
+            message,
+            source: Some(source),
+        }
+    }
+}
+
+impl std::fmt::Display for SubstitutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} [{:?} at byte {}]",
+            self.message, self.kind, self.offset
+        )
+    }
+}
+
+impl std::error::Error for SubstitutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+            .as_deref()
+            .map(|s| s as &(dyn std::error::Error + 'static))
+    }
+}
+
+type SubstResult<T> = std::result::Result<T, SubstitutionError>;
 
 /// Resolve every `{{ path }}` in `prose` against `args`, `reply`, `item`,
 /// `var`, and `sys`.
@@ -26,10 +125,11 @@ use crate::{Error, Result};
 /// only and does not transform either compiled Lua phase.
 ///
 /// # Errors
-/// Returns [`Error::Substitution`] for an unclosed `{{`, an unknown namespace, a
-/// missing key, a null value, `{{ reply }}` when `reply` is `None`, or
-/// `{{ item }}` when `item` is `None`.
-pub fn substitute(
+/// Returns [`Error::Substitution`](crate::Error::Substitution) for an unclosed
+/// `{{`, an unknown namespace, an empty or whitespace path segment, a missing
+/// key, a null value, `{{ reply }}` when `reply` is `None`, or `{{ item }}`
+/// when `item` is `None`.
+pub(crate) fn substitute(
     prose: &str,
     args: &str,
     reply: Option<&str>,
@@ -37,90 +137,193 @@ pub fn substitute(
     var: &Value,
     sys: &Value,
 ) -> Result<String> {
+    Ok(substitute_inner(prose, args, reply, item, var, sys)?)
+}
+
+fn substitute_inner(
+    prose: &str,
+    args: &str,
+    reply: Option<&str>,
+    item: Option<&str>,
+    var: &Value,
+    sys: &Value,
+) -> SubstResult<String> {
     let mut out = String::with_capacity(prose.len());
-    let mut rest = prose;
-    while let Some(start) = rest.find("{{") {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 2..];
-        let end = after
-            .find("}}")
-            .ok_or_else(|| Error::Substitution("unclosed '{{' in prose".to_string()))?;
-        let path = after[..end].trim();
-        out.push_str(&resolve(path, args, reply, item, var, sys)?);
-        rest = &after[end + 2..];
+    let bytes = prose.as_bytes();
+    let mut i = 0;
+    while i < prose.len() {
+        // Escape grammar: a backslash consumes itself and emits a literal `{`,
+        // `}`, or `\` when one immediately follows.
+        if bytes[i] == b'\\' && i + 1 < prose.len() {
+            let next = bytes[i + 1];
+            if matches!(next, b'{' | b'}' | b'\\') {
+                out.push(next as char);
+                i += 2;
+                continue;
+            }
+        }
+        if bytes[i] == b'{' && i + 1 < prose.len() && bytes[i + 1] == b'{' {
+            let start = i;
+            let after = &prose[i + 2..];
+            let end = after.find("}}").ok_or_else(|| {
+                SubstitutionError::new(
+                    SubstErrorKind::Unclosed,
+                    start,
+                    "unclosed '{{' in prose".to_string(),
+                )
+            })?;
+            let path = after[..end].trim();
+            out.push_str(&resolve(path, start, args, reply, item, var, sys)?);
+            i += 2 + end + 2;
+            continue;
+        }
+        let Some(ch) = prose[i..].chars().next() else {
+            break;
+        };
+        out.push(ch);
+        i += ch.len_utf8();
     }
-    out.push_str(rest);
     Ok(out)
 }
 
 /// Resolve a single `{{ }}` path to its rendered string.
 fn resolve(
     path: &str,
+    offset: usize,
     args: &str,
     reply: Option<&str>,
     item: Option<&str>,
     var: &Value,
     sys: &Value,
-) -> Result<String> {
+) -> SubstResult<String> {
     if path == "args" {
         return Ok(args.to_string());
     }
     if path == "reply" {
         return reply.map(String::from).ok_or_else(|| {
-            Error::Substitution("{{ reply }} is nil (no prior section reply)".to_string())
+            SubstitutionError::new(
+                SubstErrorKind::NilReply,
+                offset,
+                "{{ reply }} is nil (no prior section reply)".to_string(),
+            )
         });
     }
     if path == "item" {
         return item.map(String::from).ok_or_else(|| {
-            Error::Substitution("{{ item }} is nil (not inside a fanout arm)".to_string())
+            SubstitutionError::new(
+                SubstErrorKind::NilItem,
+                offset,
+                "{{ item }} is nil (not inside a fanout arm)".to_string(),
+            )
         });
     }
+
     let Some((namespace, keys)) = path.split_once('.') else {
-        return Err(Error::Substitution(format!("bad path: {{{{ {path} }}}}")));
+        return Err(SubstitutionError::new(
+            SubstErrorKind::BadPath,
+            offset,
+            format!("bad path: {{{{ {} }}}}", path_preview(path)),
+        ));
     };
+
+    // Validate the complete segment grammar before any lookup: every segment
+    // (namespace included) must be nonempty and free of leading or trailing
+    // whitespace, so `var.`, `var..x`, and `var. .x` are rejected up front even
+    // when a matching JSON key happens to exist.
+    for segment in path.split('.') {
+        if segment.is_empty() || segment.trim() != segment {
+            return Err(SubstitutionError::new(
+                SubstErrorKind::EmptySegment,
+                offset,
+                format!(
+                    "empty or padded path segment in {{{{ {} }}}}",
+                    path_preview(path)
+                ),
+            ));
+        }
+    }
+
     let root = match namespace {
         "var" => var,
         "sys" => sys,
-        "args" => {
-            return Err(Error::Substitution(
-                "args is a string, not a table".to_string(),
-            ));
-        }
-        "reply" => {
-            return Err(Error::Substitution(
-                "reply is a string, not a table".to_string(),
-            ));
-        }
-        "item" => {
-            return Err(Error::Substitution(
-                "item is a string, not a table".to_string(),
+        "args" | "reply" | "item" => {
+            return Err(SubstitutionError::new(
+                SubstErrorKind::NotATable,
+                offset,
+                format!("{namespace} is a string, not a table"),
             ));
         }
         other => {
-            return Err(Error::Substitution(format!(
-                "unknown namespace '{other}' in {{{{ {path} }}}}"
-            )));
+            return Err(SubstitutionError::new(
+                SubstErrorKind::UnknownNamespace,
+                offset,
+                format!(
+                    "unknown namespace '{}' in {{{{ {} }}}}",
+                    path_preview(other),
+                    path_preview(path)
+                ),
+            ));
         }
     };
+
     let mut current = root;
     for key in keys.split('.') {
-        current = current
-            .get(key)
-            .ok_or_else(|| Error::Substitution(format!("missing {{{{ {path} }}}}")))?;
+        current = current.get(key).ok_or_else(|| {
+            SubstitutionError::new(
+                SubstErrorKind::MissingKey,
+                offset,
+                format!("missing {{{{ {} }}}}", path_preview(path)),
+            )
+        })?;
     }
-    render(current, path)
+    render(current, path, offset)
+}
+
+/// Renders a prompt-controlled placeholder path for a diagnostic.
+///
+/// Control characters are escaped and the text is truncated to a bounded length
+/// so a hostile or malformed placeholder cannot forge multiline log records,
+/// leak an oversized span, or smuggle control characters through `Display`.
+fn path_preview(path: &str) -> String {
+    use std::fmt::Write as _;
+    const MAX_PREVIEW_CHARS: usize = 80;
+    let mut out = String::with_capacity(path.len().min(MAX_PREVIEW_CHARS));
+    for ch in path.chars().take(MAX_PREVIEW_CHARS) {
+        match ch {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                let _ = write!(out, "\\u{{{:04x}}}", u32::from(c));
+            }
+            c => out.push(c),
+        }
+    }
+    if path.chars().count() > MAX_PREVIEW_CHARS {
+        out.push_str("...");
+    }
+    out
 }
 
 /// Render a resolved JSON value as its substituted string.
-fn render(value: &Value, path: &str) -> Result<String> {
+fn render(value: &Value, path: &str, offset: usize) -> SubstResult<String> {
     match value {
-        Value::Null => Err(Error::Substitution(format!("missing {{{{ {path} }}}}"))),
+        Value::Null => Err(SubstitutionError::new(
+            SubstErrorKind::NullValue,
+            offset,
+            format!("missing {{{{ {} }}}}", path_preview(path)),
+        )),
         Value::String(s) => Ok(s.clone()),
         Value::Bool(b) => Ok(b.to_string()),
         Value::Number(n) => Ok(n.to_string()),
-        Value::Array(_) | Value::Object(_) => {
-            serde_json::to_string(value).map_err(|e| Error::Substitution(e.to_string()))
-        }
+        Value::Array(_) | Value::Object(_) => serde_json::to_string(value).map_err(|error| {
+            SubstitutionError::with_source(
+                SubstErrorKind::Serialize,
+                offset,
+                format!("could not serialize {{{{ {} }}}}", path_preview(path)),
+                Box::new(error),
+            )
+        }),
     }
 }
 
@@ -133,6 +336,32 @@ mod tests {
         let var = json!({ "kind": "library", "count": 3, "row": { "a": 1 } });
         let sys = json!({ "when": "2026-07-29T00:00:00Z", "id": 1 });
         substitute(prose, "Acme Corp", None, None, &var, &sys)
+    }
+
+    fn err_of(prose: &str) -> SubstitutionError {
+        let var = json!({ "kind": "library", "row": { "a": 1 }, "arr": [1, 2] });
+        let sys = json!({ "id": 1 });
+        substitute_inner(prose, "Acme Corp", Some("r"), Some("i"), &var, &sys)
+            .expect_err("expected substitution failure")
+    }
+
+    #[test]
+    fn substitution_diagnostics_escape_and_bound_the_placeholder() {
+        let hostile = format!("var.{}", "x".repeat(500));
+        let preview = path_preview(&hostile);
+        assert!(
+            preview.chars().count() <= 83,
+            "preview must be bounded, got {} chars",
+            preview.chars().count()
+        );
+        assert!(preview.ends_with("..."), "over-long preview must be elided");
+
+        let with_controls = path_preview("var.a\nb\tc");
+        assert!(
+            !with_controls.contains('\n') && !with_controls.contains('\t'),
+            "control characters must be escaped, got: {with_controls}"
+        );
+        assert!(with_controls.contains("\\n") && with_controls.contains("\\t"));
     }
 
     #[test]
@@ -175,7 +404,102 @@ mod tests {
 
     #[test]
     fn unclosed_is_error() {
-        assert!(run("open {{ args").is_err());
+        assert_eq!(err_of("open {{ args").kind, SubstErrorKind::Unclosed);
+    }
+
+    // --- SUBST-003: escape grammar -------------------------------------------
+
+    #[test]
+    fn escaped_delimiters_are_literal() {
+        assert_eq!(
+            run(r"literal \{{ args }} here").unwrap(),
+            "literal {{ args }} here"
+        );
+        assert_eq!(run(r"close \}} brace").unwrap(), "close }} brace");
+        assert_eq!(run(r"back \\ slash").unwrap(), r"back \ slash");
+    }
+
+    #[test]
+    fn escape_then_real_placeholder_adjacent() {
+        // First delimiter escaped, second one live and resolved.
+        assert_eq!(run(r"\{{x}}{{ args }}").unwrap(), "{{x}}Acme Corp");
+    }
+
+    #[test]
+    fn lone_backslash_is_literal() {
+        assert_eq!(run(r"a\b").unwrap(), r"a\b");
+        assert_eq!(run("trailing\\").unwrap(), "trailing\\");
+    }
+
+    #[test]
+    fn replacement_produced_delimiters_are_not_resubstituted() {
+        let var = json!({ "payload": "{{ args }}" });
+        let sys = json!({});
+        // `var.payload` renders text that looks like a placeholder; it must be
+        // emitted verbatim, never resolved against args.
+        let out = substitute("value: {{ var.payload }}", "SECRET", None, None, &var, &sys).unwrap();
+        assert_eq!(out, "value: {{ args }}");
+    }
+
+    // --- SUBST-004: path segment grammar -------------------------------------
+
+    #[test]
+    fn empty_or_padded_segments_are_rejected() {
+        for bad in ["var.", "var..x", "var. .x", "var.x.", "var. .x .y"] {
+            let prose = format!("{{{{ {bad} }}}}");
+            let e = err_of(&prose);
+            assert_eq!(
+                e.kind,
+                SubstErrorKind::EmptySegment,
+                "path {bad:?} must be an empty-segment error, got {:?}",
+                e.kind
+            );
+        }
+    }
+
+    #[test]
+    fn valid_nested_segment_still_resolves() {
+        assert_eq!(run("{{ var.row.a }}").unwrap(), "1");
+    }
+
+    // --- SUBST-005: typed error kind/offset/source ---------------------------
+
+    #[test]
+    fn error_carries_kind_and_offset() {
+        let e = err_of("prefix {{ ghost.x }}");
+        assert_eq!(e.kind, SubstErrorKind::UnknownNamespace);
+        assert_eq!(e.offset, 7, "offset must point at the '{{{{'");
+        assert!(e.to_string().contains("ghost.x"));
+    }
+
+    #[test]
+    fn null_value_and_reply_item_kinds() {
+        let var = json!({ "n": Value::Null });
+        let sys = json!({});
+        let e = substitute_inner("{{ var.n }}", "", None, None, &var, &sys).unwrap_err();
+        assert_eq!(e.kind, SubstErrorKind::NullValue);
+
+        let e = substitute_inner("{{ reply }}", "", None, None, &var, &sys).unwrap_err();
+        assert_eq!(e.kind, SubstErrorKind::NilReply);
+        let e = substitute_inner("{{ item }}", "", None, None, &var, &sys).unwrap_err();
+        assert_eq!(e.kind, SubstErrorKind::NilItem);
+    }
+
+    #[test]
+    fn not_a_table_kind() {
+        let e = err_of("{{ reply.x }}");
+        assert_eq!(e.kind, SubstErrorKind::NotATable);
+        assert!(e.to_string().contains("not a table"));
+    }
+
+    // --- SUBST-006: null, arrays, trust-neutral passthrough ------------------
+
+    #[test]
+    fn array_renders_as_json() {
+        let var = json!({ "arr": [1, 2, 3] });
+        let sys = json!({});
+        let out = substitute("{{ var.arr }}", "", None, None, &var, &sys).unwrap();
+        assert_eq!(out, "[1,2,3]");
     }
 
     #[test]

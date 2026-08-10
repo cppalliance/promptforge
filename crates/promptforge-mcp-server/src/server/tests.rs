@@ -28,16 +28,19 @@ use crate::config::Config;
 use crate::progress::McpObserver;
 use crate::result::NO_TURNS;
 use crate::retrieval::Retrieval;
+use std::num::NonZeroU32;
+
 use promptforge_core::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
-use promptforge_core::observe::detail;
+use promptforge_core::observe::Observation;
 
 fn fixture_model_catalog() -> ModelCatalog {
     ModelCatalog::new([ModelDescriptor::new(
-        ModelId::gateway("claude-sonnet-4-6"),
+        ModelId::gateway("claude-sonnet-4-6").expect("the test model alias is valid"),
         "A model suited for careful analysis, coding, and general assistance",
-        200_000,
+        NonZeroU32::new(200_000).expect("200000 is non-zero"),
         ThinkingMode::Never,
     )])
+    .expect("the test catalog has a single unique model")
 }
 
 fn prepared(config: &Config) -> Arc<PreparedTools> {
@@ -210,16 +213,16 @@ async fn the_runner_reuses_its_returned_run_id_for_parse_and_execution() {
     );
     let details = records
         .iter()
-        .map(|(_, _, detail)| detail.as_str())
+        .map(|(_, _, detail)| detail.clone())
         .collect::<Vec<_>>();
     for expected in [
-        detail::PARSE_STARTED,
-        detail::PARSE_SUCCEEDED,
-        detail::RUN_STARTED,
-        detail::RUN_SUCCEEDED,
+        Observation::ParseStarted,
+        Observation::ParseSucceeded,
+        Observation::RunStarted,
+        Observation::RunSucceeded,
     ] {
         assert!(
-            details.contains(&expected),
+            details.contains(&expected.to_string()),
             "the MCP runner lifecycle must include {expected:?}: {records:#?}"
         );
     }

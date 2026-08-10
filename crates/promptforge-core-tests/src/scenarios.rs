@@ -1,15 +1,16 @@
 //! Real-model PromptForge text and aliased tool-call scenarios.
 
+use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context as _, Result, ensure};
-use promptforge_core::Error;
-use promptforge_core::client::GatewayClient;
-use promptforge_core::execute::{ResolutionContext, RunOptions, run};
-use promptforge_core::observe::{Observer, detail};
+use promptforge_core::client::{GatewayClient, GatewayEndpoint, SecretString};
+use promptforge_core::execute::{ResolutionContext, RunConfig, run};
+use promptforge_core::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
+use promptforge_core::observe::{Observation, Observer};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
-use promptforge_core::tools::{Tool, ToolId};
+use promptforge_core::tools::{Tool, ToolError, ToolId, ToolOutput};
 use promptforge_tool_picker::{
     Catalog, Config, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
@@ -26,6 +27,21 @@ const TOOL_EPILOG: &str = "TOOL_EPILOG|";
 
 const REAL_TEXT: &str = include_str!("../prompts/execution/real-text.md");
 const REAL_TOOL_CALL: &str = include_str!("../prompts/execution/real-tool-call.md");
+
+/// Catalog entry for scenario fixtures: a large switchable-context model so
+/// `models.need` can filter and request thinking without a live `/v1/models`
+/// fetch. Defined here (not in core) because it is only test scaffolding.
+fn pinned_qwen_dev_catalog(model_alias: &str) -> Result<ModelCatalog> {
+    let context = NonZeroU32::new(131_072).context("131072 is a non-zero context window")?;
+    let id = ModelId::gateway(model_alias).context("pinned model alias must be valid")?;
+    ModelCatalog::new([ModelDescriptor::new(
+        id,
+        "A careful analysis model suited to structured reasoning and long-context review",
+        context,
+        ThinkingMode::Switchable,
+    )])
+    .context("pinned catalog must have a single unique model")
+}
 
 type Record = (String, String, String);
 
@@ -47,22 +63,23 @@ impl Recorder {
             .clone()
     }
 
-    fn detail_count(&self, execution: &str, expected: &str) -> usize {
+    fn detail_count(&self, execution: &str, expected: &Observation) -> usize {
+        let expected = expected.to_string();
         self.records()
             .iter()
             .filter(|(record_execution, _, found)| {
-                record_execution == execution && found == expected
+                record_execution == execution && *found == expected
             })
             .count()
     }
 }
 
 impl Observer for Recorder {
-    fn observe(&self, execution: &str, section: &str, detail: &str) {
+    fn observe(&self, execution: &str, section: &str, event: Observation) {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push((execution.to_owned(), section.to_owned(), detail.to_owned()));
+            .push((execution.to_owned(), section.to_owned(), event.to_string()));
     }
 }
 
@@ -82,8 +99,13 @@ impl StringFixtureTool {
 
 #[async_trait::async_trait]
 impl Tool for StringFixtureTool {
+    #[expect(
+        clippy::expect_used,
+        reason = "the fixture id components are compile-time constants that satisfy ToolId's validation"
+    )]
     fn id(&self) -> ToolId {
         ToolId::new("real-model-fixtures", "string_fixture")
+            .expect("the fixture tool identity is valid")
     }
 
     fn wire_name(&self) -> &'static str {
@@ -108,12 +130,12 @@ impl Tool for StringFixtureTool {
         })
     }
 
-    async fn call(&self, arguments: Value) -> promptforge_core::Result<String> {
+    async fn call(&self, arguments: Value) -> std::result::Result<ToolOutput, ToolError> {
         let valid = arguments.as_object().is_some_and(|object| {
             object.len() == 1 && object.get("value").and_then(Value::as_str) == Some(TOOL_INPUT)
         });
         if !valid {
-            return Err(Error::Lua(format!(
+            return Err(ToolError::message(format!(
                 "real-model fixture received schema-invalid arguments: {arguments}"
             )));
         }
@@ -121,33 +143,30 @@ impl Tool for StringFixtureTool {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(arguments);
-        Ok(TOOL_RESULT.to_owned())
+        Ok(ToolOutput::untrusted(TOOL_RESULT))
     }
 }
 
 async fn run_text(base_url: &str, api_key: &str) -> Result<()> {
-    let observer = Recorder::default();
-    let prompt = Prompt::parse(REAL_TEXT, TEXT_EXECUTION, &observer)
+    let observer = Arc::new(Recorder::default());
+    let prompt = Prompt::parse(REAL_TEXT, TEXT_EXECUTION, observer.as_ref())
         .context("parse execution/real-text.md")?;
     let picker = ToolPicker::build(Catalog::default(), Config::default())
         .context("build empty tool picker")?;
-    let models = promptforge_core::model::pinned_qwen_dev_catalog("writer");
-    let client = GatewayClient::new(base_url, api_key);
+    let models = pinned_qwen_dev_catalog("writer")?;
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(base_url).context("gateway base URL must be valid")?,
+        SecretString::new(api_key).context("gateway key must not be empty")?,
+    );
     let result = run(
         &prompt,
         "",
-        ResolutionContext {
-            picker: &picker,
-            models: &models,
-        },
+        ResolutionContext::new(&picker, &models),
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: TEXT_EXECUTION,
-            observer: &observer,
-            client: Some(client),
-            debug: None,
-        },
+        RunConfig::new(TEXT_EXECUTION)
+            .observer(Arc::clone(&observer) as Arc<dyn Observer>)
+            .client(client),
     )
     .await
     .context("run execution/real-text.md")?;
@@ -161,7 +180,7 @@ async fn run_text(base_url: &str, api_key: &str) -> Result<()> {
         "real-text reply omitted its requested behavioral marker: {reply:?}"
     );
     ensure!(
-        observer.detail_count(TEXT_EXECUTION, detail::MODEL_TURN_COMPLETED) == 1,
+        observer.detail_count(TEXT_EXECUTION, &Observation::ModelTurnCompleted) == 1,
         "real-text scenario did not complete in exactly one model turn"
     );
     println!("real-text scenario passed");
@@ -169,9 +188,9 @@ async fn run_text(base_url: &str, api_key: &str) -> Result<()> {
 }
 
 async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
-    let observer = Recorder::default();
+    let observer = Arc::new(Recorder::default());
     let tool = Arc::new(StringFixtureTool::default());
-    let prompt = Prompt::parse(REAL_TOOL_CALL, TOOL_EXECUTION, &observer)
+    let prompt = Prompt::parse(REAL_TOOL_CALL, TOOL_EXECUTION, observer.as_ref())
         .context("parse execution/real-tool-call.md")?;
     let schema = tool.parameters_schema();
     let config = Config::default()
@@ -188,24 +207,21 @@ async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
     )
     .context("build deterministic one-tool fixture picker")?;
     let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];
-    let models = promptforge_core::model::pinned_qwen_dev_catalog("writer");
+    let models = pinned_qwen_dev_catalog("writer")?;
 
-    let client = GatewayClient::new(base_url, api_key);
+    let client = GatewayClient::new(
+        GatewayEndpoint::new(base_url).context("gateway base URL must be valid")?,
+        SecretString::new(api_key).context("gateway key must not be empty")?,
+    );
     let result = run(
         &prompt,
         "",
-        ResolutionContext {
-            picker: &picker,
-            models: &models,
-        },
+        ResolutionContext::new(&picker, &models),
         &tools,
         &StoreRef::memory(),
-        RunOptions {
-            execution: TOOL_EXECUTION,
-            observer: &observer,
-            client: Some(client),
-            debug: None,
-        },
+        RunConfig::new(TOOL_EXECUTION)
+            .observer(Arc::clone(&observer) as Arc<dyn Observer>)
+            .client(client),
     )
     .await
     .context("run execution/real-tool-call.md")?;
@@ -227,11 +243,11 @@ async fn run_tool_call(base_url: &str, api_key: &str) -> Result<()> {
         "expected one schema-valid aliased call, got {calls:?}; final reply was {reply:?}"
     );
     ensure!(
-        observer.detail_count(TOOL_EXECUTION, detail::TOOL_CALL_SUCCEEDED) == 1,
+        observer.detail_count(TOOL_EXECUTION, &Observation::ToolCallSucceeded) == 1,
         "tool scenario did not dispatch exactly one successful aliased call"
     );
     ensure!(
-        observer.detail_count(TOOL_EXECUTION, detail::MODEL_TURN_COMPLETED) == 2,
+        observer.detail_count(TOOL_EXECUTION, &Observation::ModelTurnCompleted) == 2,
         "tool scenario did not honor its two-turn budget"
     );
     println!("real-tool-call scenario passed");

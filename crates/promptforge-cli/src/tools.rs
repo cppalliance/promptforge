@@ -52,14 +52,17 @@ impl AvailableTools {
 /// `web_fetch` is unconditional. `web_search` is included only when `key` and a
 /// non-empty gateway URL are both present, because that bearer and base URL are
 /// the credentials needed to invoke the gateway.
-pub(crate) fn available_tools(base_url: &str, key: Option<&str>) -> AvailableTools {
+pub(crate) fn available_tools(
+    base_url: &str,
+    key: Option<&str>,
+) -> Result<AvailableTools, promptforge_core::tools::ToolError> {
     let mut live: Vec<Arc<dyn Tool>> = vec![Arc::new(WebFetch::new())];
     if let Some(key) = key.filter(|_| !base_url.is_empty()) {
-        live.push(Arc::new(WebSearch::new(base_url, key)));
+        live.push(Arc::new(WebSearch::new(base_url, key)?));
     }
 
     let catalog = Catalog::new(live.iter().map(|tool| descriptor(tool.as_ref())).collect());
-    AvailableTools { live, catalog }
+    Ok(AvailableTools { live, catalog })
 }
 
 fn descriptor(tool: &dyn Tool) -> ToolDescriptor {
@@ -88,7 +91,7 @@ mod tests {
 
     #[test]
     fn available_capability_binds_to_live_tool() {
-        let available = available_tools(BASE_URL, None);
+        let available = available_tools(BASE_URL, None).expect("available tools build");
         let picker = ToolPicker::build(available.catalog().clone(), Config::default())
             .expect("fixture picker should build");
         assert_eq!(
@@ -102,7 +105,7 @@ mod tests {
 
     #[test]
     fn key_without_url_excludes_web_search_and_solo_candidate_binds_web_fetch() {
-        let available = available_tools("", Some("test-token"));
+        let available = available_tools("", Some("test-token")).expect("available tools build");
         assert!(
             available
                 .tools()
@@ -122,7 +125,8 @@ mod tests {
 
     #[test]
     fn token_includes_web_search_and_need_can_bind() {
-        let available = available_tools(BASE_URL, Some("test-token"));
+        let available =
+            available_tools(BASE_URL, Some("test-token")).expect("available tools build");
         assert!(
             available
                 .tools()
@@ -148,7 +152,7 @@ mod tests {
 
     #[test]
     fn no_token_excludes_web_search_and_solo_candidate_binds_web_fetch() {
-        let available = available_tools(BASE_URL, None);
+        let available = available_tools(BASE_URL, None).expect("available tools build");
         assert!(
             available
                 .tools()
@@ -175,7 +179,7 @@ mod tests {
     #[test]
     fn live_registry_and_picker_catalog_have_identical_ids() {
         for token in [None, Some("test-token")] {
-            let available = available_tools(BASE_URL, token);
+            let available = available_tools(BASE_URL, token).expect("available tools build");
             let live_ids = available
                 .tools()
                 .iter()
