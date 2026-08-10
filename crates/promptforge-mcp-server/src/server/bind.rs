@@ -147,10 +147,10 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use promptforge_core::execute::{self, ResolutionContext, RunOptions};
+    use promptforge_core::execute::{self, ResolutionContext, RunConfig};
     use promptforge_core::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
     use promptforge_core::observe::NullObserver;
-    use promptforge_core::parser::{Block, Prompt};
+    use promptforge_core::parser::Prompt;
     use promptforge_core::store::StoreRef;
     use promptforge_tool_picker::Outcome;
 
@@ -259,24 +259,14 @@ return 'resolved'
                 Prompt::parse(&probe, "test-run", &NullObserver).unwrap_or_else(|error| {
                     panic!("{} must parse: {error}", path.display());
                 });
-            prompt
-                .h1_blocks
-                .retain(|block| matches!(block, Block::Lua(_)));
+            prompt.strip_h1_prose();
             let result = execute::run(
                 &prompt,
                 "",
-                ResolutionContext {
-                    picker: tools.picker(),
-                    models: tools.models(),
-                },
+                ResolutionContext::new(tools.picker(), tools.models()),
                 tools.tools(),
                 &StoreRef::memory(),
-                RunOptions {
-                    execution: "test-run",
-                    observer: &NullObserver,
-                    client: None,
-                    debug: None,
-                },
+                RunConfig::new("test-run"),
             )
             .await
             .unwrap_or_else(|error| panic!("{} must resolve live H1: {error}", path.display()));
@@ -285,11 +275,16 @@ return 'resolved'
     }
 
     #[test]
-    fn gateway_client_is_built_from_url_and_key() {
+    fn gateway_client_is_built_from_url_and_key_without_leaking_the_key() {
         let config = gateway("");
-        assert_eq!(
-            format!("{:?}", gateway_client(&config.gateway)),
-            "GatewayClient { base_url: \"http://127.0.0.1:8081/v1\", key: \"gw\", .. }"
+        let rendered = format!("{:?}", gateway_client(&config.gateway));
+        assert!(
+            !rendered.contains("gw"),
+            "the bearer key must never appear in Debug output, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("http://127.0.0.1:8081/v1") && rendered.contains("<redacted>"),
+            "the client Debug must keep the base URL and redact the key, got: {rendered}"
         );
     }
 }
