@@ -191,7 +191,7 @@ impl fmt::Debug for GatewayClient {
 impl GatewayClient {
     /// Build a client from explicit parts (used by tests and by
     /// [`GatewayClient::from_env`]). A trailing slash on `base_url` is trimmed.
-    /// The response normalizer defaults to [`OpenAiChatNormalizer`].
+    /// Responses are parsed through the resolved tool dialect.
     #[must_use]
     pub fn new(base_url: &str, key: impl Into<String>) -> GatewayClient {
         GatewayClient {
@@ -207,7 +207,7 @@ impl GatewayClient {
     /// Build a client that cannot read gateway configuration or send HTTP.
     ///
     /// Hosts use this explicit sentinel for hermetic execution paths. Any
-    /// attempted model call fails with [`Error::GatewayDisabled`].
+    /// attempted model call fails with a `Disabled`-kind [`CompletionError`].
     #[must_use]
     pub fn disabled() -> GatewayClient {
         GatewayClient {

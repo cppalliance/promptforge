@@ -1,7 +1,7 @@
 //! Section lifecycle execution and fall-through.
 //!
 //! The run walks top-level sections in file order, creating one isolated
-//! [`crate::lua::SectionVm`] for each. Shared Lua loads before host injection,
+//! section VM for each. Shared Lua loads before host injection,
 //! then ordered section blocks use that same VM. Lua before the first prose is
 //! prologue-style; Lua after is epilog-style. Non-final prose is single-shot;
 //! final prose runs the full tool loop. A scalar early Lua return ends the
@@ -15,8 +15,8 @@
 //! bulk state persists across the context-clearing transitions even though a
 //! section's conversation never does.
 //!
-//! A run reports itself as it goes: [`RunOptions::observer`] receives a
-//! borrowed `(execution, section, detail)` record when the run starts and ends, at each
+//! A run reports itself as it goes: the [`RunConfig`] observer receives a
+//! `(execution, section, event)` record when the run starts and ends, at each
 //! section boundary, model turn, tool call, and harness-mediated store
 //! operation. Reporting is a side channel and never
 //! a decision, so passing [`crate::observe::NullObserver`] changes nothing but

@@ -518,8 +518,8 @@ impl ModelCatalog {
     ///
     /// The picker's `enriched_text` prefixes the tool name, so vendor model ids
     /// must not ride in that name or they drown the capability description.
-    /// Identity is encoded in the picker id's server field; every entry uses the
-    /// neutral label [`PICKER_MODEL_LABEL`].
+    /// Identity is encoded in the picker id's server field; every entry uses a
+    /// single neutral, crate-private label.
     #[must_use]
     pub fn to_picker_catalog(&self) -> Catalog {
         Catalog::new(

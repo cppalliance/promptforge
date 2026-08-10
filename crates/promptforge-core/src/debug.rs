@@ -3,7 +3,7 @@
 //! [`DebugCapture`] receives owned request and response payloads for a host
 //! that wants them on disk or in a debugger. It is a separate seam from
 //! [`crate::observe::Observer`]: observations stay payload-free, and production
-//! hosts leave [`crate::execute::RunOptions::debug`] as `None` so they pay
+//! hosts leave [`crate::execute::RunConfig::debug`] unset so they pay
 //! nothing for this path.
 
 use serde_json::Value;

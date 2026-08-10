@@ -7,11 +7,11 @@
 //! top to bottom (fall-through) and
 //! returns the run's result. [`observe`] is the seam through which a run
 //! reports its progress, for a caller that wants to watch a long run in
-//! flight; [`execute::run`] takes an [`execute::RunOptions`] carrying the
-//! [`observe::Observer`] the borrowed correlated report records go to, and
+//! flight; [`execute::run`] takes an [`execute::RunConfig`] carrying the
+//! [`observe::Observer`] the correlated report records go to, and
 //! [`observe::NullObserver`] is what a caller wanting silence passes.
 //! [`debug::DebugCapture`] is an opt-in raw request/response seam on the same
-//! options; production hosts leave it unset.
+//! config; production hosts leave it unset.
 //!
 //! A source is a promptforge prompt only when its frontmatter declares a
 //! `promptforge:` version; [`promptforge_version`] reports it (or `None`), and

@@ -1,6 +1,6 @@
 //! Tool-calling dialect detection, registry, and dispatch.
 //!
-//! A [`ToolDialect`] encapsulates the wire differences between backends that
+//! A tool dialect encapsulates the wire differences between backends that
 //! speak the same `/chat/completions` shape but vary in how tool calls are
 //! declared, returned, and echoed. The [`ToolDialectRegistry`] holds the
 //! builtin set and resolves evidence into a single dialect, hard-failing on
