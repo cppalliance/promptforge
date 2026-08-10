@@ -630,7 +630,7 @@ impl ModelResolver for PickerModelResolver<'_> {
             })?;
         match picker.resolve(description) {
             Ok(promptforge_tool_picker::Outcome::Bind(tool)) => {
-                let id = model_from_picker_id(&tool.id);
+                let id = model_from_picker_id(tool.id());
                 let descriptor = filtered.get(&id);
                 let dialect =
                     descriptor.map_or(ToolDialectId::OpenAi, ModelDescriptor::tool_dialect);
@@ -645,19 +645,23 @@ impl ModelResolver for PickerModelResolver<'_> {
             Ok(promptforge_tool_picker::Outcome::Absent) => Err(Error::ModelAbsent {
                 capability: description.to_owned(),
             }),
-            Ok(promptforge_tool_picker::Outcome::Duplicate(tools)) => Err(Error::ModelDuplicate {
+            Ok(promptforge_tool_picker::Outcome::Duplicate(group)) => Err(Error::ModelDuplicate {
                 capability: description.to_owned(),
-                candidates: tools
+                candidates: group
                     .iter()
-                    .map(|tool| model_from_picker_id(&tool.id))
+                    .map(|tool| model_from_picker_id(tool.id()))
                     .collect(),
             }),
-            Ok(promptforge_tool_picker::Outcome::Ambiguous(tools)) => Err(Error::ModelAmbiguous {
+            Ok(promptforge_tool_picker::Outcome::Ambiguous(group)) => Err(Error::ModelAmbiguous {
                 capability: description.to_owned(),
-                candidates: tools
+                candidates: group
                     .iter()
-                    .map(|tool| model_from_picker_id(&tool.id))
+                    .map(|tool| model_from_picker_id(tool.id()))
                     .collect(),
+            }),
+            Ok(_) => Err(Error::ModelBind {
+                capability: description.to_owned(),
+                detail: "the picker reported an unrecognized outcome".to_owned(),
             }),
             Err(error) => Err(Error::ModelBind {
                 capability: description.to_owned(),

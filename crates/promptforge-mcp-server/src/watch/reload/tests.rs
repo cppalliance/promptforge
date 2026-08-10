@@ -240,7 +240,7 @@ mod retrieval {
     fn indexed() -> (Fixture, Arc<Retrieval>) {
         let retrieval = Arc::new(Retrieval::idle());
         let fixture = Fixture::with_retrieval(Arc::clone(&retrieval));
-        retrieval.install_with(retrieval_fixture::embedder(), &fixture.catalog.load());
+        retrieval.install_with(&retrieval_fixture::model(), &fixture.catalog.load());
         (fixture, retrieval)
     }
 

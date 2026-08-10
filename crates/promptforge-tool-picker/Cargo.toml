@@ -1,6 +1,6 @@
 [package]
 name = "promptforge-tool-picker"
-version.workspace = true
+version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ description = "PromptForge tool picker: resolve a plain-English capability need 
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
 candle-transformers = { workspace = true }
-serde = { workspace = true }
+serde = { workspace = true, optional = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokenizers = { workspace = true }
@@ -22,6 +22,16 @@ hf-hub = { workspace = true }
 safetensors = { workspace = true }
 sha2 = { workspace = true }
 half = { workspace = true }
+
+[features]
+default = ["serde"]
+# Serialization support for the catalog and configuration value types. The
+# JSON Schema value type in a descriptor is core input data and is present with
+# or without this feature; only the serde trait implementations are gated.
+serde = ["dep:serde"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [lints]
 workspace = true

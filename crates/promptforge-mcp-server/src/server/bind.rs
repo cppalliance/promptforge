@@ -64,7 +64,7 @@ impl PreparedTools {
     pub fn new(
         gateway: &GatewayConfig,
         models: ModelCatalog,
-    ) -> Result<Self, promptforge_tool_picker::Error> {
+    ) -> Result<Self, promptforge_tool_picker::BuildError> {
         let live = live_tools(gateway);
         let catalog = catalog(&live);
         let picker = ToolPicker::build(catalog, PickerConfig::default())?;
@@ -84,7 +84,7 @@ impl PreparedTools {
     pub(crate) fn rebuild(
         &self,
         gateway: &GatewayConfig,
-    ) -> Result<Self, promptforge_tool_picker::Error> {
+    ) -> Result<Self, promptforge_tool_picker::IndexError> {
         let live = live_tools(gateway);
         let picker = self.picker.rebuild(catalog(&live))?;
         Ok(Self {
