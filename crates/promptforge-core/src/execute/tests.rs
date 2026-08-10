@@ -28,6 +28,23 @@ use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput, ToolRegis
 
 const EXECUTION: &str = "execute-test";
 
+/// F10: compile-time proof that the public execution types are thread-safe.
+///
+/// `RunConfig` carries `Arc<dyn Observer>` / `Arc<dyn DebugCapture>` (shared
+/// trait objects) and must be `Send + Sync + 'static` to cross the run's task
+/// boundaries; the typed error/limit/resolution surfaces must be too.
+const fn _public_execution_types_are_send_sync_static() {
+    const fn assert_send_sync_static<T: Send + Sync + 'static>() {}
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync_static::<RunConfig>();
+    assert_send_sync_static::<RunLimits>();
+    assert_send_sync_static::<RunError>();
+    assert_send_sync_static::<RunErrorKind>();
+    // Borrowing resolution context: a fixed concrete lifetime still proves the
+    // auto traits hold for its owned shape.
+    assert_send_sync::<ResolutionContext<'static>>();
+}
+
 /// The runtime's default per-section tool-loop cap, mirrored for tests after the
 /// `DEFAULT_MAX_TOOL_ITERATIONS` constant was folded into `RunLimits`.
 const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
