@@ -649,6 +649,14 @@ impl fmt::Debug for ResolutionContext<'_> {
     }
 }
 
+/// Builds a gateway client from the environment with the run's HTTP limits
+/// applied, so a lazily created client honors the same timeout and body cap as
+/// a caller-supplied one.
+fn env_client_with_limits(limits: RunLimits) -> Result<GatewayClient> {
+    GatewayClient::from_env()
+        .map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()))
+}
+
 /// Execute a parsed prompt through the single-pass live H1 path.
 ///
 /// H1 Lua and prose blocks run once in source order with full host access.
@@ -687,6 +695,8 @@ pub async fn run(
     let execution = execution.as_str();
     let observer = observer.as_ref();
     let debug = debug.as_deref();
+    let client =
+        client.map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
     let shared_tools = SharedTools::new(tools);
     let registry = shared_tools.registry();
     observer.observe(execution, &prompt.title, detail::RUN_STARTED);
@@ -867,7 +877,7 @@ async fn execute_live_h1(
     }
     let mut active_client = client.cloned();
     if active_client.is_none() {
-        active_client = GatewayClient::from_env().ok();
+        active_client = env_client_with_limits(limits).ok();
     }
     if let Some(infer_client) = active_client.as_ref() {
         attach_infer_hook(
@@ -939,7 +949,7 @@ async fn execute_live_h1(
                     continue;
                 }
                 if active_client.is_none() {
-                    active_client = Some(h1_try!(GatewayClient::from_env()));
+                    active_client = Some(h1_try!(env_client_with_limits(limits)));
                 }
                 let Some(active_client) = active_client.as_ref() else {
                     vm.teardown(observer, &prompt.title);
@@ -1082,7 +1092,7 @@ async fn run_sections(
         // Offline Lua-only prompts declare no models and skip this.
         if client.is_none()
             && !models.bindings().is_empty()
-            && let Ok(new_client) = GatewayClient::from_env()
+            && let Ok(new_client) = env_client_with_limits(limits)
         {
             client = Some(new_client);
         }
@@ -1134,6 +1144,7 @@ async fn run_sections(
                         shared_tools,
                         client.as_ref(),
                         max_tool_iterations,
+                        limits,
                         last_reply.as_deref(),
                         &when,
                         index + 1,
@@ -1236,7 +1247,7 @@ async fn run_sections(
                         });
                     }
                     if client.is_none() {
-                        match GatewayClient::from_env() {
+                        match env_client_with_limits(limits) {
                             Ok(new_client) => client = Some(new_client),
                             Err(error) => {
                                 vm.teardown(observer, &section.name);
@@ -1368,6 +1379,7 @@ fn run_section_lua(
     shared_tools: &SharedTools,
     client: Option<&GatewayClient>,
     max_tool_iterations: usize,
+    limits: RunLimits,
     last_reply: Option<&str>,
     when: &str,
     parent_id: usize,
@@ -1405,6 +1417,7 @@ fn run_section_lua(
                 analysis,
                 &fanout_tools,
                 max_tool_iterations,
+                limits.fanout(),
                 fanout_last_reply.as_deref(),
                 &fanout_when,
                 parent_id,
@@ -1455,6 +1468,7 @@ fn run_section_lua(
                     &exec_tools,
                     exec_client.as_ref(),
                     max_tool_iterations,
+                    limits,
                     exec_last_reply.as_deref(),
                     &exec_when,
                     &exec_turns,
@@ -1556,6 +1570,7 @@ async fn run_execute_section(
     shared_tools: &SharedTools,
     client: Option<&GatewayClient>,
     max_tool_iterations: usize,
+    limits: RunLimits,
     last_reply: Option<&str>,
     when: &str,
     turns: &Arc<AtomicU32>,
@@ -1583,7 +1598,7 @@ async fn run_execute_section(
     let mut client = client.cloned();
     if client.is_none()
         && !models.bindings().is_empty()
-        && let Ok(new_client) = GatewayClient::from_env()
+        && let Ok(new_client) = env_client_with_limits(limits)
     {
         client = Some(new_client);
     }
@@ -1635,6 +1650,7 @@ async fn run_execute_section(
                     shared_tools,
                     client.as_ref(),
                     max_tool_iterations,
+                    limits,
                     last_reply,
                     when,
                     0,
@@ -1731,7 +1747,7 @@ async fn run_execute_section(
                     });
                 }
                 if client.is_none() {
-                    match GatewayClient::from_env() {
+                    match env_client_with_limits(limits) {
                         Ok(new_client) => client = Some(new_client),
                         Err(error) => {
                             vm.teardown(observer, &section.name);
@@ -1835,6 +1851,7 @@ fn make_fanout_callback(
     analysis: &ToolAnalysis,
     shared_tools: &SharedTools,
     max_tool_iterations: usize,
+    fanout_concurrency: NonZeroUsize,
     last_reply: Option<&str>,
     when: &str,
     parent_id: usize,
@@ -1866,6 +1883,7 @@ fn make_fanout_callback(
         analysis,
         shared_tools,
         max_tool_iterations,
+        fanout_concurrency,
         last_reply,
         when,
         parent_id,

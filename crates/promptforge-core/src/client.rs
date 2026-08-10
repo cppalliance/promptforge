@@ -10,7 +10,9 @@
 //! gateway to retarget it.
 
 use std::fmt;
+use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::Value;
 
@@ -162,7 +164,16 @@ pub struct GatewayClient {
     key: String,
     normalizer: Arc<dyn CompletionNormalizer>,
     dialect_registry: Arc<ToolDialectRegistry>,
+    /// Wall-clock cap applied to each completion request.
+    request_timeout: Duration,
+    /// Byte ceiling enforced on a response body before it is decoded.
+    max_response_bytes: u64,
 }
+
+/// Default per-request timeout, matching [`crate::execute::RunLimits`].
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+/// Default response-body ceiling, matching [`crate::execute::RunLimits`].
+const DEFAULT_MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone)]
 enum GatewayTransport {
@@ -191,6 +202,8 @@ impl GatewayClient {
             key: key.into(),
             normalizer: OpenAiChatNormalizer::shared(),
             dialect_registry: Arc::new(ToolDialectRegistry::builtin()),
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
         }
     }
 
@@ -206,7 +219,25 @@ impl GatewayClient {
             key: String::new(),
             normalizer: OpenAiChatNormalizer::shared(),
             dialect_registry: Arc::new(ToolDialectRegistry::builtin()),
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
         }
+    }
+
+    /// Applies the run's HTTP limits to this client.
+    ///
+    /// Each completion request is bounded by `request_timeout`, and the response
+    /// body is refused once it would exceed `max_response_bytes` before any
+    /// UTF-8 or JSON decoding runs.
+    #[must_use]
+    pub fn with_request_limits(
+        mut self,
+        request_timeout: Duration,
+        max_response_bytes: NonZeroU64,
+    ) -> GatewayClient {
+        self.request_timeout = request_timeout;
+        self.max_response_bytes = max_response_bytes.get();
+        self
     }
 
     /// Replace the response normalizer used by [`GatewayClient::complete`].
@@ -297,14 +328,16 @@ impl GatewayClient {
         let response = http
             .post(format!("{}/chat/completions", self.base_url))
             .bearer_auth(&self.key)
+            .timeout(self.request_timeout)
             .json(&request_body)
             .send()
             .await
             .map_err(Error::http)?;
 
         let status = response.status();
+        let raw_body = read_body_capped(response, self.max_response_bytes).await?;
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = String::from_utf8_lossy(&raw_body);
             let body: String = body.chars().take(2000).collect();
             let body = if body.is_empty() {
                 "(empty body)".to_string()
@@ -317,7 +350,8 @@ impl GatewayClient {
             });
         }
 
-        let response_body: Value = response.json().await.map_err(Error::http)?;
+        let response_body: Value = serde_json::from_slice(&raw_body)
+            .map_err(|error| Error::MalformedResponse(error.to_string()))?;
         let turn = dialect.parse_turn(&response_body)?;
         Ok(Completion {
             result: turn.outcome,
@@ -327,6 +361,31 @@ impl GatewayClient {
             response_body,
         })
     }
+}
+
+/// Reads a response body, refusing it once it would exceed `cap` bytes.
+///
+/// The advertised `Content-Length` short-circuits an oversize body, and the
+/// streamed chunks are bounded so a gateway that omits or lies about the length
+/// still cannot force an unbounded allocation before decoding.
+async fn read_body_capped(mut response: reqwest::Response, cap: u64) -> Result<Vec<u8>> {
+    if let Some(len) = response.content_length()
+        && len > cap
+    {
+        return Err(Error::MalformedResponse(format!(
+            "response body of {len} bytes exceeds the {cap}-byte limit"
+        )));
+    }
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(Error::http)? {
+        if body.len() as u64 + chunk.len() as u64 > cap {
+            return Err(Error::MalformedResponse(format!(
+                "response body exceeds the {cap}-byte limit"
+            )));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 fn from_env_with(lookup: impl Fn(&str) -> Option<String>) -> Result<GatewayClient> {

@@ -8,11 +8,12 @@
 //! `.exhausted`). Fatal arm errors abort siblings;
 //! [`Error::ToolLoopExhausted`] soft-degrades to an incomplete stub.
 
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 use serde_json::json;
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinSet;
 
 use crate::cancel;
@@ -77,6 +78,8 @@ pub(crate) struct FanoutContext<'a> {
     pub analysis: &'a crate::execute::ToolAnalysis,
     pub shared_tools: &'a SharedTools,
     pub max_tool_iterations: usize,
+    /// Maximum number of arms permitted to execute concurrently.
+    pub fanout_concurrency: NonZeroUsize,
     pub last_reply: Option<&'a str>,
     pub when: &'a str,
     /// The 1-based id of the parent section that initiated the fanout.
@@ -110,6 +113,11 @@ pub(crate) async fn run_fanout_arms(
     let mut join_set = JoinSet::new();
     let mut replies: Vec<Option<LuaFanoutResult>> = vec![None; items.len()];
 
+    // Bound how many arms run at once. Every arm acquires a permit before it
+    // touches its VM or the network; the surplus stays parked on the semaphore
+    // rather than all being resident at once.
+    let semaphore = Arc::new(Semaphore::new(ctx.fanout_concurrency.get()));
+
     for (index, item_text) in items.iter().enumerate() {
         let payload = ArmPayload {
             worker: worker.clone(),
@@ -133,7 +141,13 @@ pub(crate) async fn run_fanout_arms(
             observer: Arc::clone(&proxy_observer),
             debug: proxy_debug.clone(),
         };
-        join_set.spawn(async move { run_one_arm(payload).await });
+        let permit_source = Arc::clone(&semaphore);
+        join_set.spawn(async move {
+            let _permit = permit_source.acquire_owned().await.map_err(|_| {
+                Error::Lua("fanout concurrency semaphore closed before an arm could start".to_owned())
+            })?;
+            run_one_arm(payload).await
+        });
     }
 
     // Drop the unused sender clone so the debug channel can close when arms finish.
@@ -617,6 +631,7 @@ mod tests {
             analysis: &analysis,
             shared_tools: &shared_tools,
             max_tool_iterations: 24,
+            fanout_concurrency: NonZeroUsize::new(8).expect("8 is non-zero"),
             last_reply: None,
             when: "2026-08-08",
             parent_id: 1,
@@ -674,6 +689,7 @@ mod tests {
             analysis: &analysis,
             shared_tools: &shared_tools,
             max_tool_iterations: 24,
+            fanout_concurrency: NonZeroUsize::new(8).expect("8 is non-zero"),
             last_reply: None,
             when: "2026-08-08",
             parent_id: 1,
