@@ -6,7 +6,7 @@
 //! builtin set and resolves evidence into a single dialect, hard-failing on
 //! ties or no-match so the runtime never silently guesses.
 
-#[path = "dialects/gemma3_tool_code.rs"]
+#[path = "dialects/gemma3_tool_code/mod.rs"]
 mod gemma3_tool_code;
 #[path = "dialects/openai.rs"]
 mod openai;
