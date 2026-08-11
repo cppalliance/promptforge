@@ -6,10 +6,18 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::ConfigError;
 use crate::queue::QueueConfig;
 
 mod imp;
+mod interpolate;
+mod validate;
+
+#[cfg(test)]
+pub(crate) use interpolate::interpolate;
+pub(crate) use interpolate::interpolate_value;
+
+#[cfg(test)]
+use crate::error::ConfigError;
 
 #[cfg(test)]
 mod tests;
@@ -421,44 +429,4 @@ pub(crate) enum SearchProvider {
 
 fn is_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
-}
-
-/// Expand `${VAR}` from the environment; `$$` is a literal `$`.
-fn interpolate(input: &str) -> Result<String, ConfigError> {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '$' {
-            out.push(c);
-            continue;
-        }
-        match chars.peek() {
-            Some('$') => {
-                chars.next();
-                out.push('$');
-            }
-            Some('{') => {
-                chars.next();
-                let mut name = String::new();
-                let mut closed = false;
-                for nc in chars.by_ref() {
-                    if nc == '}' {
-                        closed = true;
-                        break;
-                    }
-                    name.push(nc);
-                }
-                if !closed {
-                    return Err(ConfigError::Interpolation(
-                        "unclosed ${...} interpolation".to_string(),
-                    ));
-                }
-                let value =
-                    std::env::var(&name).map_err(|_| ConfigError::UnresolvedVar(name.clone()))?;
-                out.push_str(&value);
-            }
-            _ => out.push('$'),
-        }
-    }
-    Ok(out)
 }

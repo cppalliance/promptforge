@@ -514,3 +514,182 @@ endpoints = ["e"]
         Err(ConfigError::Validation(_))
     ));
 }
+
+/// A config whose only variable part is one `[[endpoint]]` block. Table-driven
+/// endpoint-validation tests substitute the block to exercise one invariant each.
+fn config_with_endpoint(endpoint_block: &str) -> String {
+    format!(
+        r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+{endpoint_block}
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+"#
+    )
+}
+
+#[test]
+fn rejects_empty_endpoint_id() {
+    // CFG-003: a blank endpoint id can never be referenced and shadows the
+    // unnamed slot.
+    let toml = config_with_endpoint(
+        r#"[[endpoint]]
+id = ""
+protocol = "openai"
+base_url = "http://a"
+api_key = """#,
+    );
+    assert!(matches!(
+        Config::parse_toml(&toml),
+        Err(ConfigError::Validation(_))
+    ));
+}
+
+#[test]
+fn rejects_malformed_endpoint_base_url() {
+    // CFG-003 / UP-005: base_url must parse as an absolute HTTP(S) URL, not any
+    // string that later gets concatenated with a path.
+    for bad in ["not-a-url", "127.0.0.1:9", "ftp://example.com", ""] {
+        let toml = config_with_endpoint(&format!(
+            r#"[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "{bad}"
+api_key = """#
+        ));
+        assert!(
+            matches!(Config::parse_toml(&toml), Err(ConfigError::Validation(_))),
+            "expected base_url {bad:?} to be rejected"
+        );
+    }
+}
+
+#[test]
+fn accepts_well_formed_endpoint_base_url() {
+    for good in ["http://127.0.0.1:9", "https://api.example.com/v1"] {
+        let toml = config_with_endpoint(&format!(
+            r#"[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "{good}"
+api_key = """#
+        ));
+        assert!(
+            Config::parse_toml(&toml).is_ok(),
+            "expected base_url {good:?} to be accepted"
+        );
+    }
+}
+
+/// A config whose only variable part is the two web-search knob lines under a
+/// valid `[tools.web_search]` section.
+fn config_with_web_search_knobs(freshness: &str, safesearch: &str) -> String {
+    format!(
+        r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+
+[tools.web_search]
+provider = "brave"
+api_key = "k"
+default_freshness = "{freshness}"
+default_safesearch = "{safesearch}"
+"#
+    )
+}
+
+#[test]
+fn rejects_invalid_web_search_freshness() {
+    // CFG-006: freshness is a closed vocabulary, not an arbitrary string.
+    for bad in ["daily", "p1", "yesterday"] {
+        let toml = config_with_web_search_knobs(bad, "");
+        assert!(
+            matches!(Config::parse_toml(&toml), Err(ConfigError::Validation(_))),
+            "expected freshness {bad:?} to be rejected"
+        );
+    }
+}
+
+#[test]
+fn rejects_invalid_web_search_safesearch() {
+    // CFG-006: safesearch is off/moderate/strict (or empty), nothing else.
+    for bad in ["on", "medium", "safe"] {
+        let toml = config_with_web_search_knobs("", bad);
+        assert!(
+            matches!(Config::parse_toml(&toml), Err(ConfigError::Validation(_))),
+            "expected safesearch {bad:?} to be rejected"
+        );
+    }
+}
+
+#[test]
+fn accepts_valid_web_search_knobs() {
+    for (freshness, safesearch) in [
+        ("", ""),
+        ("pd", "off"),
+        ("pw", "moderate"),
+        ("2024-01-01to2024-12-31", "strict"),
+    ] {
+        let toml = config_with_web_search_knobs(freshness, safesearch);
+        assert!(
+            Config::parse_toml(&toml).is_ok(),
+            "expected freshness {freshness:?}/safesearch {safesearch:?} to be accepted"
+        );
+    }
+}
+
+#[test]
+fn rejects_web_search_non_url_base() {
+    // CFG-006: the base URL is parsed, not prefix-matched.
+    let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+
+[tools.web_search]
+provider = "brave"
+api_key = "k"
+base_url = "https://"
+"#;
+    // `https://` passes a naive `starts_with("https://")` prefix check but has no
+    // host, so only a real parse rejects it (CFG-006).
+    assert!(matches!(
+        Config::parse_toml(toml),
+        Err(ConfigError::Validation(_))
+    ));
+}
