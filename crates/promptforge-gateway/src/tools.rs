@@ -189,6 +189,76 @@ fn clamp_count(requested: u8, max_count: u8) -> u8 {
     requested.clamp(1, max_count)
 }
 
+/// Reject malformed request-supplied provider knobs at the boundary (TOOLS-004).
+///
+/// Empty/absent knobs are omitted downstream and need no validation; the config
+/// defaults are already validated at load. This validates only caller-supplied,
+/// non-empty values so an arbitrary string is never forwarded to the provider.
+///
+/// # Errors
+/// Returns [`GatewayError::MalformedRequest`] for an out-of-vocabulary
+/// `freshness`/`safesearch` or a malformed `country`/`search_lang` code.
+fn validate_request_knobs(request: &WebSearchRequest) -> Result<(), GatewayError> {
+    if let Some(freshness) = non_empty_opt(request.freshness.as_deref())
+        && !is_valid_freshness(freshness)
+    {
+        return Err(GatewayError::MalformedRequest(format!(
+            "web_search: invalid freshness {freshness:?}"
+        )));
+    }
+    if let Some(safesearch) = non_empty_opt(request.safesearch.as_deref())
+        && !matches!(safesearch, "off" | "moderate" | "strict")
+    {
+        return Err(GatewayError::MalformedRequest(format!(
+            "web_search: invalid safesearch {safesearch:?}"
+        )));
+    }
+    if let Some(country) = non_empty_opt(request.country.as_deref())
+        && !is_alpha_code(country, 2, 2)
+    {
+        return Err(GatewayError::MalformedRequest(format!(
+            "web_search: invalid country {country:?}"
+        )));
+    }
+    if let Some(lang) = non_empty_opt(request.search_lang.as_deref())
+        && !is_alpha_code(lang, 2, 3)
+    {
+        return Err(GatewayError::MalformedRequest(format!(
+            "web_search: invalid search_lang {lang:?}"
+        )));
+    }
+    Ok(())
+}
+
+/// Whether `value` is an accepted Brave freshness knob: one of `pd`/`pw`/`pm`/
+/// `py`, or a `YYYY-MM-DDtoYYYY-MM-DD` date range.
+fn is_valid_freshness(value: &str) -> bool {
+    if matches!(value, "pd" | "pw" | "pm" | "py") {
+        return true;
+    }
+    value
+        .split_once("to")
+        .is_some_and(|(from, to)| is_iso_date(from) && is_iso_date(to))
+}
+
+/// Whether `value` is `YYYY-MM-DD`.
+fn is_iso_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+}
+
+/// Whether `value` is `min..=max` ASCII alphabetic characters (a locale code).
+fn is_alpha_code(value: &str, min: usize, max: usize) -> bool {
+    let len = value.chars().count();
+    len >= min && len <= max && value.chars().all(|c| c.is_ascii_alphabetic())
+}
+
 /// Resolve an optional string knob: `Some` and non-empty after trim, else `None`.
 fn non_empty_opt(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|s| !s.is_empty())
@@ -225,6 +295,7 @@ pub(crate) async fn web_search(
         .await
         .ok_or(GatewayError::ToolNotConfigured("web_search"))?;
     let query = trim_web_search_query(&request.query)?;
+    validate_request_knobs(&request)?;
     let count = clamp_count(
         request.count.unwrap_or(web_search.settings.default_count),
         web_search.settings.max_count,
@@ -280,6 +351,54 @@ mod tests {
                 }
                 other => panic!("expected MalformedRequest, got {other:?}"),
             }
+        }
+    }
+
+    fn knob_request(
+        freshness: &str,
+        safesearch: &str,
+        country: &str,
+        lang: &str,
+    ) -> WebSearchRequest {
+        WebSearchRequest {
+            query: "q".to_string(),
+            count: None,
+            freshness: Some(freshness.to_string()),
+            country: Some(country.to_string()),
+            search_lang: Some(lang.to_string()),
+            safesearch: Some(safesearch.to_string()),
+            include_domains: Vec::new(),
+            exclude_domains: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn validate_request_knobs_accepts_valid_and_empty() {
+        // TOOLS-004: valid closed-vocab and locale codes pass; empty knobs are
+        // omitted downstream and need no validation.
+        assert!(validate_request_knobs(&knob_request("pd", "moderate", "us", "en")).is_ok());
+        assert!(
+            validate_request_knobs(&knob_request("2024-01-01to2024-12-31", "off", "GB", "eng"))
+                .is_ok()
+        );
+        assert!(validate_request_knobs(&knob_request("", "", "", "")).is_ok());
+    }
+
+    #[test]
+    fn validate_request_knobs_rejects_malformed() {
+        // TOOLS-004: arbitrary strings are rejected at the boundary, not
+        // forwarded to the provider.
+        for req in [
+            knob_request("daily", "", "", ""),
+            knob_request("", "medium", "", ""),
+            knob_request("", "", "usa", ""),
+            knob_request("", "", "", "english"),
+            knob_request("", "", "1", ""),
+        ] {
+            assert!(matches!(
+                validate_request_knobs(&req),
+                Err(GatewayError::MalformedRequest(_))
+            ));
         }
     }
 

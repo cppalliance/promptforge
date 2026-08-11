@@ -18,6 +18,8 @@ pub(crate) const URL_MAX_CHARS: usize = 2048;
 pub(crate) const SNIPPET_MAX_CHARS: usize = 1024;
 /// Max number of extra snippets kept per result (WSP-001).
 pub(crate) const MAX_EXTRA_SNIPPETS: usize = 8;
+/// Max characters kept for a result `age` after sanitisation (WSP-001).
+pub(crate) const AGE_MAX_CHARS: usize = 64;
 
 /// Sanitize free text: drop most controls, collapse whitespace, trim, decode a
 /// fixed entity set, then cap by Unicode scalar count.
@@ -236,11 +238,17 @@ pub(crate) fn post_process_results(
                 .map(|snippet| sanitize_text(&snippet, SNIPPET_MAX_CHARS))
                 .filter(|snippet| !snippet.is_empty())
                 .collect();
+            // `age` is provider-controlled free text; sanitize and cap it like
+            // every other retained string (WSP-001).
+            let age = r
+                .age
+                .map(|age| sanitize_text(&age, AGE_MAX_CHARS))
+                .filter(|age| !age.is_empty());
             SearchResult {
                 title,
                 url,
                 description,
-                age: r.age,
+                age,
                 site_name,
                 extra_snippets,
             }
@@ -353,6 +361,18 @@ mod tests {
         assert_eq!(site_name_from_host("example.com"), "example.com");
         assert_eq!(host_from_url("not-a-url"), Some("not-a-url".to_string()));
         assert_eq!(host_from_url("https:///"), None);
+    }
+
+    #[test]
+    fn age_is_sanitized_and_capped() {
+        // WSP-001: provider-controlled `age` is sanitized (controls dropped) and
+        // capped like every other retained string.
+        let mut result = hit("T", "https://a.com/1");
+        result.age = Some(format!("2 days\u{0001}ago {}", "x".repeat(AGE_MAX_CHARS)));
+        let out = post_process_results(vec![result], false, &[], &[], 10, 10);
+        let age = out[0].age.as_deref().expect("age kept");
+        assert!(age.chars().count() <= AGE_MAX_CHARS);
+        assert!(!age.contains('\u{0001}'));
     }
 
     #[test]
