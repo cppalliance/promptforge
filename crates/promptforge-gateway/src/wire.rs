@@ -5,6 +5,13 @@
 //! because JSON is the contract and each side's struct is shaped by its role.
 //! In v0 the message and choice payloads are kept as opaque JSON so everything
 //! the gateway does not route passes through untouched.
+//!
+//! WIRE-005: the `object` discriminators are fixed `&'static str` literals
+//! (`"list"`, `"model"`), so they are already closed. The `tool_dialect` and
+//! `tools_mode` catalog fields stay `String`: they are registry-assigned open
+//! identifiers owned by `promptforge-core` (see the ROUTING-005 disposition),
+//! stringified only at this catalog boundary rather than re-modeled as a closed
+//! gateway enum that would fight core's vocabulary.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -25,20 +32,30 @@ pub(crate) struct ChatRequest {
 }
 
 impl ChatRequest {
+    /// Reserved top-level keys that must never appear in the passthrough `rest`.
+    const RESERVED: [&'static str; 2] = ["model", "messages"];
+
     /// Validate the request shape at the trust boundary, without coercion.
     ///
-    /// Rejects an empty model and any message that is not a JSON object; the
-    /// object contents themselves pass through verbatim.
+    /// Rejects an empty model, any message that is not a JSON object, and any
+    /// reserved key smuggled into the flattened `rest` map (WIRE-003); the
+    /// message object contents themselves pass through verbatim.
     ///
     /// # Errors
-    /// Returns a static reason string when the model is empty or a message is
-    /// not a JSON object.
+    /// Returns a static reason string when the model is empty, a message is not
+    /// a JSON object, or `rest` collides with a named field.
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
         if self.model.trim().is_empty() {
             return Err("model must not be empty");
         }
         if self.messages.iter().any(|message| !message.is_object()) {
             return Err("each message must be a JSON object");
+        }
+        if Self::RESERVED
+            .iter()
+            .any(|key| self.rest.contains_key(*key))
+        {
+            return Err("rest must not contain a reserved key (model, messages)");
         }
         Ok(())
     }
@@ -58,14 +75,24 @@ pub(crate) struct ChatResponse {
 }
 
 impl ChatResponse {
+    /// Reserved top-level keys that must never appear in the passthrough `rest`.
+    const RESERVED: [&'static str; 2] = ["model", "choices"];
+
     /// Validate the upstream response shape, treating structural failure as an
     /// upstream-protocol error rather than silently passing it through.
     ///
     /// # Errors
-    /// Returns a static reason string when a choice is not a JSON object.
+    /// Returns a static reason string when a choice is not a JSON object or a
+    /// reserved key collides with the flattened `rest` map (WIRE-003).
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
         if self.choices.iter().any(|choice| !choice.is_object()) {
             return Err("upstream returned a non-object choice");
+        }
+        if Self::RESERVED
+            .iter()
+            .any(|key| self.rest.contains_key(*key))
+        {
+            return Err("rest must not contain a reserved key (model, choices)");
         }
         Ok(())
     }
@@ -130,6 +157,27 @@ mod tests {
                 .validate()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn request_rejects_reserved_keys_in_rest() {
+        let mut req = request("m", vec![]);
+        req.rest
+            .insert("messages".to_owned(), serde_json::json!(["x"]));
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn response_rejects_reserved_keys_in_rest() {
+        let mut response = ChatResponse {
+            model: "m".to_owned(),
+            choices: vec![],
+            rest: Map::new(),
+        };
+        response
+            .rest
+            .insert("choices".to_owned(), serde_json::json!([]));
+        assert!(response.validate().is_err());
     }
 
     #[test]
