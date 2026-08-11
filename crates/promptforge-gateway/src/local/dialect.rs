@@ -6,6 +6,7 @@
 //! [`ToolDialectRegistry`]. Resolution hard-fails on ambiguous or absent
 //! evidence so a local model never silently defaults to an incorrect dialect.
 
+use std::io::Read as _;
 use std::path::Path;
 use std::time::Duration;
 
@@ -17,6 +18,37 @@ use super::sidecar;
 use crate::local::error::LocalError;
 
 const PROPS_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Byte ceiling for a dialect-probe JSON body (HYGIENE-BOUNDS-001).
+const MAX_PROBE_BODY: u64 = crate::http_util::MAX_JSON_BODY as u64;
+
+/// Reads a blocking probe response with a byte cap, rejecting oversize rather
+/// than truncating, then decodes it as JSON (HYGIENE-BOUNDS-001).
+fn read_probe_json(
+    operation: &'static str,
+    response: reqwest::blocking::Response,
+) -> Result<Value, LocalError> {
+    let mut buf = Vec::new();
+    response
+        .take(MAX_PROBE_BODY + 1)
+        .read_to_end(&mut buf)
+        .map_err(|source| LocalError::DialectRead { operation, source })?;
+    if buf.len() as u64 > MAX_PROBE_BODY {
+        return Err(LocalError::DialectRead {
+            operation,
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("probe body exceeds {MAX_PROBE_BODY} bytes"),
+            ),
+        });
+    }
+    decode_probe_json(operation, &buf)
+}
+
+/// Decodes probe body bytes as JSON (pure; unit-tested).
+fn decode_probe_json(operation: &'static str, bytes: &[u8]) -> Result<Value, LocalError> {
+    serde_json::from_slice(bytes).map_err(|source| LocalError::DialectDecode { operation, source })
+}
 
 /// Fetches `/props` from a ready local llama-server and resolves the tool dialect.
 ///
@@ -107,10 +139,7 @@ fn fetch_props_evidence(guard: &ServerGuard) -> Result<DialectEvidence, LocalErr
         });
     }
 
-    let props: Value = response.json().map_err(|source| LocalError::DialectProbe {
-        operation: "parse /props JSON",
-        source,
-    })?;
+    let props: Value = read_probe_json("read /props body", response)?;
 
     let chat_template = props
         .get("chat_template")
@@ -166,10 +195,7 @@ fn fetch_tool_call_capability(
             status: response.status().to_string(),
         });
     }
-    let body: Value = response.json().map_err(|source| LocalError::DialectProbe {
-        operation: "parse /v1/models JSON",
-        source,
-    })?;
+    let body: Value = read_probe_json("read /v1/models body", response)?;
     Ok(tool_call_capability_from_body(&body))
 }
 
@@ -191,6 +217,16 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn decode_probe_json_accepts_valid_and_rejects_malformed() {
+        // HYGIENE-BOUNDS-001: bodies are decoded from bounded bytes; malformed
+        // JSON is a typed decode error, not a swallowed empty value.
+        let ok = decode_probe_json("op", br#"{"chat_template":"x"}"#).expect("valid json");
+        assert_eq!(ok["chat_template"], "x");
+        let err = decode_probe_json("op", b"not json").unwrap_err();
+        assert!(matches!(err, LocalError::DialectDecode { .. }));
+    }
 
     #[test]
     fn sidecar_supplements_missing_template() {

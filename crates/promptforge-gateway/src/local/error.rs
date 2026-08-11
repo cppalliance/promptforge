@@ -298,6 +298,27 @@ pub(crate) enum LocalError {
         status: String,
     },
 
+    /// Reading a dialect-probe body failed or exceeded the byte ceiling
+    /// (HYGIENE-BOUNDS-001).
+    #[error("{operation}")]
+    DialectRead {
+        /// Short description of the probe operation.
+        operation: &'static str,
+        /// The underlying I/O error (or an oversize `InvalidData`).
+        #[source]
+        source: io::Error,
+    },
+
+    /// Decoding a (bounded) dialect-probe body as JSON failed.
+    #[error("{operation}")]
+    DialectDecode {
+        /// Short description of the probe operation.
+        operation: &'static str,
+        /// The underlying JSON decode error.
+        #[source]
+        source: serde_json::Error,
+    },
+
     /// Resolving the tool dialect from `/props` evidence failed.
     #[error("dialect resolution failed for local model {model}")]
     DialectResolution {
@@ -334,6 +355,7 @@ impl LocalError {
                 | LocalError::Startup { .. }
                 | LocalError::DialectProbe { .. }
                 | LocalError::DialectProbeStatus { .. }
+                | LocalError::DialectRead { .. }
         )
     }
 }

@@ -1,4 +1,4 @@
-use std::io::{Read as _, Write as _};
+use std::io::{self, Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -133,7 +133,7 @@ struct FakeServer {
     address: String,
     requests: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
+    thread: Option<JoinHandle<io::Result<()>>>,
 }
 
 impl FakeServer {
@@ -150,7 +150,12 @@ impl FakeServer {
         let thread_requests = Arc::clone(&requests);
         let thread_shutdown = Arc::clone(&shutdown);
         let body = body.to_owned();
-        let thread = thread::spawn(move || {
+        // The thread returns an `io::Result`: a genuine write/flush failure while
+        // serving a real client is surfaced on join (HYGIENE-RESULT-001) instead
+        // of being swallowed, so a broken fixture cannot masquerade as success.
+        // The shutdown self-connect is skipped by the top-of-loop `shutdown`
+        // check, so it never counts as a serve error.
+        let thread = thread::spawn(move || -> io::Result<()> {
             for stream in listener.incoming() {
                 if thread_shutdown.load(Ordering::Acquire) {
                     break;
@@ -177,11 +182,12 @@ impl FakeServer {
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     body.len()
                 );
-                let _ = stream.write_all(response.as_bytes());
-                let _ = stream.write_all(&body);
-                let _ = stream.flush();
+                stream.write_all(response.as_bytes())?;
+                stream.write_all(&body)?;
+                stream.flush()?;
                 thread_requests.fetch_add(1, Ordering::AcqRel);
             }
+            Ok(())
         });
         Self {
             address,
@@ -205,7 +211,14 @@ impl Drop for FakeServer {
         self.shutdown.store(true, Ordering::Release);
         let _ = TcpStream::connect(&self.address);
         if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+            let joined = thread.join();
+            // Don't mask an in-flight test panic, but otherwise a serve-side
+            // transport failure must surface rather than be silently dropped.
+            if !std::thread::panicking() {
+                joined
+                    .expect("fake server thread panicked")
+                    .expect("fake server encountered a socket write/flush error");
+            }
         }
     }
 }
