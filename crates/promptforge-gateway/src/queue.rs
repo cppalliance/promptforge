@@ -177,17 +177,19 @@ impl EndpointLane {
     /// A lane that admits at most `concurrency` in-flight requests and queues
     /// up to `queue.max_depth` waiters.
     ///
-    /// # Panics
-    /// Panics if `concurrency` is zero. Callers must validate configuration
-    /// first.
+    /// Total and non-panicking (Q-002): a zero `concurrency` yields an unlimited
+    /// lane and a zero `max_depth` is clamped to 1. Configuration validation
+    /// already rejects both zeros, so this is purely defensive - construction
+    /// can never panic on out-of-range runtime settings.
     #[must_use]
     pub(crate) fn new(concurrency: usize, queue: &QueueConfig) -> EndpointLane {
-        assert!(concurrency >= 1, "endpoint concurrency must be at least 1");
-        assert!(queue.max_depth >= 1, "queue.max_depth must be at least 1");
+        let Some(max_inflight) = std::num::NonZeroUsize::new(concurrency) else {
+            return EndpointLane::unlimited();
+        };
         EndpointLane {
             inner: LaneInner::Limited(Arc::new(LimitedLane {
-                max_inflight: concurrency,
-                max_depth: queue.max_depth,
+                max_inflight: max_inflight.get(),
+                max_depth: queue.max_depth.max(1),
                 fair: queue.fair_scheduling,
                 state: Mutex::new(WaitState {
                     inflight: 0,
@@ -224,6 +226,22 @@ impl EndpointLane {
         }
     }
 
+    /// Number of distinct client buckets currently in the fair round-robin.
+    ///
+    /// Test-only observation seam for the distinct-client cap (Q-001).
+    #[cfg(test)]
+    pub(crate) fn distinct_clients(&self) -> usize {
+        match &self.inner {
+            LaneInner::Unlimited => 0,
+            LaneInner::Limited(lane) => lane
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .client_order
+                .len(),
+        }
+    }
+
     /// # Errors
     /// Returns [`AdmitError::QueueFull`] when the waiting queue is at
     /// `max_depth` and no in-flight slot is free.
@@ -249,12 +267,20 @@ impl EndpointLane {
                 state.next_id = state.next_id.wrapping_add(1);
                 state.waiter_count += 1;
                 let waiter = Waiter { id, reply: tx };
-                if lane.fair {
-                    enqueue_fair(&mut state, client_key, waiter);
+                // Capture the *effective* bucket key: fair scheduling may fold a
+                // fresh label into `default` once the distinct-client cap is hit
+                // (Q-001), and cancellation must remove from that same bucket.
+                let effective_key = if lane.fair {
+                    enqueue_fair(&mut state, client_key, waiter)
                 } else {
                     state.fifo.push_back(waiter);
+                    client_key.to_string()
+                };
+                AdmitOutcome::Queued {
+                    id,
+                    rx,
+                    client_key: effective_key,
                 }
-                AdmitOutcome::Queued { id, rx }
             }
         };
 
@@ -263,10 +289,10 @@ impl EndpointLane {
                 limited: Some(Arc::clone(lane)),
             }),
             AdmitOutcome::Full => Err(AdmitError::QueueFull),
-            AdmitOutcome::Queued { id, rx } => {
+            AdmitOutcome::Queued { id, rx, client_key } => {
                 let cancel = CancelOnDrop {
                     lane: Arc::clone(lane),
-                    client_key: client_key.to_string(),
+                    client_key,
                     id,
                     armed: true,
                 };
@@ -289,7 +315,12 @@ impl EndpointLane {
 enum AdmitOutcome {
     Ready,
     Full,
-    Queued { id: u64, rx: oneshot::Receiver<()> },
+    Queued {
+        id: u64,
+        rx: oneshot::Receiver<()>,
+        /// The effective bucket key the waiter was enqueued under.
+        client_key: String,
+    },
 }
 
 /// Removes a still-queued waiter if `admit` is cancelled before admission.
@@ -358,13 +389,32 @@ impl LimitedLane {
     }
 }
 
-fn enqueue_fair(state: &mut WaitState, client_key: &str, waiter: Waiter) {
-    let queue = state.by_client.entry(client_key.to_string()).or_default();
+/// Maximum number of distinct client labels tracked in the fair round-robin.
+///
+/// Beyond this, a fresh label folds into the shared `default` bucket. Because
+/// all callers authenticate with the same shared server key, per-caller identity
+/// is indistinguishable, so this global cap is the bound that stops one caller
+/// from minting many labels to win a larger share of round-robin turns (Q-001).
+const MAX_DISTINCT_CLIENTS: usize = 32;
+
+/// Enqueue a waiter under its fair-scheduling bucket, returning the *effective*
+/// bucket key actually used (which may be `default` when the distinct-client cap
+/// is reached).
+fn enqueue_fair(state: &mut WaitState, client_key: &str, waiter: Waiter) -> String {
+    let key = if state.by_client.contains_key(client_key)
+        || state.client_order.len() < MAX_DISTINCT_CLIENTS
+    {
+        client_key.to_string()
+    } else {
+        ClientId::DEFAULT.to_string()
+    };
+    let queue = state.by_client.entry(key.clone()).or_default();
     let was_empty = queue.is_empty();
     queue.push_back(waiter);
     if was_empty {
-        state.client_order.push_back(client_key.to_string());
+        state.client_order.push_back(key.clone());
     }
+    key
 }
 
 fn dequeue_fair(state: &mut WaitState) -> Option<Waiter> {

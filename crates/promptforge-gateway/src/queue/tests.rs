@@ -211,3 +211,57 @@ async fn cancel_after_wake_does_not_leak_slot() {
         .unwrap();
     drop(permit);
 }
+
+#[test]
+fn new_is_total_and_never_panics_on_zero_settings() {
+    // Q-002: a zero concurrency yields an unlimited lane; a zero max_depth is
+    // clamped. Construction never panics on out-of-range runtime settings.
+    let unlimited = EndpointLane::new(0, &QueueConfig::default());
+    assert!(matches!(unlimited.inner, LaneInner::Unlimited));
+    let clamped = EndpointLane::new(
+        1,
+        &QueueConfig {
+            max_depth: 0,
+            fair_scheduling: true,
+        },
+    );
+    assert!(matches!(clamped.inner, LaneInner::Limited(_)));
+}
+
+#[tokio::test]
+async fn distinct_client_labels_are_capped_to_bound_fair_scheduling() {
+    // Q-001: one caller minting many labels cannot expand the round-robin
+    // breadth without bound; labels beyond the cap fold into `default`.
+    let lane = EndpointLane::new(
+        1,
+        &QueueConfig {
+            max_depth: 1000,
+            fair_scheduling: true,
+        },
+    );
+    // Occupy the only in-flight slot so subsequent admits queue as waiters.
+    let _held = lane.admit("holder").await.unwrap();
+
+    let total = MAX_DISTINCT_CLIENTS + 10;
+    let mut handles = Vec::new();
+    for i in 0..total {
+        let lane = lane.clone();
+        handles.push(tokio::spawn(async move {
+            let _ = lane.admit(&format!("client-{i}")).await;
+        }));
+    }
+    await_waiters(&lane, total).await;
+
+    // Distinct buckets are bounded: at most the cap of named labels plus the one
+    // shared `default` overflow bucket, regardless of how many labels are minted.
+    assert!(
+        lane.distinct_clients() <= MAX_DISTINCT_CLIENTS + 1,
+        "distinct client buckets {} exceeded bound {}",
+        lane.distinct_clients(),
+        MAX_DISTINCT_CLIENTS + 1
+    );
+
+    for handle in handles {
+        handle.abort();
+    }
+}
