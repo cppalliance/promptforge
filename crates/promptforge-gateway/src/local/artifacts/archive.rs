@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
 
+use super::Result;
 use super::assets::ArchiveKind;
 use super::confine::{ensure_cache_directory, safe_relative_path, validate_tree_path};
-use super::Result;
 use crate::local::error::LocalError;
 
 /// Extracts `archive` into `destination`, dispatching on the archive kind.

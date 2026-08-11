@@ -488,9 +488,12 @@ impl ServerGuard {
 
 impl Drop for ServerGuard {
     fn drop(&mut self) {
-        // Best-effort, bounded teardown; the graceful, error-surfacing path is
-        // `shutdown`. `terminate_child` caps its reap at `TEARDOWN_DEADLINE`, so
-        // this never waits unbounded even if the child ignores the kill signal.
+        // Best-effort, bounded teardown. `terminate_child` caps its reap at
+        // `TEARDOWN_DEADLINE` (polling `try_wait`), so drop never waits unbounded
+        // even if the child ignores the kill signal. The error-surfacing path is
+        // `respawn`, which calls `terminate_child` with `?`; here in `Drop` the
+        // result is intentionally discarded because there is no caller to report
+        // to (SERVER-001: bounded Drop; async offload is rejected, see below).
         let _ignored = self.terminate_child();
         self.join_readers();
     }
