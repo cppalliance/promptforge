@@ -36,11 +36,23 @@ fn default_n_predict() -> u32 {
 
 /// A secret string (an API key or the shared token) that never serializes and
 /// redacts in both `Debug` and `Display`.
-#[derive(Clone, Deserialize)]
-#[serde(from = "String")]
+///
+/// The type has no public `Deserialize` or `From<String>` impl: it is
+/// constructed only inside this crate (via [`Secret::new`] and the private
+/// [`de_secret`] field deserializer), so a redacting secret can never be minted
+/// or round-tripped by a downstream consumer. `expose` is the single accessor.
+#[derive(Clone)]
 pub struct Secret(String);
 
 impl Secret {
+    /// Wrap a plaintext secret. Crate-internal: the only construction path,
+    /// used by config deserialization and by adapters that mint an ephemeral
+    /// loopback credential.
+    #[must_use]
+    pub(crate) fn new(value: String) -> Secret {
+        Secret(value)
+    }
+
     /// The secret's bytes. The one place a secret is read, when building auth.
     #[must_use]
     pub fn expose(&self) -> &str {
@@ -49,15 +61,19 @@ impl Secret {
 
     /// Whether the secret is empty (an intentionally credential-free endpoint).
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }
 
-impl From<String> for Secret {
-    fn from(value: String) -> Self {
-        Secret(value)
-    }
+/// Deserialize a [`Secret`] field from a bare TOML string without exposing a
+/// public `Deserialize` impl on the redacting type.
+fn de_secret<'de, D>(deserializer: D) -> Result<Secret, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    Ok(Secret::new(raw))
 }
 
 impl fmt::Debug for Secret {
@@ -87,7 +103,7 @@ pub(crate) enum Protocol {
 /// configuration. Deserialization goes through a private raw DTO and a
 /// validating conversion, so `Config` itself carries no public `Deserialize`
 /// impl and cannot be built from arbitrary TOML without validation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Config {
     /// Server bind address and shared key.
@@ -158,7 +174,7 @@ pub(crate) enum DeviceKind {
 }
 
 /// One compute device declared as `[[device]]`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub(crate) struct DeviceConfig {
@@ -177,7 +193,7 @@ pub(crate) struct DeviceConfig {
 }
 
 /// A concurrency lane within a local device (`[[device.lane]]`).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub(crate) struct LaneConfig {
@@ -191,7 +207,7 @@ pub(crate) struct LaneConfig {
 }
 
 /// Settings under `[local]` for artifact cache paths.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub(crate) struct LocalConfig {
@@ -205,7 +221,7 @@ pub(crate) struct LocalConfig {
 }
 
 /// One local generative model declared as `[[local_model]]`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub(crate) struct LocalModelConfig {
@@ -253,18 +269,19 @@ pub(crate) struct LocalModelConfig {
 }
 
 /// Server-level settings.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub(crate) struct ServerConfig {
     /// The socket address to bind.
     pub bind: SocketAddr,
     /// The shared bearer key every `/v1/*` request must present.
+    #[serde(deserialize_with = "de_secret")]
     pub key: Secret,
 }
 
 /// One backend the gateway can forward to.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub(crate) struct EndpointConfig {
@@ -276,6 +293,7 @@ pub(crate) struct EndpointConfig {
     /// The backend base URL (a trailing slash is trimmed).
     pub base_url: String,
     /// The credential sent to this backend.
+    #[serde(deserialize_with = "de_secret")]
     pub api_key: Secret,
     /// Maximum in-flight requests to this endpoint. Absent means unlimited
     /// (the waiting queue is a no-op pass-through for that endpoint).
@@ -308,7 +326,7 @@ pub(crate) enum ThinkingMode {
 }
 
 /// One model name and the backend it resolves to.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub(crate) struct ModelConfig {
@@ -331,7 +349,7 @@ pub(crate) struct ModelConfig {
 }
 
 /// Built-in tool configuration under the `[tools]` section.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub(crate) struct ToolsConfig {
@@ -342,13 +360,14 @@ pub(crate) struct ToolsConfig {
 }
 
 /// Configuration for the web-search tool.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub(crate) struct WebSearchConfig {
     /// The search provider backing the tool.
     pub provider: SearchProvider,
     /// The credential sent to the search provider.
+    #[serde(deserialize_with = "de_secret")]
     pub api_key: Secret,
     /// The search API base URL. Defaults to the Brave Search endpoint;
     /// override to point at a proxy or a test server.

@@ -185,7 +185,7 @@ mod tests {
             id: "e".to_owned(),
             upstream: Arc::new(OpenAiUpstream::new(
                 "http://127.0.0.1:9",
-                crate::config::Secret::from(String::new()),
+                crate::config::Secret::new(String::new()),
             )),
             lane: EndpointLane::unlimited(),
         });

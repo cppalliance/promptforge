@@ -192,7 +192,7 @@ fn parses_config_without_tools_section() {
 
 #[test]
 fn secret_redacts() {
-    let s = Secret::from("hunter2".to_string());
+    let s = Secret::new("hunter2".to_string());
     assert_eq!(format!("{s}"), "redacted");
     assert_eq!(format!("{s:?}"), "Secret(redacted)");
     assert_eq!(s.expose(), "hunter2");

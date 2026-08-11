@@ -78,6 +78,7 @@ impl ProfilesContext {
 /// `llama-server` child. The type is opaque; assemble it with
 /// [`Gateway::from_config`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Gateway {
     state: AppState,
 }

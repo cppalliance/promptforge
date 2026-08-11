@@ -221,7 +221,7 @@ impl ServerGuard {
                 child,
                 port,
                 model_alias: identity.model_alias,
-                api_key: Secret::from(identity.api_key),
+                api_key: Secret::new(identity.api_key),
                 stdout,
                 stderr,
                 readers: Vec::with_capacity(2),
