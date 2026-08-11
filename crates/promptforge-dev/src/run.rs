@@ -1,248 +1,261 @@
-//! Single-shot prompt execution against an already-running gateway.
+//! Reusable run environment and single-shot prompt execution.
 //!
-//! [`run_once`] mirrors the CLI pipeline: require gateway credentials, read
-//! the file, require a `promptforge:` version, parse, fetch the live model
-//! catalog, build the live tool registry, and execute with a
-//! [`GatewayClient`]. Every `(execution, section, detail)` observer record
+//! [`RunEnv`] owns the values that stay valid across a whole invocation: the
+//! model catalog, the live tool set, the semantic picker, and the gateway
+//! client. It is built once (fetching the catalog once) and then lends those
+//! values to [`RunEnv::run_prompt`] for each prompt run, so the watch loop does
+//! not refetch the catalog or rebuild the picker on every save.
+//!
+//! Each run mirrors the CLI pipeline: read the file, require a `promptforge:`
+//! version, parse, and execute against the gateway. Every observer record
 //! streams to stderr; the returned result string is the caller's to print on
 //! stdout. After every executed run, success or failure, the run's store is
-//! dumped beside the prompt file (see [`crate::dump`]).
+//! reconciled to `<prompt-stem>.store` beside the prompt file (see
+//! [`crate::dump`]). Blocking filesystem work runs off the async runtime.
 
-use std::io::Write;
-use std::path::Path;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
 use promptforge_core::CancelHandle;
 use promptforge_core::client::{GatewayClient, GatewayEndpoint, SecretString};
+use promptforge_core::debug::DebugCapture;
 use promptforge_core::execute::{ResolutionContext, RunConfig, run};
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
-use promptforge_core::observe::{Observation, Observer};
+use promptforge_core::observe::Observer;
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
 use promptforge_tool_picker::{Config as PickerConfig, ToolPicker};
 
-use crate::dump;
-use crate::tools;
+use crate::config::GatewayEnv;
+use crate::diagnostics::VerboseObserver;
+use crate::dump::{self, SensitiveCapture};
+use crate::tools::{self, AvailableTools};
 
-/// Gateway URL and bearer required for every run.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GatewayEnv {
-    /// The gateway API root (`PROMPTFORGE_GATEWAY_URL`).
-    pub(crate) base_url: String,
-    /// The bearer credential (`PROMPTFORGE_GATEWAY_KEY`).
-    pub(crate) key: String,
+/// Whether a run persists raw, sensitive turn traces.
+///
+/// Raw capture is off unless explicitly authorized at the process boundary,
+/// so an ordinary run never silently persists prompts, tool arguments, or
+/// model output to disk.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CapturePolicy {
+    /// No raw capture; `.trace/` is never written.
+    Off,
+    /// Raw, unredacted capture explicitly authorized by the caller.
+    RawSensitive(SensitiveCapture),
 }
 
-/// Reads and validates `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY`
-/// from the process environment.
-///
-/// # Errors
-///
-/// Returns a friendly error naming each missing variable when either is unset
-/// or empty. This is intended to fail before any prompt parse.
-pub(crate) fn require_gateway_env() -> Result<GatewayEnv> {
-    require_gateway_env_from(|name| std::env::var(name).ok())
+/// Everything reusable across the prompt runs of one invocation.
+pub(crate) struct RunEnv {
+    models: ModelCatalog,
+    tools: AvailableTools,
+    picker: ToolPicker,
+    client: GatewayClient,
+    capture: CapturePolicy,
 }
 
-/// Formats a failed run so the first line leads with `prompt.md:LINE:` when
-/// core mapped a Lua error to an absolute prompt line.
-pub(crate) fn format_dev_failure(prompt_path: &Path, error: &anyhow::Error) -> String {
-    let detail = format!("{error:#}");
-    if let Some(line) = first_mapped_prompt_line(&detail) {
-        format!(
-            "dev run failed: {}:{}: {detail}",
-            prompt_path.display(),
-            line
-        )
-    } else {
-        format!("dev run failed: {detail}")
+impl std::fmt::Debug for RunEnv {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RunEnv")
+            .field("tools", &self.tools)
+            .field("capture", &self.capture)
+            .finish_non_exhaustive()
     }
 }
 
-/// Pulls the innermost absolute prompt line from a core-mapped Lua error.
-///
-/// Core prefixes failures as `section \`Name\` epilog:51: ...`. Prefer the
-/// last such tag so a fanout parent wrapper does not hide the arm that failed.
-fn first_mapped_prompt_line(message: &str) -> Option<u32> {
-    let mut found = None;
-    let mut rest = message;
-    while let Some(idx) = rest.find(':') {
-        let after = &rest[idx + 1..];
-        let digit_end = after
-            .find(|c: char| !c.is_ascii_digit())
-            .unwrap_or(after.len());
-        if digit_end > 0
-            && after.as_bytes().get(digit_end) == Some(&b':')
-            && let Ok(line) = after[..digit_end].parse::<u32>()
-        {
-            // Ignore tiny lines that are just HTTP status noise; prompt lines
-            // for real files are almost never in the URL/port range alone, but
-            // the surrounding tag (`epilog` / `prologue` / `library`) is the
-            // real filter.
-            let before = &rest[..idx];
-            if before.ends_with("epilog")
-                || before.ends_with("prologue")
-                || before.ends_with("library")
-            {
-                found = Some(line);
+impl RunEnv {
+    /// Builds a run environment, fetching the model catalog once.
+    ///
+    /// # Errors
+    /// Returns an error when the catalog cannot be fetched, the live tool set
+    /// or picker cannot be built, or the gateway URL or key is unusable.
+    pub(crate) async fn initialize(gateway: &GatewayEnv, capture: CapturePolicy) -> Result<RunEnv> {
+        let models = fetch_model_catalog(&gateway.base_url, gateway.key.expose())
+            .await
+            .context("fetch model catalog")?;
+        RunEnv::with_catalog(gateway, models, capture)
+    }
+
+    /// Builds a run environment from an explicit catalog, skipping the network
+    /// fetch. Used by the watch loop's first init and by offline tests.
+    ///
+    /// # Errors
+    /// Returns an error when the live tool set or picker cannot be built, or
+    /// the gateway URL or key is unusable.
+    pub(crate) fn with_catalog(
+        gateway: &GatewayEnv,
+        models: ModelCatalog,
+        capture: CapturePolicy,
+    ) -> Result<RunEnv> {
+        let tools = tools::available_tools(&gateway.base_url, gateway.key.expose())
+            .context("build the live tool set")?;
+        let picker = ToolPicker::build(tools.catalog().clone(), PickerConfig::default())
+            .context("build the live tool picker")?;
+        let endpoint = GatewayEndpoint::new(&gateway.base_url)
+            .with_context(|| format!("gateway URL {:?}", gateway.base_url))?;
+        let key =
+            SecretString::new(gateway.key.expose()).context("gateway key must not be empty")?;
+        let client = GatewayClient::new(endpoint, key);
+        Ok(RunEnv {
+            models,
+            tools,
+            picker,
+            client,
+            capture,
+        })
+    }
+
+    /// Runs one prompt file once and returns its final result string.
+    ///
+    /// # Errors
+    /// Returns an error when the file cannot be read, declares no `promptforge:`
+    /// version, fails to parse, or execution fails. On a successful run whose
+    /// store dump fails, the dump error is returned; on a failed run, the
+    /// execution error is primary and the dump failure is reported to stderr.
+    pub(crate) async fn run_prompt(
+        &self,
+        prompt_path: &Path,
+        input: &str,
+        observer: Arc<dyn Observer>,
+        cancel: CancelHandle,
+    ) -> Result<String> {
+        // Read the prompt off the runtime worker so a slow filesystem cannot
+        // stall the executor.
+        let source = tokio::fs::read_to_string(prompt_path)
+            .await
+            .with_context(|| format!("read {}", prompt_path.display()))?;
+        if promptforge_core::promptforge_version(&source).is_none() {
+            bail!(
+                "{} is not a promptforge prompt: its frontmatter declares no `promptforge:` version. promptforge runs only promptforge prompts.",
+                prompt_path.display()
+            );
+        }
+
+        let execution = new_execution_id();
+        // Banner before observer traffic so a fresh process is obvious in
+        // scrollback even when an earlier run's lines are still on screen.
+        eprintln!("run id: {execution}");
+        let prompt = Prompt::parse(&source, &execution, observer.as_ref())
+            .with_context(|| format!("parse {}", prompt_path.display()))?;
+
+        // Clear the previous run's dump before starting so stale store files and
+        // traces never masquerade as the current run. A failure to clear is an
+        // error, not something to proceed past. Only `NotFound` satisfies the
+        // invariant already.
+        clear_previous_dump(prompt_path).await?;
+
+        // The store stays in memory during execution: no filesystem write runs
+        // on the async execution path. All disk work happens in the single
+        // end-of-run reconcile below, which runs off the runtime.
+        let store = StoreRef::memory();
+
+        // Raw capture is installed only when explicitly authorized.
+        let capture = match self.capture {
+            CapturePolicy::Off => None,
+            CapturePolicy::RawSensitive(authorization) => Some(Arc::new(dump::TraceCapture::new(
+                prompt_path,
+                authorization,
+            ))),
+        };
+
+        let mut config = RunConfig::new(&execution)
+            .observer(Arc::clone(&observer))
+            .client(self.client.clone())
+            .cancel(cancel);
+        if let Some(capture) = &capture {
+            let concrete = Arc::clone(capture);
+            let debug: Arc<dyn DebugCapture> = concrete;
+            config = config.debug(debug);
+        }
+
+        let result = run(
+            &prompt,
+            input,
+            ResolutionContext::new(&self.picker, &self.models),
+            self.tools.tools(),
+            &store,
+            config,
+        )
+        .await
+        .with_context(|| format!("run {}", prompt_path.display()));
+
+        // Flush the trace worker so every queued write lands before reconcile.
+        // `finish` drains and joins the I/O worker, which can block, so it runs
+        // off the async runtime.
+        if let Some(capture) = &capture {
+            let handle = Arc::clone(capture);
+            if let Err(join_error) = tokio::task::spawn_blocking(move || handle.finish()).await {
+                eprintln!("trace flush task failed: {join_error}");
             }
         }
-        rest = &rest[idx + 1..];
-    }
-    found
-}
 
-/// [`require_gateway_env`] with an injected variable lookup for offline tests.
-pub(crate) fn require_gateway_env_from(
-    lookup: impl Fn(&str) -> Option<String>,
-) -> Result<GatewayEnv> {
-    let base_url = lookup("PROMPTFORGE_GATEWAY_URL").filter(|value| !value.is_empty());
-    let key = lookup("PROMPTFORGE_GATEWAY_KEY").filter(|value| !value.is_empty());
-    match (base_url, key) {
-        (Some(base_url), Some(key)) => Ok(GatewayEnv { base_url, key }),
-        (None, None) => bail!(
-            "missing environment variables PROMPTFORGE_GATEWAY_URL and PROMPTFORGE_GATEWAY_KEY\n\
-             start promptforge-gateway first, then export both before running promptforge-dev"
-        ),
-        (None, Some(_)) => bail!(
-            "missing environment variable PROMPTFORGE_GATEWAY_URL\n\
-             start promptforge-gateway first, then export PROMPTFORGE_GATEWAY_URL and PROMPTFORGE_GATEWAY_KEY"
-        ),
-        (Some(_), None) => bail!(
-            "missing environment variable PROMPTFORGE_GATEWAY_KEY\n\
-             start promptforge-gateway first, then export PROMPTFORGE_GATEWAY_URL and PROMPTFORGE_GATEWAY_KEY"
-        ),
+        // Reconcile on success and failure alike: a failed run's partial store
+        // is exactly what a debugging author needs. Runs off the runtime.
+        let dump_result = reconcile_dump(store, prompt_path.to_path_buf()).await;
+        combine(result, dump_result)
     }
 }
 
-/// Runs one prompt file once against a ready gateway and returns the final
-/// result string.
+/// Runs one prompt file once against a ready gateway.
 ///
-/// Requires `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY`. Trace
-/// records print to stderr; nothing prints to stdout. Whether the run succeeds
-/// or fails, its store is dumped to `<prompt-stem>.store` next to the prompt
-/// file, one announcement line per file on stderr.
+/// Builds a [`RunEnv`] (fetching the catalog once) and runs the prompt.
 ///
 /// # Errors
-///
-/// Returns an error when gateway credentials are missing, the file cannot be
-/// read, the file declares no `promptforge:` version, the catalog cannot be
-/// fetched, the prompt fails to parse, or execution fails.
+/// Returns an error when the environment cannot be built or the run fails.
 pub(crate) async fn run_once(
     prompt_path: &Path,
     input: &str,
-    cancel: CancelHandle,
-) -> Result<String> {
-    let gateway = require_gateway_env()?;
-    let observer: Arc<dyn Observer> = Arc::new(VerboseObserver::new(std::io::stderr()));
-    let models = fetch_model_catalog(&gateway.base_url, &gateway.key)
-        .await
-        .context("fetch model catalog")?;
-    run_once_with(prompt_path, input, &gateway, &models, observer, cancel).await
-}
-
-/// [`run_once`] with gateway, catalog, and observer injected for offline tests
-/// and the watch loop.
-pub(crate) async fn run_once_with(
-    prompt_path: &Path,
-    input: &str,
     gateway: &GatewayEnv,
-    models: &ModelCatalog,
-    observer: Arc<dyn Observer>,
+    capture: CapturePolicy,
     cancel: CancelHandle,
 ) -> Result<String> {
-    let source = std::fs::read_to_string(prompt_path)
-        .with_context(|| format!("read {}", prompt_path.display()))?;
-    if promptforge_core::promptforge_version(&source).is_none() {
-        bail!(
-            "{} is not a promptforge prompt: its frontmatter declares no `promptforge:` version. promptforge runs only promptforge prompts.",
-            prompt_path.display()
-        );
-    }
+    let env = RunEnv::initialize(gateway, capture).await?;
+    let observer: Arc<dyn Observer> = Arc::new(VerboseObserver::new(std::io::stderr()));
+    env.run_prompt(prompt_path, input, observer, cancel).await
+}
 
-    let execution = new_execution_id();
-    // Banner before observer traffic so a fresh process is obvious in scrollback
-    // even when an earlier run's lines are still on screen.
-    eprintln!("run id: {execution}");
-    let prompt = Prompt::parse(&source, &execution, observer.as_ref())
-        .with_context(|| format!("parse {}", prompt_path.display()))?;
-
-    let available = tools::available_tools(&gateway.base_url, Some(gateway.key.as_str()))
-        .context("build the live tool set")?;
-    let picker = ToolPicker::build(available.catalog().clone(), PickerConfig::default())
-        .context("build the live tool picker")?;
-    let endpoint = GatewayEndpoint::new(&gateway.base_url)
-        .with_context(|| format!("gateway URL {:?}", gateway.base_url))?;
-    let key = SecretString::new(gateway.key.as_str()).context("gateway key must not be empty")?;
-    let client = GatewayClient::new(endpoint, key);
-    let capture = Arc::new(dump::TraceCapture::new(prompt_path));
-
-    // Clear the previous run's dump before starting so stale store files and
-    // traces never masquerade as the current run. Mid-run writes go through
-    // MirrorStore and TraceCapture; end-of-run reconcile never wipes `.trace/`.
+/// Removes the previous run's dump directory off the runtime, treating any
+/// failure other than `NotFound` as fatal.
+async fn clear_previous_dump(prompt_path: &Path) -> Result<()> {
     let dump_dir = dump::dump_directory(prompt_path);
-    if dump_dir.is_dir() {
-        let _ignored = std::fs::remove_dir_all(&dump_dir);
-    }
-
-    let store = StoreRef::new(Box::new(dump::MirrorStore::new(dump_dir)));
-
-    let config = RunConfig::new(&execution)
-        .observer(Arc::clone(&observer))
-        .debug(capture)
-        .client(client)
-        .cancel(cancel);
-    let result = run(
-        &prompt,
-        input,
-        ResolutionContext::new(&picker, models),
-        available.tools(),
-        &store,
-        config,
-    )
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        match std::fs::remove_dir_all(&dump_dir) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(anyhow::Error::from(error))
+                .with_context(|| format!("clear the previous dump {}", dump_dir.display())),
+        }
+    })
     .await
-    .with_context(|| format!("run {}", prompt_path.display()));
-    // Reconcile on success and failure alike: a failed run's partial store is
-    // exactly what a debugging author needs, and orphans from deletes land
-    // here if MirrorStore skipped them. Status lines go to stderr.
-    if let Err(error) = dump::dump_store(&store, prompt_path, &mut std::io::stderr()) {
-        eprintln!("store dump failed: {error:#}");
-    }
-    result
+    .context("join the dump-clear task")?
 }
 
-/// An observer that writes every record as one line to its sink.
-struct VerboseObserver<W> {
-    sink: Mutex<W>,
+/// Reconciles the run's store to disk off the runtime.
+async fn reconcile_dump(store: StoreRef, prompt_path: PathBuf) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let mut status = std::io::stderr();
+        dump::dump_store(&store, &prompt_path, &mut status)
+    })
+    .await
+    .context("join the store-dump task")?
 }
 
-impl<W> std::fmt::Debug for VerboseObserver<W> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("VerboseObserver").finish()
-    }
-}
-
-impl<W: Write + Send> VerboseObserver<W> {
-    fn new(sink: W) -> Self {
-        Self {
-            sink: Mutex::new(sink),
+/// Combines the execution and dump outcomes per the module's error policy.
+fn combine(run_result: Result<String>, dump_result: Result<()>) -> Result<String> {
+    match (run_result, dump_result) {
+        (Ok(output), Ok(())) => Ok(output),
+        (Ok(_), Err(dump_error)) => {
+            Err(dump_error.context("the run succeeded but its store dump failed"))
+        }
+        (Err(run_error), Ok(())) => Err(run_error),
+        (Err(run_error), Err(dump_error)) => {
+            // The execution error is primary; report the dump failure alongside
+            // it rather than dropping it silently.
+            eprintln!("store dump also failed: {dump_error:#}");
+            Err(run_error)
         }
     }
-}
-
-impl<W: Write + Send> Observer for VerboseObserver<W> {
-    fn observe(&self, execution: &str, section: &str, event: Observation) {
-        let mut sink = self.sink.lock().unwrap_or_else(PoisonError::into_inner);
-        // Observers must not panic and reporting is a side channel, so a
-        // failed write is deliberately dropped rather than surfaced.
-        let _ignored = writeln!(sink, "{}", format_record(execution, section, &event));
-    }
-}
-
-/// Formats one `(execution, section, event)` record as one trace line.
-fn format_record(execution: &str, section: &str, event: &Observation) -> String {
-    format!("[{execution}] {section}: {event}")
 }
 
 /// Mints a fresh per-invocation execution id: `dev-` plus 128 random bits.
@@ -252,51 +265,15 @@ fn new_execution_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::io::Write;
     use std::sync::{Arc, Mutex, PoisonError};
 
     use promptforge_core::CancelHandle;
     use promptforge_core::model::ModelCatalog;
     use promptforge_core::observe::{Observation, Observer};
 
-    use std::path::Path;
+    use crate::config::{GatewayEnv, GatewayKey};
 
-    use super::{
-        GatewayEnv, VerboseObserver, first_mapped_prompt_line, format_dev_failure, format_record,
-        new_execution_id, require_gateway_env_from, run_once_with,
-    };
-
-    #[derive(Clone, Debug, Default)]
-    struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
-
-    impl SharedBuffer {
-        fn contents(&self) -> String {
-            let bytes = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-            String::from_utf8(bytes.clone()).expect("observer output must be UTF-8")
-        }
-    }
-
-    impl Write for SharedBuffer {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .write(buf)
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    fn lookup_from(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
-        let map: HashMap<String, String> = pairs
-            .iter()
-            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
-            .collect();
-        move |name: &str| map.get(name).cloned()
-    }
+    use super::{CapturePolicy, RunEnv, new_execution_id};
 
     #[derive(Debug, Default)]
     struct Recorder(Mutex<Vec<(String, String, String)>>);
@@ -314,106 +291,17 @@ mod tests {
     fn fixture_gateway() -> GatewayEnv {
         GatewayEnv {
             base_url: "http://127.0.0.1:1/v1".to_owned(),
-            key: "key".to_owned(),
+            key: GatewayKey::new("key"),
         }
     }
 
-    #[test]
-    fn record_formats_as_one_bracketed_trace_line() {
-        assert_eq!(
-            format_record(
-                "dev-00000000deadbeef",
-                "Research",
-                &Observation::Lua("checkpoint".to_owned())
-            ),
-            "[dev-00000000deadbeef] Research: Lua: checkpoint"
-        );
-    }
-
-    #[test]
-    fn mapped_lua_failure_leads_with_prompt_path_and_line() {
-        let detail = "run briefer.md: lua error: lua error: section `Web Search` epilog:51: \
-             [string \"section `Web Search` epilog\"]:51: assertion failed!";
-        assert_eq!(first_mapped_prompt_line(detail), Some(51));
-        let error = anyhow::anyhow!(detail);
-        let formatted = format_dev_failure(Path::new("briefer.md"), &error);
-        assert!(
-            formatted.starts_with("dev run failed: briefer.md:51:"),
-            "expected path:line prefix, got {formatted}"
-        );
-    }
-
-    #[test]
-    fn verbose_observer_writes_every_record_as_its_own_line() {
-        let buffer = SharedBuffer::default();
-        let observer = VerboseObserver::new(buffer.clone());
-
-        observer.observe("dev-1", "Prompt", Observation::RunStarted);
-        observer.observe("dev-1", "Section", Observation::Lua("step one".to_owned()));
-
-        assert_eq!(
-            buffer.contents(),
-            "[dev-1] Prompt: Run started\n[dev-1] Section: Lua: step one\n"
-        );
-    }
-
-    #[test]
-    fn missing_both_gateway_vars_fails_before_parse() {
-        let error =
-            require_gateway_env_from(lookup_from(&[])).expect_err("both vars missing must fail");
-        let message = format!("{error:#}");
-        assert!(
-            message.contains("PROMPTFORGE_GATEWAY_URL")
-                && message.contains("PROMPTFORGE_GATEWAY_KEY"),
-            "unexpected missing-env message: {message}"
-        );
-    }
-
-    #[test]
-    fn missing_url_alone_fails_with_a_friendly_message() {
-        let error = require_gateway_env_from(lookup_from(&[("PROMPTFORGE_GATEWAY_KEY", "secret")]))
-            .expect_err("URL missing must fail");
-        let message = format!("{error:#}");
-        assert!(
-            message.starts_with("missing environment variable PROMPTFORGE_GATEWAY_URL\n"),
-            "unexpected missing-url message: {message}"
-        );
-    }
-
-    #[test]
-    fn missing_key_alone_fails_with_a_friendly_message() {
-        let error =
-            require_gateway_env_from(lookup_from(&[("PROMPTFORGE_GATEWAY_URL", "http://x/v1")]))
-                .expect_err("key missing must fail");
-        let message = format!("{error:#}");
-        assert!(
-            message.starts_with("missing environment variable PROMPTFORGE_GATEWAY_KEY\n"),
-            "unexpected missing-key message: {message}"
-        );
-    }
-
-    #[test]
-    fn empty_gateway_vars_count_as_missing() {
-        let error = require_gateway_env_from(lookup_from(&[
-            ("PROMPTFORGE_GATEWAY_URL", ""),
-            ("PROMPTFORGE_GATEWAY_KEY", ""),
-        ]))
-        .expect_err("empty vars must fail");
-        assert!(
-            format!("{error:#}").contains("PROMPTFORGE_GATEWAY_URL"),
-            "unexpected empty-env message: {error:#}"
-        );
-    }
-
-    #[test]
-    fn present_gateway_vars_are_accepted() {
-        let gateway = require_gateway_env_from(lookup_from(&[
-            ("PROMPTFORGE_GATEWAY_URL", "http://10.0.0.7:9999/v1"),
-            ("PROMPTFORGE_GATEWAY_KEY", "dev-secret"),
-        ]))
-        .expect("both vars present must succeed");
-        assert_eq!(gateway.base_url, "http://10.0.0.7:9999/v1");
-        assert_eq!(gateway.key, "dev-secret");
+    fn offline_env() -> RunEnv {
+        RunEnv::with_catalog(
+            &fixture_gateway(),
+            ModelCatalog::empty(),
+            CapturePolicy::Off,
+        )
+        .expect("offline env builds")
     }
 
     #[test]
@@ -439,18 +327,15 @@ mod tests {
         )
         .expect("write the lifecycle fixture");
         let recorder = Arc::new(Recorder::default());
-        // The prologue returns a scalar, so no model turn happens and the
-        // unreachable server address below is never contacted.
-        let result = run_once_with(
-            &path,
-            "",
-            &fixture_gateway(),
-            &ModelCatalog::empty(),
-            Arc::clone(&recorder) as Arc<dyn Observer>,
-            CancelHandle::new(),
-        )
-        .await
-        .expect("the model-free lifecycle fixture must run offline");
+        let result = offline_env()
+            .run_prompt(
+                &path,
+                "",
+                Arc::clone(&recorder) as Arc<dyn Observer>,
+                CancelHandle::new(),
+            )
+            .await
+            .expect("the model-free lifecycle fixture must run offline");
 
         assert_eq!(result, "done");
         let records = recorder.0.lock().unwrap_or_else(PoisonError::into_inner);
@@ -498,15 +383,14 @@ mod tests {
             ),
         )
         .expect("write the dump fixture");
-        run_once_with(
-            &path,
-            "",
-            &fixture_gateway(),
-            &ModelCatalog::empty(),
-            Arc::new(Recorder::default()),
-            CancelHandle::new(),
-        )
-        .await
+        offline_env()
+            .run_prompt(
+                &path,
+                "",
+                Arc::new(Recorder::default()),
+                CancelHandle::new(),
+            )
+            .await
     }
 
     #[tokio::test]
@@ -582,16 +466,15 @@ mod tests {
         let path = directory.path().join("plain.md");
         std::fs::write(&path, "---\nname: plain\n---\n\n# Plain\n").expect("write refusal fixture");
 
-        let error = run_once_with(
-            &path,
-            "",
-            &fixture_gateway(),
-            &ModelCatalog::empty(),
-            Arc::new(Recorder::default()),
-            CancelHandle::new(),
-        )
-        .await
-        .expect_err("a non-promptforge file must be refused");
+        let error = offline_env()
+            .run_prompt(
+                &path,
+                "",
+                Arc::new(Recorder::default()),
+                CancelHandle::new(),
+            )
+            .await
+            .expect_err("a non-promptforge file must be refused");
 
         assert!(
             format!("{error:#}").contains("is not a promptforge prompt"),
@@ -604,20 +487,20 @@ mod tests {
         let directory = tempfile::tempdir().expect("create missing-path fixture directory");
         let path = directory.path().join("absent.md");
 
-        let error = run_once_with(
-            &path,
-            "",
-            &fixture_gateway(),
-            &ModelCatalog::empty(),
-            Arc::new(Recorder::default()),
-            CancelHandle::new(),
-        )
-        .await
-        .expect_err("a missing prompt file must fail");
+        let error = offline_env()
+            .run_prompt(
+                &path,
+                "",
+                Arc::new(Recorder::default()),
+                CancelHandle::new(),
+            )
+            .await
+            .expect_err("a missing prompt file must fail");
 
+        let detail = format!("{error:#}");
         assert!(
-            format!("{error:#}").contains("read") && format!("{error:#}").contains("absent.md"),
-            "unexpected read error: {error:#}"
+            detail.contains("read") && detail.contains("absent.md"),
+            "unexpected read error: {detail}"
         );
     }
 }

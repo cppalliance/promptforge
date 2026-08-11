@@ -1,20 +1,33 @@
-//! Live store dumps and turn traces for the interactive prompt runner.
+//! Store dumps and turn traces for the interactive prompt runner.
 //!
-//! Each run clears `<prompt-stem>.store/` once at start. During the run,
-//! [`MirrorStore`] mirrors every store mutation to that directory and
-//! [`TraceCapture`] writes `.trace/turn-N-*.json` as each model turn arrives.
-//! After the run, [`dump_store`] reconciles disk to the in-memory store without
-//! wiping `.trace/`. StoreRef paths that cannot map to a safe relative
-//! filesystem path are skipped; nothing is ever written outside the dump
-//! directory.
+//! Each run clears `<prompt-stem>.store/` once at start. The run itself keeps
+//! its store in memory (no filesystem writes on the async execution path); when
+//! raw capture is authorized, [`TraceCapture`] queues each model turn to a
+//! worker thread. After the run, [`dump_store`] reconciles the in-memory store
+//! to disk (called off the async runtime by the caller) without wiping
+//! `.trace/`.
+//!
+//! Every write goes through [`fs_safe`], which creates owner-only files and
+//! directories, refuses to follow a symlink or reparse point at any component,
+//! and writes atomically. StoreRef paths that cannot map to a safe relative
+//! filesystem path are skipped and reported; a create/write failure is surfaced
+//! as an error so an incomplete dump is never reported as success. Nothing is
+//! ever written outside the dump directory.
+
+mod fs_safe;
+mod paths;
+mod trace_capture;
 
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context as _, Result, bail};
-use promptforge_core::debug::{DebugCapture, DebugEvent};
-use promptforge_core::store::{MemStore, Store, StoreError, StoreRef};
+use anyhow::{Context as _, Result, anyhow, bail};
+use promptforge_core::store::StoreRef;
+
+use self::paths::safe_relative_path;
+
+pub(crate) use self::trace_capture::{SensitiveCapture, TraceCapture};
 
 /// Reconciles every file in `store` under the prompt's dump directory.
 ///
@@ -25,18 +38,25 @@ use promptforge_core::store::{MemStore, Store, StoreError, StoreRef};
 /// empty store with no remaining dump contents (after removing orphans) leaves
 /// no dump directory. A store path that is absolute, traverses with `..`, or
 /// carries characters unsafe on the local filesystem is reported on `status`
-/// and skipped. Status writes are advisory and never fail the dump.
+/// and skipped (not an error).
+///
+/// This performs blocking filesystem I/O and is meant to be called off the
+/// async runtime (see `crate::run::reconcile_dump`).
 ///
 /// # Errors
 ///
-/// Returns an error when the dump path exists but is not a directory, or when
-/// creating or writing under the dump directory fails hard.
+/// Returns an error when the dump path exists but is a symlink/reparse point or
+/// is not a directory, when reconciliation fails hard, or when any store file
+/// could not be created or written (so a partial dump is never silently
+/// reported as success).
 pub(crate) fn dump_store(
     store: &StoreRef,
     prompt_path: &Path,
     status: &mut dyn Write,
 ) -> Result<()> {
     let directory = dump_directory(prompt_path);
+    fs_safe::reject_reparse_ancestors(&directory)
+        .with_context(|| format!("inspect the store dump path {}", directory.display()))?;
     if directory.symlink_metadata().is_ok() && !directory.is_dir() {
         bail!(
             "{} exists and is not a directory, refusing to replace it",
@@ -48,18 +68,31 @@ pub(crate) fn dump_store(
         .glob("**")
         .context("enumerate the run's store files")?;
     let mut kept: HashSet<PathBuf> = HashSet::new();
+    let mut failures: Vec<anyhow::Error> = Vec::new();
 
     if !paths.is_empty() {
-        std::fs::create_dir_all(&directory)
+        fs_safe::create_dir_all_secure(&directory)
             .with_context(|| format!("create the store dump directory {}", directory.display()))?;
     }
 
     for path in &paths {
-        match mirror_store_file(&directory, store, path, status) {
-            MirrorOutcome::Wrote(relative) => {
+        let contents = match store.read(path) {
+            Ok(text) => text,
+            Err(error) => {
+                let _ignored = writeln!(status, "store dump failed {path:?}: read: {error}");
+                failures.push(anyhow!("read store path {path:?}: {error}"));
+                continue;
+            }
+        };
+        match write_store_entry(&directory, path, &contents, status) {
+            Ok(Written::Kept(relative)) => {
                 kept.insert(relative);
             }
-            MirrorOutcome::Skipped => {}
+            Ok(Written::SkippedUnsafe) => {}
+            Err(error) => {
+                let _ignored = writeln!(status, "store dump failed {path:?}: {error:#}");
+                failures.push(error);
+            }
         }
     }
 
@@ -74,6 +107,14 @@ pub(crate) fn dump_store(
         }
     }
 
+    // A per-file create/write failure must not be swallowed: surface it so a
+    // successful run can never report success behind an incomplete artifact.
+    let failure_count = failures.len();
+    if let Some(first) = failures.into_iter().next() {
+        return Err(first.context(format!(
+            "store dump could not write {failure_count} file(s); the dumped artifact is incomplete"
+        )));
+    }
     Ok(())
 }
 
@@ -83,224 +124,51 @@ pub(crate) fn dump_directory(prompt_path: &Path) -> PathBuf {
     prompt_path.with_extension("store")
 }
 
-/// In-memory store that mirrors mutating operations into `dump_root`.
+/// The disposition of one store entry during a dump.
+enum Written {
+    /// The entry was written; its relative path is retained for orphan pruning.
+    Kept(PathBuf),
+    /// The logical path was unsafe to place on this filesystem; reported and
+    /// skipped, which is not a failure.
+    SkippedUnsafe,
+}
+
+/// Writes one already-read store entry into `directory`, announcing on
+/// `status`.
 ///
-/// Reads stay in memory. Unsafe store paths skip the disk side and print a
-/// skip line on stderr. `.trace/` is never modified here.
-pub(crate) struct MirrorStore {
-    inner: MemStore,
-    dump_root: PathBuf,
-}
-
-impl MirrorStore {
-    /// Mirrors into `dump_root` (typically [`dump_directory`]).
-    pub(crate) fn new(dump_root: PathBuf) -> Self {
-        Self {
-            inner: MemStore::new(),
-            dump_root,
-        }
-    }
-
-    fn mirror_write(&mut self, path: &str) {
-        let mut sink = std::io::stderr();
-        let _ = mirror_store_contents(&self.dump_root, path, &self.inner, &mut sink);
-    }
-
-    fn mirror_delete(&mut self, path: &str) {
-        let Some(relative) = safe_relative_path(path) else {
-            eprintln!("store dump skipped unsafe path {path:?}");
-            return;
-        };
-        let target = self.dump_root.join(&relative);
-        match std::fs::remove_file(&target) {
-            Ok(()) => eprintln!("store dump removed {}", target.display()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                eprintln!(
-                    "store dump skipped {path:?}: remove {}: {error}",
-                    target.display()
-                );
-            }
-        }
-    }
-}
-
-impl Store for MirrorStore {
-    fn write(&mut self, path: &str, contents: &str) -> Result<(), StoreError> {
-        self.inner.write(path, contents)?;
-        self.mirror_write(path);
-        Ok(())
-    }
-
-    fn append(&mut self, path: &str, contents: &str) -> Result<(), StoreError> {
-        self.inner.append(path, contents)?;
-        self.mirror_write(path);
-        Ok(())
-    }
-
-    fn read_lines(&self, path: &str) -> Result<String, StoreError> {
-        self.inner.read_lines(path)
-    }
-
-    fn read(&self, path: &str) -> Result<String, StoreError> {
-        self.inner.read(path)
-    }
-
-    fn str_replace(&mut self, path: &str, old: &str, new: &str) -> Result<(), StoreError> {
-        self.inner.str_replace(path, old, new)?;
-        self.mirror_write(path);
-        Ok(())
-    }
-
-    fn delete(&mut self, path: &str) -> Result<(), StoreError> {
-        self.inner.delete(path)?;
-        self.mirror_delete(path);
-        Ok(())
-    }
-
-    fn glob(&self, pattern: &str) -> Result<Vec<String>, StoreError> {
-        self.inner.glob(pattern)
-    }
-
-    fn exists(&self, path: &str) -> Result<bool, StoreError> {
-        self.inner.exists(path)
-    }
-}
-
-/// Writes raw model-turn payloads under `<prompt-stem>.store/.trace/` as each
-/// event arrives.
-pub(crate) struct TraceCapture {
-    dump_root: PathBuf,
-}
-
-impl TraceCapture {
-    /// Captures turns for the dump directory beside `prompt_path`.
-    pub(crate) fn new(prompt_path: &Path) -> Self {
-        Self {
-            dump_root: dump_directory(prompt_path),
-        }
-    }
-}
-
-impl DebugCapture for TraceCapture {
-    fn on_event(&self, _execution: &str, _section: &str, turn_index: u32, event: DebugEvent) {
-        let (name, body) = match &event {
-            DebugEvent::Request { body, .. } => (format!("turn-{turn_index}-request.json"), body),
-            DebugEvent::Response { body, .. } => (format!("turn-{turn_index}-response.json"), body),
-            _ => return,
-        };
-        let trace_dir = self.dump_root.join(".trace");
-        if let Err(error) = std::fs::create_dir_all(&trace_dir) {
-            eprintln!("trace dump failed: create {}: {error}", trace_dir.display());
-            return;
-        }
-        let target = trace_dir.join(name);
-        let rendered = match serde_json::to_string_pretty(body) {
-            Ok(text) => text,
-            Err(error) => {
-                eprintln!(
-                    "trace dump skipped {}: serialize: {error}",
-                    target.display()
-                );
-                return;
-            }
-        };
-        if let Err(error) = std::fs::write(&target, rendered) {
-            eprintln!("trace dump skipped {}: write: {error}", target.display());
-            return;
-        }
-        eprintln!("trace dump wrote {}", target.display());
-    }
-}
-
-enum MirrorOutcome {
-    Wrote(PathBuf),
-    Skipped,
-}
-
-/// Writes one store path into `directory`, announcing on `status`.
-fn mirror_store_file(
-    directory: &Path,
-    store: &StoreRef,
-    path: &str,
-    status: &mut dyn Write,
-) -> MirrorOutcome {
-    let Some(relative) = safe_relative_path(path) else {
-        let _ignored = writeln!(status, "store dump skipped unsafe path {path:?}");
-        return MirrorOutcome::Skipped;
-    };
-    let target = directory.join(&relative);
-    if let Some(parent) = target.parent()
-        && let Err(error) = std::fs::create_dir_all(parent)
-    {
-        let _ignored = writeln!(
-            status,
-            "store dump skipped {path:?}: create {}: {error}",
-            parent.display()
-        );
-        return MirrorOutcome::Skipped;
-    }
-    let contents = match store.read(path) {
-        Ok(text) => text,
-        Err(error) => {
-            let _ignored = writeln!(status, "store dump skipped {path:?}: read: {error}");
-            return MirrorOutcome::Skipped;
-        }
-    };
-    if let Err(error) = std::fs::write(&target, contents) {
-        let _ignored = writeln!(
-            status,
-            "store dump skipped {path:?}: write {}: {error}",
-            target.display()
-        );
-        return MirrorOutcome::Skipped;
-    }
-    let _ignored = writeln!(status, "store dump wrote {}", target.display());
-    MirrorOutcome::Wrote(relative)
-}
-
-/// Mirrors from a [`MemStore`] (used by [`MirrorStore`]).
-fn mirror_store_contents(
+/// Maps the logical path to a safe relative path, creates owner-only parents,
+/// and writes the contents atomically through [`fs_safe`].
+///
+/// # Errors
+/// Returns an error when creating the parent directory or writing the file
+/// fails. An unsafe logical path is reported on `status` and returned as
+/// [`Written::SkippedUnsafe`], which callers treat as non-fatal.
+fn write_store_entry(
     directory: &Path,
     path: &str,
-    store: &MemStore,
+    contents: &str,
     status: &mut dyn Write,
-) -> MirrorOutcome {
+) -> Result<Written> {
     let Some(relative) = safe_relative_path(path) else {
         let _ignored = writeln!(status, "store dump skipped unsafe path {path:?}");
-        return MirrorOutcome::Skipped;
+        return Ok(Written::SkippedUnsafe);
     };
     let target = directory.join(&relative);
-    if let Some(parent) = target.parent()
-        && let Err(error) = std::fs::create_dir_all(parent)
-    {
-        let _ignored = writeln!(
-            status,
-            "store dump skipped {path:?}: create {}: {error}",
-            parent.display()
-        );
-        return MirrorOutcome::Skipped;
+    if let Some(parent) = target.parent() {
+        fs_safe::create_dir_all_secure(parent)
+            .with_context(|| format!("create {} for {path:?}", parent.display()))?;
     }
-    let contents = match store.read(path) {
-        Ok(text) => text,
-        Err(error) => {
-            let _ignored = writeln!(status, "store dump skipped {path:?}: read: {error}");
-            return MirrorOutcome::Skipped;
-        }
-    };
-    if let Err(error) = std::fs::write(&target, &contents) {
-        let _ignored = writeln!(
-            status,
-            "store dump skipped {path:?}: write {}: {error}",
-            target.display()
-        );
-        return MirrorOutcome::Skipped;
-    }
+    fs_safe::write_atomic_secure(&target, contents.as_bytes())
+        .with_context(|| format!("write {} for {path:?}", target.display()))?;
     let _ignored = writeln!(status, "store dump wrote {}", target.display());
-    MirrorOutcome::Wrote(relative)
+    Ok(Written::Kept(relative))
 }
 
 /// Deletes dump files that are not under `.trace/` and not in `kept`.
+///
+/// Traversal is no-follow: a symlink or reparse point is left untouched and
+/// never recursed into, so reconciliation can neither traverse nor delete
+/// outside the dump root.
 fn remove_orphaned_store_files(
     directory: &Path,
     kept: &HashSet<PathBuf>,
@@ -322,10 +190,14 @@ fn remove_orphaned_store_files(
             if current == directory && file_name == ".trace" {
                 continue;
             }
-            let meta = entry
-                .metadata()
+            let file_type = entry
+                .file_type()
                 .with_context(|| format!("stat {}", path.display()))?;
-            if meta.is_dir() {
+            // Never follow a link during reconciliation.
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
                 pending.push(path);
                 continue;
             }
@@ -350,7 +222,7 @@ fn remove_orphaned_store_files(
 }
 
 /// Removes empty directories under `directory`, deepest first, never deleting
-/// `directory` itself or `.trace/`.
+/// `directory` itself or `.trace/`. Traversal is no-follow.
 fn prune_empty_dirs(directory: &Path) -> Result<()> {
     let mut dirs = Vec::new();
     let mut pending = vec![directory.to_path_buf()];
@@ -368,11 +240,13 @@ fn prune_empty_dirs(directory: &Path) -> Result<()> {
             if current == directory && entry.file_name() == ".trace" {
                 continue;
             }
-            if entry
-                .metadata()
-                .with_context(|| format!("stat {}", path.display()))?
-                .is_dir()
-            {
+            let file_type = entry
+                .file_type()
+                .with_context(|| format!("stat {}", path.display()))?;
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
                 pending.push(path.clone());
                 dirs.push(path);
             }
@@ -391,60 +265,6 @@ fn dir_is_effectively_empty(directory: &Path) -> bool {
         Ok(mut entries) => entries.next().is_none(),
         Err(_) => true,
     }
-}
-
-/// Maps one logical store path to a relative filesystem path, or `None` when
-/// the path cannot be written safely inside the dump directory.
-///
-/// StoreRef paths use `/` separators. A path is rejected when it is empty or
-/// absolute, when any component is empty, `.`, or `..`, when a component
-/// carries a separator or a character Windows reserves (`\ : * ? " < > |`, a
-/// control character, or a trailing dot or space), or when a component's stem
-/// is a reserved device name such as `NUL` or `COM1`.
-fn safe_relative_path(path: &str) -> Option<PathBuf> {
-    if path.is_empty() {
-        return None;
-    }
-    let mut relative = PathBuf::new();
-    for component in path.split('/') {
-        if !component_is_safe(component) {
-            return None;
-        }
-        relative.push(component);
-    }
-    Some(relative)
-}
-
-/// Reports whether one path component is safe as a file or directory name.
-fn component_is_safe(component: &str) -> bool {
-    if component.is_empty() || component == "." || component == ".." {
-        return false;
-    }
-    if component.ends_with('.') || component.ends_with(' ') {
-        return false;
-    }
-    if component
-        .chars()
-        .any(|c| c.is_control() || matches!(c, '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
-    {
-        return false;
-    }
-    let stem = component.split('.').next().unwrap_or(component);
-    !is_reserved_device_name(stem)
-}
-
-/// Reports whether `stem` is a Windows reserved device name, which the
-/// filesystem would silently redirect rather than store.
-fn is_reserved_device_name(stem: &str) -> bool {
-    /// One device digit: ASCII `0`-`9` or the legacy superscript digits
-    /// `¹ ² ³`, which Windows also treats as device numbers.
-    fn is_device_digit(c: char) -> bool {
-        c.is_ascii_digit() || matches!(c, '\u{00B9}' | '\u{00B2}' | '\u{00B3}')
-    }
-    let upper = stem.to_ascii_uppercase();
-    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || matches!(upper.strip_prefix("COM"), Some(digit) if digit.chars().count() == 1 && digit.chars().all(is_device_digit))
-        || matches!(upper.strip_prefix("LPT"), Some(digit) if digit.chars().count() == 1 && digit.chars().all(is_device_digit))
 }
 
 #[cfg(test)]
@@ -498,10 +318,6 @@ mod tests {
     fn unsafe_store_paths_are_skipped_with_a_status_report() {
         let directory = tempfile::tempdir().expect("create dump fixture directory");
         let store = StoreRef::memory();
-        // These paths never enter the store: `StoreRef` validates every path at
-        // the boundary and rejects them before any backend write (STORE-003
-        // hardened this to also cover backslashes, reserved device names, and
-        // trailing dot/space), so they can never reach a dump in the first place.
         for rejected in [
             "/absolute.txt",
             "../escape.txt",
@@ -515,10 +331,6 @@ mod tests {
                 "the store must reject the unsafe path {rejected:?} at the boundary"
             );
         }
-        // These pass the store's path rules but carry characters Windows
-        // reserves in a filename (drive-letter colon, `* ? |`), so they are
-        // unsafe to mirror onto this host's filesystem: the dump skips them and
-        // reports it.
         let dump_skipped = ["C:/drive.txt", "star*.txt", "q?.txt", "pipe|x.txt"];
         for path in dump_skipped {
             store
@@ -600,55 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn safe_relative_paths_accept_ordinary_names_and_reject_escapes() {
-        for accepted in ["a.txt", "a/b/c.md", "with space.txt", "dot.in.name"] {
-            assert!(
-                safe_relative_path(accepted).is_some(),
-                "{accepted:?} must be accepted"
-            );
-        }
-        for rejected in [
-            "",
-            "/a.txt",
-            "a//b.txt",
-            "..",
-            "a/..",
-            "../a",
-            "a/./b",
-            "a\\b",
-            "C:/a",
-            "a:b",
-            "que?.txt",
-            "star*.txt",
-            "pipe|.txt",
-            "quote\".txt",
-            "angle<.txt",
-            "angle>.txt",
-            "ctrl\u{7}.txt",
-            "trailing.",
-            "trailing ",
-            "CON",
-            "nul.txt",
-            "Com1.log",
-            "lpt9",
-            "com\u{00B9}",
-            "LPT\u{00B3}.txt",
-        ] {
-            assert!(
-                safe_relative_path(rejected).is_none(),
-                "{rejected:?} must be rejected"
-            );
-        }
-        for device_lookalike in ["CONSOLE", "COM10", "COMX", "LPT", "nulled.txt"] {
-            assert!(
-                safe_relative_path(device_lookalike).is_some(),
-                "{device_lookalike:?} is not a reserved device name"
-            );
-        }
-    }
-
-    #[test]
-    fn a_file_directory_collision_skips_the_loser_and_dumps_the_rest() {
+    fn a_file_directory_collision_surfaces_an_error_but_dumps_the_rest() {
         let directory = tempfile::tempdir().expect("create dump fixture directory");
         let store = StoreRef::memory();
         store.write("a", "plain file").expect("write");
@@ -657,7 +421,12 @@ mod tests {
             .expect("write");
         store.write("c.txt", "unaffected").expect("write");
 
-        let (dump_dir, status) = dump_to(directory.path(), &store);
+        let prompt = directory.path().join("fixture.md");
+        let mut status = Vec::new();
+        let error = dump_store(&store, &prompt, &mut status)
+            .expect_err("a per-file create/write failure must surface, not be swallowed");
+        let status = String::from_utf8(status).expect("status output must be UTF-8");
+        let dump_dir = dump_directory(&prompt);
 
         assert_eq!(
             std::fs::read_to_string(dump_dir.join("c.txt")).expect("read c.txt"),
@@ -665,55 +434,24 @@ mod tests {
             "a collision elsewhere must not abort the rest of the dump"
         );
         assert!(
-            status.contains("store dump skipped"),
+            format!("{error:#}").contains("incomplete"),
+            "the surfaced error must flag an incomplete dump: {error:#}"
+        );
+        assert!(
+            status.contains("store dump failed"),
             "the colliding entry must be reported: {status}"
         );
     }
 
     #[test]
-    fn trace_capture_writes_turn_files_on_event() {
-        use promptforge_core::debug::DebugEvent;
-        use serde_json::json;
-
-        let directory = tempfile::tempdir().expect("create trace fixture directory");
-        let prompt = directory.path().join("fixture.md");
-        let capture = TraceCapture::new(&prompt);
-        capture.on_event(
-            "dev-1",
-            "Only",
-            1,
-            DebugEvent::request(json!({ "model": "test", "messages": [] })),
-        );
-        capture.on_event(
-            "dev-1",
-            "Only",
-            1,
-            DebugEvent::response(
-                json!({
-                    "choices": [{ "message": { "role": "assistant", "content": "hi" } }]
-                }),
-                Some("stop".into()),
-                None,
-            ),
-        );
-
-        let trace_dir = dump_directory(&prompt).join(".trace");
-        let request =
-            std::fs::read_to_string(trace_dir.join("turn-1-request.json")).expect("request dump");
-        let response =
-            std::fs::read_to_string(trace_dir.join("turn-1-response.json")).expect("response dump");
-        assert!(request.contains("\"model\": \"test\""));
-        assert!(response.contains("\"content\": \"hi\""));
-    }
-
-    #[test]
     fn dump_store_reconcile_keeps_existing_trace_files() {
+        use promptforge_core::debug::DebugCapture;
         use promptforge_core::debug::DebugEvent;
         use serde_json::json;
 
         let directory = tempfile::tempdir().expect("create dump-then-trace fixture directory");
         let prompt = directory.path().join("fixture.md");
-        let capture = TraceCapture::new(&prompt);
+        let capture = TraceCapture::new(&prompt, SensitiveCapture::authorized());
         capture.on_event(
             "dev-1",
             "Only",
@@ -726,6 +464,7 @@ mod tests {
             1,
             DebugEvent::response(json!({ "choices": [] }), Some("stop".into()), None),
         );
+        capture.finish();
 
         let store = StoreRef::memory();
         store.write("evidence.md", "body").expect("write");
@@ -753,38 +492,21 @@ mod tests {
     }
 
     #[test]
-    fn mirror_store_writes_and_deletes_appear_on_disk_immediately() {
-        let directory = tempfile::tempdir().expect("create mirror fixture directory");
-        let dump_root = directory.path().join("fixture.store");
-        let store = StoreRef::new(Box::new(MirrorStore::new(dump_root.clone())));
-
-        store.write("evidence.md", "live").expect("write");
-        assert_eq!(
-            std::fs::read_to_string(dump_root.join("evidence.md")).expect("read mirror"),
-            "live"
-        );
-
-        store.delete("evidence.md").expect("delete");
-        assert!(
-            !dump_root.join("evidence.md").exists(),
-            "delete must remove the mirrored file"
-        );
-    }
-
-    #[test]
     fn empty_reconcile_preserves_trace_only_dump() {
+        use promptforge_core::debug::DebugCapture;
         use promptforge_core::debug::DebugEvent;
         use serde_json::json;
 
         let directory = tempfile::tempdir().expect("create trace-only fixture directory");
         let prompt = directory.path().join("fixture.md");
-        let capture = TraceCapture::new(&prompt);
+        let capture = TraceCapture::new(&prompt, SensitiveCapture::authorized());
         capture.on_event(
             "dev-1",
             "Only",
             1,
             DebugEvent::request(json!({ "model": "test" })),
         );
+        capture.finish();
 
         let mut status = Vec::new();
         dump_store(&StoreRef::memory(), &prompt, &mut status).expect("reconcile empty store");
@@ -796,6 +518,33 @@ mod tests {
                 .join("turn-1-request.json")
                 .is_file(),
             "empty store must not wipe .trace"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reconcile_never_follows_a_symlinked_orphan() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().expect("create fixture directory");
+        let outside = directory.path().join("outside.txt");
+        std::fs::write(&outside, "must survive").expect("write outside file");
+
+        let store = StoreRef::memory();
+        store.write("keep.txt", "kept").expect("write");
+        let (dump_dir, _) = dump_to(directory.path(), &store);
+        // Plant a symlink orphan inside the dump directory pointing outside.
+        symlink(&outside, dump_dir.join("link.txt")).expect("plant symlink");
+
+        // A second reconcile must remove real orphans but never delete through
+        // the planted link.
+        let second = StoreRef::memory();
+        second.write("keep.txt", "kept").expect("write");
+        dump_to(directory.path(), &second);
+
+        assert!(
+            outside.exists(),
+            "reconciliation must not delete the symlink target"
         );
     }
 

@@ -1,14 +1,18 @@
 //! Build the runner's live tool registry and matching semantic-picker catalog.
 //!
-//! `web_fetch` runs locally and is always available. `web_search` proxies
-//! through the gateway, so it is omitted when no bearer credential is
-//! installed. The abstract picker descriptors are derived from the same live
-//! instances placed in the registry, keeping identity, description, and schema
-//! agreement structural rather than conventional.
+//! Both tools are always live: `web_fetch` runs locally and `web_search`
+//! proxies through the gateway. Unlike the CLI, the dev runner has no
+//! offline mode: it always has a validated gateway URL and bearer credential
+//! (see [`crate::config::GatewayEnv`]), so both concrete tools are constructed
+//! unconditionally. The assembled live set is validated against the callable
+//! [`ToolRegistry`] contract before the picker catalog is derived, so an
+//! invalid set fails here rather than after unnecessary picker work, and the
+//! catalog can never advertise a descriptor with no matching callable tool.
 
 use std::sync::Arc;
 
-use promptforge_core::tools::{Tool, WebSearch};
+use anyhow::{Context as _, Result};
+use promptforge_core::tools::{Tool, ToolRegistry, WebSearch};
 use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId};
 use promptforge_webfetch::WebFetch;
 
@@ -47,20 +51,29 @@ impl AvailableTools {
     }
 }
 
-/// Builds every concrete tool currently available to the runner.
+/// Builds every concrete tool available to the dev runner.
 ///
-/// `web_fetch` is unconditional. `web_search` is included only when `key` and a
-/// non-empty gateway URL are both present, because that bearer and base URL are
-/// the credentials needed to invoke the gateway.
-pub(crate) fn available_tools(
-    base_url: &str,
-    key: Option<&str>,
-) -> Result<AvailableTools, promptforge_core::tools::ToolError> {
-    let mut live: Vec<Arc<dyn Tool>> = vec![Arc::new(WebFetch::new())];
-    if let Some(key) = key.filter(|_| !base_url.is_empty()) {
-        live.push(Arc::new(WebSearch::new(base_url, key)?));
-    }
+/// Both `web_fetch` and `web_search` are always constructed: the dev runner
+/// only runs with a validated gateway URL and bearer credential, so the
+/// offline case the CLI models is unreachable here.
+///
+/// # Errors
+/// Returns an error if `web_search` construction fails (for example, a
+/// malformed gateway URL or a blank credential), or if the assembled live set
+/// violates the registry contract (duplicate identity or invalid wire name).
+pub(crate) fn available_tools(base_url: &str, key: &str) -> Result<AvailableTools> {
+    let web_search = WebSearch::new(base_url, key).context("construct the web_search tool")?;
+    let live: Vec<Arc<dyn Tool>> = vec![Arc::new(WebFetch::new()), Arc::new(web_search)];
+    assemble(live)
+}
 
+/// Validates the complete live tool set and derives its picker catalog.
+///
+/// Validation runs through [`ToolRegistry::new`], the existing boundary that
+/// rejects a duplicate stable identity or a non-transport-legal wire name,
+/// before any picker work.
+fn assemble(live: Vec<Arc<dyn Tool>>) -> Result<AvailableTools> {
+    ToolRegistry::new(live.iter().map(Arc::as_ref)).context("validate the live tool registry")?;
     let catalog = Catalog::new(live.iter().map(|tool| descriptor(tool.as_ref())).collect());
     Ok(AvailableTools { live, catalog })
 }
@@ -76,11 +89,51 @@ fn descriptor(tool: &dyn Tool) -> ToolDescriptor {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use promptforge_core::tools::{Tool, ToolError, ToolId, ToolOutput};
     use promptforge_tool_picker::{Config, Outcome, ToolPicker};
 
-    use super::available_tools;
+    use super::{assemble, available_tools};
 
     const BASE_URL: &str = "http://127.0.0.1:8081/v1";
+
+    /// A minimal tool used only to exercise registry validation with
+    /// caller-chosen identity and wire name.
+    struct FakeTool {
+        id: ToolId,
+        wire: &'static str,
+    }
+
+    #[async_trait::async_trait]
+    impl Tool for FakeTool {
+        fn id(&self) -> ToolId {
+            self.id.clone()
+        }
+        fn wire_name(&self) -> &str {
+            self.wire
+        }
+        #[expect(
+            clippy::unnecessary_literal_bound,
+            reason = "the Tool trait ties the returned &str to &self"
+        )]
+        fn description(&self) -> &str {
+            "fake tool for validation tests"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({ "type": "object" })
+        }
+        async fn call(&self, _args: serde_json::Value) -> Result<ToolOutput, ToolError> {
+            Ok(ToolOutput::trusted("ok".to_owned()))
+        }
+    }
+
+    fn fake(server: &str, name: &str, wire: &'static str) -> Arc<dyn Tool> {
+        Arc::new(FakeTool {
+            id: ToolId::new(server, name).expect("valid tool id"),
+            wire,
+        })
+    }
 
     fn selected_name(picker: &ToolPicker, capability: &str) -> String {
         match picker.resolve(capability).expect("picker should resolve") {
@@ -90,54 +143,21 @@ mod tests {
     }
 
     #[test]
-    fn available_capability_binds_to_live_tool() {
-        let available = available_tools(BASE_URL, None).expect("available tools build");
-        let picker = ToolPicker::build(available.catalog().clone(), Config::default())
-            .expect("fixture picker should build");
-        assert_eq!(
-            selected_name(
-                &picker,
-                "Fetch a web page and return its main content as markdown."
-            ),
-            "web_fetch"
-        );
-    }
-
-    #[test]
-    fn key_without_url_excludes_web_search_and_solo_candidate_binds_web_fetch() {
-        let available = available_tools("", Some("test-token")).expect("available tools build");
+    fn both_tools_are_always_constructed_and_bind() {
+        let available = available_tools(BASE_URL, "test-token").expect("available tools build");
         assert!(
             available
                 .tools()
                 .iter()
-                .all(|tool| tool.id().name() != "web_search")
+                .any(|tool| tool.id().name() == "web_search"),
+            "web_search must always be present"
         );
-        let picker = ToolPicker::build(available.catalog().clone(), Config::default())
-            .expect("fixture picker should build");
-        assert_eq!(
-            selected_name(
-                &picker,
-                "Search the web and return a list of results (title, url, description)."
-            ),
-            "web_fetch"
-        );
-    }
-
-    #[test]
-    fn token_includes_web_search_and_need_can_bind() {
-        let available =
-            available_tools(BASE_URL, Some("test-token")).expect("available tools build");
         assert!(
             available
                 .tools()
                 .iter()
-                .any(|tool| tool.id().name() == "web_search")
-        );
-        assert!(
-            available
-                .catalog()
-                .iter()
-                .any(|tool| tool.name() == "web_search")
+                .any(|tool| tool.id().name() == "web_fetch"),
+            "web_fetch must always be present"
         );
         let picker = ToolPicker::build(available.catalog().clone(), Config::default())
             .expect("fixture picker should build");
@@ -148,53 +168,70 @@ mod tests {
             ),
             "web_search"
         );
-    }
-
-    #[test]
-    fn no_token_excludes_web_search_and_solo_candidate_binds_web_fetch() {
-        let available = available_tools(BASE_URL, None).expect("available tools build");
-        assert!(
-            available
-                .tools()
-                .iter()
-                .all(|tool| tool.id().name() != "web_search")
-        );
-        assert!(
-            available
-                .catalog()
-                .iter()
-                .all(|tool| tool.name() != "web_search")
-        );
-        let picker = ToolPicker::build(available.catalog().clone(), Config::default())
-            .expect("fixture picker should build");
         assert_eq!(
             selected_name(
                 &picker,
-                "Search the web and return a list of results (title, url, description)."
+                "Fetch a web page and return its main content as markdown."
             ),
             "web_fetch"
         );
     }
 
     #[test]
-    fn live_registry_and_picker_catalog_have_identical_ids() {
-        for token in [None, Some("test-token")] {
-            let available = available_tools(BASE_URL, token).expect("available tools build");
-            let live_ids = available
-                .tools()
-                .iter()
-                .map(|tool| {
-                    let id = tool.id();
-                    (id.server().to_owned(), id.name().to_owned())
-                })
-                .collect::<Vec<_>>();
-            let picker_ids = available
-                .catalog()
-                .iter()
-                .map(|tool| (tool.server().to_owned(), tool.name().to_owned()))
-                .collect::<Vec<_>>();
+    fn a_malformed_gateway_url_is_rejected() {
+        assert!(
+            available_tools("not-a-url", "test-token").is_err(),
+            "a malformed gateway URL must fail tool assembly"
+        );
+    }
 
-            assert_eq!(live_ids, picker_ids);
-        }
+    #[test]
+    fn a_blank_credential_is_rejected() {
+        assert!(
+            available_tools(BASE_URL, "").is_err(),
+            "an empty bearer credential must fail tool assembly"
+        );
+    }
+
+    #[test]
+    fn live_registry_and_picker_catalog_have_identical_ids() {
+        let available = available_tools(BASE_URL, "test-token").expect("available tools build");
+        let live_ids = available
+            .tools()
+            .iter()
+            .map(|tool| {
+                let id = tool.id();
+                (id.server().to_owned(), id.name().to_owned())
+            })
+            .collect::<Vec<_>>();
+        let picker_ids = available
+            .catalog()
+            .iter()
+            .map(|tool| (tool.server().to_owned(), tool.name().to_owned()))
+            .collect::<Vec<_>>();
+        assert_eq!(live_ids, picker_ids);
+    }
+
+    #[test]
+    fn assembly_rejects_a_duplicate_identity() {
+        let live = vec![
+            fake("promptforge", "dup", "dup_a"),
+            fake("promptforge", "dup", "dup_b"),
+        ];
+        let error = assemble(live).expect_err("a duplicate identity must fail validation");
+        assert!(
+            format!("{error:#}").contains("duplicate tool identity"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn assembly_rejects_an_invalid_wire_name() {
+        let live = vec![fake("promptforge", "bad", "not/legal")];
+        let error = assemble(live).expect_err("an invalid wire name must fail validation");
+        assert!(
+            format!("{error:#}").contains("wire name"),
+            "unexpected error: {error:#}"
+        );
     }
 }
