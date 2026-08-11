@@ -1,6 +1,6 @@
 [package]
 name = "promptforge-webfetch"
-version.workspace = true
+version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ description = "PromptForge web_fetch tool: fetch a URL and return its main conte
 promptforge-core.workspace = true
 async-trait.workspace = true
 serde_json.workspace = true
-reqwest = { workspace = true, features = ["gzip", "brotli", "stream", "charset"] }
+reqwest = { workspace = true, features = ["gzip", "brotli"] }
 readabilityrs.workspace = true
 htmd.workspace = true
 mime.workspace = true
