@@ -46,9 +46,9 @@ fn default_n_predict() -> u32 {
 /// redacts in both `Debug` and `Display`.
 ///
 /// The type has no public `Deserialize` or `From<String>` impl: it is
-/// constructed only inside this crate (via [`Secret::new`] and the private
-/// [`de_secret`] field deserializer), so a redacting secret can never be minted
-/// or round-tripped by a downstream consumer. `expose` is the single accessor.
+/// constructed only inside this crate (via a crate-private constructor and a
+/// private field deserializer), so a redacting secret can never be minted or
+/// round-tripped by a downstream consumer. `expose` is the single accessor.
 #[derive(Clone)]
 pub struct Secret(String);
 
