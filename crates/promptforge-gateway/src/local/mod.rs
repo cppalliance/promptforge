@@ -185,8 +185,22 @@ fn maybe_write_sidecar(_store: &ArtifactStore, source: &str, model_path: &Path) 
     }
     let sidecar_file = sidecar::sidecar_path(model_path);
     if sidecar_file.is_file() {
-        tracing::debug!(path = %sidecar_file.display(), "sidecar already exists");
-        return;
+        // Validate the existing sidecar rather than blindly trusting the file's
+        // presence (SIDECAR-004): only skip the refetch when it reads back as a
+        // current, usable sidecar. An unversioned, oversized, or template-less
+        // sidecar falls through and is rewritten.
+        match sidecar::read_sidecar(model_path) {
+            Ok(Some(meta)) if meta.chat_template.is_some() => {
+                tracing::debug!(path = %sidecar_file.display(), "valid sidecar already exists");
+                return;
+            }
+            _ => {
+                tracing::debug!(
+                    path = %sidecar_file.display(),
+                    "existing sidecar invalid or incomplete; refetching"
+                );
+            }
+        }
     }
 
     let client = match reqwest::blocking::Client::builder()

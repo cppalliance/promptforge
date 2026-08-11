@@ -17,7 +17,13 @@ use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 /// On-disk sidecar format version, emitted in the frontmatter (SIDECAR-005).
-const SIDECAR_VERSION: u32 = 1;
+///
+/// v2 stores the template and card as a single-line JSON object in a fenced
+/// block, so a `chat_template` that itself contains ``` fences or `##` headings
+/// round-trips losslessly (serde escapes newlines, so the fence close is
+/// unambiguous). v1 (delimiter-sensitive markdown) is still parsed for
+/// backward compatibility; unknown versions are rejected rather than mis-parsed.
+const SIDECAR_VERSION: u32 = 2;
 /// Byte ceiling for a local sidecar read (SIDECAR-003).
 const MAX_SIDECAR_BYTES: u64 = 1024 * 1024;
 /// Byte ceiling for a remote `tokenizer_config.json` read (SIDECAR-002).
@@ -45,6 +51,13 @@ pub(crate) enum SidecarError {
     /// Reading the (bounded) response body failed.
     #[error("read tokenizer config body")]
     Body(#[source] io::Error),
+    /// The response body exceeded the byte ceiling and was rejected rather than
+    /// silently truncated (SIDECAR-002).
+    #[error("tokenizer config exceeded {limit} bytes")]
+    Oversized {
+        /// The byte ceiling that was exceeded.
+        limit: u64,
+    },
     /// The response body was not valid JSON.
     #[error("decode tokenizer config JSON")]
     Decode(#[source] serde_json::Error),
@@ -79,39 +92,70 @@ pub(crate) fn read_sidecar(gguf: &Path) -> Result<Option<SidecarMeta>, io::Error
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
-    // Bounded read (SIDECAR-003): a corrupt or oversized sidecar cannot exhaust
-    // memory. Truncation only degrades best-effort metadata.
-    let mut text = String::new();
-    file.take(MAX_SIDECAR_BYTES).read_to_string(&mut text)?;
+    // Bounded read that *rejects* oversize rather than silently truncating a
+    // corrupt sidecar into a plausible-looking prefix (SIDECAR-003): read one
+    // byte past the ceiling and treat any excess as invalid data.
+    let mut bytes = Vec::new();
+    file.take(MAX_SIDECAR_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_SIDECAR_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("sidecar exceeds maximum size of {MAX_SIDECAR_BYTES} bytes"),
+        ));
+    }
+    let text = String::from_utf8_lossy(&bytes);
     Ok(Some(parse_sidecar(&text)))
 }
 
 /// Writes the sidecar `.md` beside `gguf` atomically.
 ///
-/// The content is written to a temp file in the same directory and renamed into
-/// place, so a reader never observes a half-written sidecar (SIDECAR-004).
+/// The content is written to a *uniquely named* temp file in the same directory
+/// and renamed into place, so concurrent writers never collide on a shared
+/// `.tmp` name and a reader never observes a half-written sidecar (SIDECAR-004).
+/// The temp file is removed on every failure path, not just a failed rename.
 pub(crate) fn write_sidecar(gguf: &Path, meta: &SidecarMeta) -> Result<(), io::Error> {
     let path = sidecar_path(gguf);
     let content = render_sidecar(meta);
-    let mut temp = path.clone();
-    let mut name = temp.file_name().unwrap_or_default().to_owned();
-    name.push(".tmp");
-    temp.set_file_name(name);
+    let temp = unique_temp_path(&path);
 
-    let mut file = File::create(&temp)?;
-    file.write_all(content.as_bytes())?;
-    file.sync_all()?;
-    drop(file);
-    match fs::rename(&temp, &path) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            let _ignored = fs::remove_file(&temp);
-            Err(e)
-        }
+    // Write, sync, and rename; on any failure remove the temp so a crashed or
+    // racing writer leaves no stray `.tmp.<pid>.<nanos>` file behind.
+    let write_result = (|| -> Result<(), io::Error> {
+        let mut file = File::create(&temp)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp, &path)
+    })();
+    if write_result.is_err() {
+        let _ignored = fs::remove_file(&temp);
     }
+    write_result
 }
 
-/// Renders the sidecar markdown string from metadata.
+/// Builds a per-writer-unique sibling temp path (`<name>.tmp.<pid>.<nanos>`) so
+/// two provisioning passes for the same GGUF cannot clobber each other's temp.
+fn unique_temp_path(path: &Path) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let mut temp = path.to_path_buf();
+    let mut name = temp.file_name().unwrap_or_default().to_owned();
+    name.push(format!(".tmp.{}.{nanos}", std::process::id()));
+    temp.set_file_name(name);
+    temp
+}
+
+/// The structured body payload of a v2 sidecar (single-line JSON).
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct SidecarBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    chat_template: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    card: Option<String>,
+}
+
+/// Renders the sidecar markdown string from metadata (v2 format).
 fn render_sidecar(meta: &SidecarMeta) -> String {
     let mut out = String::with_capacity(512);
     out.push_str("---\n");
@@ -130,27 +174,31 @@ fn render_sidecar(meta: &SidecarMeta) -> String {
     }
     out.push_str("---\n");
 
-    if let Some(template) = &meta.chat_template {
-        out.push_str("\n## chat_template\n\n```jinja\n");
-        out.push_str(template);
-        if !template.ends_with('\n') {
-            out.push('\n');
-        }
-        out.push_str("```\n");
-    }
-
-    if let Some(card) = &meta.card {
-        out.push_str("\n## card\n\n");
-        out.push_str(card);
-        if !card.ends_with('\n') {
-            out.push('\n');
-        }
+    // The template/card go into a single-line JSON object inside a fenced block.
+    // serde escapes all control characters (including newlines), so the JSON
+    // occupies exactly one line and can never contain the `\n```` sequence that
+    // closes the fence, even when the template embeds ``` fences or `##`
+    // headings (SIDECAR-005).
+    let body = SidecarBody {
+        chat_template: meta.chat_template.clone(),
+        card: meta.card.clone(),
+    };
+    if body.chat_template.is_some() || body.card.is_some() {
+        let json = serde_json::to_string(&body).unwrap_or_else(|_| "{}".to_owned());
+        out.push_str("\n```json\n");
+        out.push_str(&json);
+        out.push_str("\n```\n");
     }
 
     out
 }
 
 /// Parses a sidecar markdown string into [`SidecarMeta`].
+///
+/// Version-aware: v2 reads the single-line JSON body; v1 falls back to the
+/// legacy delimiter-based markdown; any other (unknown or missing) version is
+/// rejected - only the frontmatter `source`/`fetched` are kept and no
+/// template/card is trusted, rather than mis-parsing an unknown layout.
 fn parse_sidecar(text: &str) -> SidecarMeta {
     let mut meta = SidecarMeta::default();
 
@@ -163,16 +211,34 @@ fn parse_sidecar(text: &str) -> SidecarMeta {
     let frontmatter = &rest[..fm_end];
     let body = &rest[fm_end + 5..]; // skip "\n---\n"
 
+    let mut version = None;
     for line in frontmatter.lines() {
-        if let Some(value) = line.strip_prefix("source: ") {
+        if let Some(value) = line.strip_prefix("version: ") {
+            version = value.trim().parse::<u32>().ok();
+        } else if let Some(value) = line.strip_prefix("source: ") {
             meta.source = Some(value.to_owned());
         } else if let Some(value) = line.strip_prefix("fetched: ") {
             meta.fetched = Some(value.to_owned());
         }
     }
 
-    meta.chat_template = extract_fenced_block(body, "## chat_template", "jinja");
-    meta.card = extract_section_text(body, "## card");
+    match version {
+        Some(2) => {
+            if let Some(json) = extract_fenced_block(body, "", "json")
+                && let Ok(parsed) = serde_json::from_str::<SidecarBody>(json.trim())
+            {
+                meta.chat_template = parsed.chat_template;
+                meta.card = parsed.card;
+            }
+        }
+        Some(1) => {
+            meta.chat_template = extract_fenced_block(body, "## chat_template", "jinja");
+            meta.card = extract_section_text(body, "## card");
+        }
+        _ => {
+            // Unknown/missing version: reject the body, keep only frontmatter.
+        }
+    }
 
     meta
 }
@@ -236,13 +302,19 @@ pub(crate) fn fetch_hf_chat_template(
             status: response.status().to_string(),
         });
     }
-    // Bounded body read: a hostile or mistaken endpoint cannot stream unbounded
-    // bytes into memory.
+    // Bounded body read that *detects* oversize instead of silently truncating
+    // (SIDECAR-002): read one byte past the ceiling; if we got it, the body was
+    // larger than allowed and a truncated JSON prefix must not be trusted.
     let mut buf = Vec::new();
     response
-        .take(MAX_TOKENIZER_BYTES)
+        .take(MAX_TOKENIZER_BYTES + 1)
         .read_to_end(&mut buf)
         .map_err(SidecarError::Body)?;
+    if buf.len() as u64 > MAX_TOKENIZER_BYTES {
+        return Err(SidecarError::Oversized {
+            limit: MAX_TOKENIZER_BYTES,
+        });
+    }
     let json: serde_json::Value = serde_json::from_slice(&buf).map_err(SidecarError::Decode)?;
     // chat_template can be a string or an array of objects with "template" fields.
     let template = match &json["chat_template"] {
@@ -362,15 +434,54 @@ mod tests {
 
     #[test]
     fn rendered_sidecar_carries_a_format_version() {
-        // SIDECAR-005: the on-disk format is versioned, and an unknown/newer
-        // version line is tolerated on read (forward-compatible round trip).
+        // SIDECAR-005: the on-disk format is versioned.
         let rendered = render_sidecar(&sample_meta());
         assert!(
             rendered.contains(&format!("version: {SIDECAR_VERSION}")),
             "sidecar should record its format version"
         );
+    }
+
+    #[test]
+    fn unknown_version_is_rejected_not_misparsed() {
+        // SIDECAR-005: an unknown/newer version keeps only the frontmatter and
+        // refuses to trust a body it does not understand.
+        let rendered = render_sidecar(&sample_meta());
         let bumped = rendered.replacen(&format!("version: {SIDECAR_VERSION}"), "version: 999", 1);
-        assert_eq!(parse_sidecar(&bumped), sample_meta());
+        let parsed = parse_sidecar(&bumped);
+        assert_eq!(parsed.source, sample_meta().source);
+        assert_eq!(parsed.fetched, sample_meta().fetched);
+        assert!(
+            parsed.chat_template.is_none(),
+            "unknown version body rejected"
+        );
+        assert!(parsed.card.is_none());
+    }
+
+    #[test]
+    fn v1_legacy_sidecar_still_parses() {
+        // Backward compatibility: a v1 markdown sidecar round-trips its template.
+        let v1 = "---\nversion: 1\nsource: https://hf/x\n---\n\n## chat_template\n\n```jinja\n{{ bos }}\n```\n";
+        let meta = parse_sidecar(v1);
+        assert_eq!(meta.source.as_deref(), Some("https://hf/x"));
+        assert_eq!(meta.chat_template.as_deref(), Some("{{ bos }}"));
+    }
+
+    #[test]
+    fn v2_round_trips_template_with_embedded_fences_and_headings() {
+        // SIDECAR-005: the previous delimiter-based format truncated a template
+        // that itself contained ``` fences or `##` headings. The v2 JSON body
+        // round-trips it losslessly.
+        let hostile = SidecarMeta {
+            source: Some("https://huggingface.co/x/y/resolve/main/m.gguf".to_owned()),
+            fetched: Some("2026-08-10T00:00:00Z".to_owned()),
+            chat_template: Some(
+                "## not a heading\n```\nembedded fence\n```\n{{ content }}".to_owned(),
+            ),
+            card: Some("card with\n## heading and ``` fence".to_owned()),
+        };
+        let rendered = render_sidecar(&hostile);
+        assert_eq!(parse_sidecar(&rendered), hostile);
     }
 
     #[test]
