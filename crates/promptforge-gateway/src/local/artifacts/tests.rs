@@ -8,6 +8,9 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
+use super::archive::safe_archive_path;
+use super::download::{hub_bearer_token, is_huggingface_https};
+use super::progress::{DownloadProgress, download_label, progress_for_download};
 use super::*;
 
 #[test]
