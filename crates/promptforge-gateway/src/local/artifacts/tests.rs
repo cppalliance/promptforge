@@ -1,0 +1,825 @@
+use std::io::{self, Read as _, Write as _};
+use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+
+use sha2::{Digest, Sha256};
+use tempfile::TempDir;
+
+use super::archive::safe_archive_path;
+use super::download::{hub_bearer_token, is_huggingface_https};
+use super::progress::{DownloadProgress, download_label, progress_for_download};
+use super::*;
+
+#[test]
+fn parse_expected_digest_normalizes_and_validates() {
+    let lower = "a".repeat(64);
+    assert_eq!(parse_expected_digest(&lower).unwrap(), lower);
+    // Uppercase and surrounding whitespace normalize to canonical lowercase.
+    let upper = format!("  {}  ", "A".repeat(64));
+    assert_eq!(parse_expected_digest(&upper).unwrap(), "a".repeat(64));
+    // Wrong length and non-hex are rejected at the boundary.
+    assert!(matches!(
+        parse_expected_digest("abc"),
+        Err(LocalError::InvalidDigest { .. })
+    ));
+    assert!(matches!(
+        parse_expected_digest(&"z".repeat(64)),
+        Err(LocalError::InvalidDigest { .. })
+    ));
+}
+
+#[test]
+fn source_cache_key_is_stable_and_distinguishes_urls() {
+    // ART-004: the same URL is stable; distinct URLs sharing a filename differ.
+    let a = source_cache_key("https://host-a.example/repo/model.gguf");
+    let a2 = source_cache_key("https://host-a.example/repo/model.gguf");
+    let b = source_cache_key("https://host-b.example/other/model.gguf");
+    assert_eq!(a, a2);
+    assert_ne!(a, b);
+    assert_eq!(a.len(), 16);
+    assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[test]
+fn validate_cache_path_rejects_escape() {
+    // ART-006/007: a path outside the cache root is refused.
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path().join("cache");
+    std::fs::create_dir(&root).expect("mkdir");
+    let escape = root.join("..").join("outside.bin");
+    assert!(matches!(
+        validate_cache_path(&root, &escape),
+        Err(LocalError::UnsafeCachePath { .. })
+    ));
+    assert!(validate_cache_path(&root, &root.join("models").join("ok.gguf")).is_ok());
+}
+
+#[test]
+fn safe_archive_path_rejects_traversal_and_absolute() {
+    assert!(!safe_archive_path(std::path::Path::new("../evil")));
+    assert!(!safe_archive_path(std::path::Path::new("/etc/passwd")));
+    assert!(!safe_archive_path(std::path::Path::new("a/../../b")));
+    assert!(safe_archive_path(std::path::Path::new("bin/llama-server")));
+}
+
+#[test]
+fn extract_zip_rejects_traversal_entry_and_cleans_up() {
+    use std::io::Write as _;
+    use zip::write::SimpleFileOptions;
+
+    let dir = TempDir::new().expect("tempdir");
+    let archive = dir.path().join("evil.zip");
+    // Build a zip whose single entry escapes the destination. `start_file`
+    // does not sanitize the name, so this exercises the extractor's own guard.
+    {
+        let file = std::fs::File::create(&archive).expect("create archive");
+        let mut writer = zip::ZipWriter::new(file);
+        writer
+            .start_file("../escape.txt", SimpleFileOptions::default())
+            .expect("start traversal entry");
+        writer.write_all(b"pwned").expect("write entry");
+        writer.finish().expect("finish zip");
+    }
+
+    let dest = dir.path().join("out");
+    std::fs::create_dir(&dest).expect("mkdir dest");
+    let result = extract_archive(&archive, &dest, ArchiveKind::Zip);
+    assert!(matches!(result, Err(LocalError::UnsafeArchiveEntry { .. })));
+    // The traversal target must never have been written outside the destination.
+    assert!(!dir.path().join("escape.txt").exists());
+}
+
+fn tar_gz_with_symlink() -> Vec<u8> {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+
+    let mut builder = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::Symlink);
+    header.set_size(0);
+    header.set_mode(0o777);
+    header.set_path("evil-link").expect("set path");
+    header.set_link_name("/etc/passwd").expect("set link");
+    header.set_cksum();
+    builder
+        .append(&header, io::empty())
+        .expect("append symlink");
+    builder
+        .into_inner()
+        .expect("finish tar")
+        .finish()
+        .expect("finish gz")
+}
+
+#[test]
+fn extract_tar_gz_rejects_symlink_entries() {
+    // ART-007: a tar entry that is neither a regular file nor a directory (here
+    // a symlink) is rejected rather than materialized in the cache tree.
+    let dir = TempDir::new().expect("tempdir");
+    let archive = dir.path().join("evil.tar.gz");
+    std::fs::write(&archive, tar_gz_with_symlink()).expect("write archive");
+    let dest = dir.path().join("out");
+    std::fs::create_dir(&dest).expect("mkdir dest");
+    let result = extract_archive(&archive, &dest, ArchiveKind::TarGz);
+    assert!(matches!(result, Err(LocalError::UnsafeArchiveEntry { .. })));
+    assert!(!dest.join("evil-link").exists());
+}
+
+fn tar_gz_entry(entry_type: tar::EntryType, name: &str, link: Option<&str>) -> Vec<u8> {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+
+    let mut builder = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(entry_type);
+    header.set_size(0);
+    header.set_mode(0o644);
+    header.set_path(name).expect("set path");
+    if let Some(link) = link {
+        header.set_link_name(link).expect("set link");
+    }
+    header.set_cksum();
+    builder.append(&header, io::empty()).expect("append entry");
+    builder
+        .into_inner()
+        .expect("finish tar")
+        .finish()
+        .expect("finish gz")
+}
+
+fn zip_symlink(name: &str, target: &str) -> Vec<u8> {
+    use zip::write::SimpleFileOptions;
+
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut cursor);
+        writer
+            .add_symlink(name, target, SimpleFileOptions::default())
+            .expect("add symlink");
+        writer.finish().expect("finish zip");
+    }
+    cursor.into_inner()
+}
+
+#[test]
+fn extract_rejects_every_non_regular_entry_class() {
+    // ART-007: table-driven rejection of each unsafe/unsupported archive entry
+    // class - tar symlink/hardlink/char/block/fifo and a zip symlink - so none
+    // is materialized in the cache tree.
+    let tar_cases: &[(tar::EntryType, Option<&str>)] = &[
+        (tar::EntryType::Symlink, Some("/etc/passwd")),
+        (tar::EntryType::Link, Some("llama-server")),
+        (tar::EntryType::Char, None),
+        (tar::EntryType::Block, None),
+        (tar::EntryType::Fifo, None),
+    ];
+    for (entry_type, link) in tar_cases {
+        let dir = TempDir::new().expect("tempdir");
+        let archive = dir.path().join("evil.tar.gz");
+        std::fs::write(&archive, tar_gz_entry(*entry_type, "entry", *link)).expect("write archive");
+        let dest = dir.path().join("out");
+        std::fs::create_dir(&dest).expect("mkdir dest");
+        let result = extract_archive(&archive, &dest, ArchiveKind::TarGz);
+        assert!(
+            matches!(result, Err(LocalError::UnsafeArchiveEntry { .. })),
+            "tar {entry_type:?} should be rejected, got {result:?}"
+        );
+        assert!(!dest.join("entry").exists());
+    }
+
+    // A zip symlink entry (unix mode S_IFLNK) is likewise rejected.
+    let dir = TempDir::new().expect("tempdir");
+    let archive = dir.path().join("link.zip");
+    std::fs::write(&archive, zip_symlink("link", "/etc/passwd")).expect("write archive");
+    let dest = dir.path().join("out");
+    std::fs::create_dir(&dest).expect("mkdir dest");
+    let result = extract_archive(&archive, &dest, ArchiveKind::Zip);
+    assert!(
+        matches!(result, Err(LocalError::UnsafeArchiveEntry { .. })),
+        "zip symlink should be rejected, got {result:?}"
+    );
+    assert!(!dest.join("link").exists());
+}
+
+#[test]
+fn find_executable_rejects_duplicates_and_reports_missing() {
+    // ART-007: two matching executables are a hard error, not a silent pick;
+    // zero matches is a distinct missing error.
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir(root.join("a")).expect("mkdir a");
+    std::fs::create_dir(root.join("b")).expect("mkdir b");
+    std::fs::write(root.join("a").join("llama-server"), b"x").expect("write a");
+    std::fs::write(root.join("b").join("llama-server"), b"y").expect("write b");
+    assert!(matches!(
+        find_executable(root, "llama-server", "arc"),
+        Err(LocalError::DuplicateExecutable { .. })
+    ));
+    assert!(matches!(
+        find_executable(root, "absent", "arc"),
+        Err(LocalError::MissingExecutable { .. })
+    ));
+}
+
+#[test]
+fn failed_download_leaves_no_staging_part_file() {
+    // ART-007: a failed publication (digest mismatch) removes the `.part`
+    // staging file, so no partial download is left behind.
+    let body = b"partial-or-wrong-bytes";
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let url = server.url("m.gguf");
+    let err = store
+        .ensure_model(&url, Some(&"0".repeat(64)))
+        .expect_err("digest mismatch");
+    assert!(matches!(err, LocalError::DigestMismatch { .. }));
+    let key = source_cache_key(&url);
+    let staging = temp.path().join("models").join(&key).join("m.gguf.part");
+    assert!(!staging.exists(), "stale .part left behind: {staging:?}");
+}
+
+#[test]
+fn stale_staging_part_is_cleaned_before_publish() {
+    // ART-007: a pre-existing `.part` from an interrupted prior run at the
+    // destination slot is removed before the new download publishes.
+    let body = b"good-artifact-bytes";
+    let digest = hex_sha256(body);
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let url = server.url("m.gguf");
+    let key = source_cache_key(&url);
+    let dest_dir = temp.path().join("models").join(&key);
+    std::fs::create_dir_all(&dest_dir).expect("mkdir dest");
+    let stale = dest_dir.join("m.gguf.part");
+    std::fs::write(&stale, b"garbage-from-a-crash").expect("write stale part");
+
+    let path = store
+        .ensure_model(&url, Some(&digest))
+        .expect("provision over stale part");
+    assert_eq!(file_digest(&path).expect("digest"), digest);
+    assert!(!stale.exists(), "stale .part not cleaned before publish");
+}
+
+#[test]
+fn existing_final_file_at_destination_is_reused_without_download() {
+    // ART-007: a completed artifact already occupying the final destination is
+    // reused (digest match) without a re-download.
+    let body = b"already-published-artifact";
+    let digest = hex_sha256(body);
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let url = server.url("m.gguf");
+    let key = source_cache_key(&url);
+    let dest = temp.path().join("models").join(&key).join("m.gguf");
+    std::fs::create_dir_all(dest.parent().expect("parent")).expect("mkdir");
+    std::fs::write(&dest, body).expect("pre-place completed artifact");
+
+    let path = store
+        .ensure_model(&url, Some(&digest))
+        .expect("reuse existing destination");
+    assert_eq!(path, dest);
+    assert_eq!(
+        server.requests(),
+        0,
+        "a matching final artifact must not trigger a download"
+    );
+}
+
+#[test]
+fn existing_directory_at_destination_is_replaced_by_the_artifact() {
+    // ART-007: a directory occupying the final destination path is removed and
+    // the artifact is published in its place.
+    let body = b"artifact-published-over-a-directory";
+    let digest = hex_sha256(body);
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let url = server.url("m.gguf");
+    let key = source_cache_key(&url);
+    let dest = temp.path().join("models").join(&key).join("m.gguf");
+    std::fs::create_dir_all(&dest).expect("create dir at destination");
+    std::fs::write(dest.join("leftover"), b"stale").expect("stale content");
+
+    let path = store
+        .ensure_model(&url, Some(&digest))
+        .expect("replace directory at destination");
+    assert!(path.is_file(), "destination must be the published file");
+    assert_eq!(file_digest(&path).expect("digest"), digest);
+    assert_eq!(server.requests(), 1);
+}
+
+#[test]
+fn racing_publishers_over_an_occupied_destination_converge() {
+    // ART-007: a stale/wrong file occupies the final destination while several
+    // threads race to publish; the artifact lock serializes them so exactly one
+    // re-downloads and all converge on the one correct final artifact.
+    let body = b"correct-final-artifact-bytes";
+    let digest = hex_sha256(body);
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = Arc::new(ArtifactStore::new(temp.path()).expect("store"));
+    let url = server.url("m.gguf");
+    let key = source_cache_key(&url);
+    let dest = temp.path().join("models").join(&key).join("m.gguf");
+    std::fs::create_dir_all(dest.parent().expect("parent")).expect("mkdir");
+    std::fs::write(&dest, b"stale-wrong-bytes").expect("pre-place wrong final file");
+
+    let handles: Vec<_> = (0..4)
+        .map(|_| {
+            let store = Arc::clone(&store);
+            let url = url.clone();
+            let digest = digest.clone();
+            thread::spawn(move || store.ensure_model(&url, Some(&digest)).expect("publish"))
+        })
+        .collect();
+    let paths: Vec<_> = handles
+        .into_iter()
+        .map(|handle| handle.join().expect("thread"))
+        .collect();
+    assert!(paths.windows(2).all(|pair| pair[0] == pair[1]), "{paths:?}");
+    assert_eq!(file_digest(&paths[0]).expect("digest"), digest);
+    assert_eq!(
+        server.requests(),
+        1,
+        "exactly one publisher re-downloads over the stale destination"
+    );
+}
+
+#[test]
+fn install_is_valid_detects_marker_drift() {
+    // ART-007: a corrupt, mismatched, or malformed install marker invalidates
+    // the install so it is re-provisioned rather than trusted.
+    let dir = TempDir::new().expect("tempdir");
+    let install = dir.path().join("install");
+    std::fs::create_dir(&install).expect("mkdir install");
+    std::fs::write(install.join("llama-server"), b"binary").expect("write file");
+    let archive_sha = "a".repeat(64);
+    let tree_sha = super::tree_digest(&install).expect("tree digest");
+    let marker = install.join(INSTALL_MARKER);
+
+    std::fs::write(&marker, format!("{archive_sha}\n{tree_sha}\n")).expect("write marker");
+    assert!(ArtifactStore::install_is_valid(&install, &archive_sha).expect("valid"));
+    // Wrong recorded archive digest.
+    assert!(!ArtifactStore::install_is_valid(&install, &"b".repeat(64)).expect("check"));
+    // Corrupt recorded tree digest.
+    std::fs::write(&marker, format!("{archive_sha}\n{}\n", "0".repeat(64))).expect("rewrite");
+    assert!(!ArtifactStore::install_is_valid(&install, &archive_sha).expect("check"));
+    // Malformed marker with an unexpected trailing line.
+    std::fs::write(&marker, format!("{archive_sha}\n{tree_sha}\nextra\n")).expect("rewrite");
+    assert!(!ArtifactStore::install_is_valid(&install, &archive_sha).expect("check"));
+    // Missing marker.
+    std::fs::remove_file(&marker).expect("remove marker");
+    assert!(!ArtifactStore::install_is_valid(&install, &archive_sha).expect("check"));
+}
+
+#[test]
+fn concurrent_provisioning_of_same_url_is_safe() {
+    // ART-007: several threads provisioning the same URL concurrently all
+    // resolve to one correct cached blob; the artifact lock serializes them.
+    let body = b"concurrent-fixture-bytes";
+    let digest = hex_sha256(body);
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = Arc::new(ArtifactStore::new(temp.path()).expect("store"));
+    let url = server.url("shared.gguf");
+
+    let handles: Vec<_> = (0..4)
+        .map(|_| {
+            let store = Arc::clone(&store);
+            let url = url.clone();
+            let digest = digest.clone();
+            thread::spawn(move || store.ensure_model(&url, Some(&digest)).expect("provision"))
+        })
+        .collect();
+    let paths: Vec<_> = handles
+        .into_iter()
+        .map(|handle| handle.join().expect("thread"))
+        .collect();
+    assert!(paths.windows(2).all(|pair| pair[0] == pair[1]), "{paths:?}");
+    assert_eq!(file_digest(&paths[0]).expect("digest"), digest);
+    assert!(server.requests() >= 1);
+}
+
+#[cfg(windows)]
+#[test]
+fn artifact_store_enforces_private_windows_dacl() {
+    // ART-006: opening the store restricts the cache root's DACL so no broad
+    // principal (Everyone / Authenticated Users / Users) retains access, even
+    // for a cache path configured outside the default profile tree.
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path().join("cache");
+    std::fs::create_dir(&root).expect("mkdir");
+    let _store = ArtifactStore::new(&root).expect("store");
+
+    let output = std::process::Command::new("icacls")
+        .arg(&root)
+        .output()
+        .expect("icacls query");
+    assert!(output.status.success(), "icacls query failed");
+    let listing = String::from_utf8_lossy(&output.stdout);
+    for principal in ["Everyone:", "Authenticated Users:", "\\Users:"] {
+        assert!(
+            !listing.contains(principal),
+            "broad principal {principal} still present in DACL:\n{listing}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn artifact_store_enforces_owner_private_cache_root() {
+    // ART-006: opening the store tightens a group/world-accessible cache root to
+    // owner-only, enforcing the private-cache precondition the confinement relies
+    // on rather than merely documenting it.
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path().join("cache");
+    std::fs::create_dir(&root).expect("mkdir");
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777)).expect("loosen");
+    let _store = ArtifactStore::new(&root).expect("store");
+    let mode = std::fs::metadata(&root)
+        .expect("metadata")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o700, "cache root must be tightened to owner-only");
+}
+
+#[cfg(unix)]
+#[test]
+fn validate_cache_path_rejects_symlink_component() {
+    // ART-007: a symlink planted as an interior component is refused so a write
+    // cannot be redirected outside the cache root.
+    use std::os::unix::fs::symlink;
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path().join("cache");
+    std::fs::create_dir(&root).expect("mkdir root");
+    let outside = dir.path().join("outside");
+    std::fs::create_dir(&outside).expect("mkdir outside");
+    symlink(&outside, root.join("link")).expect("symlink");
+    let escaped = root.join("link").join("f.bin");
+    assert!(matches!(
+        validate_cache_path(&root, &escaped),
+        Err(LocalError::UnsafeCachePath { .. })
+    ));
+}
+
+/// Test double that records set_len / inc / finish / abandon calls.
+struct RecordingProgress {
+    total: Mutex<Option<u64>>,
+    bytes: AtomicU64,
+    finished: AtomicU64,
+    abandoned: AtomicU64,
+}
+
+impl RecordingProgress {
+    fn new() -> Self {
+        Self {
+            total: Mutex::new(None),
+            bytes: AtomicU64::new(0),
+            finished: AtomicU64::new(0),
+            abandoned: AtomicU64::new(0),
+        }
+    }
+}
+
+impl DownloadProgress for RecordingProgress {
+    fn set_len(&self, total: Option<u64>) {
+        *self.total.lock().expect("progress total lock") = total;
+    }
+
+    fn inc(&self, n: u64) {
+        self.bytes.fetch_add(n, Ordering::Relaxed);
+    }
+
+    fn finish(&self) {
+        self.finished.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn abandon(&self) {
+        self.abandoned.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+struct FakeServer {
+    address: String,
+    requests: Arc<AtomicUsize>,
+    shutdown: Arc<AtomicBool>,
+    thread: Option<JoinHandle<io::Result<()>>>,
+}
+
+impl FakeServer {
+    fn new(body: &[u8]) -> Self {
+        // A blocking listener: the socket is bound before the accept thread
+        // starts, so the kernel backlog holds any early client connection until
+        // `accept` runs. There is no startup race and thus no startup sleep, and
+        // blocking `accept` needs no WouldBlock poll loop. `Drop` wakes the
+        // final blocking `accept` with a self-connect after setting `shutdown`.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
+        let address = listener.local_addr().expect("local addr").to_string();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let thread_requests = Arc::clone(&requests);
+        let thread_shutdown = Arc::clone(&shutdown);
+        let body = body.to_owned();
+        // The thread returns an `io::Result`: a genuine write/flush failure while
+        // serving a real client is surfaced on join (HYGIENE-RESULT-001) instead
+        // of being swallowed, so a broken fixture cannot masquerade as success.
+        // The shutdown self-connect is skipped by the top-of-loop `shutdown`
+        // check, so it never counts as a serve error.
+        let thread = thread::spawn(move || -> io::Result<()> {
+            for stream in listener.incoming() {
+                if thread_shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+                let Ok(mut stream) = stream else {
+                    break;
+                };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+                let mut request = Vec::new();
+                let mut buf = [0_u8; 1024];
+                loop {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            request.extend_from_slice(&buf[..n]);
+                            if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                                break;
+                            }
+                        }
+                    }
+                }
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes())?;
+                stream.write_all(&body)?;
+                stream.flush()?;
+                thread_requests.fetch_add(1, Ordering::AcqRel);
+            }
+            Ok(())
+        });
+        Self {
+            address,
+            requests,
+            shutdown,
+            thread: Some(thread),
+        }
+    }
+
+    fn url(&self, name: &str) -> String {
+        format!("http://{}/{name}", self.address)
+    }
+
+    fn requests(&self) -> usize {
+        self.requests.load(Ordering::Acquire)
+    }
+}
+
+impl Drop for FakeServer {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+        let _ = TcpStream::connect(&self.address);
+        if let Some(thread) = self.thread.take() {
+            let joined = thread.join();
+            // Don't mask an in-flight test panic, but otherwise a serve-side
+            // transport failure must surface rather than be silently dropped.
+            if !std::thread::panicking() {
+                joined
+                    .expect("fake server thread panicked")
+                    .expect("fake server encountered a socket write/flush error");
+            }
+        }
+    }
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex_digest(hasher)
+}
+
+#[test]
+fn download_label_uses_url_basename() {
+    assert_eq!(
+        download_label("https://huggingface.co/google/gemma/resolve/main/gemma-3-27b-it-q4_0.gguf"),
+        "gemma-3-27b-it-q4_0.gguf"
+    );
+    assert_eq!(
+        download_label("https://example.com/file.gguf?download=true"),
+        "file.gguf"
+    );
+}
+
+#[test]
+fn progress_for_download_picks_bar_on_tty_and_log_off_tty() {
+    let tty = progress_for_download("x.gguf", true);
+    let log = progress_for_download("x.gguf", false);
+    // Type names are enough: both implement the trait and accept a finish.
+    tty.set_len(Some(10));
+    tty.inc(10);
+    tty.finish();
+    log.set_len(Some(10));
+    log.inc(10);
+    log.finish();
+}
+
+#[test]
+fn hf_token_host_allowlist() {
+    assert!(is_huggingface_https(
+        "https://huggingface.co/org/repo/resolve/main/model.gguf"
+    ));
+    assert!(is_huggingface_https(
+        "https://cdn-lfs.huggingface.co/repo/model.gguf"
+    ));
+    // Plaintext HTTP, arbitrary hosts, and look-alikes get no token.
+    assert!(!is_huggingface_https(
+        "http://huggingface.co/org/repo/model.gguf"
+    ));
+    assert!(!is_huggingface_https("https://evil.example/model.gguf"));
+    assert!(!is_huggingface_https(
+        "https://huggingface.co.evil.example/model.gguf"
+    ));
+    assert!(!is_huggingface_https("not a url"));
+}
+
+#[test]
+fn download_with_progress_reports_content_length_and_bytes() {
+    let body = b"progress-fixture-bytes";
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let progress = RecordingProgress::new();
+    let dest = temp.path().join("out.gguf");
+    let digest = store
+        .download_with_progress(&server.url("out.gguf"), &dest, &progress)
+        .expect("download");
+    assert_eq!(digest, hex_sha256(body));
+    assert_eq!(
+        *progress.total.lock().expect("total"),
+        Some(body.len() as u64)
+    );
+    assert_eq!(progress.bytes.load(Ordering::Relaxed), body.len() as u64);
+    progress.finish();
+    assert_eq!(progress.finished.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn hub_bearer_token_prefers_hf_token() {
+    let token = hub_bearer_token(|key| match key {
+        "HF_TOKEN" => Some(" hf_primary ".to_owned()),
+        "HUGGING_FACE_HUB_TOKEN" => Some("hf_secondary".to_owned()),
+        _ => None,
+    });
+    assert_eq!(token.as_deref(), Some("hf_primary"));
+}
+
+#[test]
+fn hub_bearer_token_falls_back_to_hugging_face_hub_token() {
+    let token = hub_bearer_token(|key| match key {
+        "HUGGING_FACE_HUB_TOKEN" => Some("hf_fallback".to_owned()),
+        _ => None,
+    });
+    assert_eq!(token.as_deref(), Some("hf_fallback"));
+}
+
+#[test]
+fn hub_bearer_token_ignores_empty_and_missing() {
+    assert!(hub_bearer_token(|_| None).is_none());
+    assert!(hub_bearer_token(|_| Some(String::new())).is_none());
+    assert!(hub_bearer_token(|_| Some("   ".to_owned())).is_none());
+    assert_eq!(
+        hub_bearer_token(|key| match key {
+            "HF_TOKEN" => Some(String::new()),
+            "HUGGING_FACE_HUB_TOKEN" => Some("hf_ok".to_owned()),
+            _ => None,
+        })
+        .as_deref(),
+        Some("hf_ok")
+    );
+}
+
+#[test]
+fn home_or_missing_rejects_absent_or_empty_home() {
+    // ART-009: artifact home resolution returns a typed error instead of
+    // silently using the working directory when the home variable is unset.
+    assert!(matches!(
+        super::home_or_missing("HOME", None),
+        Err(LocalError::MissingHome { var: "HOME" })
+    ));
+    assert!(matches!(
+        super::home_or_missing("HOME", Some(std::ffi::OsString::new())),
+        Err(LocalError::MissingHome { .. })
+    ));
+    assert_eq!(
+        super::home_or_missing("HOME", Some(std::ffi::OsString::from("/home/op"))).unwrap(),
+        PathBuf::from("/home/op")
+    );
+}
+
+#[test]
+fn download_read_timeout_fails_on_a_stalled_body() {
+    // ART-003: a peer that sends headers then stalls the body must fail on the
+    // client's idle read timeout, not pin the download thread indefinitely.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind stalled server");
+    let addr = listener.local_addr().expect("addr");
+    let handle = thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        let mut buf = [0_u8; 1024];
+        let _ = stream.read(&mut buf); // consume request head
+        // Promise a body but send none; the client's read timeout must fire.
+        let head = "HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\nConnection: close\r\n\r\n";
+        let _ = stream.write_all(head.as_bytes());
+        let _ = stream.flush();
+        // Hold the connection open by blocking on a read until the client drops.
+        let _ = stream.read(&mut buf);
+    });
+
+    let client = Client::builder()
+        .timeout(Duration::from_millis(300))
+        .build()
+        .expect("client");
+    let temp = TempDir::new().expect("tempdir");
+    let dest = temp.path().join("stalled.bin");
+    let progress = RecordingProgress::new();
+    let err = super::download::download_with_progress(
+        &client,
+        &format!("http://{addr}/stalled.bin"),
+        &dest,
+        &progress,
+    )
+    .expect_err("stalled body must fail");
+    assert!(
+        matches!(
+            err,
+            LocalError::DownloadRead { .. } | LocalError::Download { .. }
+        ),
+        "unexpected error {err:?}"
+    );
+    // Unblock the server's pending read so the thread can exit.
+    let _ = TcpStream::connect(addr);
+    let _ = handle.join();
+}
+
+#[test]
+fn downloads_verifies_and_reuses_cached_blob() {
+    let body = b"tiny-gguf-fixture";
+    let digest = hex_sha256(body);
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+
+    let first = store
+        .ensure_model(&server.url("fixture.gguf"), Some(&digest))
+        .expect("first download");
+    assert!(first.is_file());
+    assert_eq!(server.requests(), 1);
+    assert_eq!(file_digest(&first).expect("digest"), digest);
+
+    let second = store
+        .ensure_model(&server.url("fixture.gguf"), Some(&digest))
+        .expect("cache hit");
+    assert_eq!(first, second);
+    assert_eq!(server.requests(), 1);
+}
+
+#[test]
+fn rejects_digest_mismatch() {
+    let body = b"wrong-bytes";
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let err = store
+        .ensure_model(
+            &server.url("bad.gguf"),
+            Some("0000000000000000000000000000000000000000000000000000000000000000"),
+        )
+        .expect_err("digest mismatch");
+    assert!(matches!(err, LocalError::DigestMismatch { .. }));
+}
+
+#[test]
+fn reuses_unpinned_blob_without_redownload() {
+    let body = b"unpinned";
+    let server = FakeServer::new(body);
+    let temp = TempDir::new().expect("tempdir");
+    let store = ArtifactStore::new(temp.path()).expect("store");
+    let first = store
+        .ensure_model(&server.url("free.gguf"), None)
+        .expect("download");
+    let second = store
+        .ensure_model(&server.url("free.gguf"), None)
+        .expect("reuse");
+    assert_eq!(first, second);
+    assert_eq!(server.requests(), 1);
+}

@@ -9,16 +9,27 @@ use std::collections::HashMap;
 use crate::tools::SearchResult;
 
 /// Max characters kept for a result title after sanitisation.
-pub const TITLE_MAX_CHARS: usize = 512;
+pub(crate) const TITLE_MAX_CHARS: usize = 512;
 /// Max characters kept for a result description after sanitisation.
-pub const DESCRIPTION_MAX_CHARS: usize = 4096;
+pub(crate) const DESCRIPTION_MAX_CHARS: usize = 4096;
 /// Max characters kept for a result URL after tracking strip.
-pub const URL_MAX_CHARS: usize = 2048;
+pub(crate) const URL_MAX_CHARS: usize = 2048;
+/// Max characters kept for a single extra snippet after sanitisation (WSP-001).
+pub(crate) const SNIPPET_MAX_CHARS: usize = 1024;
+/// Max number of extra snippets kept per result (WSP-001).
+pub(crate) const MAX_EXTRA_SNIPPETS: usize = 8;
+/// Max characters kept for a result `age` after sanitisation (WSP-001).
+pub(crate) const AGE_MAX_CHARS: usize = 64;
 
 /// Sanitize free text: drop most controls, collapse whitespace, trim, decode a
 /// fixed entity set, then cap by Unicode scalar count.
 #[must_use]
-pub fn sanitize_text(text: &str, max_chars: usize) -> String {
+pub(crate) fn sanitize_text(text: &str, max_chars: usize) -> String {
+    // Bound the work up front (WSP-002): entity decoding and the final cap can
+    // only shrink text, so processing more than a small multiple of `max_chars`
+    // scalars is wasted effort on a hostile oversized input.
+    let bound = max_chars.saturating_mul(8).max(max_chars);
+    let text: String = text.chars().take(bound).collect();
     let mut cleaned = String::with_capacity(text.len());
     for c in text.chars() {
         if c == '\n' || c == '\t' {
@@ -36,11 +47,12 @@ pub fn sanitize_text(text: &str, max_chars: usize) -> String {
 /// Drop known tracking query parameters from `url`. Removes a trailing empty `?`.
 ///
 /// Params removed when the name equals `fbclid`, `gclid`, `mc_cid`, `mc_eid`,
-/// or starts with `utm_`.
+/// or starts with `utm_`. Does not truncate: an over-length URL is dropped by
+/// the pipeline (WSP-004), never cut mid-component into a broken link.
 #[must_use]
-pub fn strip_tracking_params(url: &str) -> String {
+pub(crate) fn strip_tracking_params(url: &str) -> String {
     let Some((base, query)) = url.split_once('?') else {
-        return truncate_chars(url, URL_MAX_CHARS);
+        return url.to_string();
     };
     let (query, fragment) = match query.split_once('#') {
         Some((q, f)) => (q, Some(f)),
@@ -66,7 +78,7 @@ pub fn strip_tracking_params(url: &str) -> String {
         out.push('#');
         out.push_str(fragment);
     }
-    truncate_chars(&out, URL_MAX_CHARS)
+    out
 }
 
 /// Extract the hostname from `url` without a URL crate.
@@ -74,7 +86,37 @@ pub fn strip_tracking_params(url: &str) -> String {
 /// Handles optional scheme, `userinfo@`, and strips a trailing port. Returns
 /// lowercase host text, or `None` when no host can be parsed.
 #[must_use]
-pub fn host_from_url(url: &str) -> Option<String> {
+pub(crate) fn host_from_url(url: &str) -> Option<String> {
+    // Prefer a standards-compliant parse for well-formed URLs (TOOLS-014), then
+    // fall back to the lenient extractor for scheme-less or non-URL inputs
+    // (used by domain-filter canonicalization).
+    if let Ok(parsed) = url::Url::parse(url)
+        && let Some(host) = parsed.host_str()
+        && !host.is_empty()
+    {
+        return Some(host.to_ascii_lowercase());
+    }
+    host_from_url_lenient(url)
+}
+
+/// Whether `url` is a standards-parsed, navigable `http`/`https` URL with a
+/// non-empty host (WSP-003).
+///
+/// Result URLs are handed to a consumer as clickable links, so a value that is
+/// not a real URL (for example the lenient `not-a-url` case accepted for
+/// domain-filter canonicalization) must never be emitted as a result.
+#[must_use]
+pub(crate) fn is_navigable_url(url: &str) -> bool {
+    match url::Url::parse(url) {
+        Ok(parsed) => {
+            matches!(parsed.scheme(), "http" | "https")
+                && parsed.host_str().is_some_and(|host| !host.is_empty())
+        }
+        Err(_) => false,
+    }
+}
+
+fn host_from_url_lenient(url: &str) -> Option<String> {
     let rest = match url.split_once("://") {
         Some((_, after)) => after,
         None => url.strip_prefix("//").unwrap_or(url),
@@ -105,7 +147,7 @@ pub fn host_from_url(url: &str) -> Option<String> {
 
 /// Hostname group / display name: lowercase host with one leading `www.` removed.
 #[must_use]
-pub fn site_name_from_host(host: &str) -> String {
+pub(crate) fn site_name_from_host(host: &str) -> String {
     let lower = host.to_ascii_lowercase();
     lower
         .strip_prefix("www.")
@@ -119,7 +161,7 @@ pub fn site_name_from_host(host: &str) -> String {
 /// means no exclude filter. A hostname matches a listed domain when they are
 /// equal (ASCII lowercase) or the hostname ends with `.` + domain.
 #[must_use]
-pub fn filter_domains(
+pub(crate) fn filter_domains(
     results: Vec<SearchResult>,
     include_domains: &[String],
     exclude_domains: &[String],
@@ -155,7 +197,7 @@ pub fn filter_domains(
 ///
 /// Host groups use full hostname, lowercase, with one leading `www.` stripped.
 #[must_use]
-pub fn diversify_hosts(
+pub(crate) fn diversify_hosts(
     results: Vec<SearchResult>,
     max_per_host: u8,
     count: u8,
@@ -187,7 +229,7 @@ pub fn diversify_hosts(
 /// Steps: sanitize title/description, optional tracking strip + URL cap,
 /// set `site_name`, include then exclude domain filters, diversify hosts.
 #[must_use]
-pub fn post_process_results(
+pub(crate) fn post_process_results(
     results: Vec<SearchResult>,
     strip_tracking: bool,
     include_domains: &[String],
@@ -197,23 +239,48 @@ pub fn post_process_results(
 ) -> Vec<SearchResult> {
     let prepared: Vec<SearchResult> = results
         .into_iter()
-        .map(|r| {
+        .filter_map(|r| {
             let title = sanitize_text(&r.title, TITLE_MAX_CHARS);
             let description = sanitize_text(&r.description, DESCRIPTION_MAX_CHARS);
             let url = if strip_tracking {
                 strip_tracking_params(&r.url)
             } else {
-                truncate_chars(&r.url, URL_MAX_CHARS)
+                r.url
             };
+            // An over-length URL is dropped whole, never char-truncated into a
+            // broken, non-navigable link (WSP-004).
+            if url.chars().count() > URL_MAX_CHARS {
+                return None;
+            }
+            // Only emit results whose URL is a real, navigable http(s) link
+            // (WSP-003): a value that only survives the lenient authority parse
+            // (for example `not-a-url`) is not a usable result URL.
+            if !is_navigable_url(&url) {
+                return None;
+            }
             let site_name = host_from_url(&url).map(|h| site_name_from_host(&h));
-            SearchResult {
+            // Cap snippet count and per-snippet length, sanitising each (WSP-001).
+            let extra_snippets = r
+                .extra_snippets
+                .into_iter()
+                .take(MAX_EXTRA_SNIPPETS)
+                .map(|snippet| sanitize_text(&snippet, SNIPPET_MAX_CHARS))
+                .filter(|snippet| !snippet.is_empty())
+                .collect();
+            // `age` is provider-controlled free text; sanitize and cap it like
+            // every other retained string (WSP-001).
+            let age = r
+                .age
+                .map(|age| sanitize_text(&age, AGE_MAX_CHARS))
+                .filter(|age| !age.is_empty());
+            Some(SearchResult {
                 title,
                 url,
                 description,
-                age: r.age,
+                age,
                 site_name,
-                extra_snippets: r.extra_snippets,
-            }
+                extra_snippets,
+            })
         })
         .collect();
     let filtered = filter_domains(prepared, include_domains, exclude_domains);
@@ -299,9 +366,35 @@ mod tests {
             sanitize_text(&desc, DESCRIPTION_MAX_CHARS).chars().count(),
             DESCRIPTION_MAX_CHARS
         );
+    }
 
-        let url = format!("https://example.com/{}", "u".repeat(URL_MAX_CHARS));
-        assert_eq!(strip_tracking_params(&url).chars().count(), URL_MAX_CHARS);
+    #[test]
+    fn overlong_url_result_is_dropped_not_truncated() {
+        // WSP-004: a URL longer than the cap is dropped whole rather than cut
+        // mid-component into a broken link.
+        let long = format!("https://example.com/{}", "u".repeat(URL_MAX_CHARS));
+        let ok = hit("Keep", "https://a.com/1");
+        let dropped = hit("Drop", &long);
+        let out = post_process_results(vec![ok, dropped], true, &[], &[], 10, 10);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].title, "Keep");
+    }
+
+    #[test]
+    fn non_navigable_result_urls_are_dropped() {
+        // WSP-003: a result whose URL is not a standards-parsed http(s) URL is
+        // dropped rather than emitted as a broken link.
+        assert!(is_navigable_url("https://example.com/path"));
+        assert!(is_navigable_url("http://a.com"));
+        assert!(!is_navigable_url("not-a-url"));
+        assert!(!is_navigable_url("ftp://host/file"));
+        assert!(!is_navigable_url("https:///"));
+        let keep = hit("Keep", "https://a.com/1");
+        let bogus = hit("Bogus", "not-a-url");
+        let scheme = hit("Ftp", "ftp://a.com/x");
+        let out = post_process_results(vec![keep, bogus, scheme], false, &[], &[], 10, 10);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].title, "Keep");
     }
 
     #[test]
@@ -323,6 +416,47 @@ mod tests {
         assert_eq!(site_name_from_host("example.com"), "example.com");
         assert_eq!(host_from_url("not-a-url"), Some("not-a-url".to_string()));
         assert_eq!(host_from_url("https:///"), None);
+    }
+
+    #[test]
+    fn age_is_sanitized_and_capped() {
+        // WSP-001: provider-controlled `age` is sanitized (controls dropped) and
+        // capped like every other retained string.
+        let mut result = hit("T", "https://a.com/1");
+        result.age = Some(format!("2 days\u{0001}ago {}", "x".repeat(AGE_MAX_CHARS)));
+        let out = post_process_results(vec![result], false, &[], &[], 10, 10);
+        let age = out[0].age.as_deref().expect("age kept");
+        assert!(age.chars().count() <= AGE_MAX_CHARS);
+        assert!(!age.contains('\u{0001}'));
+    }
+
+    #[test]
+    fn extra_snippets_are_capped_in_count_and_length() {
+        let mut result = hit("T", "https://a.com/1");
+        result.extra_snippets = (0..20).map(|i| format!("snippet {i}")).collect();
+        result
+            .extra_snippets
+            .push("x".repeat(SNIPPET_MAX_CHARS + 50));
+        let out = post_process_results(vec![result], false, &[], &[], 10, 10);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].extra_snippets.len() <= MAX_EXTRA_SNIPPETS);
+        for snippet in &out[0].extra_snippets {
+            assert!(snippet.chars().count() <= SNIPPET_MAX_CHARS);
+        }
+    }
+
+    #[test]
+    fn host_from_url_uses_real_parsing_then_lenient_fallback() {
+        // Well-formed URL: standards parse.
+        assert_eq!(
+            host_from_url("https://WWW.Example.COM:8443/x?a=b#f"),
+            Some("www.example.com".to_owned())
+        );
+        // Scheme-less host/path: lenient fallback still yields the host.
+        assert_eq!(
+            host_from_url("sub.example.com/path"),
+            Some("sub.example.com".to_owned())
+        );
     }
 
     #[test]

@@ -12,9 +12,56 @@
 //! The sidecar is YAML frontmatter plus optional fenced content. The gateway
 //! reads it back as supplementary [`DialectEvidence`] when `/props` is thin.
 
-use std::fs;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
+
+/// On-disk sidecar format version, emitted in the frontmatter (SIDECAR-005).
+///
+/// v2 stores the template and card as a single-line JSON object in a fenced
+/// block, so a `chat_template` that itself contains ``` fences or `##` headings
+/// round-trips losslessly (serde escapes newlines, so the fence close is
+/// unambiguous). v1 (delimiter-sensitive markdown) is still parsed for
+/// backward compatibility; unknown versions are rejected rather than mis-parsed.
+const SIDECAR_VERSION: u32 = 2;
+/// Byte ceiling for a local sidecar read (SIDECAR-003).
+const MAX_SIDECAR_BYTES: u64 = 1024 * 1024;
+/// Byte ceiling for a remote `tokenizer_config.json` read (SIDECAR-002).
+const MAX_TOKENIZER_BYTES: u64 = 8 * 1024 * 1024;
+
+/// A typed failure while fetching remote sidecar metadata (SIDECAR-006).
+///
+/// The caller deliberately downgrades this to a debug log and proceeds without
+/// a sidecar, rather than swallowing the distinction between "no template" and
+/// "fetch failed".
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum SidecarError {
+    /// The source URL was not a recognized Hugging Face `resolve` URL.
+    #[error("unsupported Hugging Face source URL")]
+    UnsupportedUrl,
+    /// The HTTP request failed at the transport layer.
+    #[error("fetch tokenizer config")]
+    Request(#[source] reqwest::Error),
+    /// The endpoint returned a non-success status.
+    #[error("fetch tokenizer config returned {status}")]
+    Status {
+        /// The rendered status.
+        status: String,
+    },
+    /// Reading the (bounded) response body failed.
+    #[error("read tokenizer config body")]
+    Body(#[source] io::Error),
+    /// The response body exceeded the byte ceiling and was rejected rather than
+    /// silently truncated (SIDECAR-002).
+    #[error("tokenizer config exceeded {limit} bytes")]
+    Oversized {
+        /// The byte ceiling that was exceeded.
+        limit: u64,
+    },
+    /// The response body was not valid JSON.
+    #[error("decode tokenizer config JSON")]
+    Decode(#[source] serde_json::Error),
+}
 
 /// Metadata extracted from the sidecar markdown file.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -40,25 +87,81 @@ pub(crate) fn sidecar_path(gguf: &Path) -> PathBuf {
 /// genuine I/O failures (permissions, corrupt read).
 pub(crate) fn read_sidecar(gguf: &Path) -> Result<Option<SidecarMeta>, io::Error> {
     let path = sidecar_path(gguf);
-    let text = match fs::read_to_string(&path) {
-        Ok(t) => t,
+    let file = match File::open(&path) {
+        Ok(file) => file,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
+    // Bounded read that *rejects* oversize rather than silently truncating a
+    // corrupt sidecar into a plausible-looking prefix (SIDECAR-003): read one
+    // byte past the ceiling and treat any excess as invalid data.
+    let mut bytes = Vec::new();
+    file.take(MAX_SIDECAR_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_SIDECAR_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("sidecar exceeds maximum size of {MAX_SIDECAR_BYTES} bytes"),
+        ));
+    }
+    let text = String::from_utf8_lossy(&bytes);
     Ok(Some(parse_sidecar(&text)))
 }
 
-/// Writes the sidecar `.md` beside `gguf`.
+/// Writes the sidecar `.md` beside `gguf` atomically.
+///
+/// The content is written to a *uniquely named* temp file in the same directory
+/// and renamed into place, so concurrent writers never collide on a shared
+/// `.tmp` name and a reader never observes a half-written sidecar (SIDECAR-004).
+/// The temp file is removed on every failure path, not just a failed rename.
 pub(crate) fn write_sidecar(gguf: &Path, meta: &SidecarMeta) -> Result<(), io::Error> {
     let path = sidecar_path(gguf);
     let content = render_sidecar(meta);
-    fs::write(&path, content.as_bytes())
+    let temp = unique_temp_path(&path);
+
+    // Write, sync, and rename; on any failure remove the temp so a crashed or
+    // racing writer leaves no stray `.tmp.<pid>.<nanos>` file behind.
+    let write_result = (|| -> Result<(), io::Error> {
+        let mut file = File::create(&temp)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp, &path)
+    })();
+    if write_result.is_err() {
+        let _ignored = fs::remove_file(&temp);
+    }
+    write_result
 }
 
-/// Renders the sidecar markdown string from metadata.
+/// Builds a per-writer-unique sibling temp path (`<name>.tmp.<pid>.<nanos>`) so
+/// two provisioning passes for the same GGUF cannot clobber each other's temp.
+fn unique_temp_path(path: &Path) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let mut temp = path.to_path_buf();
+    let mut name = temp.file_name().unwrap_or_default().to_owned();
+    name.push(format!(".tmp.{}.{nanos}", std::process::id()));
+    temp.set_file_name(name);
+    temp
+}
+
+/// The structured body payload of a v2 sidecar (single-line JSON).
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct SidecarBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    chat_template: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    card: Option<String>,
+}
+
+/// Renders the sidecar markdown string from metadata (v2 format).
 fn render_sidecar(meta: &SidecarMeta) -> String {
     let mut out = String::with_capacity(512);
     out.push_str("---\n");
+    out.push_str("version: ");
+    out.push_str(&SIDECAR_VERSION.to_string());
+    out.push('\n');
     if let Some(source) = &meta.source {
         out.push_str("source: ");
         out.push_str(source);
@@ -71,27 +174,31 @@ fn render_sidecar(meta: &SidecarMeta) -> String {
     }
     out.push_str("---\n");
 
-    if let Some(template) = &meta.chat_template {
-        out.push_str("\n## chat_template\n\n```jinja\n");
-        out.push_str(template);
-        if !template.ends_with('\n') {
-            out.push('\n');
-        }
-        out.push_str("```\n");
-    }
-
-    if let Some(card) = &meta.card {
-        out.push_str("\n## card\n\n");
-        out.push_str(card);
-        if !card.ends_with('\n') {
-            out.push('\n');
-        }
+    // The template/card go into a single-line JSON object inside a fenced block.
+    // serde escapes all control characters (including newlines), so the JSON
+    // occupies exactly one line and can never contain the `\n```` sequence that
+    // closes the fence, even when the template embeds ``` fences or `##`
+    // headings (SIDECAR-005).
+    let body = SidecarBody {
+        chat_template: meta.chat_template.clone(),
+        card: meta.card.clone(),
+    };
+    if body.chat_template.is_some() || body.card.is_some() {
+        let json = serde_json::to_string(&body).unwrap_or_else(|_| "{}".to_owned());
+        out.push_str("\n```json\n");
+        out.push_str(&json);
+        out.push_str("\n```\n");
     }
 
     out
 }
 
 /// Parses a sidecar markdown string into [`SidecarMeta`].
+///
+/// Version-aware: v2 reads the single-line JSON body; v1 falls back to the
+/// legacy delimiter-based markdown; any other (unknown or missing) version is
+/// rejected - only the frontmatter `source`/`fetched` are kept and no
+/// template/card is trusted, rather than mis-parsing an unknown layout.
 fn parse_sidecar(text: &str) -> SidecarMeta {
     let mut meta = SidecarMeta::default();
 
@@ -104,16 +211,34 @@ fn parse_sidecar(text: &str) -> SidecarMeta {
     let frontmatter = &rest[..fm_end];
     let body = &rest[fm_end + 5..]; // skip "\n---\n"
 
+    let mut version = None;
     for line in frontmatter.lines() {
-        if let Some(value) = line.strip_prefix("source: ") {
+        if let Some(value) = line.strip_prefix("version: ") {
+            version = value.trim().parse::<u32>().ok();
+        } else if let Some(value) = line.strip_prefix("source: ") {
             meta.source = Some(value.to_owned());
         } else if let Some(value) = line.strip_prefix("fetched: ") {
             meta.fetched = Some(value.to_owned());
         }
     }
 
-    meta.chat_template = extract_fenced_block(body, "## chat_template", "jinja");
-    meta.card = extract_section_text(body, "## card");
+    match version {
+        Some(2) => {
+            if let Some(json) = extract_fenced_block(body, "", "json")
+                && let Ok(parsed) = serde_json::from_str::<SidecarBody>(json.trim())
+            {
+                meta.chat_template = parsed.chat_template;
+                meta.card = parsed.card;
+            }
+        }
+        Some(1) => {
+            meta.chat_template = extract_fenced_block(body, "## chat_template", "jinja");
+            meta.card = extract_section_text(body, "## card");
+        }
+        _ => {
+            // Unknown/missing version: reject the body, keep only frontmatter.
+        }
+    }
 
     meta
 }
@@ -153,38 +278,57 @@ fn extract_section_text(body: &str, heading: &str) -> Option<String> {
 /// Fetches HF tokenizer config for `chat_template` from a HF URL.
 ///
 /// Attempts to resolve the repo/revision from the download URL and fetch
-/// `tokenizer_config.json`. Returns `None` on any failure - this is
-/// best-effort metadata enrichment.
+/// `tokenizer_config.json` (read with a byte cap, SIDECAR-002). `Ok(None)`
+/// means the response was valid but carried no usable template.
+///
+/// # Errors
+/// Returns a [`SidecarError`] the caller can log and deliberately downgrade
+/// (SIDECAR-006) when the URL is unsupported, the request fails, the status is
+/// non-success, or the body cannot be read or decoded.
 pub(crate) fn fetch_hf_chat_template(
     client: &reqwest::blocking::Client,
     source_url: &str,
     bearer: Option<&str>,
-) -> Option<String> {
-    let (repo, revision) = parse_hf_url(source_url)?;
+) -> Result<Option<String>, SidecarError> {
+    let (repo, revision) = parse_hf_url(source_url).ok_or(SidecarError::UnsupportedUrl)?;
     let api_url = format!("https://huggingface.co/{repo}/raw/{revision}/tokenizer_config.json");
     let mut request = client.get(&api_url);
     if let Some(token) = bearer {
         request = request.bearer_auth(token);
     }
-    let response = request.send().ok()?;
+    let response = request.send().map_err(SidecarError::Request)?;
     if !response.status().is_success() {
-        return None;
+        return Err(SidecarError::Status {
+            status: response.status().to_string(),
+        });
     }
-    let json: serde_json::Value = response.json().ok()?;
+    // Bounded body read that *detects* oversize instead of silently truncating
+    // (SIDECAR-002): read one byte past the ceiling; if we got it, the body was
+    // larger than allowed and a truncated JSON prefix must not be trusted.
+    let mut buf = Vec::new();
+    response
+        .take(MAX_TOKENIZER_BYTES + 1)
+        .read_to_end(&mut buf)
+        .map_err(SidecarError::Body)?;
+    if buf.len() as u64 > MAX_TOKENIZER_BYTES {
+        return Err(SidecarError::Oversized {
+            limit: MAX_TOKENIZER_BYTES,
+        });
+    }
+    let json: serde_json::Value = serde_json::from_slice(&buf).map_err(SidecarError::Decode)?;
     // chat_template can be a string or an array of objects with "template" fields.
-    match &json["chat_template"] {
+    let template = match &json["chat_template"] {
         serde_json::Value::String(s) => Some(s.clone()),
-        serde_json::Value::Array(arr) => {
-            // Pick the "default" template, or the first one.
-            arr.iter()
-                .find(|entry| entry.get("name").and_then(|n| n.as_str()) == Some("default"))
-                .or_else(|| arr.first())
-                .and_then(|entry| entry.get("template"))
-                .and_then(|t| t.as_str())
-                .map(String::from)
-        }
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .find(|entry| entry.get("name").and_then(|n| n.as_str()) == Some("default"))
+            .or_else(|| arr.first())
+            .and_then(|entry| entry.get("template"))
+            .and_then(|t| t.as_str())
+            .map(String::from),
         _ => None,
-    }
+    };
+    Ok(template)
 }
 
 /// Parses a HF download URL into `(repo, revision)`.
@@ -205,18 +349,41 @@ fn parse_hf_url(url: &str) -> Option<(String, String)> {
 }
 
 /// Returns the current UTC timestamp as an ISO-8601 string suitable for the
-/// `fetched` frontmatter field. Uses a simple format without external crate
-/// dependencies.
+/// `fetched` frontmatter field, formatted from [`std::time::SystemTime`] with no
+/// external crate or subprocess.
 pub(crate) fn utc_now_iso() -> String {
-    // std::time alone cannot produce wall-clock; use a minimal approach
-    // that works in our blocking context.
-    let output = std::process::Command::new("date")
-        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
-        .output();
-    match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_owned(),
-        _ => "unknown".to_owned(),
-    }
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    format_unix_utc(secs)
+}
+
+/// Format a Unix timestamp (seconds since 1970-01-01 UTC) as `YYYY-MM-DDThh:mm:ssZ`.
+///
+/// Uses Howard Hinnant's days-to-civil algorithm; valid for all dates at or
+/// after the Unix epoch.
+fn format_unix_utc(secs: u64) -> String {
+    let days = secs / 86_400;
+    let second_of_day = secs % 86_400;
+    let (hour, minute, second) = (
+        second_of_day / 3_600,
+        (second_of_day % 3_600) / 60,
+        second_of_day % 60,
+    );
+
+    let z = days + 719_468;
+    let era = z / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let mp = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { year + 1 } else { year };
+
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
 #[cfg(test)]
@@ -237,6 +404,18 @@ mod tests {
     }
 
     #[test]
+    fn formats_unix_epoch_boundaries() {
+        assert_eq!(super::format_unix_utc(0), "1970-01-01T00:00:00Z");
+        // 2021-01-01T00:00:00Z == 1609459200
+        assert_eq!(
+            super::format_unix_utc(1_609_459_200),
+            "2021-01-01T00:00:00Z"
+        );
+        // 2000-02-29T12:34:56Z (leap day) == 951827696
+        assert_eq!(super::format_unix_utc(951_827_696), "2000-02-29T12:34:56Z");
+    }
+
+    #[test]
     fn sidecar_path_replaces_extension() {
         let gguf = PathBuf::from("/cache/models/gemma-3-27b-it-q4_0.gguf");
         assert_eq!(
@@ -251,6 +430,58 @@ mod tests {
         let rendered = render_sidecar(&meta);
         let parsed = parse_sidecar(&rendered);
         assert_eq!(parsed, meta);
+    }
+
+    #[test]
+    fn rendered_sidecar_carries_a_format_version() {
+        // SIDECAR-005: the on-disk format is versioned.
+        let rendered = render_sidecar(&sample_meta());
+        assert!(
+            rendered.contains(&format!("version: {SIDECAR_VERSION}")),
+            "sidecar should record its format version"
+        );
+    }
+
+    #[test]
+    fn unknown_version_is_rejected_not_misparsed() {
+        // SIDECAR-005: an unknown/newer version keeps only the frontmatter and
+        // refuses to trust a body it does not understand.
+        let rendered = render_sidecar(&sample_meta());
+        let bumped = rendered.replacen(&format!("version: {SIDECAR_VERSION}"), "version: 999", 1);
+        let parsed = parse_sidecar(&bumped);
+        assert_eq!(parsed.source, sample_meta().source);
+        assert_eq!(parsed.fetched, sample_meta().fetched);
+        assert!(
+            parsed.chat_template.is_none(),
+            "unknown version body rejected"
+        );
+        assert!(parsed.card.is_none());
+    }
+
+    #[test]
+    fn v1_legacy_sidecar_still_parses() {
+        // Backward compatibility: a v1 markdown sidecar round-trips its template.
+        let v1 = "---\nversion: 1\nsource: https://hf/x\n---\n\n## chat_template\n\n```jinja\n{{ bos }}\n```\n";
+        let meta = parse_sidecar(v1);
+        assert_eq!(meta.source.as_deref(), Some("https://hf/x"));
+        assert_eq!(meta.chat_template.as_deref(), Some("{{ bos }}"));
+    }
+
+    #[test]
+    fn v2_round_trips_template_with_embedded_fences_and_headings() {
+        // SIDECAR-005: the previous delimiter-based format truncated a template
+        // that itself contained ``` fences or `##` headings. The v2 JSON body
+        // round-trips it losslessly.
+        let hostile = SidecarMeta {
+            source: Some("https://huggingface.co/x/y/resolve/main/m.gguf".to_owned()),
+            fetched: Some("2026-08-10T00:00:00Z".to_owned()),
+            chat_template: Some(
+                "## not a heading\n```\nembedded fence\n```\n{{ content }}".to_owned(),
+            ),
+            card: Some("card with\n## heading and ``` fence".to_owned()),
+        };
+        let rendered = render_sidecar(&hostile);
+        assert_eq!(parse_sidecar(&rendered), hostile);
     }
 
     #[test]

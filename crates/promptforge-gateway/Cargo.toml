@@ -1,6 +1,6 @@
 [package]
 name = "promptforge-gateway"
-version.workspace = true
+version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -14,15 +14,17 @@ path = "src/main.rs"
 [dependencies]
 axum.workspace = true
 async-trait.workspace = true
-fastrand.workspace = true
 flate2.workspace = true
 indicatif.workspace = true
 promptforge-core.workspace = true
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+subtle.workspace = true
 tar.workspace = true
 toml.workspace = true
+url.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["signal"] }

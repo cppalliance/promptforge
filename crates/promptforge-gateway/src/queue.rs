@@ -10,6 +10,48 @@ use std::sync::{Arc, Mutex};
 use serde::Deserialize;
 use tokio::sync::oneshot;
 
+/// A bounded scheduling identity parsed from the client header.
+///
+/// Callers name themselves via `X-PromptForge-Client` for fair queueing. The
+/// value is parsed at the boundary into a bounded id (max length, restricted
+/// charset); anything missing, empty, oversized, or containing other characters
+/// maps to the single documented `default` bucket so an authenticated caller
+/// cannot mint unbounded, attacker-chosen scheduler identities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ClientId(String);
+
+impl ClientId {
+    /// Maximum accepted client-id length, in bytes.
+    pub(crate) const MAX_LEN: usize = 64;
+    /// The fallback bucket for absent or invalid ids.
+    pub(crate) const DEFAULT: &'static str = "default";
+
+    /// Parse an optional header string into a bounded [`ClientId`].
+    pub(crate) fn from_header(value: Option<&str>) -> ClientId {
+        value.map_or_else(|| ClientId(Self::DEFAULT.to_owned()), Self::parse)
+    }
+
+    /// Parse a raw string into a bounded [`ClientId`], falling back to `default`.
+    pub(crate) fn parse(raw: &str) -> ClientId {
+        let trimmed = raw.trim();
+        let valid = !trimmed.is_empty()
+            && trimmed.len() <= Self::MAX_LEN
+            && trimmed
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'));
+        if valid {
+            ClientId(trimmed.to_owned())
+        } else {
+            ClientId(Self::DEFAULT.to_owned())
+        }
+    }
+
+    /// The validated id as a string slice.
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Waiting-queue settings shared by every limited endpoint lane.
 ///
 /// `max_depth` counts only requests waiting for a concurrency slot, not
@@ -17,7 +59,7 @@ use tokio::sync::oneshot;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct QueueConfig {
+pub(crate) struct QueueConfig {
     /// Maximum number of waiting requests before new admits return
     /// [`AdmitError::QueueFull`]. Defaults to 100.
     #[serde(default = "default_max_depth")]
@@ -48,10 +90,16 @@ impl Default for QueueConfig {
 /// Failure to admit a request onto an endpoint lane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum AdmitError {
+pub(crate) enum AdmitError {
     /// The endpoint's waiting queue is already at `max_depth`.
     #[error("queue full")]
     QueueFull,
+
+    /// The waiting slot's notification channel closed before a slot was granted
+    /// (the lane was torn down while this caller waited). Distinct from
+    /// [`AdmitError::QueueFull`], which is a live back-pressure signal.
+    #[error("endpoint lane unavailable")]
+    Unavailable,
 }
 
 /// A concurrency slot held until dropped.
@@ -60,7 +108,7 @@ pub enum AdmitError {
 /// waiter). An unlimited lane returns a no-op permit.
 #[derive(Debug)]
 #[must_use = "dropping the permit releases the concurrency slot"]
-pub struct Permit {
+pub(crate) struct Permit {
     limited: Option<Arc<LimitedLane>>,
 }
 
@@ -74,7 +122,7 @@ impl Drop for Permit {
 
 /// Per-endpoint admission controller.
 #[derive(Debug, Clone)]
-pub struct EndpointLane {
+pub(crate) struct EndpointLane {
     inner: LaneInner,
 }
 
@@ -120,7 +168,7 @@ struct Waiter {
 impl EndpointLane {
     /// An unlimited lane: every [`admit`](Self::admit) succeeds immediately.
     #[must_use]
-    pub fn unlimited() -> EndpointLane {
+    pub(crate) fn unlimited() -> EndpointLane {
         EndpointLane {
             inner: LaneInner::Unlimited,
         }
@@ -129,17 +177,19 @@ impl EndpointLane {
     /// A lane that admits at most `concurrency` in-flight requests and queues
     /// up to `queue.max_depth` waiters.
     ///
-    /// # Panics
-    /// Panics if `concurrency` is zero. Callers must validate configuration
-    /// first.
+    /// Total and non-panicking (Q-002): a zero `concurrency` yields an unlimited
+    /// lane and a zero `max_depth` is clamped to 1. Configuration validation
+    /// already rejects both zeros, so this is purely defensive - construction
+    /// can never panic on out-of-range runtime settings.
     #[must_use]
-    pub fn new(concurrency: usize, queue: &QueueConfig) -> EndpointLane {
-        assert!(concurrency >= 1, "endpoint concurrency must be at least 1");
-        assert!(queue.max_depth >= 1, "queue.max_depth must be at least 1");
+    pub(crate) fn new(concurrency: usize, queue: &QueueConfig) -> EndpointLane {
+        let Some(max_inflight) = std::num::NonZeroUsize::new(concurrency) else {
+            return EndpointLane::unlimited();
+        };
         EndpointLane {
             inner: LaneInner::Limited(Arc::new(LimitedLane {
-                max_inflight: concurrency,
-                max_depth: queue.max_depth,
+                max_inflight: max_inflight.get(),
+                max_depth: queue.max_depth.max(1),
                 fair: queue.fair_scheduling,
                 state: Mutex::new(WaitState {
                     inflight: 0,
@@ -159,21 +209,43 @@ impl EndpointLane {
     /// limited, waits (fairly or FIFO) until a slot is free, or fails if the
     /// waiting queue is already at `max_depth`.
     ///
+    /// Number of requests currently waiting for a slot on this lane.
+    ///
+    /// Test-only observation seam so tests can rendezvous on a waiter being
+    /// enqueued instead of sleeping.
+    #[cfg(test)]
+    pub(crate) fn waiter_count(&self) -> usize {
+        match &self.inner {
+            LaneInner::Unlimited => 0,
+            LaneInner::Limited(lane) => {
+                lane.state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .waiter_count
+            }
+        }
+    }
+
+    /// Number of distinct client buckets currently in the fair round-robin.
+    ///
+    /// Test-only observation seam for the distinct-client cap (Q-001).
+    #[cfg(test)]
+    pub(crate) fn distinct_clients(&self) -> usize {
+        match &self.inner {
+            LaneInner::Unlimited => 0,
+            LaneInner::Limited(lane) => lane
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .client_order
+                .len(),
+        }
+    }
+
     /// # Errors
     /// Returns [`AdmitError::QueueFull`] when the waiting queue is at
     /// `max_depth` and no in-flight slot is free.
-    ///
-    /// # Examples
-    /// ```
-    /// # async fn demo() -> Result<(), promptforge_gateway::queue::AdmitError> {
-    /// use promptforge_gateway::queue::{EndpointLane, QueueConfig};
-    ///
-    /// let lane = EndpointLane::unlimited();
-    /// let _permit = lane.admit("default").await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn admit(&self, client_key: &str) -> Result<Permit, AdmitError> {
+    pub(crate) async fn admit(&self, client_key: &str) -> Result<Permit, AdmitError> {
         let LaneInner::Limited(lane) = &self.inner else {
             return Ok(Permit { limited: None });
         };
@@ -195,12 +267,20 @@ impl EndpointLane {
                 state.next_id = state.next_id.wrapping_add(1);
                 state.waiter_count += 1;
                 let waiter = Waiter { id, reply: tx };
-                if lane.fair {
-                    enqueue_fair(&mut state, client_key, waiter);
+                // Capture the *effective* bucket key: fair scheduling may fold a
+                // fresh label into `default` once the distinct-client cap is hit
+                // (Q-001), and cancellation must remove from that same bucket.
+                let effective_key = if lane.fair {
+                    enqueue_fair(&mut state, client_key, waiter)
                 } else {
                     state.fifo.push_back(waiter);
+                    client_key.to_string()
+                };
+                AdmitOutcome::Queued {
+                    id,
+                    rx,
+                    client_key: effective_key,
                 }
-                AdmitOutcome::Queued { id, rx }
             }
         };
 
@@ -209,10 +289,10 @@ impl EndpointLane {
                 limited: Some(Arc::clone(lane)),
             }),
             AdmitOutcome::Full => Err(AdmitError::QueueFull),
-            AdmitOutcome::Queued { id, rx } => {
+            AdmitOutcome::Queued { id, rx, client_key } => {
                 let cancel = CancelOnDrop {
                     lane: Arc::clone(lane),
-                    client_key: client_key.to_string(),
+                    client_key,
                     id,
                     armed: true,
                 };
@@ -223,7 +303,9 @@ impl EndpointLane {
                             limited: Some(Arc::clone(lane)),
                         })
                     }
-                    Err(_) => Err(AdmitError::QueueFull),
+                    // The sender was dropped without granting a slot: the lane
+                    // is gone, not merely full. Surface that distinctly.
+                    Err(_) => Err(AdmitError::Unavailable),
                 }
             }
         }
@@ -233,7 +315,12 @@ impl EndpointLane {
 enum AdmitOutcome {
     Ready,
     Full,
-    Queued { id: u64, rx: oneshot::Receiver<()> },
+    Queued {
+        id: u64,
+        rx: oneshot::Receiver<()>,
+        /// The effective bucket key the waiter was enqueued under.
+        client_key: String,
+    },
 }
 
 /// Removes a still-queued waiter if `admit` is cancelled before admission.
@@ -302,13 +389,32 @@ impl LimitedLane {
     }
 }
 
-fn enqueue_fair(state: &mut WaitState, client_key: &str, waiter: Waiter) {
-    let queue = state.by_client.entry(client_key.to_string()).or_default();
+/// Maximum number of distinct client labels tracked in the fair round-robin.
+///
+/// Beyond this, a fresh label folds into the shared `default` bucket. Because
+/// all callers authenticate with the same shared server key, per-caller identity
+/// is indistinguishable, so this global cap is the bound that stops one caller
+/// from minting many labels to win a larger share of round-robin turns (Q-001).
+const MAX_DISTINCT_CLIENTS: usize = 32;
+
+/// Enqueue a waiter under its fair-scheduling bucket, returning the *effective*
+/// bucket key actually used (which may be `default` when the distinct-client cap
+/// is reached).
+fn enqueue_fair(state: &mut WaitState, client_key: &str, waiter: Waiter) -> String {
+    let key = if state.by_client.contains_key(client_key)
+        || state.client_order.len() < MAX_DISTINCT_CLIENTS
+    {
+        client_key.to_string()
+    } else {
+        ClientId::DEFAULT.to_string()
+    };
+    let queue = state.by_client.entry(key.clone()).or_default();
     let was_empty = queue.is_empty();
     queue.push_back(waiter);
     if was_empty {
-        state.client_order.push_back(client_key.to_string());
+        state.client_order.push_back(key.clone());
     }
+    key
 }
 
 fn dequeue_fair(state: &mut WaitState) -> Option<Waiter> {
@@ -322,6 +428,21 @@ fn dequeue_fair(state: &mut WaitState) -> Option<Waiter> {
     }
     Some(waiter)
 }
+
+/// Compile-time assertion that the admission primitives cross thread
+/// boundaries, so losing `Send`/`Sync` on any of them fails the build rather
+/// than silently breaking spawned request handling.
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<EndpointLane>();
+    assert_send_sync::<Permit>();
+    assert_send_sync::<QueueConfig>();
+    assert_send_sync::<AdmitError>();
+    assert_send_sync::<ClientId>();
+};
+
+#[cfg(test)]
+mod tests;
 
 fn remove_waiter(state: &mut WaitState, fair: bool, client_key: &str, id: u64) -> bool {
     if fair {
@@ -343,150 +464,5 @@ fn remove_waiter(state: &mut WaitState, fair: bool, client_key: &str, id: u64) -
         };
         state.fifo.remove(pos);
         true
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Duration;
-
-    #[tokio::test]
-    async fn unlimited_lane_admits_immediately() {
-        let lane = EndpointLane::unlimited();
-        let permit = lane.admit("default").await.unwrap();
-        assert!(permit.limited.is_none());
-    }
-
-    #[tokio::test]
-    async fn concurrency_one_serializes_two_admits() {
-        let lane = EndpointLane::new(1, &QueueConfig::default());
-        let phase = Arc::new(AtomicUsize::new(0));
-
-        let first = lane.admit("a").await.unwrap();
-        phase.store(1, Ordering::SeqCst);
-
-        let lane2 = lane.clone();
-        let phase2 = Arc::clone(&phase);
-        let second = tokio::spawn(async move {
-            phase2.store(2, Ordering::SeqCst);
-            let permit = lane2.admit("a").await.unwrap();
-            phase2.store(3, Ordering::SeqCst);
-            permit
-        });
-
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(
-            phase.load(Ordering::SeqCst),
-            2,
-            "second admit still waiting"
-        );
-
-        drop(first);
-        let _second_permit = second.await.unwrap();
-        assert_eq!(phase.load(Ordering::SeqCst), 3);
-    }
-
-    #[tokio::test]
-    async fn queue_full_rejects_when_max_depth_waiters_present() {
-        // concurrency=1, max_depth=1: one in-flight + one waiting; third fails.
-        let lane = EndpointLane::new(
-            1,
-            &QueueConfig {
-                max_depth: 1,
-                fair_scheduling: true,
-            },
-        );
-        let inflight = lane.admit("a").await.unwrap();
-
-        let lane_wait = lane.clone();
-        let waiting = tokio::spawn(async move { lane_wait.admit("b").await });
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        let err = lane.admit("c").await.unwrap_err();
-        assert_eq!(err, AdmitError::QueueFull);
-
-        drop(inflight);
-        let _waiting_permit = waiting.await.unwrap().unwrap();
-    }
-
-    #[tokio::test]
-    async fn fair_scheduling_interleaves_clients() {
-        // concurrency=1; enqueue A, A, B while one A holds. Fair wake order
-        // is A, B, A (not FIFO A, A, B).
-        let lane = EndpointLane::new(
-            1,
-            &QueueConfig {
-                max_depth: 10,
-                fair_scheduling: true,
-            },
-        );
-        let held = lane.admit("A").await.unwrap();
-
-        let order = Arc::new(Mutex::new(Vec::new()));
-        let mut handles = Vec::new();
-        for key in ["A", "A", "B"] {
-            let lane = lane.clone();
-            let order = Arc::clone(&order);
-            let key = key.to_string();
-            handles.push(tokio::spawn(async move {
-                let permit = lane.admit(&key).await.unwrap();
-                order
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(key);
-                // Release immediately so the next fair waiter can run.
-                drop(permit);
-            }));
-            // Let each waiter register before the next enqueue.
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-
-        drop(held);
-        for handle in handles {
-            handle.await.unwrap();
-        }
-
-        let got = order
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        assert_eq!(got, vec!["A", "B", "A"]);
-    }
-
-    #[tokio::test]
-    async fn cancel_after_wake_does_not_leak_slot() {
-        // concurrency=1: queue a waiter, wake it by dropping the holder, then
-        // cancel the waiter future before it returns a Permit. The granted slot
-        // must be released so a later admit can still acquire.
-        use std::future::{Future, poll_fn};
-        use std::task::Poll;
-
-        let lane = EndpointLane::new(
-            1,
-            &QueueConfig {
-                max_depth: 10,
-                fair_scheduling: true,
-            },
-        );
-        let held = lane.admit("a").await.unwrap();
-
-        let mut waiting = Box::pin(lane.admit("b"));
-        poll_fn(|cx| match waiting.as_mut().poll(cx) {
-            Poll::Ready(_) => panic!("waiter should be queued, not ready"),
-            Poll::Pending => Poll::Ready(()),
-        })
-        .await;
-
-        drop(held);
-        // Cancel while CancelOnDrop is still armed after the oneshot transfer.
-        drop(waiting);
-
-        let permit = tokio::time::timeout(Duration::from_millis(500), lane.admit("c"))
-            .await
-            .expect("slot leaked: subsequent admit timed out")
-            .unwrap();
-        drop(permit);
     }
 }
