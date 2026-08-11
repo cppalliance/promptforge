@@ -7,7 +7,7 @@ use crate::observe::{NullObserver, Observation, detail};
 #[test]
 fn invalid_frontmatter_preserves_the_yaml_cause_as_source() {
     // error.rs F3: a malformed-YAML frontmatter must classify as
-    // `Frontmatter` and retain the underlying serde_yaml failure as the
+    // `Frontmatter` and retain the underlying serde_yaml_ng failure as the
     // public error's `source()`, instead of flattening it into a string.
     let src = "---\nname: p\ndescription: d\n: : :\n---\n\n# T\n\n## S\n\nhi\n";
     let error = Prompt::parse(src, "test", &NullObserver)

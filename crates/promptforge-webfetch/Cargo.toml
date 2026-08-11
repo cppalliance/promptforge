@@ -4,6 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 publish = false
 description = "PromptForge web_fetch tool: fetch a URL and return its main content as markdown"
 

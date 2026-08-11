@@ -1,0 +1,54 @@
+# cargo-deny configuration for the PromptForge (BSL-1.0) workspace.
+# Run locally with `cargo deny check`; CI runs the same. See PF-ROOT-008.
+
+[graph]
+# Check the dependency graph for all targets, not just the host.
+all-features = true
+
+[advisories]
+version = 2
+# Vulnerabilities and yanked crates always fail. "unmaintained" is scoped to
+# crates this workspace depends on directly, so we are accountable for our own
+# choices without failing CI on unmaintained deep-transitive crates we cannot
+# control (currently RUSTSEC-2025-0119 number_prefix via indicatif and
+# RUSTSEC-2024-0436 paste via the candle/gemm stack).
+unmaintained = "workspace"
+# Reviewed advisories consciously accepted go here, each with a rationale.
+ignore = []
+
+[licenses]
+version = 2
+# Permissive licenses compatible with distributing a BSL-1.0 workspace.
+allow = [
+    "BSL-1.0",
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    # Mozilla root-certificate bundle (webpki-roots), pulled via reqwest
+    # rustls-tls; a permissive data license.
+    "CDLA-Permissive-2.0",
+    "CC0-1.0",
+    "Unlicense",
+    "0BSD",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Warn on duplicate versions of the same crate so unification regressions are
+# visible without hard-failing a large native-dependency graph.
+multiple-versions = "warn"
+wildcards = "warn"
+
+[sources]
+# Only crates.io is an allowed registry; no git sources are expected.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

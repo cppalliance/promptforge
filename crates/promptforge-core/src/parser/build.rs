@@ -242,7 +242,7 @@ pub fn promptforge_version(source: &str) -> Option<u32> {
     }
 
     let (yaml, _body, _lines) = split_frontmatter(source).ok()?;
-    let probe: Probe = serde_yaml::from_str(&yaml).ok()?;
+    let probe: Probe = serde_yaml_ng::from_str(&yaml).ok()?;
     probe.promptforge
 }
 
