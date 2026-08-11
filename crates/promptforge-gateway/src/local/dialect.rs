@@ -118,44 +118,59 @@ fn fetch_props_evidence(guard: &ServerGuard) -> Result<DialectEvidence, LocalErr
 
     // `total_slots` and capabilities are top-level in /props. When the server
     // was launched with `--jinja` and the template declares tool support, the
-    // /v1/models response carries `meta.has_tool_call_capability`. We check
-    // both /props and /v1/models for the capability flag.
-    let supports_tool_calls = fetch_tool_call_capability(&client, &base, guard.api_key());
+    // /v1/models response carries `meta.has_tool_call_capability`. A probe
+    // failure is surfaced (the server just passed readiness, so it is an
+    // anomaly), while a reachable response whose field is absent yields `None`
+    // rather than a bogus definitive `false`. (MOD-003)
+    let supports_tool_calls = fetch_tool_call_capability(&client, &base, guard.api_key())?;
 
     Ok(DialectEvidence::new(
-        Some(supports_tool_calls),
+        supports_tool_calls,
         chat_template,
         model_id,
         None,
     ))
 }
 
-/// Checks the /v1/models response for native tool-call capability.
+/// Reads native tool-call capability from `/v1/models`.
+///
+/// # Errors
+/// Returns [`LocalError::Server`] when the probe request fails, returns a
+/// non-success status, or the body is not JSON. `Ok(None)` means the endpoint
+/// answered but did not report the capability (unknown, not `false`).
 fn fetch_tool_call_capability(
     client: &reqwest::blocking::Client,
     base: &str,
     api_key: &str,
-) -> bool {
-    let Ok(response) = client
+) -> Result<Option<bool>, LocalError> {
+    let response = client
         .get(format!("{base}/v1/models"))
         .bearer_auth(api_key)
         .send()
-    else {
-        return false;
-    };
+        .map_err(|e| LocalError::Server(format!("GET /v1/models for tool capability: {e}")))?;
     if !response.status().is_success() {
-        return false;
+        return Err(LocalError::Server(format!(
+            "GET /v1/models for tool capability returned {}",
+            response.status()
+        )));
     }
-    let Ok(body) = response.json::<Value>() else {
-        return false;
-    };
+    let body: Value = response
+        .json()
+        .map_err(|e| LocalError::Server(format!("parse /v1/models JSON: {e}")))?;
+    Ok(tool_call_capability_from_body(&body))
+}
+
+/// Extracts `data[0].meta.has_tool_call_capability` from a `/v1/models` body.
+///
+/// Returns `None` when the field is absent, so callers can distinguish
+/// "unknown" from a definitive `Some(false)`.
+fn tool_call_capability_from_body(body: &Value) -> Option<bool> {
     body.get("data")
         .and_then(Value::as_array)
         .and_then(|models| models.first())
         .and_then(|model| model.get("meta"))
         .and_then(|meta| meta.get("has_tool_call_capability"))
         .and_then(Value::as_bool)
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -260,6 +275,22 @@ mod tests {
         let id = registry.resolve(&evidence).expect("should resolve");
         assert_eq!(id.to_string(), "openai");
         assert_eq!(id.tools_mode().to_string(), "native");
+    }
+
+    #[test]
+    fn tool_call_capability_distinguishes_absent_from_false() {
+        let present_true = serde_json::json!({
+            "data": [{ "meta": { "has_tool_call_capability": true } }]
+        });
+        let present_false = serde_json::json!({
+            "data": [{ "meta": { "has_tool_call_capability": false } }]
+        });
+        let absent = serde_json::json!({ "data": [{ "meta": {} }] });
+        let no_data = serde_json::json!({ "object": "list" });
+        assert_eq!(tool_call_capability_from_body(&present_true), Some(true));
+        assert_eq!(tool_call_capability_from_body(&present_false), Some(false));
+        assert_eq!(tool_call_capability_from_body(&absent), None);
+        assert_eq!(tool_call_capability_from_body(&no_data), None);
     }
 
     #[test]
