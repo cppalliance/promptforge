@@ -188,12 +188,22 @@ impl Config {
         // raw text would expand `${VAR}` inside comments and keys, and an
         // interpolated value containing a quote, backslash, or newline would
         // corrupt the TOML structure on a second parse. (CFG-007)
-        let mut document: toml::Value =
-            toml::from_str(raw).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        let document: toml::Value = toml::from_str(raw).map_err(|source| ConfigError::Parse {
+            path: None,
+            source: Box::new(source),
+        })?;
+        Self::from_value(document)
+    }
+
+    /// Interpolate string leaves, deserialize, and validate an already-parsed
+    /// TOML document. Used by [`Self::parse_toml`] and by profile include
+    /// resolution, which merges into a `toml::Value` and avoids re-serializing.
+    pub(crate) fn from_value(mut document: toml::Value) -> Result<Config, ConfigError> {
         interpolate_value(&mut document)?;
-        let raw: RawConfig = document
-            .try_into()
-            .map_err(|e| ConfigError::Parse(e.to_string()))?;
+        let raw: RawConfig = document.try_into().map_err(|source| ConfigError::Parse {
+            path: None,
+            source: Box::new(source),
+        })?;
         let config = Config::from(raw);
         config.validate()?;
         Ok(config)

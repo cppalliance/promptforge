@@ -208,7 +208,7 @@ async fn admin_list_profiles(
     check_auth(&state, &headers).await?;
     let dir = profiles_dir(&state)?;
     let profiles =
-        profile::list_profiles(dir).map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
+        profile::list_profiles(dir).map_err(|e| GatewayError::switch_failed("list-profiles", e))?;
     Ok(Json(serde_json::json!({ "profiles": profiles })))
 }
 
@@ -254,7 +254,7 @@ async fn admin_switch_profile(
     check_auth(&state, &headers).await?;
     let dir = profiles_dir(&state)?.to_path_buf();
     let name = crate::profile::ProfileName::parse(&request.name)
-        .map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
+        .map_err(|e| GatewayError::switch_failed("parse-name", e))?;
 
     // Serialize switches for the whole operation (LIB-008).
     let _switch = state.switch.lock().await;
@@ -267,9 +267,9 @@ async fn admin_switch_profile(
     // Build and validate the entire remote side off the live lock. Any failure
     // here returns before mutating live state at all (LIB-009).
     let config = crate::config::Config::load_profile(&dir, &name)
-        .map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
-    let remote_routing =
-        Routing::from_config(&config).map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
+        .map_err(|e| GatewayError::switch_failed("load-profile", e))?;
+    let remote_routing = Routing::from_config(&config)
+        .map_err(|e| GatewayError::switch_failed("build-routing", e))?;
     let new_web_search = config
         .web_search_config()
         .map(WebSearchState::new)
@@ -288,18 +288,16 @@ async fn admin_switch_profile(
     let new_local = match tokio::task::spawn_blocking(move || LocalRuntime::start(&config)).await {
         Ok(Ok(runtime)) => runtime,
         Ok(Err(e)) => {
-            return Err(GatewayError::SwitchFailed(e.to_string()));
+            return Err(GatewayError::switch_failed("start-local", e));
         }
         Err(e) => {
-            return Err(GatewayError::SwitchFailed(format!(
-                "local runtime start task failed: {e}"
-            )));
+            return Err(GatewayError::switch_failed("start-local-task", e));
         }
     };
 
     let routing = remote_routing
         .merge(new_local.models().iter().cloned())
-        .map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
+        .map_err(|e| GatewayError::switch_failed("merge-routing", e))?;
 
     // Atomic swap: commit the whole new profile at once.
     {

@@ -50,7 +50,7 @@ impl ConfigError {
     pub fn kind(&self) -> ConfigErrorKind {
         match self.0 {
             ConfigErrorRepr::Read { .. } => ConfigErrorKind::Read,
-            ConfigErrorRepr::Parse(_) => ConfigErrorKind::Parse,
+            ConfigErrorRepr::Parse { .. } => ConfigErrorKind::Parse,
             ConfigErrorRepr::Interpolation(_) => ConfigErrorKind::Interpolation,
             ConfigErrorRepr::UnresolvedVar(_) => ConfigErrorKind::UnresolvedVar,
             ConfigErrorRepr::Validation(_) => ConfigErrorKind::Validation,
@@ -209,5 +209,93 @@ impl std::fmt::Display for ServeError {
 impl std::error::Error for ServeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error as _;
+    use std::path::PathBuf;
+
+    fn de_error() -> toml::de::Error {
+        toml::from_str::<toml::Table>("= bad").unwrap_err()
+    }
+
+    #[test]
+    fn config_error_kind_is_table_driven() {
+        let cases: Vec<(ConfigErrorRepr, ConfigErrorKind)> = vec![
+            (
+                ConfigErrorRepr::Read {
+                    path: PathBuf::from("c.toml"),
+                    source: std::io::Error::other("x"),
+                },
+                ConfigErrorKind::Read,
+            ),
+            (
+                ConfigErrorRepr::Parse {
+                    path: None,
+                    source: Box::new(de_error()),
+                },
+                ConfigErrorKind::Parse,
+            ),
+            (
+                ConfigErrorRepr::UnresolvedVar("V".to_owned()),
+                ConfigErrorKind::UnresolvedVar,
+            ),
+            (
+                ConfigErrorRepr::Interpolation("bad".to_owned()),
+                ConfigErrorKind::Interpolation,
+            ),
+            (
+                ConfigErrorRepr::Validation("bad".to_owned()),
+                ConfigErrorKind::Validation,
+            ),
+            (
+                ConfigErrorRepr::IncludeCycle {
+                    path: PathBuf::from("a.toml"),
+                    chain: vec![PathBuf::from("a.toml")],
+                },
+                ConfigErrorKind::IncludeCycle,
+            ),
+            (
+                ConfigErrorRepr::IncludeDepth {
+                    path: PathBuf::from("a.toml"),
+                    max: 16,
+                },
+                ConfigErrorKind::IncludeDepth,
+            ),
+        ];
+        for (repr, kind) in cases {
+            assert_eq!(ConfigError::from(repr).kind(), kind);
+        }
+    }
+
+    #[test]
+    fn config_error_read_and_parse_preserve_source_and_path() {
+        let read = ConfigError::from(ConfigErrorRepr::Read {
+            path: PathBuf::from("c.toml"),
+            source: std::io::Error::other("x"),
+        });
+        assert!(read.source().is_some());
+        assert!(read.to_string().contains("c.toml"));
+
+        let parse = ConfigError::from(ConfigErrorRepr::Parse {
+            path: Some(PathBuf::from("inc.toml")),
+            source: Box::new(de_error()),
+        });
+        assert!(parse.source().is_some());
+        assert!(parse.to_string().contains("inc.toml"));
+    }
+
+    #[test]
+    fn startup_error_kind_is_table_driven_and_source_preserving() {
+        let cfg = StartupError::config(ConfigErrorRepr::Validation("bad".to_owned()));
+        assert_eq!(cfg.kind(), StartupErrorKind::Config);
+        assert!(cfg.source().is_some());
+
+        let bind = StartupError::bind(std::io::Error::other("x"));
+        assert_eq!(bind.kind(), StartupErrorKind::Bind);
+        assert!(bind.source().is_some());
     }
 }

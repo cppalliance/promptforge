@@ -51,7 +51,7 @@ endpoints = ["anthropic"]
 "#;
     assert!(matches!(
         Config::parse_toml(toml),
-        Err(ConfigError::Parse(_))
+        Err(ConfigError::Parse { .. })
     ));
 }
 
@@ -76,7 +76,7 @@ endpoints = ["anthropic"]
 "#;
     assert!(matches!(
         Config::parse_toml(toml),
-        Err(ConfigError::Parse(_))
+        Err(ConfigError::Parse { .. })
     ));
 }
 
@@ -250,7 +250,7 @@ mystery = true
 "#;
     assert!(matches!(
         Config::parse_toml(toml),
-        Err(ConfigError::Parse(_))
+        Err(ConfigError::Parse { .. })
     ));
 }
 

@@ -58,11 +58,11 @@ pub(crate) fn list_profiles(dir: &Path) -> Result<Vec<String>, ConfigError> {
     }
     let mut names = Vec::new();
     for entry in fs::read_dir(dir).map_err(|source| ConfigError::Read {
-        path: dir.display().to_string(),
+        path: dir.to_owned(),
         source,
     })? {
         let entry = entry.map_err(|source| ConfigError::Read {
-            path: dir.display().to_string(),
+            path: dir.to_owned(),
             source,
         })?;
         let path = entry.path();
@@ -104,8 +104,9 @@ pub(crate) fn load_path(path: &Path) -> Result<Config, ConfigError> {
     let mut stack = Vec::new();
     let mut visiting = HashSet::new();
     let value = load_value(path, 0, &mut stack, &mut visiting)?;
-    let raw = toml::to_string(&value).map_err(|e| ConfigError::Parse(e.to_string()))?;
-    Config::parse_toml(&raw)
+    // Interpolate and deserialize the merged include tree directly from the
+    // `toml::Value`, avoiding a re-serialize round-trip (and its ser error).
+    Config::from_value(value)
 }
 
 fn load_value(
@@ -116,31 +117,28 @@ fn load_value(
 ) -> Result<Value, ConfigError> {
     if depth > MAX_INCLUDE_DEPTH {
         return Err(ConfigError::IncludeDepth {
-            path: path.display().to_string(),
+            path: path.to_owned(),
             max: MAX_INCLUDE_DEPTH,
         });
     }
 
     let canonical = canonicalize_for_cycle(path);
     if !visiting.insert(canonical.clone()) {
-        let chain = stack
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join(" -> ");
         return Err(ConfigError::IncludeCycle {
-            path: canonical.display().to_string(),
-            chain,
+            path: canonical,
+            chain: stack.clone(),
         });
     }
     stack.push(canonical.clone());
 
     let raw = fs::read_to_string(path).map_err(|source| ConfigError::Read {
-        path: path.display().to_string(),
+        path: path.to_owned(),
         source,
     })?;
-    let mut doc: Value =
-        toml::from_str(&raw).map_err(|e| ConfigError::Parse(format!("{}: {e}", path.display())))?;
+    let mut doc: Value = toml::from_str(&raw).map_err(|source| ConfigError::Parse {
+        path: Some(path.to_owned()),
+        source: Box::new(source),
+    })?;
 
     let includes = take_includes(&mut doc)?;
     let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -195,7 +193,7 @@ fn resolve_include(base_dir: &Path, name: &str) -> Result<PathBuf, ConfigError> 
     };
     if !resolved.exists() {
         return Err(ConfigError::Read {
-            path: resolved.display().to_string(),
+            path: resolved.clone(),
             source: std::io::Error::new(std::io::ErrorKind::NotFound, "include not found"),
         });
     }
