@@ -2,10 +2,10 @@
 //!
 //! [`GuardedResolver`] implements reqwest's [`Resolve`] trait, so it runs at
 //! connect time on every hop. It resolves a host, then keeps only the addresses
-//! [`addr_allowed_for_host`] permits and hands those to reqwest. It filters rather than
-//! rejecting on the first blocked answer, so a host that returns one public and
-//! one private address is still reachable at its public address, while a host
-//! that returns only blocked addresses fails with
+//! [`addr_allowed_for_host`] permits and hands those to reqwest. It filters
+//! rather than rejecting on the first blocked answer, so a host that returns one
+//! public and one private address is still reachable at its public address,
+//! while a host that returns only blocked addresses fails with
 //! [`FetchError::NoAllowedAddress`]. Because it re-resolves on every call and
 //! caches no verdict, a DNS-rebinding answer is caught on the hop that returns
 //! it.
@@ -13,6 +13,7 @@
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 
@@ -24,14 +25,15 @@ use crate::error::FetchError;
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// The future a [`Lookup`] returns: resolved addresses or an I/O error.
-type LookupFuture = Pin<Box<dyn Future<Output = std::io::Result<Vec<SocketAddr>>> + Send>>;
+pub(crate) type LookupFuture =
+    Pin<Box<dyn Future<Output = std::io::Result<Vec<SocketAddr>>> + Send>>;
 
 /// Resolves a host name to a set of socket addresses.
 ///
 /// This is the seam the [`GuardedResolver`] filters. The production
 /// implementation is [`SystemLookup`]; tests substitute a stub so the filtering
 /// and no-caching behavior can be checked without real DNS.
-pub trait Lookup: Send + Sync + 'static {
+pub(crate) trait Lookup: Send + Sync + 'static {
     /// Resolves `host` to zero or more socket addresses.
     ///
     /// The port carried by each address is irrelevant: reqwest overrides it with
@@ -41,7 +43,7 @@ pub trait Lookup: Send + Sync + 'static {
 
 /// The production [`Lookup`], backed by [`tokio::net::lookup_host`].
 #[derive(Debug, Clone, Copy, Default)]
-pub struct SystemLookup;
+pub(crate) struct SystemLookup;
 
 impl Lookup for SystemLookup {
     fn lookup(&self, host: String) -> LookupFuture {
@@ -55,19 +57,20 @@ impl Lookup for SystemLookup {
 /// A guarded DNS resolver that filters answers through [`addr_allowed_for_host`].
 ///
 /// Construct the production resolver with [`GuardedResolver::system`], or wrap
-/// any [`Lookup`] with [`GuardedResolver::new`].
+/// any [`Lookup`] with [`GuardedResolver::new`]. The policy is held behind an
+/// [`Arc`] so each resolving future clones only a pointer, not the whole config.
 #[derive(Debug, Clone)]
-pub struct GuardedResolver<L = SystemLookup> {
+pub(crate) struct GuardedResolver<L = SystemLookup> {
     /// The underlying host-to-address lookup.
     inner: L,
     /// The address policy applied to each resolved address.
-    config: FetchConfig,
+    config: Arc<FetchConfig>,
 }
 
 impl GuardedResolver<SystemLookup> {
     /// Builds a guarded resolver over the system resolver.
     #[must_use]
-    pub fn system(config: FetchConfig) -> GuardedResolver<SystemLookup> {
+    pub(crate) fn system(config: Arc<FetchConfig>) -> GuardedResolver<SystemLookup> {
         GuardedResolver {
             inner: SystemLookup,
             config,
@@ -77,8 +80,11 @@ impl GuardedResolver<SystemLookup> {
 
 impl<L: Lookup> GuardedResolver<L> {
     /// Builds a guarded resolver over `inner` with the address policy `config`.
+    ///
+    /// The custom-lookup form is an internal test seam.
+    #[cfg(test)]
     #[must_use]
-    pub fn new(inner: L, config: FetchConfig) -> GuardedResolver<L> {
+    pub(crate) fn new(inner: L, config: Arc<FetchConfig>) -> GuardedResolver<L> {
         GuardedResolver { inner, config }
     }
 
@@ -122,12 +128,12 @@ impl<L: Lookup> Resolve for GuardedResolver<L> {
     fn resolve(&self, name: Name) -> Resolving {
         let host = name.as_str().to_owned();
         let fut = self.inner.lookup(host.clone());
-        let config = self.config.clone();
+        let config = Arc::clone(&self.config);
         Box::pin(async move {
             let addrs = fut.await.map_err(|source| -> BoxError {
                 Box::new(FetchError::Dns {
                     host: host.clone(),
-                    message: source.to_string(),
+                    source,
                 })
             })?;
             let allowed = GuardedResolver::<L>::filter(&host, addrs, &config)
@@ -142,13 +148,20 @@ impl<L: Lookup> Resolve for GuardedResolver<L> {
 mod tests {
     use std::collections::VecDeque;
     use std::net::SocketAddr;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use reqwest::dns::{Name, Resolve};
 
-    use super::{GuardedResolver, Lookup, LookupFuture};
+    use super::{GuardedResolver, Lookup, LookupFuture, SystemLookup};
     use crate::config::FetchConfig;
     use crate::error::FetchError;
+
+    /// The exported resolver types must stay `Send + Sync` for reqwest.
+    const _: fn() = || {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<GuardedResolver<SystemLookup>>();
+        assert_send_sync::<SystemLookup>();
+    };
 
     /// A stub [`Lookup`] that hands back queued answers, one per call.
     struct StubLookup {
@@ -185,6 +198,11 @@ mod tests {
         host.parse().expect("test host must be a valid dns name")
     }
 
+    /// Wraps `config` in an [`Arc`] for a [`GuardedResolver`].
+    fn shared(config: FetchConfig) -> Arc<FetchConfig> {
+        Arc::new(config)
+    }
+
     /// Resolves `resolver` for `host`, returning the address list or the error.
     async fn resolve_once<L: Lookup>(
         resolver: &GuardedResolver<L>,
@@ -197,14 +215,13 @@ mod tests {
     #[tokio::test]
     async fn public_then_loopback_succeeds_then_fails_no_caching() {
         let stub = StubLookup::new([vec![sa("93.184.216.34:0")], vec![sa("127.0.0.1:0")]]);
-        let resolver = GuardedResolver::new(stub, FetchConfig::default());
+        let resolver = GuardedResolver::new(stub, shared(FetchConfig::default()));
 
         let first = resolve_once(&resolver, "example.com")
             .await
             .expect("the public answer must resolve");
         assert_eq!(first, vec![sa("93.184.216.34:0")]);
 
-        // A second call re-resolves (no cached verdict) and now sees loopback.
         let err = resolve_once(&resolver, "example.com")
             .await
             .expect_err("the loopback answer must be refused on the second call");
@@ -218,7 +235,7 @@ mod tests {
     #[tokio::test]
     async fn multi_answer_yields_only_the_public_address() {
         let stub = StubLookup::new([vec![sa("93.184.216.34:0"), sa("127.0.0.1:0")]]);
-        let resolver = GuardedResolver::new(stub, FetchConfig::default());
+        let resolver = GuardedResolver::new(stub, shared(FetchConfig::default()));
 
         let addrs = resolve_once(&resolver, "example.com")
             .await
@@ -233,7 +250,7 @@ mod tests {
     #[tokio::test]
     async fn only_private_fails_with_no_allowed_address() {
         let stub = StubLookup::new([vec![sa("10.0.0.5:0"), sa("127.0.0.1:0")]]);
-        let resolver = GuardedResolver::new(stub, FetchConfig::default());
+        let resolver = GuardedResolver::new(stub, shared(FetchConfig::default()));
 
         let err = resolve_once(&resolver, "internal.example")
             .await
@@ -248,12 +265,12 @@ mod tests {
 
     #[tokio::test]
     async fn allow_exact_lets_the_whitelisted_address_through() {
-        let cfg = FetchConfig {
-            allow_exact: vec![("localhost".to_string(), "127.0.0.1".parse().expect("ip"))],
-            ..FetchConfig::default()
-        };
+        let cfg = FetchConfig::builder()
+            .allow_host_address("localhost", "127.0.0.1".parse().expect("ip"))
+            .build()
+            .expect("valid config");
         let stub = StubLookup::new([vec![sa("127.0.0.1:0")]]);
-        let resolver = GuardedResolver::new(stub, cfg);
+        let resolver = GuardedResolver::new(stub, shared(cfg));
 
         let addrs = resolve_once(&resolver, "localhost")
             .await
@@ -263,13 +280,12 @@ mod tests {
 
     #[tokio::test]
     async fn allow_exact_refuses_a_different_host_for_the_same_address() {
-        let cfg = FetchConfig {
-            allow_exact: vec![("localhost".to_string(), "127.0.0.1".parse().expect("ip"))],
-            ..FetchConfig::default()
-        };
-        // A rebinding answer: evil.com resolves to the whitelisted loopback.
+        let cfg = FetchConfig::builder()
+            .allow_host_address("localhost", "127.0.0.1".parse().expect("ip"))
+            .build()
+            .expect("valid config");
         let stub = StubLookup::new([vec![sa("127.0.0.1:0")]]);
-        let resolver = GuardedResolver::new(stub, cfg);
+        let resolver = GuardedResolver::new(stub, shared(cfg));
 
         let err = resolve_once(&resolver, "evil.com")
             .await
