@@ -10,10 +10,46 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use serde_json::Value;
+use serde::Deserialize;
 
 use super::{API_KEY_REDACTION, AttemptIdentity, CAPTURE_LIMIT, LOOPBACK, LaunchOptions, Result};
+use crate::http_util::MAX_JSON_BODY;
 use crate::local::error::LocalError;
+
+/// A narrow view of the `llama-server` `/v1/models` readiness response.
+///
+/// Deserializing into this instead of a free-form `serde_json::Value` keeps the
+/// readiness check from allocating an arbitrary document (SERVER-003); it is fed
+/// bytes that were already capped by [`read_blocking_capped`].
+#[derive(Deserialize)]
+struct ReadinessModels {
+    #[serde(default)]
+    data: Vec<ReadinessModel>,
+}
+
+#[derive(Deserialize)]
+struct ReadinessModel {
+    id: String,
+}
+
+/// Reads at most `cap` bytes from a blocking response body.
+///
+/// `reqwest::blocking::Response` is a [`Read`], so `take(cap)` bounds the read; a
+/// stalled or oversized readiness body can never force an unbounded allocation.
+fn read_blocking_capped(response: reqwest::blocking::Response, cap: usize) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    let _ = response.take(cap as u64).read_to_end(&mut buffer);
+    buffer
+}
+
+/// Whether the capped readiness body lists `model_alias` under `data[].id`.
+///
+/// Pure and total: a body that fails to parse (including one truncated at the
+/// byte cap) yields `false`, so readiness is simply not yet confirmed.
+fn readiness_lists_model(body: &[u8], model_alias: &str) -> bool {
+    serde_json::from_slice::<ReadinessModels>(body)
+        .is_ok_and(|parsed| parsed.data.iter().any(|model| model.id == model_alias))
+}
 
 #[derive(Debug)]
 pub(super) struct BoundedCapture {
@@ -118,16 +154,8 @@ pub(super) fn readiness_belongs_to(
     if !models.status().is_success() {
         return false;
     }
-    let Ok(body) = models.json::<Value>() else {
-        return false;
-    };
-    body.get("data")
-        .and_then(Value::as_array)
-        .is_some_and(|models| {
-            models
-                .iter()
-                .any(|model| model.get("id").and_then(Value::as_str) == Some(model_alias))
-        })
+    let body = read_blocking_capped(models, MAX_JSON_BODY);
+    readiness_lists_model(&body, model_alias)
 }
 
 /// Builds the full `llama-server` argument vector for one launch attempt.
@@ -237,4 +265,23 @@ where
             stream: name,
             source,
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::readiness_lists_model;
+
+    #[test]
+    fn readiness_lists_model_matches_alias_and_tolerates_junk() {
+        let body = br#"{"object":"list","data":[{"id":"promptforge-local-abc"}]}"#;
+        assert!(readiness_lists_model(body, "promptforge-local-abc"));
+        assert!(!readiness_lists_model(body, "some-other-alias"));
+        // Missing `data`, empty body, and truncated JSON all read as not-ready.
+        assert!(!readiness_lists_model(br#"{"object":"list"}"#, "x"));
+        assert!(!readiness_lists_model(b"", "x"));
+        assert!(!readiness_lists_model(
+            br#"{"data":[{"id":"promptforge"#,
+            "x"
+        ));
+    }
 }
