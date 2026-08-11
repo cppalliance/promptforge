@@ -38,6 +38,32 @@ struct BraveResult {
     extra_snippets: Vec<String>,
 }
 
+impl From<BraveResult> for SearchResult {
+    fn from(result: BraveResult) -> SearchResult {
+        SearchResult {
+            title: result.title,
+            url: result.url,
+            description: result.description,
+            age: result.age,
+            site_name: None,
+            extra_snippets: result.extra_snippets,
+        }
+    }
+}
+
+/// Maps a decoded Brave envelope to the executor-facing result list.
+///
+/// Pure and deterministic, so the mapping is unit-tested without a live call.
+fn map_brave_response(parsed: BraveResponse) -> Vec<SearchResult> {
+    parsed
+        .web
+        .map(|web| web.results)
+        .unwrap_or_default()
+        .into_iter()
+        .map(SearchResult::from)
+        .collect()
+}
+
 /// Parameters for a Brave Search API request.
 #[derive(Debug, Clone)]
 pub(crate) struct BraveSearchParams<'a> {
@@ -76,24 +102,31 @@ pub(crate) fn prefix_web_search_upstream(err: GatewayError) -> GatewayError {
                 format!("web_search: {body}")
             },
         },
-        GatewayError::UpstreamTransport(source) => GatewayError::UpstreamTransport(Box::new(
-            WebSearchUpstream(format!("web_search: {source}")),
-        )),
+        GatewayError::UpstreamTransport(source) => {
+            GatewayError::UpstreamTransport(Box::new(WebSearchUpstream { source }))
+        }
         other => other,
     }
 }
 
-/// Transport error wrapper so the source chain carries the `web_search: ` prefix.
+/// Transport error context wrapper that preserves the underlying cause via
+/// `source()` (TOOLS-008) rather than flattening it into a string.
 #[derive(Debug)]
-struct WebSearchUpstream(String);
+struct WebSearchUpstream {
+    source: Box<dyn std::error::Error + Send + Sync>,
+}
 
 impl std::fmt::Display for WebSearchUpstream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str("web_search upstream request failed")
     }
 }
 
-impl std::error::Error for WebSearchUpstream {}
+impl std::error::Error for WebSearchUpstream {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
 
 /// Build Brave `/web/search` query pairs from [`BraveSearchParams`].
 ///
@@ -156,25 +189,48 @@ pub(crate) async fn brave_search(
         }));
     }
 
-    let parsed: BraveResponse = response
-        .json()
+    // Bounded success body read with explicit result handling (TOOLS-009): a
+    // transport failure mid-body is surfaced, then the capped bytes are decoded.
+    let bytes = crate::http_util::read_bytes_capped(response, crate::http_util::MAX_JSON_BODY)
         .await
         .map_err(|e| prefix_web_search_upstream(GatewayError::upstream_transport(e)))?;
+    let parsed: BraveResponse = serde_json::from_slice(&bytes)
+        .map_err(|e| prefix_web_search_upstream(GatewayError::UpstreamTransport(Box::new(e))))?;
 
-    let results = parsed
-        .web
-        .map(|web| web.results)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|r| SearchResult {
-            title: r.title,
-            url: r.url,
-            description: r.description,
-            age: r.age,
-            site_name: None,
-            extra_snippets: r.extra_snippets,
-        })
-        .collect();
+    Ok(map_brave_response(parsed))
+}
 
-    Ok(results)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_brave_response_maps_web_results() {
+        let json = serde_json::json!({
+            "web": { "results": [
+                {
+                    "title": "T",
+                    "url": "https://a.com/1",
+                    "description": "d",
+                    "age": "1 day ago",
+                    "extra_snippets": ["s"]
+                }
+            ]}
+        });
+        let parsed: BraveResponse = serde_json::from_value(json).expect("parse");
+        let mapped = map_brave_response(parsed);
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0].title, "T");
+        assert_eq!(mapped[0].url, "https://a.com/1");
+        assert_eq!(mapped[0].age.as_deref(), Some("1 day ago"));
+        assert!(mapped[0].site_name.is_none());
+        assert_eq!(mapped[0].extra_snippets, vec!["s".to_owned()]);
+    }
+
+    #[test]
+    fn map_brave_response_is_empty_without_web_object() {
+        let parsed: BraveResponse =
+            serde_json::from_value(serde_json::json!({})).expect("parse empty");
+        assert!(map_brave_response(parsed).is_empty());
+    }
 }

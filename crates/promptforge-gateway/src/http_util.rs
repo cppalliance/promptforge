@@ -10,6 +10,9 @@ use std::time::Duration;
 /// Maximum bytes read from a non-success (error) body, kept for diagnostics.
 pub(crate) const MAX_ERROR_BODY: usize = 64 * 1024;
 
+/// Maximum bytes read from a success JSON body before decoding.
+pub(crate) const MAX_JSON_BODY: usize = 4 * 1024 * 1024;
+
 /// Connect timeout for outbound calls.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -49,4 +52,35 @@ pub(crate) async fn read_body_capped(response: reqwest::Response, cap: usize) ->
         }
     }
     String::from_utf8_lossy(&buffer).into_owned()
+}
+
+/// Read at most `cap` bytes from `response`, propagating a transport error if a
+/// chunk read fails.
+///
+/// Unlike [`read_body_capped`], this surfaces the read result explicitly so a
+/// caller can distinguish a genuine transport failure from a short body before
+/// deserializing.
+///
+/// # Errors
+/// Returns the underlying [`reqwest::Error`] when streaming a chunk fails.
+pub(crate) async fn read_bytes_capped(
+    response: reqwest::Response,
+    cap: usize,
+) -> Result<Vec<u8>, reqwest::Error> {
+    let mut response = response;
+    let mut buffer: Vec<u8> = Vec::new();
+    while buffer.len() < cap {
+        match response.chunk().await? {
+            Some(chunk) => {
+                let remaining = cap - buffer.len();
+                let take = remaining.min(chunk.len());
+                buffer.extend_from_slice(&chunk[..take]);
+                if take < chunk.len() {
+                    break;
+                }
+            }
+            None => break,
+        }
+    }
+    Ok(buffer)
 }

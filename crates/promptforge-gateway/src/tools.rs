@@ -113,7 +113,7 @@ pub(crate) struct WebSearchRequest {
 }
 
 /// The response body for `POST /v1/tools/web_search`.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct WebSearchResponse {
     /// The trimmed request query that produced these results.
     pub query: String,
@@ -122,7 +122,7 @@ pub(crate) struct WebSearchResponse {
 }
 
 /// One search result, trimmed to the fields the executor needs.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct SearchResult {
     /// The result's title.
     pub title: String,
@@ -141,21 +141,45 @@ pub(crate) struct SearchResult {
     pub extra_snippets: Vec<String>,
 }
 
-/// Trim ASCII whitespace from `query` and reject empty values.
+/// Maximum query length kept, in Unicode scalar values (TOOLS-004).
+const MAX_QUERY_CHARS: usize = 512;
+
+/// Trim Unicode whitespace from `query`, reject empty values, and cap length.
 ///
 /// # Errors
 /// Returns [`GatewayError::MalformedRequest`] with
 /// `"web_search: empty query"` when the trimmed query is empty.
 fn trim_web_search_query(query: &str) -> Result<String, GatewayError> {
-    let trimmed = query
-        .trim_matches(|c: char| c.is_ascii_whitespace())
-        .to_string();
+    // Unicode-aware trim (TOOLS-004), not just ASCII whitespace.
+    let trimmed = query.trim();
     if trimmed.is_empty() {
         return Err(GatewayError::MalformedRequest(
             "web_search: empty query".to_string(),
         ));
     }
-    Ok(trimmed)
+    // Cap by scalar count so an oversized query cannot bloat the provider call.
+    Ok(trimmed.chars().take(MAX_QUERY_CHARS).collect())
+}
+
+/// Canonicalize a caller-supplied domain filter to a bare lowercase hostname.
+///
+/// Accepts a full URL, a `host/path`, or a bare host; strips scheme, path, and
+/// port, lowercases, and drops entries that yield no host (WSP-006).
+fn canonicalize_domains(domains: &[String]) -> Vec<String> {
+    domains
+        .iter()
+        .filter_map(|raw| {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                return None;
+            }
+            if raw.contains("://") || raw.contains('/') || raw.contains(':') {
+                crate::web_search_process::host_from_url(raw)
+            } else {
+                Some(raw.to_ascii_lowercase())
+            }
+        })
+        .collect()
 }
 
 /// Clamp the requested count into `1..=max_count`.
@@ -227,11 +251,13 @@ pub(crate) async fn web_search(
         &params,
     )
     .await?;
+    let include_domains = canonicalize_domains(&request.include_domains);
+    let exclude_domains = canonicalize_domains(&request.exclude_domains);
     let results = post_process_results(
         mapped,
         web_search.settings.strip_tracking,
-        &request.include_domains,
-        &request.exclude_domains,
+        &include_domains,
+        &exclude_domains,
         web_search.settings.max_per_host,
         count,
     );

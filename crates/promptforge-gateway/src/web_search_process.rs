@@ -14,11 +14,20 @@ pub(crate) const TITLE_MAX_CHARS: usize = 512;
 pub(crate) const DESCRIPTION_MAX_CHARS: usize = 4096;
 /// Max characters kept for a result URL after tracking strip.
 pub(crate) const URL_MAX_CHARS: usize = 2048;
+/// Max characters kept for a single extra snippet after sanitisation (WSP-001).
+pub(crate) const SNIPPET_MAX_CHARS: usize = 1024;
+/// Max number of extra snippets kept per result (WSP-001).
+pub(crate) const MAX_EXTRA_SNIPPETS: usize = 8;
 
 /// Sanitize free text: drop most controls, collapse whitespace, trim, decode a
 /// fixed entity set, then cap by Unicode scalar count.
 #[must_use]
 pub(crate) fn sanitize_text(text: &str, max_chars: usize) -> String {
+    // Bound the work up front (WSP-002): entity decoding and the final cap can
+    // only shrink text, so processing more than a small multiple of `max_chars`
+    // scalars is wasted effort on a hostile oversized input.
+    let bound = max_chars.saturating_mul(8).max(max_chars);
+    let text: String = text.chars().take(bound).collect();
     let mut cleaned = String::with_capacity(text.len());
     for c in text.chars() {
         if c == '\n' || c == '\t' {
@@ -75,6 +84,19 @@ pub(crate) fn strip_tracking_params(url: &str) -> String {
 /// lowercase host text, or `None` when no host can be parsed.
 #[must_use]
 pub(crate) fn host_from_url(url: &str) -> Option<String> {
+    // Prefer a standards-compliant parse for well-formed URLs (TOOLS-014), then
+    // fall back to the lenient extractor for scheme-less or non-URL inputs
+    // (used by domain-filter canonicalization).
+    if let Ok(parsed) = url::Url::parse(url)
+        && let Some(host) = parsed.host_str()
+        && !host.is_empty()
+    {
+        return Some(host.to_ascii_lowercase());
+    }
+    host_from_url_lenient(url)
+}
+
+fn host_from_url_lenient(url: &str) -> Option<String> {
     let rest = match url.split_once("://") {
         Some((_, after)) => after,
         None => url.strip_prefix("//").unwrap_or(url),
@@ -206,13 +228,21 @@ pub(crate) fn post_process_results(
                 truncate_chars(&r.url, URL_MAX_CHARS)
             };
             let site_name = host_from_url(&url).map(|h| site_name_from_host(&h));
+            // Cap snippet count and per-snippet length, sanitising each (WSP-001).
+            let extra_snippets = r
+                .extra_snippets
+                .into_iter()
+                .take(MAX_EXTRA_SNIPPETS)
+                .map(|snippet| sanitize_text(&snippet, SNIPPET_MAX_CHARS))
+                .filter(|snippet| !snippet.is_empty())
+                .collect();
             SearchResult {
                 title,
                 url,
                 description,
                 age: r.age,
                 site_name,
-                extra_snippets: r.extra_snippets,
+                extra_snippets,
             }
         })
         .collect();
@@ -323,6 +353,35 @@ mod tests {
         assert_eq!(site_name_from_host("example.com"), "example.com");
         assert_eq!(host_from_url("not-a-url"), Some("not-a-url".to_string()));
         assert_eq!(host_from_url("https:///"), None);
+    }
+
+    #[test]
+    fn extra_snippets_are_capped_in_count_and_length() {
+        let mut result = hit("T", "https://a.com/1");
+        result.extra_snippets = (0..20).map(|i| format!("snippet {i}")).collect();
+        result
+            .extra_snippets
+            .push("x".repeat(SNIPPET_MAX_CHARS + 50));
+        let out = post_process_results(vec![result], false, &[], &[], 10, 10);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].extra_snippets.len() <= MAX_EXTRA_SNIPPETS);
+        for snippet in &out[0].extra_snippets {
+            assert!(snippet.chars().count() <= SNIPPET_MAX_CHARS);
+        }
+    }
+
+    #[test]
+    fn host_from_url_uses_real_parsing_then_lenient_fallback() {
+        // Well-formed URL: standards parse.
+        assert_eq!(
+            host_from_url("https://WWW.Example.COM:8443/x?a=b#f"),
+            Some("www.example.com".to_owned())
+        );
+        // Scheme-less host/path: lenient fallback still yields the host.
+        assert_eq!(
+            host_from_url("sub.example.com/path"),
+            Some("sub.example.com".to_owned())
+        );
     }
 
     #[test]
