@@ -287,6 +287,35 @@ fn interpolates_and_escapes() {
 }
 
 #[test]
+fn interpolation_ignores_comments_and_keys() {
+    // CFG-007: a `${VAR}` inside a comment is not interpolated, so an unset
+    // variable there must not fail the load. Raw-text interpolation would have
+    // tried to resolve it and errored.
+    let toml = r#"
+# a comment mentioning ${PROMPTFORGE_DEFINITELY_UNSET_VAR_XYZ}
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "a $$-priced model"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+"#;
+    let config = Config::from_toml_str(toml).expect("comment vars are not interpolated");
+    // `$$` in a string value still unescapes to a single `$`.
+    assert_eq!(config.models[0].description, "a $-priced model");
+}
+
+#[test]
 fn unresolved_variable_is_an_error() {
     let missing = "${PROMPTFORGE_DEFINITELY_UNSET_VAR_XYZ}";
     assert!(matches!(

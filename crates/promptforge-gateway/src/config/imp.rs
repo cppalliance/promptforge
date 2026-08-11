@@ -182,11 +182,18 @@ impl Config {
         Self::parse_toml(raw).map_err(crate::api_error::ConfigError::from)
     }
 
-    /// Interpolate, parse, and validate, returning the internal error type.
+    /// Parse, interpolate, and validate, returning the internal error type.
     pub(crate) fn parse_toml(raw: &str) -> Result<Config, ConfigError> {
-        let interpolated = interpolate(raw)?;
-        let raw: RawConfig =
-            toml::from_str(&interpolated).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        // Parse first, then interpolate only string *values*. Interpolating the
+        // raw text would expand `${VAR}` inside comments and keys, and an
+        // interpolated value containing a quote, backslash, or newline would
+        // corrupt the TOML structure on a second parse. (CFG-007)
+        let mut document: toml::Value =
+            toml::from_str(raw).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        interpolate_value(&mut document)?;
+        let raw: RawConfig = document
+            .try_into()
+            .map_err(|e| ConfigError::Parse(e.to_string()))?;
         let config = Config::from(raw);
         config.validate()?;
         Ok(config)
@@ -489,4 +496,27 @@ impl Config {
         }
         Ok(())
     }
+}
+
+/// Recursively interpolate `${VAR}` in every string leaf of a TOML value,
+/// leaving keys, comments (already stripped by the parser), and non-string
+/// scalars untouched. (CFG-007)
+fn interpolate_value(value: &mut toml::Value) -> Result<(), ConfigError> {
+    match value {
+        toml::Value::String(text) => {
+            *text = interpolate(text)?;
+        }
+        toml::Value::Array(items) => {
+            for item in items {
+                interpolate_value(item)?;
+            }
+        }
+        toml::Value::Table(table) => {
+            for (_, entry) in table.iter_mut() {
+                interpolate_value(entry)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
