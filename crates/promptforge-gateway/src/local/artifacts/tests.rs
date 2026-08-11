@@ -28,6 +28,67 @@ fn parse_expected_digest_normalizes_and_validates() {
     ));
 }
 
+#[test]
+fn source_cache_key_is_stable_and_distinguishes_urls() {
+    // ART-004: the same URL is stable; distinct URLs sharing a filename differ.
+    let a = source_cache_key("https://host-a.example/repo/model.gguf");
+    let a2 = source_cache_key("https://host-a.example/repo/model.gguf");
+    let b = source_cache_key("https://host-b.example/other/model.gguf");
+    assert_eq!(a, a2);
+    assert_ne!(a, b);
+    assert_eq!(a.len(), 16);
+    assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[test]
+fn validate_cache_path_rejects_escape() {
+    // ART-006/007: a path outside the cache root is refused.
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path().join("cache");
+    std::fs::create_dir(&root).expect("mkdir");
+    let escape = root.join("..").join("outside.bin");
+    assert!(matches!(
+        validate_cache_path(&root, &escape),
+        Err(LocalError::UnsafeCachePath { .. })
+    ));
+    assert!(validate_cache_path(&root, &root.join("models").join("ok.gguf")).is_ok());
+}
+
+#[test]
+fn safe_archive_path_rejects_traversal_and_absolute() {
+    assert!(!safe_archive_path(std::path::Path::new("../evil")));
+    assert!(!safe_archive_path(std::path::Path::new("/etc/passwd")));
+    assert!(!safe_archive_path(std::path::Path::new("a/../../b")));
+    assert!(safe_archive_path(std::path::Path::new("bin/llama-server")));
+}
+
+#[test]
+fn extract_zip_rejects_traversal_entry_and_cleans_up() {
+    use std::io::Write as _;
+    use zip::write::SimpleFileOptions;
+
+    let dir = TempDir::new().expect("tempdir");
+    let archive = dir.path().join("evil.zip");
+    // Build a zip whose single entry escapes the destination. `start_file`
+    // does not sanitize the name, so this exercises the extractor's own guard.
+    {
+        let file = std::fs::File::create(&archive).expect("create archive");
+        let mut writer = zip::ZipWriter::new(file);
+        writer
+            .start_file("../escape.txt", SimpleFileOptions::default())
+            .expect("start traversal entry");
+        writer.write_all(b"pwned").expect("write entry");
+        writer.finish().expect("finish zip");
+    }
+
+    let dest = dir.path().join("out");
+    std::fs::create_dir(&dest).expect("mkdir dest");
+    let result = extract_archive(&archive, &dest, ArchiveKind::Zip);
+    assert!(matches!(result, Err(LocalError::UnsafeArchiveEntry { .. })));
+    // The traversal target must never have been written outside the destination.
+    assert!(!dir.path().join("escape.txt").exists());
+}
+
 /// Test double that records set_len / inc / finish / abandon calls.
 struct RecordingProgress {
     total: Mutex<Option<u64>>,

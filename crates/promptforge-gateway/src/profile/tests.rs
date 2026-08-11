@@ -237,6 +237,7 @@ key = "t"
 name = "q"
 description = "base"
 source = "https://example.com/a.gguf"
+sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 context = 1024
 "#,
     );
@@ -250,6 +251,7 @@ include = ["base.toml"]
 name = "q"
 description = "child"
 source = "https://example.com/b.gguf"
+sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 context = 2048
 "#,
     );
@@ -345,6 +347,7 @@ concurrency = 3
 name = "gemma"
 description = "prose"
 source = "https://example.com/a.gguf"
+sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 context = 1024
 device = "local-gpu"
 lane = "generative"

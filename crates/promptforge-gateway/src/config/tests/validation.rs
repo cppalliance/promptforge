@@ -2,6 +2,26 @@ use super::super::*;
 use super::SAMPLE;
 
 #[test]
+fn rejects_remote_local_model_without_digest() {
+    // ART-002: a remote (https) local_model source must be pinned by sha256.
+    let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[[local_model]]
+name = "q"
+description = "unpinned remote"
+source = "https://example.com/model.gguf"
+context = 1024
+"#;
+    assert!(matches!(
+        Config::from_toml_str(toml),
+        Err(err) if err.kind() == crate::ConfigErrorKind::Validation
+    ));
+}
+
+#[test]
 fn rejects_duplicate_endpoint_names() {
     let toml = r#"
 [server]
@@ -283,7 +303,7 @@ key = "t"
 [[local_model]]
 name = "qwen-local"
 description = "A careful analysis model suited to structured reasoning and long-context review"
-source = "https://example.com/model.gguf"
+source = "/models/model.gguf"
 context = 65536
 thinking = "never"
 "#;
@@ -448,7 +468,7 @@ endpoints = ["anthropic"]
 [[local_model]]
 name = "q"
 description = "prose"
-source = "https://example.com/m.gguf"
+source = "/models/m.gguf"
 device = "local-gpu"
 lane = "generative"
 context = 4096

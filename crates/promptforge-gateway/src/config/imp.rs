@@ -476,6 +476,15 @@ impl Config {
                     local_model.name
                 )));
             }
+            // Remote artifacts must be pinned by digest (ART-002); a local
+            // filesystem source is operator-controlled and may be unpinned.
+            let is_remote = local_model.source.starts_with("https://");
+            if is_remote && local_model.sha256.is_none() {
+                return Err(ConfigError::Validation(format!(
+                    "local_model {} has a remote source and must set a sha256 pin",
+                    local_model.name
+                )));
+            }
             if local_model.context < 1 {
                 return Err(ConfigError::Validation(format!(
                     "local_model {} context must be at least 1",

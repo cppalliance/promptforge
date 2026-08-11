@@ -112,7 +112,10 @@ impl ArtifactStore {
     pub(crate) fn ensure_model(&self, source: &str, sha256: Option<&str>) -> Result<PathBuf> {
         if looks_like_url(source) {
             let name = filename_from_url(source)?;
-            let destination = self.cache_path(Path::new("models").join(&name))?;
+            // Key the cache slot by normalized source identity (ART-004) so two
+            // distinct URLs that share a filename cannot collide on one path.
+            let key = source_cache_key(source);
+            let destination = self.cache_path(Path::new("models").join(&key).join(&name))?;
             let asset = FileAsset {
                 name: &name,
                 url: source,
@@ -422,6 +425,16 @@ impl ArtifactStore {
 
 fn looks_like_url(source: &str) -> bool {
     source.starts_with("https://") || source.starts_with("http://")
+}
+
+/// A stable, filesystem-safe cache-slot key derived from the full source URL.
+///
+/// Two different URLs that share a filename map to different slots (ART-004),
+/// while the same URL always maps to the same slot so a cache hit is stable.
+fn source_cache_key(source: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(source.as_bytes());
+    hex_digest(hasher).chars().take(16).collect()
 }
 
 fn filename_from_url(url: &str) -> Result<String> {
