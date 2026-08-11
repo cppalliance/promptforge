@@ -4,316 +4,82 @@
 //! sections top to bottom (fall-through). `input` is the single raw argument
 //! string exposed to the prompt as `args`; it defaults to empty. The file must
 //! be a promptforge prompt - its frontmatter must declare a `promptforge:`
-//! version - or the CLI declines to run it.
+//! version - or the CLI declines to run it. Gateway credentials come only from
+//! `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY`.
+//!
+//! `main` is the process boundary: it parses arguments, installs the Ctrl-C
+//! signal, invokes the application runner, prints its output or error chain, and
+//! selects the exit status. All orchestration lives in [`app`].
 
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use clap::Parser;
 use promptforge_core::CancelHandle;
-use promptforge_core::client::GatewayClient;
-use promptforge_core::execute::{ResolutionContext, RunConfig};
-use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
+use promptforge_core::execute::RunError;
 use promptforge_core::observe::{NullObserver, Observer};
-use promptforge_core::store::StoreRef;
-use promptforge_core::{execute, parser::Prompt};
-use promptforge_tool_picker::{Config as PickerConfig, ToolPicker};
 
+use crate::app::{Cli, Command, RunRequest};
+
+mod app;
 mod tools;
 
-/// Entry point. Dispatches subcommands and maps errors to a non-zero exit.
+/// Parses arguments, runs the requested command, and maps its result to a
+/// process exit status. `clap` owns usage failures and their status; this
+/// returns 130 for a cancelled run and 1 for any other failure.
 #[tokio::main]
 async fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let cancel = install_cancel();
+
+    match cli.command {
+        Command::Run(args) => {
+            let observer: Arc<dyn Observer> = Arc::new(NullObserver::default());
+            let request = RunRequest {
+                file: &args.file,
+                input: args.input.as_deref().unwrap_or_default(),
+                observer,
+                cancel,
+            };
+            match app::run(request).await {
+                Ok(output) => {
+                    println!("{output}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("error: {error:?}");
+                    ExitCode::from(exit_code(&error))
+                }
+            }
+        }
+    }
+}
+
+/// Installs a Ctrl-C handler that trips the returned cancellation handle once.
+///
+/// A failure to register the signal listener is reported to stderr rather than
+/// discarded: the run simply stays non-cancellable in that case.
+fn install_cancel() -> CancelHandle {
     let cancel = CancelHandle::new();
     let signal_cancel = cancel.clone();
     tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            signal_cancel.cancel();
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => signal_cancel.cancel(),
+            Err(error) => {
+                eprintln!("warning: cannot listen for Ctrl-C, run is not cancellable: {error}");
+            }
         }
     });
-
-    let mut args = std::env::args().skip(1);
-    let command = args.next();
-    match command.as_deref() {
-        Some("run") => {
-            let Some(path) = args.next() else {
-                eprintln!("usage: promptforge run <file.md> [input]");
-                return ExitCode::FAILURE;
-            };
-            let input = args.next().unwrap_or_default();
-            let observer: Arc<dyn Observer> = Arc::new(NullObserver::default());
-            run(&path, &input, observer, cancel).await
-        }
-        Some(other) => {
-            eprintln!("unknown command: {other}\nusage: promptforge run <file.md> [input]");
-            ExitCode::FAILURE
-        }
-        None => {
-            eprintln!("usage: promptforge run <file.md> [input]");
-            ExitCode::FAILURE
-        }
-    }
+    cancel
 }
 
-/// Parse the file, execute its sections with `input` as `args`, and print the
-/// result.
-async fn run(
-    path: &str,
-    input: &str,
-    observer: Arc<dyn Observer>,
-    cancel: CancelHandle,
-) -> ExitCode {
-    let gateway_key = std::env::var("PROMPTFORGE_GATEWAY_KEY").ok();
-    let gateway_url = std::env::var("PROMPTFORGE_GATEWAY_URL").ok();
-    run_with_gateway(
-        path,
-        input,
-        observer,
-        cancel,
-        Gateway::Environment {
-            url: gateway_url.as_deref(),
-            key: gateway_key.as_deref(),
-        },
-    )
-    .await
-}
-
-enum Gateway<'a> {
-    Environment {
-        url: Option<&'a str>,
-        key: Option<&'a str>,
-    },
-    #[cfg(test)]
-    Disabled,
-}
-
-async fn run_with_gateway(
-    path: &str,
-    input: &str,
-    observer: Arc<dyn Observer>,
-    cancel: CancelHandle,
-    gateway: Gateway<'_>,
-) -> ExitCode {
-    let execution = format!("cli-{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..));
-    let source = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: cannot read {path}: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    if promptforge_core::promptforge_version(&source).is_none() {
-        eprintln!(
-            "error: {path} is not a promptforge prompt: its frontmatter declares no `promptforge:` version. promptforge runs only promptforge prompts."
-        );
-        return ExitCode::FAILURE;
-    }
-
-    let prompt = match Prompt::parse(&source, &execution, observer.as_ref()) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    match gateway {
-        Gateway::Environment { url, key } => {
-            let base_url = match url {
-                Some(url) => url,
-                None if key.is_some() => {
-                    eprintln!("error: missing environment variable PROMPTFORGE_GATEWAY_URL");
-                    return ExitCode::FAILURE;
-                }
-                None => "",
-            };
-            let available = match tools::available_tools(base_url, key) {
-                Ok(available) => available,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            let picker =
-                match ToolPicker::build(available.catalog().clone(), PickerConfig::default()) {
-                    Ok(picker) => picker,
-                    Err(e) => {
-                        eprintln!("error: {e}");
-                        return ExitCode::FAILURE;
-                    }
-                };
-            let models = match key {
-                Some(key) => match fetch_model_catalog(base_url, key).await {
-                    Ok(catalog) => catalog,
-                    Err(error) => {
-                        eprintln!("error: fetch model catalog: {error}");
-                        return ExitCode::FAILURE;
-                    }
-                },
-                None => ModelCatalog::empty(),
-            };
-            execute_prompt(
-                &prompt,
-                input,
-                observer,
-                cancel,
-                &execution,
-                &picker,
-                &models,
-                available.tools(),
-                None,
-            )
-            .await
-        }
-        #[cfg(test)]
-        Gateway::Disabled => {
-            let picker = match ToolPicker::build(
-                promptforge_tool_picker::Catalog::default(),
-                PickerConfig::default(),
-            ) {
-                Ok(picker) => picker,
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            execute_prompt(
-                &prompt,
-                input,
-                observer,
-                cancel,
-                &execution,
-                &picker,
-                &ModelCatalog::empty(),
-                &[],
-                Some(GatewayClient::disabled()),
-            )
-            .await
-        }
-    }
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the CLI passes one explicit execution environment to the core runner"
-)]
-async fn execute_prompt(
-    prompt: &Prompt,
-    input: &str,
-    observer: Arc<dyn Observer>,
-    cancel: CancelHandle,
-    execution: &str,
-    picker: &ToolPicker,
-    models: &ModelCatalog,
-    tools: &[Arc<dyn promptforge_core::tools::Tool>],
-    client: Option<GatewayClient>,
-) -> ExitCode {
-    let store = StoreRef::memory();
-
-    let mut config = RunConfig::new(execution).observer(observer).cancel(cancel);
-    if let Some(client) = client {
-        config = config.client(client);
-    }
-
-    match execute::run(
-        prompt,
-        input,
-        ResolutionContext::new(picker, models),
-        tools,
-        &store,
-        config,
-    )
-    .await
-    {
-        Ok(result) => {
-            println!("{result}");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("error: {e}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use promptforge_core::CancelHandle;
-    use promptforge_core::observe::{Observation, Observer};
-
-    use super::{Gateway, run_with_gateway};
-
-    #[derive(Default)]
-    struct Recorder(Mutex<Vec<(String, String, String)>>);
-
-    impl Observer for Recorder {
-        fn observe(&self, execution: &str, section: &str, event: Observation) {
-            self.0
-                .lock()
-                .expect("the CLI recorder mutex must not be poisoned")
-                .push((execution.to_owned(), section.to_owned(), event.to_string()));
-        }
-    }
-
-    #[tokio::test]
-    async fn injected_no_gateway_run_is_hermetic_and_reuses_one_execution_id() {
-        let path = std::env::temp_dir().join(format!(
-            "promptforge-cli-execution-{:016x}.md",
-            fastrand::u64(..)
-        ));
-        std::fs::write(
-            &path,
-            "---\nname: lifecycle\ndescription: CLI lifecycle fixture\npromptforge: 1\n---\n\n\
-             # Lifecycle\n\n## Run\n\n```lua\nreturn 'done'\n```\n",
-        )
-        .expect("write the CLI lifecycle fixture");
-        let recorder = Arc::new(Recorder::default());
-
-        let status = run_with_gateway(
-            path.to_str().expect("the fixture path must be UTF-8"),
-            "",
-            Arc::clone(&recorder) as Arc<dyn Observer>,
-            CancelHandle::new(),
-            Gateway::Disabled,
-        )
-        .await;
-        std::fs::remove_file(&path).expect("remove the CLI lifecycle fixture");
-
-        assert_eq!(status, std::process::ExitCode::SUCCESS);
-        let records = recorder
-            .0
-            .lock()
-            .expect("the CLI recorder mutex must not be poisoned");
-        let execution = records
-            .first()
-            .map(|(execution, _, _)| execution.as_str())
-            .expect("the CLI run must emit observations");
-        assert!(
-            execution.starts_with("cli-") && execution.len() == 36,
-            "the CLI must generate its documented execution id: {execution}"
-        );
-        assert!(
-            records
-                .iter()
-                .all(|(record_execution, _, _)| record_execution == execution),
-            "parse and execution must reuse one id: {records:#?}"
-        );
-        let details = records
-            .iter()
-            .map(|(_, _, detail)| detail.clone())
-            .collect::<Vec<_>>();
-        for expected in [
-            Observation::ParseStarted,
-            Observation::ParseSucceeded,
-            Observation::RunStarted,
-            Observation::RunSucceeded,
-        ] {
-            assert!(
-                details.contains(&expected.to_string()),
-                "the CLI lifecycle must include {expected:?}: {records:#?}"
-            );
-        }
-    }
+/// Maps a run failure to a process exit code: 130 for a cooperative cancellation
+/// (the conventional interrupted code), 1 for every other failure.
+fn exit_code(error: &anyhow::Error) -> u8 {
+    let cancelled = error.chain().any(|cause| {
+        cause
+            .downcast_ref::<RunError>()
+            .is_some_and(RunError::is_cancelled)
+    });
+    if cancelled { 130 } else { 1 }
 }
