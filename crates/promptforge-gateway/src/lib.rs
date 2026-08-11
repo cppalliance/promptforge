@@ -16,16 +16,26 @@
 //! `GET /health`. In-process llama.cpp FFI, endpoint pinning, model packs,
 //! streaming, and the Anthropic protocol shim are deferred.
 
-pub mod config;
-pub mod error;
-pub mod local;
-pub mod profile;
-pub mod queue;
-pub mod routing;
-pub mod tools;
-pub mod upstream;
-pub mod web_search_process;
-pub mod wire;
+mod api_error;
+mod config;
+mod error;
+mod http_util;
+mod local;
+mod profile;
+mod queue;
+mod routing;
+mod runner;
+mod tools;
+mod upstream;
+mod web_search_process;
+mod wire;
+
+pub use crate::api_error::{
+    ConfigError, ConfigErrorKind, ServeError, StartupError, StartupErrorKind,
+};
+pub use crate::config::{Config, Secret};
+pub use crate::profile::{ProfileName, ProfileNameError, default_profiles_dir};
+pub use crate::runner::{ConfigSource, Gateway, ProfilesContext, ServeOptions, run};
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -39,7 +49,7 @@ use axum::{Router, response::IntoResponse};
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
-use crate::config::{Secret, WebSearchConfig};
+use crate::config::WebSearchConfig;
 use crate::error::GatewayError;
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
@@ -59,27 +69,24 @@ struct LiveState {
 
 /// Directory used by admin profile routes.
 #[derive(Debug)]
-struct ProfilesContext {
+struct AdminProfiles {
     dir: PathBuf,
 }
 
 /// Shared handler state: live routing/key/local runtime, and optional profiles dir.
 #[derive(Debug, Clone)]
-pub struct AppState {
+pub(crate) struct AppState {
     live: Arc<RwLock<LiveState>>,
-    profiles: Option<Arc<ProfilesContext>>,
+    profiles: Option<Arc<AdminProfiles>>,
+    /// Serializes profile switches so two concurrent switches cannot interleave
+    /// their reads and writes of the live state.
+    switch: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
-    /// Build handler state from a routing table and the server key.
+    /// Build full runtime state for `Gateway` and integration tests.
     #[must_use]
-    pub fn new(routing: Arc<Routing>, key: Secret) -> AppState {
-        AppState::from_parts(routing, key, LocalRuntime::empty(), None, None, None)
-    }
-
-    /// Build full runtime state for `serve` and integration tests.
-    #[must_use]
-    pub fn from_parts(
+    pub(crate) fn from_parts(
         routing: Arc<Routing>,
         key: Secret,
         local: LocalRuntime,
@@ -95,7 +102,8 @@ impl AppState {
                 local,
                 profile_name,
             })),
-            profiles: profiles_dir.map(|dir| Arc::new(ProfilesContext { dir })),
+            profiles: profiles_dir.map(|dir| Arc::new(AdminProfiles { dir })),
+            switch: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -106,7 +114,7 @@ impl AppState {
 }
 
 /// Build the gateway's axum router.
-pub fn build_router(state: AppState) -> Router {
+pub(crate) fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/models", get(list_models))
@@ -133,20 +141,30 @@ async fn chat_completions(
     Json(request): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, GatewayError> {
     check_auth(&state, &headers).await?;
+    request
+        .validate()
+        .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
     let model = {
         let live = state.live.read().await;
         live.routing.model(&request.model)?
     };
-    let client_key = headers
-        .get(CLIENT_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("default");
-    let _permit = model.endpoint.lane.admit(client_key).await?;
+    let client_id = crate::queue::ClientId::from_header(
+        headers
+            .get(CLIENT_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    );
+    let _permit = model.endpoint.lane.admit(client_id.as_str()).await?;
     let response = model
         .endpoint
         .upstream
         .send(request, &model.upstream_name)
         .await?;
+    response
+        .validate()
+        .map_err(|reason| GatewayError::UpstreamStatus {
+            status: 502,
+            body: reason.to_owned(),
+        })?;
     Ok(Json(response))
 }
 
@@ -190,7 +208,7 @@ async fn admin_list_profiles(
     check_auth(&state, &headers).await?;
     let dir = profiles_dir(&state)?;
     let profiles =
-        profile::list_profiles(dir).map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
+        profile::list_profiles(dir).map_err(|e| GatewayError::switch_failed("list-profiles", e))?;
     Ok(Json(serde_json::json!({ "profiles": profiles })))
 }
 
@@ -215,10 +233,19 @@ async fn admin_status(
     })))
 }
 
-/// Immediately switches to another named profile. Unloads the previous local
-/// runtime (killing its children) before loading the next; in-flight chat
-/// requests may fail with 503 or a transport error. A load failure leaves
-/// remote-only routing from the new profile with empty local models.
+/// Immediately switches to another named profile.
+///
+/// Switches are serialized by a dedicated mutex, so two concurrent requests
+/// cannot interleave. Configuration is loaded and validated off the live lock;
+/// a config or routing failure returns an error and leaves the live state
+/// untouched. The bearer key, routing, and web-search settings of the new
+/// profile are committed only after the new local runtime starts successfully,
+/// via a single atomic swap under the write lock, so a failed switch never
+/// rotates the admin credential. Because old and new `llama-server` children
+/// must not both hold VRAM, the old children are stopped before the new ones
+/// start; a start failure therefore leaves the previous profile authenticated
+/// and remote-routable but without its local models (a documented degraded
+/// state) rather than a half-applied new profile.
 async fn admin_switch_profile(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -226,73 +253,84 @@ async fn admin_switch_profile(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &headers).await?;
     let dir = profiles_dir(&state)?.to_path_buf();
-    let name = request.name.trim();
-    if name.is_empty() {
-        return Err(GatewayError::SwitchFailed(
-            "profile name must not be empty".to_string(),
-        ));
-    }
+    let name = crate::profile::ProfileName::parse(&request.name)
+        .map_err(|e| GatewayError::switch_failed("parse-name", e))?;
+
+    // Serialize switches for the whole operation (LIB-008).
+    let _switch = state.switch.lock().await;
 
     let path = dir.join(format!("{name}.toml"));
     if !path.is_file() {
-        return Err(GatewayError::ProfileNotFound(name.to_owned()));
+        return Err(GatewayError::ProfileNotFound(name.to_string()));
     }
 
-    let config =
-        profile::load_named(&dir, name).map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
-
-    // Remote-only routing for the interim (and failure) live state. Kept owned
-    // so a successful load can merge local models without reloading the file.
-    let remote_routing =
-        Routing::from_config(&config).map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
-    let interim_routing = Routing::new(remote_routing.models().to_vec());
+    // Build and validate the entire remote side off the live lock. Any failure
+    // here returns before mutating live state at all (LIB-009).
+    let config = crate::config::Config::load_profile(&dir, &name)
+        .map_err(|e| GatewayError::switch_failed("load-profile", e))?;
+    let remote_routing = Routing::from_config(&config)
+        .map_err(|e| GatewayError::switch_failed("build-routing", e))?;
     let new_web_search = config
-        .tools
-        .as_ref()
-        .and_then(|t| t.web_search.as_ref())
+        .web_search_config()
         .map(WebSearchState::new)
         .map(Arc::new);
-    let new_key = config.server.key.clone();
+    let new_key = config.server_key();
 
-    // Immediate unload under the write lock, then drop old children before load
-    // so old and new llama-server processes never hold VRAM at once.
+    // Stop the previous local children before starting new ones so the two
+    // never hold VRAM simultaneously. The bearer key, routing, and web-search
+    // settings are left untouched here, so auth stays stable if start fails.
     let old_local = {
         let mut live = state.live.write().await;
-        let old_local = std::mem::replace(&mut live.local, LocalRuntime::empty());
-        live.routing = Arc::new(interim_routing);
-        live.key = new_key;
-        live.web_search = new_web_search;
-        live.profile_name = Some(name.to_owned());
-        old_local
+        std::mem::replace(&mut live.local, LocalRuntime::empty())
     };
-    drop(old_local);
+    // Explicitly terminate the old children before starting new ones, and abort
+    // the switch if teardown fails. Dropping the runtime does not free their
+    // VRAM here (the still-live old routing holds Arc<dyn Upstream> clones, so
+    // the runtime is not the sole owner - PFGL-MOD-001); the teardown also
+    // cancels any in-flight recovery/respawn and disables further respawn, so no
+    // old child can outlive the switch (PF-GW-SERVER-004). Every child failure
+    // is surfaced, never discarded, so we never start replacements on top of a
+    // survivor.
+    match tokio::task::spawn_blocking(move || {
+        let result = old_local.shutdown();
+        drop(old_local);
+        result
+    })
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return Err(GatewayError::switch_failed("shutdown-local", e)),
+        Err(e) => return Err(GatewayError::switch_failed("shutdown-local-task", e)),
+    }
 
     let new_local = match tokio::task::spawn_blocking(move || LocalRuntime::start(&config)).await {
         Ok(Ok(runtime)) => runtime,
         Ok(Err(e)) => {
-            return Err(GatewayError::SwitchFailed(e.to_string()));
+            return Err(GatewayError::switch_failed("start-local", e));
         }
         Err(e) => {
-            return Err(GatewayError::SwitchFailed(format!(
-                "local runtime start task failed: {e}"
-            )));
+            return Err(GatewayError::switch_failed("start-local-task", e));
         }
     };
 
     let routing = remote_routing
         .merge(new_local.models().iter().cloned())
-        .map_err(|e| GatewayError::SwitchFailed(e.to_string()))?;
+        .map_err(|e| GatewayError::switch_failed("merge-routing", e))?;
 
+    // Atomic swap: commit the whole new profile at once.
     {
         let mut live = state.live.write().await;
-        live.local = new_local;
         live.routing = Arc::new(routing);
+        live.key = new_key;
+        live.web_search = new_web_search;
+        live.local = new_local;
+        live.profile_name = Some(name.to_string());
     }
 
     tracing::info!(profile = %name, "switched profile");
     Ok(Json(serde_json::json!({
         "ok": true,
-        "profile": name,
+        "profile": name.to_string(),
     })))
 }
 
@@ -312,21 +350,46 @@ pub(crate) async fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<
         .and_then(|value| value.strip_prefix("Bearer "))
         .unwrap_or("");
     let live = state.live.read().await;
-    if constant_time_eq(presented.as_bytes(), live.key.expose().as_bytes()) {
+    if secret_eq(presented.as_bytes(), live.key.expose().as_bytes()) {
         Ok(())
     } else {
         Err(GatewayError::Unauthorized)
     }
 }
 
-/// Length-checked constant-time byte comparison.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
+/// Constant-time credential comparison.
+///
+/// Both inputs are hashed to fixed-length SHA-256 digests before comparison, so
+/// the comparison operates on equal-length data (no early length-based
+/// short-circuit) and leaks neither the configured key's length nor its bytes.
+/// The digest comparison uses the `subtle` crate's constant-time primitive.
+fn secret_eq(presented: &[u8], configured: &[u8]) -> bool {
+    use sha2::{Digest, Sha256};
+    use subtle::ConstantTimeEq;
+
+    let presented = Sha256::digest(presented);
+    let configured = Sha256::digest(configured);
+    presented.ct_eq(&configured).into()
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::secret_eq;
+
+    #[test]
+    fn equal_secrets_match() {
+        assert!(secret_eq(b"s3cret-token", b"s3cret-token"));
     }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b) {
-        diff |= x ^ y;
+
+    #[test]
+    fn unequal_secrets_do_not_match() {
+        assert!(!secret_eq(b"s3cret-token", b"wrong-token"));
+        assert!(!secret_eq(b"", b"nonempty"));
+        assert!(!secret_eq(b"short", b"a-much-longer-token"));
     }
-    diff == 0
+
+    #[test]
+    fn empty_matches_empty() {
+        assert!(secret_eq(b"", b""));
+    }
 }

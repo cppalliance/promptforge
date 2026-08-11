@@ -7,31 +7,26 @@
 //! [`LocalRuntime`] kills the children.
 
 pub(crate) mod artifacts;
+mod dialect;
 mod error;
 mod server;
 pub(crate) mod sidecar;
 mod upstream;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
-
-use promptforge_core::dialects::{DialectEvidence, ToolDialectRegistry};
-use serde_json::Value;
 
 use crate::config::{Config, LocalModelConfig, ThinkingMode};
 use crate::queue::EndpointLane;
 use crate::routing::{Endpoint, Model};
 
-pub use artifacts::{
-    DEV_MODEL_NAME, DEV_MODEL_SHA256, DEV_MODEL_URL, SCENARIO_MODEL_NAME, SCENARIO_MODEL_SHA256,
-    SCENARIO_MODEL_URL,
-};
-pub use error::LocalError;
+pub(crate) use error::LocalError;
 
-use artifacts::{ArtifactStore, default_promptforge_root};
+use artifacts::ArtifactStore;
+use dialect::resolve_local_dialect;
 use server::{LaunchOptions, ServerGuard};
 use upstream::LocalUpstream;
 
@@ -40,7 +35,7 @@ use upstream::LocalUpstream;
 /// Keep this value alive for the lifetime of the gateway process. Dropping it
 /// terminates every child (via [`LocalUpstream`] Drop → [`ServerGuard`] Drop).
 #[derive(Debug)]
-pub struct LocalRuntime {
+pub(crate) struct LocalRuntime {
     models: Vec<Arc<Model>>,
 }
 
@@ -48,7 +43,7 @@ impl LocalRuntime {
     /// An empty runtime with no children. Used when no `[[local_model]]` is set
     /// and as the placeholder before the first profile switch.
     #[must_use]
-    pub fn empty() -> LocalRuntime {
+    pub(crate) fn empty() -> LocalRuntime {
         LocalRuntime { models: Vec::new() }
     }
 
@@ -59,19 +54,18 @@ impl LocalRuntime {
     ///
     /// # Errors
     /// Returns [`LocalError`] when download, verification, spawn, or readiness fails.
-    pub fn start(config: &Config) -> Result<LocalRuntime, LocalError> {
+    pub(crate) fn start(config: &Config) -> Result<LocalRuntime, LocalError> {
         if config.local_models.is_empty() {
             return Ok(LocalRuntime::empty());
         }
 
-        let cache_root = resolve_cache_root(config.local.cache_dir.as_deref());
+        let cache_root = resolve_cache_root(config.local.cache_dir.as_deref())?;
         tracing::info!(path = %cache_root.display(), "local model cache");
         let store = ArtifactStore::new(cache_root)?;
         let llama_server = store.provision_llama_server()?;
         tracing::info!(path = %llama_server.display(), "provisioned llama-server");
 
-        let interrupted = Arc::new(AtomicBool::new(false));
-        arm_startup_interrupt(Arc::clone(&interrupted));
+        let interrupted = startup_interrupt_flag();
         let mut models = Vec::with_capacity(config.local_models.len());
 
         for local_model in &config.local_models {
@@ -87,12 +81,12 @@ impl LocalRuntime {
 
             let concurrency = config
                 .local_model_concurrency(local_model)
-                .map_err(|e| LocalError::Server(e.to_string()))?;
-            let parallel = u32::try_from(concurrency).map_err(|_| {
-                LocalError::Server(format!(
-                    "lane concurrency {concurrency} does not fit in u32"
-                ))
-            })?;
+                .map_err(|source| LocalError::LaneConcurrency {
+                    model: local_model.name.clone(),
+                    source,
+                })?;
+            let parallel =
+                u32::try_from(concurrency).map_err(|_| LocalError::LaneTooLarge { concurrency })?;
             let options = launch_options(local_model, parallel);
             let guard =
                 ServerGuard::start(&llama_server, &model_path, &options, interrupted.as_ref())?;
@@ -136,35 +130,63 @@ impl LocalRuntime {
 
     /// Models registered for local inference, in `[[local_model]]` order.
     #[must_use]
-    pub fn models(&self) -> &[Arc<Model>] {
+    pub(crate) fn models(&self) -> &[Arc<Model>] {
         &self.models
     }
 
     /// Number of local model endpoints (each owns one `llama-server` child).
     #[must_use]
-    pub fn child_count(&self) -> usize {
+    pub(crate) fn child_count(&self) -> usize {
         self.models.len()
     }
+
+    /// Explicitly terminate every owned `llama-server` child and disable respawn,
+    /// returning the first teardown failure after attempting *all* children.
+    ///
+    /// Dropping the runtime does not guarantee child termination, because the
+    /// routing table holds `Arc<dyn Upstream>` clones of these same models, so
+    /// the runtime is not the sole owner (PFGL-MOD-001). This drives an explicit
+    /// teardown through the [`Upstream`](crate::upstream::Upstream) seam so a
+    /// profile switch frees the old children's VRAM deterministically before the
+    /// replacement profile's children start. Every child is torn down even if an
+    /// earlier one fails, so one stuck child never strands the rest.
+    ///
+    /// # Errors
+    /// Returns the first [`LocalError`] a child teardown produced.
+    pub(crate) fn shutdown(&self) -> Result<(), LocalError> {
+        let mut first_error: Option<LocalError> = None;
+        for model in &self.models {
+            if let Err(error) = model.endpoint.upstream.shutdown() {
+                first_error.get_or_insert(error);
+            }
+        }
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
 }
 
-fn resolve_cache_root(configured: Option<&str>) -> PathBuf {
+fn resolve_cache_root(configured: Option<&str>) -> Result<PathBuf, LocalError> {
     match configured {
         Some(path) if !path.is_empty() => expand_configured_path(path),
-        _ => default_promptforge_root(),
+        // An unset cache_dir defaults to `~/.promptforge`; a missing home is a
+        // typed error rather than a silent working-directory fallback (ART-009).
+        _ => artifacts::default_promptforge_root_checked(),
     }
 }
 
-fn expand_configured_path(path: &str) -> PathBuf {
+fn expand_configured_path(path: &str) -> Result<PathBuf, LocalError> {
     if let Some(rest) = path.strip_prefix("~/") {
-        return artifacts::default_home().join(rest);
+        return Ok(artifacts::default_home_checked()?.join(rest));
     }
     if let Some(rest) = path.strip_prefix("~\\") {
-        return artifacts::default_home().join(rest);
+        return Ok(artifacts::default_home_checked()?.join(rest));
     }
     if path == "~" {
-        return artifacts::default_home();
+        return artifacts::default_home_checked();
     }
-    PathBuf::from(path)
+    Ok(PathBuf::from(path))
 }
 
 fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
@@ -181,65 +203,6 @@ fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
     }
 }
 
-/// Fetches `/props` from a ready local llama-server and resolves the tool dialect.
-///
-/// When `/props` does not supply a `chat_template`, the sidecar `.md` next to
-/// the GGUF is consulted as a fallback. Props always wins over conflicting
-/// sidecar data.
-///
-/// Returns `(tool_dialect, tools_mode)` strings for the routing model.
-/// Hard-fails on `DialectNone` or `DialectTie` so local models never silently
-/// default to an incorrect dialect.
-fn resolve_local_dialect(
-    guard: &ServerGuard,
-    model_name: &str,
-    model_path: &Path,
-) -> Result<(String, String), LocalError> {
-    let mut evidence = fetch_props_evidence(guard)?;
-
-    if evidence.chat_template.is_none()
-        && let Some(sidecar_meta) = read_sidecar_quietly(model_path)
-        && let Some(template) = sidecar_meta.chat_template
-    {
-        tracing::debug!(
-            model = %model_name,
-            "supplementing chat_template from sidecar"
-        );
-        evidence.chat_template = Some(template);
-    }
-
-    tracing::debug!(
-        model = %model_name,
-        supports_tool_calls = ?evidence.supports_tool_calls,
-        has_template = evidence.chat_template.is_some(),
-        model_id = ?evidence.model_id,
-        "dialect evidence from /props + sidecar"
-    );
-    let registry = ToolDialectRegistry::builtin();
-    let dialect_id = registry.resolve(&evidence).map_err(|error| {
-        LocalError::Server(format!(
-            "dialect resolution failed for local model {model_name}: {error}"
-        ))
-    })?;
-    let tools_mode = dialect_id.tools_mode();
-    Ok((dialect_id.to_string(), tools_mode.to_string()))
-}
-
-/// Reads the sidecar metadata next to a GGUF, logging and swallowing errors.
-fn read_sidecar_quietly(model_path: &Path) -> Option<sidecar::SidecarMeta> {
-    match sidecar::read_sidecar(model_path) {
-        Ok(meta) => meta,
-        Err(e) => {
-            tracing::warn!(
-                path = %model_path.display(),
-                error = %e,
-                "failed to read sidecar"
-            );
-            None
-        }
-    }
-}
-
 /// Best-effort: fetch HF metadata and write a sidecar `.md` beside the GGUF.
 ///
 /// Only attempts the fetch for HF URLs. Failures are logged at debug level
@@ -250,8 +213,22 @@ fn maybe_write_sidecar(_store: &ArtifactStore, source: &str, model_path: &Path) 
     }
     let sidecar_file = sidecar::sidecar_path(model_path);
     if sidecar_file.is_file() {
-        tracing::debug!(path = %sidecar_file.display(), "sidecar already exists");
-        return;
+        // Validate the existing sidecar rather than blindly trusting the file's
+        // presence (SIDECAR-004): only skip the refetch when it reads back as a
+        // current, usable sidecar. An unversioned, oversized, or template-less
+        // sidecar falls through and is rewritten.
+        match sidecar::read_sidecar(model_path) {
+            Ok(Some(meta)) if meta.chat_template.is_some() => {
+                tracing::debug!(path = %sidecar_file.display(), "valid sidecar already exists");
+                return;
+            }
+            _ => {
+                tracing::debug!(
+                    path = %sidecar_file.display(),
+                    "existing sidecar invalid or incomplete; refetching"
+                );
+            }
+        }
     }
 
     let client = match reqwest::blocking::Client::builder()
@@ -267,17 +244,24 @@ fn maybe_write_sidecar(_store: &ArtifactStore, source: &str, model_path: &Path) 
     };
 
     let bearer = artifacts::hub_bearer_token_from_env();
-    let chat_template = sidecar::fetch_hf_chat_template(&client, source, bearer.as_deref());
-
-    if chat_template.is_none() {
-        tracing::debug!(source = %source, "no chat_template from HF metadata");
-        return;
-    }
+    let chat_template = match sidecar::fetch_hf_chat_template(&client, source, bearer.as_deref()) {
+        Ok(Some(template)) => template,
+        Ok(None) => {
+            tracing::debug!(source = %source, "no chat_template from HF metadata");
+            return;
+        }
+        Err(error) => {
+            // Deliberate downgrade (SIDECAR-006): the sidecar is supplementary,
+            // so a fetch failure is logged and skipped, not propagated.
+            tracing::debug!(source = %source, error = %error, "sidecar fetch failed");
+            return;
+        }
+    };
 
     let meta = sidecar::SidecarMeta {
         source: Some(source.to_owned()),
         fetched: Some(sidecar::utc_now_iso()),
-        chat_template,
+        chat_template: Some(chat_template),
         card: None,
     };
 
@@ -292,191 +276,42 @@ fn maybe_write_sidecar(_store: &ArtifactStore, source: &str, model_path: &Path) 
     }
 }
 
-const PROPS_TIMEOUT: Duration = Duration::from_secs(5);
+/// Process-wide Ctrl-C flag for startup readiness loops.
+static STARTUP_INTERRUPT: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
-/// Fetches `GET /props` from a ready llama-server and builds [`DialectEvidence`].
-fn fetch_props_evidence(guard: &ServerGuard) -> Result<DialectEvidence, LocalError> {
-    let base = format!("http://127.0.0.1:{}", guard.port());
-    let client = reqwest::blocking::Client::builder()
-        .no_proxy()
-        .timeout(PROPS_TIMEOUT)
-        .build()
-        .map_err(|e| LocalError::Server(format!("build props client: {e}")))?;
-
-    let response = client
-        .get(format!("{base}/props"))
-        .bearer_auth(guard.api_key())
-        .send()
-        .map_err(|e| LocalError::Server(format!("GET /props failed: {e}")))?;
-
-    if !response.status().is_success() {
-        return Err(LocalError::Server(format!(
-            "GET /props returned {}",
-            response.status()
-        )));
-    }
-
-    let props: Value = response
-        .json()
-        .map_err(|e| LocalError::Server(format!("parse /props JSON: {e}")))?;
-
-    let chat_template = props
-        .get("chat_template")
-        .and_then(Value::as_str)
-        .map(String::from);
-
-    // llama-server /props exposes `default_generation_settings.model` as the
-    // loaded model path and `default_generation_settings.samplers` etc.
-    let model_id = props
-        .get("default_generation_settings")
-        .and_then(|dgs| dgs.get("model"))
-        .and_then(Value::as_str)
-        .map(String::from);
-
-    // `total_slots` and capabilities are top-level in /props. When the server
-    // was launched with `--jinja` and the template declares tool support, the
-    // /v1/models response carries `meta.has_tool_call_capability`. We check
-    // both /props and /v1/models for the capability flag.
-    let supports_tool_calls = fetch_tool_call_capability(&client, &base, guard.api_key());
-
-    Ok(DialectEvidence::new(
-        Some(supports_tool_calls),
-        chat_template,
-        model_id,
-        None,
-    ))
-}
-
-/// Checks the /v1/models response for native tool-call capability.
-fn fetch_tool_call_capability(
-    client: &reqwest::blocking::Client,
-    base: &str,
-    api_key: &str,
-) -> bool {
-    let Ok(response) = client
-        .get(format!("{base}/v1/models"))
-        .bearer_auth(api_key)
-        .send()
-    else {
-        return false;
-    };
-    if !response.status().is_success() {
-        return false;
-    }
-    let Ok(body) = response.json::<Value>() else {
-        return false;
-    };
-    body.get("data")
-        .and_then(Value::as_array)
-        .and_then(|models| models.first())
-        .and_then(|model| model.get("meta"))
-        .and_then(|meta| meta.get("has_tool_call_capability"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
-/// Arms a Ctrl-C watcher so readiness loops can abort while children are starting.
-fn arm_startup_interrupt(interrupted: Arc<AtomicBool>) {
-    thread::spawn(move || {
-        let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        else {
-            return;
-        };
-        runtime.block_on(async {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                interrupted.store(true, Ordering::Release);
-            }
-        });
-    });
+/// Returns the shared startup-interrupt flag, installing the single process-wide
+/// Ctrl-C watcher on first use.
+///
+/// Earlier code armed a fresh OS thread and Tokio runtime on every
+/// [`LocalRuntime::start`], leaking both on each profile switch. One `OnceLock`
+/// watcher is installed once and its flag shared by every start.
+fn startup_interrupt_flag() -> Arc<AtomicBool> {
+    STARTUP_INTERRUPT
+        .get_or_init(|| {
+            let flag = Arc::new(AtomicBool::new(false));
+            let watcher = Arc::clone(&flag);
+            thread::spawn(move || {
+                let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                else {
+                    return;
+                };
+                runtime.block_on(async {
+                    if tokio::signal::ctrl_c().await.is_ok() {
+                        watcher.store(true, Ordering::Release);
+                    }
+                });
+            });
+            flag
+        })
+        .clone()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::Config;
-
-    use std::fs;
-    use tempfile::TempDir;
-
-    #[test]
-    fn sidecar_supplements_missing_template() {
-        let dir = TempDir::new().expect("tempdir");
-        let gguf = dir.path().join("gemma-3-27b.gguf");
-        fs::write(&gguf, b"fake").expect("write gguf");
-
-        let meta = sidecar::SidecarMeta {
-            source: Some(
-                "https://huggingface.co/google/gemma/resolve/main/gemma-3-27b.gguf".to_owned(),
-            ),
-            fetched: Some("2026-08-08T00:00:00Z".to_owned()),
-            chat_template: Some("<start_of_turn>user\n{{ content }}".to_owned()),
-            card: None,
-        };
-        sidecar::write_sidecar(&gguf, &meta).expect("write sidecar");
-
-        let mut evidence = DialectEvidence::new(
-            Some(false),
-            None, // props had no template
-            Some("gemma-3-27b-it".to_owned()),
-            None,
-        );
-
-        // Simulate the merge: sidecar fills in missing chat_template
-        if evidence.chat_template.is_none()
-            && let Some(sc) = read_sidecar_quietly(&gguf)
-        {
-            evidence.chat_template = sc.chat_template;
-        }
-
-        assert!(evidence.chat_template.is_some());
-        let registry = ToolDialectRegistry::builtin();
-        let id = registry
-            .resolve(&evidence)
-            .expect("should resolve with sidecar");
-        assert_eq!(id.to_string(), "gemma3_tool_code");
-    }
-
-    #[test]
-    fn props_wins_over_conflicting_sidecar() {
-        let dir = TempDir::new().expect("tempdir");
-        let gguf = dir.path().join("model.gguf");
-        fs::write(&gguf, b"fake").expect("write gguf");
-
-        let meta = sidecar::SidecarMeta {
-            source: None,
-            fetched: None,
-            chat_template: Some("sidecar-template-should-lose".to_owned()),
-            card: None,
-        };
-        sidecar::write_sidecar(&gguf, &meta).expect("write sidecar");
-
-        let evidence = DialectEvidence::new(
-            Some(true),                             // props says native tools
-            Some("props-template-wins".to_owned()), // props has its own template
-            None,
-            None,
-        );
-
-        // Props already has chat_template, so sidecar should NOT be consulted.
-        // The merge logic only reads sidecar when evidence.chat_template is None.
-        assert_eq!(
-            evidence.chat_template.as_deref(),
-            Some("props-template-wins")
-        );
-        let registry = ToolDialectRegistry::builtin();
-        let id = registry.resolve(&evidence).expect("should resolve");
-        assert_eq!(id.to_string(), "openai");
-    }
-
-    #[test]
-    fn sidecar_missing_file_is_harmless() {
-        let dir = TempDir::new().expect("tempdir");
-        let gguf = dir.path().join("no-sidecar.gguf");
-        let result = read_sidecar_quietly(&gguf);
-        assert!(result.is_none());
-    }
 
     #[test]
     fn empty_local_models_starts_noop_runtime() {
@@ -504,37 +339,6 @@ endpoints = ["e"]
         let runtime = LocalRuntime::start(&config).expect("empty local runtime");
         assert_eq!(runtime.child_count(), 0);
         assert!(runtime.models().is_empty());
-    }
-
-    #[test]
-    fn gemma_props_resolve_to_gemma3_tool_code() {
-        let evidence = DialectEvidence::new(
-            Some(false),
-            Some("<start_of_turn>user\n".to_string()),
-            Some("gemma-3-27b-it".to_string()),
-            None,
-        );
-        let registry = ToolDialectRegistry::builtin();
-        let id = registry.resolve(&evidence).expect("should resolve");
-        assert_eq!(id.to_string(), "gemma3_tool_code");
-        assert_eq!(id.tools_mode().to_string(), "emulated");
-    }
-
-    #[test]
-    fn tools_true_resolves_to_openai() {
-        let evidence = DialectEvidence::new(Some(true), None, None, None);
-        let registry = ToolDialectRegistry::builtin();
-        let id = registry.resolve(&evidence).expect("should resolve");
-        assert_eq!(id.to_string(), "openai");
-        assert_eq!(id.tools_mode().to_string(), "native");
-    }
-
-    #[test]
-    fn dialect_none_is_hard_fail() {
-        let evidence = DialectEvidence::default();
-        let registry = ToolDialectRegistry::builtin();
-        let result = registry.resolve(&evidence);
-        assert!(result.is_err(), "empty evidence must hard-fail");
     }
 
     #[test]

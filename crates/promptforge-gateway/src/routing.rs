@@ -3,13 +3,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::config::{Config, ThinkingMode};
+use crate::config::{Config, Protocol, ThinkingMode};
 use crate::error::{ConfigError, GatewayError};
 use crate::queue::EndpointLane;
 use crate::upstream::{OpenAiUpstream, Upstream};
 
 /// One backend endpoint plus the upstream that talks to it.
-pub struct Endpoint {
+pub(crate) struct Endpoint {
     /// The endpoint's configured id.
     pub id: String,
     /// The upstream implementation forwarding to this backend.
@@ -29,7 +29,7 @@ impl std::fmt::Debug for Endpoint {
 
 /// One model, resolved to a backend endpoint and the backend's model string.
 #[derive(Debug)]
-pub struct Model {
+pub(crate) struct Model {
     /// The caller-facing model name.
     pub name: String,
     /// Prose describing the model for catalog consumers.
@@ -50,7 +50,7 @@ pub struct Model {
 
 /// A resolved routing table.
 #[derive(Debug)]
-pub struct Routing {
+pub(crate) struct Routing {
     by_name: HashMap<String, Arc<Model>>,
     /// Configured models in `gateway.toml` order, for the catalog listing.
     models: Vec<Arc<Model>>,
@@ -59,18 +59,30 @@ pub struct Routing {
 impl Routing {
     /// Build a routing table directly from resolved models. Intended for tests
     /// and for [`Routing::from_config`]. Order of `models` is the catalog order.
-    #[must_use]
-    pub fn new(models: Vec<Arc<Model>>) -> Routing {
-        let by_name = models
-            .iter()
-            .map(|model| (model.name.clone(), Arc::clone(model)))
-            .collect();
-        Routing { by_name, models }
+    ///
+    /// # Errors
+    /// Returns [`ConfigError::Validation`] when two models share a name, which
+    /// would otherwise silently shadow one entry in the lookup table while
+    /// leaving both in the catalog listing.
+    pub(crate) fn new(models: Vec<Arc<Model>>) -> Result<Routing, ConfigError> {
+        let mut by_name = HashMap::with_capacity(models.len());
+        for model in &models {
+            if by_name
+                .insert(model.name.clone(), Arc::clone(model))
+                .is_some()
+            {
+                return Err(ConfigError::Validation(format!(
+                    "duplicate model name {}",
+                    model.name
+                )));
+            }
+        }
+        Ok(Routing { by_name, models })
     }
 
     /// Configured models in catalog order.
     #[must_use]
-    pub fn models(&self) -> &[Arc<Model>] {
+    pub(crate) fn models(&self) -> &[Arc<Model>] {
         &self.models
     }
 
@@ -81,13 +93,15 @@ impl Routing {
     /// Returns [`ConfigError::Validation`] if a model references an endpoint
     /// that is not defined (which [`Config::validate`] already rejects, so this
     /// is a defensive second check).
-    pub fn from_config(config: &Config) -> Result<Routing, ConfigError> {
+    pub(crate) fn from_config(config: &Config) -> Result<Routing, ConfigError> {
         let mut endpoints: HashMap<&str, Arc<Endpoint>> = HashMap::new();
         for endpoint in &config.endpoints {
-            let upstream: Arc<dyn Upstream> = Arc::new(OpenAiUpstream::new(
-                &endpoint.base_url,
-                endpoint.api_key.clone(),
-            ));
+            let upstream: Arc<dyn Upstream> = match endpoint.protocol {
+                Protocol::Openai => Arc::new(OpenAiUpstream::new(
+                    &endpoint.base_url,
+                    endpoint.api_key.clone(),
+                )),
+            };
             let lane = match config.endpoint_concurrency(endpoint) {
                 Some(n) => EndpointLane::new(n, &config.queue),
                 None => EndpointLane::unlimited(),
@@ -125,14 +139,14 @@ impl Routing {
             }));
         }
 
-        Ok(Routing::new(models))
+        Routing::new(models)
     }
 
     /// Appends models (for example from [`crate::local::LocalRuntime`]) to this table.
     ///
     /// # Errors
     /// Returns [`ConfigError::Validation`] when a model name already exists.
-    pub fn merge(
+    pub(crate) fn merge(
         mut self,
         extras: impl IntoIterator<Item = Arc<Model>>,
     ) -> Result<Routing, ConfigError> {
@@ -153,7 +167,7 @@ impl Routing {
     ///
     /// # Errors
     /// Returns [`GatewayError::UnknownModel`] when no `[[model]]` matches.
-    pub fn model(&self, name: &str) -> Result<Arc<Model>, GatewayError> {
+    pub(crate) fn model(&self, name: &str) -> Result<Arc<Model>, GatewayError> {
         self.by_name
             .get(name)
             .cloned()
@@ -165,6 +179,27 @@ impl Routing {
 mod tests {
     use super::*;
     use crate::config::Config;
+
+    fn model_named(name: &str) -> Arc<Model> {
+        let endpoint = Arc::new(Endpoint {
+            id: "e".to_owned(),
+            upstream: Arc::new(OpenAiUpstream::new(
+                "http://127.0.0.1:9",
+                crate::config::Secret::new(String::new()),
+            )),
+            lane: EndpointLane::unlimited(),
+        });
+        Arc::new(Model {
+            name: name.to_owned(),
+            description: "d".to_owned(),
+            context: 8192,
+            thinking: ThinkingMode::Never,
+            tool_dialect: "openai".to_owned(),
+            tools_mode: "native".to_owned(),
+            upstream_name: "u".to_owned(),
+            endpoint,
+        })
+    }
 
     fn routing() -> Routing {
         let toml = r#"
@@ -204,5 +239,34 @@ endpoints = ["e"]
             r.model("nope"),
             Err(GatewayError::UnknownModel(_))
         ));
+    }
+
+    #[test]
+    fn new_rejects_duplicate_model_names() {
+        let dup = Routing::new(vec![model_named("m"), model_named("m")]);
+        assert!(matches!(dup, Err(ConfigError::Validation(_))));
+    }
+
+    #[test]
+    fn new_preserves_catalog_order() {
+        let r = Routing::new(vec![model_named("a"), model_named("b"), model_named("c")])
+            .expect("distinct names");
+        let names: Vec<&str> = r.models().iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn merge_rejects_duplicate_model_names() {
+        let base = Routing::new(vec![model_named("known")]).expect("distinct");
+        let merged = base.merge([model_named("known")]);
+        assert!(matches!(merged, Err(ConfigError::Validation(_))));
+    }
+
+    #[test]
+    fn merge_appends_after_existing_models() {
+        let base = Routing::new(vec![model_named("a")]).expect("distinct");
+        let merged = base.merge([model_named("b")]).expect("distinct extra");
+        let names: Vec<&str> = merged.models().iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["a", "b"]);
     }
 }

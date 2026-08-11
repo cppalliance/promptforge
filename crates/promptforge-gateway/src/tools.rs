@@ -10,20 +10,18 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use serde::{Deserialize, Serialize};
 
+mod brave;
+
 use crate::AppState;
 use crate::check_auth;
 use crate::config::{Secret, WebSearchConfig};
 use crate::error::GatewayError;
 use crate::web_search_process::post_process_results;
-
-pub use crate::web_search_process::{
-    DESCRIPTION_MAX_CHARS, TITLE_MAX_CHARS, URL_MAX_CHARS, diversify_hosts, filter_domains,
-    host_from_url, sanitize_text, site_name_from_host, strip_tracking_params,
-};
+use brave::{BraveSearchParams, brave_overfetch_count, brave_search};
 
 /// Cloneable runtime settings for `web_search`, filled from [`WebSearchConfig`].
 #[derive(Debug, Clone)]
-pub struct WebSearchSettings {
+pub(crate) struct WebSearchSettings {
     /// Used when the request omits `count`.
     pub default_count: u8,
     /// Clamp and over-fetch ceiling for result counts.
@@ -41,7 +39,7 @@ pub struct WebSearchSettings {
 impl WebSearchSettings {
     /// Build settings from the tool configuration.
     #[must_use]
-    pub fn from_config(cfg: &WebSearchConfig) -> WebSearchSettings {
+    pub(crate) fn from_config(cfg: &WebSearchConfig) -> WebSearchSettings {
         WebSearchSettings {
             default_count: cfg.default_count,
             max_count: cfg.max_count,
@@ -56,7 +54,7 @@ impl WebSearchSettings {
 /// The web-search runtime state: the provider credential, the base URL, and a
 /// shared HTTP client.
 #[derive(Debug)]
-pub struct WebSearchState {
+pub(crate) struct WebSearchState {
     /// The credential sent to the search provider.
     api_key: Secret,
     /// The search API base URL.
@@ -70,12 +68,15 @@ pub struct WebSearchState {
 impl WebSearchState {
     /// Build web-search state from its configuration.
     #[must_use]
-    pub fn new(cfg: &WebSearchConfig) -> WebSearchState {
+    pub(crate) fn new(cfg: &WebSearchConfig) -> WebSearchState {
+        // v0 supports only the Brave provider; the query path below is
+        // Brave-shaped. Reading the provider keeps the selection explicit.
+        let crate::config::SearchProvider::Brave = cfg.provider;
         WebSearchState {
             api_key: cfg.api_key.clone(),
             base_url: cfg.base_url.trim_end_matches('/').to_string(),
             settings: WebSearchSettings::from_config(cfg),
-            http: reqwest::Client::new(),
+            http: crate::http_util::bounded_client(),
         }
     }
 }
@@ -83,7 +84,7 @@ impl WebSearchState {
 /// The request body for `POST /v1/tools/web_search`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct WebSearchRequest {
+pub(crate) struct WebSearchRequest {
     /// The search query.
     pub query: String,
     /// The desired number of results. Defaults to
@@ -112,8 +113,8 @@ pub struct WebSearchRequest {
 }
 
 /// The response body for `POST /v1/tools/web_search`.
-#[derive(Debug, Serialize)]
-pub struct WebSearchResponse {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct WebSearchResponse {
     /// The trimmed request query that produced these results.
     pub query: String,
     /// The trimmed search results.
@@ -121,8 +122,8 @@ pub struct WebSearchResponse {
 }
 
 /// One search result, trimmed to the fields the executor needs.
-#[derive(Debug, Serialize)]
-pub struct SearchResult {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct SearchResult {
     /// The result's title.
     pub title: String,
     /// The result's URL.
@@ -140,66 +141,84 @@ pub struct SearchResult {
     pub extra_snippets: Vec<String>,
 }
 
-/// The Brave response envelope, narrowed to the `web.results` array.
-#[derive(Deserialize)]
-struct BraveResponse {
-    web: Option<BraveWeb>,
-}
+/// Maximum query length kept, in Unicode scalar values (TOOLS-004).
+const MAX_QUERY_CHARS: usize = 512;
 
-/// The `web` object of a Brave response.
-#[derive(Deserialize)]
-struct BraveWeb {
-    #[serde(default)]
-    results: Vec<BraveResult>,
-}
-
-/// One Brave result, narrowed to the fields the executor needs.
-#[derive(Deserialize)]
-struct BraveResult {
-    #[serde(default)]
-    title: String,
-    #[serde(default)]
-    url: String,
-    #[serde(default)]
-    description: String,
-    #[serde(default)]
-    age: Option<String>,
-    #[serde(default)]
-    extra_snippets: Vec<String>,
-}
-
-/// Parameters for a Brave Search API request.
-#[derive(Debug, Clone)]
-struct BraveSearchParams<'a> {
-    /// The trimmed search query (`q`).
-    query: &'a str,
-    /// Over-fetched result count sent to Brave (`count`).
-    count: u8,
-    /// Optional freshness filter.
-    freshness: Option<&'a str>,
-    /// Optional country code.
-    country: Option<&'a str>,
-    /// Optional search language.
-    search_lang: Option<&'a str>,
-    /// Optional SafeSearch level.
-    safesearch: Option<&'a str>,
-}
-
-/// Trim ASCII whitespace from `query` and reject empty values.
+/// Trim Unicode whitespace from `query`, reject empty values, and cap length.
 ///
 /// # Errors
 /// Returns [`GatewayError::MalformedRequest`] with
 /// `"web_search: empty query"` when the trimmed query is empty.
 fn trim_web_search_query(query: &str) -> Result<String, GatewayError> {
-    let trimmed = query
-        .trim_matches(|c: char| c.is_ascii_whitespace())
-        .to_string();
+    // Unicode-aware trim (TOOLS-004), not just ASCII whitespace.
+    let trimmed = query.trim();
     if trimmed.is_empty() {
         return Err(GatewayError::MalformedRequest(
             "web_search: empty query".to_string(),
         ));
     }
-    Ok(trimmed)
+    // Cap by scalar count so an oversized query cannot bloat the provider call.
+    Ok(trimmed.chars().take(MAX_QUERY_CHARS).collect())
+}
+
+/// Validate and canonicalize caller-supplied domain filters (WSP-006).
+///
+/// Each entry must be a bare hostname/domain, not a URL: non-empty, ASCII, no
+/// scheme, path, port, or whitespace, and standard label syntax. A malformed
+/// entry rejects the whole request with a clear error rather than being
+/// silently dropped or leniently parsed and forwarded to the provider.
+///
+/// `field` is `"include"`/`"exclude"` for the error message. Returned domains
+/// are lowercased for case-insensitive matching.
+///
+/// # Errors
+/// Returns [`GatewayError::MalformedRequest`] for any malformed entry.
+fn validate_domain_filters(field: &str, domains: &[String]) -> Result<Vec<String>, GatewayError> {
+    domains
+        .iter()
+        .map(|raw| validate_domain_filter(field, raw))
+        .collect()
+}
+
+/// Validate one caller-supplied domain filter entry (WSP-006).
+fn validate_domain_filter(field: &str, raw: &str) -> Result<String, GatewayError> {
+    let domain = raw.trim();
+    let malformed =
+        || GatewayError::MalformedRequest(format!("web_search: invalid {field} domain {raw:?}"));
+    if domain.is_empty()
+        || domain.len() > 253
+        || domain.contains("://")
+        || domain.contains('/')
+        || domain.contains(':')
+        || domain.chars().any(char::is_whitespace)
+    {
+        return Err(malformed());
+    }
+    let lower = domain.to_ascii_lowercase();
+    if !is_valid_domain_syntax(&lower) {
+        return Err(malformed());
+    }
+    Ok(lower)
+}
+
+/// Whether `domain` is dot-separated labels of `[a-z0-9-]`, each `1..=63` chars
+/// and not starting or ending with `-` (at least one label).
+fn is_valid_domain_syntax(domain: &str) -> bool {
+    let mut labels = 0_usize;
+    for label in domain.split('.') {
+        if label.is_empty()
+            || label.len() > 63
+            || label.starts_with('-')
+            || label.ends_with('-')
+            || !label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return false;
+        }
+        labels += 1;
+    }
+    labels >= 1
 }
 
 /// Clamp the requested count into `1..=max_count`.
@@ -209,14 +228,74 @@ fn clamp_count(requested: u8, max_count: u8) -> u8 {
     requested.clamp(1, max_count)
 }
 
-/// Compute the Brave over-fetch count from a clamped requested count.
+/// Reject malformed request-supplied provider knobs at the boundary (TOOLS-004).
 ///
-/// `brave_count = min(max_count, requested_count.saturating_mul(3).max(requested_count))`
-#[must_use]
-fn brave_overfetch_count(requested_count: u8, max_count: u8) -> u8 {
-    let max_count = max_count.max(1);
-    let over = requested_count.saturating_mul(3).max(requested_count);
-    over.min(max_count)
+/// Empty/absent knobs are omitted downstream and need no validation; the config
+/// defaults are already validated at load. This validates only caller-supplied,
+/// non-empty values so an arbitrary string is never forwarded to the provider.
+///
+/// # Errors
+/// Returns [`GatewayError::MalformedRequest`] for an out-of-vocabulary
+/// `freshness`/`safesearch` or a malformed `country`/`search_lang` code.
+fn validate_request_knobs(request: &WebSearchRequest) -> Result<(), GatewayError> {
+    if let Some(freshness) = non_empty_opt(request.freshness.as_deref())
+        && !is_valid_freshness(freshness)
+    {
+        return Err(GatewayError::MalformedRequest(format!(
+            "web_search: invalid freshness {freshness:?}"
+        )));
+    }
+    if let Some(safesearch) = non_empty_opt(request.safesearch.as_deref())
+        && !matches!(safesearch, "off" | "moderate" | "strict")
+    {
+        return Err(GatewayError::MalformedRequest(format!(
+            "web_search: invalid safesearch {safesearch:?}"
+        )));
+    }
+    if let Some(country) = non_empty_opt(request.country.as_deref())
+        && !is_alpha_code(country, 2, 2)
+    {
+        return Err(GatewayError::MalformedRequest(format!(
+            "web_search: invalid country {country:?}"
+        )));
+    }
+    if let Some(lang) = non_empty_opt(request.search_lang.as_deref())
+        && !is_alpha_code(lang, 2, 3)
+    {
+        return Err(GatewayError::MalformedRequest(format!(
+            "web_search: invalid search_lang {lang:?}"
+        )));
+    }
+    Ok(())
+}
+
+/// Whether `value` is an accepted Brave freshness knob: one of `pd`/`pw`/`pm`/
+/// `py`, or a `YYYY-MM-DDtoYYYY-MM-DD` date range.
+fn is_valid_freshness(value: &str) -> bool {
+    if matches!(value, "pd" | "pw" | "pm" | "py") {
+        return true;
+    }
+    value
+        .split_once("to")
+        .is_some_and(|(from, to)| is_iso_date(from) && is_iso_date(to))
+}
+
+/// Whether `value` is `YYYY-MM-DD`.
+fn is_iso_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+}
+
+/// Whether `value` is `min..=max` ASCII alphabetic characters (a locale code).
+fn is_alpha_code(value: &str, min: usize, max: usize) -> bool {
+    let len = value.chars().count();
+    len >= min && len <= max && value.chars().all(|c| c.is_ascii_alphabetic())
 }
 
 /// Resolve an optional string knob: `Some` and non-empty after trim, else `None`.
@@ -237,127 +316,15 @@ fn resolve_safesearch<'a>(
     non_empty_opt(request).or_else(|| non_empty_opt(Some(default_safesearch)))
 }
 
-/// Prefix Brave upstream errors with `web_search: `.
-fn prefix_web_search_upstream(err: GatewayError) -> GatewayError {
-    match err {
-        GatewayError::UpstreamStatus { status, body } => GatewayError::UpstreamStatus {
-            status,
-            body: if body.starts_with("web_search: ") {
-                body
-            } else {
-                format!("web_search: {body}")
-            },
-        },
-        GatewayError::UpstreamTransport(source) => GatewayError::UpstreamTransport(Box::new(
-            WebSearchUpstream(format!("web_search: {source}")),
-        )),
-        other => other,
-    }
-}
-
-/// Transport error wrapper so the source chain carries the `web_search: ` prefix.
-#[derive(Debug)]
-struct WebSearchUpstream(String);
-
-impl std::fmt::Display for WebSearchUpstream {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for WebSearchUpstream {}
-
-/// Build Brave `/web/search` query pairs from [`BraveSearchParams`].
-///
-/// Always includes `extra_snippets=true`. Optional knobs are omitted when `None`.
-#[must_use]
-fn brave_search_query(params: &BraveSearchParams<'_>) -> Vec<(&'static str, String)> {
-    let mut query = vec![
-        ("q", params.query.to_string()),
-        ("count", params.count.to_string()),
-        ("extra_snippets", "true".to_string()),
-    ];
-    if let Some(freshness) = params.freshness {
-        query.push(("freshness", freshness.to_string()));
-    }
-    if let Some(country) = params.country {
-        query.push(("country", country.to_string()));
-    }
-    if let Some(search_lang) = params.search_lang {
-        query.push(("search_lang", search_lang.to_string()));
-    }
-    if let Some(safesearch) = params.safesearch {
-        query.push(("safesearch", safesearch.to_string()));
-    }
-    query
-}
-
-/// Call the Brave Search API and map `web.results` to [`SearchResult`] values.
-///
-/// Always sends `extra_snippets=true`. Optional knobs are omitted when `None`.
-///
-/// # Errors
-/// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
-/// [`GatewayError::UpstreamStatus`] on a non-success provider status. Both are
-/// prefixed with `web_search: ` on the body or source message.
-async fn brave_search(
-    http: &reqwest::Client,
-    base_url: &str,
-    api_key: &str,
-    params: &BraveSearchParams<'_>,
-) -> Result<Vec<SearchResult>, GatewayError> {
-    let query = brave_search_query(params);
-
-    let response = http
-        .get(format!("{base_url}/web/search"))
-        .query(&query)
-        .header("X-Subscription-Token", api_key)
-        .header("Accept", "application/json")
-        .send()
-        .await
-        .map_err(|e| prefix_web_search_upstream(GatewayError::upstream_transport(e)))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        let body: String = body.chars().take(2000).collect();
-        return Err(prefix_web_search_upstream(GatewayError::UpstreamStatus {
-            status: status.as_u16(),
-            body,
-        }));
-    }
-
-    let parsed: BraveResponse = response
-        .json()
-        .await
-        .map_err(|e| prefix_web_search_upstream(GatewayError::upstream_transport(e)))?;
-
-    let results = parsed
-        .web
-        .map(|web| web.results)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|r| SearchResult {
-            title: r.title,
-            url: r.url,
-            description: r.description,
-            age: r.age,
-            site_name: None,
-            extra_snippets: r.extra_snippets,
-        })
-        .collect();
-
-    Ok(results)
-}
-
 /// The `POST /v1/tools/web_search` route: bearer-authed, proxies to Brave.
 ///
 /// # Errors
 /// Returns [`GatewayError::Unauthorized`] when the bearer token is absent or
 /// wrong, [`GatewayError::ToolNotConfigured`] when no `[tools.web_search]`
 /// section is present, [`GatewayError::MalformedRequest`] when `query` is empty
-/// after trimming, and the upstream variants on a provider failure.
-pub async fn web_search(
+/// after trimming or an `include`/`exclude` domain filter is malformed, and the
+/// upstream variants on a provider failure.
+pub(crate) async fn web_search(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<WebSearchRequest>,
@@ -368,6 +335,11 @@ pub async fn web_search(
         .await
         .ok_or(GatewayError::ToolNotConfigured("web_search"))?;
     let query = trim_web_search_query(&request.query)?;
+    validate_request_knobs(&request)?;
+    // Reject malformed domain filters at the boundary before any provider call
+    // (WSP-006).
+    let include_domains = validate_domain_filters("include", &request.include_domains)?;
+    let exclude_domains = validate_domain_filters("exclude", &request.exclude_domains)?;
     let count = clamp_count(
         request.count.unwrap_or(web_search.settings.default_count),
         web_search.settings.max_count,
@@ -397,8 +369,8 @@ pub async fn web_search(
     let results = post_process_results(
         mapped,
         web_search.settings.strip_tracking,
-        &request.include_domains,
-        &request.exclude_domains,
+        &include_domains,
+        &exclude_domains,
         web_search.settings.max_per_host,
         count,
     );
@@ -407,6 +379,7 @@ pub async fn web_search(
 
 #[cfg(test)]
 mod tests {
+    use super::brave::{brave_search_query, prefix_web_search_upstream};
     use super::*;
     use crate::error::GatewayError;
 
@@ -420,6 +393,87 @@ mod tests {
                 }
                 other => panic!("expected MalformedRequest, got {other:?}"),
             }
+        }
+    }
+
+    fn knob_request(
+        freshness: &str,
+        safesearch: &str,
+        country: &str,
+        lang: &str,
+    ) -> WebSearchRequest {
+        WebSearchRequest {
+            query: "q".to_string(),
+            count: None,
+            freshness: Some(freshness.to_string()),
+            country: Some(country.to_string()),
+            search_lang: Some(lang.to_string()),
+            safesearch: Some(safesearch.to_string()),
+            include_domains: Vec::new(),
+            exclude_domains: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn validate_request_knobs_accepts_valid_and_empty() {
+        // TOOLS-004: valid closed-vocab and locale codes pass; empty knobs are
+        // omitted downstream and need no validation.
+        assert!(validate_request_knobs(&knob_request("pd", "moderate", "us", "en")).is_ok());
+        assert!(
+            validate_request_knobs(&knob_request("2024-01-01to2024-12-31", "off", "GB", "eng"))
+                .is_ok()
+        );
+        assert!(validate_request_knobs(&knob_request("", "", "", "")).is_ok());
+    }
+
+    #[test]
+    fn validate_request_knobs_rejects_malformed() {
+        // TOOLS-004: arbitrary strings are rejected at the boundary, not
+        // forwarded to the provider.
+        for req in [
+            knob_request("daily", "", "", ""),
+            knob_request("", "medium", "", ""),
+            knob_request("", "", "usa", ""),
+            knob_request("", "", "", "english"),
+            knob_request("", "", "1", ""),
+        ] {
+            assert!(matches!(
+                validate_request_knobs(&req),
+                Err(GatewayError::MalformedRequest(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn validate_domain_filters_accepts_valid_and_rejects_malformed() {
+        // WSP-006: bare valid domains pass (lowercased); malformed entries are
+        // rejected with a clear MalformedRequest, not silently forwarded.
+        assert_eq!(
+            validate_domain_filters("include", &["Example.COM".into(), "sub.a-b.co".into()])
+                .expect("valid domains"),
+            vec!["example.com".to_string(), "sub.a-b.co".to_string()]
+        );
+        // An empty list means "no filter" and stays Ok.
+        assert!(
+            validate_domain_filters("exclude", &[])
+                .expect("empty list")
+                .is_empty()
+        );
+        for bad in [
+            "",                    // empty
+            "   ",                 // whitespace-only
+            "https://example.com", // scheme
+            "example.com/path",    // path
+            "exa mple.com",        // embedded space
+            "exa$mple.com",        // invalid character
+            "example.com:8080",    // port
+            "-bad.com",            // label starts with hyphen
+            "bad-.com",            // label ends with hyphen
+            "a..b.com",            // empty label
+        ] {
+            let err = validate_domain_filters("include", &[bad.to_string()])
+                .expect_err(&format!("{bad:?} must be rejected"));
+            assert!(matches!(err, GatewayError::MalformedRequest(_)), "{err:?}");
         }
     }
 
@@ -516,7 +570,7 @@ mod tests {
 
 #[cfg(test)]
 mod live_tests {
-    use super::{BraveSearchParams, brave_search};
+    use super::brave::{BraveSearchParams, brave_search};
 
     /// Hits the real Brave Search API to validate the request shape and the
     /// `web.results` parsing against Brave's actual JSON.

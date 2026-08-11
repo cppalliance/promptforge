@@ -1,0 +1,214 @@
+//! `impl Config`: public load/parse entry points and read-only accessors.
+//!
+//! Semantic validation lives in [`super::validate`]; `${VAR}` interpolation
+//! lives in [`super::interpolate`]. This module is only the loading seam and the
+//! accessors the rest of the crate reads a validated `Config` through.
+
+use std::net::SocketAddr;
+use std::path::Path;
+
+use super::{
+    Config, DeviceKind, EndpointConfig, LocalModelConfig, RawConfig, Secret, WebSearchConfig,
+    interpolate_value,
+};
+use crate::error::ConfigError;
+
+impl Config {
+    /// Load a configuration file with recursive `include` resolution.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError`](crate::ConfigError) if the file cannot be read,
+    /// an include cycle or depth limit is hit, an interpolation is malformed or
+    /// references an unset variable, the TOML is invalid, or a semantic check
+    /// fails.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use promptforge_gateway::Config;
+    /// use std::path::Path;
+    ///
+    /// # fn demo() -> Result<(), promptforge_gateway::ConfigError> {
+    /// let config = Config::load(Path::new("gateway.toml"))?;
+    /// let _ = config;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn load(path: &Path) -> Result<Config, crate::api_error::ConfigError> {
+        crate::profile::load_path(path).map_err(crate::api_error::ConfigError::from)
+    }
+
+    /// Load a named profile from `dir` with recursive `include` resolution.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError`](crate::ConfigError) when the profile is missing,
+    /// includes cycle or exceed depth, or the resolved document fails config
+    /// validation.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use promptforge_gateway::{Config, ProfileName};
+    /// use std::path::Path;
+    ///
+    /// # fn demo() -> Result<(), Box<dyn std::error::Error>> {
+    /// let name = ProfileName::parse("dev")?;
+    /// let config = Config::load_profile(Path::new("/etc/promptforge/profiles"), &name)?;
+    /// let _ = config;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn load_profile(
+        dir: &Path,
+        name: &crate::profile::ProfileName,
+    ) -> Result<Config, crate::api_error::ConfigError> {
+        crate::profile::load_named(dir, name).map_err(crate::api_error::ConfigError::from)
+    }
+
+    /// The server bind address.
+    #[must_use]
+    pub(crate) fn bind_addr(&self) -> SocketAddr {
+        self.server.bind
+    }
+
+    /// A clone of the server's bearer key.
+    #[must_use]
+    pub(crate) fn server_key(&self) -> Secret {
+        self.server.key.clone()
+    }
+
+    /// The web-search configuration, when `[tools.web_search]` is present.
+    #[must_use]
+    pub(crate) fn web_search_config(&self) -> Option<&WebSearchConfig> {
+        self.tools
+            .as_ref()
+            .and_then(|tools| tools.web_search.as_ref())
+    }
+
+    /// Resolve the concurrency limit for an endpoint: explicit
+    /// `concurrency`, else the referenced remote device's concurrency, else
+    /// unlimited (`None`).
+    #[must_use]
+    pub(crate) fn endpoint_concurrency(&self, endpoint: &EndpointConfig) -> Option<usize> {
+        if let Some(n) = endpoint.concurrency {
+            return Some(n);
+        }
+        let device_id = endpoint.device.as_deref()?;
+        self.devices
+            .iter()
+            .find(|d| d.id == device_id)
+            .and_then(|d| d.concurrency)
+    }
+
+    /// Resolve lane concurrency for a local model. Defaults to 1 when no
+    /// device/lane is declared.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError::Validation`] when the device or lane is missing.
+    pub(crate) fn local_model_concurrency(
+        &self,
+        model: &LocalModelConfig,
+    ) -> Result<usize, ConfigError> {
+        match (&model.device, &model.lane) {
+            (None, None) => Ok(1),
+            (Some(device_id), Some(lane_id)) => {
+                let device = self
+                    .devices
+                    .iter()
+                    .find(|d| d.id == *device_id)
+                    .ok_or_else(|| {
+                        ConfigError::Validation(format!(
+                            "local_model {} names undefined device {device_id}",
+                            model.name
+                        ))
+                    })?;
+                if device.kind != DeviceKind::Local {
+                    return Err(ConfigError::Validation(format!(
+                        "local_model {} must reference a local device, but {device_id} is remote",
+                        model.name
+                    )));
+                }
+                let lane = device
+                    .lanes
+                    .iter()
+                    .find(|l| l.id == *lane_id)
+                    .ok_or_else(|| {
+                        ConfigError::Validation(format!(
+                            "local_model {} names undefined lane {lane_id} on device {device_id}",
+                            model.name
+                        ))
+                    })?;
+                if lane.concurrency < 1 {
+                    return Err(ConfigError::Validation(format!(
+                        "device {device_id} lane {lane_id} concurrency must be at least 1"
+                    )));
+                }
+                Ok(lane.concurrency)
+            }
+            _ => Err(ConfigError::Validation(format!(
+                "local_model {} must set both device and lane, or neither",
+                model.name
+            ))),
+        }
+    }
+
+    /// Interpolate, parse, and validate a configuration from a TOML string.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError`](crate::ConfigError) for a malformed or unresolved
+    /// interpolation, invalid TOML, or a failed semantic check.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_gateway::Config;
+    ///
+    /// let toml = r#"
+    /// [server]
+    /// bind = "127.0.0.1:8080"
+    /// key = "secret"
+    ///
+    /// [[endpoint]]
+    /// id = "e"
+    /// protocol = "openai"
+    /// base_url = "http://127.0.0.1:9"
+    /// api_key = ""
+    ///
+    /// [[model]]
+    /// name = "m"
+    /// description = "a model"
+    /// context = 8192
+    /// upstream = "u"
+    /// endpoints = ["e"]
+    /// "#;
+    /// let config = Config::from_toml_str(toml).unwrap();
+    /// let _ = config;
+    /// ```
+    pub fn from_toml_str(raw: &str) -> Result<Config, crate::api_error::ConfigError> {
+        Self::parse_toml(raw).map_err(crate::api_error::ConfigError::from)
+    }
+
+    /// Parse, interpolate, and validate, returning the internal error type.
+    pub(crate) fn parse_toml(raw: &str) -> Result<Config, ConfigError> {
+        // Parse first, then interpolate only string *values*. Interpolating the
+        // raw text would expand `${VAR}` inside comments and keys, and an
+        // interpolated value containing a quote, backslash, or newline would
+        // corrupt the TOML structure on a second parse. (CFG-007)
+        let document: toml::Value = toml::from_str(raw).map_err(|source| ConfigError::Parse {
+            path: None,
+            source: Box::new(source),
+        })?;
+        Self::from_value(document)
+    }
+
+    /// Interpolate string leaves, deserialize, and validate an already-parsed
+    /// TOML document. Used by [`Self::parse_toml`] and by profile include
+    /// resolution, which merges into a `toml::Value` and avoids re-serializing.
+    pub(crate) fn from_value(mut document: toml::Value) -> Result<Config, ConfigError> {
+        interpolate_value(&mut document)?;
+        let raw: RawConfig = document.try_into().map_err(|source| ConfigError::Parse {
+            path: None,
+            source: Box::new(source),
+        })?;
+        let config = Config::from(raw);
+        config.validate()?;
+        Ok(config)
+    }
+}
