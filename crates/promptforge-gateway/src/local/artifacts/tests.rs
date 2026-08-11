@@ -10,6 +10,24 @@ use tempfile::TempDir;
 
 use super::*;
 
+#[test]
+fn parse_expected_digest_normalizes_and_validates() {
+    let lower = "a".repeat(64);
+    assert_eq!(parse_expected_digest(&lower).unwrap(), lower);
+    // Uppercase and surrounding whitespace normalize to canonical lowercase.
+    let upper = format!("  {}  ", "A".repeat(64));
+    assert_eq!(parse_expected_digest(&upper).unwrap(), "a".repeat(64));
+    // Wrong length and non-hex are rejected at the boundary.
+    assert!(matches!(
+        parse_expected_digest("abc"),
+        Err(LocalError::InvalidDigest { .. })
+    ));
+    assert!(matches!(
+        parse_expected_digest(&"z".repeat(64)),
+        Err(LocalError::InvalidDigest { .. })
+    ));
+}
+
 /// Test double that records set_len / inc / finish / abandon calls.
 struct RecordingProgress {
     total: Mutex<Option<u64>>,

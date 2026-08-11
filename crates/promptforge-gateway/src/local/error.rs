@@ -52,6 +52,16 @@ pub(crate) enum LocalError {
         source: io::Error,
     },
 
+    /// A configured `sha256` pin was not a 64-character lowercase-normalizable
+    /// hex string.
+    #[error("invalid sha-256 pin `{value}`: {reason}")]
+    InvalidDigest {
+        /// The offending configured digest string.
+        value: String,
+        /// Why it was rejected.
+        reason: &'static str,
+    },
+
     /// A downloaded or cached blob did not match its pin.
     #[error("sha-256 mismatch for `{name}`: expected {expected}, got {actual}")]
     DigestMismatch {

@@ -45,6 +45,31 @@ fn is_hf_host(host: &str) -> bool {
 
 type Result<T> = std::result::Result<T, LocalError>;
 
+/// Validates and canonicalizes a configured SHA-256 pin at the trust boundary.
+///
+/// A pin must be exactly 64 hexadecimal characters. The returned value is
+/// lowercased so comparison against the lowercase hex produced by [`hex_digest`]
+/// never fails on case alone (a real footgun with an uppercase config value).
+///
+/// # Errors
+/// Returns [`LocalError::InvalidDigest`] when the pin is not 64 hex characters.
+fn parse_expected_digest(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.len() != 64 {
+        return Err(LocalError::InvalidDigest {
+            value: raw.to_owned(),
+            reason: "expected exactly 64 hexadecimal characters",
+        });
+    }
+    if !trimmed.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(LocalError::InvalidDigest {
+            value: raw.to_owned(),
+            reason: "expected only hexadecimal characters",
+        });
+    }
+    Ok(trimmed.to_ascii_lowercase())
+}
+
 /// Cache root plus HTTP client for provisioning local inference artifacts.
 #[derive(Debug)]
 pub(crate) struct ArtifactStore {
@@ -104,11 +129,12 @@ impl ArtifactStore {
             });
         }
         if let Some(expected) = sha256 {
+            let expected = parse_expected_digest(expected)?;
             let actual = file_digest(&path)?;
             if actual != expected {
                 return Err(LocalError::DigestMismatch {
                     name: path.display().to_string(),
-                    expected: expected.to_owned(),
+                    expected,
                     actual,
                 });
             }
@@ -206,8 +232,13 @@ impl ArtifactStore {
         let staging = part_path(destination);
         remove_cache_entry(&self.cache, &staging)?;
 
+        // Validate/canonicalize the pin once, at the boundary, so both the
+        // cache-hit and post-download comparisons are case-insensitive and a
+        // malformed pin fails fast rather than always mismatching.
+        let expected_digest = asset.sha256.map(parse_expected_digest).transpose()?;
+
         if destination.is_file() {
-            match asset.sha256 {
+            match expected_digest.as_deref() {
                 Some(expected) => {
                     if file_digest(destination)? == expected {
                         return Ok(());
@@ -234,7 +265,7 @@ impl ArtifactStore {
                 return Err(error);
             }
         };
-        if let Some(expected) = asset.sha256
+        if let Some(expected) = expected_digest.as_deref()
             && actual != expected
         {
             remove_cache_entry(&self.cache, &staging)?;
