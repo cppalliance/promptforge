@@ -202,7 +202,7 @@ enum ShutdownTrigger {
 
 /// Classifies the result of awaiting Ctrl-C, distinguishing a real interrupt
 /// from a failure to install the signal handler (MAIN-003).
-fn classify_shutdown(result: std::io::Result<()>) -> ShutdownTrigger {
+fn classify_shutdown(result: &std::io::Result<()>) -> ShutdownTrigger {
     match result {
         Ok(()) => ShutdownTrigger::Interrupted,
         Err(_) => ShutdownTrigger::HandlerFailed,
@@ -216,7 +216,7 @@ fn classify_shutdown(result: std::io::Result<()>) -> ShutdownTrigger {
 /// an interrupt and stop the server. The process can still be terminated by the
 /// OS.
 async fn shutdown_signal() {
-    match classify_shutdown(tokio::signal::ctrl_c().await) {
+    match classify_shutdown(&tokio::signal::ctrl_c().await) {
         ShutdownTrigger::Interrupted => {
             tracing::info!("received Ctrl-C; shutting down gracefully");
         }
@@ -224,20 +224,6 @@ async fn shutdown_signal() {
             tracing::error!("failed to install Ctrl-C handler; continuing to serve");
             std::future::pending::<()>().await;
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{ShutdownTrigger, classify_shutdown};
-
-    #[test]
-    fn classify_shutdown_distinguishes_interrupt_from_handler_failure() {
-        assert_eq!(classify_shutdown(Ok(())), ShutdownTrigger::Interrupted);
-        assert_eq!(
-            classify_shutdown(Err(std::io::Error::other("no handler"))),
-            ShutdownTrigger::HandlerFailed
-        );
     }
 }
 
@@ -256,5 +242,19 @@ fn load_startup(options: &ServeOptions) -> Result<(Config, Option<ProfileName>),
                 .and_then(|stem| ProfileName::parse(stem).ok());
             Ok((config, active))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ShutdownTrigger, classify_shutdown};
+
+    #[test]
+    fn classify_shutdown_distinguishes_interrupt_from_handler_failure() {
+        assert_eq!(classify_shutdown(&Ok(())), ShutdownTrigger::Interrupted);
+        assert_eq!(
+            classify_shutdown(&Err(std::io::Error::other("no handler"))),
+            ShutdownTrigger::HandlerFailed
+        );
     }
 }
