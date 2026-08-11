@@ -2,57 +2,89 @@
 //!
 //! The filesystem watcher covers the prompt file's parent directory filtered
 //! to the prompt's file name, because editors often save through an atomic
-//! rename that replaces the watched inode. Raw change notifications funnel
-//! into a channel, and [`rerun_on_changes`] coalesces each notification burst
-//! behind a quiet period before driving one rerun. The already-running gateway
-//! stays warm across every rerun; this crate never starts it.
+//! rename that replaces the watched inode. Raw change notifications funnel into
+//! a bounded capacity-one channel, and [`rerun_on_changes`] coalesces each
+//! notification burst behind a quiet period before driving one rerun. The
+//! reusable [`RunEnv`] is built once and lent to every rerun, so the
+//! already-running gateway's catalog, tools, and picker stay warm across saves.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 use notify::{RecursiveMode, Watcher as _};
 use promptforge_core::CancelHandle;
-use tokio::sync::mpsc::{self, UnboundedReceiver};
+use promptforge_core::observe::Observer;
+use tokio::sync::mpsc::{self, Receiver};
 
-use crate::run;
+use crate::config::GatewayEnv;
+use crate::diagnostics::{VerboseObserver, format_dev_failure};
+use crate::run::{CapturePolicy, RunEnv};
 
 /// Quiet period that must elapse after the last change notification before a
 /// rerun fires, absorbing editor write-then-rename save bursts.
 const DEBOUNCE: Duration = Duration::from_millis(300);
 
+/// What the settle logic decided to do next.
+enum Settle {
+    /// A debounced change is ready to rerun.
+    Rerun,
+    /// The loop should stop (cancelled, or the event source closed).
+    Done,
+    /// The watcher backend failed; stop and surface the message.
+    Backend(String),
+}
+
 /// Runs `prompt` once, then reruns it after every debounced save until the
 /// process is interrupted.
 ///
-/// Each rerun re-reads, re-parses, and re-executes the file against
-/// the already-running gateway named by the process environment, and dumps
-/// the run's store beside the prompt; the watcher's file-name filter keeps
-/// those dump writes from feeding back into the rerun loop. A failed run
-/// prints its error on stderr and keeps watching; results print to stdout.
-/// The loop itself never returns except through an error while installing
-/// the watcher.
+/// Each rerun re-reads, re-parses, and re-executes the file against the
+/// already-running gateway, reusing the [`RunEnv`] built once here. A failed
+/// run prints its error on stderr and keeps watching; results print to stdout.
 ///
 /// # Errors
 ///
-/// Returns an error when the prompt path has no file name or the filesystem
-/// watcher cannot be installed on its parent directory.
-pub(crate) async fn run(prompt: &Path, input: &str, cancel: &CancelHandle) -> Result<()> {
+/// Returns an error when the prompt path has no file name, the filesystem
+/// watcher cannot be installed, the run environment cannot be built, or the
+/// watcher backend reports a failure that invalidates reliable watching.
+pub(crate) async fn run(
+    prompt: &Path,
+    input: &str,
+    gateway: &GatewayEnv,
+    capture: CapturePolicy,
+    cancel: &CancelHandle,
+) -> Result<()> {
     let file_name = prompt
         .file_name()
         .with_context(|| format!("{} names no file to watch", prompt.display()))?
         .to_owned();
     let directory = watched_directory(prompt);
 
-    let (sender, mut receiver) = mpsc::unbounded_channel();
+    // Capacity-one wake channel: a full channel already records a pending
+    // change, so a noisy watcher or a slow rerun cannot grow an unbounded
+    // backlog. A backend error is recorded in `backend_error` (which cannot be
+    // lost even when the wake channel is full) and then wakes the loop.
+    let (sender, mut receiver) = mpsc::channel::<()>(1);
+    let backend_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let callback_backend = Arc::clone(&backend_error);
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        // A backend error is not actionable mid-loop and the next save still
-        // produces an event, so errors are deliberately dropped.
-        if let Ok(event) = event
-            && event_touches(&event, &file_name)
-        {
-            // A closed channel only means the loop is shutting down.
-            let _ignored = sender.send(());
+        match event {
+            Ok(event) if event_touches(&event, &file_name) => {
+                // Full means a change is already pending; closed means shutdown.
+                let _ignored = sender.try_send(());
+            }
+            Ok(_) => {}
+            Err(error) => {
+                // Record the backend error where it cannot be dropped even if the
+                // wake channel is full, then wake the loop so it surfaces it
+                // rather than parking on stale coverage.
+                if let Ok(mut slot) = callback_backend.lock() {
+                    slot.get_or_insert_with(|| error.to_string());
+                }
+                let _ignored = sender.try_send(());
+            }
         }
     })
     .context("create the prompt file watcher")?;
@@ -64,12 +96,29 @@ pub(crate) async fn run(prompt: &Path, input: &str, cancel: &CancelHandle) -> Re
         "watching {} for changes; press Ctrl-C to stop",
         prompt.display()
     );
-    run_and_report(prompt, input, cancel).await;
-    rerun_on_changes(&mut receiver, DEBOUNCE, cancel, move || async move {
-        eprintln!("{} changed; rerunning", prompt.display());
-        run_and_report(prompt, input, cancel).await;
-    })
+
+    // Build the reusable run environment once (fetching the catalog once), then
+    // lend it to every rerun.
+    let env = RunEnv::initialize(gateway, capture).await?;
+    let env_ref = &env;
+
+    run_and_report(env_ref, prompt, input, cancel).await;
+    let outcome = rerun_on_changes(
+        &mut receiver,
+        DEBOUNCE,
+        cancel,
+        &backend_error,
+        move || async move {
+            eprintln!("{} changed; rerunning", prompt.display());
+            run_and_report(env_ref, prompt, input, cancel).await;
+        },
+    )
     .await;
+
+    // Keep the watcher alive until the loop is done.
+    drop(watcher);
+
+    outcome?;
     if cancel.is_cancelled() {
         bail!("interrupted by Ctrl-C");
     }
@@ -86,10 +135,6 @@ fn watched_directory(prompt: &Path) -> PathBuf {
 }
 
 /// Reports whether `event` names the watched file.
-///
-/// Matching is by final path component because a save may arrive as a
-/// create, modify, rename, or remove event whose paths differ in everything
-/// but the file name.
 fn event_touches(event: &notify::Event, file_name: &OsStr) -> bool {
     event
         .paths
@@ -97,53 +142,79 @@ fn event_touches(event: &notify::Event, file_name: &OsStr) -> bool {
         .any(|path| path.file_name() == Some(file_name))
 }
 
-/// Drives `rerun` once per debounced change until the event source closes.
+/// Drives `rerun` once per debounced change until the event source closes or
+/// cancellation fires.
 ///
-/// This is the seam the watch loop and its tests share: tests inject events
-/// through the channel and observe rerun requests without any filesystem
-/// watcher or server.
+/// # Errors
+/// Returns an error when the watcher backend reports a failure.
 async fn rerun_on_changes<F, Fut>(
-    receiver: &mut UnboundedReceiver<()>,
+    receiver: &mut Receiver<()>,
     debounce: Duration,
     cancel: &CancelHandle,
+    backend: &Mutex<Option<String>>,
     mut rerun: F,
-) where
+) -> Result<()>
+where
     F: FnMut() -> Fut,
     Fut: Future<Output = ()>,
 {
-    while next_rerun(receiver, debounce, cancel).await {
-        rerun().await;
+    loop {
+        match next_rerun(receiver, debounce, cancel, backend).await {
+            Settle::Rerun => rerun().await,
+            Settle::Done => return Ok(()),
+            Settle::Backend(message) => {
+                bail!("prompt file watcher reported an error, stopping: {message}")
+            }
+        }
     }
 }
 
-/// Waits for one change notification, then absorbs every further
-/// notification until `debounce` of quiet passes.
+/// Takes the recorded backend error, if any, leaving the slot empty.
+fn take_backend(backend: &Mutex<Option<String>>) -> Option<String> {
+    backend
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
+}
+
+/// Waits for one change notification, then absorbs every further notification
+/// until `debounce` of quiet passes.
 ///
-/// Returns `true` when a settled change awaits a rerun and `false` once the
-/// event source closes with nothing pending. A source that closes with a
-/// change already received still yields that final rerun first.
+/// [`Settle::Rerun`] means a settled change awaits a rerun, [`Settle::Done`]
+/// means the source closed or cancellation fired, and [`Settle::Backend`]
+/// carries a watcher backend failure.
 async fn next_rerun(
-    receiver: &mut UnboundedReceiver<()>,
+    receiver: &mut Receiver<()>,
     debounce: Duration,
     cancel: &CancelHandle,
-) -> bool {
+    backend: &Mutex<Option<String>>,
+) -> Settle {
     tokio::select! {
         biased;
-        () = cancel.cancelled() => return false,
-        msg = receiver.recv() => {
-            if msg.is_none() {
-                return false;
+        () = cancel.cancelled() => return Settle::Done,
+        msg = receiver.recv() => match msg {
+            None => return Settle::Done,
+            // Every wake checks the loss-proof backend slot first, so a backend
+            // error surfaces even if its own wake send was dropped (channel full).
+            Some(()) => {
+                if let Some(message) = take_backend(backend) {
+                    return Settle::Backend(message);
+                }
             }
         }
     }
     loop {
         tokio::select! {
             biased;
-            () = cancel.cancelled() => return false,
+            () = cancel.cancelled() => return Settle::Done,
             timed = tokio::time::timeout(debounce, receiver.recv()) => {
                 match timed {
-                    Ok(Some(())) => {}
-                    Ok(None) | Err(_) => return true,
+                    Ok(Some(())) => {
+                        if let Some(message) = take_backend(backend) {
+                            return Settle::Backend(message);
+                        }
+                    }
+                    Ok(None) | Err(_) => return Settle::Rerun,
                 }
             }
         }
@@ -151,11 +222,15 @@ async fn next_rerun(
 }
 
 /// Runs the prompt once, printing the result to stdout or the error to stderr.
-async fn run_and_report(prompt: &Path, input: &str, cancel: &CancelHandle) {
-    match run::run_once(prompt, input, cancel.clone()).await {
+async fn run_and_report(env: &RunEnv, prompt: &Path, input: &str, cancel: &CancelHandle) {
+    let observer: Arc<dyn Observer> = Arc::new(VerboseObserver::new(std::io::stderr()));
+    match env
+        .run_prompt(prompt, input, observer, cancel.clone())
+        .await
+    {
         Ok(result) => println!("{result}"),
         Err(error) => {
-            eprintln!("{}", run::format_dev_failure(prompt, &error));
+            eprintln!("{}", format_dev_failure(prompt, &error));
         }
     }
 }
@@ -200,9 +275,6 @@ mod tests {
 
     #[test]
     fn events_from_the_store_dump_directory_never_match_the_watched_prompt() {
-        // Every rerun dumps the store into `<prompt-stem>.store` beside the
-        // prompt, inside the watched directory; those writes must not feed
-        // back into the rerun loop.
         let file_name = OsStr::new("prompt.md");
         for path in [
             "/w/prompt.store",
@@ -241,27 +313,39 @@ mod tests {
         assert_eq!(watched_directory(Path::new("demo.md")), PathBuf::from("."));
     }
 
+    fn no_backend() -> Mutex<Option<String>> {
+        Mutex::new(None)
+    }
+
     #[tokio::test(start_paused = true)]
     async fn a_burst_of_events_coalesces_into_one_rerun_per_quiet_period() {
-        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let (sender, mut receiver) = mpsc::channel::<()>(1);
         let driver = tokio::spawn(async move {
             for _ in 0..3 {
-                sender.send(()).expect("rerun loop must be receiving");
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                let _ignored = sender.try_send(());
+                tokio::time::advance(Duration::from_millis(100)).await;
             }
             // Quiet long enough for the first rerun to fire, then one more
-            // settled change before the source closes.
-            tokio::time::sleep(Duration::from_millis(400)).await;
-            sender.send(()).expect("rerun loop must be receiving");
+            // settled change before the source closes. Virtual time only.
+            tokio::time::advance(Duration::from_millis(400)).await;
+            let _ignored = sender.try_send(());
         });
 
         let cancel = CancelHandle::new();
+        let backend = no_backend();
         let mut reruns = 0_u32;
-        rerun_on_changes(&mut receiver, Duration::from_millis(300), &cancel, || {
-            reruns += 1;
-            async {}
-        })
-        .await;
+        rerun_on_changes(
+            &mut receiver,
+            Duration::from_millis(300),
+            &cancel,
+            &backend,
+            || {
+                reruns += 1;
+                async {}
+            },
+        )
+        .await
+        .expect("no backend error");
 
         driver.await.expect("event driver must not panic");
         assert_eq!(reruns, 2, "three-burst then one change must rerun twice");
@@ -269,34 +353,177 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_change_already_queued_when_the_source_closes_still_reruns() {
-        let (sender, mut receiver) = mpsc::unbounded_channel();
-        sender.send(()).expect("fresh channel accepts one event");
+        let (sender, mut receiver) = mpsc::channel::<()>(1);
+        sender
+            .try_send(())
+            .expect("fresh channel accepts one event");
         drop(sender);
 
         let cancel = CancelHandle::new();
+        let backend = no_backend();
         let mut reruns = 0_u32;
-        rerun_on_changes(&mut receiver, Duration::from_millis(300), &cancel, || {
-            reruns += 1;
-            async {}
-        })
-        .await;
+        rerun_on_changes(
+            &mut receiver,
+            Duration::from_millis(300),
+            &cancel,
+            &backend,
+            || {
+                reruns += 1;
+                async {}
+            },
+        )
+        .await
+        .expect("no backend error");
 
         assert_eq!(reruns, 1);
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_source_that_closes_without_events_never_reruns() {
-        let (sender, mut receiver) = mpsc::unbounded_channel::<()>();
+        let (sender, mut receiver) = mpsc::channel::<()>(1);
         drop(sender);
 
         let cancel = CancelHandle::new();
+        let backend = no_backend();
         let mut reruns = 0_u32;
-        rerun_on_changes(&mut receiver, Duration::from_millis(300), &cancel, || {
-            reruns += 1;
-            async {}
-        })
-        .await;
+        rerun_on_changes(
+            &mut receiver,
+            Duration::from_millis(300),
+            &cancel,
+            &backend,
+            || {
+                reruns += 1;
+                async {}
+            },
+        )
+        .await
+        .expect("no backend error");
 
         assert_eq!(reruns, 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_backend_error_stops_the_loop_with_a_contextual_error() {
+        let (sender, mut receiver) = mpsc::channel::<()>(1);
+        let backend = Mutex::new(Some("watch coverage lost".to_owned()));
+        sender.try_send(()).expect("wake the loop");
+
+        let cancel = CancelHandle::new();
+        let mut reruns = 0_u32;
+        let error = rerun_on_changes(
+            &mut receiver,
+            Duration::from_millis(300),
+            &cancel,
+            &backend,
+            || {
+                reruns += 1;
+                async {}
+            },
+        )
+        .await
+        .expect_err("a backend error must stop the loop");
+
+        assert!(
+            format!("{error:#}").contains("watch coverage lost"),
+            "unexpected error: {error:#}"
+        );
+        assert_eq!(reruns, 0, "a backend error must not drive a rerun");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_backend_error_is_not_lost_when_a_change_is_already_queued() {
+        // The single wake slot is already occupied by a pending change, so the
+        // backend error's own wake send is dropped (full). It must still surface
+        // because the error is recorded in the loss-proof slot, not the channel.
+        let (sender, mut receiver) = mpsc::channel::<()>(1);
+        sender
+            .try_send(())
+            .expect("occupy the wake slot with a change");
+        assert!(
+            sender.try_send(()).is_err(),
+            "the wake channel must now be full so the error's wake is dropped"
+        );
+        let backend = Mutex::new(Some("coverage lost while a change was pending".to_owned()));
+
+        let cancel = CancelHandle::new();
+        let mut reruns = 0_u32;
+        let error = rerun_on_changes(
+            &mut receiver,
+            Duration::from_millis(300),
+            &cancel,
+            &backend,
+            || {
+                reruns += 1;
+                async {}
+            },
+        )
+        .await
+        .expect_err("the backend error must not be dropped");
+
+        assert!(
+            format!("{error:#}").contains("coverage lost while a change was pending"),
+            "unexpected error: {error:#}"
+        );
+        assert_eq!(reruns, 0, "the error must win over the pending change");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancellation_while_idle_stops_without_rerunning() {
+        // Keep the sender alive so only cancellation, not channel closure, ends
+        // the loop.
+        let (_sender, mut receiver) = mpsc::channel::<()>(1);
+        let cancel = CancelHandle::new();
+        let signal = cancel.clone();
+        tokio::spawn(async move { signal.cancel() });
+
+        let backend = no_backend();
+        let mut reruns = 0_u32;
+        rerun_on_changes(
+            &mut receiver,
+            Duration::from_millis(300),
+            &cancel,
+            &backend,
+            || {
+                reruns += 1;
+                async {}
+            },
+        )
+        .await
+        .expect("no backend error");
+
+        assert_eq!(reruns, 0, "cancelling an idle wait must not rerun");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancellation_during_debounce_stops_without_a_final_rerun() {
+        let (sender, mut receiver) = mpsc::channel::<()>(1);
+        sender
+            .try_send(())
+            .expect("fresh channel accepts one event");
+        let cancel = CancelHandle::new();
+        let signal = cancel.clone();
+        // Cancels once the loop parks in the debounce wait.
+        tokio::spawn(async move { signal.cancel() });
+
+        let backend = no_backend();
+        let mut reruns = 0_u32;
+        rerun_on_changes(
+            &mut receiver,
+            Duration::from_millis(300),
+            &cancel,
+            &backend,
+            || {
+                reruns += 1;
+                async {}
+            },
+        )
+        .await
+        .expect("no backend error");
+
+        assert_eq!(
+            reruns, 0,
+            "cancelling during the quiet period must not fire a final rerun"
+        );
+        drop(sender);
     }
 }
