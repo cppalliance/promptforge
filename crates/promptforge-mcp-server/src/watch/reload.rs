@@ -4,10 +4,11 @@
 //! [`Reloader::reload`] is the whole of a reload and takes no events, so it is
 //! driven directly by a test and by the watcher alike. It re-reads
 //! `prompts.toml`, runs the boot pass's own resolution over the prompts
-//! directory under [`OnBroken::Retain`], swaps the result into the
-//! [`CatalogHandle`], and rebuilds retrieval when the text it ranks on moved.
-//! The rebuild rides this swap rather than a task of its own, so `need_prompt`
-//! and the runner never disagree for longer than one atomic store.
+//! directory under [`OnBroken::Retain`], and, when the text retrieval ranks on
+//! moved, reindexes over the same loaded model. The new catalog and its index
+//! are bound into one [`Generation`] and published by a single store into the
+//! [`CatalogHandle`], so `need_prompt` and the runner can never disagree: a
+//! reader loads the whole pair or the older whole pair, never a mix.
 //!
 //! Nothing is announced to a client. `tools/list` is the same four built-ins
 //! whatever the catalog holds, and every call reads the catalog fresh, so a
@@ -31,31 +32,121 @@ mod tests;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use crate::catalog::{Catalog, CatalogHandle, OnBroken};
 use crate::config::{Config, Secret};
-use crate::retrieval::Retrieval;
+use crate::error::{CatalogError, ConfigError};
+use crate::generation::Generation;
 
 /// What one reload changed.
 ///
-/// `ranking_changed` reports that [`Catalog::hash`] moved, which is what tells
-/// retrieval its index is stale, so an edit to a prompt's body alone costs no
-/// rebuild.
+/// A reload that could not resolve its candidate is a [`ReloadError`], not a
+/// value of this type: every `Reload` describes a candidate that resolved. What
+/// remains to report is whether the text retrieval ranks on moved, whether the
+/// retrieval index that rode the swap is a stale carry-over, and whether this
+/// build actually became the live generation or was dropped for a newer one.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct Reload {
-    /// The text retrieval ranks on changed, so any index over it is stale.
-    pub ranking_changed: bool,
-    /// The candidate was refused and the previous catalog is still live.
-    pub refused: bool,
+pub(crate) struct Reload {
+    /// The text retrieval ranks on changed, so any index over it was rebuilt.
+    pub(crate) ranking_changed: bool,
+    /// The catalog resolved but its retrieval index could not be rebuilt, so
+    /// the previous index rode the swap and is stale until the next reload.
+    pub(crate) retrieval_stale: bool,
+    /// This build became the live generation. `false` when a newer reload had
+    /// already published, or a shutdown was in flight, so this build was dropped
+    /// rather than allowed to clobber a fresher one.
+    pub(crate) published: bool,
 }
 
-impl Reload {
-    /// The reload that changed nothing because the candidate was refused.
-    fn refusal() -> Reload {
-        Reload {
-            refused: true,
-            ..Reload::default()
+/// Why a reload did not resolve a candidate to publish.
+///
+/// Opaque and source-preserving: [`Watcher`](crate::Watcher) owns the logging
+/// and tests classify with [`ReloadError::kind`]. It never reaches the crate's
+/// public surface - the watcher is the boundary, and a reload failure keeps the
+/// previous generation live rather than surfacing to a client - so the cause is
+/// carried through [`std::error::Error::source`] without exposing a variant.
+#[derive(Debug)]
+pub(crate) struct ReloadError {
+    repr: ReloadErrorRepr,
+}
+
+#[derive(Debug)]
+enum ReloadErrorRepr {
+    /// `prompts.toml` could not be read or parsed.
+    Config(ConfigError),
+    /// The candidate catalog could not be resolved.
+    Catalog(CatalogError),
+}
+
+/// A stable classification of a [`ReloadError`], so a caller acts on the class
+/// rather than matching the private representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the watcher acts on a reload failure through Display and source; the classifier exists for the tests and for a future caller that must branch on the class"
+    )
+)]
+pub(crate) enum ReloadErrorKind {
+    /// `prompts.toml` could not be read or parsed.
+    Config,
+    /// The candidate catalog could not be resolved.
+    Catalog,
+}
+
+impl ReloadError {
+    /// The configuration would not load.
+    fn config(source: ConfigError) -> ReloadError {
+        ReloadError {
+            repr: ReloadErrorRepr::Config(source),
+        }
+    }
+
+    /// The candidate catalog would not resolve.
+    fn catalog(source: CatalogError) -> ReloadError {
+        ReloadError {
+            repr: ReloadErrorRepr::Catalog(source),
+        }
+    }
+
+    /// Classifies the failure without exposing the error's representation.
+    #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "paired with ReloadErrorKind: the classifier the tests use and a future caller branches on"
+        )
+    )]
+    pub(crate) fn kind(&self) -> ReloadErrorKind {
+        match &self.repr {
+            ReloadErrorRepr::Config(_) => ReloadErrorKind::Config,
+            ReloadErrorRepr::Catalog(_) => ReloadErrorKind::Catalog,
+        }
+    }
+}
+
+impl std::fmt::Display for ReloadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.repr {
+            ReloadErrorRepr::Config(_) => {
+                f.write_str("reload keeps the previous catalog: the configuration would not load")
+            }
+            ReloadErrorRepr::Catalog(_) => {
+                f.write_str("reload keeps the previous catalog: the candidate would not resolve")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ReloadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.repr {
+            ReloadErrorRepr::Config(source) => Some(source),
+            ReloadErrorRepr::Catalog(source) => Some(source),
         }
     }
 }
@@ -65,33 +156,55 @@ impl Reload {
 /// Cheap to share: everything it holds is either read-only or already behind an
 /// `Arc`.
 #[derive(Debug)]
-pub struct Reloader {
+pub(crate) struct Reloader {
     /// The `prompts.toml` the catalog-shaping tables are re-read from.
     source: PathBuf,
     /// The configuration boot loaded, which is what is actually in force.
     boot: Arc<Config>,
-    /// The catalog a reload swaps.
+    /// The live generation a reload replaces, catalog and retrieval index
+    /// together. It also owns the publication coordinator every reload claims a
+    /// ticket from and publishes through, so ordering is global to the handle
+    /// even when two reloaders share it.
     catalog: Arc<CatalogHandle>,
-    /// The retrieval index a reload rebuilds when the ranking text moved.
-    retrieval: Arc<Retrieval>,
+    /// Set by [`Watcher::shutdown`](crate::Watcher) so a reload that settles as
+    /// the process stops does not publish a late generation.
+    cancel: Arc<AtomicBool>,
+}
+
+/// A resolved reload that has claimed its place in line but has not published.
+///
+/// Splitting the resolve from the publish is what lets a test drive two reloads
+/// past each other - build the older, build the newer, then commit them in the
+/// reverse order - and prove the stale one is dropped rather than allowed to
+/// win. Production calls [`Reloader::reload`], which builds then commits at once.
+struct Pending {
+    /// This reload's place in line, claimed when it began.
+    ticket: u64,
+    /// The catalog and its retrieval index, assembled and ready to publish.
+    generation: Generation,
+    /// What the commit will report, but for [`Reload::published`], which the
+    /// commit fills in once it knows whether this build became live.
+    outcome: Reload,
 }
 
 impl Reloader {
-    /// Builds a reloader over the configuration file boot read, the catalog it
-    /// produced, and the retrieval index over that catalog.
+    /// Builds a reloader over the configuration file boot read and the live
+    /// generation it produced.
     #[must_use]
-    pub fn new(
-        source: &Path,
-        boot: Arc<Config>,
-        catalog: Arc<CatalogHandle>,
-        retrieval: Arc<Retrieval>,
-    ) -> Reloader {
+    pub(crate) fn new(source: &Path, boot: Arc<Config>, catalog: Arc<CatalogHandle>) -> Reloader {
         Reloader {
             source: source.to_path_buf(),
             boot,
             catalog,
-            retrieval,
+            cancel: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// The shutdown flag the watcher shares, so signalling it stops both a
+    /// pending reload's publish and the watch task.
+    #[must_use]
+    pub(crate) fn cancel_handle(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancel)
     }
 
     /// Re-resolves the catalog, swaps it in, and rebuilds retrieval when the
@@ -102,72 +215,93 @@ impl Reloader {
     /// prompt. It belongs on a blocking task, which is where the watcher calls
     /// it.
     ///
-    /// A failure is not returned: this runs under a live service, where the only
-    /// useful answer to a candidate that cannot be resolved is to keep serving
-    /// the previous catalog and say so in the log. The refusal is visible in
-    /// [`Reload::refused`].
-    pub fn reload(&self) -> Reload {
-        let Some(config) = self.candidate_config() else {
-            return Reload::refusal();
-        };
-        let candidate = match Catalog::resolve(&config, OnBroken::Retain) {
-            Ok(candidate) => candidate,
-            Err(error) => {
-                tracing::warn!("reload keeps the previous catalog: {error}");
-                return Reload::refusal();
-            }
-        };
+    /// # Errors
+    /// Returns a [`ReloadError`] when the configuration will not load
+    /// ([`ReloadErrorKind::Config`]) or the candidate catalog will not resolve
+    /// ([`ReloadErrorKind::Catalog`]). The previous generation stays live in
+    /// both cases; this runs under a live service, where the only useful answer
+    /// to a candidate that cannot be resolved is to keep serving what already
+    /// works and let the watcher log why.
+    pub(crate) fn reload(&self) -> Result<Reload, ReloadError> {
+        let pending = self.build()?;
+        Ok(self.commit(pending))
+    }
+
+    /// Resolves a candidate generation and claims its ticket, without
+    /// publishing.
+    ///
+    /// The ticket is claimed first, before any file is read, so it orders
+    /// reloads by when they were triggered rather than by how long resolving
+    /// took - which is what lets a slow reload be recognised as stale at commit.
+    fn build(&self) -> Result<Pending, ReloadError> {
+        let ticket = self.catalog.claim();
+        let config = self.candidate_config()?;
+        let candidate =
+            Catalog::resolve(&config, OnBroken::Retain).map_err(ReloadError::catalog)?;
 
         let previous = self.catalog.load();
-        let ranking_changed = previous.hash() != candidate.hash();
+        let ranking_changed = previous.catalog().hash() != candidate.hash();
         let broken = candidate
             .entries()
             .iter()
             .filter(|entry| entry.problem().is_some())
             .count();
+        // The whole generation - the new catalog and the index built over it -
+        // is assembled here, off the runtime, before a single store publishes
+        // it. A body-only save carries the previous index forward untouched; a
+        // save that moved a name or a description reindexes over the same loaded
+        // model, one forward pass per prompt and no weights. A rebuild that
+        // fails carries the previous index forward too, now stale, rather than
+        // dropping retrieval. Either way the pair is published atomically, so no
+        // reader ever sees the new catalog beside the old index or the reverse.
+        let (retrieval, retrieval_stale) = if ranking_changed {
+            let reindex = previous.retrieval().rebuilt(&candidate);
+            let stale = reindex.is_stale();
+            (reindex.into_retrieval(), stale)
+        } else {
+            (previous.retrieval().clone(), false)
+        };
         tracing::info!(
-            "reloaded {} prompt(s), {broken} broken; ranking {}",
+            "reloaded {} prompt(s), {broken} broken; ranking {}, retrieval {}",
             candidate.len(),
             if ranking_changed {
                 "changed"
             } else {
                 "unchanged"
             },
+            if retrieval_stale { "stale" } else { "current" },
         );
-        // The swap is what a later call reads; a run already in flight holds the
-        // snapshot it loaded and finishes under that definition.
-        self.catalog.store(candidate);
-        if ranking_changed {
-            // After the swap, never before it: retrieval hands a name to a
-            // caller that will pass it to the runner, so an index that is
-            // briefly behind the catalog is safe in a way one that is briefly
-            // ahead of it is not. The rebuild reuses the loaded model, so it
-            // costs one forward pass per prompt and no weights - and it blocks
-            // for the whole of that, which is why this method documents that it
-            // belongs on a blocking task.
-            self.retrieval.rebuild(&self.catalog.load());
-        }
-        Reload {
-            ranking_changed,
-            refused: false,
-        }
+        Ok(Pending {
+            ticket,
+            generation: Generation::new(candidate, retrieval),
+            outcome: Reload {
+                ranking_changed,
+                retrieval_stale,
+                published: false,
+            },
+        })
+    }
+
+    /// Publishes a [`Pending`] reload through the coordinator, filling in
+    /// whether it became the live generation.
+    fn commit(&self, pending: Pending) -> Reload {
+        let Pending {
+            ticket,
+            generation,
+            mut outcome,
+        } = pending;
+        outcome.published = self.catalog.publish(&self.cancel, ticket, generation);
+        outcome
     }
 
     /// The configuration a reload resolves under: the file as it is now, with
     /// the settings a reload cannot change put back to what boot read.
     ///
-    /// `None` means the file could not be read or parsed, which is a refusal.
-    fn candidate_config(&self) -> Option<Config> {
-        let mut config = match Config::load(&self.source) {
-            Ok(config) => config,
-            Err(error) => {
-                tracing::warn!(
-                    "reload keeps the previous catalog: {} is not loadable: {error}",
-                    self.source.display()
-                );
-                return None;
-            }
-        };
+    /// # Errors
+    /// Returns a [`ReloadError`] with [`ReloadErrorKind::Config`] when the file
+    /// could not be read or parsed.
+    fn candidate_config(&self) -> Result<Config, ReloadError> {
+        let mut config = Config::load(&self.source).map_err(ReloadError::config)?;
         let ignored = ignored_changes(&self.boot, &config);
         if !ignored.is_empty() {
             tracing::info!(
@@ -179,7 +313,7 @@ impl Reloader {
         // The watcher watches the directory boot named, so resolving against a
         // different one would publish prompts nothing is watching.
         config.paths.prompts.clone_from(&self.boot.paths.prompts);
-        Some(config)
+        Ok(config)
     }
 }
 
@@ -217,6 +351,9 @@ pub(super) fn ignored_changes(boot: &Config, candidate: &Config) -> Vec<&'static
     }
     if boot.server.watch_debounce != candidate.server.watch_debounce {
         ignored.push("[server].watch_debounce");
+    }
+    if boot.server.allowed_hosts != candidate.server.allowed_hosts {
+        ignored.push("[server].allowed_hosts");
     }
     if boot.paths.prompts != candidate.paths.prompts {
         ignored.push("[paths].prompts");

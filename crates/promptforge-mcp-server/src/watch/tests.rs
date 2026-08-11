@@ -15,13 +15,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use notify::EventKind;
 use notify::event::{AccessKind, CreateKind, ModifyKind};
+use rmcp::model::{CallToolRequestParams, CallToolResult, JsonObject};
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
-use super::fixture::config_source;
+use super::fixture::{Fixture, config_source};
 use super::{Interesting, Watcher, debounce};
 use crate::catalog::{Catalog, CatalogHandle};
 use crate::config::Config;
-use crate::retrieval::Retrieval;
+use crate::error::WatchErrorKind;
+use crate::server::{PreparedTools, PromptForgeServer};
 
 /// The debounce window every timing test uses. Its value is immaterial on a
 /// paused clock; what matters is that the test advances past it.
@@ -178,6 +181,23 @@ fn another_file_beside_the_configuration_is_not() {
 }
 
 #[test]
+fn a_same_named_configuration_file_elsewhere_is_not_interesting() {
+    // The whole configuration path is matched, not just its name: a
+    // `prompts.toml` in another directory is a different file, and a save to it
+    // must not trigger this server's reload.
+    let root = Path::new("/srv/pf");
+    let interesting = filter(root);
+    assert!(
+        interesting.matches(&modified(&root.join("prompts.toml"))),
+        "the watched configuration file still counts"
+    );
+    assert!(
+        !interesting.matches(&modified(Path::new("/somewhere/else/prompts.toml"))),
+        "a file with the same name in another directory is not the watched one"
+    );
+}
+
+#[test]
 fn reading_a_prompt_is_not_a_change() {
     // The resolver itself reads every prompt, so an access event would schedule
     // the next reload from the last one.
@@ -290,13 +310,8 @@ async fn watch_false_starts_nothing() {
     let config = Config::load(&source).expect("the configuration loads");
     let catalog = Arc::new(CatalogHandle::new(Catalog::new(Vec::new())));
 
-    let watcher = Watcher::start(
-        &source,
-        Arc::new(config),
-        catalog,
-        Arc::new(Retrieval::idle()),
-    )
-    .expect("starting nothing cannot fail");
+    let watcher =
+        Watcher::start(&source, Arc::new(config), catalog).expect("starting nothing cannot fail");
     assert!(
         watcher.is_none(),
         "watch = false leaves the catalog exactly as boot resolved it"
@@ -315,11 +330,112 @@ async fn an_unwatchable_prompts_directory_is_an_error() {
     let config = Config::load(&source).expect("the configuration loads");
     let catalog = Arc::new(CatalogHandle::new(Catalog::new(Vec::new())));
 
-    let started = Watcher::start(
-        &source,
-        Arc::new(config),
-        catalog,
-        Arc::new(Retrieval::idle()),
-    );
+    let started = Watcher::start(&source, Arc::new(config), catalog);
     assert!(started.is_err());
+}
+
+#[tokio::test]
+async fn shutdown_signals_and_awaits_a_clean_stop() {
+    let dir = tempfile::tempdir().expect("create a temporary root");
+    let root = dir.path();
+    fs::create_dir_all(root.join("prompts")).expect("create the prompts directory");
+    let source = root.join("prompts.toml");
+    fs::write(&source, config_source(root, "")).expect("write the configuration");
+    let config = Config::load(&source).expect("the configuration loads");
+    let catalog = Arc::new(CatalogHandle::new(Catalog::new(Vec::new())));
+
+    let watcher = Watcher::start(&source, Arc::new(config), catalog)
+        .expect("the watch starts")
+        .expect("watch is on by default");
+    // Returns only once the debounce task has ended: a shutdown that failed to
+    // close the event stream, or failed to await, would hang this test rather
+    // than pass it.
+    watcher.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// The fixture's own encoding
+// ---------------------------------------------------------------------------
+
+/// One `tools/call` request over an object of arguments.
+fn call(name: &'static str, arguments: Value) -> CallToolRequestParams {
+    let arguments: JsonObject = match arguments {
+        Value::Object(map) => map,
+        other => panic!("arguments must be an object, got {other}"),
+    };
+    CallToolRequestParams::new(name).with_arguments(arguments)
+}
+
+/// The text of a result's single content block.
+fn text_of(result: &CallToolResult) -> String {
+    let [block] = result.content.as_slice() else {
+        panic!("expected exactly one content block")
+    };
+    block.as_text().expect("the block is text").text.clone()
+}
+
+#[tokio::test]
+async fn a_value_with_quotes_and_newlines_round_trips_through_the_fixture() {
+    // The fixture encodes the description into a YAML scalar and the value into
+    // a Lua literal. Content with a quote, a newline, or a YAML/Lua
+    // metacharacter must carry through as data: raw interpolation would have
+    // terminated the scalar or spilled onto the next line, producing a file that
+    // would not resolve or one that resolved to something other than what was
+    // written.
+    let fixture = Fixture::new();
+    let server = PromptForgeServer::new(
+        Arc::clone(&fixture.config),
+        Arc::clone(&fixture.catalog),
+        Arc::new(
+            PreparedTools::new(
+                &fixture.config.gateway,
+                promptforge_core::model::ModelCatalog::empty(),
+            )
+            .expect("prepare fixture live tools"),
+        ),
+    );
+
+    let value = "line one's \"quote\"\nline two: [[bracket]] and a \\ backslash\ttab";
+    let description = "a description with 'quotes', \"more\",\nand a newline";
+    fixture.rewrite("alpha", description, value);
+    assert!(
+        fixture
+            .reload()
+            .expect("a value with quotes and newlines still resolves")
+            .published,
+        "the escaped fixture content resolves"
+    );
+
+    let ran = server
+        .dispatch(call("run_prompt", json!({ "prompt": "alpha" })))
+        .await
+        .expect("the runner answers");
+    assert_eq!(
+        text_of(&ran),
+        value,
+        "the value round-trips verbatim through the Lua literal"
+    );
+    assert_eq!(
+        fixture.description("alpha"),
+        description,
+        "the description round-trips verbatim through the YAML scalar"
+    );
+}
+
+#[test]
+fn starting_outside_a_runtime_is_a_typed_error_rather_than_a_panic() {
+    // A plain `#[test]`, so there is no ambient Tokio runtime. The debounce
+    // task has nowhere to run, and an operator has to hear about that as a
+    // returned error rather than as a panic out of the first spawn.
+    let dir = tempfile::tempdir().expect("create a temporary root");
+    let root = dir.path();
+    fs::create_dir_all(root.join("prompts")).expect("create the prompts directory");
+    let source = root.join("prompts.toml");
+    fs::write(&source, config_source(root, "")).expect("write the configuration");
+    let config = Config::load(&source).expect("the configuration loads");
+    let catalog = Arc::new(CatalogHandle::new(Catalog::new(Vec::new())));
+
+    let error = Watcher::start(&source, Arc::new(config), catalog)
+        .expect_err("no runtime is an error, not a panic");
+    assert_eq!(error.kind(), WatchErrorKind::Runtime);
 }

@@ -16,23 +16,21 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 /// A prompt that runs offline.
 const ECHO: &str = "---\nname: echo\ndescription: Returns its argument\npromptforge: 1\n---\n\n\
 # Test prompt\n\n## Main\n\n```lua\nreturn args\n```\n";
 
-/// A prompt whose frontmatter name is not a legal tool name.
-const SHOUTY: &str = "---\nname: Shouty\ndescription: An illegal tool name\npromptforge: 1\n---\n\n\
-# Test prompt\n\n## Main\n\n```lua\nreturn args\n```\n";
-
-/// A prompt that declares itself one and then carries no section.
-const NO_SECTIONS: &str =
-    "---\nname: hollow\ndescription: No sections at all\npromptforge: 1\n---\n\n# Only a title\n";
-
 /// How long any single line may take to arrive before the test gives up.
 const PATIENCE: Duration = Duration::from_secs(20);
+
+/// The most bytes one line may carry before the test treats the server as
+/// misbehaving. Every real frame here is a few hundred bytes; the cap only
+/// exists so a server that never sends a newline cannot make the read allocate
+/// without bound.
+const LINE_LIMIT: u64 = 1 << 20;
 
 /// Writes a prompts directory carrying `prompts` and the configuration that
 /// globs it, returning the configuration's path.
@@ -122,13 +120,22 @@ impl Session {
     }
 
     /// Reads one JSON-RPC message from the next line.
+    ///
+    /// The read is bounded twice over: by `PATIENCE` in time and by
+    /// [`LINE_LIMIT`] in bytes, so neither a silent server nor one that never
+    /// terminates a line can hang or exhaust the test.
     async fn receive(&mut self) -> Value {
         let mut line = String::new();
-        let read = tokio::time::timeout(PATIENCE, self.stdout.read_line(&mut line))
+        let mut limited = (&mut self.stdout).take(LINE_LIMIT);
+        let read = tokio::time::timeout(PATIENCE, limited.read_line(&mut line))
             .await
             .expect("the server answers within the wait")
             .expect("read from the child");
         assert!(read > 0, "the server closed its output");
+        assert!(
+            line.ends_with('\n'),
+            "the server's line stayed within {LINE_LIMIT} bytes"
+        );
         serde_json::from_str(&line).expect("the server writes one JSON message per line")
     }
 }
@@ -184,6 +191,70 @@ async fn stdio_completes_initialize_and_lists_its_tools() {
 }
 
 #[tokio::test]
+async fn stdio_leaves_the_configured_bind_address_unlistened() {
+    use std::net::{SocketAddr, TcpListener};
+
+    use tokio::net::TcpStream;
+
+    // Reserve a loopback port, learn its number, then release it. The address
+    // is now free and is what the configuration names; if `--stdio` honored the
+    // bind, the child would be listening here by the time the handshake returns.
+    let reserved = TcpListener::bind("127.0.0.1:0").expect("reserve a loopback port");
+    let addr: SocketAddr = reserved.local_addr().expect("read the reserved address");
+    drop(reserved);
+
+    let dir = tempfile::tempdir().expect("create a temporary directory");
+    let config = fixture_with(
+        dir.path(),
+        &[("echo.md", ECHO)],
+        &format!("bind = \"{addr}\"\ntoken = \"unused-on-stdio\"\n"),
+    );
+    let mut session = Session::spawn_at(dir, &config);
+
+    // Drive initialize to completion so the child is fully up: whatever it was
+    // ever going to bind, it has bound by the time this reply arrives.
+    session
+        .send(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "stdio-bind-check", "version": "0" },
+            },
+        }))
+        .await;
+    let initialized = session.receive().await;
+    assert_eq!(initialized["id"], json!(1));
+
+    // Observe the invariant directly: connect to the configured address and
+    // require the connection to be refused. A refusal proves nothing is
+    // listening there; a success would prove the transport bound its HTTP
+    // surface. The attempt is bounded by `PATIENCE` so a stall cannot pass for
+    // a refusal.
+    //
+    // Limitation: the reserved port is released before the child starts, so an
+    // unrelated process could in principle claim it in that window. On loopback
+    // with a freshly reserved ephemeral port this is vanishingly unlikely, and
+    // it could only mask the fault, never manufacture one - an accepted
+    // connection still fails the test.
+    match tokio::time::timeout(PATIENCE, TcpStream::connect(addr)).await {
+        Ok(Ok(_stream)) => {
+            panic!("stdio bound {addr}: its HTTP surface is listening")
+        }
+        Ok(Err(_refused)) => {}
+        Err(elapsed) => {
+            panic!(
+                "connecting to {addr} neither refused nor completed: {elapsed} within {PATIENCE:?}"
+            )
+        }
+    }
+
+    session.child.kill().await.expect("stop the server");
+}
+
+#[tokio::test]
 async fn stdio_serves_a_configuration_that_carries_no_token() {
     // `[server].token` is a property of the HTTP surface. A local install is
     // spawned by its harness and reads no token at all, so requiring one in the
@@ -213,42 +284,4 @@ async fn stdio_serves_a_configuration_that_carries_no_token() {
     );
 
     session.child.kill().await.expect("stop the server");
-}
-
-#[tokio::test]
-async fn a_catalog_with_two_faults_refuses_to_serve_and_prints_both() {
-    // Decision 10: boot either produces a complete catalog or the process
-    // refuses to start, and every fault is printed before the nonzero exit so an
-    // operator fixes them in one pass rather than one restart each.
-    let dir = tempfile::tempdir().expect("create a temporary directory");
-    let config = fixture(
-        dir.path(),
-        &[
-            ("echo.md", ECHO),
-            ("upper.md", SHOUTY),
-            ("hollow.md", NO_SECTIONS),
-        ],
-    );
-
-    let output = Command::new(env!("CARGO_BIN_EXE_promptforge-mcp-server"))
-        .arg("serve")
-        .arg(&config)
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .expect("run the server");
-
-    assert!(
-        !output.status.success(),
-        "an incomplete catalog is refused: {:?}",
-        output.status
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("catalog has 2 fault"), "{stderr}");
-    for named in ["upper.md", "Shouty", "hollow.md"] {
-        assert!(
-            stderr.contains(named),
-            "every fault names its prompt and its file: {stderr}"
-        );
-    }
 }

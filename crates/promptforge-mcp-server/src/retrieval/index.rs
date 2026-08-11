@@ -9,9 +9,7 @@
 //! The configuration departs from the engine's defaults in exactly one place,
 //! the similarity floor, and [`crate::retrieval`] says why.
 
-use promptforge_tool_picker::{
-    Catalog as Descriptors, Config, ConfigError, ToolDescriptor, ToolId, ToolPicker,
-};
+use promptforge_tool_picker::{Catalog as Descriptors, Config, ToolDescriptor, ToolId, ToolPicker};
 use serde_json::json;
 
 use crate::catalog::Catalog;
@@ -25,11 +23,12 @@ use crate::retrieval::{Candidate, Shortlist};
 /// arises.
 const SERVER: &str = "promptforge";
 
-/// The similarity a candidate must reach to be offered: none at all.
+/// The similarity a candidate must reach to be offered: the lowest the engine's
+/// validated policy admits, which is zero. The engine's configuration domain
+/// forbids a negative floor, so a candidate whose similarity to the capability
+/// is negative is the one thing this floor still withholds; [`crate::retrieval`]
+/// states that in the module contract.
 const SIMILARITY_FLOOR: f32 = 0.0;
-
-/// How long a shortlist the engine's own policy reports.
-const TOP_K: usize = 3;
 
 /// One built index: the engine over one catalog's descriptors.
 ///
@@ -44,17 +43,17 @@ pub(crate) struct Index {
 impl Index {
     /// Loads the model and indexes `catalog`.
     ///
-    /// `None` means the model could not be loaded, which is reported here
-    /// because this is the only place that knows what went wrong; the caller's
-    /// answer to it is to serve without retrieval.
+    /// `None` means the index could not be built, either because the model would
+    /// not load or because the catalog could not be indexed; the engine's
+    /// `BuildError` does not say which, so neither does the log. The reason is
+    /// reported here because this is the only place that knows it; the caller's
+    /// answer is to serve without retrieval.
     pub(super) fn build(catalog: &Catalog) -> Option<Index> {
-        let config = config().ok()?;
+        let config = compiled_config()?;
         match ToolPicker::build(descriptors(catalog), config) {
             Ok(picker) => Some(Index { picker }),
             Err(error) => {
-                tracing::error!(
-                    "need_prompt cannot answer: the retrieval model did not load: {error}"
-                );
+                tracing::error!("need_prompt cannot answer: retrieval index build failed: {error}");
                 None
             }
         }
@@ -66,7 +65,7 @@ impl Index {
         model: &promptforge_tool_picker::Model,
         catalog: &Catalog,
     ) -> Option<Index> {
-        let config = config().ok()?;
+        let config = compiled_config()?;
         match ToolPicker::build_with_model(model, descriptors(catalog), config) {
             Ok(picker) => Some(Index { picker }),
             Err(error) => {
@@ -150,13 +149,27 @@ fn args_schema() -> serde_json::Value {
     json!({"type": "object", "properties": {"args": {"type": "string"}}})
 }
 
-/// The engine's configuration for this use: its defaults, with the floor at zero.
+/// The engine's configuration for this use, or `None` after logging why the
+/// compiled-in policy is invalid.
 ///
-/// # Errors
-/// Returns [`ConfigError`] only if the compiled-in constants leave the
-/// supported policy domain, which they do not.
-fn config() -> Result<Config, ConfigError> {
-    Config::default()
-        .with_similarity_floor(SIMILARITY_FLOOR)
-        .and_then(|config| config.with_top_k(TOP_K))
+/// The shortlist length is not set here: the query passes its own `k` (the
+/// `CANDIDATES` bound in `crate::retrieval`) to `Index::shortlist`, which is the
+/// one authoritative bound, so `top_k` in this configuration would never be
+/// consulted. The only value this configuration departs from the engine's
+/// defaults on is the similarity floor.
+///
+/// A failure is a violated compiled-in invariant rather than an expected error,
+/// so it is logged with its real cause rather than silently discarded: a future
+/// edit that pushes [`SIMILARITY_FLOOR`] out of the supported domain must not
+/// disable retrieval without a trace.
+fn compiled_config() -> Option<Config> {
+    match Config::default().with_similarity_floor(SIMILARITY_FLOOR) {
+        Ok(config) => Some(config),
+        Err(error) => {
+            tracing::error!(
+                "need_prompt cannot answer: the compiled-in retrieval policy is invalid: {error}"
+            );
+            None
+        }
+    }
 }
