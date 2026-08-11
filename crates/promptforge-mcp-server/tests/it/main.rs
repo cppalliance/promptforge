@@ -7,6 +7,7 @@
 //! temporary directory, so nothing but `shipped` reads what the repository
 //! actually ships.
 
+mod catalog_refusal;
 mod progress;
 mod shipped;
 mod stdio;

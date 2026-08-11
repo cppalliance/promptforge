@@ -38,11 +38,18 @@
 //! separately at `info`, once status, elapsed time, and the final turn count
 //! exist. Everything inside a run is `debug`, because a section can make dozens
 //! of tool calls and burying the boundaries under them defeats the purpose. The
-//! one exception is a tool call that failed, which is `warn`: a search that
-//! came back empty is a thing an operator wants without turning on debug, and
-//! it is rare enough not to flood.
+//! exceptions are the two within-run failures - a failed tool call and a failed
+//! model turn - which are `warn`: each is a thing an operator wants without
+//! turning on debug, and both are rare enough not to flood.
 //!
-//! [`RunResult`]: crate::RunResult
+//! No log line carries author-controlled content. The `execution` name, the
+//! `section` name, and an unrecognized detail's payload are all untrusted per
+//! the [`Observer`] contract, so the log records only stable counts and fixed
+//! messages; a prompt cannot write the server's trusted log stream. The
+//! `section` name still reaches the client, but on the progress channel that is
+//! its purpose, not the operator log.
+//!
+//! [`RunResult`]: crate::result::RunResult
 //!
 //! `total` is never sent. A `jump` or an early return means the number of
 //! sections a run will visit is unknown when it starts, so a denominator would
@@ -53,14 +60,19 @@
 #[cfg(test)]
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
 
 use promptforge_core::observe::{Observation, Observer};
 use rmcp::RoleServer;
-use rmcp::model::{ProgressNotificationParam, ProgressToken};
+use rmcp::model::ProgressToken;
 use rmcp::service::Peer;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tokio::task::JoinHandle;
+
+mod pump;
+#[cfg(test)]
+mod tests;
+
+pub(crate) use pump::ProgressPump;
 
 /// How many frames may wait for the pump before the queue starts dropping
 /// them.
@@ -70,25 +82,9 @@ use tokio::task::JoinHandle;
 /// reading, not a throttle on a healthy one.
 const CAPACITY: usize = 64;
 
-/// How long the reply waits for the pump to drain before abandoning it.
-///
-/// Sending a notification resolves only once the transport has accepted it, so
-/// an unbounded wait lets a peer that stalled its stream without closing it
-/// hold the whole `tools/call` open. Progress is best-effort in both
-/// directions: a caption nobody reads is not worth a reply nobody receives.
-///
-/// A quarter second is chosen against the two things it trades off. A healthy
-/// stream, local or across a LAN, accepts a queued frame in single-digit
-/// milliseconds, so this is generous enough that the last caption is not lost
-/// to an ordinary hiccup. A stalled one costs the caller a quarter second on a
-/// reply that already took minutes to earn, which no user perceives. The value
-/// deliberately does not track [`CAPACITY`]: a queue depth and a wait are
-/// unrelated quantities that happened to be written with the same number.
-const FLUSH_GRACE: Duration = Duration::from_millis(250);
-
 /// One queued progress notification.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Frame {
+pub(crate) struct Frame {
     /// The run's latched section count.
     progress: u32,
     /// The caption the client renders in place.
@@ -101,18 +97,8 @@ struct Frame {
 /// [`reporting`](Self::reporting), which reports to a peer through a
 /// [`ProgressPump`]. Both count the run's model turns, so the caller reads
 /// [`turns`](Self::turns) whichever it built.
-///
-/// # Examples
-/// ```
-/// use promptforge_core::observe::{Observation, Observer};
-/// use promptforge_mcp_server::McpObserver;
-///
-/// let observer = McpObserver::silent();
-/// observer.observe("example-run", "Gather", Observation::ModelTurnCompleted);
-/// assert_eq!(observer.turns(), 1);
-/// ```
 #[derive(Debug)]
-pub struct McpObserver {
+pub(crate) struct McpObserver {
     /// The queue the pump drains, absent when the call carried no
     /// `progressToken` and there is therefore nothing to report to.
     frames: Option<Sender<Frame>>,
@@ -120,8 +106,13 @@ pub struct McpObserver {
     completed: AtomicU32,
     /// The run's model round trips, as the run itself reported them.
     turns: AtomicU32,
-    /// Frames the queue had no room for.
+    /// Frames the queue had no room for: the peer is reading, but slower than
+    /// the run produces boundaries.
     dropped: AtomicU32,
+    /// Frames dropped because the pump is gone: the peer stopped accepting and
+    /// the receiving half closed. A different situation from a full queue, so
+    /// it is counted apart rather than folded into `dropped`.
+    disconnected: AtomicU32,
     /// Complete records retained only for runner lifecycle regressions.
     #[cfg(test)]
     records: Mutex<Vec<(String, String, String)>>,
@@ -133,7 +124,7 @@ impl McpObserver {
     /// This is what a call carrying no `progressToken` uses: no channel, no
     /// pump, and a result identical to the reported path's.
     #[must_use]
-    pub fn silent() -> McpObserver {
+    pub(crate) fn silent() -> McpObserver {
         McpObserver::over(None)
     }
 
@@ -148,10 +139,13 @@ impl McpObserver {
     /// # Panics
     /// Panics when called outside a Tokio runtime, since the pump runs on a
     /// task and that task is spawned here.
-    pub fn reporting(peer: Peer<RoleServer>, token: ProgressToken) -> (McpObserver, ProgressPump) {
+    pub(crate) fn reporting(
+        peer: Peer<RoleServer>,
+        token: ProgressToken,
+    ) -> (McpObserver, ProgressPump) {
         let (observer, frames) = McpObserver::queued();
-        let task = tokio::spawn(pump(frames, peer, token));
-        (observer, ProgressPump { task })
+        let pump = ProgressPump::spawn(frames, peer, token);
+        (observer, pump)
     }
 
     /// How many completed model round trips have been observed so far.
@@ -159,14 +153,22 @@ impl McpObserver {
     /// Zero before the first completed turn, and zero throughout a run that
     /// reaches no model at all.
     #[must_use]
-    pub fn turns(&self) -> u32 {
+    pub(crate) fn turns(&self) -> u32 {
         self.turns.load(Ordering::Relaxed)
     }
 
     /// How many frames were dropped because the queue was full.
+    #[cfg(test)]
     #[must_use]
-    pub fn dropped(&self) -> u32 {
+    pub(crate) fn dropped(&self) -> u32 {
         self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// How many frames were dropped because the pump had already gone away.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn disconnected(&self) -> u32 {
+        self.disconnected.load(Ordering::Relaxed)
     }
 
     /// Complete correlated observations retained by the test observer.
@@ -185,6 +187,7 @@ impl McpObserver {
             completed: AtomicU32::new(0),
             turns: AtomicU32::new(0),
             dropped: AtomicU32::new(0),
+            disconnected: AtomicU32::new(0),
             #[cfg(test)]
             records: Mutex::new(Vec::new()),
         }
@@ -207,9 +210,10 @@ impl McpObserver {
 
     /// Queues one frame, or counts it as dropped.
     ///
-    /// Never blocks: a full queue and a pump that has gone away are both a
-    /// dropped frame, because the alternative is stalling the run over a
-    /// report.
+    /// Never blocks: both a full queue and a pump that has gone away drop the
+    /// frame rather than stall the run over a report, but the two are counted
+    /// and logged apart. A full queue is a slow-but-present peer (backpressure);
+    /// a closed queue is a peer that stopped accepting entirely.
     fn queue(&self, progress: u32, message: &str) {
         let Some(frames) = &self.frames else {
             return;
@@ -218,9 +222,24 @@ impl McpObserver {
             progress,
             message: message.to_owned(),
         };
-        if frames.try_send(frame).is_err() {
-            let dropped = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
-            tracing::debug!(dropped, progress, "dropped a progress frame");
+        match frames.try_send(frame) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                let dropped = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
+                tracing::debug!(
+                    dropped,
+                    progress,
+                    "dropped a progress frame: the queue is full"
+                );
+            }
+            Err(TrySendError::Closed(_)) => {
+                let disconnected = self.disconnected.fetch_add(1, Ordering::Relaxed) + 1;
+                tracing::debug!(
+                    disconnected,
+                    progress,
+                    "dropped a progress frame: the pump is gone"
+                );
+            }
         }
     }
 }
@@ -232,279 +251,46 @@ impl Observer for McpObserver {
             .lock()
             .expect("the MCP test recorder mutex must not be poisoned")
             .push((execution.to_owned(), section.to_owned(), event.to_string()));
+        // `execution`, `section`, and an unrecognized detail's payload are all
+        // author-controlled per the Observer contract, so none is interpolated
+        // into an operator log: a prompt must not be able to write the server's
+        // trusted log stream. The test recorder above keeps them for lifecycle
+        // assertions, and `section` still rides the dedicated progress channel
+        // as a client-facing caption; the log carries only stable counts.
+        let _ = execution;
         match event {
             Observation::RunStarted => {
-                tracing::info!(%execution, %section, "run started");
+                tracing::info!("run started");
                 self.queue(0, section);
             }
             Observation::SectionStarted => {
                 self.queue(self.advance(), section);
             }
             Observation::SectionFinished => {
-                tracing::debug!(%execution, %section, "section finished");
+                tracing::debug!("section finished");
             }
             Observation::ModelTurnCompleted => {
                 let turn = self.turns.fetch_add(1, Ordering::Relaxed) + 1;
-                tracing::debug!(%execution, %section, turn, "model turn completed");
+                tracing::debug!(turn, "model turn completed");
             }
             Observation::ModelTurnFailed => {
-                tracing::warn!(%execution, %section, "model turn failed");
+                tracing::warn!("model turn failed");
             }
             Observation::ToolCallSucceeded => {
-                tracing::debug!(%execution, %section, "tool call succeeded");
+                tracing::debug!("tool call succeeded");
             }
             Observation::ToolCallFailed => {
-                tracing::warn!(%execution, %section, "tool call failed");
+                tracing::warn!("tool call failed");
             }
             Observation::RunSucceeded => {
-                tracing::debug!(%execution, %section, "run success observed");
+                tracing::debug!("run success observed");
             }
             Observation::RunFailed => {
-                tracing::debug!(%execution, %section, "run failure observed");
+                tracing::debug!("run failure observed");
             }
-            other => {
-                tracing::debug!(%execution, %section, detail = %other, "unrecognized observation");
-            }
-        }
-    }
-}
-
-/// The task that delivers what an [`McpObserver`] queues.
-///
-/// Ends when the observer is dropped, which closes the queue, or when the peer
-/// stops accepting notifications.
-#[derive(Debug)]
-#[must_use = "the frames a run queued are delivered by the pump, so finish it"]
-pub struct ProgressPump {
-    /// The forwarding task.
-    task: JoinHandle<()>,
-}
-
-impl ProgressPump {
-    /// Waits a bounded grace period for every frame queued before the observer
-    /// was dropped, then abandons what is left.
-    ///
-    /// Awaiting this before answering the call is what keeps the last frame
-    /// from arriving after the result it described. The wait is bounded
-    /// because a peer that has stopped reading its stream would otherwise hold
-    /// the reply open for as long as it liked.
-    pub async fn finish(mut self) {
-        match tokio::time::timeout(FLUSH_GRACE, &mut self.task).await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                tracing::debug!(%error, "the progress pump did not finish cleanly");
-            }
-            Err(_elapsed) => {
-                self.task.abort();
-                tracing::debug!("abandoned the progress pump, which was still sending");
+            _other => {
+                tracing::debug!("unrecognized observation");
             }
         }
-    }
-}
-
-/// Forwards frames to the client until the queue closes or the peer refuses
-/// one.
-async fn pump(mut frames: Receiver<Frame>, peer: Peer<RoleServer>, token: ProgressToken) {
-    while let Some(frame) = frames.recv().await {
-        let notification = ProgressNotificationParam::new(token.clone(), f64::from(frame.progress))
-            .with_message(frame.message);
-        if let Err(error) = peer.notify_progress(notification).await {
-            tracing::debug!(%error, "stopped reporting progress");
-            return;
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::fmt::Write;
-
-    use std::sync::Arc;
-
-    use super::{Frame, McpObserver, ProgressPump, Receiver};
-    use crate::levels::Levels;
-    use promptforge_core::execute::{self, ResolutionContext, RunConfig};
-    use promptforge_core::model::ModelCatalog;
-    use promptforge_core::observe::{NullObserver, Observation, Observer};
-    use promptforge_core::parser::Prompt;
-    use promptforge_core::store::StoreRef;
-    use promptforge_tool_picker::{Catalog, Config, ToolPicker};
-    use tracing::Level;
-    use tracing_subscriber::layer::SubscriberExt;
-
-    /// Every frame the queue is holding.
-    fn drain(frames: &mut Receiver<Frame>) -> Vec<Frame> {
-        let mut drained = Vec::new();
-        while let Ok(frame) = frames.try_recv() {
-            drained.push(frame);
-        }
-        drained
-    }
-
-    /// The frame a caption and a count would produce.
-    fn frame(progress: u32, message: &str) -> Frame {
-        Frame {
-            progress,
-            message: message.to_owned(),
-        }
-    }
-
-    /// A prompt of `sections` Lua-only sections, the last of which returns, so
-    /// the whole run happens offline and emits one frame per section.
-    fn long_prompt(sections: usize) -> String {
-        let mut source = String::from(
-            "---\nname: long\ndescription: Many sections\npromptforge: 1\n---\n\n# Test prompt\n",
-        );
-        for section in 1..sections {
-            let _written = write!(
-                source,
-                "\n## S{section}\n\n```lua\nvar.step = {section}\n```\n"
-            );
-        }
-        let _written = write!(
-            source,
-            "\n## S{sections}\n\n```lua\nreturn 'long done'\n```\n"
-        );
-        source
-    }
-
-    /// The observations a three-section run emits, one section of which takes a
-    /// model turn and a tool call.
-    fn three_section_run() -> Vec<(&'static str, Observation)> {
-        vec![
-            ("Trio", Observation::RunStarted),
-            ("First", Observation::SectionStarted),
-            ("First", Observation::ModelTurnCompleted),
-            ("First", Observation::ToolCallSucceeded),
-            ("First", Observation::SectionFinished),
-            ("Second", Observation::SectionStarted),
-            ("Second", Observation::SectionFinished),
-            ("Third", Observation::SectionStarted),
-            ("Third", Observation::SectionFinished),
-            ("Trio", Observation::RunSucceeded),
-        ]
-    }
-
-    #[test]
-    fn a_run_frames_its_start_and_each_section_and_nothing_else() {
-        let (observer, mut frames) = McpObserver::queued();
-        for (section, report) in three_section_run() {
-            observer.observe("test-run", section, report);
-        }
-        assert_eq!(
-            drain(&mut frames),
-            vec![
-                frame(0, "Trio"),
-                frame(1, "First"),
-                frame(2, "Second"),
-                frame(3, "Third"),
-            ]
-        );
-        assert_eq!(observer.turns(), 1, "the run's own total is what is kept");
-        assert_eq!(observer.dropped(), 0);
-    }
-
-    #[test]
-    fn progress_counts_recognized_section_starts() {
-        let (observer, mut frames) = McpObserver::queued();
-        for section in ["one", "two", "three"] {
-            observer.observe("test-run", section, Observation::SectionStarted);
-        }
-        let progress: Vec<u32> = drain(&mut frames).iter().map(|f| f.progress).collect();
-        assert_eq!(progress, vec![1, 2, 3]);
-    }
-
-    #[tokio::test]
-    async fn a_pump_that_never_drains_still_lets_the_run_finish() {
-        // `frames` is held and never read, which is a pump whose peer has
-        // stopped accepting: the queue fills, and the run must not notice.
-        let sections = super::CAPACITY + 16;
-        let source = long_prompt(sections);
-        let prompt = Prompt::parse(&source, "test-run", &NullObserver::default())
-            .expect("the fixture prompt parses");
-        let (observer, _frames) = McpObserver::queued();
-        let observer = Arc::new(observer);
-
-        let store = StoreRef::memory();
-        let models = ModelCatalog::empty();
-        let picker = ToolPicker::build(Catalog::default(), Config::default())
-            .expect("empty picker must build");
-        let value = execute::run(
-            &prompt,
-            "",
-            ResolutionContext::new(&picker, &models),
-            &[],
-            &store,
-            RunConfig::new("test-run").observer(Arc::clone(&observer) as Arc<dyn Observer>),
-        )
-        .await
-        .expect("a Lua-only run reaches no model and finishes");
-
-        assert_eq!(value, "long done");
-        assert!(
-            observer.dropped() > 0,
-            "a run past the queue's capacity drops frames rather than stalling"
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_pump_the_peer_never_accepts_is_abandoned() {
-        // A send that never resolves is what a peer holding its stream open
-        // produces, and the reply must not wait on it.
-        let pump = ProgressPump {
-            task: tokio::spawn(std::future::pending()),
-        };
-        let started = tokio::time::Instant::now();
-        pump.finish().await;
-        assert_eq!(
-            started.elapsed(),
-            super::FLUSH_GRACE,
-            "the flush waits its grace and no longer"
-        );
-    }
-
-    #[test]
-    fn only_the_run_start_and_a_failed_tool_call_reach_the_default_level() {
-        let levels = Levels::default();
-        let subscriber = tracing_subscriber::registry().with(levels.clone());
-        let observer = McpObserver::silent();
-        tracing::subscriber::with_default(subscriber, || {
-            for (section, report) in three_section_run() {
-                observer.observe("test-run", section, report);
-            }
-            observer.observe("test-run", "First", Observation::ToolCallFailed);
-        });
-        assert_eq!(
-            levels.operator_visible(),
-            vec![Level::INFO, Level::WARN],
-            "the run start, then the failed tool call"
-        );
-    }
-
-    #[test]
-    fn a_silent_observer_counts_turns_without_a_queue() {
-        let observer = McpObserver::silent();
-        for (section, report) in three_section_run() {
-            observer.observe("test-run", section, report);
-        }
-        assert_eq!(observer.turns(), 1);
-        assert_eq!(observer.dropped(), 0, "there is nothing to drop into");
-    }
-
-    #[test]
-    fn unknown_details_are_tolerated_without_frames_or_counters() {
-        let (observer, mut frames) = McpObserver::queued();
-        for report in [
-            Observation::ToolRegistryValidationStarted,
-            Observation::ToolRegistryValidationSucceeded,
-            Observation::ToolRegistryValidationFailed,
-            Observation::Other("A future detail".to_owned()),
-        ] {
-            observer.observe("test-run", "First", report);
-        }
-
-        assert!(drain(&mut frames).is_empty());
-        assert_eq!(observer.turns(), 0);
-        assert_eq!(observer.dropped(), 0);
     }
 }

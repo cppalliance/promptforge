@@ -13,9 +13,8 @@ use std::sync::Arc;
 use rmcp::model::{CallToolRequestParams, CallToolResult, JsonObject};
 use serde_json::{Value, json};
 
-use super::{Reload, ignored_changes};
+use super::{Reload, ReloadErrorKind, Reloader, ignored_changes};
 use crate::config::Config;
-use crate::retrieval::Retrieval;
 use crate::server::{PreparedTools, PromptForgeServer};
 use crate::watch::fixture::{Fixture, config_source};
 
@@ -36,14 +35,30 @@ fn text_of(result: &CallToolResult) -> String {
     block.as_text().expect("the block is text").text.clone()
 }
 
+/// A live server over a fixture's configuration and catalog, so a test can call
+/// a prompt across a reload rather than only assert the catalog left behind.
+fn live_server(fixture: &Fixture) -> PromptForgeServer {
+    PromptForgeServer::new(
+        Arc::clone(&fixture.config),
+        Arc::clone(&fixture.catalog),
+        Arc::new(
+            PreparedTools::new(
+                &fixture.config.gateway,
+                promptforge_core::model::ModelCatalog::empty(),
+            )
+            .expect("prepare fixture live tools"),
+        ),
+    )
+}
+
 #[test]
 fn an_edited_prompt_replaces_the_live_one() {
     let fixture = Fixture::new();
     fixture.rewrite("alpha", "Do the alpha thing, better", "alpha v2");
 
-    let reload = fixture.reload();
+    let reload = fixture.reload().expect("the edit resolves");
 
-    assert!(!reload.refused);
+    assert!(reload.published);
     assert!(
         reload.ranking_changed,
         "retrieval ranks on that description"
@@ -52,17 +67,94 @@ fn an_edited_prompt_replaces_the_live_one() {
 }
 
 #[test]
+fn an_overlapping_stale_reload_never_overwrites_a_newer_published_generation() {
+    // Two reloads triggered in order but committed out of order: the older
+    // build, made to finish last, is recognised as stale and dropped, so the
+    // newest content stays published. This is the lost update a single ArcSwap
+    // left open - a slow reload clobbering a newer one - now closed by the
+    // reload coordinator's monotonic ticket and its serialized publish.
+    let fixture = Fixture::new();
+    let reloader = fixture.reloader();
+
+    fixture.rewrite("alpha", "the older description", "old");
+    let older = reloader.build().expect("the older candidate resolves");
+
+    fixture.rewrite("alpha", "the newer description", "new");
+    let newer = reloader.build().expect("the newer candidate resolves");
+
+    // The newer reload publishes first; the older one then finishes late.
+    let newer = reloader.commit(newer);
+    let older = reloader.commit(older);
+
+    assert!(newer.published, "the newer build becomes live");
+    assert!(
+        !older.published,
+        "the older build is dropped rather than clobbering the newer generation"
+    );
+    assert_eq!(
+        fixture.description("alpha"),
+        "the newer description",
+        "the newest content stays published; no lost update"
+    );
+}
+
+#[test]
+fn two_reloaders_over_one_handle_committing_out_of_order_keep_the_newest_content() {
+    // Two independent reloaders share one `CatalogHandle` - the shape of two
+    // `Watcher::start` calls over one live catalog. Because the publication
+    // coordinator lives on the handle rather than on either reloader, a ticket
+    // one reloader claims orders against a ticket the other claims. The older
+    // build, made to commit last, is recognised as stale and dropped, so the
+    // newest content stays published even across reloaders. The monotonic ticket
+    // that only ordered within a single reloader could not have caught this.
+    let fixture = Fixture::new();
+    let source = fixture.root().join("prompts.toml");
+    let first = Reloader::new(
+        &source,
+        Arc::clone(&fixture.config),
+        Arc::clone(&fixture.catalog),
+    );
+    let second = Reloader::new(
+        &source,
+        Arc::clone(&fixture.config),
+        Arc::clone(&fixture.catalog),
+    );
+
+    fixture.rewrite("alpha", "the older description", "old");
+    let older = first.build().expect("the older candidate resolves");
+
+    fixture.rewrite("alpha", "the newer description", "new");
+    let newer = second.build().expect("the newer candidate resolves");
+
+    // The newer reloader publishes first; the older reloader then finishes late.
+    let newer = second.commit(newer);
+    let older = first.commit(older);
+
+    assert!(newer.published, "the newer build becomes live");
+    assert!(
+        !older.published,
+        "the older build on a different reloader is dropped, not published stale-over-fresh"
+    );
+    assert_eq!(
+        fixture.description("alpha"),
+        "the newer description",
+        "the newest content stays published across two reloaders sharing one handle"
+    );
+}
+
+#[test]
 fn a_body_only_edit_leaves_the_ranking_alone() {
     let fixture = Fixture::new();
     fixture.rewrite("alpha", "Do the alpha thing", "alpha v2");
 
-    let reload = fixture.reload();
+    let reload = fixture.reload().expect("the edit resolves");
 
     assert_eq!(
         reload,
         Reload {
             ranking_changed: false,
-            refused: false,
+            retrieval_stale: false,
+            published: true,
         }
     );
 }
@@ -72,10 +164,10 @@ fn a_new_file_joins_the_catalog() {
     let fixture = Fixture::new();
     Fixture::write_prompt(fixture.root(), "gamma", "Do the gamma thing", "gamma v1");
 
-    let reload = fixture.reload();
+    let reload = fixture.reload().expect("the new file resolves");
 
-    assert!(!reload.refused);
-    assert_eq!(fixture.catalog.load().len(), 3);
+    assert!(reload.published);
+    assert_eq!(fixture.catalog.load().catalog().len(), 3);
     assert_eq!(fixture.description("gamma"), "Do the gamma thing");
 }
 
@@ -85,10 +177,11 @@ fn a_deleted_file_leaves_the_catalog() {
     fs::remove_file(fixture.root().join("prompts").join("beta.md"))
         .expect("remove the fixture prompt");
 
-    let reload = fixture.reload();
+    let reload = fixture.reload().expect("the deletion resolves");
 
-    assert!(!reload.refused);
-    let catalog = fixture.catalog.load();
+    assert!(reload.published);
+    let generation = fixture.catalog.load();
+    let catalog = generation.catalog();
     assert_eq!(catalog.len(), 1);
     assert!(catalog.find("beta").is_none());
 }
@@ -98,10 +191,13 @@ fn a_broken_prompt_is_retained_with_its_error_and_the_rest_keep_serving() {
     let fixture = Fixture::new();
     fixture.break_prompt("alpha");
 
-    let reload = fixture.reload();
+    let reload = fixture
+        .reload()
+        .expect("a broken prompt does not refuse the reload");
 
-    assert!(!reload.refused, "one bad file must not freeze the catalog");
-    let catalog = fixture.catalog.load();
+    assert!(reload.published, "one bad file must not freeze the catalog");
+    let generation = fixture.catalog.load();
+    let catalog = generation.catalog();
     assert_eq!(catalog.len(), 2);
     let broken = catalog
         .find("alpha")
@@ -126,10 +222,12 @@ fn a_catalog_level_fault_keeps_the_previous_catalog() {
             .expect("remove the fixture prompt");
     }
 
-    let reload = fixture.reload();
+    let error = fixture
+        .reload()
+        .expect_err("an empty resolved catalog is not an answer");
 
-    assert!(reload.refused, "an empty resolved catalog is not an answer");
-    assert_eq!(fixture.catalog.load().len(), 2);
+    assert_eq!(error.kind(), ReloadErrorKind::Catalog);
+    assert_eq!(fixture.catalog.load().catalog().len(), 2);
 }
 
 #[test]
@@ -138,10 +236,12 @@ fn an_unparsable_configuration_keeps_the_previous_catalog() {
     fs::write(fixture.root().join("prompts.toml"), "this is not toml = [")
         .expect("break the configuration");
 
-    let reload = fixture.reload();
+    let error = fixture
+        .reload()
+        .expect_err("an unparsable configuration is not an answer");
 
-    assert!(reload.refused);
-    assert_eq!(fixture.catalog.load().len(), 2);
+    assert_eq!(error.kind(), ReloadErrorKind::Config);
+    assert_eq!(fixture.catalog.load().catalog().len(), 2);
 }
 
 #[test]
@@ -151,11 +251,12 @@ fn a_run_in_flight_finishes_under_the_snapshot_it_started_with() {
     let in_flight = fixture.catalog.load();
     fixture.rewrite("alpha", "Something else entirely", "alpha v2");
 
-    let reload = fixture.reload();
+    let reload = fixture.reload().expect("the edit resolves");
 
-    assert!(!reload.refused);
+    assert!(reload.published);
     assert_eq!(
         in_flight
+            .catalog()
             .find("alpha")
             .expect("the snapshot still holds the entry")
             .description(),
@@ -174,14 +275,13 @@ fn a_bind_change_is_ignored_rather_than_applied() {
     )
     .expect("rewrite the bind address");
 
-    let reload = fixture.reload();
+    let reload = fixture
+        .reload()
+        .expect("a change the reload ignores is not a refusal");
 
-    assert!(
-        !reload.refused,
-        "a change the reload ignores is not a refusal"
-    );
+    assert!(reload.published);
     assert_eq!(
-        fixture.catalog.load().len(),
+        fixture.catalog.load().catalog().len(),
         2,
         "the catalog reloads even though the socket does not"
     );
@@ -225,10 +325,10 @@ fn every_setting_a_reload_cannot_apply_is_named() {
 /// rebuild path this rides.
 #[cfg(feature = "picker")]
 mod retrieval {
-    use super::{Arc, Fixture, fs};
+    use super::{Fixture, fs};
     use crate::retrieval::{Retrieval, Shortlist, fixture as retrieval_fixture};
 
-    /// The names a capability retrieves, best first.
+    /// The names a capability retrieves from one index, best first.
     fn names(retrieval: &Retrieval, capability: &str) -> Vec<String> {
         match retrieval.shortlist(capability) {
             Shortlist::Candidates(candidates) => candidates.into_iter().map(|c| c.name).collect(),
@@ -236,19 +336,21 @@ mod retrieval {
         }
     }
 
-    /// A fixture whose retrieval index is loaded over its own catalog.
-    fn indexed() -> (Fixture, Arc<Retrieval>) {
-        let retrieval = Arc::new(Retrieval::idle());
-        let fixture = Fixture::with_retrieval(Arc::clone(&retrieval));
-        retrieval.install_with(&retrieval_fixture::model(), &fixture.catalog.load());
-        (fixture, retrieval)
+    /// A fixture whose live generation carries an index over its own catalog,
+    /// built from the test binary's shared model.
+    fn indexed() -> Fixture {
+        Fixture::with_retrieval(|catalog| {
+            Retrieval::indexed_with(&retrieval_fixture::model(), catalog)
+        })
     }
 
     #[test]
     fn a_renamed_prompt_is_retrievable_under_its_new_name() {
-        let (fixture, retrieval) = indexed();
+        let fixture = indexed();
         let capability = "Do the alpha thing";
-        assert!(names(&retrieval, capability).contains(&"alpha".to_owned()));
+        assert!(
+            names(fixture.catalog.load().retrieval(), capability).contains(&"alpha".to_owned())
+        );
 
         fs::remove_file(fixture.root().join("prompts").join("alpha.md"))
             .expect("remove the old file");
@@ -258,11 +360,11 @@ mod retrieval {
             "Do the alpha thing",
             "alpha v2",
         );
-        let reload = fixture.reload();
+        let reload = fixture.reload().expect("the rename resolves");
 
         assert!(reload.ranking_changed, "a name is part of what is ranked");
-        assert_eq!(retrieval.rebuilds(), 1);
-        let retrieved = names(&retrieval, capability);
+        let generation = fixture.catalog.load();
+        let retrieved = names(generation.retrieval(), capability);
         assert!(retrieved.contains(&"alpha_two".to_owned()), "{retrieved:?}");
         assert!(
             !retrieved.contains(&"alpha".to_owned()),
@@ -271,36 +373,65 @@ mod retrieval {
     }
 
     #[test]
-    fn a_body_only_edit_does_not_rebuild_the_index() {
-        let (fixture, retrieval) = indexed();
+    fn a_body_only_edit_carries_the_same_index_forward() {
+        let fixture = indexed();
+        let before = fixture.catalog.load();
 
         fixture.rewrite("alpha", "Do the alpha thing", "alpha v2");
-        let reload = fixture.reload();
+        let reload = fixture.reload().expect("the body edit resolves");
 
         assert!(!reload.ranking_changed);
-        assert_eq!(
-            retrieval.rebuilds(),
-            0,
-            "a body nothing ranks on changed, so the embedding cost is not paid"
+        let after = fixture.catalog.load();
+        assert!(
+            before.retrieval().same_index(after.retrieval()),
+            "a body nothing ranks on changed, so the very same index rides the new generation"
         );
+    }
+
+    #[test]
+    fn a_reload_publishes_the_catalog_and_its_index_as_one_snapshot() {
+        let fixture = indexed();
+        let capability = "Do the alpha thing";
+
+        fs::remove_file(fixture.root().join("prompts").join("alpha.md"))
+            .expect("remove the old file");
+        Fixture::write_prompt(
+            fixture.root(),
+            "alpha_two",
+            "Do the alpha thing",
+            "alpha v2",
+        );
+        assert!(
+            fixture
+                .reload()
+                .expect("the rename resolves")
+                .ranking_changed
+        );
+
+        // One load, so the catalog and the index are the same generation. There
+        // is no store between reading one and the other for a reader to observe
+        // a torn pair through: the renamed prompt is gone from both at once, and
+        // every name the index can still offer resolves in that same catalog.
+        let generation = fixture.catalog.load();
+        assert!(
+            generation.catalog().find("alpha").is_none(),
+            "the old name is gone from the published catalog"
+        );
+        let retrieved = names(generation.retrieval(), capability);
+        assert!(retrieved.contains(&"alpha_two".to_owned()), "{retrieved:?}");
+        for name in &retrieved {
+            assert!(
+                generation.catalog().find(name).is_some(),
+                "a retrieved name must resolve in the same snapshot's catalog: {name}"
+            );
+        }
     }
 }
 
 #[tokio::test]
 async fn a_call_after_a_reload_runs_the_new_body_and_a_broken_prompt_answers_with_its_error() {
     let fixture = Fixture::new();
-    let server = PromptForgeServer::new(
-        Arc::clone(&fixture.config),
-        Arc::clone(&fixture.catalog),
-        Arc::new(Retrieval::idle()),
-        Arc::new(
-            PreparedTools::new(
-                &fixture.config.gateway,
-                promptforge_core::model::ModelCatalog::empty(),
-            )
-            .expect("prepare fixture live tools"),
-        ),
-    );
+    let server = live_server(&fixture);
 
     let before = server
         .dispatch(call("run_prompt", json!({ "prompt": "alpha" })))
@@ -310,7 +441,7 @@ async fn a_call_after_a_reload_runs_the_new_body_and_a_broken_prompt_answers_wit
 
     fixture.rewrite("alpha", "Do the alpha thing", "alpha v2");
     fixture.break_prompt("beta");
-    assert!(!fixture.reload().refused);
+    fixture.reload().expect("the reload resolves");
 
     let after = server
         .dispatch(call("run_prompt", json!({ "prompt": "alpha" })))
@@ -340,18 +471,7 @@ async fn a_prompt_added_mid_session_is_callable_on_the_same_handler() {
     // and the one handler a session holds runs a prompt written after it
     // connected, because every call reads the catalog fresh.
     let fixture = Fixture::new();
-    let server = PromptForgeServer::new(
-        Arc::clone(&fixture.config),
-        Arc::clone(&fixture.catalog),
-        Arc::new(Retrieval::idle()),
-        Arc::new(
-            PreparedTools::new(
-                &fixture.config.gateway,
-                promptforge_core::model::ModelCatalog::empty(),
-            )
-            .expect("prepare fixture live tools"),
-        ),
-    );
+    let server = live_server(&fixture);
 
     let missing = server
         .dispatch(call("run_prompt", json!({ "prompt": "gamma" })))
@@ -360,7 +480,7 @@ async fn a_prompt_added_mid_session_is_callable_on_the_same_handler() {
     assert_eq!(missing.is_error, Some(true));
 
     Fixture::write_prompt(fixture.root(), "gamma", "Do the gamma thing", "gamma v1");
-    assert!(!fixture.reload().refused);
+    fixture.reload().expect("the new prompt resolves");
 
     let listed = server
         .dispatch(call("list_prompts", json!({})))

@@ -1,206 +1,171 @@
 //! Error types for the MCP server.
+//!
+//! One opaque error per failure family, each split into its own submodule and
+//! re-exported here so every `crate::error::…` path and the crate's public
+//! surface are unchanged. Each error keeps its representation private, so a
+//! caller classifies with `kind()` and reads causes through
+//! [`std::error::Error::source`] rather than matching a variant.
 
-use std::fmt;
-use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+mod config;
+mod fault;
+mod prepared;
+mod run;
+mod serve;
+mod watch;
 
-/// A `prompts.toml` load failure.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum ConfigError {
-    /// The configuration file could not be read.
-    #[non_exhaustive]
-    #[error("read config {path}")]
-    Read {
-        /// The path that could not be read.
-        path: String,
-        /// The underlying I/O error.
-        #[source]
-        source: std::io::Error,
-    },
+pub use self::config::{ConfigError, ConfigErrorKind};
+pub(crate) use self::fault::Fault;
+pub use self::fault::{CatalogError, CatalogErrorKind, FaultKind, FaultRef, Faults};
+pub use self::prepared::{PreparedToolsError, PreparedToolsErrorKind};
+pub use self::run::{RunError, RunErrorKind};
+// The transport-start error is internal: the serve functions are crate-private
+// and the public boot entry surfaces it only through the opaque `RunError`, so
+// its type and classifier stay off the public API. The classifier is read only
+// by the transport tests, so it is compiled only under test.
+pub(crate) use self::serve::ServeError;
+#[cfg(test)]
+pub(crate) use self::serve::ServeErrorKind;
+pub use self::watch::{WatchError, WatchErrorKind};
 
-    /// The configuration was not valid TOML, or a value had the wrong shape.
-    #[non_exhaustive]
-    #[error("parse config: {0}")]
-    Parse(String),
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
 
-    /// `[server].token` was present but carried nothing: empty, or only
-    /// whitespace. An empty shared bearer would make a request presenting no
-    /// credential compare equal, so it is refused where it is read rather than
-    /// where it is used. An absent token is a different statement and is
-    /// allowed: only the HTTP transport reads one, and it refuses to bind
-    /// without one.
-    #[error("[server].token must not be empty")]
-    EmptyToken,
+    use super::*;
 
-    /// A `${VAR}` referenced an environment variable that was not set.
-    #[non_exhaustive]
-    #[error("unresolved environment variable {0}")]
-    UnresolvedVar(String),
+    #[test]
+    fn config_error_classifies_and_renders_each_shape() {
+        let io = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
+        let read = ConfigError::read(PathBuf::from("prompts.toml"), io);
+        assert_eq!(read.kind(), ConfigErrorKind::Read);
+        assert_eq!(read.path(), Some(Path::new("prompts.toml")));
+        assert!(read.to_string().contains("prompts.toml"));
+        let source = std::error::Error::source(&read).expect("a read carries its io source");
+        let io = source
+            .downcast_ref::<std::io::Error>()
+            .expect("the source is an io::Error");
+        assert_eq!(io.kind(), std::io::ErrorKind::NotFound);
 
-    /// A `${...}` interpolation was malformed (for example, unclosed).
-    #[non_exhaustive]
-    #[error("interpolation: {0}")]
-    Interpolation(String),
-}
+        let parse = ConfigError::parse("bad value");
+        assert_eq!(parse.kind(), ConfigErrorKind::Parse);
+        assert!(std::error::Error::source(&parse).is_none());
+        assert!(parse.to_string().contains("bad value"));
 
-/// A transport that would not start, or that stopped abnormally.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum ServeError {
-    /// `[server].token` was absent and the streamable-HTTP transport has no
-    /// shared bearer to check. Refused before the socket is bound, since a
-    /// `/mcp` served without one would be open to anything that can reach it.
-    #[error("[server].token is required to serve over http")]
-    MissingToken,
+        assert_eq!(
+            ConfigError::empty_token().kind(),
+            ConfigErrorKind::EmptyToken
+        );
 
-    /// The configured socket could not be bound.
-    #[non_exhaustive]
-    #[error("bind {addr}")]
-    Bind {
-        /// The address that could not be bound.
-        addr: SocketAddr,
-        /// The underlying I/O error.
-        #[source]
-        source: std::io::Error,
-    },
+        let unresolved = ConfigError::unresolved_var("TOKEN");
+        assert_eq!(unresolved.kind(), ConfigErrorKind::UnresolvedVar);
+        assert!(unresolved.to_string().contains("TOKEN"));
+        assert!(unresolved.path().is_none());
 
-    /// The HTTP accept loop stopped with an error.
-    #[non_exhaustive]
-    #[error("serve http")]
-    Http {
-        /// The underlying I/O error.
-        #[source]
-        source: std::io::Error,
-    },
-
-    /// The stdio session did not complete its handshake, or ended abnormally.
-    /// The detail is rendered rather than carried, so no dependency's error
-    /// type reaches this crate's public surface.
-    #[non_exhaustive]
-    #[error("serve stdio: {0}")]
-    Stdio(String),
-}
-
-/// A filesystem watch that could not be established.
-///
-/// Only starting the watcher fails this way. Once it is running, a reload that
-/// cannot re-resolve the catalog keeps the previous one and logs why, because a
-/// typo in one file must not take the running service down with it.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum WatchError {
-    /// The platform watcher could not be created. The detail is rendered rather
-    /// than carried, so no dependency's error type reaches this crate's public
-    /// surface.
-    #[non_exhaustive]
-    #[error("create the filesystem watcher: {0}")]
-    Create(String),
-
-    /// A path could not be watched.
-    #[non_exhaustive]
-    #[error("watch {path}: {detail}")]
-    Watch {
-        /// The path that could not be watched.
-        path: String,
-        /// What the platform watcher reported.
-        detail: String,
-    },
-}
-
-/// One thing wrong with a resolved catalog, named as precisely as the pass can
-/// name it.
-///
-/// A fault carries the prompt it is about and the file it came from wherever
-/// either is known: a prompt that would not parse has both, a stale override
-/// has only the name its block was keyed on, and an empty catalog has neither.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Fault {
-    prompt: Option<String>,
-    path: Option<PathBuf>,
-    detail: String,
-}
-
-impl Fault {
-    /// Builds a fault from whatever the pass could name.
-    pub(crate) fn new(
-        prompt: Option<String>,
-        path: Option<PathBuf>,
-        detail: impl Into<String>,
-    ) -> Fault {
-        Fault {
-            prompt,
-            path,
-            detail: detail.into(),
-        }
+        assert_eq!(
+            ConfigError::interpolation("unclosed").kind(),
+            ConfigErrorKind::Interpolation
+        );
     }
 
-    /// The prompt the fault is about, when the pass got far enough to name one.
-    #[must_use]
-    pub fn prompt(&self) -> Option<&str> {
-        self.prompt.as_deref()
+    #[test]
+    fn parse_from_toml_preserves_the_source() {
+        let toml_err = toml::from_str::<toml::Table>("= not valid").unwrap_err();
+        let err = ConfigError::parse_toml(toml_err);
+        assert_eq!(err.kind(), ConfigErrorKind::Parse);
+        assert!(
+            std::error::Error::source(&err).is_some(),
+            "a toml parse failure keeps its source"
+        );
     }
 
-    /// The file the fault is about, when one is known.
-    #[must_use]
-    pub fn path(&self) -> Option<&Path> {
-        self.path.as_deref()
+    #[test]
+    fn read_error_preserves_a_non_unicode_render() {
+        // The path is stored as a `PathBuf`, so `path()` returns it verbatim
+        // rather than through a lossy display round trip.
+        let path = PathBuf::from("weird/../name.toml");
+        let err = ConfigError::read(
+            path.clone(),
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        );
+        assert_eq!(err.path(), Some(path.as_path()));
     }
 
-    /// What is wrong, as a lowercase noun phrase.
-    #[must_use]
-    pub fn detail(&self) -> &str {
-        &self.detail
+    #[test]
+    fn watch_error_classifies_names_its_path_and_keeps_its_source() {
+        let io = std::io::Error::new(std::io::ErrorKind::NotFound, "gone");
+        let watch = WatchError::watch(PathBuf::from("prompts"), io);
+        assert_eq!(watch.kind(), WatchErrorKind::Watch);
+        assert_eq!(watch.path(), Some(Path::new("prompts")));
+        assert!(watch.to_string().contains("prompts"));
+        let source = std::error::Error::source(&watch).expect("a watch failure keeps its source");
+        assert!(
+            source.downcast_ref::<std::io::Error>().is_some(),
+            "the erased source is the io::Error it was built from"
+        );
+
+        let create = WatchError::create(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert_eq!(create.kind(), WatchErrorKind::Create);
+        assert!(create.path().is_none());
+        assert!(std::error::Error::source(&create).is_some());
+
+        let runtime = WatchError::runtime();
+        assert_eq!(runtime.kind(), WatchErrorKind::Runtime);
+        assert!(runtime.path().is_none());
+        assert!(std::error::Error::source(&runtime).is_none());
+    }
+
+    #[test]
+    fn catalog_error_display_is_singular_then_plural() {
+        let one = CatalogError::new(vec![Fault::new(
+            FaultKind::Unparsable,
+            Some("p".into()),
+            None,
+            "boom",
+        )]);
+        let text = one.to_string();
+        assert!(text.contains("1 fault"), "{text}");
+        assert!(!text.contains("faults"), "{text}");
+        assert_eq!(one.kind(), CatalogErrorKind::Broken);
+
+        let two = CatalogError::new(vec![
+            Fault::new(FaultKind::Empty, None, None, "nothing resolved"),
+            Fault::new(FaultKind::Pattern, None, None, "bad include"),
+        ]);
+        let text = two.to_string();
+        assert!(text.contains("2 faults"), "{text}");
+        assert_eq!(two.kind(), CatalogErrorKind::Configuration);
+    }
+
+    #[test]
+    fn fault_ref_reports_locus_kind_and_display() {
+        let err = CatalogError::new(vec![
+            Fault::new(
+                FaultKind::Unparsable,
+                Some("p".into()),
+                Some(PathBuf::from("a.md")),
+                "bad",
+            ),
+            Fault::new(
+                FaultKind::Unreadable,
+                None,
+                Some(PathBuf::from("b.md")),
+                "unreadable",
+            ),
+            Fault::new(FaultKind::Empty, None, None, "empty catalog"),
+        ]);
+        let faults: Vec<FaultRef<'_>> = err.faults().collect();
+        assert_eq!(faults.len(), 3);
+
+        assert_eq!(faults[0].kind(), FaultKind::Unparsable);
+        assert_eq!(faults[0].prompt(), Some("p"));
+        assert_eq!(faults[0].path(), Some(Path::new("a.md")));
+        assert!(faults[0].to_string().contains("bad"));
+
+        assert_eq!(faults[1].kind(), FaultKind::Unreadable);
+        assert_eq!(faults[1].prompt(), None);
+        assert_eq!(faults[1].path(), Some(Path::new("b.md")));
+
+        assert_eq!(faults[2].kind(), FaultKind::Empty);
+        assert_eq!(faults[2].to_string(), "empty catalog");
     }
 }
-
-impl fmt::Display for Fault {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match (&self.prompt, &self.path) {
-            (Some(prompt), Some(path)) => {
-                write!(f, "{prompt} ({}): {}", path.display(), self.detail)
-            }
-            (Some(prompt), None) => write!(f, "{prompt}: {}", self.detail),
-            (None, Some(path)) => write!(f, "{}: {}", path.display(), self.detail),
-            (None, None) => f.write_str(&self.detail),
-        }
-    }
-}
-
-/// Everything wrong with one resolution pass, accumulated.
-///
-/// The pass runs to completion rather than stopping at the first problem, so an
-/// operator fixing a configuration sees every fault in one go instead of one per
-/// restart. `Display` writes the count and then one indented line per fault.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct CatalogError {
-    faults: Vec<Fault>,
-}
-
-impl CatalogError {
-    /// Collects faults into an error. Never called with an empty list, since a
-    /// pass with no faults returns the catalog.
-    pub(crate) fn new(faults: Vec<Fault>) -> CatalogError {
-        CatalogError { faults }
-    }
-
-    /// Every fault, in the order the pass found them.
-    #[must_use]
-    pub fn faults(&self) -> &[Fault] {
-        &self.faults
-    }
-}
-
-impl fmt::Display for CatalogError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let plural = if self.faults.len() == 1 { "" } else { "s" };
-        write!(f, "catalog has {} fault{plural}", self.faults.len())?;
-        for fault in &self.faults {
-            write!(f, "\n  {fault}")?;
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for CatalogError {}

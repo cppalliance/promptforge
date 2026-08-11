@@ -13,9 +13,10 @@ use serde_json::{Value, json};
 
 use super::fixture::{self, PROMPTS};
 use super::{Candidate, Retrieval, Shortlist};
+use crate::CatalogHandle;
 use crate::catalog::{Catalog, Entry};
 use crate::server::{PreparedTools, PromptForgeServer};
-use crate::{CatalogHandle, NEED_PROMPT};
+use crate::tools::NEED_PROMPT;
 
 /// The candidate names a capability retrieves, best first.
 fn names(shortlist: &Shortlist) -> Vec<String> {
@@ -39,8 +40,10 @@ fn server(retrieval: Retrieval) -> PromptForgeServer {
     let prompts = fixture::catalog(PROMPTS);
     PromptForgeServer::new(
         Arc::clone(&prompts.config),
-        Arc::new(CatalogHandle::new(prompts.catalog.clone())),
-        Arc::new(retrieval),
+        Arc::new(CatalogHandle::with_retrieval(
+            prompts.catalog.clone(),
+            retrieval,
+        )),
         Arc::new(
             PreparedTools::new(
                 &prompts.config.gateway,
@@ -169,7 +172,7 @@ fn an_idle_index_reports_that_retrieval_is_unavailable() {
 }
 
 #[test]
-fn a_rebuild_ranks_the_new_catalog_and_the_old_names_are_gone() {
+fn a_reindex_ranks_the_new_catalog_and_the_old_names_are_gone() {
     let before = fixture::catalog(&[
         (
             "stakeholder_position",
@@ -197,29 +200,36 @@ fn a_rebuild_ranks_the_new_catalog_and_the_old_names_are_gone() {
             "Translate a document into another language.",
         ),
     ]);
-    retrieval.rebuild(&after.catalog);
+    let reindexed = retrieval.reindexed(&after.catalog);
 
-    assert_eq!(retrieval.rebuilds(), 1);
-    let retrieved = names(&retrieval.shortlist(capability));
+    assert!(
+        !retrieval.same_index(&reindexed),
+        "a reindex is a new immutable index, not a mutation of the old one"
+    );
+    let retrieved = names(&reindexed.shortlist(capability));
     assert_eq!(retrieved[0], "position_report", "{retrieved:?}");
     assert!(
         !retrieved.iter().any(|n| n == "stakeholder_position"),
         "a name the catalog no longer has must not be recommended: {retrieved:?}"
     );
+    assert_eq!(
+        names(&retrieval.shortlist(capability))[0],
+        "stakeholder_position",
+        "the original index is immutable and still ranks its own catalog"
+    );
 }
 
 #[test]
-fn a_rebuild_of_an_idle_index_stays_idle() {
+fn a_reindex_of_an_idle_index_stays_idle() {
     let prompts = fixture::catalog(PROMPTS);
     let retrieval = Retrieval::idle();
 
-    retrieval.rebuild(&prompts.catalog);
+    let reindexed = retrieval.reindexed(&prompts.catalog);
 
     assert!(
-        !retrieval.is_available(),
+        !reindexed.is_available(),
         "there is no model behind an idle index to reuse, and a save must not load one"
     );
-    assert_eq!(retrieval.rebuilds(), 0);
 }
 
 #[tokio::test]
@@ -260,17 +270,43 @@ async fn the_tool_call_reports_each_candidate_as_a_name_and_a_description() {
 }
 
 #[tokio::test]
-async fn a_missing_or_mistyped_capability_is_the_client_s_bug() {
+async fn a_missing_capability_is_the_client_s_bug() {
     let prompts = fixture::catalog(PROMPTS);
     let server = server(fixture::retrieval(&prompts.catalog));
 
-    for arguments in [json!({}), json!({ "capability": 7 })] {
-        let error = server
-            .dispatch(call(arguments.clone()))
-            .await
-            .expect_err("the schema declared a required string");
-        assert_eq!(error.code, ErrorCode::INVALID_PARAMS, "{arguments}");
-    }
+    let error = server
+        .dispatch(call(json!({})))
+        .await
+        .expect_err("the schema declared a required string");
+    assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+}
+
+#[tokio::test]
+async fn a_mistyped_capability_is_the_client_s_bug() {
+    let prompts = fixture::catalog(PROMPTS);
+    let server = server(fixture::retrieval(&prompts.catalog));
+
+    let error = server
+        .dispatch(call(json!({ "capability": 7 })))
+        .await
+        .expect_err("the schema declared the required argument a string");
+    assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+}
+
+#[test]
+fn a_failed_shortlist_is_a_server_fault_the_caller_cannot_act_on() {
+    // The production arm behind `need_prompt`: a ranking that could not embed
+    // the capability is nothing the caller did or can correct, so it is a
+    // protocol fault rather than a result carrying `isError`.
+    let error =
+        crate::server::need_prompt_result(&Shortlist::Failed("embedding failed".to_owned()))
+            .expect_err("a failed ranking is a fault, not a result");
+    assert_eq!(error.code, ErrorCode::INTERNAL_ERROR);
+    assert!(
+        error.message.contains("rank prompts for the capability"),
+        "{}",
+        error.message
+    );
 }
 
 #[tokio::test]

@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use promptforge_mcp_server::{
-    Catalog, CatalogHandle, Config, OnBroken, PreparedTools, PromptForgeServer, Retrieval,
+    Catalog, CatalogHandle, Config, OnBroken, PreparedTools, PromptForgeServer,
 };
 use rmcp::model::{CallToolRequestParams, CallToolResponse, ProgressNotificationParam};
 use rmcp::service::NotificationContext;
@@ -42,7 +42,13 @@ impl ClientHandler for RecordingClient {
         params: ProgressNotificationParam,
         _context: NotificationContext<RoleClient>,
     ) {
-        let _sent = self.progress.send(params);
+        // Every frame is forwarded while the test still holds the receiver: the
+        // receiver is dropped only at teardown, after the session has ended and
+        // no further notifications can arrive. A failed send would mean a frame
+        // escaped that window, so the result is asserted rather than discarded.
+        self.progress
+            .send(params)
+            .expect("the test is still receiving progress frames");
     }
 }
 
@@ -55,7 +61,12 @@ const TRIO: &str = "---\nname: trio\ndescription: Three sections\npromptforge: 1
 ## Third\n\n```lua\nreturn 'trio done'\n```\n";
 
 /// A server over a catalog holding [`TRIO`] alone.
-fn trio_server() -> (TempDir, PromptForgeServer) {
+///
+/// The prepared tools are loaded through the public boot seam pointed at the
+/// fixture's unreachable gateway: the model-catalog fetch fails and degrades to
+/// an empty catalog, which is all a Lua-only run needs, and the live tools are
+/// built without a network round trip.
+async fn trio_server() -> (TempDir, PromptForgeServer) {
     let dir = tempfile::tempdir().expect("create a temporary prompts directory");
     fs::write(dir.path().join("trio.md"), TRIO).expect("write the fixture prompt");
     let config = Config::from_toml_str(&format!(
@@ -69,16 +80,13 @@ fn trio_server() -> (TempDir, PromptForgeServer) {
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
     let tools = Arc::new(
-        PreparedTools::new(
-            &config.gateway,
-            promptforge_core::model::ModelCatalog::empty(),
-        )
-        .expect("prepare fixture live tools"),
+        PreparedTools::load(&config)
+            .await
+            .expect("prepare fixture live tools"),
     );
     let server = PromptForgeServer::new(
         Arc::new(config),
         Arc::new(CatalogHandle::new(catalog)),
-        Arc::new(Retrieval::idle()),
         tools,
     );
     (dir, server)
@@ -86,12 +94,15 @@ fn trio_server() -> (TempDir, PromptForgeServer) {
 
 #[tokio::test]
 async fn a_run_frames_its_start_and_then_each_section() {
-    let (_dir, server) = trio_server();
+    let (_dir, server) = trio_server().await;
 
     let (server_io, client_io) = tokio::io::duplex(4096);
-    tokio::spawn(async move {
-        let running = server.serve(server_io).await.unwrap();
-        let _ = running.waiting().await;
+    let server_task = tokio::spawn(async move {
+        let running = server
+            .serve(server_io)
+            .await
+            .expect("the server starts its session");
+        running.waiting().await.expect("the server session ends")
     });
 
     let (sender, mut progress) = unbounded_channel();
@@ -143,43 +154,25 @@ async fn a_run_frames_its_start_and_then_each_section() {
         ]
     );
 
+    // Shut the session down and join the server before draining, so every frame
+    // the run would ever send has already been sent. The client owns the only
+    // sender, so once it is gone the channel is closed and `recv` resolves the
+    // moment it is empty: the assertion rests on a closed channel, not on a
+    // wall-clock race.
+    client
+        .cancel()
+        .await
+        .expect("the client disconnects cleanly");
+    server_task.await.expect("the server task joins");
     assert!(
-        tokio::time::timeout(Duration::from_millis(200), progress.recv())
-            .await
-            .is_err(),
+        progress.recv().await.is_none(),
         "the run frames its start and its sections, and nothing else"
     );
 }
 
-#[tokio::test]
-async fn a_call_with_no_progress_token_answers_the_same() {
-    // No token means no peer to report to, so there is no channel and no pump
-    // task - and the caller must not be able to tell from the answer.
-    let (_dir, server) = trio_server();
-    let result = server
-        .dispatch(
-            CallToolRequestParams::new("run_prompt").with_arguments(
-                serde_json::json!({ "prompt": "trio" })
-                    .as_object()
-                    .expect("the arguments are an object")
-                    .clone(),
-            ),
-        )
-        .await
-        .expect("the call reaches the prompt");
-
-    assert_eq!(result.is_error, Some(false));
-    assert_eq!(
-        result.content[0].as_text().expect("a text block").text,
-        "trio done"
-    );
-    let structured = result
-        .structured_content
-        .expect("every run result carries structured content");
-    assert_eq!(structured["status"], serde_json::json!("completed"));
-    assert_eq!(structured["value"], serde_json::json!("trio done"));
-    assert_eq!(structured["turns"], serde_json::json!(0));
-}
+// The untokened-call path - a `tools/call` that carries no `progressToken`,
+// which no `rmcp` client can produce - is asserted in-crate against the
+// handler's own entry point in `server::tests`, where that entry point lives.
 
 /// The next `count` notifications, or a panic once waiting stops being
 /// plausible.

@@ -5,35 +5,48 @@
 //! [`RUN_PROMPT`] rather than in `tools/list`, and nothing this server offers
 //! can be selected for a task the caller did not ask for by name.
 //!
-//! The list is therefore the same four entries for every catalog: the listing
-//! tool, the runner, the resolver, and the collector. Each is one entry in
-//! [`built_in_definitions`], carrying its name, its description, its schema,
-//! and whether this build publishes it. A fifth built-in is one more entry
-//! there and no edit anywhere else.
+//! The list is the same set of built-ins for every catalog, though not the same
+//! count for every build: the listing tool, the runner, and the collector are
+//! always published, and the resolver joins them only when the `picker` feature
+//! is compiled in. A default build publishes four; a build without `picker`
+//! publishes three. Each is one entry in the built-in definitions, carrying its
+//! name, its description, its schema, and whether this build publishes it.
 //!
-//! The one publication rule left is a property of the build rather than of the
-//! catalog or the request: [`NEED_PROMPT`] needs the `picker` feature, which
-//! carries the embedding model that ranks candidates.
+//! [`BuiltInTool`] is the single source of truth. Its variants drive the names,
+//! the published metadata ([`tool_definitions`]), the publication rule
+//! ([`publishes_built_in`]), the reserved-name set ([`reserved_names`], which
+//! catalog resolution reads), AND the dispatch handler in [`crate::server`], so
+//! a name cannot be a tool in one place and a legal prompt name in another.
+//! Adding a built-in is adding one enum variant; the compiler then refuses to
+//! build until that variant gains a name, a description, a schema, and a
+//! publication rule (all exhaustive `match`es over the enum here) plus a handler
+//! arm (an exhaustive `match` over the enum in the server's dispatch). A
+//! published tool with no handler, or a handler for a tool that publishes no
+//! metadata, cannot compile, so metadata and dispatch cannot drift.
+//!
+//! The one publication rule that varies is a property of the build rather than
+//! of the catalog or the request: [`NEED_PROMPT`] needs the `picker` feature,
+//! which carries the embedding model that ranks candidates.
 
 #[cfg(test)]
 mod tests;
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use rmcp::model::{JsonObject, Tool};
 use serde_json::Value;
 
 /// The name of the built-in that reports the whole catalog.
-pub const LIST_PROMPTS: &str = "list_prompts";
+pub(crate) const LIST_PROMPTS: &str = "list_prompts";
 
 /// The name of the built-in that runs any enabled prompt by name.
-pub const RUN_PROMPT: &str = "run_prompt";
+pub(crate) const RUN_PROMPT: &str = "run_prompt";
 
 /// The name of the built-in that collects a run which outlived its call.
-pub const CHECK_RUN: &str = "check_run";
+pub(crate) const CHECK_RUN: &str = "check_run";
 
 /// The name of the built-in that resolves a described prompt to names.
-pub const NEED_PROMPT: &str = "need_prompt";
+pub(crate) const NEED_PROMPT: &str = "need_prompt";
 
 /// The register instruction and the two examples that steer a caller of
 /// [`NEED_PROMPT`] into author phrasing.
@@ -92,49 +105,109 @@ const NEED_PROMPT_DESCRIPTION: &str = concat!(
 /// [`RUN_PROMPT`], so the list is fixed for the life of the process and a
 /// prompt saved a second ago is callable with no reconnect and no restart.
 ///
-/// # Examples
-/// ```
-/// # use promptforge_mcp_server::tool_definitions;
-/// let published = tool_definitions();
-/// let names: Vec<&str> = published.iter().map(|t| t.name.as_ref()).collect();
-/// assert!(names.contains(&"run_prompt"));
-/// ```
+/// The schemas are built once, on first use, and reused (see
+/// [`BUILT_IN_DEFINITIONS`]): they are immutable and identical on every call, so
+/// rebuilding them per `tools/list` would be pure waste.
 #[must_use]
-pub fn tool_definitions() -> Vec<Tool> {
-    built_in_definitions()
-        .into_iter()
-        .filter(|built_in| built_in.published)
-        .map(|built_in| Tool::new(built_in.name, built_in.description, built_in.input_schema))
+pub(crate) fn tool_definitions() -> Vec<Tool> {
+    BUILT_IN_DEFINITIONS
+        .iter()
+        .filter(|built_in| built_in.tool.published())
+        .map(|built_in| {
+            Tool::new(
+                built_in.tool.name(),
+                built_in.tool.description(),
+                Arc::clone(&built_in.input_schema),
+            )
+        })
         .collect()
 }
 
-/// One built-in: how it is published, and whether this build publishes it.
-struct BuiltIn {
-    name: &'static str,
-    description: &'static str,
-    input_schema: Arc<JsonObject>,
-    published: bool,
+/// The built-in tools this server can answer, in `tools/list` order.
+///
+/// This enum is the single source of truth that binds a built-in's published
+/// metadata to its dispatch handler. Both the listing here and the dispatcher
+/// in [`crate::server`] key on it, and both match it exhaustively: adding a
+/// variant does not compile until that variant has a [`name`](BuiltInTool::name),
+/// a [`description`](BuiltInTool::description), a schema
+/// ([`build_schema`](BuiltInTool::build_schema)), a
+/// [`published`](BuiltInTool::published) rule, AND a handler arm in the server's
+/// dispatch. A published tool with no handler cannot exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BuiltInTool {
+    /// Reports the whole catalog.
+    ListPrompts,
+    /// Runs any enabled prompt by name.
+    RunPrompt,
+    /// Resolves a described prompt to names; published only with `picker`.
+    NeedPrompt,
+    /// Collects a run that outlived its call.
+    CheckRun,
 }
 
-/// Every built-in, in `tools/list` order, each paired with the rule that
-/// publishes it, so adding a built-in is adding a row.
-///
-/// This is the single statement of what the server offers. Both the listing and
-/// the dispatcher read it, so a built-in absent from `tools/list` is one the
-/// handler refuses as well, and the two cannot drift into a tool that answers a
-/// call it never advertised.
-fn built_in_definitions() -> [BuiltIn; 4] {
-    [
-        BuiltIn {
-            name: LIST_PROMPTS,
-            description: LIST_PROMPTS_DESCRIPTION,
-            input_schema: schema(&[], &[]),
-            published: true,
-        },
-        BuiltIn {
-            name: RUN_PROMPT,
-            description: RUN_PROMPT_DESCRIPTION,
-            input_schema: schema(
+impl BuiltInTool {
+    /// Every built-in, in `tools/list` order, whether or not this build
+    /// publishes it.
+    pub(crate) const ALL: [BuiltInTool; 4] = [
+        BuiltInTool::ListPrompts,
+        BuiltInTool::RunPrompt,
+        BuiltInTool::NeedPrompt,
+        BuiltInTool::CheckRun,
+    ];
+
+    /// The wire name a caller reaches this built-in by.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            BuiltInTool::ListPrompts => LIST_PROMPTS,
+            BuiltInTool::RunPrompt => RUN_PROMPT,
+            BuiltInTool::NeedPrompt => NEED_PROMPT,
+            BuiltInTool::CheckRun => CHECK_RUN,
+        }
+    }
+
+    /// The description `tools/list` publishes for this built-in.
+    fn description(self) -> &'static str {
+        match self {
+            BuiltInTool::ListPrompts => LIST_PROMPTS_DESCRIPTION,
+            BuiltInTool::RunPrompt => RUN_PROMPT_DESCRIPTION,
+            BuiltInTool::NeedPrompt => NEED_PROMPT_DESCRIPTION,
+            BuiltInTool::CheckRun => CHECK_RUN_DESCRIPTION,
+        }
+    }
+
+    /// Whether this build publishes the built-in.
+    ///
+    /// The only rule that varies is [`NeedPrompt`](BuiltInTool::NeedPrompt),
+    /// which needs the `picker` feature that carries the ranking model.
+    pub(crate) fn published(self) -> bool {
+        match self {
+            BuiltInTool::ListPrompts | BuiltInTool::RunPrompt | BuiltInTool::CheckRun => true,
+            BuiltInTool::NeedPrompt => cfg!(feature = "picker"),
+        }
+    }
+
+    /// The built-in whose wire name is `name`, whether or not this build
+    /// publishes it, or `None` when no built-in owns the name.
+    pub(crate) fn from_name(name: &str) -> Option<BuiltInTool> {
+        BuiltInTool::ALL
+            .into_iter()
+            .find(|tool| tool.name() == name)
+    }
+
+    /// Builds this built-in's input schema, called once per built-in when
+    /// [`BUILT_IN_DEFINITIONS`] is first used and shared by every reader after.
+    fn build_schema(self) -> Arc<JsonObject> {
+        match self {
+            BuiltInTool::ListPrompts => schema(
+                &[(
+                    "cursor",
+                    Some(
+                        "A pagination cursor from a previous listing's next_cursor, to read the page after it. Omitting it reads the first page.",
+                    ),
+                )],
+                &[],
+            ),
+            BuiltInTool::RunPrompt => schema(
                 &[
                     (
                         "prompt",
@@ -149,41 +222,59 @@ fn built_in_definitions() -> [BuiltIn; 4] {
                 ],
                 &["prompt"],
             ),
-            published: true,
-        },
-        BuiltIn {
-            name: NEED_PROMPT,
-            description: NEED_PROMPT_DESCRIPTION,
-            input_schema: schema(
+            BuiltInTool::NeedPrompt => schema(
                 &[("capability", Some(CAPABILITY_REGISTER))],
                 &["capability"],
             ),
-            published: cfg!(feature = "picker"),
-        },
-        BuiltIn {
-            name: CHECK_RUN,
-            description: CHECK_RUN_DESCRIPTION,
-            input_schema: schema(
+            BuiltInTool::CheckRun => schema(
                 &[(
                     "run_id",
                     Some("The run id from an earlier result whose status was running."),
                 )],
                 &["run_id"],
             ),
-            published: true,
-        },
-    ]
+        }
+    }
 }
+
+/// One built-in paired with its input schema.
+struct BuiltIn {
+    tool: BuiltInTool,
+    input_schema: Arc<JsonObject>,
+}
+
+/// Every built-in with its schema, built once via [`LazyLock`] and shared by
+/// every reader thereafter: the set is fixed for the life of the process, so
+/// its schemas are allocated on first use rather than rebuilt per `tools/list`.
+static BUILT_IN_DEFINITIONS: LazyLock<[BuiltIn; 4]> = LazyLock::new(|| {
+    BuiltInTool::ALL.map(|tool| BuiltIn {
+        tool,
+        input_schema: tool.build_schema(),
+    })
+});
 
 /// Whether `name` is a built-in this build publishes.
 ///
-/// The dispatcher asks before it answers a built-in, so a name this build
-/// leaves out of `tools/list` - `need_prompt` without the `picker` feature - is
-/// a method that does not exist rather than one the handler answers anyway.
+/// Dispatch itself routes through [`BuiltInTool::from_name`] and
+/// [`BuiltInTool::published`] directly; this is the same test read the tests use
+/// to assert that publication tracks the listing, so it is compiled under test.
+#[cfg(test)]
 pub(crate) fn publishes_built_in(name: &str) -> bool {
-    built_in_definitions()
-        .iter()
-        .any(|built_in| built_in.name == name && built_in.published)
+    BuiltInTool::from_name(name).is_some_and(BuiltInTool::published)
+}
+
+/// Every name a built-in owns, in `tools/list` order, whether or not this build
+/// publishes it.
+///
+/// Derived from [`BuiltInTool`] rather than kept as a second list, so the
+/// reserved set catalog resolution reads to keep a prompt from taking a tool's
+/// name (see [`crate::catalog`]) cannot drift from the names listing and
+/// dispatch are keyed on. Every variant contributes its name whether or not this
+/// build publishes it, so `need_prompt` is reserved even in a build without the
+/// `picker` feature: a name legal in one build and not another is worse than one
+/// never legal.
+pub(crate) fn reserved_names() -> impl Iterator<Item = &'static str> {
+    BuiltInTool::ALL.into_iter().map(BuiltInTool::name)
 }
 
 /// An object schema whose every property is a string.
@@ -208,6 +299,10 @@ fn schema(properties: &[(&str, Option<&str>)], required: &[&str]) -> Arc<JsonObj
     let mut schema = JsonObject::new();
     schema.insert("type".to_owned(), Value::String("object".to_owned()));
     schema.insert("properties".to_owned(), Value::Object(declared));
+    // A strict object: a misspelled or obsolete argument is a caller defect, so
+    // the schema rejects any property it did not declare rather than letting an
+    // unknown key pass validation and silently run with a default.
+    schema.insert("additionalProperties".to_owned(), Value::Bool(false));
     if !required.is_empty() {
         schema.insert(
             "required".to_owned(),

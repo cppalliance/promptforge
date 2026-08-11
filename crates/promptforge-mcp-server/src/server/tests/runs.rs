@@ -6,8 +6,8 @@
 //! its deadline is made slow by a gateway that answers only when the test says
 //! so, rather than by a duration anybody has to guess.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
@@ -18,13 +18,14 @@ use tempfile::TempDir;
 use tokio::sync::Notify;
 
 use super::{
-    PromptForgeServer, call, server, server_with, speaking_server_with, structured_of, text_of,
+    Gateway, PromptForgeServer, call, server, server_with, speaking_server_with, structured_of,
+    text_of,
 };
 
-/// Spawns a gateway that answers nothing until `release` is signalled, which is
-/// how a prompt is made slower than its deadline without waiting on a clock to
-/// make it so.
-async fn spawn_gated_gateway(release: Arc<Notify>) -> SocketAddr {
+/// A gateway that answers nothing until `release` is signalled, which is how a
+/// prompt is made slower than its deadline without waiting on a clock to make it
+/// so.
+async fn spawn_gated_gateway(release: Arc<Notify>) -> Gateway {
     let completions = move |Json(_body): Json<Value>| {
         let release = Arc::clone(&release);
         async move {
@@ -36,22 +37,73 @@ async fn spawn_gated_gateway(release: Arc<Notify>) -> SocketAddr {
     };
 
     let router = Router::new().route("/v1/chat/completions", post(completions));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind an ephemeral port");
-    let addr = listener.local_addr().expect("read the bound address");
-    tokio::spawn(async move {
-        let _served = axum::serve(listener, router).await;
-    });
-    addr
+    Gateway::serve(router).await
 }
 
 /// A server whose one prose prompt is pointed at a gateway the test releases.
-async fn gated_server(server_lines: &str) -> (TempDir, PromptForgeServer, Arc<Notify>) {
+///
+/// The returned [`Gateway`] is the test's to keep alive: dropping it stops the
+/// serving task, so the caller holds it until the run under test no longer needs
+/// the backend.
+async fn gated_server(server_lines: &str) -> (TempDir, PromptForgeServer, Arc<Notify>, Gateway) {
     let release = Arc::new(Notify::new());
     let gateway = spawn_gated_gateway(Arc::clone(&release)).await;
-    let (dir, server) = speaking_server_with(gateway, server_lines);
-    (dir, server, release)
+    let (dir, server) = speaking_server_with(gateway.addr(), server_lines);
+    (dir, server, release, gateway)
+}
+
+/// A gateway that reports on `started` when a run reaches it and then blocks for
+/// ever, so a run can be observed in flight and never answered.
+async fn spawn_reporting_gateway(started: Arc<Notify>) -> Gateway {
+    let completions = move |Json(_body): Json<Value>| {
+        let started = Arc::clone(&started);
+        async move {
+            started.notify_one();
+            // Never answers: the run stays in flight until it is cancelled.
+            std::future::pending::<()>().await;
+            Json(json!({ "choices": [] }))
+        }
+    };
+
+    let router = Router::new().route("/v1/chat/completions", post(completions));
+    Gateway::serve(router).await
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_abandoned_call_cancels_the_in_flight_run_and_frees_its_slot() {
+    // The run reaches the gateway and blocks there, so it is provably in flight
+    // when its call is dropped well before the reply deadline.
+    let started = Arc::new(Notify::new());
+    let gateway = spawn_reporting_gateway(Arc::clone(&started)).await;
+    let (_dir, server) = speaking_server_with(
+        gateway.addr(),
+        "max_concurrent_runs = 1\nadmission_timeout = \"50s\"\nreply_deadline = \"300s\"",
+    );
+
+    let abandoned = tokio::time::timeout(
+        Duration::from_secs(2),
+        server.dispatch(call("run_prompt", json!({ "prompt": "speak" }))),
+    )
+    .await;
+    assert!(
+        abandoned.is_err(),
+        "the call is dropped long before its 300s reply deadline"
+    );
+
+    // The run had reached the gateway, so what was dropped was an in-flight run,
+    // not one that failed before it started.
+    tokio::time::timeout(Duration::from_secs(1), started.notified())
+        .await
+        .expect("the run reached the gateway before its call was abandoned");
+
+    // The old bug detached the run here, leaving it to hold the only slot for
+    // the life of the process. Now dropping the call cancelled it, so it ended
+    // and returned its slot: a fresh admission is granted rather than refused.
+    let readmitted = server.registry.admit().await;
+    assert!(
+        readmitted.is_some(),
+        "a cancelled run frees its slot; a detached leak would refuse this within the admission wait"
+    );
 }
 
 #[tokio::test]
@@ -82,7 +134,7 @@ async fn check_run_collects_a_run_that_finished_inside_its_deadline() {
 
 #[tokio::test(start_paused = true)]
 async fn a_run_that_outlives_its_deadline_is_reported_running_and_keeps_going() {
-    let (_dir, server, release) = gated_server("reply_deadline = \"50ms\"").await;
+    let (_dir, server, release, _gateway) = gated_server("reply_deadline = \"50ms\"").await;
 
     let result = server
         .dispatch(call("run_prompt", json!({ "prompt": "speak" })))

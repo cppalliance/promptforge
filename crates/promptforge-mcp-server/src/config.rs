@@ -9,11 +9,12 @@
 //! edition 2024 and this workspace forbids unsafe, so a gateway client is
 //! constructed explicitly from these values.
 
+mod interpolate;
 #[cfg(test)]
 mod tests;
+mod types;
 
 use std::collections::BTreeMap;
-use std::fmt;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -23,79 +24,170 @@ use serde::Deserialize;
 
 use crate::error::ConfigError;
 
-/// A secret string (the shared bearer or the gateway token) that never
-/// serializes and redacts in both `Debug` and `Display`.
-#[derive(Clone, Deserialize)]
-#[serde(from = "String")]
-pub struct Secret(String);
-
-impl Secret {
-    /// The secret's bytes. The one place a secret is read, when building auth.
-    #[must_use]
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-
-    /// Whether the secret is the empty string.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Whether the secret carries nothing usable: empty, or only whitespace.
-    #[must_use]
-    pub fn is_blank(&self) -> bool {
-        self.0.trim().is_empty()
-    }
-}
-
-impl From<String> for Secret {
-    fn from(value: String) -> Self {
-        Secret(value)
-    }
-}
-
-impl fmt::Debug for Secret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Secret(redacted)")
-    }
-}
-
-impl fmt::Display for Secret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("redacted")
-    }
-}
+use self::interpolate::interpolate_document;
+pub(crate) use self::types::{GatewayUrl, GlobPattern, PromptName, RelativePromptPath, Secret};
 
 /// The whole MCP server configuration.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+///
+/// Opaque and validated: a `Config` exists only if it passed [`Config::load`]
+/// or [`Config::from_toml_str`], so nothing downstream re-checks its
+/// invariants. It carries no `Deserialize`; deserialization lands in the
+/// private `RawConfig` and reaches this type only through a validating
+/// `TryFrom`.
+///
+/// # Examples
+/// ```
+/// use promptforge_mcp_server::Config;
+///
+/// let config: Config = r#"
+/// [server]
+/// token = "shared-bearer"
+///
+/// [gateway]
+/// url = "http://127.0.0.1:8081/v1"
+/// key = "gateway-bearer"
+/// "#
+/// .parse()?;
+/// assert_eq!(config, config.clone());
+/// # Ok::<(), promptforge_mcp_server::ConfigError>(())
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Config {
     /// Socket, shared token, concurrency, and the reload and timing settings.
-    pub server: ServerConfig,
+    pub(crate) server: ServerConfig,
     /// Where the prompts live.
-    #[serde(default)]
-    pub paths: PathsConfig,
+    pub(crate) paths: PathsConfig,
     /// The gateway every run's model calls go through.
-    pub gateway: GatewayConfig,
+    pub(crate) gateway: GatewayConfig,
     /// The globs that assemble the catalog.
-    #[serde(default)]
-    pub catalog: CatalogConfig,
+    pub(crate) catalog: CatalogConfig,
     /// Per-prompt exceptions to the globs, keyed by the prompt's frontmatter
     /// `name`.
+    pub(crate) prompts: BTreeMap<PromptName, PromptConfig>,
+}
+
+/// The unvalidated shape `prompts.toml` deserializes into.
+///
+/// Kept private and separate from [`Config`] so no caller can build a
+/// configuration that skipped validation: the only way across the boundary is
+/// the `TryFrom` below, which constructs every validated newtype. This is what
+/// makes an unvalidated `Config` unrepresentable rather than merely
+/// discouraged.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConfig {
+    server: RawServerConfig,
     #[serde(default)]
-    pub prompts: BTreeMap<String, PromptConfig>,
+    paths: PathsConfig,
+    gateway: RawGatewayConfig,
+    #[serde(default)]
+    catalog: CatalogConfig,
+    #[serde(default)]
+    prompts: BTreeMap<PromptName, PromptConfig>,
+}
+
+impl TryFrom<RawConfig> for Config {
+    type Error = ConfigError;
+
+    fn try_from(raw: RawConfig) -> Result<Config, ConfigError> {
+        // The shared bearer is optional, but present it must carry something:
+        // an empty token would compare equal to a request presenting no
+        // credential. The blank rejection lives in [`Secret`]; it is mapped
+        // back onto the token here so the public error keeps its
+        // [`EmptyToken`](crate::ConfigErrorKind::EmptyToken) kind and message.
+        let token = raw
+            .server
+            .token
+            .map(|value| Secret::try_from(value).map_err(|_| ConfigError::empty_token()))
+            .transpose()?;
+        // The gateway credential is required and read on every run, so a blank
+        // one is refused where it is read rather than surfacing later as an
+        // opaque authentication failure against the gateway. The endpoint's own
+        // shape is enforced by [`GatewayUrl`]'s validating conversion.
+        let key = Secret::try_from(raw.gateway.key)
+            .map_err(|_| ConfigError::parse("[gateway].key must not be empty"))?;
+        Ok(Config {
+            server: ServerConfig {
+                bind: raw.server.bind,
+                allowed_hosts: raw.server.allowed_hosts,
+                token,
+                max_concurrent_runs: raw.server.max_concurrent_runs,
+                admission_timeout: raw.server.admission_timeout,
+                reply_deadline: raw.server.reply_deadline,
+                retain_completed: raw.server.retain_completed,
+                watch: raw.server.watch,
+                watch_debounce: raw.server.watch_debounce,
+            },
+            paths: raw.paths,
+            gateway: GatewayConfig {
+                url: raw.gateway.url,
+                key,
+            },
+            catalog: raw.catalog,
+            prompts: raw.prompts,
+        })
+    }
+}
+
+/// The unvalidated shape of the `[server]` section.
+///
+/// Carries the shared token as a raw `String` so a blank one reaches the
+/// validating [`TryFrom`](Config) rather than being rejected mid-deserialize,
+/// which is what lets the public error keep its
+/// [`EmptyToken`](crate::ConfigErrorKind::EmptyToken) kind.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawServerConfig {
+    #[serde(default = "default_bind")]
+    bind: SocketAddr,
+    #[serde(default)]
+    allowed_hosts: Vec<String>,
+    #[serde(default)]
+    token: Option<String>,
+    #[serde(default = "default_max_concurrent_runs")]
+    max_concurrent_runs: NonZeroUsize,
+    #[serde(default = "default_admission_timeout", with = "humantime_serde")]
+    admission_timeout: Duration,
+    #[serde(default = "default_reply_deadline", with = "humantime_serde")]
+    reply_deadline: Duration,
+    #[serde(default = "default_retain_completed", with = "humantime_serde")]
+    retain_completed: Duration,
+    #[serde(default = "default_watch")]
+    watch: bool,
+    #[serde(default = "default_watch_debounce", with = "humantime_serde")]
+    watch_debounce: Duration,
+}
+
+/// The unvalidated shape of the `[gateway]` section.
+///
+/// Carries the key as a raw `String` so a blank one reaches the validating
+/// [`TryFrom`](Config) and the public error keeps its
+/// [`Parse`](crate::ConfigErrorKind::Parse) kind and `[gateway].key` message.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawGatewayConfig {
+    url: GatewayUrl,
+    key: String,
 }
 
 /// Server-level settings.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct ServerConfig {
+pub(crate) struct ServerConfig {
     /// The socket address the streamable-HTTP transport binds.
-    #[serde(default = "default_bind")]
-    pub bind: SocketAddr,
+    pub(crate) bind: SocketAddr,
+    /// The host authorities inbound `Host` headers are validated against on the
+    /// streamable-HTTP transport, so a bound socket cannot be reached under a
+    /// name the operator did not intend (the DNS-rebinding defence).
+    ///
+    /// Empty is the secure default only for a loopback bind, where it means the
+    /// loopback names `localhost`, `127.0.0.1`, and `::1`. A non-loopback bind
+    /// with an empty list is refused, because the reachable-host policy would
+    /// otherwise silently contradict the bind: enumerate the public authorities
+    /// (`["example.com", "example.com:8080"]`) instead. Read by the HTTP
+    /// transport alone; stdio ignores it.
+    pub(crate) allowed_hosts: Vec<String>,
     /// The shared bearer token every `/mcp` request must present.
     ///
     /// Optional, because the token is a property of the HTTP surface alone:
@@ -104,40 +196,33 @@ pub struct ServerConfig {
     /// absent rather than failing the load, so a local stdio install is not
     /// stopped by a credential its transport never reads. Present, it must
     /// carry something.
-    #[serde(default)]
-    pub token: Option<Secret>,
+    pub(crate) token: Option<Secret>,
     /// How many prompts may run at once before a call waits for admission.
-    #[serde(default = "default_max_concurrent_runs")]
-    pub max_concurrent_runs: NonZeroUsize,
+    pub(crate) max_concurrent_runs: NonZeroUsize,
     /// How long a call waits for a run slot before it is refused.
-    #[serde(default = "default_admission_timeout", with = "humantime_serde")]
-    pub admission_timeout: Duration,
+    pub(crate) admission_timeout: Duration,
     /// How long a call blocks before it returns a `running` result and leaves
     /// the run going in the background. Keep it under the client's own call
     /// ceiling: Cursor's remote calls fail at about 300 seconds.
-    #[serde(default = "default_reply_deadline", with = "humantime_serde")]
-    pub reply_deadline: Duration,
+    pub(crate) reply_deadline: Duration,
     /// How long a finished run stays collectable before it is evicted.
-    #[serde(default = "default_retain_completed", with = "humantime_serde")]
-    pub retain_completed: Duration,
+    pub(crate) retain_completed: Duration,
     /// Whether to re-read prompts on save, so writing a prompt is an
     /// edit-and-call loop rather than an edit-restart-call one.
-    #[serde(default = "default_watch")]
-    pub watch: bool,
+    pub(crate) watch: bool,
     /// How long the watcher waits for filesystem events to settle.
-    #[serde(default = "default_watch_debounce", with = "humantime_serde")]
-    pub watch_debounce: Duration,
+    pub(crate) watch_debounce: Duration,
 }
 
 /// Filesystem locations.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct PathsConfig {
+pub(crate) struct PathsConfig {
     /// The prompts directory. Catalog patterns and a named block's `file` are
     /// both relative to it.
     #[serde(default = "default_prompts_dir")]
-    pub prompts: PathBuf,
+    pub(crate) prompts: PathBuf,
 }
 
 impl Default for PathsConfig {
@@ -149,59 +234,94 @@ impl Default for PathsConfig {
 }
 
 /// The gateway a run's model calls go through.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct GatewayConfig {
+pub(crate) struct GatewayConfig {
     /// The gateway base URL, for example `http://127.0.0.1:8081/v1`.
-    pub url: String,
+    pub(crate) url: GatewayUrl,
     /// The shared key the gateway requires.
-    pub key: Secret,
+    pub(crate) key: Secret,
 }
 
 /// The globs that assemble the catalog.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct CatalogConfig {
+pub(crate) struct CatalogConfig {
     /// Patterns to include, relative to the prompts directory. `*` does not
     /// cross a separator and `**` does. Empty enumerates by hand.
     #[serde(default)]
-    pub include: Vec<String>,
+    pub(crate) include: Vec<GlobPattern>,
     /// Patterns to subtract from the included set.
     #[serde(default)]
-    pub exclude: Vec<String>,
+    pub(crate) exclude: Vec<GlobPattern>,
 }
 
 /// One `[prompts.NAME]` block: an exception to the globs.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct PromptConfig {
+pub(crate) struct PromptConfig {
     /// Whether the prompt is published at all. `false` drops one the globs
     /// caught.
     #[serde(default = "default_enabled")]
-    pub enabled: bool,
+    pub(crate) enabled: bool,
     /// A path relative to the prompts directory, for a file no glob matches.
     /// Absent means the block is an exception to a globbed prompt.
     #[serde(default)]
-    pub file: Option<PathBuf>,
+    pub(crate) file: Option<RelativePromptPath>,
 }
+
+/// The largest a `prompts.toml` may be. A configuration is a handful of
+/// sections; anything past a few mebibytes is a wrong file or a mistake, and
+/// reading it unbounded would let a stray path pull an arbitrarily large file
+/// into memory at boot. Four mebibytes leaves generous headroom over any real
+/// configuration.
+const MAX_CONFIG_BYTES: u64 = 4 * 1024 * 1024;
 
 impl Config {
     /// Loads, interpolates, and parses a configuration file.
     ///
+    /// The read is capped at four mebibytes: a file larger than that is refused
+    /// rather than read into memory, since a real configuration is a handful of
+    /// sections and anything larger is a wrong path or a mistake.
+    ///
     /// # Errors
-    /// Returns [`ConfigError::Read`] if `path` is unreadable,
-    /// [`ConfigError::Interpolation`] or [`ConfigError::UnresolvedVar`] if a
-    /// `${VAR}` is malformed or unset, [`ConfigError::Parse`] if the TOML is
-    /// invalid or carries an unknown key, and [`ConfigError::EmptyToken`] if
-    /// `[server].token` is present and carries nothing.
+    /// Returns a [`ConfigError`] whose [`kind`](ConfigError::kind) is
+    /// [`Read`](crate::ConfigErrorKind::Read) if `path` is unreadable,
+    /// [`Interpolation`](crate::ConfigErrorKind::Interpolation) or
+    /// [`UnresolvedVar`](crate::ConfigErrorKind::UnresolvedVar) if a `${VAR}` is
+    /// malformed or unset, [`Parse`](crate::ConfigErrorKind::Parse) if the TOML
+    /// is invalid, carries an unknown key, or exceeds the size cap, and
+    /// [`EmptyToken`](crate::ConfigErrorKind::EmptyToken) if `[server].token` is
+    /// present and carries nothing.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use std::path::Path;
+    /// use promptforge_mcp_server::Config;
+    ///
+    /// let config = Config::load(Path::new("prompts.toml"))?;
+    /// # let _ = config;
+    /// # Ok::<(), promptforge_mcp_server::ConfigError>(())
+    /// ```
     pub fn load(path: &Path) -> Result<Config, ConfigError> {
-        let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
-            path: path.display().to_string(),
-            source,
-        })?;
+        use std::io::Read as _;
+
+        let file = std::fs::File::open(path)
+            .map_err(|source| ConfigError::read(path.to_path_buf(), source))?;
+        // Read one byte past the cap so an exactly-limit file still loads while
+        // a larger one is detected without pulling the whole thing in.
+        let mut raw = String::new();
+        file.take(MAX_CONFIG_BYTES + 1)
+            .read_to_string(&mut raw)
+            .map_err(|source| ConfigError::read(path.to_path_buf(), source))?;
+        if raw.len() as u64 > MAX_CONFIG_BYTES {
+            return Err(ConfigError::parse(format!(
+                "config file {} exceeds the {MAX_CONFIG_BYTES}-byte limit",
+                path.display()
+            )));
+        }
         Config::from_toml_str(&raw)
     }
 
@@ -213,11 +333,13 @@ impl Config {
     /// transport that reads it refuses to bind without it.
     ///
     /// # Errors
-    /// Returns [`ConfigError::Interpolation`] or [`ConfigError::UnresolvedVar`]
-    /// for a malformed or unset `${VAR}` outside `[server].token`,
-    /// [`ConfigError::Parse`] for invalid TOML or an unknown key, and
-    /// [`ConfigError::EmptyToken`] for a `[server].token` that is present and
-    /// empty or whitespace alone.
+    /// Returns a [`ConfigError`] whose [`kind`](ConfigError::kind) is
+    /// [`Interpolation`](crate::ConfigErrorKind::Interpolation) or
+    /// [`UnresolvedVar`](crate::ConfigErrorKind::UnresolvedVar) for a malformed
+    /// or unset `${VAR}` outside `[server].token`,
+    /// [`Parse`](crate::ConfigErrorKind::Parse) for invalid TOML or an unknown
+    /// key, and [`EmptyToken`](crate::ConfigErrorKind::EmptyToken) for a
+    /// `[server].token` that is present and empty or whitespace alone.
     ///
     /// # Examples
     /// ```
@@ -231,33 +353,27 @@ impl Config {
     /// key = "gateway-bearer"
     /// "#,
     /// )?;
-    /// assert_eq!(config.server.bind.port(), 9310);
+    /// let _config = config;
     /// # Ok::<(), promptforge_mcp_server::ConfigError>(())
     /// ```
     pub fn from_toml_str(raw: &str) -> Result<Config, ConfigError> {
-        let mut document: toml::Table =
-            toml::from_str(raw).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        let mut document: toml::Table = toml::from_str(raw).map_err(ConfigError::parse_toml)?;
         interpolate_document(&mut document)?;
-        let config: Config = toml::Value::Table(document)
+        let raw_config: RawConfig = toml::Value::Table(document)
             .try_into()
-            .map_err(|e: toml::de::Error| ConfigError::Parse(e.to_string()))?;
-        config.validate()?;
-        Ok(config)
+            .map_err(ConfigError::parse_toml)?;
+        Config::try_from(raw_config)
     }
+}
 
-    /// The checks a parsed configuration must pass before anything reads it.
-    ///
-    /// The shared bearer is the whole of it: an empty token would make a request
-    /// presenting no credential compare equal to it, so the load refuses one
-    /// rather than leaving the surface open to a typo. An absent token is a
-    /// different statement - stdio needs none - and `serve` refuses to bind
-    /// without one. The bearer layer refuses an absent header on its own too,
-    /// so the two defences are independent.
-    fn validate(&self) -> Result<(), ConfigError> {
-        if self.server.token.as_ref().is_some_and(Secret::is_blank) {
-            return Err(ConfigError::EmptyToken);
-        }
-        Ok(())
+impl std::str::FromStr for Config {
+    type Err = ConfigError;
+
+    /// Parses a configuration from a TOML string, the same path as
+    /// [`Config::from_toml_str`], so `s.parse::<Config>()` and
+    /// `Config::from_toml_str(s)` agree.
+    fn from_str(s: &str) -> Result<Config, ConfigError> {
+        Config::from_toml_str(s)
     }
 }
 
@@ -306,96 +422,4 @@ fn default_prompts_dir() -> PathBuf {
 /// A named block publishes its prompt unless it says otherwise.
 fn default_enabled() -> bool {
     true
-}
-
-/// Expands `${VAR}` in every string the parsed document carries.
-///
-/// Interpolating after the parse rather than over the raw text is what lets one
-/// field be treated differently from the rest. `[server].token` is that field:
-/// an unset variable there drops the token, because the HTTP transport refuses
-/// to bind without one anyway and the stdio transport never reads it, so
-/// failing the load would stop a local install over a credential it does not
-/// use. Everywhere else an unset variable still fails the load, which is what
-/// keeps the gateway from starting with a blank credential.
-fn interpolate_document(document: &mut toml::Table) -> Result<(), ConfigError> {
-    if let Some(server) = document
-        .get_mut("server")
-        .and_then(toml::Value::as_table_mut)
-        && let Some(toml::Value::String(token)) = server.get("token")
-        && matches!(interpolate(token), Err(ConfigError::UnresolvedVar(_)))
-    {
-        server.remove("token");
-    }
-    interpolate_table(document)
-}
-
-/// Expands `${VAR}` in every string under one table.
-fn interpolate_table(table: &mut toml::Table) -> Result<(), ConfigError> {
-    for (_, value) in table.iter_mut() {
-        interpolate_value(value)?;
-    }
-    Ok(())
-}
-
-/// Expands `${VAR}` in one value, reaching through arrays and tables. A number,
-/// a boolean, and a datetime carry no text to expand.
-fn interpolate_value(value: &mut toml::Value) -> Result<(), ConfigError> {
-    match value {
-        toml::Value::String(text) => *text = interpolate(text)?,
-        toml::Value::Array(items) => {
-            for item in items {
-                interpolate_value(item)?;
-            }
-        }
-        toml::Value::Table(table) => interpolate_table(table)?,
-        _ => {}
-    }
-    Ok(())
-}
-
-/// Expands `${VAR}` from the process environment; `$$` is a literal `$`.
-fn interpolate(input: &str) -> Result<String, ConfigError> {
-    interpolate_with(input, &|name| std::env::var(name).ok())
-}
-
-/// Expands `${VAR}` through `lookup`, which answers `None` for an unset name.
-fn interpolate_with(
-    input: &str,
-    lookup: &dyn Fn(&str) -> Option<String>,
-) -> Result<String, ConfigError> {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '$' {
-            out.push(c);
-            continue;
-        }
-        match chars.peek() {
-            Some('$') => {
-                chars.next();
-                out.push('$');
-            }
-            Some('{') => {
-                chars.next();
-                let mut name = String::new();
-                let mut closed = false;
-                for nc in chars.by_ref() {
-                    if nc == '}' {
-                        closed = true;
-                        break;
-                    }
-                    name.push(nc);
-                }
-                if !closed {
-                    return Err(ConfigError::Interpolation(
-                        "unclosed ${...} interpolation".to_string(),
-                    ));
-                }
-                let value = lookup(&name).ok_or(ConfigError::UnresolvedVar(name))?;
-                out.push_str(&value);
-            }
-            _ => out.push('$'),
-        }
-    }
-    Ok(out)
 }

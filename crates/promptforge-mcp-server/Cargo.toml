@@ -1,16 +1,27 @@
 [package]
 name = "promptforge-mcp-server"
-version.workspace = true
+version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
 description = "PromptForge MCP server: runs a prompt an agentic harness names to run_prompt"
+repository.workspace = true
+readme = "README.md"
+keywords = ["mcp", "promptforge", "llm", "agent", "server"]
+categories = ["command-line-utilities", "development-tools"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 arc-swap.workspace = true
 axum.workspace = true
 fastrand.workspace = true
+# `StreamExt::next` over the framed stdio reader and `SinkExt::send` over its
+# writer: the bounded transport is a `FramedRead`/`FramedWrite` pair.
+futures-util.workspace = true
 glob.workspace = true
 # The durations `prompts.toml` carries, read back out to a caller: a refusal
 # names the wait it spent and an unknown run id names the retention window.
@@ -23,10 +34,19 @@ promptforge-webfetch.workspace = true
 rmcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
+# `[gateway].url` is parsed as a real URL at the config boundary, so a
+# malformed endpoint is refused there rather than surfacing later as an opaque
+# connection failure against the gateway.
+url.workspace = true
 # `time` is the bounded flush in `progress.rs` and both deadlines in
-# `registry.rs`; `sync` is the admission semaphore and the progress queue.
-tokio = { workspace = true, features = ["sync", "time"] }
+# `registry.rs`; `sync` is the admission semaphore and the progress queue;
+# `signal` is the ctrl-c the binary hands both transports as their graceful
+# shutdown; `io-util` is the bounded read the stdio transport frames lines with.
+tokio = { workspace = true, features = ["io-util", "signal", "sync", "time"] }
+# `codec` is the `FramedRead`/`FramedWrite` the bounded stdio transport frames
+# JSON-RPC lines with; `CancellationToken` is the graceful-shutdown handle
+# threaded into the streamable-HTTP config and awaited by Axum's drain.
+tokio-util = { version = "0.7", features = ["codec"] }
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
