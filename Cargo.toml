@@ -20,7 +20,7 @@ repository = "https://github.com/cppalliance/promptforge"
 
 [workspace.dependencies]
 promptforge-core = { path = "crates/promptforge-core", version = "0.0.0" }
-promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.1.0" }
+promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.0.0" }
 promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.0.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
