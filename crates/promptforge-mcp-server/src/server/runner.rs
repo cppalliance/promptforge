@@ -27,17 +27,19 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use promptforge_core::CancelHandle;
 use promptforge_core::client::GatewayClient;
 use promptforge_core::execute::{self, ResolutionContext, RunConfig};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
 use rmcp::model::{CallToolResult, ErrorData};
+use tokio::sync::oneshot;
 use tokio::time::Instant;
 
 use crate::catalog::Entry;
 use crate::config::Config;
 use crate::progress::{McpObserver, ProgressPump};
-use crate::registry::{RunRegistry, RunSlot, elapsed_ms};
+use crate::registry::{DuplicateRun, RunRegistry, RunSlot, elapsed_ms};
 use crate::result::{NO_TURNS, RunResult};
 
 use super::{PreparedTools, Reporting, bind, run_result, text_error};
@@ -66,6 +68,9 @@ struct Launch {
     started: Instant,
     /// The admission slot, returned when this value drops.
     slot: RunSlot,
+    /// The run's cancellation handle, installed on the core run so an abandoned
+    /// call stops it cooperatively.
+    cancel: CancelHandle,
 }
 
 /// One run's observer, correlation id, and optional progress pump.
@@ -171,23 +176,42 @@ async fn run_observed(
         }
     };
 
-    registry.started(&run_id, entry.name());
-    let task = tokio::spawn(execute_run(
-        Arc::clone(registry),
-        Launch {
-            run_id: run_id.clone(),
-            prompt,
-            name: entry.name().to_owned(),
-            args: args.to_owned(),
-            tools,
-            observer,
-            client,
-            started,
-            slot,
-        },
-    ));
+    let cancel = CancelHandle::new();
+    let (result_tx, result_rx) = oneshot::channel();
+    let launch = Launch {
+        run_id: run_id.clone(),
+        prompt,
+        name: entry.name().to_owned(),
+        args: args.to_owned(),
+        tools,
+        observer,
+        client,
+        started,
+        slot,
+        cancel: cancel.clone(),
+    };
 
-    let result = registry.settle(&run_id, entry.name(), task).await;
+    // The supervisor owns the run from the instant it is registered, so the
+    // slot and observer inside `launch` are released whether the run is
+    // admitted or refused as a duplicate id.
+    if let Err(DuplicateRun) = registry.launch(
+        run_id.clone(),
+        entry.name().to_owned(),
+        cancel.clone(),
+        result_tx,
+        move || tokio::spawn(execute_run(launch)),
+    ) {
+        finish_pump(pump).await;
+        return run_result(&RunResult::failed(
+            run_id,
+            entry.name(),
+            "the run id was already in use".to_owned(),
+            NO_TURNS,
+            0,
+        ));
+    }
+
+    let result = registry.settle(&run_id, entry.name(), result_rx).await;
     if let Some(pump) = pump {
         pump.finish().await;
     }
@@ -225,11 +249,14 @@ pub(super) async fn run_recorded(
     .await
 }
 
-/// Runs one prompt to a [`RunResult`] and records it.
+/// Runs one prompt to a [`RunResult`].
 ///
 /// This is the body of the spawned task, so nothing here borrows from the call
-/// that started it.
-async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
+/// that started it. Its returned result is what the supervisor in
+/// [`RunRegistry::launch`] records; the run installs its own
+/// [`CancelHandle`](promptforge_core::CancelHandle) so an abandoned call stops
+/// it cooperatively and it ends as the failure the core reports.
+async fn execute_run(launch: Launch) -> RunResult {
     let Launch {
         run_id,
         prompt,
@@ -240,12 +267,14 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
         client,
         started,
         slot,
+        cancel,
     } = launch;
 
     let store = StoreRef::memory();
     let config = RunConfig::new(run_id.as_str())
         .observer(Arc::clone(&observer) as Arc<dyn promptforge_core::observe::Observer>)
-        .client(client);
+        .client(client)
+        .cancel(cancel);
     let outcome = execute::run(
         &prompt,
         &args,
@@ -269,7 +298,6 @@ async fn execute_run(registry: Arc<RunRegistry>, launch: Launch) -> RunResult {
         Err(error) => RunResult::failed(run_id.clone(), &name, error.to_string(), turns, elapsed),
     };
     log_terminal_result(&result);
-    registry.finished(&run_id, result.clone());
     // Explicit, because returning the slot is the point of having held it.
     drop(slot);
     result
@@ -299,11 +327,11 @@ async fn finish_pump(pump: Option<ProgressPump>) {
 /// Logs one payload-free terminal record after every field is final.
 fn log_terminal_result(result: &RunResult) {
     tracing::info!(
-        run_id = %result.run_id,
-        prompt = %result.prompt,
-        status = ?result.status,
-        turns = result.turns,
-        elapsed_ms = result.elapsed_ms,
+        run_id = %result.run_id(),
+        prompt = %result.prompt(),
+        status = ?result.status(),
+        turns = result.turns(),
+        elapsed_ms = result.elapsed_ms(),
         "run reached its terminal state"
     );
 }
@@ -328,10 +356,9 @@ mod tests {
     use std::time::Duration;
 
     use tracing::Level;
-    use tracing_subscriber::layer::SubscriberExt;
 
     use super::{log_terminal_result, new_run_id, refused};
-    use crate::levels::Levels;
+    use crate::levels::recording;
     use crate::result::RunResult;
 
     #[test]
@@ -350,15 +377,14 @@ mod tests {
 
     #[test]
     fn terminal_log_carries_the_completed_result_measurements() {
-        let levels = Levels::default();
-        let subscriber = tracing_subscriber::registry().with(levels.clone());
+        let (levels, _recording) = recording();
         let result = RunResult::completed("r1".into(), "echo", "secret".into(), 3, 42);
 
-        tracing::subscriber::with_default(subscriber, || log_terminal_result(&result));
+        log_terminal_result(&result);
 
         assert_eq!(levels.operator_visible(), vec![Level::INFO]);
         for field in [
-            "run reached its terminal state",
+            "message=run reached its terminal state",
             "run_id=r1",
             "prompt=echo",
             "status=Completed",
@@ -371,7 +397,7 @@ mod tests {
             );
         }
         assert!(
-            !levels.said(Level::INFO, "secret"),
+            !levels.mentioned(Level::INFO, "secret"),
             "terminal logging must exclude the run payload"
         );
     }

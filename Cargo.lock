@@ -2927,11 +2927,12 @@ dependencies = [
 
 [[package]]
 name = "promptforge-mcp-server"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "arc-swap",
  "axum",
  "fastrand",
+ "futures-util",
  "glob",
  "humantime",
  "humantime-serde",
@@ -2943,12 +2944,13 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.19",
  "tokio",
+ "tokio-util",
  "toml",
  "tower",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]

@@ -11,7 +11,7 @@ use std::path::Path;
 use super::{admit, parse, read};
 use crate::catalog::Entry;
 use crate::config::Config;
-use crate::error::Fault;
+use crate::error::{Fault, FaultKind};
 
 /// Applies the `[prompts.NAME]` blocks: a `file` reaches a prompt no glob
 /// matches, and `enabled = false` drops one. A block with no `file` that
@@ -26,25 +26,53 @@ pub(super) fn apply(
     let mut disabled: BTreeSet<&str> = BTreeSet::new();
 
     for (key, block) in &config.prompts {
+        let key = key.as_str();
         if !block.enabled {
-            disabled.insert(key.as_str());
+            disabled.insert(key);
         }
         match &block.file {
             Some(file) => {
                 if !block.enabled {
                     continue;
                 }
-                let path = root.join(file);
-                // A block names one file deliberately, so whatever is there has
-                // to parse: the silent skip is a property of globbing alone.
+                // The `file` crossed the config boundary as a
+                // `RelativePromptPath`, so its shape is already known good: an
+                // absolute or `..`-bearing value never reaches here. A file that
+                // resolves outside the prompts directory is still refused by
+                // canonical ancestry once it is joined, since a symlink escape
+                // is only visible then.
+                let path = root.join(file.as_path());
                 let entry = match read(&path) {
+                    Ok(_) if !super::path::confined(root, &path) => Entry::broken_as(
+                        key.to_owned(),
+                        path.clone(),
+                        FaultKind::Unreadable,
+                        "resolves outside the prompts directory".to_string(),
+                    ),
                     Ok(source) => match parse(&source) {
                         Ok(prompt) => admit(path.clone(), source, prompt, Some(key)),
-                        Err(detail) => Entry::broken(key.clone(), path.clone(), detail),
+                        Err(detail) => Entry::broken_as(
+                            key.to_owned(),
+                            path.clone(),
+                            FaultKind::Unparsable,
+                            detail,
+                        ),
                     },
-                    Err(detail) => Entry::broken(key.clone(), path.clone(), detail),
+                    Err(detail) => Entry::broken_as(
+                        key.to_owned(),
+                        path.clone(),
+                        FaultKind::Unreadable,
+                        detail,
+                    ),
                 };
-                match entries.iter().position(|held| held.path() == path) {
+                // Identity is canonical, not lexical, so a block spelled
+                // `./top.md` or naming a symlink replaces the globbed entry for
+                // that file rather than appending a second that then collides on
+                // name.
+                match entries
+                    .iter()
+                    .position(|held| super::path::same_file(held.path(), &path))
+                {
                     Some(index) => entries[index] = entry,
                     None => entries.push(entry),
                 }
@@ -52,7 +80,8 @@ pub(super) fn apply(
             None => {
                 if !entries.iter().any(|held| held.name() == key) {
                     faults.push(Fault::new(
-                        Some(key.clone()),
+                        FaultKind::StaleOverride,
+                        Some(key.to_owned()),
                         None,
                         "[prompts] block matches no prompt; it names no file and no glob found it",
                     ));
@@ -164,6 +193,20 @@ mod tests {
     }
 
     #[test]
+    fn a_block_file_that_climbs_above_the_root_is_refused() {
+        // The `file` is a `RelativePromptPath`, so a value that climbs above the
+        // prompts directory is refused at the config boundary rather than
+        // reaching resolution as a fault.
+        let err = crate::config::Config::from_toml_str(
+            "[server]\ntoken = \"t\"\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+             [prompts.escapee]\nfile = \"../outside/escapee.md\"\n",
+        )
+        .expect_err("a block file climbing above the root is refused");
+        assert!(err.to_string().contains(".."), "the escape is named: {err}");
+    }
+
+    #[test]
     fn a_named_block_matching_nothing_is_a_stale_override() {
         let dir = TempDir::new().expect("temporary prompts directory");
         let root = dir.path();
@@ -176,7 +219,10 @@ mod tests {
         let error =
             Catalog::resolve(&config, OnBroken::Reject).expect_err("the stale override is a fault");
         assert_eq!(error.faults().len(), 1);
-        assert_eq!(error.faults()[0].prompt(), Some("renamed_away"));
+        assert_eq!(
+            error.faults().next().expect("one fault").prompt(),
+            Some("renamed_away")
+        );
         assert!(fault_text(&error).contains("matches no prompt"));
     }
 

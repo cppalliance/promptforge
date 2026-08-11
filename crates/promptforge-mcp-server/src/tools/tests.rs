@@ -8,12 +8,16 @@
 //! capability offered for selection.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use promptforge_core::model::ModelCatalog;
 use promptforge_core::observe::NullObserver;
 use promptforge_core::parser::Prompt;
 
-use super::{prompt_value, publishes_built_in, tool_definitions};
-use crate::catalog::{Catalog, Entry};
+use super::{prompt_value, publishes_built_in, reserved_names, tool_definitions};
+use crate::catalog::{Catalog, CatalogHandle, Entry};
+use crate::config::Config;
+use crate::server::{PreparedTools, PromptForgeServer};
 
 /// The four names this server publishes, in `tools/list` order.
 const BUILT_INS: [&str; 4] = ["list_prompts", "run_prompt", "need_prompt", "check_run"];
@@ -50,6 +54,43 @@ fn names() -> Vec<String> {
         .collect()
 }
 
+/// The configuration and prepared tools every fixture server shares. Built once
+/// per test: neither depends on the catalog, and the listing reads neither.
+fn fixture_server_parts() -> (Arc<Config>, Arc<PreparedTools>) {
+    let config = Config::from_toml_str(
+        "[server]\ntoken = \"t\"\n\n[gateway]\nurl = \"http://127.0.0.1:8081/v1/\"\nkey = \"gw\"\n",
+    )
+    .expect("the fixture configuration parses");
+    let tools = Arc::new(
+        PreparedTools::new(&config.gateway, ModelCatalog::empty()).expect("prepare fixture tools"),
+    );
+    (Arc::new(config), tools)
+}
+
+/// A server that publishes `catalog`, sharing `config` and `tools`.
+fn server_over(
+    catalog: Catalog,
+    config: &Arc<Config>,
+    tools: &Arc<PreparedTools>,
+) -> PromptForgeServer {
+    PromptForgeServer::new(
+        Arc::clone(config),
+        Arc::new(CatalogHandle::new(catalog)),
+        Arc::clone(tools),
+    )
+}
+
+/// The built-in names the real listing handler publishes for `server`.
+fn published_by(server: &PromptForgeServer) -> Vec<String> {
+    server
+        .list_page(None)
+        .expect("the listing succeeds")
+        .tools
+        .iter()
+        .map(|tool| tool.name.to_string())
+        .collect()
+}
+
 #[test]
 #[cfg(feature = "picker")]
 fn the_published_tool_list_is_the_golden_one() {
@@ -61,38 +102,105 @@ fn the_published_tool_list_is_the_golden_one() {
 }
 
 #[test]
-fn a_catalog_of_three_prompts_publishes_only_the_built_ins() {
-    assert_eq!(catalog().len(), 3);
-    let published = names();
-    let expected: Vec<&str> = BUILT_INS
-        .into_iter()
-        .filter(|name| *name != "need_prompt" || cfg!(feature = "picker"))
-        .collect();
-    assert_eq!(published, expected);
+#[cfg(not(feature = "picker"))]
+fn the_published_tool_list_is_the_no_picker_golden_one() {
+    // A build without `picker` publishes three built-ins, not four: the
+    // resolver is gated out. Its own golden pins that surface so the
+    // feature-off contract cannot silently regress.
+    let published = serde_json::to_string_pretty(&tool_definitions()).expect("tools serialize");
+    assert_eq!(
+        published,
+        include_str!("tests/golden-tools-list-no-picker.json").trim_end()
+    );
 }
 
 #[test]
-fn no_prompt_name_is_ever_a_tool_name() {
-    // Every catalog shape the resolver can produce: healthy prompts, a broken
-    // one, and a prompt named the way a built-in is described.
-    let catalogs = [
-        catalog(),
-        Catalog::new(vec![Entry::broken(
-            "echo".to_owned(),
-            PathBuf::from("echo.md"),
-            "frontmatter is missing description",
-        )]),
-        Catalog::new(vec![entry("run_the_prompts", "List and run everything")]),
-    ];
-    for catalog in &catalogs {
-        for entry in catalog.entries() {
-            assert!(
-                !names().iter().any(|name| name == entry.name()),
-                "{} reached tools/list",
-                entry.name()
-            );
-        }
+fn every_published_schema_rejects_unknown_properties() {
+    // A strict object schema: an argument the tool never declared is a caller
+    // defect the boundary refuses, not one it silently drops.
+    for tool in tool_definitions() {
+        let schema = serde_json::to_value(&*tool.input_schema).expect("the schema serializes");
+        assert_eq!(
+            schema["additionalProperties"],
+            serde_json::json!(false),
+            "{} must reject unknown properties",
+            tool.name
+        );
     }
+}
+
+#[test]
+fn the_reserved_names_are_exactly_the_built_in_names() {
+    // The one set both listing/dispatch and catalog resolution read. A built-in
+    // added to the definitions but not reserved would let a prompt take its
+    // name and shadow it; a name reserved but not a built-in would refuse a
+    // prompt for no live tool. Pinning the two equal forbids either drift, so a
+    // prompt named exactly as any built-in always collides and is refused.
+    let mut reserved: Vec<&str> = reserved_names().collect();
+    reserved.sort_unstable();
+    let mut built_ins = BUILT_INS.to_vec();
+    built_ins.sort_unstable();
+    assert_eq!(
+        reserved, built_ins,
+        "the reserved set and the built-in name set must be identical"
+    );
+    // Each reserved name is dispatchable exactly when this build publishes it.
+    for name in reserved_names() {
+        assert_eq!(
+            publishes_built_in(name),
+            names().iter().any(|published| published == name),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn the_tool_surface_never_varies_with_the_catalog() {
+    // `tools/list` serves the fixed built-in set and reads no catalog: a prompt
+    // is reached by naming it to run_prompt, never by becoming a tool of its
+    // own. Prove that through the real listing code path -
+    // `PromptForgeServer::list_page`, which `ServerHandler::list_tools`
+    // delegates to - by driving two materially different catalogs and asserting
+    // the published tools are byte-identical either way. One catalog is plain;
+    // the other's own entries take built-in names, including a broken entry
+    // named exactly like a built-in, which is the case that would leak through
+    // if the listing consulted the catalog at all.
+    let (config, tools) = fixture_server_parts();
+    let plain = server_over(catalog(), &config, &tools);
+    let collides = server_over(
+        Catalog::new(vec![
+            entry("list_prompts", "A prompt named exactly like a built-in"),
+            Entry::broken(
+                "run_prompt".to_owned(),
+                PathBuf::from("run_prompt.md"),
+                "frontmatter is missing description",
+            ),
+            entry("staker", "Build a stakeholder position report"),
+        ]),
+        &config,
+        &tools,
+    );
+
+    let expected: Vec<String> = BUILT_INS
+        .into_iter()
+        .filter(|name| *name != "need_prompt" || cfg!(feature = "picker"))
+        .map(str::to_owned)
+        .collect();
+
+    let from_plain = published_by(&plain);
+    let from_collides = published_by(&collides);
+    assert_eq!(
+        from_plain, expected,
+        "the real listing over a plain catalog is exactly the built-ins"
+    );
+    assert_eq!(
+        from_collides, expected,
+        "and is identical over a catalog whose own entries take built-in names"
+    );
+    assert_eq!(
+        from_plain, from_collides,
+        "two materially different catalogs publish the same built-in tools"
+    );
 }
 
 #[test]

@@ -1,6 +1,8 @@
 //! Unit tests for `prompts.toml` parsing.
 
+use super::interpolate::interpolate_with;
 use super::*;
+use crate::error::ConfigErrorKind;
 
 /// A configuration exercising every field the plan names.
 const FULL: &str = r#"
@@ -63,11 +65,23 @@ fn parses_a_full_config() {
         PathBuf::from(r"C:\ProgramData\promptforge\prompts")
     );
 
-    assert_eq!(config.gateway.url, "http://127.0.0.1:8081/v1");
+    assert_eq!(config.gateway.url.as_str(), "http://127.0.0.1:8081/v1");
     assert_eq!(config.gateway.key.expose(), "gateway-bearer");
 
-    assert_eq!(config.catalog.include, ["*.md", "governance/**/*.md"]);
-    assert_eq!(config.catalog.exclude, ["_*.md", "drafts/**"]);
+    let include: Vec<&str> = config
+        .catalog
+        .include
+        .iter()
+        .map(GlobPattern::as_str)
+        .collect();
+    let exclude: Vec<&str> = config
+        .catalog
+        .exclude
+        .iter()
+        .map(GlobPattern::as_str)
+        .collect();
+    assert_eq!(include, ["*.md", "governance/**/*.md"]);
+    assert_eq!(exclude, ["_*.md", "drafts/**"]);
 
     assert_eq!(config.prompts.len(), 2);
 }
@@ -112,7 +126,10 @@ fn a_named_block_can_carry_a_file() {
     let config = Config::from_toml_str(FULL).expect("full config parses");
 
     let staker = &config.prompts["staker"];
-    assert_eq!(staker.file, Some(PathBuf::from("experiments/staker-v3.md")));
+    assert_eq!(
+        staker.file.as_ref().map(RelativePromptPath::as_path),
+        Some(Path::new("experiments/staker-v3.md"))
+    );
     assert!(staker.enabled);
 }
 
@@ -154,10 +171,8 @@ fn an_unset_variable_outside_the_server_token_is_still_an_error() {
     // there fails the load rather than starting with a blank credential.
     let toml = MINIMAL.replace("key = \"gateway-bearer\"", "key = \"${NOT_SET_ANYWHERE}\"");
     let err = Config::from_toml_str(&toml).expect_err("an unset gateway key is refused");
-    assert!(
-        matches!(err, ConfigError::UnresolvedVar(ref name) if name == "NOT_SET_ANYWHERE"),
-        "{err}"
-    );
+    assert_eq!(err.kind(), ConfigErrorKind::UnresolvedVar, "{err}");
+    assert!(err.to_string().contains("NOT_SET_ANYWHERE"), "{err}");
 }
 
 #[test]
@@ -173,7 +188,7 @@ fn an_empty_or_whitespace_server_token_is_an_error() {
              [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"t\"\n"
         );
         let err = Config::from_toml_str(&toml).expect_err("a token carrying nothing is refused");
-        assert!(matches!(err, ConfigError::EmptyToken), "{err}");
+        assert_eq!(err.kind(), ConfigErrorKind::EmptyToken, "{err}");
         let text = err.to_string();
         assert!(text.contains("token"), "{text}");
         assert!(text.contains("must not be empty"), "{text}");
@@ -184,7 +199,7 @@ fn an_empty_or_whitespace_server_token_is_an_error() {
 fn an_unknown_key_is_an_error() {
     let toml = format!("{MINIMAL}\n[catalog]\ninculde = [\"*.md\"]\n");
     let err = Config::from_toml_str(&toml).expect_err("a misspelled key is refused");
-    assert!(matches!(err, ConfigError::Parse(_)), "{err}");
+    assert_eq!(err.kind(), ConfigErrorKind::Parse, "{err}");
     assert!(err.to_string().contains("inculde"), "{err}");
 }
 
@@ -195,7 +210,7 @@ fn a_catalog_default_expose_is_rejected_by_name() {
     // published under its own name, so the load fails and names the key.
     let toml = format!("{MINIMAL}\n[catalog]\ndefault_expose = \"tool\"\n");
     let err = Config::from_toml_str(&toml).expect_err("default_expose is refused");
-    assert!(matches!(err, ConfigError::Parse(_)), "{err}");
+    assert_eq!(err.kind(), ConfigErrorKind::Parse, "{err}");
     assert!(err.to_string().contains("default_expose"), "{err}");
 }
 
@@ -203,7 +218,7 @@ fn a_catalog_default_expose_is_rejected_by_name() {
 fn a_per_prompt_expose_is_rejected_by_name() {
     let toml = format!("{MINIMAL}\n[prompts.staker]\nexpose = \"tool\"\n");
     let err = Config::from_toml_str(&toml).expect_err("a per-prompt expose is refused");
-    assert!(matches!(err, ConfigError::Parse(_)), "{err}");
+    assert_eq!(err.kind(), ConfigErrorKind::Parse, "{err}");
     assert!(err.to_string().contains("expose"), "{err}");
 }
 
@@ -239,17 +254,15 @@ fn interpolation_substitutes_escapes_and_passes_a_lone_dollar_through() {
 fn an_unset_variable_is_an_error() {
     let lookup = |_: &str| None;
     let err = interpolate_with("${NOPE}", &lookup).expect_err("an unset variable is refused");
-    assert!(
-        matches!(err, ConfigError::UnresolvedVar(ref name) if name == "NOPE"),
-        "{err}"
-    );
+    assert_eq!(err.kind(), ConfigErrorKind::UnresolvedVar, "{err}");
+    assert!(err.to_string().contains("NOPE"), "{err}");
 }
 
 #[test]
 fn an_unclosed_interpolation_is_an_error() {
     let lookup = |_: &str| Some(String::new());
     let err = interpolate_with("${OPEN", &lookup).expect_err("an unclosed ${ is refused");
-    assert!(matches!(err, ConfigError::Interpolation(_)), "{err}");
+    assert_eq!(err.kind(), ConfigErrorKind::Interpolation, "{err}");
 }
 
 #[test]
@@ -259,27 +272,201 @@ fn loads_from_a_file() {
     std::fs::write(&path, MINIMAL).expect("write config");
 
     let config = Config::load(&path).expect("config loads");
-    assert_eq!(config.gateway.url, "http://127.0.0.1:8081/v1");
+    assert_eq!(config.gateway.url.as_str(), "http://127.0.0.1:8081/v1");
 }
 
 #[test]
-fn an_unreadable_file_is_an_error() {
+fn an_unreadable_file_names_its_path_and_a_not_found_source() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("absent.toml");
 
     let err = Config::load(&path).expect_err("a missing file is refused");
-    assert!(matches!(err, ConfigError::Read { .. }), "{err}");
+    assert_eq!(err.kind(), ConfigErrorKind::Read, "{err}");
+    // The path survives losslessly rather than through a rendered string.
+    assert_eq!(err.path(), Some(path.as_path()), "{err}");
+    // The io cause survives, so a caller can tell a missing file from a
+    // permission failure without parsing the message.
+    let source = std::error::Error::source(&err).expect("a read error carries an io source");
+    let io = source
+        .downcast_ref::<std::io::Error>()
+        .expect("the source is an io::Error");
+    assert_eq!(io.kind(), std::io::ErrorKind::NotFound, "{io}");
+}
+
+#[test]
+fn from_str_agrees_with_from_toml_str() {
+    let parsed: Config = MINIMAL.parse().expect("FromStr parses the minimal config");
+    let direct = Config::from_toml_str(MINIMAL).expect("from_toml_str parses it too");
+    assert_eq!(parsed.gateway.url.as_str(), direct.gateway.url.as_str());
+    assert_eq!(parsed.gateway.key.expose(), direct.gateway.key.expose());
+}
+
+#[test]
+fn a_blank_gateway_key_is_refused() {
+    let source = r#"
+[server]
+token = "shared-bearer"
+
+[gateway]
+url = "http://127.0.0.1:8081/v1"
+key = "   "
+"#;
+    let err = Config::from_toml_str(source).expect_err("a blank gateway key is refused");
+    assert_eq!(err.kind(), ConfigErrorKind::Parse, "{err}");
+    assert!(err.to_string().contains("[gateway].key"), "{err}");
+}
+
+#[test]
+fn an_empty_gateway_url_is_refused() {
+    let source = r#"
+[server]
+token = "shared-bearer"
+
+[gateway]
+url = ""
+key = "gateway-bearer"
+"#;
+    let err = Config::from_toml_str(source).expect_err("an empty gateway url is refused");
+    assert_eq!(err.kind(), ConfigErrorKind::Parse, "{err}");
+    assert!(err.to_string().contains("[gateway].url"), "{err}");
+}
+
+#[test]
+fn a_schemeless_gateway_url_is_refused() {
+    // The URL is validated at the parse boundary, so a value with no http(s)
+    // scheme is refused there rather than reaching the gateway client as an
+    // endpoint it cannot use.
+    let source = r#"
+[server]
+token = "shared-bearer"
+
+[gateway]
+url = "127.0.0.1:8081/v1"
+key = "gateway-bearer"
+"#;
+    let err = Config::from_toml_str(source).expect_err("a schemeless gateway url is refused");
+    assert_eq!(err.kind(), ConfigErrorKind::Parse, "{err}");
+    assert!(err.to_string().contains("http"), "{err}");
+}
+
+#[test]
+fn a_prompt_block_keyed_on_an_illegal_name_is_refused() {
+    // A `[prompts.NAME]` key is a PromptName, held to the same shape a
+    // published tool name must have, so a key no prompt could declare is
+    // refused at the parse boundary.
+    let toml = format!("{MINIMAL}\n[prompts.Research-Person]\nenabled = false\n");
+    let err = Config::from_toml_str(&toml).expect_err("an illegal block key is refused");
+    assert_eq!(err.kind(), ConfigErrorKind::Parse, "{err}");
+}
+
+#[test]
+fn a_relative_block_file_is_accepted_and_an_escaping_one_is_not() {
+    let ok = format!("{MINIMAL}\n[prompts.staker]\nfile = \"experiments/staker.md\"\n");
+    Config::from_toml_str(&ok).expect("a relative block file parses");
+
+    let escaping = format!("{MINIMAL}\n[prompts.staker]\nfile = \"../staker.md\"\n");
+    let err = Config::from_toml_str(&escaping).expect_err("an escaping block file is refused");
+    assert_eq!(err.kind(), ConfigErrorKind::Parse, "{err}");
+    assert!(err.to_string().contains(".."), "{err}");
+}
+
+#[test]
+fn a_malformed_catalog_pattern_is_refused() {
+    // The pattern is a GlobPattern, validated to compile at the parse boundary,
+    // so a syntactically broken glob is refused there rather than mid-resolve.
+    let toml = format!("{MINIMAL}\n[catalog]\ninclude = [\"a[b\"]\n");
+    let err = Config::from_toml_str(&toml).expect_err("a malformed glob is refused");
+    assert_eq!(err.kind(), ConfigErrorKind::Parse, "{err}");
+}
+
+#[test]
+fn interpolation_reaches_array_and_nested_table_values() {
+    // cargo sets CARGO_PKG_NAME in the test process's environment, so this
+    // exercises the real interpolation path through `Config` for an array value
+    // (`[server].allowed_hosts`) and a nested-table value
+    // (`[prompts.NAME].file`), not just a single scalar.
+    let pkg = std::env::var("CARGO_PKG_NAME").expect("cargo sets CARGO_PKG_NAME");
+    let toml = "\
+[server]
+token = \"shared-bearer\"
+allowed_hosts = [\"${CARGO_PKG_NAME}\", \"static-host\"]
+
+[gateway]
+url = \"http://127.0.0.1:8081/v1\"
+key = \"gateway-bearer\"
+
+[prompts.example]
+file = \"${CARGO_PKG_NAME}.md\"
+";
+    let config = Config::from_toml_str(toml).expect("config parses");
+
+    assert_eq!(
+        config.server.allowed_hosts,
+        vec![pkg.clone(), "static-host".to_string()]
+    );
+    assert_eq!(
+        config.prompts["example"]
+            .file
+            .as_ref()
+            .map(RelativePromptPath::as_path),
+        Some(Path::new(&format!("{pkg}.md")))
+    );
+}
+
+#[test]
+fn malformed_values_are_refused_at_parse() {
+    let cases = [
+        (
+            "zero concurrency",
+            "[server]\ntoken = \"t\"\nmax_concurrent_runs = 0\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"k\"\n",
+        ),
+        (
+            "invalid bind address",
+            "[server]\ntoken = \"t\"\nbind = \"not-an-address\"\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"k\"\n",
+        ),
+        (
+            "invalid duration",
+            "[server]\ntoken = \"t\"\nadmission_timeout = \"not-a-duration\"\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"k\"\n",
+        ),
+        ("a missing gateway section", "[server]\ntoken = \"t\"\n"),
+        (
+            "a missing gateway url",
+            "[server]\ntoken = \"t\"\n\n[gateway]\nkey = \"k\"\n",
+        ),
+    ];
+    for (label, toml) in cases {
+        let err = Config::from_toml_str(toml).expect_err(label);
+        assert_eq!(err.kind(), ConfigErrorKind::Parse, "{label}: {err}");
+    }
 }
 
 #[test]
 fn secret_redacts() {
-    let secret = Secret::from("hunter2".to_string());
+    let secret = Secret::try_from("hunter2".to_string()).expect("a non-blank secret is accepted");
 
     assert_eq!(format!("{secret}"), "redacted");
     assert_eq!(format!("{secret:?}"), "Secret(redacted)");
     assert_eq!(secret.expose(), "hunter2");
     assert!(!secret.is_empty());
     assert!(!secret.is_blank());
-    assert!(Secret::from(String::new()).is_empty());
-    assert!(Secret::from("  \t".to_string()).is_blank());
+}
+
+#[test]
+fn a_blank_secret_is_refused_at_the_type_boundary() {
+    // The blank rejection lives in `Secret` itself, so no `Config` field can
+    // ever hold a token or key that carries nothing usable. Empty, spaces, and
+    // tabs-and-newlines are the same mistake with different whitespace.
+    for blank in ["", "   ", "\t\n"] {
+        Secret::try_from(blank).expect_err("a blank secret is refused");
+        Secret::try_from(blank.to_string()).expect_err("a blank owned secret is refused");
+    }
+    assert_eq!(
+        Secret::try_from("k")
+            .expect("a non-blank secret is accepted")
+            .expose(),
+        "k"
+    );
 }

@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use promptforge_mcp_server::{
-    Catalog, CatalogHandle, Config, OnBroken, PreparedTools, PromptForgeServer, Retrieval, Watcher,
+    Catalog, CatalogHandle, Config, OnBroken, PreparedTools, PromptForgeServer, Watcher,
 };
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, CallToolResponse};
@@ -71,29 +71,21 @@ async fn a_saved_prompt_is_callable_on_the_session_that_was_already_open() {
 
     let config = Arc::new(Config::load(&source).expect("the configuration loads"));
     let catalog = Catalog::resolve(&config, OnBroken::Reject).expect("boot resolves");
-    let catalog = Arc::new(CatalogHandle::new(catalog));
     // Idle, so this test costs no model load: what it is about is that a real
-    // platform event reaches a real client, and the rebuild that rides the same
-    // swap is asserted in the reload's own tests.
-    let retrieval = Arc::new(Retrieval::idle());
+    // platform event reaches a real client, and the reindex that rides the same
+    // generation swap is asserted in the reload's own tests.
+    let catalog = Arc::new(CatalogHandle::new(catalog));
 
-    let _watcher = Watcher::start(
-        &source,
-        Arc::clone(&config),
-        Arc::clone(&catalog),
-        Arc::clone(&retrieval),
-    )
-    .expect("the watcher starts")
-    .expect("watch defaults to on");
+    let _watcher = Watcher::start(&source, Arc::clone(&config), Arc::clone(&catalog))
+        .expect("the watcher starts")
+        .expect("watch defaults to on");
 
     let tools = Arc::new(
-        PreparedTools::new(
-            &config.gateway,
-            promptforge_core::model::ModelCatalog::empty(),
-        )
-        .expect("prepare fixture live tools"),
+        PreparedTools::load(&config)
+            .await
+            .expect("prepare fixture live tools"),
     );
-    let server = PromptForgeServer::new(config, Arc::clone(&catalog), retrieval, tools);
+    let server = PromptForgeServer::new(config, Arc::clone(&catalog), tools);
     let (server_io, client_io) = tokio::io::duplex(4096);
     tokio::spawn(async move {
         let Ok(running) = server.serve(server_io).await else {
@@ -119,11 +111,37 @@ async fn a_saved_prompt_is_callable_on_the_session_that_was_already_open() {
     // already open.
     write_prompt(root, "gamma", "Do the gamma thing", "gamma v1");
 
-    wait_until(
-        || catalog.load().find("gamma").is_some(),
-        "the saved prompt joins the catalog",
-    )
-    .await;
+    // Polling the call itself is the readiness gate, asserted from the client's
+    // side alone: a run that returns the new prompt's value proves the save
+    // reached the live catalog the runner reads, with no reconnect in between.
+    let deadline = Instant::now() + PATIENCE;
+    let result = loop {
+        let response = client
+            .call_tool_once(
+                CallToolRequestParams::new("run_prompt").with_arguments(
+                    serde_json::json!({ "prompt": "gamma" })
+                        .as_object()
+                        .expect("the arguments are an object")
+                        .clone(),
+                ),
+            )
+            .await
+            .expect("the session answers the call");
+        if let CallToolResponse::Complete(result) = response
+            && result.is_error == Some(false)
+        {
+            break result;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "waited {PATIENCE:?} for the saved prompt to become callable"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(
+        result.content[0].as_text().expect("a text block").text,
+        "gamma v1"
+    );
 
     let listed = client
         .list_tools(None)
@@ -138,36 +156,4 @@ async fn a_saved_prompt_is_callable_on_the_session_that_was_already_open() {
         !names.contains(&"gamma"),
         "a prompt saved mid-session is still not a tool of its own: {names:?}"
     );
-
-    let response = client
-        .call_tool_once(
-            CallToolRequestParams::new("run_prompt").with_arguments(
-                serde_json::json!({ "prompt": "gamma" })
-                    .as_object()
-                    .expect("the arguments are an object")
-                    .clone(),
-            ),
-        )
-        .await
-        .expect("the call reaches the prompt written after the client connected");
-    let CallToolResponse::Complete(result) = response else {
-        panic!("this server answers a call with its result")
-    };
-    assert_eq!(result.is_error, Some(false));
-    assert_eq!(
-        result.content[0].as_text().expect("a text block").text,
-        "gamma v1"
-    );
-}
-
-/// Polls `ready` until it holds, or panics naming what never happened.
-async fn wait_until<F: Fn() -> bool>(ready: F, what: &str) {
-    let deadline = Instant::now() + PATIENCE;
-    while Instant::now() < deadline {
-        if ready() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("waited {PATIENCE:?} for {what}");
 }

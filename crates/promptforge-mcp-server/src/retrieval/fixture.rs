@@ -27,9 +27,7 @@ pub(crate) fn model() -> Model {
 
 /// Retrieval over `catalog`, over the shared model.
 pub(crate) fn retrieval(catalog: &Catalog) -> Retrieval {
-    let retrieval = Retrieval::idle();
-    retrieval.install_with(&model(), catalog);
-    retrieval
+    Retrieval::indexed_with(&model(), catalog)
 }
 
 /// A prompt whose Lua returns at once, so it needs no gateway.
@@ -63,12 +61,12 @@ pub(crate) fn catalog(prompts: &[(&str, &str)]) -> Prompts {
         )
         .expect("write the fixture prompt");
     }
+    let prompts = toml::Value::String(dir.path().display().to_string()).to_string();
     let config = Config::from_toml_str(&format!(
         "[server]\ntoken = \"t\"\n\n\
          [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
-         [paths]\nprompts = '{}'\n\n\
+         [paths]\nprompts = {prompts}\n\n\
          [catalog]\ninclude = [\"*.md\"]\n",
-        dir.path().display()
     ))
     .expect("the fixture configuration parses");
     let catalog =

@@ -29,7 +29,6 @@ mod reload;
 mod tests;
 
 use std::borrow::Cow;
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -42,9 +41,10 @@ use tokio::task::JoinHandle;
 use crate::catalog::CatalogHandle;
 use crate::config::Config;
 use crate::error::WatchError;
-use crate::retrieval::Retrieval;
+#[cfg(doc)]
+use crate::error::WatchErrorKind;
 
-pub use crate::watch::reload::{Reload, Reloader};
+pub(crate) use crate::watch::reload::Reloader;
 
 /// How many "something changed" tokens the queue holds.
 ///
@@ -55,16 +55,27 @@ const PENDING_EVENTS: usize = 16;
 
 /// A live watch over `prompts.toml` and the prompts directory.
 ///
-/// Dropping it stops both: the platform watcher goes with it and the debounce
-/// task is aborted, so a dropped watcher cannot reload a catalog somebody else
-/// now owns. The task reaches the platform watcher through a [`Weak`] for that
-/// reason - it has to re-register a broken watch, and it must not be what keeps
-/// one alive.
+/// [`shutdown`](Watcher::shutdown) is the ordered stop: it signals a reload
+/// settling right now to publish nothing, closes the event stream, and awaits
+/// the debounce task, so no reload lands after the server has decided to stop.
+/// Dropping the watcher is the unordered fallback: the platform watcher goes
+/// with it and the debounce task is aborted wherever it happens to be, so a
+/// dropped watcher cannot reload a catalog somebody else now owns. The task
+/// reaches the platform watcher through a [`Weak`] for that reason - it has to
+/// re-register a broken watch, and it must not be what keeps one alive.
+#[must_use = "dropping the watcher stops live reload; hold it for as long as the server serves"]
 pub struct Watcher {
-    /// Held and never read. Its `Drop` is what unregisters the watches.
-    _watcher: Arc<Mutex<RecommendedWatcher>>,
-    /// The debounce task, aborted on drop.
-    task: JoinHandle<()>,
+    /// The platform watcher, held so its `Drop` unregisters the watches.
+    /// `Option` so [`shutdown`](Watcher::shutdown) can drop it early - closing
+    /// the event channel - while `Drop` still covers a watcher stopped without
+    /// a shutdown.
+    platform: Option<Arc<Mutex<RecommendedWatcher>>>,
+    /// The debounce task. `Option` so `shutdown` can take and await it, leaving
+    /// `Drop` nothing to abort.
+    task: Option<JoinHandle<()>>,
+    /// Shared with the reloader. Set to stop a reload settling during shutdown
+    /// from publishing a late generation.
+    shutdown: Arc<AtomicBool>,
 }
 
 impl Watcher {
@@ -75,20 +86,45 @@ impl Watcher {
     /// task of its own.
     ///
     /// # Errors
-    /// Returns [`WatchError::Create`] if the platform watcher cannot be built
-    /// and [`WatchError::Watch`] if either path cannot be watched. A watch that
-    /// cannot be established is a configuration problem an operator has to see,
-    /// so it is an error here rather than a warning; `watch = false` is the way
-    /// to serve without one.
+    /// Returns [`WatchErrorKind::Create`] if the platform watcher cannot be
+    /// built, [`WatchErrorKind::Watch`] if either path cannot be watched, and
+    /// [`WatchErrorKind::Runtime`] if it is called with no Tokio runtime to run
+    /// the debounce task on. A watch that cannot be established is a
+    /// configuration problem an operator has to see, so it is an error here
+    /// rather than a warning; `watch = false` is the way to serve without one.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # use std::path::Path;
+    /// # use std::sync::Arc;
+    /// # use promptforge_mcp_server::{Catalog, CatalogHandle, Config, OnBroken, Watcher};
+    /// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
+    /// let source = Path::new("prompts.toml");
+    /// let config = Config::load(source)?;
+    /// let catalog = Arc::new(CatalogHandle::new(Catalog::resolve(&config, OnBroken::Reject)?));
+    /// // Called from inside a Tokio runtime: the debounce window runs on a task.
+    /// if let Some(watcher) = Watcher::start(source, Arc::new(config), catalog)? {
+    ///     // ... serve ...
+    ///     watcher.shutdown().await;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn start(
         source: &Path,
         config: Arc<Config>,
         catalog: Arc<CatalogHandle>,
-        retrieval: Arc<Retrieval>,
     ) -> Result<Option<Watcher>, WatchError> {
         if !config.server.watch {
             tracing::info!("[server].watch is false: prompts are read once, at boot");
             return Ok(None);
+        }
+        // The debounce window and the blocking re-resolution both run on tasks,
+        // so a runtime has to be present. Detecting its absence here turns a
+        // caller's mistake into a returned error rather than a panic from the
+        // first `tokio::spawn` below.
+        if tokio::runtime::Handle::try_current().is_err() {
+            return Err(WatchError::runtime());
         }
         let window = config.server.watch_debounce;
         // The configuration's own directory, not the file: an editor that saves
@@ -124,7 +160,7 @@ impl Watcher {
                     }
                 }
             })
-            .map_err(|error| WatchError::Create(error.to_string()))?;
+            .map_err(WatchError::create)?;
         roots.register(&mut watcher)?;
         let watcher = Arc::new(Mutex::new(watcher));
 
@@ -135,40 +171,98 @@ impl Watcher {
             humantime::format_duration(window)
         );
 
-        let reloader = Arc::new(Reloader::new(source, config, catalog, retrieval));
+        let reloader = Arc::new(Reloader::new(source, config, catalog));
+        // Shared with the reloader: setting it stops both a pending publish and
+        // the settled-window work below.
+        let shutdown = reloader.cancel_handle();
         let repair = Arc::downgrade(&watcher);
+        let cancel = Arc::clone(&shutdown);
         let task = tokio::spawn(async move {
             debounce(pending, window, move || {
                 let reloader = Arc::clone(&reloader);
                 let broken = Arc::clone(&broken);
                 let repair = repair.clone();
                 let roots = roots.clone();
+                let cancel = Arc::clone(&cancel);
                 async move {
+                    // A shutdown signalled while this window settled: do no work
+                    // and publish nothing, so a late generation cannot land on a
+                    // catalog the process is stopping.
+                    if cancel.load(Ordering::SeqCst) {
+                        return;
+                    }
                     // Before the reload, so a re-registered watch sees whatever
                     // the resolution below is about to read.
                     if broken.swap(false, Ordering::Relaxed) {
                         re_register(&repair, &roots);
                     }
                     // Re-resolution reads and parses every prompt file. That is
-                    // blocking work and has no business on a runtime worker.
-                    let resolved = tokio::task::spawn_blocking(move || reloader.reload()).await;
-                    if let Err(error) = resolved {
-                        tracing::error!("the reload did not finish: {error}");
+                    // blocking work and has no business on a runtime worker. The
+                    // watcher owns the logging, since the reload returns its
+                    // outcome rather than logging it.
+                    match tokio::task::spawn_blocking(move || reloader.reload()).await {
+                        Ok(Ok(reload)) => {
+                            if reload.retrieval_stale {
+                                tracing::warn!(
+                                    "reload kept the previous, now stale, retrieval index; \
+                                     run_prompt is unaffected"
+                                );
+                            }
+                        }
+                        Ok(Err(error)) => {
+                            if let Some(cause) = std::error::Error::source(&error) {
+                                tracing::warn!("{error}: {cause}");
+                            } else {
+                                tracing::warn!("{error}");
+                            }
+                        }
+                        Err(join) => tracing::error!("the reload did not finish: {join}"),
                     }
                 }
             })
             .await;
         });
         Ok(Some(Watcher {
-            _watcher: watcher,
-            task,
+            platform: Some(watcher),
+            task: Some(task),
+            shutdown,
         }))
+    }
+
+    /// Signals the watch to stop and awaits its clean quiescence.
+    ///
+    /// Prefer this to dropping the watcher when the shutdown order matters.
+    /// Dropping aborts the debounce task wherever it happens to be; this sets
+    /// the shutdown flag so a reload settling right now publishes nothing,
+    /// closes the event stream so the debounce loop returns, and then awaits the
+    /// task - so no reload lands after the server has decided to stop.
+    pub async fn shutdown(mut self) {
+        // Set first, so a reload already on its blocking task publishes nothing
+        // when it returns.
+        self.shutdown.store(true, Ordering::SeqCst);
+        // Dropping the platform watcher drops the event channel's only sender,
+        // so the debounce loop settles whatever it holds and returns rather than
+        // waiting on a stream nothing will feed again.
+        self.platform = None;
+        if let Some(task) = self.task.take() {
+            match task.await {
+                Ok(()) => {}
+                // A cancellation is the drop path racing shutdown, not a fault.
+                Err(error) if error.is_cancelled() => {}
+                Err(error) => tracing::error!("the watch task did not stop cleanly: {error}"),
+            }
+        }
     }
 }
 
 impl Drop for Watcher {
     fn drop(&mut self) {
-        self.task.abort();
+        // The unordered fallback: a shutdown that ran already took the task, so
+        // this aborts only a watcher dropped without one.
+        self.shutdown.store(true, Ordering::SeqCst);
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
     }
 }
 
@@ -177,7 +271,10 @@ impl std::fmt::Debug for Watcher {
         // The platform watcher itself has nothing readable to report, so what is
         // printed is the one thing a reader wants: whether this is still live.
         f.debug_struct("Watcher")
-            .field("watching", &!self.task.is_finished())
+            .field(
+                "watching",
+                &self.task.as_ref().is_some_and(|task| !task.is_finished()),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -199,7 +296,8 @@ impl Roots {
     /// Registers both watches, naming the path in the failure.
     ///
     /// # Errors
-    /// Returns [`WatchError::Watch`] for the first path that cannot be watched.
+    /// Returns [`WatchErrorKind::Watch`] for the first path that cannot be
+    /// watched.
     fn register(&self, watcher: &mut RecommendedWatcher) -> Result<(), WatchError> {
         watch(watcher, &self.prompts, RecursiveMode::Recursive)?;
         watch(watcher, &self.config_dir, RecursiveMode::NonRecursive)
@@ -246,10 +344,7 @@ fn watch(
 ) -> Result<(), WatchError> {
     watcher
         .watch(path, mode)
-        .map_err(|error| WatchError::Watch {
-            path: path.display().to_string(),
-            detail: error.to_string(),
-        })
+        .map_err(|error| WatchError::watch(path.to_path_buf(), error))
 }
 
 /// The directory holding the configuration file, which is what gets watched.
@@ -311,47 +406,53 @@ fn plain(path: &Path) -> Cow<'_, Path> {
     }
 }
 
+/// Every spelling one path might arrive as: the path itself, its absolute form,
+/// and its canonicalized form, each stripped of the Windows verbatim prefix and
+/// deduplicated.
+///
+/// `notify` does not promise which form it delivers, so all three are held. The
+/// absolute form is the one that carries a relative `[paths].prompts` - the
+/// shipped default - since a relative path is never a prefix of the absolute
+/// path a platform watcher delivers. The canonical form is for a root the
+/// backend resolved itself: fsevent canonicalizes its watch root, which is what
+/// a symlinked temporary directory arrives as. Resolving them once, here, keeps
+/// the syscall off the per-event path, and the watched paths do not move under a
+/// running server - `[paths].prompts` is one of the settings a reload refuses to
+/// apply. `std::path::absolute` touches no filesystem, resolves no symlink, and
+/// answers for a path that does not exist yet.
+fn forms(path: &Path) -> Vec<PathBuf> {
+    let mut forms = vec![plain(path).into_owned()];
+    let resolved = [
+        std::path::absolute(path).ok(),
+        std::fs::canonicalize(path).ok(),
+    ];
+    for form in resolved.into_iter().flatten() {
+        let form = plain(&form).into_owned();
+        if !forms.contains(&form) {
+            forms.push(form);
+        }
+    }
+    forms
+}
+
 /// Which filesystem events start a debounce window.
 struct Interesting {
     /// The prompts directory in every form an event might name it by. Anything
     /// under any of them counts.
-    ///
-    /// `notify` does not promise which form it delivers, so all three are held:
-    /// the configured spelling, that spelling made absolute, and the
-    /// canonicalized one. The absolute form is the one that carries a relative
-    /// `[paths].prompts` - the shipped default - since a relative path is never
-    /// a prefix of the absolute path a platform watcher delivers. The canonical
-    /// form is for a root the backend resolved itself: fsevent canonicalizes its
-    /// watch root, which is what a symlinked temporary directory arrives as.
     roots: Vec<PathBuf>,
-    /// The configuration file's name, which is the only file in its own
-    /// directory that counts.
-    config_name: Option<OsString>,
+    /// The configuration file in every form an event might name it by. Only an
+    /// event for exactly this file counts - matched by its whole path, not by
+    /// its name, so a `prompts.toml` in some other directory the config
+    /// directory happens to sit beside cannot trigger a reload.
+    config: Vec<PathBuf>,
 }
 
 impl Interesting {
     /// The filter for one watcher's two roots.
-    ///
-    /// The forms are resolved once, here, because canonicalizing is a syscall
-    /// per call otherwise and the watch root does not move under a running
-    /// server - `[paths].prompts` is one of the settings a reload refuses to
-    /// apply. `std::path::absolute` touches no filesystem, resolves no symlink,
-    /// and answers for a directory that does not exist yet.
     fn new(prompts: &Path, source: &Path) -> Interesting {
-        let mut roots = vec![plain(prompts).into_owned()];
-        let resolved = [
-            std::path::absolute(prompts).ok(),
-            std::fs::canonicalize(prompts).ok(),
-        ];
-        for form in resolved.into_iter().flatten() {
-            let form = plain(&form).into_owned();
-            if !roots.contains(&form) {
-                roots.push(form);
-            }
-        }
         Interesting {
-            roots,
-            config_name: source.file_name().map(std::ffi::OsStr::to_owned),
+            roots: forms(prompts),
+            config: forms(source),
         }
     }
 
@@ -366,10 +467,14 @@ impl Interesting {
         event.paths.iter().any(|path| self.watched(path))
     }
 
-    /// Whether one path is one of the two roots' contents.
+    /// Whether one path is under the prompts directory or is the configuration
+    /// file itself.
     fn watched(&self, path: &Path) -> bool {
         let path = plain(path);
         self.roots.iter().any(|root| path.starts_with(root))
-            || (self.config_name.is_some() && path.file_name() == self.config_name.as_deref())
+            || self
+                .config
+                .iter()
+                .any(|file| path.as_ref() == file.as_path())
     }
 }
