@@ -364,6 +364,55 @@ lane = "generative"
 }
 
 #[test]
+fn non_array_inherited_collection_is_a_located_error() {
+    // PROFILE-001: a keyed collection (`endpoint`) provided as a table, not an
+    // array of tables, is rejected with a path:line diagnostic.
+    let tmp = TempDir::new().unwrap();
+    write(
+        tmp.path(),
+        "broken.toml",
+        r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[endpoint]
+id = "not-an-array"
+"#,
+    );
+    let err = load_path(&tmp.path().join("broken.toml")).unwrap_err();
+    let msg = err.to_string();
+    assert!(matches!(err, ConfigError::Validation(_)));
+    assert!(msg.contains("broken.toml:"), "expected path:line in {msg}");
+    assert!(msg.contains("endpoint"), "expected key in {msg}");
+}
+
+#[test]
+fn orphan_device_lane_without_device_field_is_rejected() {
+    // PROFILE-002: a leaf-only [[device.lane]] must name its parent device.
+    let tmp = TempDir::new().unwrap();
+    write(
+        tmp.path(),
+        "common.toml",
+        "[server]\nbind = \"127.0.0.1:8081\"\nkey = \"t\"\n\n[[device]]\nid = \"gpu\"\ntype = \"local\"\n",
+    );
+    write(
+        tmp.path(),
+        "leaf.toml",
+        r#"
+include = ["common.toml"]
+
+[[device.lane]]
+id = "generative"
+concurrency = 1
+"#,
+    );
+    let err = load_path(&tmp.path().join("leaf.toml")).unwrap_err();
+    assert!(matches!(err, ConfigError::Validation(_)));
+    assert!(err.to_string().contains("device"));
+}
+
+#[test]
 fn merge_type_error_includes_path_and_line() {
     let tmp = TempDir::new().unwrap();
     write(

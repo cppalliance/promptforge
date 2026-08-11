@@ -271,9 +271,14 @@ fn merge_type_error(
     got: &Value,
     header_hint: &str,
 ) -> ConfigError {
-    let line = line_of_header(path, header_hint)
-        .or_else(|| line_of_header(path, &format!("[[{key}]]")))
-        .or_else(|| line_containing(path, key));
+    // Single read of the source, then locate in memory (PROFILE-007): avoids
+    // re-reading the file up to three times for one diagnostic.
+    let source = fs::read_to_string(path).ok();
+    let line = source.as_deref().and_then(|text| {
+        line_of_header_in(text, header_hint)
+            .or_else(|| line_of_header_in(text, &format!("[[{key}]]")))
+            .or_else(|| line_containing_in(text, key))
+    });
     ConfigError::Validation(format!(
         "{}: expected {expected} while merging {key}, got {}",
         loc(path, line),
@@ -290,15 +295,18 @@ fn loc(path: &Path, line: Option<usize>) -> String {
 
 fn line_of_header(path: &Path, header: &str) -> Option<usize> {
     let raw = fs::read_to_string(path).ok()?;
-    raw.lines()
+    line_of_header_in(&raw, header)
+}
+
+fn line_of_header_in(text: &str, header: &str) -> Option<usize> {
+    text.lines()
         .enumerate()
         .find(|(_, line)| line.trim_start().starts_with(header))
         .map(|(i, _)| i + 1)
 }
 
-fn line_containing(path: &Path, needle: &str) -> Option<usize> {
-    let raw = fs::read_to_string(path).ok()?;
-    raw.lines()
+fn line_containing_in(text: &str, needle: &str) -> Option<usize> {
+    text.lines()
         .enumerate()
         .find(|(_, line)| line.contains(needle))
         .map(|(i, _)| i + 1)

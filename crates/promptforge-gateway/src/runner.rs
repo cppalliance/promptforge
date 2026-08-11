@@ -185,12 +185,60 @@ pub fn run(options: ServeOptions) -> Result<(), StartupError> {
         let listener = TcpListener::bind(bind).await.map_err(StartupError::bind)?;
         tracing::info!("promptforge-gateway serving on {bind}");
         gateway
-            .serve(listener, async {
-                let _ = tokio::signal::ctrl_c().await;
-            })
+            .serve(listener, shutdown_signal())
             .await
             .map_err(StartupError::serve)
     })
+}
+
+/// What awaiting the Ctrl-C signal produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShutdownTrigger {
+    /// A genuine interrupt was received; shut down gracefully.
+    Interrupted,
+    /// The signal handler could not be installed; do not spuriously shut down.
+    HandlerFailed,
+}
+
+/// Classifies the result of awaiting Ctrl-C, distinguishing a real interrupt
+/// from a failure to install the signal handler (MAIN-003).
+fn classify_shutdown(result: std::io::Result<()>) -> ShutdownTrigger {
+    match result {
+        Ok(()) => ShutdownTrigger::Interrupted,
+        Err(_) => ShutdownTrigger::HandlerFailed,
+    }
+}
+
+/// Resolves only on a genuine Ctrl-C interrupt.
+///
+/// If the signal handler cannot be installed, the error is logged and this
+/// future never resolves, so a handler-install failure does not masquerade as
+/// an interrupt and stop the server. The process can still be terminated by the
+/// OS.
+async fn shutdown_signal() {
+    match classify_shutdown(tokio::signal::ctrl_c().await) {
+        ShutdownTrigger::Interrupted => {
+            tracing::info!("received Ctrl-C; shutting down gracefully");
+        }
+        ShutdownTrigger::HandlerFailed => {
+            tracing::error!("failed to install Ctrl-C handler; continuing to serve");
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ShutdownTrigger, classify_shutdown};
+
+    #[test]
+    fn classify_shutdown_distinguishes_interrupt_from_handler_failure() {
+        assert_eq!(classify_shutdown(Ok(())), ShutdownTrigger::Interrupted);
+        assert_eq!(
+            classify_shutdown(Err(std::io::Error::other("no handler"))),
+            ShutdownTrigger::HandlerFailed
+        );
+    }
 }
 
 fn load_startup(options: &ServeOptions) -> Result<(Config, Option<ProfileName>), StartupError> {

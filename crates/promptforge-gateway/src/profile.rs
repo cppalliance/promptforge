@@ -17,6 +17,17 @@ use crate::local::artifacts::default_promptforge_root;
 /// Maximum `include` nesting depth (guards against runaway trees).
 pub(crate) const MAX_INCLUDE_DEPTH: usize = 16;
 
+// Include boundary policy (PROFILE-009).
+//
+// Profile files are operator-authored, trusted inputs. `include` paths resolve
+// relative to the including file (absolute paths are permitted) and may reach a
+// shared parent (for example `../common.toml`); this is deliberate so operators
+// can factor shared configuration. The two guarded, attacker-relevant surfaces
+// are enforced elsewhere: runtime profile *selection* is confined to a single
+// path component by [`ProfileName`], and include recursion is bounded by
+// [`MAX_INCLUDE_DEPTH`] and cycle detection. There is intentionally no
+// additional filesystem confinement on include targets themselves.
+
 mod merge;
 mod name;
 
