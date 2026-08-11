@@ -169,10 +169,14 @@ impl LocalUpstream {
             });
         }
 
-        let mut parsed: ChatResponse = response
-            .json()
+        // Byte-bounded read then decode. A decode failure is a protocol error,
+        // not a transport death, so `send` will not respawn the child on it
+        // (UPSTREAM-003): recovery below fires only on `UpstreamTransport`.
+        let bytes = crate::http_util::read_bytes_capped(response, crate::http_util::MAX_JSON_BODY)
             .await
             .map_err(GatewayError::upstream_transport)?;
+        let mut parsed: ChatResponse =
+            serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
         parsed.model = requested;
         Ok(parsed)
     }

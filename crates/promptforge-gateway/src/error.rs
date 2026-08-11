@@ -32,6 +32,17 @@ pub(crate) enum GatewayError {
     #[error("upstream transport error")]
     UpstreamTransport(#[source] Box<dyn std::error::Error + Send + Sync>),
 
+    /// The upstream returned a success status but a body that could not be
+    /// decoded into the expected shape.
+    ///
+    /// Distinct from [`GatewayError::UpstreamTransport`] so a decode failure
+    /// (a protocol problem) never masquerades as a transport death and triggers
+    /// a spurious local `llama-server` respawn (UP-004, UPSTREAM-003). The cause
+    /// is preserved via `source()`.
+    #[non_exhaustive]
+    #[error("upstream protocol error")]
+    UpstreamProtocol(#[source] Box<dyn std::error::Error + Send + Sync>),
+
     /// The upstream backend returned a non-success status.
     #[non_exhaustive]
     #[error("upstream returned {status}")]
@@ -87,6 +98,15 @@ impl GatewayError {
         GatewayError::UpstreamTransport(Box::new(source))
     }
 
+    /// Wrap a body-decode failure as a protocol error (not a transport error),
+    /// preserving the cause via `source()`.
+    #[must_use]
+    pub(crate) fn upstream_protocol(
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> GatewayError {
+        GatewayError::UpstreamProtocol(Box::new(source))
+    }
+
     /// Wrap a profile-switch failure at `stage`, preserving the cause.
     #[must_use]
     pub(crate) fn switch_failed(
@@ -125,6 +145,9 @@ impl GatewayError {
                 "server_error",
                 "upstream_transport",
             ),
+            GatewayError::UpstreamProtocol(_) => {
+                (StatusCode::BAD_GATEWAY, "server_error", "upstream_protocol")
+            }
             GatewayError::UpstreamStatus { status, .. } => {
                 let code = StatusCode::from_u16(*status).unwrap_or(StatusCode::BAD_GATEWAY);
                 if code.is_client_error() {
@@ -292,6 +315,19 @@ mod tests {
         for (error, expected) in cases {
             assert_eq!(error.classify(), expected);
         }
+    }
+
+    #[test]
+    fn upstream_protocol_is_502_and_not_a_transport_error() {
+        let error = GatewayError::upstream_protocol(std::io::Error::other("bad json"));
+        assert_eq!(
+            error.classify(),
+            (StatusCode::BAD_GATEWAY, "server_error", "upstream_protocol")
+        );
+        // Must not be a transport error, so a decode failure never triggers a
+        // local child respawn (UP-004, UPSTREAM-003).
+        assert!(!matches!(error, GatewayError::UpstreamTransport(_)));
+        assert!(error.source().is_some());
     }
 
     #[test]

@@ -81,10 +81,15 @@ impl Upstream for OpenAiUpstream {
             });
         }
 
-        let mut parsed: ChatResponse = response
-            .json()
+        // Read a byte-bounded body, then decode. A chunk read failure is a
+        // transport error; a decode failure is a protocol error (never a
+        // transport death) so it cannot trigger a spurious recovery upstream
+        // (UP-003, UP-004).
+        let bytes = crate::http_util::read_bytes_capped(response, crate::http_util::MAX_JSON_BODY)
             .await
             .map_err(GatewayError::upstream_transport)?;
+        let mut parsed: ChatResponse =
+            serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
         // Return the caller's model name, never the backend's.
         parsed.model = requested;
         Ok(parsed)
