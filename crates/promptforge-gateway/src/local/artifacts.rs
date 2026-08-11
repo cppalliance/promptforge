@@ -3,42 +3,52 @@
 //! Downloads land under the operator cache (`~/.promptforge` by default). The
 //! `llama-server` build is the same b10082 pin used by `promptforge-core-tests`,
 //! preferring GPU-enabled archives (Vulkan on Windows/Linux, Metal on macOS).
+//!
+//! The module is split into cohesive units: [`assets`] (release table),
+//! [`digest`] (hashing + pin validation), [`archive`] (extraction),
+//! [`confine`] (cache-root path safety), [`progress`] (download reporting), and
+//! [`download`] (HTTP transfer + scoped HF auth). This file owns
+//! [`ArtifactStore`], the orchestration that ties them together.
 
-use std::ffi::OsStr;
+mod archive;
+mod assets;
+mod confine;
+mod digest;
+mod download;
+mod progress;
+
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, IsTerminal, Read, Write};
-use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::io;
+use std::path::{Path, PathBuf};
 
-use flate2::read::GzDecoder;
-use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 
 use crate::local::error::LocalError;
 
-const LLAMA_RELEASE: &str = "b10082";
+use archive::{extract_archive, find_executable, require_executable};
+use assets::{ArchiveKind, FileAsset, LLAMA_RELEASE, ServerAsset, server_asset};
+use confine::{
+    enforce_private_cache_root, ensure_cache_directory, part_path, remove_cache_entry,
+    rename_confined, safe_relative_path, validate_cache_path, validate_tree_path, write_synced,
+};
+use digest::{file_digest, hex_digest, parse_expected_digest, tree_digest};
+
+// Re-export consumed elsewhere in the crate (`local/mod.rs`). Test-only helpers
+// are imported directly from their submodules by `tests.rs`.
+pub(crate) use download::hub_bearer_token_from_env;
+
 const INSTALL_MARKER: &str = ".promptforge-install";
-/// Non-TTY log cadence: every 64 MiB or 5% of Content-Length, whichever fires first.
-const LOG_PROGRESS_BYTES: u64 = 64 * 1024 * 1024;
-
-/// Pinned Qwen3.5-9B Q4_K_M GGUF URL (same pin as core-tests Dev).
-pub const DEV_MODEL_URL: &str =
-    "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf";
-/// SHA-256 of [`DEV_MODEL_URL`].
-pub const DEV_MODEL_SHA256: &str =
-    "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8";
-/// Basename of the Dev-model GGUF.
-pub const DEV_MODEL_NAME: &str = "Qwen3.5-9B-Q4_K_M.gguf";
-
-/// Pinned tiny Qwen3-0.6B GGUF URL (same pin as core-tests Scenario).
-pub const SCENARIO_MODEL_URL: &str =
-    "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf?download=true";
-/// SHA-256 of [`SCENARIO_MODEL_URL`].
-pub const SCENARIO_MODEL_SHA256: &str =
-    "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031";
-/// Basename of the Scenario-model GGUF.
-pub const SCENARIO_MODEL_NAME: &str = "Qwen3-0.6B-Q8_0.gguf";
+/// Connect timeout for artifact downloads (bounds a stalled connect).
+const DOWNLOAD_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Whole-request timeout for an artifact download (ART-003).
+///
+/// The pinned blocking reqwest client exposes no per-read (idle) timeout, so a
+/// stalled body is bounded by a generous whole-request ceiling instead: large
+/// enough for multi-gigabyte GGUF weights on a slow link, but finite so a peer
+/// that accepts the connection and then sends nothing can never pin the
+/// provisioning thread forever.
+const DOWNLOAD_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2 * 60 * 60);
 
 type Result<T> = std::result::Result<T, LocalError>;
 
@@ -57,8 +67,13 @@ impl ArtifactStore {
     pub(crate) fn new(cache: impl Into<PathBuf>) -> Result<Self> {
         let cache = cache.into();
         ensure_cache_directory(&cache, &cache)?;
+        // Enforce the private-cache precondition the confinement design relies on
+        // (owner-only root) before trusting the tree (ART-006).
+        enforce_private_cache_root(&cache)?;
         let client = Client::builder()
             .user_agent(concat!("promptforge-gateway/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
+            .timeout(DOWNLOAD_REQUEST_TIMEOUT)
             .build()
             .map_err(LocalError::HttpClient)?;
         Ok(Self { cache, client })
@@ -83,7 +98,10 @@ impl ArtifactStore {
     pub(crate) fn ensure_model(&self, source: &str, sha256: Option<&str>) -> Result<PathBuf> {
         if looks_like_url(source) {
             let name = filename_from_url(source)?;
-            let destination = self.cache_path(Path::new("models").join(&name))?;
+            // Key the cache slot by normalized source identity (ART-004) so two
+            // distinct URLs that share a filename cannot collide on one path.
+            let key = source_cache_key(source);
+            let destination = self.cache_path(Path::new("models").join(&key).join(&name))?;
             let asset = FileAsset {
                 name: &name,
                 url: source,
@@ -92,7 +110,7 @@ impl ArtifactStore {
             self.ensure_blob(asset, &destination)?;
             return Ok(destination);
         }
-        let path = expand_tilde(source);
+        let path = expand_tilde(source)?;
         if !path.is_file() {
             return Err(LocalError::InvalidSource {
                 value: source.to_owned(),
@@ -100,11 +118,12 @@ impl ArtifactStore {
             });
         }
         if let Some(expected) = sha256 {
+            let expected = parse_expected_digest(expected)?;
             let actual = file_digest(&path)?;
             if actual != expected {
                 return Err(LocalError::DigestMismatch {
                     name: path.display().to_string(),
-                    expected: expected.to_owned(),
+                    expected,
                     actual,
                 });
             }
@@ -202,8 +221,13 @@ impl ArtifactStore {
         let staging = part_path(destination);
         remove_cache_entry(&self.cache, &staging)?;
 
+        // Validate/canonicalize the pin once, at the boundary, so both the
+        // cache-hit and post-download comparisons are case-insensitive and a
+        // malformed pin fails fast rather than always mismatching.
+        let expected_digest = asset.sha256.map(parse_expected_digest).transpose()?;
+
         if destination.is_file() {
-            match asset.sha256 {
+            match expected_digest.as_deref() {
                 Some(expected) => {
                     if file_digest(destination)? == expected {
                         return Ok(());
@@ -230,7 +254,7 @@ impl ArtifactStore {
                 return Err(error);
             }
         };
-        if let Some(expected) = asset.sha256
+        if let Some(expected) = expected_digest.as_deref()
             && actual != expected
         {
             remove_cache_entry(&self.cache, &staging)?;
@@ -244,81 +268,17 @@ impl ArtifactStore {
     }
 
     fn download(&self, url: &str, destination: &Path) -> Result<String> {
-        let label = download_label(url);
-        let progress = progress_for_download(&label, io::stderr().is_terminal());
-        match self.download_with_progress(url, destination, progress.as_ref()) {
-            Ok(digest) => {
-                progress.finish();
-                Ok(digest)
-            }
-            Err(error) => {
-                progress.abandon();
-                Err(error)
-            }
-        }
+        download::download(&self.client, url, destination)
     }
 
+    #[cfg(test)]
     fn download_with_progress(
         &self,
         url: &str,
         destination: &Path,
-        progress: &dyn DownloadProgress,
+        progress: &dyn progress::DownloadProgress,
     ) -> Result<String> {
-        let mut request = self.client.get(url);
-        if let Some(token) = hub_bearer_token(env_var) {
-            request = request.bearer_auth(token);
-        }
-        let mut response = request
-            .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .map_err(|source| LocalError::Download {
-                url: url.to_owned(),
-                source,
-            })?;
-        let total = response.content_length();
-        progress.set_len(total);
-        let file = File::create(destination).map_err(|source| LocalError::Io {
-            operation: "create partial download",
-            path: destination.to_owned(),
-            source,
-        })?;
-        let mut writer = BufWriter::new(file);
-        let mut hasher = Sha256::new();
-        let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
-        loop {
-            let count = response
-                .read(&mut buffer)
-                .map_err(|source| LocalError::DownloadRead {
-                    url: url.to_owned(),
-                    source,
-                })?;
-            if count == 0 {
-                break;
-            }
-            writer
-                .write_all(&buffer[..count])
-                .map_err(|source| LocalError::Io {
-                    operation: "write partial download",
-                    path: destination.to_owned(),
-                    source,
-                })?;
-            hasher.update(&buffer[..count]);
-            progress.inc(count as u64);
-        }
-        writer.flush().map_err(|source| LocalError::Io {
-            operation: "flush partial download",
-            path: destination.to_owned(),
-            source,
-        })?;
-        writer
-            .get_ref()
-            .sync_all()
-            .map_err(|source| LocalError::Io {
-                operation: "sync partial download",
-                path: destination.to_owned(),
-                source,
-            })?;
-        Ok(hex_digest(hasher))
+        download::download_with_progress(&self.client, url, destination, progress)
     }
 
     fn cache_path(&self, relative: PathBuf) -> Result<PathBuf> {
@@ -371,6 +331,16 @@ fn looks_like_url(source: &str) -> bool {
     source.starts_with("https://") || source.starts_with("http://")
 }
 
+/// A stable, filesystem-safe cache-slot key derived from the full source URL.
+///
+/// Two different URLs that share a filename map to different slots (ART-004),
+/// while the same URL always maps to the same slot so a cache hit is stable.
+fn source_cache_key(source: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(source.as_bytes());
+    hex_digest(hasher).chars().take(16).collect()
+}
+
 fn filename_from_url(url: &str) -> Result<String> {
     let without_query = url.split('?').next().unwrap_or(url);
     let name = without_query
@@ -390,20 +360,24 @@ fn filename_from_url(url: &str) -> Result<String> {
     Ok(name.to_owned())
 }
 
-fn expand_tilde(source: &str) -> PathBuf {
+fn expand_tilde(source: &str) -> Result<PathBuf> {
     if let Some(rest) = source.strip_prefix("~/") {
-        return default_home().join(rest);
+        return Ok(default_home_checked()?.join(rest));
     }
     if let Some(rest) = source.strip_prefix("~\\") {
-        return default_home().join(rest);
+        return Ok(default_home_checked()?.join(rest));
     }
     if source == "~" {
-        return default_home();
+        return default_home_checked();
     }
-    PathBuf::from(source)
+    Ok(PathBuf::from(source))
 }
 
 /// Returns the operator home directory used for `~` expansion and defaults.
+///
+/// Infallible: falls back to the working directory when unset. Used only by the
+/// infallible public profiles-directory default; the artifact path uses
+/// [`default_home_checked`] instead so a missing home is a typed error (ART-009).
 #[must_use]
 pub(crate) fn default_home() -> PathBuf {
     #[cfg(windows)]
@@ -416,1154 +390,37 @@ pub(crate) fn default_home() -> PathBuf {
     }
 }
 
-/// Default root for gateway local artifacts (`~/.promptforge`).
+/// Resolves the operator home for artifact provisioning, or a typed error.
+///
+/// Unlike [`default_home`], this returns [`LocalError::MissingHome`] rather than
+/// silently using the working directory when the home variable is unset or empty
+/// (ART-009).
+pub(crate) fn default_home_checked() -> Result<PathBuf> {
+    #[cfg(windows)]
+    let (var, value) = ("USERPROFILE", std::env::var_os("USERPROFILE"));
+    #[cfg(not(windows))]
+    let (var, value) = ("HOME", std::env::var_os("HOME"));
+    home_or_missing(var, value)
+}
+
+/// Pure resolver: an empty or absent home value is a [`LocalError::MissingHome`].
+fn home_or_missing(var: &'static str, value: Option<std::ffi::OsString>) -> Result<PathBuf> {
+    match value {
+        Some(value) if !value.is_empty() => Ok(PathBuf::from(value)),
+        _ => Err(LocalError::MissingHome { var }),
+    }
+}
+
+/// Default root for gateway local artifacts (`~/.promptforge`), infallible.
 #[must_use]
 pub(crate) fn default_promptforge_root() -> PathBuf {
     default_home().join(".promptforge")
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ArchiveKind {
-    TarGz,
-    Zip,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ServerAsset<'a> {
-    os: &'a str,
-    arch: &'a str,
-    platform: &'a str,
-    archive_name: &'a str,
-    url: &'a str,
-    sha256: &'a str,
-    archive_kind: ArchiveKind,
-    executable_name: &'a str,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct FileAsset<'a> {
-    name: &'a str,
-    url: &'a str,
-    sha256: Option<&'a str>,
-}
-
-const WINDOWS_AARCH64_CPU: ServerAsset<'static> = ServerAsset {
-    os: "windows",
-    arch: "aarch64",
-    platform: "windows-aarch64",
-    archive_name: "llama-b10082-bin-win-cpu-arm64.zip",
-    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-win-cpu-arm64.zip",
-    sha256: "50dab63396f579cc0ceb4a4fc4b985414d55aaebd4722f363ad03696648711a4",
-    archive_kind: ArchiveKind::Zip,
-    executable_name: "llama-server.exe",
-};
-
-// The macOS release tars are already Metal-enabled, so both kinds share them.
-const MACOS_X86_64: ServerAsset<'static> = ServerAsset {
-    os: "macos",
-    arch: "x86_64",
-    platform: "macos-x86_64",
-    archive_name: "llama-b10082-bin-macos-x64.tar.gz",
-    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-macos-x64.tar.gz",
-    sha256: "5a28fad0f05bf283c1adb92224c1bf3c25ee06acd0f4065b170016c14b490473",
-    archive_kind: ArchiveKind::TarGz,
-    executable_name: "llama-server",
-};
-
-const MACOS_AARCH64: ServerAsset<'static> = ServerAsset {
-    os: "macos",
-    arch: "aarch64",
-    platform: "macos-aarch64",
-    archive_name: "llama-b10082-bin-macos-arm64.tar.gz",
-    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-macos-arm64.tar.gz",
-    sha256: "d644e16eefef3402e4fa86c0fcdce3b00a6786db68c3f216875ce87b45d29173",
-    archive_kind: ArchiveKind::TarGz,
-    executable_name: "llama-server",
-};
-
-const WINDOWS_X86_64_VULKAN: ServerAsset<'static> = ServerAsset {
-    os: "windows",
-    arch: "x86_64",
-    platform: "windows-x86_64-vulkan",
-    archive_name: "llama-b10082-bin-win-vulkan-x64.zip",
-    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-win-vulkan-x64.zip",
-    sha256: "0a4b2e41cfb950da9a749baf8978e0626690fbead3b0ca96860785484cda5bde",
-    archive_kind: ArchiveKind::Zip,
-    executable_name: "llama-server.exe",
-};
-
-const LINUX_X86_64_VULKAN: ServerAsset<'static> = ServerAsset {
-    os: "linux",
-    arch: "x86_64",
-    platform: "linux-x86_64-vulkan",
-    archive_name: "llama-b10082-bin-ubuntu-vulkan-x64.tar.gz",
-    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-ubuntu-vulkan-x64.tar.gz",
-    sha256: "9003ea32e3d5d8a01da3e4b5d3124e0d21c63d51e112c40f5dcdef91ffaca7cc",
-    archive_kind: ArchiveKind::TarGz,
-    executable_name: "llama-server",
-};
-
-const LINUX_AARCH64_VULKAN: ServerAsset<'static> = ServerAsset {
-    os: "linux",
-    arch: "aarch64",
-    platform: "linux-aarch64-vulkan",
-    archive_name: "llama-b10082-bin-ubuntu-vulkan-arm64.tar.gz",
-    url: "https://github.com/ggml-org/llama.cpp/releases/download/b10082/llama-b10082-bin-ubuntu-vulkan-arm64.tar.gz",
-    sha256: "2805902c3074f615a0105a5325ee29799500c8e29c90ccb986b59e1141df551e",
-    archive_kind: ArchiveKind::TarGz,
-    executable_name: "llama-server",
-};
-
-// No Vulkan build exists for Windows arm64 in release b10082, so the dev
-// table falls back to the CPU archive there.
-const DEV_SERVER_ASSETS: &[ServerAsset<'static>] = &[
-    WINDOWS_X86_64_VULKAN,
-    WINDOWS_AARCH64_CPU,
-    LINUX_X86_64_VULKAN,
-    LINUX_AARCH64_VULKAN,
-    MACOS_X86_64,
-    MACOS_AARCH64,
-];
-
-fn server_asset(os: &str, arch: &str) -> Result<ServerAsset<'static>> {
-    DEV_SERVER_ASSETS
-        .iter()
-        .copied()
-        .find(|asset| asset.os == os && asset.arch == arch)
-        .ok_or_else(|| LocalError::UnsupportedPlatform {
-            os: os.to_owned(),
-            arch: arch.to_owned(),
-        })
-}
-
-fn extract_archive(archive: &Path, destination: &Path, kind: ArchiveKind) -> Result<()> {
-    match kind {
-        ArchiveKind::TarGz => extract_tar_gz(archive, destination),
-        ArchiveKind::Zip => extract_zip(archive, destination),
-    }
-}
-
-fn extract_tar_gz(archive: &Path, destination: &Path) -> Result<()> {
-    let file = File::open(archive).map_err(|source| LocalError::Io {
-        operation: "open archive",
-        path: archive.to_owned(),
-        source,
-    })?;
-    let mut tar = tar::Archive::new(GzDecoder::new(BufReader::new(file)));
-    let entries = tar.entries().map_err(|source| LocalError::Archive {
-        archive: archive.display().to_string(),
-        source,
-    })?;
-    for entry in entries {
-        let mut entry = entry.map_err(|source| LocalError::Archive {
-            archive: archive.display().to_string(),
-            source,
-        })?;
-        let entry_path = entry
-            .path()
-            .map_err(|source| LocalError::Archive {
-                archive: archive.display().to_string(),
-                source,
-            })?
-            .into_owned();
-        if !safe_archive_path(&entry_path)
-            || !(entry.header().entry_type().is_file() || entry.header().entry_type().is_dir())
-        {
-            return Err(LocalError::UnsafeArchiveEntry {
-                archive: archive.display().to_string(),
-                entry: entry_path.display().to_string(),
-            });
-        }
-        let output = destination.join(&entry_path);
-        validate_tree_path(destination, &output)?;
-        if let Some(parent) = output.parent() {
-            ensure_cache_directory(destination, parent)?;
-        }
-        let unpacked = entry
-            .unpack_in(destination)
-            .map_err(|source| LocalError::Archive {
-                archive: archive.display().to_string(),
-                source,
-            })?;
-        if !unpacked {
-            return Err(LocalError::UnsafeArchiveEntry {
-                archive: archive.display().to_string(),
-                entry: entry_path.display().to_string(),
-            });
-        }
-        validate_tree_path(destination, &output)?;
-    }
-    Ok(())
-}
-
-fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
-    let file = File::open(archive).map_err(|source| LocalError::Io {
-        operation: "open archive",
-        path: archive.to_owned(),
-        source,
-    })?;
-    let mut zip =
-        zip::ZipArchive::new(BufReader::new(file)).map_err(|source| LocalError::Archive {
-            archive: archive.display().to_string(),
-            source: io::Error::other(source),
-        })?;
-    for index in 0..zip.len() {
-        let mut entry = zip.by_index(index).map_err(|source| LocalError::Archive {
-            archive: archive.display().to_string(),
-            source: io::Error::other(source),
-        })?;
-        let Some(relative) = entry.enclosed_name() else {
-            return Err(LocalError::UnsafeArchiveEntry {
-                archive: archive.display().to_string(),
-                entry: entry.name().to_owned(),
-            });
-        };
-        if !safe_archive_name(entry.name()) || !safe_relative_path(&relative) {
-            return Err(LocalError::UnsafeArchiveEntry {
-                archive: archive.display().to_string(),
-                entry: entry.name().to_owned(),
-            });
-        }
-        let mode = entry.unix_mode();
-        if !zip_entry_type_is_supported(mode, entry.is_dir()) {
-            return Err(LocalError::UnsafeArchiveEntry {
-                archive: archive.display().to_string(),
-                entry: entry.name().to_owned(),
-            });
-        }
-        let output = destination.join(relative);
-        validate_tree_path(destination, &output)?;
-        if entry.is_dir() {
-            ensure_cache_directory(destination, &output)?;
-            continue;
-        }
-        let Some(parent) = output.parent() else {
-            return Err(LocalError::InvalidPath { path: output });
-        };
-        ensure_cache_directory(destination, parent)?;
-        validate_tree_path(destination, &output)?;
-        let mut file = File::create(&output).map_err(|source| LocalError::Io {
-            operation: "create extracted file",
-            path: output.clone(),
-            source,
-        })?;
-        io::copy(&mut entry, &mut file).map_err(|source| LocalError::Io {
-            operation: "write extracted file",
-            path: output.clone(),
-            source,
-        })?;
-        drop(file);
-        apply_archive_mode(&output, mode)?;
-    }
-    Ok(())
-}
-
-fn safe_relative_path(path: &Path) -> bool {
-    !path.as_os_str().is_empty()
-        && path
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
-}
-
-fn safe_archive_path(path: &Path) -> bool {
-    safe_relative_path(path) && path.to_str().is_some_and(safe_archive_name)
-}
-
-fn safe_archive_name(name: &str) -> bool {
-    if name.is_empty() || name.starts_with(['/', '\\']) || name.contains('\0') {
-        return false;
-    }
-    let mut saw_component = false;
-    for component in name.split(['/', '\\']) {
-        if component.is_empty() {
-            continue;
-        }
-        if component == "." || component == ".." || component.contains(':') {
-            return false;
-        }
-        saw_component = true;
-    }
-    saw_component
-}
-
-fn zip_entry_type_is_supported(mode: Option<u32>, is_directory: bool) -> bool {
-    let Some(mode) = mode else {
-        return true;
-    };
-    let kind = mode & 0o170_000;
-    if is_directory {
-        kind == 0 || kind == 0o040_000
-    } else {
-        kind == 0 || kind == 0o100_000
-    }
-}
-
-#[cfg(unix)]
-fn apply_archive_mode(path: &Path, mode: Option<u32>) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    let Some(mode) = mode else {
-        return Ok(());
-    };
-    fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o7777)).map_err(|source| {
-        LocalError::Io {
-            operation: "set extracted file permissions",
-            path: path.to_owned(),
-            source,
-        }
-    })
-}
-
-#[cfg(not(unix))]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "matches the fallible Unix implementation at the call site"
-)]
-fn apply_archive_mode(_path: &Path, _mode: Option<u32>) -> Result<()> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn require_executable(path: &Path, archive: &str) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    let mode = fs::metadata(path)
-        .map_err(|source| LocalError::Io {
-            operation: "inspect executable permissions",
-            path: path.to_owned(),
-            source,
-        })?
-        .permissions()
-        .mode();
-    if mode & 0o111 == 0 {
-        return Err(LocalError::UnsafeArchiveEntry {
-            archive: archive.to_owned(),
-            entry: path.display().to_string(),
-        });
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "matches the fallible Unix implementation at the call site"
-)]
-fn require_executable(_path: &Path, _archive: &str) -> Result<()> {
-    Ok(())
-}
-
-fn find_executable(root: &Path, name: &str, archive: &str) -> Result<PathBuf> {
-    let mut matches = Vec::new();
-    collect_named_files(root, OsStr::new(name), &mut matches)?;
-    matches.sort();
-    match matches.as_slice() {
-        [] => Err(LocalError::MissingExecutable {
-            archive: archive.to_owned(),
-            executable: name.to_owned(),
-        }),
-        [path] => Ok(path.clone()),
-        _ => Err(LocalError::DuplicateExecutable {
-            archive: archive.to_owned(),
-            executable: name.to_owned(),
-        }),
-    }
-}
-
-fn collect_named_files(root: &Path, name: &OsStr, files: &mut Vec<PathBuf>) -> Result<()> {
-    let entries = fs::read_dir(root).map_err(|source| LocalError::Io {
-        operation: "read installation directory",
-        path: root.to_owned(),
-        source,
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|source| LocalError::Io {
-            operation: "read installation entry",
-            path: root.to_owned(),
-            source,
-        })?;
-        let path = entry.path();
-        let file_type = entry.file_type().map_err(|source| LocalError::Io {
-            operation: "inspect installation entry",
-            path: path.clone(),
-            source,
-        })?;
-        if file_type.is_dir() {
-            collect_named_files(&path, name, files)?;
-        } else if file_type.is_file() && entry.file_name() == name {
-            files.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn tree_digest(root: &Path) -> Result<String> {
-    let mut files = Vec::new();
-    collect_tree_files(root, root, &mut files)?;
-    files.sort_by(|left, right| left.0.cmp(&right.0));
-    let mut tree_hasher = Sha256::new();
-    for (relative, path) in files {
-        tree_hasher.update((relative.len() as u64).to_le_bytes());
-        tree_hasher.update(relative.as_bytes());
-        tree_hasher.update(file_mode(&path)?.to_le_bytes());
-        tree_hasher.update(file_digest(&path)?.as_bytes());
-    }
-    Ok(hex_digest(tree_hasher))
-}
-
-#[cfg(unix)]
-fn file_mode(path: &Path) -> Result<u32> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    fs::metadata(path)
-        .map(|metadata| metadata.permissions().mode() & 0o7777)
-        .map_err(|source| LocalError::Io {
-            operation: "inspect cached artifact permissions",
-            path: path.to_owned(),
-            source,
-        })
-}
-
-#[cfg(not(unix))]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "matches the fallible Unix implementation at the call site"
-)]
-fn file_mode(_path: &Path) -> Result<u32> {
-    Ok(0)
-}
-
-fn collect_tree_files(
-    root: &Path,
-    directory: &Path,
-    files: &mut Vec<(String, PathBuf)>,
-) -> Result<()> {
-    let entries = fs::read_dir(directory).map_err(|source| LocalError::Io {
-        operation: "read installation directory",
-        path: directory.to_owned(),
-        source,
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|source| LocalError::Io {
-            operation: "read installation entry",
-            path: directory.to_owned(),
-            source,
-        })?;
-        let path = entry.path();
-        let file_type = entry.file_type().map_err(|source| LocalError::Io {
-            operation: "inspect installation entry",
-            path: path.clone(),
-            source,
-        })?;
-        if file_type.is_dir() {
-            collect_tree_files(root, &path, files)?;
-        } else if file_type.is_file() && path != root.join(INSTALL_MARKER) {
-            let relative = path
-                .strip_prefix(root)
-                .map_err(|source| LocalError::Io {
-                    operation: "resolve installation entry",
-                    path: path.clone(),
-                    source: io::Error::other(source),
-                })?
-                .to_str()
-                .ok_or_else(|| LocalError::InvalidPath { path: path.clone() })?
-                .replace('\\', "/");
-            files.push((relative, path));
-        } else if !file_type.is_file() {
-            return Err(LocalError::UnsafeArchiveEntry {
-                archive: root.display().to_string(),
-                entry: path.display().to_string(),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn file_digest(path: &Path) -> Result<String> {
-    let file = File::open(path).map_err(|source| LocalError::Io {
-        operation: "open cached artifact",
-        path: path.to_owned(),
-        source,
-    })?;
-    let mut reader = BufReader::new(file);
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
-    loop {
-        let count = reader.read(&mut buffer).map_err(|source| LocalError::Io {
-            operation: "hash cached artifact",
-            path: path.to_owned(),
-            source,
-        })?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(&buffer[..count]);
-    }
-    Ok(hex_digest(hasher))
-}
-
-/// Reads a process environment variable as UTF-8 text.
-fn env_var(name: &str) -> Option<String> {
-    std::env::var(name).ok()
-}
-
-/// Reads the HF bearer token from the process environment.
-pub(crate) fn hub_bearer_token_from_env() -> Option<String> {
-    hub_bearer_token(env_var)
-}
-
-/// Hugging Face hub bearer token for gated downloads.
-///
-/// Prefers `HF_TOKEN`, then `HUGGING_FACE_HUB_TOKEN`. Empty or whitespace-only
-/// values are ignored. The token is never logged.
-fn hub_bearer_token(lookup: impl Fn(&str) -> Option<String>) -> Option<String> {
-    for key in ["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"] {
-        if let Some(value) = lookup(key) {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_owned());
-            }
-        }
-    }
-    None
-}
-
-/// Progress updates for a single HTTP blob download.
-trait DownloadProgress: Send {
-    fn set_len(&self, total: Option<u64>);
-    fn inc(&self, n: u64);
-    fn finish(&self);
-    fn abandon(&self);
-}
-
-/// Basename (or short fallback) shown on the progress bar / log lines.
-fn download_label(url: &str) -> String {
-    url.rsplit('/')
-        .next()
-        .and_then(|part| {
-            let name = part.split('?').next().unwrap_or(part);
-            (!name.is_empty()).then(|| name.to_owned())
-        })
-        .unwrap_or_else(|| "download".to_owned())
-}
-
-/// Chooses a TTY progress bar or non-TTY tracing progress for `label`.
-fn progress_for_download(label: &str, is_tty: bool) -> Box<dyn DownloadProgress> {
-    if is_tty {
-        Box::new(IndicatifProgress::new(label))
-    } else {
-        Box::new(TracingProgress::new(label))
-    }
-}
-
-/// Interactive stderr progress bar via indicatif.
-struct IndicatifProgress {
-    bar: ProgressBar,
-}
-
-impl IndicatifProgress {
-    fn new(label: &str) -> Self {
-        let bar = ProgressBar::new_spinner();
-        bar.set_message(label.to_owned());
-        if let Some(style) = bar_style() {
-            bar.set_style(style);
-        }
-        Self { bar }
-    }
-}
-
-fn bar_style() -> Option<ProgressStyle> {
-    ProgressStyle::with_template(
-        "{spinner:.green} {msg} [{bar:40.cyan/blue}] {percent:>3}% {bytes}/{total_bytes} ({bytes_per_sec}, ETA {eta})",
-    )
-    .ok()
-    .map(|style| style.progress_chars("=>-"))
-}
-
-fn spinner_style() -> Option<ProgressStyle> {
-    ProgressStyle::with_template("{spinner:.green} {msg} {bytes} ({bytes_per_sec})").ok()
-}
-
-impl DownloadProgress for IndicatifProgress {
-    fn set_len(&self, total: Option<u64>) {
-        match total {
-            Some(len) if len > 0 => {
-                self.bar.set_length(len);
-                if let Some(style) = bar_style() {
-                    self.bar.set_style(style);
-                }
-            }
-            _ => {
-                if let Some(style) = spinner_style() {
-                    self.bar.set_style(style);
-                }
-            }
-        }
-    }
-
-    fn inc(&self, n: u64) {
-        self.bar.inc(n);
-    }
-
-    fn finish(&self) {
-        self.bar.finish_and_clear();
-    }
-
-    fn abandon(&self) {
-        self.bar.abandon();
-    }
-}
-
-/// Non-TTY progress: periodic `tracing::info!` lines.
-struct TracingProgress {
-    label: String,
-    total: AtomicU64,
-    downloaded: AtomicU64,
-    last_logged: AtomicU64,
-}
-
-impl TracingProgress {
-    fn new(label: &str) -> Self {
-        Self {
-            label: label.to_owned(),
-            total: AtomicU64::new(0),
-            downloaded: AtomicU64::new(0),
-            last_logged: AtomicU64::new(0),
-        }
-    }
-
-    fn maybe_log(&self, force: bool) {
-        let downloaded = self.downloaded.load(Ordering::Relaxed);
-        let total = self.total.load(Ordering::Relaxed);
-        let last = self.last_logged.load(Ordering::Relaxed);
-        let step = if total > 0 {
-            (total / 20).max(LOG_PROGRESS_BYTES)
-        } else {
-            LOG_PROGRESS_BYTES
-        };
-        if !force && downloaded.saturating_sub(last) < step && downloaded != 0 {
-            return;
-        }
-        self.last_logged.store(downloaded, Ordering::Relaxed);
-        if let Some(percent) = downloaded.saturating_mul(100).checked_div(total) {
-            tracing::info!(
-                file = %self.label,
-                downloaded,
-                total,
-                percent,
-                "download progress"
-            );
-        } else {
-            tracing::info!(
-                file = %self.label,
-                downloaded,
-                "download progress"
-            );
-        }
-    }
-}
-
-impl DownloadProgress for TracingProgress {
-    fn set_len(&self, total: Option<u64>) {
-        if let Some(len) = total {
-            self.total.store(len, Ordering::Relaxed);
-        }
-        tracing::info!(
-            file = %self.label,
-            total = total.unwrap_or(0),
-            "download started"
-        );
-    }
-
-    fn inc(&self, n: u64) {
-        self.downloaded.fetch_add(n, Ordering::Relaxed);
-        self.maybe_log(false);
-    }
-
-    fn finish(&self) {
-        self.maybe_log(true);
-        tracing::info!(
-            file = %self.label,
-            downloaded = self.downloaded.load(Ordering::Relaxed),
-            "download finished"
-        );
-    }
-
-    fn abandon(&self) {
-        tracing::warn!(
-            file = %self.label,
-            downloaded = self.downloaded.load(Ordering::Relaxed),
-            "download abandoned"
-        );
-    }
-}
-
-fn hex_digest(hasher: Sha256) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let bytes = hasher.finalize();
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(char::from(HEX[usize::from(byte >> 4)]));
-        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    output
-}
-
-fn part_path(path: &Path) -> PathBuf {
-    let mut name = path.as_os_str().to_owned();
-    name.push(".part");
-    PathBuf::from(name)
-}
-
-fn ensure_cache_directory(root: &Path, directory: &Path) -> Result<()> {
-    if directory == root {
-        fs::create_dir_all(root).map_err(|source| LocalError::Io {
-            operation: "create cache directory",
-            path: root.to_owned(),
-            source,
-        })?;
-        return validate_tree_path(root, root);
-    }
-    validate_tree_path(root, directory)?;
-    let relative = confined_relative(root, directory)?;
-    let mut current = root.to_owned();
-    for component in relative.components() {
-        current.push(component.as_os_str());
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) => {
-                if is_link_or_reparse(&metadata) || !metadata.is_dir() {
-                    return Err(LocalError::UnsafeCachePath { path: current });
-                }
-            }
-            Err(source) if source.kind() == io::ErrorKind::NotFound => {
-                if let Err(source) = fs::create_dir(&current)
-                    && source.kind() != io::ErrorKind::AlreadyExists
-                {
-                    return Err(LocalError::Io {
-                        operation: "create cache directory",
-                        path: current.clone(),
-                        source,
-                    });
-                }
-                validate_tree_path(root, &current)?;
-            }
-            Err(source) => {
-                return Err(LocalError::Io {
-                    operation: "inspect cache directory",
-                    path: current,
-                    source,
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
-fn remove_cache_entry(root: &Path, path: &Path) -> Result<()> {
-    validate_tree_path(root, path)?;
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(source) => {
-            return Err(LocalError::Io {
-                operation: "inspect cache entry",
-                path: path.to_owned(),
-                source,
-            });
-        }
-    };
-    if is_link_or_reparse(&metadata) {
-        return Err(LocalError::UnsafeCachePath {
-            path: path.to_owned(),
-        });
-    }
-    let result = if metadata.is_dir() {
-        fs::remove_dir_all(path)
-    } else {
-        fs::remove_file(path)
-    };
-    result.map_err(|source| LocalError::Io {
-        operation: "remove cache entry",
-        path: path.to_owned(),
-        source,
-    })
-}
-
-fn rename_confined(root: &Path, source: &Path, destination: &Path) -> Result<()> {
-    validate_tree_path(root, source)?;
-    validate_tree_path(root, destination)?;
-    fs::rename(source, destination).map_err(|error| LocalError::Io {
-        operation: "atomically install artifact",
-        path: destination.to_owned(),
-        source: error,
-    })
-}
-
-fn validate_cache_path(root: &Path, path: &Path) -> Result<()> {
-    validate_tree_path(root, path)
-}
-
-fn validate_tree_path(root: &Path, path: &Path) -> Result<()> {
-    let relative = confined_relative(root, path)?;
-    let root_metadata = fs::symlink_metadata(root).map_err(|source| LocalError::Io {
-        operation: "inspect cache root",
-        path: root.to_owned(),
-        source,
-    })?;
-    if is_link_or_reparse(&root_metadata) || !root_metadata.is_dir() {
-        return Err(LocalError::UnsafeCachePath {
-            path: root.to_owned(),
-        });
-    }
-    let mut current = root.to_owned();
-    let components: Vec<_> = relative.components().collect();
-    for (index, component) in components.iter().enumerate() {
-        current.push(component.as_os_str());
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) => {
-                if is_link_or_reparse(&metadata)
-                    || (index + 1 != components.len() && !metadata.is_dir())
-                {
-                    return Err(LocalError::UnsafeCachePath { path: current });
-                }
-            }
-            Err(source) if source.kind() == io::ErrorKind::NotFound => break,
-            Err(source) => {
-                return Err(LocalError::Io {
-                    operation: "inspect cache path",
-                    path: current,
-                    source,
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
-fn confined_relative<'a>(root: &Path, path: &'a Path) -> Result<&'a Path> {
-    let relative = path
-        .strip_prefix(root)
-        .map_err(|_| LocalError::UnsafeCachePath {
-            path: path.to_owned(),
-        })?;
-    if !relative.as_os_str().is_empty() && !safe_relative_path(relative) {
-        return Err(LocalError::UnsafeCachePath {
-            path: path.to_owned(),
-        });
-    }
-    Ok(relative)
-}
-
-#[cfg(windows)]
-fn is_link_or_reparse(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt as _;
-
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn is_link_or_reparse(metadata: &fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
-}
-
-fn write_synced(path: &Path, contents: &[u8]) -> Result<()> {
-    let mut file = File::create(path).map_err(|source| LocalError::Io {
-        operation: "create install marker",
-        path: path.to_owned(),
-        source,
-    })?;
-    file.write_all(contents).map_err(|source| LocalError::Io {
-        operation: "write install marker",
-        path: path.to_owned(),
-        source,
-    })?;
-    file.sync_all().map_err(|source| LocalError::Io {
-        operation: "sync install marker",
-        path: path.to_owned(),
-        source,
-    })
+/// Default artifact root (`~/.promptforge`), erroring when home is unset (ART-009).
+pub(crate) fn default_promptforge_root_checked() -> Result<PathBuf> {
+    Ok(default_home_checked()?.join(".promptforge"))
 }
 
 #[cfg(test)]
-mod tests {
-    use std::io::{Read as _, Write as _};
-    use std::net::{TcpListener, TcpStream};
-    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
-    use std::thread::{self, JoinHandle};
-    use std::time::Duration;
-
-    use sha2::{Digest, Sha256};
-    use tempfile::TempDir;
-
-    use super::*;
-
-    /// Test double that records set_len / inc / finish / abandon calls.
-    struct RecordingProgress {
-        total: Mutex<Option<u64>>,
-        bytes: AtomicU64,
-        finished: AtomicU64,
-        abandoned: AtomicU64,
-    }
-
-    impl RecordingProgress {
-        fn new() -> Self {
-            Self {
-                total: Mutex::new(None),
-                bytes: AtomicU64::new(0),
-                finished: AtomicU64::new(0),
-                abandoned: AtomicU64::new(0),
-            }
-        }
-    }
-
-    impl DownloadProgress for RecordingProgress {
-        fn set_len(&self, total: Option<u64>) {
-            *self.total.lock().expect("progress total lock") = total;
-        }
-
-        fn inc(&self, n: u64) {
-            self.bytes.fetch_add(n, Ordering::Relaxed);
-        }
-
-        fn finish(&self) {
-            self.finished.fetch_add(1, Ordering::Relaxed);
-        }
-
-        fn abandon(&self) {
-            self.abandoned.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    struct FakeServer {
-        address: String,
-        requests: Arc<AtomicUsize>,
-        shutdown: Arc<AtomicBool>,
-        thread: Option<JoinHandle<()>>,
-    }
-
-    impl FakeServer {
-        fn new(body: &[u8]) -> Self {
-            let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
-            listener
-                .set_nonblocking(true)
-                .expect("nonblocking fake server");
-            let address = listener.local_addr().expect("local addr").to_string();
-            let requests = Arc::new(AtomicUsize::new(0));
-            let shutdown = Arc::new(AtomicBool::new(false));
-            let thread_requests = Arc::clone(&requests);
-            let thread_shutdown = Arc::clone(&shutdown);
-            let body = body.to_owned();
-            let thread = thread::spawn(move || {
-                while !thread_shutdown.load(Ordering::Acquire) {
-                    match listener.accept() {
-                        Ok((mut stream, _)) => {
-                            if thread_shutdown.load(Ordering::Acquire) {
-                                break;
-                            }
-                            stream
-                                .set_nonblocking(false)
-                                .expect("make accepted socket blocking");
-                            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-                            let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-                            let mut request = Vec::new();
-                            let mut buf = [0_u8; 1024];
-                            loop {
-                                match stream.read(&mut buf) {
-                                    Ok(0) | Err(_) => break,
-                                    Ok(n) => {
-                                        request.extend_from_slice(&buf[..n]);
-                                        if request.windows(4).any(|w| w == b"\r\n\r\n") {
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            let response = format!(
-                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                                body.len()
-                            );
-                            let _ = stream.write_all(response.as_bytes());
-                            let _ = stream.write_all(&body);
-                            let _ = stream.flush();
-                            thread_requests.fetch_add(1, Ordering::AcqRel);
-                        }
-                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(1));
-                        }
-                        Err(_) => break,
-                    }
-                }
-            });
-            // Give the accept loop a moment to start before clients connect.
-            thread::sleep(Duration::from_millis(10));
-            Self {
-                address,
-                requests,
-                shutdown,
-                thread: Some(thread),
-            }
-        }
-
-        fn url(&self, name: &str) -> String {
-            format!("http://{}/{name}", self.address)
-        }
-
-        fn requests(&self) -> usize {
-            self.requests.load(Ordering::Acquire)
-        }
-    }
-
-    impl Drop for FakeServer {
-        fn drop(&mut self) {
-            self.shutdown.store(true, Ordering::Release);
-            let _ = TcpStream::connect(&self.address);
-            if let Some(thread) = self.thread.take() {
-                let _ = thread.join();
-            }
-        }
-    }
-
-    fn hex_sha256(bytes: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(bytes);
-        hex_digest(hasher)
-    }
-
-    #[test]
-    fn download_label_uses_url_basename() {
-        assert_eq!(
-            download_label(
-                "https://huggingface.co/google/gemma/resolve/main/gemma-3-27b-it-q4_0.gguf"
-            ),
-            "gemma-3-27b-it-q4_0.gguf"
-        );
-        assert_eq!(
-            download_label("https://example.com/file.gguf?download=true"),
-            "file.gguf"
-        );
-    }
-
-    #[test]
-    fn progress_for_download_picks_bar_on_tty_and_log_off_tty() {
-        let tty = progress_for_download("x.gguf", true);
-        let log = progress_for_download("x.gguf", false);
-        // Type names are enough: both implement the trait and accept a finish.
-        tty.set_len(Some(10));
-        tty.inc(10);
-        tty.finish();
-        log.set_len(Some(10));
-        log.inc(10);
-        log.finish();
-    }
-
-    #[test]
-    fn download_with_progress_reports_content_length_and_bytes() {
-        let body = b"progress-fixture-bytes";
-        let server = FakeServer::new(body);
-        let temp = TempDir::new().expect("tempdir");
-        let store = ArtifactStore::new(temp.path()).expect("store");
-        let progress = RecordingProgress::new();
-        let dest = temp.path().join("out.gguf");
-        let digest = store
-            .download_with_progress(&server.url("out.gguf"), &dest, &progress)
-            .expect("download");
-        assert_eq!(digest, hex_sha256(body));
-        assert_eq!(
-            *progress.total.lock().expect("total"),
-            Some(body.len() as u64)
-        );
-        assert_eq!(progress.bytes.load(Ordering::Relaxed), body.len() as u64);
-        progress.finish();
-        assert_eq!(progress.finished.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
-    fn hub_bearer_token_prefers_hf_token() {
-        let token = hub_bearer_token(|key| match key {
-            "HF_TOKEN" => Some(" hf_primary ".to_owned()),
-            "HUGGING_FACE_HUB_TOKEN" => Some("hf_secondary".to_owned()),
-            _ => None,
-        });
-        assert_eq!(token.as_deref(), Some("hf_primary"));
-    }
-
-    #[test]
-    fn hub_bearer_token_falls_back_to_hugging_face_hub_token() {
-        let token = hub_bearer_token(|key| match key {
-            "HUGGING_FACE_HUB_TOKEN" => Some("hf_fallback".to_owned()),
-            _ => None,
-        });
-        assert_eq!(token.as_deref(), Some("hf_fallback"));
-    }
-
-    #[test]
-    fn hub_bearer_token_ignores_empty_and_missing() {
-        assert!(hub_bearer_token(|_| None).is_none());
-        assert!(hub_bearer_token(|_| Some(String::new())).is_none());
-        assert!(hub_bearer_token(|_| Some("   ".to_owned())).is_none());
-        assert_eq!(
-            hub_bearer_token(|key| match key {
-                "HF_TOKEN" => Some(String::new()),
-                "HUGGING_FACE_HUB_TOKEN" => Some("hf_ok".to_owned()),
-                _ => None,
-            })
-            .as_deref(),
-            Some("hf_ok")
-        );
-    }
-
-    #[test]
-    fn downloads_verifies_and_reuses_cached_blob() {
-        let body = b"tiny-gguf-fixture";
-        let digest = hex_sha256(body);
-        let server = FakeServer::new(body);
-        let temp = TempDir::new().expect("tempdir");
-        let store = ArtifactStore::new(temp.path()).expect("store");
-
-        let first = store
-            .ensure_model(&server.url("fixture.gguf"), Some(&digest))
-            .expect("first download");
-        assert!(first.is_file());
-        assert_eq!(server.requests(), 1);
-        assert_eq!(file_digest(&first).expect("digest"), digest);
-
-        let second = store
-            .ensure_model(&server.url("fixture.gguf"), Some(&digest))
-            .expect("cache hit");
-        assert_eq!(first, second);
-        assert_eq!(server.requests(), 1);
-    }
-
-    #[test]
-    fn rejects_digest_mismatch() {
-        let body = b"wrong-bytes";
-        let server = FakeServer::new(body);
-        let temp = TempDir::new().expect("tempdir");
-        let store = ArtifactStore::new(temp.path()).expect("store");
-        let err = store
-            .ensure_model(
-                &server.url("bad.gguf"),
-                Some("0000000000000000000000000000000000000000000000000000000000000000"),
-            )
-            .expect_err("digest mismatch");
-        assert!(matches!(err, LocalError::DigestMismatch { .. }));
-    }
-
-    #[test]
-    fn reuses_unpinned_blob_without_redownload() {
-        let body = b"unpinned";
-        let server = FakeServer::new(body);
-        let temp = TempDir::new().expect("tempdir");
-        let store = ArtifactStore::new(temp.path()).expect("store");
-        let first = store
-            .ensure_model(&server.url("free.gguf"), None)
-            .expect("download");
-        let second = store
-            .ensure_model(&server.url("free.gguf"), None)
-            .expect("reuse");
-        assert_eq!(first, second);
-        assert_eq!(server.requests(), 1);
-    }
-}
+mod tests;
