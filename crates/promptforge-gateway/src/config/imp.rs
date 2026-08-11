@@ -60,7 +60,7 @@ impl Config {
         dir: &Path,
         name: &crate::profile::ProfileName,
     ) -> Result<Config, crate::api_error::ConfigError> {
-        crate::profile::load_named(dir, name.as_str()).map_err(crate::api_error::ConfigError::from)
+        crate::profile::load_named(dir, name).map_err(crate::api_error::ConfigError::from)
     }
 
     /// The server bind address.

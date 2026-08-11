@@ -92,18 +92,20 @@ pub(crate) fn list_profiles(dir: &Path) -> Result<Vec<String>, ConfigError> {
     Ok(names)
 }
 
-/// Loads `dir/name.toml` with recursive include resolution.
+/// Loads `dir/<name>.toml` with recursive include resolution.
+///
+/// Takes a validated [`ProfileName`] rather than a raw string: confinement to a
+/// single normal path component is already guaranteed by the type, so this
+/// function does no divergent re-validation. In particular an ordinary name
+/// like `analysis..v2` (a single component that merely contains `..`) loads
+/// correctly, where the previous substring check wrongly rejected it
+/// (PROFILE-010).
 ///
 /// # Errors
 /// Returns [`ConfigError`] when the file is missing, includes cycle or exceed
 /// depth, merge fails, or the resolved document fails config validation.
-pub(crate) fn load_named(dir: &Path, name: &str) -> Result<Config, ConfigError> {
-    if name.is_empty() || name.contains(['/', '\\']) || name.contains("..") {
-        return Err(ConfigError::Validation(format!(
-            "invalid profile name {name:?}"
-        )));
-    }
-    let path = dir.join(format!("{name}.toml"));
+pub(crate) fn load_named(dir: &Path, name: &ProfileName) -> Result<Config, ConfigError> {
+    let path = dir.join(format!("{}.toml", name.as_str()));
     load_path(&path)
 }
 

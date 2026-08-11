@@ -231,7 +231,7 @@ async fn shutdown_signal() {
 fn load_startup(options: &ServeOptions) -> Result<(Config, Option<ProfileName>), StartupError> {
     match &options.source {
         ConfigSource::Profile(name) => {
-            let config = crate::profile::load_named(&options.profiles_dir, name.as_str())
+            let config = crate::profile::load_named(&options.profiles_dir, name)
                 .map_err(StartupError::config)?;
             Ok((config, Some(name.clone())))
         }

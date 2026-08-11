@@ -218,7 +218,40 @@ upstream = "u"
 endpoints = ["e"]
 "#,
     );
-    let config = load_named(tmp.path(), "alpha").unwrap();
+    let config = load_named(tmp.path(), &ProfileName::parse("alpha").unwrap()).unwrap();
+    assert_eq!(config.models[0].name, "m");
+}
+
+#[test]
+fn load_named_accepts_single_component_name_containing_dot_dot() {
+    // PROFILE-010: `analysis..v2` is one normal path component (it merely
+    // contains `..`), so it is a valid ProfileName and must load. The old
+    // substring `contains("..")` check wrongly rejected it.
+    let tmp = TempDir::new().unwrap();
+    let name = ProfileName::parse("analysis..v2").expect("single component is valid");
+    write(
+        tmp.path(),
+        "analysis..v2.toml",
+        r#"
+[server]
+bind = "127.0.0.1:8081"
+key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 1
+upstream = "u"
+endpoints = ["e"]
+"#,
+    );
+    let config = load_named(tmp.path(), &name).unwrap();
     assert_eq!(config.models[0].name, "m");
 }
 
