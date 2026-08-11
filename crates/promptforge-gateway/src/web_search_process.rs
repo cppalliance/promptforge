@@ -47,11 +47,12 @@ pub(crate) fn sanitize_text(text: &str, max_chars: usize) -> String {
 /// Drop known tracking query parameters from `url`. Removes a trailing empty `?`.
 ///
 /// Params removed when the name equals `fbclid`, `gclid`, `mc_cid`, `mc_eid`,
-/// or starts with `utm_`.
+/// or starts with `utm_`. Does not truncate: an over-length URL is dropped by
+/// the pipeline (WSP-004), never cut mid-component into a broken link.
 #[must_use]
 pub(crate) fn strip_tracking_params(url: &str) -> String {
     let Some((base, query)) = url.split_once('?') else {
-        return truncate_chars(url, URL_MAX_CHARS);
+        return url.to_string();
     };
     let (query, fragment) = match query.split_once('#') {
         Some((q, f)) => (q, Some(f)),
@@ -77,7 +78,7 @@ pub(crate) fn strip_tracking_params(url: &str) -> String {
         out.push('#');
         out.push_str(fragment);
     }
-    truncate_chars(&out, URL_MAX_CHARS)
+    out
 }
 
 /// Extract the hostname from `url` without a URL crate.
@@ -221,14 +222,19 @@ pub(crate) fn post_process_results(
 ) -> Vec<SearchResult> {
     let prepared: Vec<SearchResult> = results
         .into_iter()
-        .map(|r| {
+        .filter_map(|r| {
             let title = sanitize_text(&r.title, TITLE_MAX_CHARS);
             let description = sanitize_text(&r.description, DESCRIPTION_MAX_CHARS);
             let url = if strip_tracking {
                 strip_tracking_params(&r.url)
             } else {
-                truncate_chars(&r.url, URL_MAX_CHARS)
+                r.url
             };
+            // An over-length URL is dropped whole, never char-truncated into a
+            // broken, non-navigable link (WSP-004).
+            if url.chars().count() > URL_MAX_CHARS {
+                return None;
+            }
             let site_name = host_from_url(&url).map(|h| site_name_from_host(&h));
             // Cap snippet count and per-snippet length, sanitising each (WSP-001).
             let extra_snippets = r
@@ -244,14 +250,14 @@ pub(crate) fn post_process_results(
                 .age
                 .map(|age| sanitize_text(&age, AGE_MAX_CHARS))
                 .filter(|age| !age.is_empty());
-            SearchResult {
+            Some(SearchResult {
                 title,
                 url,
                 description,
                 age,
                 site_name,
                 extra_snippets,
-            }
+            })
         })
         .collect();
     let filtered = filter_domains(prepared, include_domains, exclude_domains);
@@ -337,9 +343,18 @@ mod tests {
             sanitize_text(&desc, DESCRIPTION_MAX_CHARS).chars().count(),
             DESCRIPTION_MAX_CHARS
         );
+    }
 
-        let url = format!("https://example.com/{}", "u".repeat(URL_MAX_CHARS));
-        assert_eq!(strip_tracking_params(&url).chars().count(), URL_MAX_CHARS);
+    #[test]
+    fn overlong_url_result_is_dropped_not_truncated() {
+        // WSP-004: a URL longer than the cap is dropped whole rather than cut
+        // mid-component into a broken link.
+        let long = format!("https://example.com/{}", "u".repeat(URL_MAX_CHARS));
+        let ok = hit("Keep", "https://a.com/1");
+        let dropped = hit("Drop", &long);
+        let out = post_process_results(vec![ok, dropped], true, &[], &[], 10, 10);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].title, "Keep");
     }
 
     #[test]
