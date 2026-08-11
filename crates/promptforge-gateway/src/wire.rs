@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 use crate::config::ThinkingMode;
 
 /// An incoming chat completions request.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub(crate) struct ChatRequest {
     /// The model name, resolved against the routing table.
@@ -45,7 +45,7 @@ impl ChatRequest {
 }
 
 /// An outgoing chat completions response.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub(crate) struct ChatResponse {
     /// The model name, rewritten to the caller's requested name.
@@ -72,7 +72,7 @@ impl ChatResponse {
 }
 
 /// The OpenAI-shaped model list returned by `GET /v1/models`.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[non_exhaustive]
 pub(crate) struct ModelsResponse {
     /// Always `"list"`.
@@ -82,7 +82,7 @@ pub(crate) struct ModelsResponse {
 }
 
 /// One catalogued model, with PromptForge extensions beside the OpenAI `id`.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[non_exhaustive]
 pub(crate) struct ModelInfo {
     /// The caller-facing model name (`[[model]].name`).
@@ -140,5 +140,41 @@ mod tests {
             rest: Map::new(),
         };
         assert!(response.validate().is_err());
+    }
+
+    #[test]
+    fn request_round_trips_through_json() {
+        let json = serde_json::json!({
+            "model": "m",
+            "messages": [{ "role": "user", "content": "hi" }],
+            "temperature": 0.5,
+            "stream": false,
+        });
+        let req: ChatRequest = serde_json::from_value(json.clone()).expect("parse request");
+        // Unnamed fields land in `rest`, not on named fields.
+        assert!(req.rest.contains_key("temperature"));
+        assert!(req.rest.contains_key("stream"));
+        assert!(!req.rest.contains_key("model"));
+        assert!(!req.rest.contains_key("messages"));
+        // Serialize back and re-parse: the value is stable.
+        let reparsed: ChatRequest =
+            serde_json::from_value(serde_json::to_value(&req).expect("serialize"))
+                .expect("reparse");
+        assert_eq!(req, reparsed);
+    }
+
+    #[test]
+    fn response_round_trips_and_preserves_unknown_fields() {
+        let json = serde_json::json!({
+            "model": "backend",
+            "choices": [{ "index": 0 }],
+            "usage": { "total_tokens": 7 },
+        });
+        let resp: ChatResponse = serde_json::from_value(json).expect("parse response");
+        assert!(resp.rest.contains_key("usage"));
+        let reparsed: ChatResponse =
+            serde_json::from_value(serde_json::to_value(&resp).expect("serialize"))
+                .expect("reparse");
+        assert_eq!(resp, reparsed);
     }
 }

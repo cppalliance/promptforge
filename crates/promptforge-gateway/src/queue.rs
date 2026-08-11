@@ -94,6 +94,12 @@ pub(crate) enum AdmitError {
     /// The endpoint's waiting queue is already at `max_depth`.
     #[error("queue full")]
     QueueFull,
+
+    /// The waiting slot's notification channel closed before a slot was granted
+    /// (the lane was torn down while this caller waited). Distinct from
+    /// [`AdmitError::QueueFull`], which is a live back-pressure signal.
+    #[error("endpoint lane unavailable")]
+    Unavailable,
 }
 
 /// A concurrency slot held until dropped.
@@ -271,7 +277,9 @@ impl EndpointLane {
                             limited: Some(Arc::clone(lane)),
                         })
                     }
-                    Err(_) => Err(AdmitError::QueueFull),
+                    // The sender was dropped without granting a slot: the lane
+                    // is gone, not merely full. Surface that distinctly.
+                    Err(_) => Err(AdmitError::Unavailable),
                 }
             }
         }
@@ -370,6 +378,18 @@ fn dequeue_fair(state: &mut WaitState) -> Option<Waiter> {
     }
     Some(waiter)
 }
+
+/// Compile-time assertion that the admission primitives cross thread
+/// boundaries, so losing `Send`/`Sync` on any of them fails the build rather
+/// than silently breaking spawned request handling.
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<EndpointLane>();
+    assert_send_sync::<Permit>();
+    assert_send_sync::<QueueConfig>();
+    assert_send_sync::<AdmitError>();
+    assert_send_sync::<ClientId>();
+};
 
 #[cfg(test)]
 mod tests;

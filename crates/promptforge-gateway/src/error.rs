@@ -64,7 +64,11 @@ pub(crate) enum GatewayError {
 impl From<crate::queue::AdmitError> for GatewayError {
     fn from(value: crate::queue::AdmitError) -> Self {
         match value {
-            crate::queue::AdmitError::QueueFull => GatewayError::QueueFull,
+            // Both are "cannot admit now" from the client's perspective (503);
+            // the queue layer keeps them distinct for diagnostics and tests.
+            crate::queue::AdmitError::QueueFull | crate::queue::AdmitError::Unavailable => {
+                GatewayError::QueueFull
+            }
         }
     }
 }

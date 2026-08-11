@@ -59,13 +59,25 @@ pub(crate) struct Routing {
 impl Routing {
     /// Build a routing table directly from resolved models. Intended for tests
     /// and for [`Routing::from_config`]. Order of `models` is the catalog order.
-    #[must_use]
-    pub(crate) fn new(models: Vec<Arc<Model>>) -> Routing {
-        let by_name = models
-            .iter()
-            .map(|model| (model.name.clone(), Arc::clone(model)))
-            .collect();
-        Routing { by_name, models }
+    ///
+    /// # Errors
+    /// Returns [`ConfigError::Validation`] when two models share a name, which
+    /// would otherwise silently shadow one entry in the lookup table while
+    /// leaving both in the catalog listing.
+    pub(crate) fn new(models: Vec<Arc<Model>>) -> Result<Routing, ConfigError> {
+        let mut by_name = HashMap::with_capacity(models.len());
+        for model in &models {
+            if by_name
+                .insert(model.name.clone(), Arc::clone(model))
+                .is_some()
+            {
+                return Err(ConfigError::Validation(format!(
+                    "duplicate model name {}",
+                    model.name
+                )));
+            }
+        }
+        Ok(Routing { by_name, models })
     }
 
     /// Configured models in catalog order.
@@ -127,7 +139,7 @@ impl Routing {
             }));
         }
 
-        Ok(Routing::new(models))
+        Routing::new(models)
     }
 
     /// Appends models (for example from [`crate::local::LocalRuntime`]) to this table.
@@ -168,6 +180,27 @@ mod tests {
     use super::*;
     use crate::config::Config;
 
+    fn model_named(name: &str) -> Arc<Model> {
+        let endpoint = Arc::new(Endpoint {
+            id: "e".to_owned(),
+            upstream: Arc::new(OpenAiUpstream::new(
+                "http://127.0.0.1:9",
+                crate::config::Secret::from(String::new()),
+            )),
+            lane: EndpointLane::unlimited(),
+        });
+        Arc::new(Model {
+            name: name.to_owned(),
+            description: "d".to_owned(),
+            context: 8192,
+            thinking: ThinkingMode::Never,
+            tool_dialect: "openai".to_owned(),
+            tools_mode: "native".to_owned(),
+            upstream_name: "u".to_owned(),
+            endpoint,
+        })
+    }
+
     fn routing() -> Routing {
         let toml = r#"
 [server]
@@ -206,5 +239,34 @@ endpoints = ["e"]
             r.model("nope"),
             Err(GatewayError::UnknownModel(_))
         ));
+    }
+
+    #[test]
+    fn new_rejects_duplicate_model_names() {
+        let dup = Routing::new(vec![model_named("m"), model_named("m")]);
+        assert!(matches!(dup, Err(ConfigError::Validation(_))));
+    }
+
+    #[test]
+    fn new_preserves_catalog_order() {
+        let r = Routing::new(vec![model_named("a"), model_named("b"), model_named("c")])
+            .expect("distinct names");
+        let names: Vec<&str> = r.models().iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn merge_rejects_duplicate_model_names() {
+        let base = Routing::new(vec![model_named("known")]).expect("distinct");
+        let merged = base.merge([model_named("known")]);
+        assert!(matches!(merged, Err(ConfigError::Validation(_))));
+    }
+
+    #[test]
+    fn merge_appends_after_existing_models() {
+        let base = Routing::new(vec![model_named("a")]).expect("distinct");
+        let merged = base.merge([model_named("b")]).expect("distinct extra");
+        let names: Vec<&str> = merged.models().iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["a", "b"]);
     }
 }

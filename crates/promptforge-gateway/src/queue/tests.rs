@@ -131,6 +131,53 @@ async fn fair_scheduling_interleaves_clients() {
 }
 
 #[tokio::test]
+async fn cancel_while_queued_frees_the_waiter_slot() {
+    // concurrency=1: hold the only slot, queue a waiter, then cancel the waiter
+    // future before it is ever woken. Its queue entry must be removed so the
+    // waiter count returns to zero and a fresh admit can queue again.
+    use std::future::{Future, poll_fn};
+    use std::task::Poll;
+
+    let lane = EndpointLane::new(
+        1,
+        &QueueConfig {
+            max_depth: 10,
+            fair_scheduling: true,
+        },
+    );
+    let held = lane.admit("a").await.unwrap();
+
+    let mut waiting = Box::pin(lane.admit("b"));
+    poll_fn(|cx| match waiting.as_mut().poll(cx) {
+        Poll::Ready(_) => panic!("waiter should be queued, not ready"),
+        Poll::Pending => Poll::Ready(()),
+    })
+    .await;
+    await_waiters(&lane, 1).await;
+
+    drop(waiting);
+    await_waiters(&lane, 0).await;
+
+    // The slot is still held, so a new caller queues rather than being admitted.
+    let lane_next = lane.clone();
+    let next = tokio::spawn(async move { lane_next.admit("c").await });
+    await_waiters(&lane, 1).await;
+    drop(held);
+    let _permit = next.await.unwrap().unwrap();
+}
+
+#[test]
+fn queue_full_and_unavailable_are_distinct() {
+    // Q-006: a closed notification channel is not the same condition as live
+    // back-pressure; the queue layer keeps the two variants distinct.
+    assert_ne!(AdmitError::QueueFull, AdmitError::Unavailable);
+    assert_ne!(
+        AdmitError::QueueFull.to_string(),
+        AdmitError::Unavailable.to_string()
+    );
+}
+
+#[tokio::test]
 async fn cancel_after_wake_does_not_leak_slot() {
     // concurrency=1: queue a waiter, wake it by dropping the holder, then
     // cancel the waiter future before it returns a Permit. The granted slot
