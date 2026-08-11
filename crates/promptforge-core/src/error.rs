@@ -57,7 +57,7 @@ pub(crate) enum Error {
     /// The prompt frontmatter was not valid YAML, preserving the parser cause.
     ///
     /// Unlike [`Error::Parse`], this retains the originating YAML decode failure
-    /// (a [`serde_yaml::Error`]) as the `#[source]` cause (F3) so
+    /// (a [`serde_yaml_ng::Error`]) as the `#[source]` cause (F3) so
     /// [`crate::ParseError::source`] can expose the frontmatter syntax location
     /// instead of flattening it into the message.
     #[error("invalid frontmatter: {message}")]

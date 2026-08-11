@@ -354,7 +354,7 @@ impl Prompt {
 
     fn parse_inner(input: &str, execution: &str, observer: &dyn Observer) -> Result<Prompt> {
         let (yaml, body, frontmatter_lines) = split_frontmatter(input)?;
-        let frontmatter: Frontmatter = serde_yaml::from_str(&yaml).map_err(|e| {
+        let frontmatter: Frontmatter = serde_yaml_ng::from_str(&yaml).map_err(|e| {
             // Retain the YAML decode failure as the `#[source]` cause (F3) so the
             // public parse error can expose the frontmatter syntax location.
             Error::ParseFrontmatter {
