@@ -4,6 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 publish = false
 description = "PromptForge tool picker: resolve a plain-English capability need to a tool from an abstract catalog"
 

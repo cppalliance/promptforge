@@ -26,7 +26,53 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --locked --workspace --all-features
+
+      - name: Doctests
+        run: cargo test --workspace --doc
+
+      - name: Docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --all-features
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Verify the declared MSRV (workspace.package.rust-version) instead of
+      # trusting it: build and test on exactly that toolchain.
+      - uses: dtolnay/rust-toolchain@1.89.0
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build and test on MSRV
+        run: |
+          cargo build --locked --workspace --all-features
+          cargo test --locked --workspace --all-features
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deny and cargo-audit
+        run: cargo install cargo-deny cargo-audit --locked
+
+      # Advisories, licenses, duplicate versions, and source policy (deny.toml).
+      - name: cargo deny
+        run: cargo deny check
+
+      # RUSTSEC vulnerability scan of the committed lockfile.
+      - name: cargo audit
+        run: cargo audit
+
+      # Unused-dependency hygiene: run `cargo machete` locally
+      # (`cargo install cargo-machete`) before adding or removing dependencies.
