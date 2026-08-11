@@ -90,7 +90,10 @@ async fn unknown_model_is_404_with_model_not_found_code() {
     let response = reqwest::Client::new()
         .post(format!("http://{}/v1/chat/completions", gateway.addr))
         .bearer_auth("test-token")
-        .json(&serde_json::json!({ "model": "nope", "messages": [] }))
+        .json(&serde_json::json!({
+            "model": "nope",
+            "messages": [{ "role": "user", "content": "hi" }]
+        }))
         .send()
         .await
         .unwrap();
