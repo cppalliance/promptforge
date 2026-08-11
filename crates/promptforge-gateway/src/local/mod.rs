@@ -202,17 +202,24 @@ fn maybe_write_sidecar(_store: &ArtifactStore, source: &str, model_path: &Path) 
     };
 
     let bearer = artifacts::hub_bearer_token_from_env();
-    let chat_template = sidecar::fetch_hf_chat_template(&client, source, bearer.as_deref());
-
-    if chat_template.is_none() {
-        tracing::debug!(source = %source, "no chat_template from HF metadata");
-        return;
-    }
+    let chat_template = match sidecar::fetch_hf_chat_template(&client, source, bearer.as_deref()) {
+        Ok(Some(template)) => template,
+        Ok(None) => {
+            tracing::debug!(source = %source, "no chat_template from HF metadata");
+            return;
+        }
+        Err(error) => {
+            // Deliberate downgrade (SIDECAR-006): the sidecar is supplementary,
+            // so a fetch failure is logged and skipped, not propagated.
+            tracing::debug!(source = %source, error = %error, "sidecar fetch failed");
+            return;
+        }
+    };
 
     let meta = sidecar::SidecarMeta {
         source: Some(source.to_owned()),
         fetched: Some(sidecar::utc_now_iso()),
-        chat_template,
+        chat_template: Some(chat_template),
         card: None,
     };
 

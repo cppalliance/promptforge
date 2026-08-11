@@ -12,9 +12,43 @@
 //! The sidecar is YAML frontmatter plus optional fenced content. The gateway
 //! reads it back as supplementary [`DialectEvidence`] when `/props` is thin.
 
-use std::fs;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
+
+/// On-disk sidecar format version, emitted in the frontmatter (SIDECAR-005).
+const SIDECAR_VERSION: u32 = 1;
+/// Byte ceiling for a local sidecar read (SIDECAR-003).
+const MAX_SIDECAR_BYTES: u64 = 1024 * 1024;
+/// Byte ceiling for a remote `tokenizer_config.json` read (SIDECAR-002).
+const MAX_TOKENIZER_BYTES: u64 = 8 * 1024 * 1024;
+
+/// A typed failure while fetching remote sidecar metadata (SIDECAR-006).
+///
+/// The caller deliberately downgrades this to a debug log and proceeds without
+/// a sidecar, rather than swallowing the distinction between "no template" and
+/// "fetch failed".
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum SidecarError {
+    /// The source URL was not a recognized Hugging Face `resolve` URL.
+    #[error("unsupported Hugging Face source URL")]
+    UnsupportedUrl,
+    /// The HTTP request failed at the transport layer.
+    #[error("fetch tokenizer config")]
+    Request(#[source] reqwest::Error),
+    /// The endpoint returned a non-success status.
+    #[error("fetch tokenizer config returned {status}")]
+    Status {
+        /// The rendered status.
+        status: String,
+    },
+    /// Reading the (bounded) response body failed.
+    #[error("read tokenizer config body")]
+    Body(#[source] io::Error),
+    /// The response body was not valid JSON.
+    #[error("decode tokenizer config JSON")]
+    Decode(#[source] serde_json::Error),
+}
 
 /// Metadata extracted from the sidecar markdown file.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -40,25 +74,50 @@ pub(crate) fn sidecar_path(gguf: &Path) -> PathBuf {
 /// genuine I/O failures (permissions, corrupt read).
 pub(crate) fn read_sidecar(gguf: &Path) -> Result<Option<SidecarMeta>, io::Error> {
     let path = sidecar_path(gguf);
-    let text = match fs::read_to_string(&path) {
-        Ok(t) => t,
+    let file = match File::open(&path) {
+        Ok(file) => file,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
+    // Bounded read (SIDECAR-003): a corrupt or oversized sidecar cannot exhaust
+    // memory. Truncation only degrades best-effort metadata.
+    let mut text = String::new();
+    file.take(MAX_SIDECAR_BYTES).read_to_string(&mut text)?;
     Ok(Some(parse_sidecar(&text)))
 }
 
-/// Writes the sidecar `.md` beside `gguf`.
+/// Writes the sidecar `.md` beside `gguf` atomically.
+///
+/// The content is written to a temp file in the same directory and renamed into
+/// place, so a reader never observes a half-written sidecar (SIDECAR-004).
 pub(crate) fn write_sidecar(gguf: &Path, meta: &SidecarMeta) -> Result<(), io::Error> {
     let path = sidecar_path(gguf);
     let content = render_sidecar(meta);
-    fs::write(&path, content.as_bytes())
+    let mut temp = path.clone();
+    let mut name = temp.file_name().unwrap_or_default().to_owned();
+    name.push(".tmp");
+    temp.set_file_name(name);
+
+    let mut file = File::create(&temp)?;
+    file.write_all(content.as_bytes())?;
+    file.sync_all()?;
+    drop(file);
+    match fs::rename(&temp, &path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ignored = fs::remove_file(&temp);
+            Err(e)
+        }
+    }
 }
 
 /// Renders the sidecar markdown string from metadata.
 fn render_sidecar(meta: &SidecarMeta) -> String {
     let mut out = String::with_capacity(512);
     out.push_str("---\n");
+    out.push_str("version: ");
+    out.push_str(&SIDECAR_VERSION.to_string());
+    out.push('\n');
     if let Some(source) = &meta.source {
         out.push_str("source: ");
         out.push_str(source);
@@ -153,38 +212,51 @@ fn extract_section_text(body: &str, heading: &str) -> Option<String> {
 /// Fetches HF tokenizer config for `chat_template` from a HF URL.
 ///
 /// Attempts to resolve the repo/revision from the download URL and fetch
-/// `tokenizer_config.json`. Returns `None` on any failure - this is
-/// best-effort metadata enrichment.
+/// `tokenizer_config.json` (read with a byte cap, SIDECAR-002). `Ok(None)`
+/// means the response was valid but carried no usable template.
+///
+/// # Errors
+/// Returns a [`SidecarError`] the caller can log and deliberately downgrade
+/// (SIDECAR-006) when the URL is unsupported, the request fails, the status is
+/// non-success, or the body cannot be read or decoded.
 pub(crate) fn fetch_hf_chat_template(
     client: &reqwest::blocking::Client,
     source_url: &str,
     bearer: Option<&str>,
-) -> Option<String> {
-    let (repo, revision) = parse_hf_url(source_url)?;
+) -> Result<Option<String>, SidecarError> {
+    let (repo, revision) = parse_hf_url(source_url).ok_or(SidecarError::UnsupportedUrl)?;
     let api_url = format!("https://huggingface.co/{repo}/raw/{revision}/tokenizer_config.json");
     let mut request = client.get(&api_url);
     if let Some(token) = bearer {
         request = request.bearer_auth(token);
     }
-    let response = request.send().ok()?;
+    let response = request.send().map_err(SidecarError::Request)?;
     if !response.status().is_success() {
-        return None;
+        return Err(SidecarError::Status {
+            status: response.status().to_string(),
+        });
     }
-    let json: serde_json::Value = response.json().ok()?;
+    // Bounded body read: a hostile or mistaken endpoint cannot stream unbounded
+    // bytes into memory.
+    let mut buf = Vec::new();
+    response
+        .take(MAX_TOKENIZER_BYTES)
+        .read_to_end(&mut buf)
+        .map_err(SidecarError::Body)?;
+    let json: serde_json::Value = serde_json::from_slice(&buf).map_err(SidecarError::Decode)?;
     // chat_template can be a string or an array of objects with "template" fields.
-    match &json["chat_template"] {
+    let template = match &json["chat_template"] {
         serde_json::Value::String(s) => Some(s.clone()),
-        serde_json::Value::Array(arr) => {
-            // Pick the "default" template, or the first one.
-            arr.iter()
-                .find(|entry| entry.get("name").and_then(|n| n.as_str()) == Some("default"))
-                .or_else(|| arr.first())
-                .and_then(|entry| entry.get("template"))
-                .and_then(|t| t.as_str())
-                .map(String::from)
-        }
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .find(|entry| entry.get("name").and_then(|n| n.as_str()) == Some("default"))
+            .or_else(|| arr.first())
+            .and_then(|entry| entry.get("template"))
+            .and_then(|t| t.as_str())
+            .map(String::from),
         _ => None,
-    }
+    };
+    Ok(template)
 }
 
 /// Parses a HF download URL into `(repo, revision)`.
@@ -286,6 +358,19 @@ mod tests {
         let rendered = render_sidecar(&meta);
         let parsed = parse_sidecar(&rendered);
         assert_eq!(parsed, meta);
+    }
+
+    #[test]
+    fn rendered_sidecar_carries_a_format_version() {
+        // SIDECAR-005: the on-disk format is versioned, and an unknown/newer
+        // version line is tolerated on read (forward-compatible round trip).
+        let rendered = render_sidecar(&sample_meta());
+        assert!(
+            rendered.contains(&format!("version: {SIDECAR_VERSION}")),
+            "sidecar should record its format version"
+        );
+        let bumped = rendered.replacen(&format!("version: {SIDECAR_VERSION}"), "version: 999", 1);
+        assert_eq!(parse_sidecar(&bumped), sample_meta());
     }
 
     #[test]
