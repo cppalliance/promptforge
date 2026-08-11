@@ -138,10 +138,12 @@ struct FakeServer {
 
 impl FakeServer {
     fn new(body: &[u8]) -> Self {
+        // A blocking listener: the socket is bound before the accept thread
+        // starts, so the kernel backlog holds any early client connection until
+        // `accept` runs. There is no startup race and thus no startup sleep, and
+        // blocking `accept` needs no WouldBlock poll loop. `Drop` wakes the
+        // final blocking `accept` with a self-connect after setting `shutdown`.
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake server");
-        listener
-            .set_nonblocking(true)
-            .expect("nonblocking fake server");
         let address = listener.local_addr().expect("local addr").to_string();
         let requests = Arc::new(AtomicUsize::new(0));
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -149,48 +151,38 @@ impl FakeServer {
         let thread_shutdown = Arc::clone(&shutdown);
         let body = body.to_owned();
         let thread = thread::spawn(move || {
-            while !thread_shutdown.load(Ordering::Acquire) {
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        if thread_shutdown.load(Ordering::Acquire) {
-                            break;
-                        }
-                        stream
-                            .set_nonblocking(false)
-                            .expect("make accepted socket blocking");
-                        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-                        let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-                        let mut request = Vec::new();
-                        let mut buf = [0_u8; 1024];
-                        loop {
-                            match stream.read(&mut buf) {
-                                Ok(0) | Err(_) => break,
-                                Ok(n) => {
-                                    request.extend_from_slice(&buf[..n]);
-                                    if request.windows(4).any(|w| w == b"\r\n\r\n") {
-                                        break;
-                                    }
-                                }
+            for stream in listener.incoming() {
+                if thread_shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+                let Ok(mut stream) = stream else {
+                    break;
+                };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+                let mut request = Vec::new();
+                let mut buf = [0_u8; 1024];
+                loop {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            request.extend_from_slice(&buf[..n]);
+                            if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                                break;
                             }
                         }
-                        let response = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                            body.len()
-                        );
-                        let _ = stream.write_all(response.as_bytes());
-                        let _ = stream.write_all(&body);
-                        let _ = stream.flush();
-                        thread_requests.fetch_add(1, Ordering::AcqRel);
                     }
-                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(1));
-                    }
-                    Err(_) => break,
                 }
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(&body);
+                let _ = stream.flush();
+                thread_requests.fetch_add(1, Ordering::AcqRel);
             }
         });
-        // Give the accept loop a moment to start before clients connect.
-        thread::sleep(Duration::from_millis(10));
         Self {
             address,
             requests,

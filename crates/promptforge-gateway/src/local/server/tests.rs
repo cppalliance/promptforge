@@ -42,10 +42,11 @@ struct FakeHttpServer {
 
 impl FakeHttpServer {
     fn start(model_alias: &str) -> Self {
+        // Blocking listener: bound before the accept thread starts, so early
+        // client connections are held in the kernel backlog (no startup race,
+        // no startup sleep), and blocking `accept` needs no WouldBlock poll
+        // loop. `Drop` wakes the final blocking `accept` with a self-connect.
         let listener = TcpListener::bind((LOOPBACK, 0)).expect("bind unrelated fake listener");
-        listener
-            .set_nonblocking(true)
-            .expect("make unrelated fake listener nonblocking");
         let port = listener
             .local_addr()
             .expect("read unrelated fake listener address")
@@ -54,12 +55,12 @@ impl FakeHttpServer {
         let thread_shutdown = Arc::clone(&shutdown);
         let model_alias = model_alias.to_owned();
         let thread = thread::spawn(move || {
-            while !thread_shutdown.load(Ordering::Acquire) {
-                match listener.accept() {
-                    Ok((stream, _)) => respond(stream, &model_alias, None),
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(5));
-                    }
+            for stream in listener.incoming() {
+                if thread_shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+                match stream {
+                    Ok(stream) => respond(stream, &model_alias, None),
                     Err(_) => break,
                 }
             }
