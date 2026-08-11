@@ -37,9 +37,10 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A33. Alternating blocks share one section conversation; non-final prose runs one round and final prose owns the full tool loop.
 - A34. A subroutine call starts a fresh VM and returns; a transfer clears context, stops the caller, and does not return.
 - A35. The H1 program executes exactly once with live host resolution; no separate declaration or bind replay phase exists.
-- A36. Shared Lua libraries load into each section VM before host capability injection and have no load-time effects.
 
 - A37. A clean workspace build requires no secret environment variable or manually provisioned artifact.
+
+- A38. Each user-facing component owns a colocated guide derived from verified behavior.
 
 ## Principles
 
