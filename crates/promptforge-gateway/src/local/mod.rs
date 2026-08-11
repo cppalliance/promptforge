@@ -81,12 +81,12 @@ impl LocalRuntime {
 
             let concurrency = config
                 .local_model_concurrency(local_model)
-                .map_err(|e| LocalError::Server(e.to_string()))?;
-            let parallel = u32::try_from(concurrency).map_err(|_| {
-                LocalError::Server(format!(
-                    "lane concurrency {concurrency} does not fit in u32"
-                ))
-            })?;
+                .map_err(|source| LocalError::LaneConcurrency {
+                    model: local_model.name.clone(),
+                    source,
+                })?;
+            let parallel =
+                u32::try_from(concurrency).map_err(|_| LocalError::LaneTooLarge { concurrency })?;
             let options = launch_options(local_model, parallel);
             let guard =
                 ServerGuard::start(&llama_server, &model_path, &options, interrupted.as_ref())?;

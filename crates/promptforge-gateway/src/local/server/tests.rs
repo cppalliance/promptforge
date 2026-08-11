@@ -133,9 +133,11 @@ fn deterministic_identity(index: usize) -> AttemptIdentity {
 }
 
 fn spawn_fake_child(request: &SpawnRequest<'_>) -> Result<Child> {
-    let executable = std::env::current_exe()
-        .map_err(|source| LocalError::Server(format!("locate test executable: {source}")))?;
-    Command::new(executable)
+    let executable = std::env::current_exe().map_err(|source| LocalError::Spawn {
+        executable: PathBuf::from("<test-executable>"),
+        source,
+    })?;
+    Command::new(&executable)
         .args([
             "--exact",
             "local::server::tests::fake_llama_server_worker",
@@ -149,7 +151,7 @@ fn spawn_fake_child(request: &SpawnRequest<'_>) -> Result<Child> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|source| LocalError::Server(format!("spawn fake llama-server child: {source}")))
+        .map_err(|source| LocalError::Spawn { executable, source })
 }
 
 #[test]
@@ -274,9 +276,10 @@ fn debug_redacts_api_key() {
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
     let mut select_port = || {
-        ports
-            .pop_front()
-            .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
+        ports.pop_front().ok_or_else(|| LocalError::Port {
+            operation: "unexpected test port selection",
+            source: std::io::Error::other("test port queue exhausted"),
+        })
     };
     let mut make_identity = || deterministic_identity(0);
     let interrupted = AtomicBool::new(false);
@@ -303,9 +306,10 @@ fn retries_after_foreign_health_listener_wins_selected_port() {
     let fresh_port = free_port().expect("select retry port");
     let mut ports = VecDeque::from([foreign.port, fresh_port]);
     let mut select_port = || {
-        ports
-            .pop_front()
-            .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
+        ports.pop_front().ok_or_else(|| LocalError::Port {
+            operation: "unexpected test port selection",
+            source: std::io::Error::other("test port queue exhausted"),
+        })
     };
     let mut identity_index = 0;
     let mut make_identity = || {
@@ -351,9 +355,10 @@ fn drop_kills_the_child_process() {
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
     let mut select_port = || {
-        ports
-            .pop_front()
-            .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
+        ports.pop_front().ok_or_else(|| LocalError::Port {
+            operation: "unexpected test port selection",
+            source: std::io::Error::other("test port queue exhausted"),
+        })
     };
     let mut make_identity = || deterministic_identity(0);
     let child_id = Arc::new(Mutex::new(None));
@@ -396,9 +401,10 @@ fn respawn_reuses_port_and_identity_after_child_death() {
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
     let mut select_port = || {
-        ports
-            .pop_front()
-            .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
+        ports.pop_front().ok_or_else(|| LocalError::Port {
+            operation: "unexpected test port selection",
+            source: std::io::Error::other("test port queue exhausted"),
+        })
     };
     let mut make_identity = || deterministic_identity(0);
     let spawn_log = Arc::new(Mutex::new(Vec::new()));
@@ -463,9 +469,10 @@ fn local_upstream_send_respawns_dead_child_once() {
     let port = free_port().expect("select free port");
     let mut ports = VecDeque::from([port]);
     let mut select_port = || {
-        ports
-            .pop_front()
-            .ok_or_else(|| LocalError::Server("unexpected port selection".to_owned()))
+        ports.pop_front().ok_or_else(|| LocalError::Port {
+            operation: "unexpected test port selection",
+            source: std::io::Error::other("test port queue exhausted"),
+        })
     };
     let mut make_identity = || deterministic_identity(0);
     let spawn_count = Arc::new(Mutex::new(0_usize));

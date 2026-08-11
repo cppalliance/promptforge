@@ -93,10 +93,9 @@ impl LocalUpstream {
                 model = %inner.model_name,
                 "llama-server dead but respawn cooldown active"
             );
-            return Err(LocalError::Server(format!(
-                "llama-server for {} exited; respawn cooldown active",
-                inner.model_name
-            )));
+            return Err(LocalError::RespawnCooldown {
+                model: inner.model_name.clone(),
+            });
         }
 
         tracing::warn!(
@@ -119,6 +118,7 @@ impl LocalUpstream {
                 tracing::error!(
                     model = %inner.model_name,
                     error = %error,
+                    retryable = error.is_retryable(),
                     "llama-server respawn failed"
                 );
                 Err(error)

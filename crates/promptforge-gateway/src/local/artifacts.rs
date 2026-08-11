@@ -316,9 +316,10 @@ impl ArtifactStore {
         if let Some(total) = total
             && total > MAX_ARTIFACT_BYTES
         {
-            return Err(LocalError::Server(format!(
-                "artifact at {url} declares {total} bytes, exceeding the {MAX_ARTIFACT_BYTES}-byte limit"
-            )));
+            return Err(LocalError::ArtifactTooLarge {
+                url: url.to_owned(),
+                limit: MAX_ARTIFACT_BYTES,
+            });
         }
         progress.set_len(total);
         let file = File::create(destination).map_err(|source| LocalError::Io {
@@ -342,9 +343,10 @@ impl ArtifactStore {
             }
             downloaded = downloaded.saturating_add(count as u64);
             if downloaded > MAX_ARTIFACT_BYTES {
-                return Err(LocalError::Server(format!(
-                    "artifact at {url} exceeded the {MAX_ARTIFACT_BYTES}-byte limit mid-stream"
-                )));
+                return Err(LocalError::ArtifactTooLarge {
+                    url: url.to_owned(),
+                    limit: MAX_ARTIFACT_BYTES,
+                });
             }
             writer
                 .write_all(&buffer[..count])

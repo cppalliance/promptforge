@@ -96,11 +96,9 @@ impl ChildSpawner {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
-                .map_err(|source| {
-                    LocalError::Server(format!(
-                        "start llama-server at {}: {source}",
-                        request.executable.display()
-                    ))
+                .map_err(|source| LocalError::Spawn {
+                    executable: request.executable.to_owned(),
+                    source,
                 })
         })
     }
@@ -160,7 +158,7 @@ impl ServerGuard {
     /// Starts `llama-server` with `options` and verifies authenticated model identity.
     ///
     /// # Errors
-    /// Returns [`LocalError::Server`] when spawn, readiness, or identity checks fail.
+    /// Returns a [`LocalError`] when spawn, readiness, or identity checks fail.
     pub(crate) fn start(
         executable: &Path,
         model: &Path,
@@ -242,20 +240,22 @@ impl ServerGuard {
                     ));
                 }
                 Err(error) => {
-                    return Err(LocalError::Server(format!(
-                        "{error}\nllama-server invocation failed\n{}\n{}",
-                        display_invocation(executable, &args),
-                        guard.diagnostics()
-                    )));
+                    return Err(LocalError::Startup {
+                        detail: format!(
+                            "{}\n{}",
+                            display_invocation(executable, &args),
+                            guard.diagnostics()
+                        ),
+                        source: Box::new(error),
+                    });
                 }
             }
         }
 
-        Err(LocalError::Server(format!(
-            "llama-server exhausted {} fresh-port attempts after child bind collisions\n{}",
-            policy.attempts,
-            collisions.join("\n")
-        )))
+        Err(LocalError::PortCollisions {
+            attempts: policy.attempts,
+            detail: collisions.join("\n"),
+        })
     }
 
     fn start_capture(&mut self) -> Result<()> {
@@ -263,7 +263,7 @@ impl ServerGuard {
             .child
             .stdout
             .take()
-            .ok_or_else(|| LocalError::Server("capture llama-server stdout".to_owned()))?;
+            .ok_or(LocalError::Capture { stream: "stdout" })?;
         self.readers.push(capture_reader(
             "llama-server-stdout",
             child_stdout,
@@ -273,7 +273,7 @@ impl ServerGuard {
             .child
             .stderr
             .take()
-            .ok_or_else(|| LocalError::Server("capture llama-server stderr".to_owned()))?;
+            .ok_or(LocalError::Capture { stream: "stderr" })?;
         self.readers.push(capture_reader(
             "llama-server-stderr",
             child_stderr,
@@ -337,7 +337,6 @@ impl ServerGuard {
         interrupted: &AtomicBool,
         policy: StartupPolicy,
     ) -> Result<WaitOutcome> {
-        let health = format!("http://{LOOPBACK}:{}/health", self.port);
         let deadline = Instant::now() + policy.deadline;
         let client = reqwest::blocking::Client::builder()
             .no_proxy()
@@ -345,15 +344,11 @@ impl ServerGuard {
             .connect_timeout(policy.http_timeout)
             .timeout(policy.http_timeout)
             .build()
-            .map_err(|source| {
-                LocalError::Server(format!("build llama-server readiness client: {source}"))
-            })?;
+            .map_err(|source| LocalError::ReadinessClient { source })?;
 
         loop {
             if interrupted.load(Ordering::Acquire) {
-                return Err(LocalError::Server(
-                    "llama-server startup interrupted by Ctrl-C".to_owned(),
-                ));
+                return Err(LocalError::StartupInterrupted);
             }
             if let Some(status) = self.child_status()? {
                 return self.classify_early_exit(status, policy.http_timeout);
@@ -365,19 +360,18 @@ impl ServerGuard {
                 return Ok(WaitOutcome::Ready);
             }
             if Instant::now() >= deadline {
-                return Err(LocalError::Server(format!(
-                    "llama-server did not expose its authenticated model at {health} within {} seconds",
-                    policy.deadline.as_secs()
-                )));
+                return Err(LocalError::ReadinessTimeout {
+                    seconds: policy.deadline.as_secs(),
+                });
             }
             thread::sleep(policy.interval);
         }
     }
 
     fn child_status(&mut self) -> Result<Option<ExitStatus>> {
-        self.child.try_wait().map_err(|source| {
-            LocalError::Server(format!("inspect llama-server during readiness: {source}"))
-        })
+        self.child
+            .try_wait()
+            .map_err(|source| LocalError::Inspect { source })
     }
 
     /// Returns whether the child process is still running.
@@ -397,7 +391,7 @@ impl ServerGuard {
     /// alias, and API key, then waits until authenticated readiness succeeds.
     ///
     /// # Errors
-    /// Returns [`LocalError::Server`] when kill, spawn, or readiness fails.
+    /// Returns a [`LocalError`] when kill, spawn, or readiness fails.
     pub(crate) fn respawn(
         &mut self,
         executable: &Path,
@@ -435,12 +429,14 @@ impl ServerGuard {
         let policy = self.policy;
         match self.wait_until_ready(&interrupted, policy)? {
             WaitOutcome::Ready => Ok(()),
-            WaitOutcome::PortCollision(status) => Err(LocalError::Server(format!(
-                "llama-server respawn hit a port collision on {} with {status}\n{}\n{}",
-                self.port,
-                display_invocation(executable, &args),
-                self.diagnostics()
-            ))),
+            WaitOutcome::PortCollision(status) => Err(LocalError::RespawnPortCollision {
+                port: self.port,
+                detail: format!(
+                    "child exited with {status}\n{}\n{}",
+                    display_invocation(executable, &args),
+                    self.diagnostics()
+                ),
+            }),
         }
     }
 
@@ -453,9 +449,9 @@ impl ServerGuard {
         if listener_is_present(self.port, connect_timeout) {
             Ok(WaitOutcome::PortCollision(status))
         } else {
-            Err(LocalError::Server(format!(
-                "llama-server exited before readiness with {status}"
-            )))
+            Err(LocalError::EarlyExit {
+                status: status.to_string(),
+            })
         }
     }
 
@@ -476,16 +472,14 @@ impl ServerGuard {
         }
         self.child
             .kill()
-            .map_err(|source| LocalError::Server(format!("kill llama-server child: {source}")))?;
+            .map_err(|source| LocalError::Kill { source })?;
         let deadline = Instant::now() + TEARDOWN_DEADLINE;
         loop {
             if self.child_status()?.is_some() {
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                return Err(LocalError::Server(
-                    "llama-server child did not exit within the teardown deadline".to_owned(),
-                ));
+                return Err(LocalError::TeardownTimeout);
             }
             thread::sleep(TEARDOWN_POLL);
         }

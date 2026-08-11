@@ -57,12 +57,17 @@ pub(super) fn new_capture() -> SharedCapture {
 }
 
 pub(super) fn free_port() -> Result<u16> {
-    let listener = TcpListener::bind((LOOPBACK, 0))
-        .map_err(|source| LocalError::Server(format!("select free llama-server port: {source}")))?;
+    let listener = TcpListener::bind((LOOPBACK, 0)).map_err(|source| LocalError::Port {
+        operation: "select free llama-server port",
+        source,
+    })?;
     listener
         .local_addr()
         .map(|address| address.port())
-        .map_err(|source| LocalError::Server(format!("read selected llama-server port: {source}")))
+        .map_err(|source| LocalError::Port {
+            operation: "read selected llama-server port",
+            source,
+        })
 }
 
 pub(super) fn random_identity() -> AttemptIdentity {
@@ -228,5 +233,8 @@ where
                 }
             }
         })
-        .map_err(|source| LocalError::Server(format!("start {name} capture thread: {source}")))
+        .map_err(|source| LocalError::CaptureThread {
+            stream: name,
+            source,
+        })
 }

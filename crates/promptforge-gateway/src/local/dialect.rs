@@ -53,11 +53,13 @@ pub(crate) fn resolve_local_dialect(
         "dialect evidence from /props + sidecar"
     );
     let registry = ToolDialectRegistry::builtin();
-    let dialect_id = registry.resolve(&evidence).map_err(|error| {
-        LocalError::Server(format!(
-            "dialect resolution failed for local model {model_name}: {error}"
-        ))
-    })?;
+    let dialect_id =
+        registry
+            .resolve(&evidence)
+            .map_err(|source| LocalError::DialectResolution {
+                model: model_name.to_owned(),
+                source: Box::new(source),
+            })?;
     let tools_mode = dialect_id.tools_mode();
     Ok((dialect_id.to_string(), tools_mode.to_string()))
 }
@@ -84,24 +86,31 @@ fn fetch_props_evidence(guard: &ServerGuard) -> Result<DialectEvidence, LocalErr
         .no_proxy()
         .timeout(PROPS_TIMEOUT)
         .build()
-        .map_err(|e| LocalError::Server(format!("build props client: {e}")))?;
+        .map_err(|source| LocalError::DialectProbe {
+            operation: "build props client",
+            source,
+        })?;
 
     let response = client
         .get(format!("{base}/props"))
         .bearer_auth(guard.api_key())
         .send()
-        .map_err(|e| LocalError::Server(format!("GET /props failed: {e}")))?;
+        .map_err(|source| LocalError::DialectProbe {
+            operation: "GET /props",
+            source,
+        })?;
 
     if !response.status().is_success() {
-        return Err(LocalError::Server(format!(
-            "GET /props returned {}",
-            response.status()
-        )));
+        return Err(LocalError::DialectProbeStatus {
+            operation: "GET /props",
+            status: response.status().to_string(),
+        });
     }
 
-    let props: Value = response
-        .json()
-        .map_err(|e| LocalError::Server(format!("parse /props JSON: {e}")))?;
+    let props: Value = response.json().map_err(|source| LocalError::DialectProbe {
+        operation: "parse /props JSON",
+        source,
+    })?;
 
     let chat_template = props
         .get("chat_template")
@@ -135,9 +144,9 @@ fn fetch_props_evidence(guard: &ServerGuard) -> Result<DialectEvidence, LocalErr
 /// Reads native tool-call capability from `/v1/models`.
 ///
 /// # Errors
-/// Returns [`LocalError::Server`] when the probe request fails, returns a
-/// non-success status, or the body is not JSON. `Ok(None)` means the endpoint
-/// answered but did not report the capability (unknown, not `false`).
+/// Returns a [`LocalError`] when the probe request fails, returns a non-success
+/// status, or the body is not JSON. `Ok(None)` means the endpoint answered but
+/// did not report the capability (unknown, not `false`).
 fn fetch_tool_call_capability(
     client: &reqwest::blocking::Client,
     base: &str,
@@ -147,16 +156,20 @@ fn fetch_tool_call_capability(
         .get(format!("{base}/v1/models"))
         .bearer_auth(api_key)
         .send()
-        .map_err(|e| LocalError::Server(format!("GET /v1/models for tool capability: {e}")))?;
+        .map_err(|source| LocalError::DialectProbe {
+            operation: "GET /v1/models for tool capability",
+            source,
+        })?;
     if !response.status().is_success() {
-        return Err(LocalError::Server(format!(
-            "GET /v1/models for tool capability returned {}",
-            response.status()
-        )));
+        return Err(LocalError::DialectProbeStatus {
+            operation: "GET /v1/models for tool capability",
+            status: response.status().to_string(),
+        });
     }
-    let body: Value = response
-        .json()
-        .map_err(|e| LocalError::Server(format!("parse /v1/models JSON: {e}")))?;
+    let body: Value = response.json().map_err(|source| LocalError::DialectProbe {
+        operation: "parse /v1/models JSON",
+        source,
+    })?;
     Ok(tool_call_capability_from_body(&body))
 }
 
