@@ -2278,7 +2278,7 @@ checksum = "fc04a4c58212d57930a24bf47d3fa87485264a3a054e9c10e042eb373573ad3c"
 
 [[package]]
 name = "make-user-guide"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "markup5ever"
@@ -2838,7 +2838,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2851,7 +2851,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2886,7 +2886,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-dev"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2902,7 +2902,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-gateway"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2928,7 +2928,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-mcp-server"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "arc-swap",
  "axum",
@@ -2956,7 +2956,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-tool-picker"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -2974,7 +2974,7 @@ dependencies = [
 
 [[package]]
 name = "promptforge-webfetch"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
