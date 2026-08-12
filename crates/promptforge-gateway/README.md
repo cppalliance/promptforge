@@ -1,24 +1,31 @@
-# `promptforge-gateway`
+# promptforge-gateway
 
-Inference gateway binary: holds backend credentials, routes OpenAI-shaped chat completions, and advertises a bearer-authed model catalog.
+[![Crates.io](https://img.shields.io/crates/v/promptforge-gateway.svg)](https://crates.io/crates/promptforge-gateway)
+[![docs.rs](https://img.shields.io/docsrs/promptforge-gateway)](https://docs.rs/promptforge-gateway)
+[![License](https://img.shields.io/crates/l/promptforge-gateway)](LICENSE)
 
-## What it serves
+The credential-holding inference gateway for PromptForge. It serves an OpenAI-compatible HTTP API that routes chat completions to configured backends, holds every credential, manages a model catalog, runs a built-in web search tool, and optionally spawns local `llama-server` processes for GGUF models. Nothing above it holds a vendor key. A key rotation touches one file on one host.
 
-- `POST /v1/chat/completions` - OpenAI-shaped passthrough; `temperature`, `max_tokens`, and `chat_template_kwargs` ride through the request body's catch-all
-- `GET /v1/models` - catalog built from every `[[model]]` / `[[local_model]]` in the active profile
-- `POST /v1/tools/web_search` - optional Brave-backed search when `[tools.web_search]` is configured
-- `GET /admin/profiles`, `GET /admin/status`, `POST /admin/switch-profile` - named profiles (same bearer as `/v1`)
-- `GET /health` - unauthenticated liveness
+## Installation
 
-Hosts fetch `GET /v1/models` to build the `ModelCatalog` that H1 `models.need` binds against. Chat remains passthrough; catalog metadata does not rewrite request bodies.
-
-## Configuration
-
-See the repository-root `gateway.toml`, example profiles under `profiles/`, and `design-gateway.md` for `[[endpoint]]` / `[[model]]` / `[[local_model]]` / `include` / devices.
-
-```text
-cargo run -p promptforge-gateway -- serve gateway.toml
-cargo run -p promptforge-gateway -- serve --profiles-dir ./profiles --profile analytical
+```bash
+cargo install promptforge-gateway
 ```
 
-`design-gateway.md` is the design document for this crate.
+## Usage
+
+```bash
+promptforge-gateway serve gateway.toml
+```
+
+Configure endpoints, models, and credentials in a single TOML file. The gateway accepts `POST /v1/chat/completions` and serves a model catalog at `GET /v1/models`.
+
+See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for full documentation.
+
+## Minimum Rust Version
+
+Rust 1.89 or later.
+
+## License
+
+Licensed under the [Boost Software License 1.0](LICENSE).

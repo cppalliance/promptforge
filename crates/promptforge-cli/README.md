@@ -1,34 +1,32 @@
 # promptforge-cli
 
-The `promptforge` command-line tool. It parses a PromptForge prompt file and executes its sections top to bottom (fall-through).
+[![Crates.io](https://img.shields.io/crates/v/promptforge-cli.svg)](https://crates.io/crates/promptforge-cli)
+[![docs.rs](https://img.shields.io/docsrs/promptforge-cli)](https://docs.rs/promptforge-cli)
+[![License](https://img.shields.io/crates/l/promptforge-cli)](LICENSE)
+
+A command-line tool that runs PromptForge prompt files in a single process. Point it at a prompt file, and it parses the sections, executes them top to bottom, and prints the returned value. No server to start, no connection to manage, no configuration to write. You edit a prompt, run it, and see what it produces.
+
+## Installation
+
+```bash
+cargo install promptforge-cli
+```
 
 ## Usage
 
-```text
-promptforge run <file.md> [input]
+```bash
+promptforge run prompts/hello.md
+promptforge run prompts/staker.md "Bloomberg"
 ```
 
-- `file.md` must be a PromptForge prompt: its frontmatter must declare a `promptforge:` version, or the CLI declines to run it.
-- `input` is the single raw argument string exposed to the prompt as `args`; it defaults to empty.
+The prompt's returned value goes to stdout. Errors go to stderr. On success, stdout contains exactly the returned value and nothing else.
 
-Run `promptforge --help` or `promptforge run --help` for generated usage, and `promptforge --version` for the version.
+See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for full documentation.
 
-## Gateway configuration
+## Minimum Rust Version
 
-Gateway credentials are read only from the environment:
+Rust 1.89 or later.
 
-- `PROMPTFORGE_GATEWAY_URL` - the gateway base URL.
-- `PROMPTFORGE_GATEWAY_KEY` - the bearer token.
+## License
 
-With neither set, the CLI runs local-only (`web_fetch` only, no remote model catalog). Both are required together to reach the gateway and enable `web_search`; a key without a usable URL is rejected.
-
-## Exit status
-
-- `0` - success.
-- `1` - an operational failure (unreadable file, not a prompt, parse, setup, or execution error).
-- `2` - a usage error (owned by the argument parser).
-- `130` - the run was cancelled with Ctrl-C.
-
-## Publication
-
-This is an unpublished leaf binary (`publish = false`, `version = "0.0.0"`).
+Licensed under the [Boost Software License 1.0](LICENSE).
