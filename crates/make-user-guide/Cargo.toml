@@ -1,0 +1,10 @@
+[package]
+name = "make-user-guide"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true
