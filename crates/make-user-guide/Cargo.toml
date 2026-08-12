@@ -2,6 +2,7 @@
 name = "make-user-guide"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]
