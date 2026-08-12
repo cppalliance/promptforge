@@ -1,11 +1,11 @@
 [package]
 name = "promptforge-webfetch"
-version = "0.0.0"
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
+
 description = "PromptForge web_fetch tool: fetch a URL and return its main content as markdown"
 readme = "README.md"
 keywords = ["http", "fetch", "web", "ssrf", "readability"]

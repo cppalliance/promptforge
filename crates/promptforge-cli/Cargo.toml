@@ -1,11 +1,11 @@
 [package]
 name = "promptforge-cli"
-version = "0.0.0"
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
+
 description = "PromptForge command-line tool"
 readme = "README.md"
 keywords = ["promptforge", "prompt", "llm", "cli", "ai"]

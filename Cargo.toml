@@ -3,16 +3,16 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.89"
 license = "BSL-1.0"
 repository = "https://github.com/cppalliance/promptforge"
 
 [workspace.dependencies]
-promptforge-core = { path = "crates/promptforge-core", version = "0.0.0" }
-promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.0.0" }
-promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.0.0" }
+promptforge-core = { path = "crates/promptforge-core", version = "0.1.0" }
+promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.1.0" }
+promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.1.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"
