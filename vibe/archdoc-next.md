@@ -45,3 +45,4 @@
 - [2026-08-10-1-crate-review] continuous fix stage: Treat bounded implementation slices as one effort that continues until every finding is dispositioned and the build is clean.
 - [2026-08-10-1-crate-review] green-before-advance: Never checkpoint or leave a component while its verification gate is red or blocked.
 - [2026-08-11-1-dokuman-all-crates] test-only documentation: Omit a separate user guide when a crate exposes test infrastructure but no standalone user-facing capability.
+- [2026-08-11-2-make-user-guide-crate] document structure preservation: Keep one product H1, transform component headings outside code fences, and fail visibly on missing source guides.

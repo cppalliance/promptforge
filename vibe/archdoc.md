@@ -32,7 +32,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A28. Tool-call accounting is scoped to one VM and prompt alias; unscoped tool names fail instead of dispatching.
 - A29. Local lane concurrency is the single authority for gateway admission and backend parallel slots.
 - A30. Fan-out arms run concurrently, return in input order, and abort siblings on the first error.
-- A31. A failed local inference child is respawned with stable routing identity and at most one request retry.
 - A32. Search yields sanitized, source-diverse leads; fetch remains the boundary for page content.
 - A33. Alternating blocks share one section conversation; non-final prose runs one round and final prose owns the full tool loop.
 - A34. A subroutine call starts a fresh VM and returns; a transfer clears context, stops the caller, and does not return.
@@ -41,6 +40,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A37. A clean workspace build requires no secret environment variable or manually provisioned artifact.
 
 - A38. Each user-facing component owns a colocated guide derived from verified behavior.
+
+- A39. The product guide is generated deterministically from component-owned guides.
 
 ## Principles
 
