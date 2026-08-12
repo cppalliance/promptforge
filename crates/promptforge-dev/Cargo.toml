@@ -10,6 +10,7 @@ description = "Interactive PromptForge prompt runner against an already-running 
 readme = "README.md"
 keywords = ["promptforge", "prompt", "llm", "gateway", "cli"]
 categories = ["command-line-utilities", "development-tools"]
+documentation = "https://cppalliance.github.io/promptforge/"
 
 [[bin]]
 name = "promptforge-dev"

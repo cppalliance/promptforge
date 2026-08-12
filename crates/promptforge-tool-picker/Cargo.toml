@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 description = "PromptForge tool picker: resolve a plain-English capability need to a tool from an abstract catalog"
+readme = "README.md"
+keywords = ["tool", "semantic", "embedding", "resolution", "ai"]
+categories = ["algorithms"]
+documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 candle-core = { workspace = true }

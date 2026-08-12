@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 description = "PromptForge web_fetch tool: fetch a URL and return its main content as markdown"
+readme = "README.md"
+keywords = ["http", "fetch", "web", "ssrf", "readability"]
+categories = ["web-programming::http-client"]
+documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 promptforge-core.workspace = true
@@ -28,6 +32,9 @@ tokio.workspace = true
 axum.workspace = true
 flate2.workspace = true
 futures-util.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
 
 [lints]
 workspace = true
