@@ -10,6 +10,7 @@ description = "PromptForge command-line tool"
 readme = "README.md"
 keywords = ["promptforge", "prompt", "llm", "cli", "ai"]
 categories = ["command-line-utilities", "development-tools"]
+documentation = "https://cppalliance.github.io/promptforge/"
 
 [[bin]]
 name = "promptforge"
