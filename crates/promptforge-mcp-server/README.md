@@ -1,26 +1,32 @@
 # promptforge-mcp-server
 
-The PromptForge MCP server. It runs PromptForge prompts for an agentic harness
-(Cursor, Claude Code) behind a fixed set of built-in tools: a prompt runs
-because a caller named it to `run_prompt`, so the catalog is never published as
-individual tools and `tools/list` is stable whatever the catalog holds.
+[![Crates.io](https://img.shields.io/crates/v/promptforge-mcp-server.svg)](https://crates.io/crates/promptforge-mcp-server)
+[![docs.rs](https://img.shields.io/docsrs/promptforge-mcp-server)](https://docs.rs/promptforge-mcp-server)
+[![License](https://img.shields.io/crates/l/promptforge-mcp-server)](LICENSE)
 
-## Running
+An MCP server that runs PromptForge prompts for agentic harnesses like Cursor and Claude Code. It puts a prompt catalog behind four fixed MCP tools rather than publishing each prompt as its own tool, which means `tools/list` never changes and a prompt saved ten seconds ago is callable with no reconnect. Serves over streamable HTTP with bearer auth, or over stdio for a local spawn.
 
+## Installation
+
+```bash
+cargo install promptforge-mcp-server
 ```
-promptforge-mcp-server serve [--stdio] <prompts.toml>
+
+## Usage
+
+```bash
+promptforge-mcp-server serve prompts.toml
+promptforge-mcp-server serve --stdio prompts.toml
 ```
 
-- Without `--stdio`, the server binds the streamable-HTTP transport at `/mcp`
-  behind a shared bearer, with an unauthenticated `/healthz` beside it.
-- With `--stdio`, the server speaks JSON-RPC over standard input and output and
-  never reads the shared token.
+Configure your prompt catalog, gateway connection, and server settings in a single `prompts.toml` file.
 
-`prompts.toml` names the bind address, the shared token, the prompts directory,
-the gateway every run's model calls go through, and which prompts the harness
-sees. See the crate's library documentation for the configuration shape and the
-boot/serve seam.
+See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for full documentation.
+
+## Minimum Rust Version
+
+Rust 1.89 or later.
 
 ## License
 
-BSL-1.0
+Licensed under the [Boost Software License 1.0](LICENSE).

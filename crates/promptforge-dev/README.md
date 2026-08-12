@@ -1,42 +1,32 @@
-# `promptforge-dev`
+# promptforge-dev
 
-Interactive runner for one PromptForge prompt against an already-running `promptforge-gateway`. This binary never starts the gateway or `llama-server`.
+[![Crates.io](https://img.shields.io/crates/v/promptforge-dev.svg)](https://crates.io/crates/promptforge-dev)
+[![docs.rs](https://img.shields.io/docsrs/promptforge-dev)](https://docs.rs/promptforge-dev)
+[![License](https://img.shields.io/crates/l/promptforge-dev)](LICENSE)
 
-## Prerequisites
+The edit-run-inspect loop for PromptForge prompts. Point it at a prompt file and it runs the prompt against your already-running gateway, dumps the store for inspection, and optionally watches for saves so every edit triggers a fresh run. No gateway management, no model downloads, no weight files - just the prompt and its output, tight enough that your iteration cycle is limited by how fast you can think.
 
-1. Start `promptforge-gateway` yourself (profile, models, and Brave credentials live there).
-2. Export both:
+## Installation
 
-```text
-export PROMPTFORGE_GATEWAY_URL=http://127.0.0.1:8081/v1
-export PROMPTFORGE_GATEWAY_KEY=<bearer from your gateway profile>
+```bash
+cargo install promptforge-dev
 ```
-
-Missing either variable fails immediately with a short message telling you to start the gateway first. No prompt file is read until both are set.
 
 ## Usage
 
-From the PromptForge repository root:
-
-```text
-cargo run -p promptforge-dev -- <prompt.md> [input] [--watch]
+```bash
+promptforge-dev my-prompt.md "summarize this paragraph"
+promptforge-dev --watch my-prompt.md
 ```
 
-- `input` is optional and defaults to empty; it becomes the prompt's `args`.
-- `--watch` re-reads, re-parses, and re-executes after every save (300 ms debounce).
-- There is no `--context`, `--max-tokens`, or `--no-think`. Declare those on the prompt under `models.need` / `models.always`.
+Requires a running `promptforge-gateway`. Set `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` before launching.
 
-## What happens on each run
+See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for full documentation.
 
-1. Fetch the live model catalog from the gateway.
-2. Prepare tools (`web_fetch` always; `web_search` when the same gateway credentials are present), the picker, and the model catalog for live H1 resolution.
-3. Clear `<prompt-stem>.store/` beside the prompt, then execute.
-4. During the run, store writes land under `<prompt-stem>.store/` immediately and each model turn writes `.trace/turn-N-*.json`. End-of-run reconcile removes orphans without wiping `.trace/`. Observer lines go to stderr; the result goes to stdout.
+## Minimum Rust Version
 
-## Offline tests
+Rust 1.89 or later.
 
-```text
-cargo test -p promptforge-dev
-```
+## License
 
-These cover arg parse, dump safety, watch debounce, tool registry construction, and missing-env failures. They do not contact a live gateway.
+Licensed under the [Boost Software License 1.0](LICENSE).
