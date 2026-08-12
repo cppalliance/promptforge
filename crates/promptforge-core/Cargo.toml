@@ -1,7 +1,6 @@
 [package]
 name = "promptforge-core"
-# Private, unpublished crate: pinned to 0.0.0 rather than inheriting the
-# workspace release version, so it is never mistaken for a released 0.1.0
+# Version will be set to 0.1.0 for publishing
 # (MANIFEST-001). The workspace dependency entry is pinned to 0.0.0 to match.
 version = "0.0.0"
 edition.workspace = true
@@ -13,6 +12,7 @@ keywords = ["prompt", "llm", "ai", "runtime", "openai"]
 categories = ["text-processing", "api-bindings"]
 publish = false
 description = "PromptForge runtime core: prompt parser, HTTP client, section execution"
+documentation = "https://cppalliance.github.io/promptforge/"
 
 [dependencies]
 async-trait.workspace = true
@@ -32,6 +32,9 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 [dev-dependencies]
 axum.workspace = true
 tokio.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
 
 [lints]
 workspace = true

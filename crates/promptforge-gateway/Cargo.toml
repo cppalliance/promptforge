@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 description = "PromptForge inference gateway: routes OpenAI-shaped chat completions to a backend"
+readme = "README.md"
+keywords = ["llm", "gateway", "openai", "proxy", "gguf"]
+categories = ["web-programming::http-server"]
+documentation = "https://cppalliance.github.io/promptforge/"
 
 [[bin]]
 name = "promptforge-gateway"
