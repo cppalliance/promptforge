@@ -1,10 +1,10 @@
 [package]
 name = "promptforge-mcp-server"
-version = "0.0.0"
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish = false
+
 description = "PromptForge MCP server: serves prompts as MCP tools for agentic harnesses"
 documentation = "https://cppalliance.github.io/promptforge/"
 repository.workspace = true

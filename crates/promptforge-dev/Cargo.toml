@@ -1,11 +1,11 @@
 [package]
 name = "promptforge-dev"
-version = "0.0.0"
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
+
 description = "Interactive PromptForge prompt runner against an already-running gateway"
 readme = "README.md"
 keywords = ["promptforge", "prompt", "llm", "gateway", "cli"]

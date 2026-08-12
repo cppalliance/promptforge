@@ -1,11 +1,11 @@
 [package]
 name = "promptforge-gateway"
-version = "0.0.0"
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-publish = false
+
 description = "PromptForge inference gateway: routes OpenAI-shaped chat completions to a backend"
 readme = "README.md"
 keywords = ["llm", "gateway", "openai", "proxy", "gguf"]
