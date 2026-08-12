@@ -1,0 +1,8 @@
+[book]
+title = "PromptForge User Guide"
+authors = ["Vinnie Falco"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/cppalliance/promptforge"
