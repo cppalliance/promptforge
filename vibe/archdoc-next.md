@@ -46,3 +46,5 @@
 - [2026-08-10-1-crate-review] green-before-advance: Never checkpoint or leave a component while its verification gate is red or blocked.
 - [2026-08-11-1-dokuman-all-crates] test-only documentation: Omit a separate user guide when a crate exposes test infrastructure but no standalone user-facing capability.
 - [2026-08-11-2-make-user-guide-crate] document structure preservation: Keep one product H1, transform component headings outside code fences, and fail visibly on missing source guides.
+- [2026-08-12-1-mdbook-guide] documentation layers: Keep package READMEs as concise signposts while the built guide owns task-oriented documentation and API docs own signatures.
+- [2026-08-12-1-mdbook-guide] release sequencing: Complete guide, package metadata, and dry-run validation before changing the release version or publishing artifacts.
