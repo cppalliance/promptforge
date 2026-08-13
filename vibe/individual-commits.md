@@ -38,3 +38,5 @@
 
 ## 2026-08-10 Rebuild promptforge-core around a validated bounded API
 
+## 2026-08-12 Expand README into a full project page with banners
+
