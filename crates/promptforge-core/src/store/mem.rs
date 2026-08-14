@@ -317,7 +317,7 @@ impl Store for MemStore {
 }
 
 /// Renders `content` as numbered lines, right-aligned to the widest number.
-fn number_lines(content: &str) -> String {
+pub(super) fn number_lines(content: &str) -> String {
     let total = content.lines().count();
     if total == 0 {
         return String::new();
