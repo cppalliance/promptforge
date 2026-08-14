@@ -18,12 +18,14 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 mod error;
+mod file;
 mod glob;
 mod mem;
 mod path;
 
 use error::StorePoisoned;
 pub use error::{PathReason, StoreError, StoreErrorKind};
+pub use file::FileStore;
 use glob::{MAX_GLOB_PATTERN_BYTES, compile_glob, matches_tokens, validate_glob_grammar};
 pub use mem::{MemStore, Store};
 use path::StorePath;
