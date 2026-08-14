@@ -38,6 +38,7 @@ async fn main() -> ExitCode {
             let request = RunRequest {
                 file: &args.file,
                 input: args.input.as_deref().unwrap_or_default(),
+                store_dir: args.store_dir.as_deref(),
                 observer,
                 cancel,
             };
