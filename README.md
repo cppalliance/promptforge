@@ -116,8 +116,7 @@ flowchart LR
 ## Documentation
 
 - [PromptForge User Guide](https://cppalliance.github.io/promptforge/) - full documentation
-- [User Guide source](user-guide.md) - progressive tutorial for writing prompts
-- [DEVELOPMENT.md](DEVELOPMENT.md) - gateway config, store API, architecture, dev workflow
+- [User Guide](promptforge-user-guide.md) - progressive tutorial for writing prompts
 - [design-core.md](crates/promptforge-core/design-core.md) - core design notes
 
 ![Filing cabinets](images/banner-06.png)
@@ -128,7 +127,7 @@ Rust 1.89 or later.
 
 ## Contributing
 
-Build, format, and test before you open a PR. CI runs `cargo fmt --check`, `clippy -D warnings`, and `cargo test --workspace`. See [DEVELOPMENT.md](DEVELOPMENT.md) for details.
+Build, format, and test before you open a PR. CI runs `cargo fmt --check`, `clippy -D warnings`, and `cargo test --workspace`.
 
 ![Creator](images/promptforge-portrait.png)
 

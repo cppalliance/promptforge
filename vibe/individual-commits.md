@@ -40,3 +40,5 @@
 
 ## 2026-08-12 Expand README into a full project page with banners
 
+## 2026-08-14 Delete stale docs and fix their references
+

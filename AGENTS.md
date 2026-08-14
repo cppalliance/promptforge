@@ -8,9 +8,7 @@ This rule outranks every other rule here. Before you add a frontmatter field, a 
 
 ## Rules
 
-- After completing work (compiles + tests pass), update STATUS.md before committing.
-- STATUS.md is the snapshot a fresh context reads first. Keep it under 80 lines.
-- On every commit, update STATUS.md and README.md to reflect the current state.
+- After completing work (compiles + tests pass), update README.md if the public surface changed.
 - Every public type, function, and module must have a `///` doc comment. `cargo doc` is the project documentation.
 - Do NOT look at files outside this repo for reference.
 - The plan is the spec. Work from the plan and AGENTS.md only.
