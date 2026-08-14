@@ -61,12 +61,12 @@ impl std::fmt::Debug for TraceCapture {
 }
 
 impl TraceCapture {
-    /// Captures turns for the dump directory beside `prompt_path`.
+    /// Captures turns under `store_dir/.trace/`.
     ///
     /// Requires a [`SensitiveCapture`] authorization because raw bodies are
     /// persisted verbatim.
-    pub(crate) fn new(prompt_path: &Path, _authorization: SensitiveCapture) -> TraceCapture {
-        let trace_dir = super::dump_directory(prompt_path).join(".trace");
+    pub(crate) fn new(store_dir: &Path, _authorization: SensitiveCapture) -> TraceCapture {
+        let trace_dir = store_dir.join(".trace");
         let (sender, receiver) = sync_channel::<TraceJob>(QUEUE_CAPACITY);
         let worker = match std::thread::Builder::new()
             .name("promptforge-dev-trace".to_owned())
@@ -183,14 +183,13 @@ mod tests {
     use promptforge_core::debug::DebugCapture;
     use promptforge_core::debug::DebugEvent;
 
-    use super::super::dump_directory;
     use super::{SensitiveCapture, TraceCapture};
 
     #[test]
     fn trace_capture_writes_turn_files_after_finish() {
         let directory = tempfile::tempdir().expect("create trace fixture directory");
-        let prompt = directory.path().join("fixture.md");
-        let capture = TraceCapture::new(&prompt, SensitiveCapture::authorized());
+        let store_dir = directory.path().join("fixture");
+        let capture = TraceCapture::new(&store_dir, SensitiveCapture::authorized());
         capture.on_event(
             "dev-1",
             "Only",
@@ -209,7 +208,7 @@ mod tests {
         );
         capture.finish();
 
-        let trace_dir = dump_directory(&prompt).join(".trace");
+        let trace_dir = store_dir.join(".trace");
         let request =
             std::fs::read_to_string(trace_dir.join("turn-1-request.json")).expect("request dump");
         let response =
@@ -224,14 +223,12 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
 
         let directory = tempfile::tempdir().expect("create trace fixture directory");
-        let prompt = directory.path().join("fixture.md");
-        let capture = TraceCapture::new(&prompt, SensitiveCapture::authorized());
+        let store_dir = directory.path().join("fixture");
+        let capture = TraceCapture::new(&store_dir, SensitiveCapture::authorized());
         capture.on_event("dev-1", "Only", 1, DebugEvent::request(json!({ "a": 1 })));
         capture.finish();
 
-        let file = dump_directory(&prompt)
-            .join(".trace")
-            .join("turn-1-request.json");
+        let file = store_dir.join(".trace").join("turn-1-request.json");
         let mode = std::fs::metadata(&file).expect("stat").permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "raw trace files must be owner-only");
     }

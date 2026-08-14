@@ -274,12 +274,12 @@ mod tests {
     }
 
     #[test]
-    fn events_from_the_store_dump_directory_never_match_the_watched_prompt() {
+    fn events_from_the_store_directory_never_match_the_watched_prompt() {
         let file_name = OsStr::new("prompt.md");
         for path in [
-            "/w/prompt.store",
-            "/w/prompt.store/evidence.md",
-            "/w/prompt.store/notes/deep.txt",
+            "/w/prompt",
+            "/w/prompt/evidence.md",
+            "/w/prompt/notes/deep.txt",
         ] {
             assert!(
                 !event_touches(
