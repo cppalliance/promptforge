@@ -48,3 +48,5 @@
 - [2026-08-11-2-make-user-guide-crate] document structure preservation: Keep one product H1, transform component headings outside code fences, and fail visibly on missing source guides.
 - [2026-08-12-1-mdbook-guide] documentation layers: Keep package READMEs as concise signposts while the built guide owns task-oriented documentation and API docs own signatures.
 - [2026-08-12-1-mdbook-guide] release sequencing: Complete guide, package metadata, and dry-run validation before changing the release version or publishing artifacts.
+- [2026-08-14-1-file-backed-store] backend-transparent execution: Keep the executor unaware of whether a run-scoped store is memory-backed or file-backed.
+- [2026-08-14-1-file-backed-store] prompt-owned resume: Express resume and skip behavior through ordinary store operations in prompt code, not special engine logic.

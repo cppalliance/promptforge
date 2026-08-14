@@ -40,9 +40,10 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A37. A clean workspace build requires no secret environment variable or manually provisioned artifact.
 
 
-- A39. The product guide is generated deterministically from component-owned guides.
 
 - A40. Every published package is self-contained and installable from a clean environment.
+
+- A41. Store persistence and root selection are caller policy; the executor is backend-agnostic.
 
 ## Principles
 
