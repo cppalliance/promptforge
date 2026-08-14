@@ -16,7 +16,7 @@ use promptforge_core::execute::{self, ResolutionContext, RunConfig};
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::observe::Observer;
 use promptforge_core::parser::Prompt;
-use promptforge_core::store::StoreRef;
+use promptforge_core::store::{FileStore, StoreRef};
 use promptforge_tool_picker::{Config as PickerConfig, ToolPicker};
 
 use crate::tools::{self, Gateway, Remote};
@@ -44,6 +44,10 @@ pub(crate) struct RunArgs {
     pub(crate) file: PathBuf,
     /// Raw input string exposed to the prompt as `args` (defaults to empty).
     pub(crate) input: Option<String>,
+    /// Directory for persistent file-backed store. When absent, an ephemeral
+    /// in-memory store is used.
+    #[arg(long = "store", value_name = "DIR")]
+    pub(crate) store_dir: Option<PathBuf>,
 }
 
 /// A single prompt run: what to run, and the run-scoped I/O and cancellation.
@@ -52,6 +56,9 @@ pub(crate) struct RunRequest<'a> {
     pub(crate) file: &'a Path,
     /// The raw `args` input exposed to the prompt.
     pub(crate) input: &'a str,
+    /// Optional directory for persistent file-backed store. `None` means
+    /// ephemeral in-memory.
+    pub(crate) store_dir: Option<&'a Path>,
     /// The observer that records the run lifecycle.
     pub(crate) observer: Arc<dyn Observer>,
     /// The cooperative cancellation handle wired to Ctrl-C.
@@ -123,6 +130,7 @@ async fn run_with_gateway(request: RunRequest<'_>, gateway: Gateway) -> Result<S
     let RunRequest {
         file,
         input,
+        store_dir,
         observer,
         cancel,
     } = request;
@@ -155,7 +163,14 @@ async fn run_with_gateway(request: RunRequest<'_>, gateway: Gateway) -> Result<S
         Gateway::Disabled => ModelCatalog::empty(),
     };
 
-    let store = StoreRef::memory();
+    let store = match store_dir {
+        Some(dir) => {
+            let backend = FileStore::new(dir)
+                .with_context(|| format!("create store directory {}", dir.display()))?;
+            StoreRef::new(Box::new(backend))
+        }
+        None => StoreRef::memory(),
+    };
     let config = RunConfig::new(execution.as_str())
         .observer(observer)
         .cancel(cancel);
@@ -191,7 +206,7 @@ fn with_test_client(config: RunConfig, _gateway: &Gateway) -> RunConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
 
     use clap::Parser;
@@ -221,6 +236,7 @@ mod tests {
             RunRequest {
                 file,
                 input: "",
+                store_dir: None,
                 observer,
                 cancel: CancelHandle::new(),
             },
@@ -235,10 +251,28 @@ mod tests {
         let Command::Run(args) = cli.command;
         assert_eq!(args.file, Path::new("prompt.md"));
         assert_eq!(args.input, None);
+        assert_eq!(args.store_dir, None);
 
         let cli = Cli::parse_from(["promptforge", "run", "prompt.md", "hello world"]);
         let Command::Run(args) = cli.command;
         assert_eq!(args.input.as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn parser_accepts_store_flag() {
+        let cli = Cli::parse_from([
+            "promptforge",
+            "run",
+            "--store",
+            "/tmp/my-store",
+            "prompt.md",
+        ]);
+        let Command::Run(args) = cli.command;
+        assert_eq!(args.store_dir, Some(PathBuf::from("/tmp/my-store")));
+
+        let cli = Cli::parse_from(["promptforge", "run", "prompt.md"]);
+        let Command::Run(args) = cli.command;
+        assert_eq!(args.store_dir, None);
     }
 
     #[test]
@@ -357,6 +391,7 @@ mod tests {
             RunRequest {
                 file: &path,
                 input: "",
+                store_dir: None,
                 observer: Arc::new(Recorder::default()),
                 cancel,
             },
