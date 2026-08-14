@@ -9,9 +9,9 @@
 //! Each run mirrors the CLI pipeline: read the file, require a `promptforge:`
 //! version, parse, and execute against the gateway. Every observer record
 //! streams to stderr; the returned result string is the caller's to print on
-//! stdout. After every executed run, success or failure, the run's store is
-//! reconciled to `<prompt-stem>.store` beside the prompt file (see
-//! [`crate::dump`]). Blocking filesystem work runs off the async runtime.
+//! stdout. The store is file-backed under a sibling directory of the prompt
+//! (see [`store_directory`]), so every write lands on disk immediately and no
+//! post-run reconcile is needed.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,7 +24,7 @@ use promptforge_core::execute::{ResolutionContext, RunConfig, run};
 use promptforge_core::model::{ModelCatalog, fetch_model_catalog};
 use promptforge_core::observe::Observer;
 use promptforge_core::parser::Prompt;
-use promptforge_core::store::StoreRef;
+use promptforge_core::store::{FileStore, StoreRef};
 use promptforge_tool_picker::{Config as PickerConfig, ToolPicker};
 
 use crate::config::GatewayEnv;
@@ -110,9 +110,7 @@ impl RunEnv {
     ///
     /// # Errors
     /// Returns an error when the file cannot be read, declares no `promptforge:`
-    /// version, fails to parse, or execution fails. On a successful run whose
-    /// store dump fails, the dump error is returned; on a failed run, the
-    /// execution error is primary and the dump failure is reported to stderr.
+    /// version, fails to parse, or execution fails.
     pub(crate) async fn run_prompt(
         &self,
         prompt_path: &Path,
@@ -120,8 +118,6 @@ impl RunEnv {
         observer: Arc<dyn Observer>,
         cancel: CancelHandle,
     ) -> Result<String> {
-        // Read the prompt off the runtime worker so a slow filesystem cannot
-        // stall the executor.
         let source = tokio::fs::read_to_string(prompt_path)
             .await
             .with_context(|| format!("read {}", prompt_path.display()))?;
@@ -133,30 +129,27 @@ impl RunEnv {
         }
 
         let execution = new_execution_id();
-        // Banner before observer traffic so a fresh process is obvious in
-        // scrollback even when an earlier run's lines are still on screen.
         eprintln!("run id: {execution}");
         let prompt = Prompt::parse(&source, &execution, observer.as_ref())
             .with_context(|| format!("parse {}", prompt_path.display()))?;
 
-        // Clear the previous run's dump before starting so stale store files and
-        // traces never masquerade as the current run. A failure to clear is an
-        // error, not something to proceed past. Only `NotFound` satisfies the
-        // invariant already.
-        clear_previous_dump(prompt_path).await?;
+        let store_dir = store_directory(prompt_path);
 
-        // The store stays in memory during execution: no filesystem write runs
-        // on the async execution path. All disk work happens in the single
-        // end-of-run reconcile below, which runs off the runtime.
-        let store = StoreRef::memory();
+        // Clear the previous run's store directory so stale files never
+        // masquerade as the current run's output.
+        clear_previous_store(&store_dir).await?;
+
+        // The store is file-backed: every write lands on disk immediately.
+        let file_store = FileStore::new(&store_dir)
+            .with_context(|| format!("create store directory {}", store_dir.display()))?;
+        let store = StoreRef::new(Box::new(file_store));
 
         // Raw capture is installed only when explicitly authorized.
         let capture = match self.capture {
             CapturePolicy::Off => None,
-            CapturePolicy::RawSensitive(authorization) => Some(Arc::new(dump::TraceCapture::new(
-                prompt_path,
-                authorization,
-            ))),
+            CapturePolicy::RawSensitive(authorization) => {
+                Some(Arc::new(dump::TraceCapture::new(&store_dir, authorization)))
+            }
         };
 
         let mut config = RunConfig::new(&execution)
@@ -180,9 +173,7 @@ impl RunEnv {
         .await
         .with_context(|| format!("run {}", prompt_path.display()));
 
-        // Flush the trace worker so every queued write lands before reconcile.
-        // `finish` drains and joins the I/O worker, which can block, so it runs
-        // off the async runtime.
+        // Flush the trace worker so every queued write lands before we return.
         if let Some(capture) = &capture {
             let handle = Arc::clone(capture);
             if let Err(join_error) = tokio::task::spawn_blocking(move || handle.finish()).await {
@@ -190,10 +181,11 @@ impl RunEnv {
             }
         }
 
-        // Reconcile on success and failure alike: a failed run's partial store
-        // is exactly what a debugging author needs. Runs off the runtime.
-        let dump_result = reconcile_dump(store, prompt_path.to_path_buf()).await;
-        combine(result, dump_result)
+        // Remove the store directory if it is empty (no store writes and no
+        // trace) so authors see a clean sibling tree.
+        cleanup_empty_store(&store_dir).await;
+
+        result
     }
 }
 
@@ -215,47 +207,45 @@ pub(crate) async fn run_once(
     env.run_prompt(prompt_path, input, observer, cancel).await
 }
 
-/// Removes the previous run's dump directory off the runtime, treating any
+/// Returns the store directory for `prompt_path`: the prompt's parent directory
+/// joined with the prompt's file stem (no extension).
+///
+/// For example, `prompts/research-person.md` yields `prompts/research-person/`.
+pub(crate) fn store_directory(prompt_path: &Path) -> PathBuf {
+    let stem = prompt_path.file_stem().unwrap_or(prompt_path.as_os_str());
+    match prompt_path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(stem),
+        _ => PathBuf::from(stem),
+    }
+}
+
+/// Removes the previous run's store directory off the runtime, treating any
 /// failure other than `NotFound` as fatal.
-async fn clear_previous_dump(prompt_path: &Path) -> Result<()> {
-    let dump_dir = dump::dump_directory(prompt_path);
+async fn clear_previous_store(store_dir: &Path) -> Result<()> {
+    let dir = store_dir.to_path_buf();
     tokio::task::spawn_blocking(move || -> Result<()> {
-        match std::fs::remove_dir_all(&dump_dir) {
+        match std::fs::remove_dir_all(&dir) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(anyhow::Error::from(error))
-                .with_context(|| format!("clear the previous dump {}", dump_dir.display())),
+                .with_context(|| format!("clear the previous store {}", dir.display())),
         }
     })
     .await
-    .context("join the dump-clear task")?
+    .context("join the store-clear task")?
 }
 
-/// Reconciles the run's store to disk off the runtime.
-async fn reconcile_dump(store: StoreRef, prompt_path: PathBuf) -> Result<()> {
-    tokio::task::spawn_blocking(move || {
-        let mut status = std::io::stderr();
-        dump::dump_store(&store, &prompt_path, &mut status)
+/// Removes the store directory if it is empty (no entries at all).
+async fn cleanup_empty_store(store_dir: &Path) {
+    let dir = store_dir.to_path_buf();
+    let _ignored = tokio::task::spawn_blocking(move || {
+        if let Ok(mut entries) = std::fs::read_dir(&dir)
+            && entries.next().is_none()
+        {
+            let _ignored = std::fs::remove_dir(&dir);
+        }
     })
-    .await
-    .context("join the store-dump task")?
-}
-
-/// Combines the execution and dump outcomes per the module's error policy.
-fn combine(run_result: Result<String>, dump_result: Result<()>) -> Result<String> {
-    match (run_result, dump_result) {
-        (Ok(output), Ok(())) => Ok(output),
-        (Ok(_), Err(dump_error)) => {
-            Err(dump_error.context("the run succeeded but its store dump failed"))
-        }
-        (Err(run_error), Ok(())) => Err(run_error),
-        (Err(run_error), Err(dump_error)) => {
-            // The execution error is primary; report the dump failure alongside
-            // it rather than dropping it silently.
-            eprintln!("store dump also failed: {dump_error:#}");
-            Err(run_error)
-        }
-    }
+    .await;
 }
 
 /// Mints a fresh per-invocation execution id: `dev-` plus 128 random bits.
@@ -273,7 +263,7 @@ mod tests {
 
     use crate::config::{GatewayEnv, GatewayKey};
 
-    use super::{CapturePolicy, RunEnv, new_execution_id};
+    use super::{CapturePolicy, RunEnv, new_execution_id, store_directory};
 
     #[derive(Debug, Default)]
     struct Recorder(Mutex<Vec<(String, String, String)>>);
@@ -314,6 +304,23 @@ mod tests {
             assert_eq!(nonce.len(), 32);
             assert!(nonce.chars().all(|c| c.is_ascii_hexdigit()));
         }
+    }
+
+    #[test]
+    fn store_directory_derives_from_prompt_stem() {
+        use std::path::Path;
+        assert_eq!(
+            store_directory(Path::new("prompts/research-person.md")),
+            Path::new("prompts/research-person")
+        );
+        assert_eq!(
+            store_directory(Path::new("briefer.md")),
+            Path::new("briefer")
+        );
+        assert_eq!(
+            store_directory(Path::new("/abs/path/demo.yaml")),
+            Path::new("/abs/path/demo")
+        );
     }
 
     #[tokio::test]
@@ -378,11 +385,11 @@ mod tests {
         std::fs::write(
             &path,
             format!(
-                "---\nname: fixture\ndescription: dump fixture\npromptforge: 1\n---\n\n\
+                "---\nname: fixture\ndescription: store fixture\npromptforge: 1\n---\n\n\
                  # Fixture\n\n## Run\n\n```lua\n{lua}\n```\n"
             ),
         )
-        .expect("write the dump fixture");
+        .expect("write the store fixture");
         offline_env()
             .run_prompt(
                 &path,
@@ -394,8 +401,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_successful_run_dumps_the_store_beside_the_prompt() {
-        let directory = tempfile::tempdir().expect("create dump fixture directory");
+    async fn a_successful_run_writes_the_store_beside_the_prompt() {
+        let directory = tempfile::tempdir().expect("create store fixture directory");
         let result = run_fixture(
             &directory,
             "store.write('evidence.md', 'found\\nit\\n')\n\
@@ -406,22 +413,22 @@ mod tests {
         .expect("the model-free fixture must run offline");
 
         assert_eq!(result, "done");
-        let dump_dir = directory.path().join("fixture.store");
+        let store_dir = directory.path().join("fixture");
         assert_eq!(
-            std::fs::read_to_string(dump_dir.join("evidence.md")).expect("read dumped file"),
+            std::fs::read_to_string(store_dir.join("evidence.md")).expect("read store file"),
             "found\nit\n",
-            "the dump must carry raw contents, trailing newline included"
+            "the store must carry raw contents, trailing newline included"
         );
         assert_eq!(
-            std::fs::read_to_string(dump_dir.join("notes").join("deep.txt"))
-                .expect("read nested dumped file"),
+            std::fs::read_to_string(store_dir.join("notes").join("deep.txt"))
+                .expect("read nested store file"),
             "nested"
         );
     }
 
     #[tokio::test]
-    async fn a_failed_run_still_dumps_its_partial_store() {
-        let directory = tempfile::tempdir().expect("create dump fixture directory");
+    async fn a_failed_run_still_writes_its_partial_store() {
+        let directory = tempfile::tempdir().expect("create store fixture directory");
         let error = run_fixture(
             &directory,
             "store.write('partial.md', 'kept for debugging')\nerror('boom')",
@@ -434,29 +441,33 @@ mod tests {
             "unexpected failure: {error:#}"
         );
         assert_eq!(
-            std::fs::read_to_string(directory.path().join("fixture.store").join("partial.md"))
-                .expect("read the failed run's dump"),
+            std::fs::read_to_string(directory.path().join("fixture").join("partial.md"))
+                .expect("read the failed run's store"),
             "kept for debugging",
             "a failed run's partial store is exactly what a debugging author needs"
         );
     }
 
     #[tokio::test]
-    async fn a_rerun_with_an_empty_store_removes_the_previous_dump() {
-        let directory = tempfile::tempdir().expect("create dump fixture directory");
+    async fn a_rerun_clears_stale_files_from_the_previous_store() {
+        let directory = tempfile::tempdir().expect("create store fixture directory");
         run_fixture(&directory, "store.write('stale.txt', 'old')\nreturn 'one'")
             .await
             .expect("the first run must succeed");
-        let dump_dir = directory.path().join("fixture.store");
-        assert!(dump_dir.join("stale.txt").is_file());
+        let store_dir = directory.path().join("fixture");
+        assert!(store_dir.join("stale.txt").is_file());
 
         run_fixture(&directory, "return 'two'")
             .await
             .expect("the second run must succeed");
 
         assert!(
-            !dump_dir.exists(),
-            "an empty rerun must leave no dump directory"
+            !store_dir.join("stale.txt").exists(),
+            "stale files from a previous run must not persist"
+        );
+        assert!(
+            !store_dir.exists(),
+            "an empty run must leave no store directory"
         );
     }
 

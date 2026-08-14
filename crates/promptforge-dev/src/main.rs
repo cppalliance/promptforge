@@ -7,7 +7,7 @@
 //!
 //! `--capture-raw` opts into persisting verbatim request and response bodies
 //! (full prompts, tool arguments and results, and model output) under
-//! `<prompt-stem>.store/.trace/`. It is off by default because that material
+//! `<prompt-stem>/.trace/`. It is off by default because that material
 //! is sensitive. Use `--` to pass an input that begins with `--`.
 
 mod config;
@@ -90,7 +90,7 @@ async fn main() -> ExitCode {
         eprintln!(
             "warning: --capture-raw persists verbatim prompts, tool arguments and results, \
              and model output to {}",
-            dump::dump_directory(&args.prompt).join(".trace").display()
+            run::store_directory(&args.prompt).join(".trace").display()
         );
         CapturePolicy::RawSensitive(dump::SensitiveCapture::authorized())
     } else {
