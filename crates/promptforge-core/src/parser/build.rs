@@ -16,6 +16,34 @@ use crate::lua::LuaProgram;
 use crate::observe::Observer;
 use crate::{Error, Result};
 
+/// A declared input or output file in a prompt's frontmatter.
+///
+/// The `path` is the store-internal filename the prompt reads or writes;
+/// `description` is documentation that also feeds MCP schema generation.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct FileDecl {
+    /// The store-internal path (e.g. `"paper.md"`).
+    path: String,
+    /// Human-readable purpose of this file.
+    description: String,
+}
+
+impl FileDecl {
+    /// Returns the store-internal path.
+    #[must_use]
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Returns the human-readable description.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+}
+
 /// The parsed frontmatter of a prompt file.
 ///
 /// Unknown keys are rejected (`deny_unknown_fields`): a misspelled or
@@ -43,6 +71,12 @@ pub struct Frontmatter {
     /// explicit value is a positive, bounded count. Zero is unrepresentable.
     #[serde(default)]
     pub(crate) max_tool_iterations: MaxToolIterations,
+    /// A file the prompt expects to find in the store when it starts.
+    #[serde(default)]
+    pub(crate) input: Option<FileDecl>,
+    /// A file the prompt will leave in the store when it finishes.
+    #[serde(default)]
+    pub(crate) output: Option<FileDecl>,
 }
 
 /// The largest explicit `max_tool_iterations` a prompt may declare.
@@ -162,6 +196,18 @@ impl Frontmatter {
     #[must_use]
     pub fn max_tool_iterations(&self) -> MaxToolIterations {
         self.max_tool_iterations
+    }
+
+    /// Returns the declared input file, when present.
+    #[must_use]
+    pub fn input(&self) -> Option<&FileDecl> {
+        self.input.as_ref()
+    }
+
+    /// Returns the declared output file, when present.
+    #[must_use]
+    pub fn output(&self) -> Option<&FileDecl> {
+        self.output.as_ref()
     }
 }
 /// A heading with its title and the prose/Lua that follows it (before the next

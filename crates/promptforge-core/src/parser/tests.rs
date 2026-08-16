@@ -1080,3 +1080,44 @@ fn shared_library_source_line_is_correct() {
     let replay = prompt.replay.as_ref().expect("replay must exist");
     assert_eq!(replay.source_line().get(), 9, "shared Lua starts on line 9");
 }
+
+#[test]
+fn frontmatter_parses_input_and_output() {
+    let source = concat!(
+        "---\n",
+        "name: test\n",
+        "description: d\n",
+        "promptforge: 1\n",
+        "input:\n",
+        "  path: paper.md\n",
+        "  description: The input paper\n",
+        "output:\n",
+        "  path: report.md\n",
+        "  description: The output report\n",
+        "---\n\n",
+        "# Title\n\n## Only\n\ndone\n",
+    );
+    let prompt = Prompt::parse(source, "test", &NullObserver).unwrap();
+    let fm = prompt.frontmatter();
+    let input = fm.input().expect("input declared");
+    assert_eq!(input.path(), "paper.md");
+    assert_eq!(input.description(), "The input paper");
+    let output = fm.output().expect("output declared");
+    assert_eq!(output.path(), "report.md");
+    assert_eq!(output.description(), "The output report");
+}
+
+#[test]
+fn frontmatter_without_input_output_still_parses() {
+    let source = concat!(
+        "---\n",
+        "name: simple\n",
+        "description: no files\n",
+        "promptforge: 1\n",
+        "---\n\n",
+        "# Title\n\n## Only\n\ndone\n",
+    );
+    let prompt = Prompt::parse(source, "test", &NullObserver).unwrap();
+    assert!(prompt.frontmatter().input().is_none());
+    assert!(prompt.frontmatter().output().is_none());
+}

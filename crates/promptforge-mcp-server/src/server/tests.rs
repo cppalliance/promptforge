@@ -11,6 +11,7 @@
 //! and so needs a backend to take one against.
 
 mod dispatch;
+mod io;
 mod listing;
 mod runs;
 
@@ -46,11 +47,11 @@ fn fixture_model_catalog() -> ModelCatalog {
 fn prepared(config: &Config) -> Arc<PreparedTools> {
     static SEED: OnceLock<PreparedTools> = OnceLock::new();
     let seed = SEED.get_or_init(|| {
-        PreparedTools::new(&config.gateway, fixture_model_catalog())
+        PreparedTools::new(&config.gateway, &config.tools, fixture_model_catalog())
             .expect("prepare fixture tool model")
     });
     Arc::new(
-        seed.rebuild(&config.gateway)
+        seed.rebuild(&config.gateway, &config.tools)
             .expect("index fixture live tools"),
     )
 }
@@ -60,6 +61,26 @@ fn echo_prompt(name: &str, description: &str) -> String {
     format!(
         "---\nname: {name}\ndescription: {description}\npromptforge: 1\n---\n\n\
          # Test prompt\n\n## Main\n\n```lua\nreturn args\n```\n"
+    )
+}
+
+/// A prompt that declares an input file and returns its content from the store.
+fn input_prompt(name: &str, store_path: &str) -> String {
+    format!(
+        "---\nname: {name}\ndescription: Reads declared input\npromptforge: 1\n\
+         input:\n  path: {store_path}\n  description: The input file\n---\n\n\
+         # Test prompt\n\n## Main\n\n```lua\nreturn store.read(\"{store_path}\")\n```\n"
+    )
+}
+
+/// A prompt that declares an output file, writes content to the store, and
+/// returns a value.
+fn output_prompt(name: &str, store_path: &str) -> String {
+    format!(
+        "---\nname: {name}\ndescription: Writes declared output\npromptforge: 1\n\
+         output:\n  path: {store_path}\n  description: The output file\n---\n\n\
+         # Test prompt\n\n## Main\n\n\
+         ```lua\nstore.write(\"{store_path}\", \"produced content\")\nreturn \"done\"\n```\n"
     )
 }
 

@@ -92,10 +92,6 @@ enum EntryState {
     /// The file read, parsed, and passed every check.
     Healthy {
         source: String,
-        // Boxed to keep this variant from dwarfing `Broken`; read by tests that
-        // assert an entry parsed, while production reaches the prompt through
-        // the validated source snapshot the runner re-parses.
-        #[cfg_attr(not(test), allow(dead_code))]
         prompt: Box<Prompt>,
     },
     /// The file failed a check. The class is what a fault is tagged with; the
@@ -174,7 +170,6 @@ impl Entry {
     }
 
     /// The parsed prompt, or `None` on a broken entry.
-    #[cfg_attr(not(test), allow(dead_code))]
     #[must_use]
     pub(crate) fn prompt(&self) -> Option<&Prompt> {
         match &self.state {

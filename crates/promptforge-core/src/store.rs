@@ -81,6 +81,28 @@ impl StoreRef {
         }
     }
 
+    /// Builds a handle over a [`MemStore`] pre-populated with the given files.
+    ///
+    /// Each path is validated at construction time. See
+    /// [`MemStore::with_files`] for details.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::InvalidPath`] if any path fails validation.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::store::StoreRef;
+    ///
+    /// let store = StoreRef::with_files([
+    ///     ("data.txt".to_owned(), "contents".to_owned()),
+    /// ])?;
+    /// assert_eq!(store.read("data.txt")?, "contents");
+    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// ```
+    pub fn with_files(files: impl IntoIterator<Item = (String, String)>) -> Result<StoreRef, StoreError> {
+        Ok(StoreRef::new(Box::new(MemStore::with_files(files)?)))
+    }
+
     /// Builds a handle over a fresh in-memory [`MemStore`] backend.
     ///
     /// # Examples

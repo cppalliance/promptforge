@@ -233,8 +233,20 @@ impl PromptForgeServer {
             BuiltInTool::RunPrompt => {
                 let requested = required_string(arguments, "prompt")?;
                 let args = optional_string(arguments, "args")?;
+                let input_file = optional_string(arguments, "input_file")?;
+                let input_text = optional_string(arguments, "input_text")?;
+                let output_file = optional_string(arguments, "output_file")?;
+                if !input_file.is_empty() && !input_text.is_empty() {
+                    return Err(ErrorData::invalid_params(
+                        "input_file and input_text are mutually exclusive; specify one, not both",
+                        None,
+                    ));
+                }
                 match resolve::resolve(generation.catalog(), &requested) {
-                    Ok(entry) => self.run(entry, &args, reporting).await,
+                    Ok(entry) => {
+                        self.run(entry, &args, &input_file, &input_text, &output_file, reporting)
+                            .await
+                    }
                     // A miss is caller-correctable: hand back every enabled
                     // name, nearest first, so the model's next call can name one
                     // exactly.
@@ -338,6 +350,9 @@ impl PromptForgeServer {
         &self,
         entry: &Entry,
         args: &str,
+        input_file: &str,
+        input_text: &str,
+        output_file: &str,
         reporting: Option<Reporting>,
     ) -> Result<CallToolResult, ErrorData> {
         runner::run(
@@ -346,6 +361,9 @@ impl PromptForgeServer {
             Arc::clone(&self.tools),
             entry,
             args,
+            input_file,
+            input_text,
+            output_file,
             reporting,
         )
         .await
