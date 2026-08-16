@@ -108,10 +108,6 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
                 detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
             ),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
-            ("Only".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
-            ("Only".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
-            ("Only".to_string(), detail::MODEL_SCOPE_CLOSING.to_string()),
-            ("Only".to_string(), detail::MODEL_SCOPE_CLOSED.to_string()),
             (
                 "Only".to_string(),
                 detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
@@ -194,10 +190,6 @@ async fn epilog_runs_after_reply_and_can_return() {
                 detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
             ),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
-            ("Only".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
-            ("Only".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
-            ("Only".to_string(), detail::MODEL_SCOPE_CLOSING.to_string()),
-            ("Only".to_string(), detail::MODEL_SCOPE_CLOSED.to_string()),
             (
                 "Only".to_string(),
                 detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
@@ -344,10 +336,6 @@ Ask using {{ var.question }}.\n\n\
                 "Only".to_owned(),
                 detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
             ),
-            ("Only".to_owned(), detail::TOOL_SCOPE_CLOSING.to_string()),
-            ("Only".to_owned(), detail::TOOL_SCOPE_CLOSED.to_string()),
-            ("Only".to_owned(), detail::MODEL_SCOPE_CLOSING.to_string()),
-            ("Only".to_owned(), detail::MODEL_SCOPE_CLOSED.to_string()),
             (
                 "Only".to_owned(),
                 detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),

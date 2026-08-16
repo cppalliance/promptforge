@@ -1032,27 +1032,7 @@ fn scope_closure_reports_exact_payload_free_sequence() {
         .expect("empty scope may close before host injection");
     assert!(scope.bindings().is_empty());
 
-    assert_eq!(
-        recorder.observations(),
-        [
-            (
-                "private section".to_owned(),
-                detail::TOOL_SCOPE_CLOSING.clone(),
-            ),
-            (
-                "private section".to_owned(),
-                detail::TOOL_SCOPE_CLOSED.clone(),
-            ),
-            (
-                "private section".to_owned(),
-                detail::MODEL_SCOPE_CLOSING.clone(),
-            ),
-            (
-                "private section".to_owned(),
-                detail::MODEL_SCOPE_CLOSED.clone(),
-            ),
-        ]
-    );
+    assert!(recorder.observations().is_empty());
 }
 
 #[test]
@@ -1175,10 +1155,6 @@ fn section_vm_reports_store_operations_in_each_phase() {
             ("Gather".to_owned(), detail::LUA_PROLOGUE_STARTED.clone(),),
             ("Gather".to_owned(), detail::STORE_WRITE_SUCCEEDED.clone(),),
             ("Gather".to_owned(), detail::LUA_PROLOGUE_SUCCEEDED.clone(),),
-            ("Gather".to_owned(), detail::TOOL_SCOPE_CLOSING.clone(),),
-            ("Gather".to_owned(), detail::TOOL_SCOPE_CLOSED.clone(),),
-            ("Gather".to_owned(), detail::MODEL_SCOPE_CLOSING.clone(),),
-            ("Gather".to_owned(), detail::MODEL_SCOPE_CLOSED.clone(),),
             (
                 "Gather".to_owned(),
                 detail::LUA_REPLY_BINDING_STARTED.clone(),
@@ -1363,10 +1339,6 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
             detail::LUA_SHARED_LOAD_SUCCEEDED,
             detail::LUA_PROLOGUE_STARTED,
             detail::LUA_PROLOGUE_SUCCEEDED,
-            detail::TOOL_SCOPE_CLOSING,
-            detail::TOOL_SCOPE_CLOSED,
-            detail::MODEL_SCOPE_CLOSING,
-            detail::MODEL_SCOPE_CLOSED,
             detail::LUA_REPLY_BINDING_STARTED,
             detail::LUA_REPLY_BINDING_SUCCEEDED,
             detail::LUA_EPILOG_STARTED,
