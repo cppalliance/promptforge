@@ -153,7 +153,6 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
         "Exercise an author-shaped prologue, prose, and epilog"
     );
     assert_eq!(prompt.frontmatter().promptforge(), Some(1));
-    assert_eq!(prompt.frontmatter().default_return(), Some("fallback"));
     assert_eq!(
         prompt.frontmatter().max_tool_iterations(),
         MaxToolIterations::Limit(NonZeroU32::new(3).expect("3 is non-zero"))

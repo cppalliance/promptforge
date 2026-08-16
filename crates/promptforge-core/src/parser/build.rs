@@ -61,9 +61,6 @@ pub struct Frontmatter {
     /// file as a promptforge prompt; `None` means the file is not one. Optional.
     #[serde(default)]
     pub(crate) promptforge: Option<u32>,
-    /// Value returned when the run falls off the last section. Optional.
-    #[serde(default)]
-    pub(crate) default_return: Option<String>,
     /// Maximum model round trips a section's tool-call loop may take.
     ///
     /// A non-optional [`MaxToolIterations`]: an absent value deserializes to
@@ -184,12 +181,6 @@ impl Frontmatter {
     #[must_use]
     pub fn promptforge(&self) -> Option<u32> {
         self.promptforge
-    }
-
-    /// Returns the value produced when the run falls off the last section.
-    #[must_use]
-    pub fn default_return(&self) -> Option<&str> {
-        self.default_return.as_deref()
     }
 
     /// Returns the per-section tool-loop cap declared in frontmatter.

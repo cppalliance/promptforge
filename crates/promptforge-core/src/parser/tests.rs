@@ -168,7 +168,7 @@ fn parses_single_minimal_section() {
     assert_eq!(p.sections.len(), 1);
     assert_eq!(p.sections[0].name, "Greet");
     assert_eq!(p.sections[0].prose(), "Say hi");
-    assert!(p.frontmatter.default_return.is_none());
+
 }
 
 #[test]

@@ -7,8 +7,8 @@
 //! final prose runs the full tool loop. A scalar early Lua return ends the
 //! section; a scalar late Lua return ends the run.
 //!
-//! Running off the last section ends the run: the result is `default_return`
-//! from the frontmatter, else the last model reply, else a generic completion.
+//! Running off the last section ends the run: the result is the last model
+//! reply, else a generic completion.
 //!
 //! One run-scoped [`StoreRef`] is created once by the caller and threaded through
 //! every section (both its Lua prologue and, later, the model's file tools), so
