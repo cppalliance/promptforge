@@ -62,6 +62,8 @@ pub struct Config {
     pub(crate) gateway: GatewayConfig,
     /// The globs that assemble the catalog.
     pub(crate) catalog: CatalogConfig,
+    /// Which live tools the server registers for prompt runs.
+    pub(crate) tools: ToolsConfig,
     /// Per-prompt exceptions to the globs, keyed by the prompt's frontmatter
     /// `name`.
     pub(crate) prompts: BTreeMap<PromptName, PromptConfig>,
@@ -83,6 +85,8 @@ struct RawConfig {
     gateway: RawGatewayConfig,
     #[serde(default)]
     catalog: CatalogConfig,
+    #[serde(default)]
+    tools: ToolsConfig,
     #[serde(default)]
     prompts: BTreeMap<PromptName, PromptConfig>,
 }
@@ -125,6 +129,7 @@ impl TryFrom<RawConfig> for Config {
                 key,
             },
             catalog: raw.catalog,
+            tools: raw.tools,
             prompts: raw.prompts,
         })
     }
@@ -270,6 +275,31 @@ pub(crate) struct PromptConfig {
     /// Absent means the block is an exception to a globbed prompt.
     #[serde(default)]
     pub(crate) file: Option<RelativePromptPath>,
+}
+
+/// Which live tools the server registers for prompt runs.
+///
+/// Defaults to nothing enabled, so a prompt with no `[tools]` section runs in
+/// a true sandbox with no network access.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub(crate) struct ToolsConfig {
+    /// Register the web_fetch tool (fetches URLs and returns content).
+    #[serde(default)]
+    pub(crate) web_fetch: bool,
+    /// Register the web_search tool (searches the web via the gateway).
+    #[serde(default)]
+    pub(crate) web_search: bool,
+}
+
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self {
+            web_fetch: false,
+            web_search: false,
+        }
+    }
 }
 
 /// The largest a `prompts.toml` may be. A configuration is a handful of

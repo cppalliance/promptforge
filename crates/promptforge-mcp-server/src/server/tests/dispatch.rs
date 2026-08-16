@@ -130,7 +130,8 @@ async fn the_runner_resolves_and_executes_against_the_shared_registry() {
     let config = Config::from_toml_str(&format!(
         "[server]\ntoken = \"t\"\n\n\
          [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
-         [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
+         [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n\n\
+         [tools]\nweb_fetch = true\nweb_search = true\n",
         dir.path().display()
     ))
     .expect("the fixture configuration parses");
