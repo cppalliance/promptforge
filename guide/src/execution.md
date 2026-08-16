@@ -1,6 +1,6 @@
 # Execution
 
-A prompt file is a Markdown document with YAML frontmatter that promptforge compiles into an executable pipeline. The frontmatter declares identity (`name`, `description`) and a version tag (`promptforge: 2`). Below the frontmatter, an H1 title heads the prompt and one or more H2 sections supply the instructions, Lua logic, and prose that the runtime walks at execution time.
+A prompt file is a Markdown document with YAML frontmatter that promptforge compiles into an executable pipeline. The frontmatter declares identity (`name`, `description`) and a version tag (`promptforge: 2`). Below the frontmatter, an H1 title heads the prompt and zero or more H2 sections supply the instructions, Lua logic, and prose that the runtime walks at execution time.
 
 ## The Run Function
 
@@ -21,7 +21,29 @@ let result = run(
 ).await?;
 ```
 
-The run resolves the H1 block once, then walks H2 sections top to bottom. A section falls through to the next when its Lua does not return a value. An explicit return stops fall-through. When execution falls off the last section, the result is the `default_return` frontmatter value, then the last model reply, then the generic string "done".
+The run resolves the H1 block once, then walks H2 sections top to bottom. A section falls through to the next when its Lua does not return a value. An explicit return stops fall-through. When execution falls off the last section, the result is the last model reply, then the generic string "done".
+
+## H1-Only Execution
+
+A prompt with no H2 sections executes its H1 blocks (including any prose), and the model reply becomes the run result:
+
+````markdown
+---
+name: summarize
+description: Summarize the input
+promptforge: 1
+---
+
+# Summarize
+
+```lua
+models.always("m", "A model suited for careful analysis")
+```
+
+Summarize this text in one paragraph.
+
+{{ args }}
+````
 
 ## Run Configuration
 
