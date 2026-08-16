@@ -55,3 +55,4 @@
 - [2026-08-15-2-quickref-file] compressed operational reference: Keep an LLM-loadable quick reference factual and point each schema or language topic to its authoritative source.
 - [2026-08-15-3-gateway-dotenv-support] config-matched secret sidecars: Associate an optional ignored secret file with each config layer by name rather than adding secret syntax to config.
 - [2026-08-15-3-gateway-dotenv-support] gateway-local secret loading: Keep vendor secret loading inside the gateway; callers retain only gateway connection credentials.
+- [2026-08-15-4-h1-only-prompt-support] remove inert fallback configuration: Do not retain declarative fields that execution no longer honors; fall-through uses actual reply state.
