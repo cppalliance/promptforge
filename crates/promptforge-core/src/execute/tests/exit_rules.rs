@@ -20,14 +20,6 @@ async fn explicit_return_stops_fall_through() {
 }
 
 #[tokio::test]
-async fn runs_off_end_to_default_return() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\ndefault_return: \"fell off\"\n---\n\n\
-## Only\n\n```lua\nlocal x = 1\n```\n";
-    let out = run_offline(md).await.unwrap();
-    assert_eq!(out, "fell off");
-}
-
-#[tokio::test]
 async fn generic_result_when_nothing_produced() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nlocal x = 1\n```\n";

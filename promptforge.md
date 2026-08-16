@@ -4,58 +4,46 @@ Load this file to write and run PromptForge prompts. The repo root is `c:\Users\
 
 ## Running a prompt
 
-When the user says `promptforge <prompt.md> [input]`:
+When the user says `promptforge <name> [input]`:
 
 1. Check terminals for a running `promptforge-gateway`. If absent, start one in a background terminal from the repo root:
    ```
    cargo run -p promptforge-gateway -- serve gateway.toml
    ```
    Wait for the line containing "serving" before proceeding.
-2. Run the prompt from the repo root:
+2. Check that the `user-promptforge` MCP server is connected (`GetMcpTools` server status). If it is in error state, check terminals for a running `promptforge-mcp-server`. If absent, start one in a background terminal from the repo root:
    ```
-   cargo run -p promptforge-dev -- <prompt.md> [input]
+   cargo run -p promptforge-mcp-server -- serve local/prompts.toml
+   ```
+   Wait for the line containing "listening" before proceeding.
+3. Run the prompt as an MCP tool call:
+   ```
+   CallMcpTool(server: "user-promptforge", toolName: "<name>", arguments: { "input": "<input>" })
    ```
 
-The gateway persists for the session. Skip step 1 on subsequent runs.
+The gateway and MCP server persist for the session. Skip steps 1-2 on subsequent runs.
 
-Secrets (`ANTHROPIC_API_KEY`, `BRAVE_API_KEY`, etc.) go in `gateway.env` next to `gateway.toml`. The gateway loads it automatically before resolving `${VAR}` references in the config. The dev runner needs `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` - put those in the process environment or a wrapper script.
+Secrets (`ANTHROPIC_API_KEY`, `BRAVE_API_KEY`, etc.) go in `gateway.env` next to `gateway.toml`. The gateway loads it automatically before resolving `${VAR}` references in the config. The MCP server needs `PROMPTFORGE_MCP_TOKEN` and `PROMPTFORGE_GATEWAY_KEY` in its environment.
 
 **NEVER read, open, cat, or load any `.env` file into context.** These files contain secrets. The gateway reads them at startup - the agent must not.
 
-If the prompt contains only Lua (no prose outside fences), it runs without a gateway.
-
-Prompts in `local/prompts/` use path `local/prompts/<name>.md`.
+Prompts live in `local/prompts/`. Drop a `.md` file there and it becomes an MCP tool (with `--watch`, live).
 
 ## Components
 
 | Component | Command | Secrets | Default bind |
 |---|---|---|---|
 | Gateway | `cargo run -p promptforge-gateway -- serve gateway.toml` | `gateway.env` (loaded automatically) | `127.0.0.1:8081` |
-| MCP Server | `cargo run -p promptforge-mcp-server -- serve [--stdio] <prompts.toml>` | `PROMPTFORGE_MCP_TOKEN`, `PROMPTFORGE_GATEWAY_KEY` | `127.0.0.1:9310` |
-| Dev Runner | `cargo run -p promptforge-dev -- [--watch] [--capture-raw] <prompt.md> [input]` | `PROMPTFORGE_GATEWAY_URL`, `PROMPTFORGE_GATEWAY_KEY` | n/a |
+| MCP Server | `cargo run -p promptforge-mcp-server -- serve local/prompts.toml` | `PROMPTFORGE_MCP_TOKEN`, `PROMPTFORGE_GATEWAY_KEY` | `127.0.0.1:9310` |
 
-Start the gateway first. The MCP server and dev runner both call through it.
+Start the gateway first. The MCP server calls through it.
 
-## `prompts.toml` (MCP server config)
+## `local/prompts.toml` (MCP server config)
 
-```toml
-[server]
-token = "${PROMPTFORGE_MCP_TOKEN}"
+The MCP server config lives at `local/prompts.toml` (gitignored). It serves `local/prompts/`.
 
-[paths]
-prompts = "local/prompts"
-
-[gateway]
-url = "http://127.0.0.1:8081/v1"
-key = "${PROMPTFORGE_GATEWAY_KEY}"
-
-[tools]
-web_fetch = true
-web_search = true
-```
-
+- `[catalog]` required: `include` globs relative to `[paths].prompts`. Without it the server finds zero prompts.
 - `[tools]` defaults to nothing enabled (true sandbox). Enable per prompt needs.
-- `[catalog]` optional: `include`/`exclude` globs relative to `[paths].prompts`.
 - `[prompts.NAME]` optional: per-prompt overrides (`enabled = false`).
 - Full schema: `crates/promptforge-mcp-server/design-mcp-server.md`
 
@@ -138,7 +126,7 @@ Full reference: `guide/src/prompt-files.md` (structure), `guide/src/lua.md` (API
 
 ## Example
 
-```markdown
+````markdown
 ---
 name: research_person
 description: Research a person from the open web
@@ -163,13 +151,6 @@ tools.add("search", "fetch")
 Research this person using live web tools. Return a factual summary.
 
 {{ args }}
-```
+````
 
 More examples: `prompts/`
-
-## Local MCP Prompts
-
-- `local/prompts/` - gitignored directory for local prompts
-- `local/prompts.toml` - config serving that directory (also gitignored)
-- Drop a `.md` prompt file into `local/prompts/` and it is live (with `--watch`)
-- Launch: `cargo run -p promptforge-mcp-server -- serve local/prompts.toml`
