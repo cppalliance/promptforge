@@ -119,7 +119,7 @@ Lua blocks in the H1 region execute once in source order before any H2 section. 
 # My Prompt
 
 ```lua
-models.always("writer", "a capable writing model")
+models.only("writer", "a capable writing model")
 tools.need("search", "web search capability")
 tools.always("search")
 var.topic = "Rust async patterns"
@@ -161,7 +161,7 @@ Each section VM provides these globals:
 | `reply` | Previous section's model answer |
 | `tasks` | Section handles for control flow |
 
-The `sys` table includes `when`, `now`, `id`, `section_name`, `execution`, `section_count`, `model` (after scope closure), and `reply_finish_reason` (after inference). It is sealed - writes raise errors and the metatable cannot be replaced.
+The `sys` table includes `when`, `now`, `id`, `section_name`, `execution`, `section_count`, `model` (after first model interaction), and `reply_finish_reason` (after inference). It is sealed - writes raise errors and the metatable cannot be replaced.
 
 ### Template Substitution
 
@@ -232,16 +232,16 @@ models.need("writer", "a creative writing model", {
 })
 
 -- Set it as the prompt-wide default
-models.always("writer")
+models.only("writer")
 ```
 
-The `models.always(alias, description, opts)` form declares and designates in one atomic call. Within sections, `models.use(alias)` selects a specific model:
+The `models.only(alias, description, opts)` form declares and designates in one atomic call. Within sections, `models.use(alias)` selects a specific model:
 
 ```lua
 models.use("analyst")
 ```
 
-Sections without `models.use` inherit the `models.always` default. Sections with non-empty prose but no model binding receive a clear error.
+Sections without `models.use` inherit the `models.only` default. Sections with non-empty prose but no model binding receive a clear error.
 
 ### Hard Constraints
 
@@ -252,7 +252,7 @@ The opts table filters the catalog before semantic resolution:
 - `temperature` - float in range 0.0 to 2.0
 - `max_tokens` - positive integer
 
-Duplicate model aliases or duplicate `models.always` calls are rejected atomically.
+Duplicate model aliases or duplicate `models.only` calls are rejected atomically.
 
 ### Model Inference from Lua
 

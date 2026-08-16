@@ -8,7 +8,7 @@ Tools are declared by capability description and resolved semantically at runtim
 -- Declare a tool need
 local search = tools.need("search", "web search capability")
 
--- Promote to prompt-wide scope (available in all sections)
+-- Promote to prompt-wide availability (available in all sections)
 tools.always("search")
 ```
 
@@ -41,7 +41,7 @@ The tool loop runs the model in a cycle: dispatch tool calls, feed results back,
 
 Untrusted tool output is wrapped with a CSPRNG nonce envelope before reaching the model, preventing prompt injection. Each round uses a fresh nonce. Trusted tool output passes verbatim. Trust marking is mandatory at construction time.
 
-Near-duplicate tools in the same section scope are detected and rejected before any model call, with similarity diagnostics. Out-of-scope tool calls produce a clear error distinguishing globally-declared-but-unscoped tools from truly unknown ones.
+Near-duplicate tools available to the same section are detected and rejected before any model call, with similarity diagnostics. Tool calls for tools not available to the section produce a clear error distinguishing globally-declared-but-unavailable tools from truly unknown ones.
 
 ## Tool Call Counts
 
@@ -59,7 +59,7 @@ if tools.calls.search == 0 then
 end
 ```
 
-Counts increment even when a tool call fails. Mistyped aliases produce a hard error with the available scope listed.
+Counts increment even when a tool call fails. Mistyped aliases produce a hard error with the available tools listed.
 
 ## Implementing Custom Tools
 
