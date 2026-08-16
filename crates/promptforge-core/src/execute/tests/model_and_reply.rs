@@ -548,34 +548,6 @@ async fn fanout_arm_epilog_sees_sys_model_catalog_id() {
     assert_eq!(out, "claude-sonnet-4-6:stop:a");
 }
 
-#[tokio::test]
-async fn default_return_precedes_the_last_model_reply() {
-    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
-    let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\ndefault_return: fallback\n---\n\n\
-# Test prompt\n\n\
-## Only\n\nAsk the model.\n";
-    let out = run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(out, "fallback");
-}
-
 // --- Reply forwarding across sections ---
 
 #[tokio::test]

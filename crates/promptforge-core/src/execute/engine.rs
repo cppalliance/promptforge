@@ -8,7 +8,7 @@
 //! - [`run_sections`] is the top-level walk. It loops over the prompt's
 //!   sections with [`JumpPolicy::Follow`], carries the model reply across
 //!   section boundaries (clearing it on a jump), and computes the run's final
-//!   result (frontmatter `default_return`, else the last reply, else `"done"`).
+//!   result (the last reply, else `"done"`).
 //! - [`run_execute_section`] is the `execute()` subroutine. It drives the
 //!   engine once for one isolated section with [`JumpPolicy::Reject`] and a
 //!   frozen `execute_depth`, then returns that section's reply.
@@ -192,12 +192,7 @@ pub(crate) async fn run_sections(
     }
 
     // Ran off the end.
-    Ok(prompt
-        .frontmatter
-        .default_return
-        .clone()
-        .or(last_reply)
-        .unwrap_or_else(|| "done".to_string()))
+    Ok(last_reply.unwrap_or_else(|| "done".to_string()))
 }
 
 /// Execute one section's block lifecycle over the shared [`WalkContext`].

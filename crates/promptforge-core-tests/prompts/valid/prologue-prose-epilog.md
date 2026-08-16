@@ -2,7 +2,6 @@
 name: phase_boundaries
 description: Exercise an author-shaped prologue, prose, and epilog
 promptforge: 1
-default_return: fallback
 max_tool_iterations: 3
 ---
 
