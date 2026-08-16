@@ -30,7 +30,7 @@ use crate::debug::DebugCapture;
 use crate::fanout;
 use crate::lua::{
     LuaBlockResult, LuaSectionHandle, SectionVm, ToolBindings, ToolCallCounts,
-    resolve_section_target,
+    resolve_section_target, snapshot_tool_scope,
 };
 use crate::model::{CompletionOptions, ModelBinding, ModelBindings};
 use crate::observe::{Observer, detail};
@@ -264,7 +264,10 @@ async fn run_one_section(
 
     let has_children = !section.children.is_empty();
     let mut conversation: Vec<Message> = Vec::new();
-    let mut scopes_ready = false;
+    // Tracks whether the walk has passed the first prose block, which splits
+    // Lua blocks into prologue (before) and epilog (after) and gates the
+    // one-time tool/model snapshot below.
+    let mut seen_prose = false;
     let mut counts: Option<ToolCallCounts> = None;
     let mut model_binding: Option<ModelBinding> = None;
     let mut schemas: Vec<ToolSchema> = Vec::new();
@@ -284,7 +287,7 @@ async fn run_one_section(
                 let returned = run_section_lua(
                     &vm,
                     program,
-                    !scopes_ready,
+                    !seen_prose,
                     has_children,
                     section,
                     ctx.store,
@@ -335,22 +338,33 @@ async fn run_one_section(
                 }
             }
             Block::Prose { text, loop_capable } => {
-                if !scopes_ready {
-                    let scopes = match vm.close_scopes(ctx.observer, &section.name) {
-                        Ok(scopes) => scopes,
+                if !seen_prose {
+                    seen_prose = true;
+                    let scope = match snapshot_tool_scope(ctx.bindings, &vm.tool_runtime) {
+                        Ok(scope) => scope,
                         Err(error) => {
                             vm.teardown(ctx.observer, &section.name);
                             return Err(error);
                         }
                     };
-                    counts = match vm.install_tool_call_counts(&scopes.tools) {
+                    counts = match vm.install_tool_call_counts(&scope) {
                         Ok(c) => Some(c),
                         Err(error) => {
                             vm.teardown(ctx.observer, &section.name);
                             return Err(error);
                         }
                     };
-                    if let Some(binding) = scopes.model.as_ref() {
+                    let resolved_model = match crate::lua::resolve_model_binding(
+                        ctx.models,
+                        &vm.model_runtime,
+                    ) {
+                        Ok(model) => model,
+                        Err(error) => {
+                            vm.teardown(ctx.observer, &section.name);
+                            return Err(error);
+                        }
+                    };
+                    if let Some(binding) = resolved_model.as_ref() {
                         let current = match vm.current_sys(&sys) {
                             Ok(current) => current,
                             Err(error) => {
@@ -366,10 +380,10 @@ async fn run_one_section(
                         sys = enriched;
                         completion_options = Some(binding.completion_options());
                     }
-                    model_binding = scopes.model;
+                    model_binding = resolved_model;
                     let (prepared_schemas, prepared_dispatch) = match prepare_effective_scope(
                         ctx.analysis,
-                        &scopes.tools,
+                        &scope,
                         &registry,
                         ctx.execution,
                         ctx.observer,
@@ -383,8 +397,6 @@ async fn run_one_section(
                     };
                     schemas = prepared_schemas;
                     dispatch = prepared_dispatch;
-                    let _ = scopes.tools;
-                    scopes_ready = true;
                 }
 
                 let var = match vm.var() {
@@ -487,17 +499,6 @@ async fn run_one_section(
                 }
             }
         }
-    }
-
-    // Classic prologue-only early return / jump tears down without closing
-    // scope. A lua-only section that falls through still closes, matching today.
-    if !scopes_ready
-        && early_return.is_none()
-        && jump_heading.is_none()
-        && let Err(error) = vm.close_scopes(ctx.observer, &section.name)
-    {
-        vm.teardown(ctx.observer, &section.name);
-        return Err(error);
     }
 
     vm.teardown(ctx.observer, &section.name);

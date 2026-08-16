@@ -182,11 +182,11 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             ));
         }
 
-        let scopes = vm.close_scopes(observer, &worker.name)?;
-        let scope = scopes.tools;
+        let scope = crate::lua::snapshot_tool_scope(&bindings, &vm.tool_runtime)?;
         let counts = Some(vm.install_tool_call_counts(&scope)?);
+        let model = crate::lua::resolve_model_binding(&models, &vm.model_runtime)?;
 
-        let sys = if let Some(model_binding) = scopes.model.as_ref() {
+        let sys = if let Some(model_binding) = model.as_ref() {
             let current = vm.current_sys(&sys)?;
             let enriched = crate::lua::enrich_sys_model(&current, model_binding);
             vm.re_seal_sys(&enriched)?;
@@ -207,7 +207,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
 
         let mut arm_reply: Option<String> = None;
         if !prose.trim().is_empty() {
-            let Some(model_binding) = scopes.model else {
+            let Some(model_binding) = model else {
                 return Err(Error::ModelRequired {
                     section: worker.name.clone(),
                 });

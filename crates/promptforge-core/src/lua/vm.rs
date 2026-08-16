@@ -1,13 +1,12 @@
 use super::{
-    Arc, AtomicU32, AtomicUsize, BTreeMap, ClosedScopes, DEFAULT_LUA_LOG_EVENTS,
-    DEFAULT_LUA_MEMORY_BYTES, Error, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle,
-    LuaOptions, LuaProgram, LuaSectionHandle, LuaSerdeExt, LuaToolHandle, ModelBindings,
-    ModelInferHook, ModelRuntime, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution,
-    StdLib, StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolPhase, ToolRuntime, ToolScope,
-    Value, close_model_scope, default_log_byte_budget, detail, finish_log_phase, harden,
-    install_h2_models, install_h2_tools, install_instruction_budget, install_log,
-    install_lua_tool_calls, install_store_table, install_tasks_table, resolve_section_target,
-    scalar_return, seal_sys,
+    Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
+    Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram,
+    LuaSectionHandle, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook,
+    ModelRuntime, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution, StdLib,
+    StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, ToolScope, Value,
+    default_log_byte_budget, detail, finish_log_phase, harden, install_h2_models, install_h2_tools,
+    install_instruction_budget, install_log, install_lua_tool_calls, install_store_table,
+    install_tasks_table, resolve_section_target, scalar_return, seal_sys,
 };
 
 /// One hardened, isolated Lua VM for a section's complete lifecycle.
@@ -118,7 +117,6 @@ impl SectionVm {
             bound_tools: ToolBindings::default(),
             bound_models: ModelBindings::default(),
             tool_runtime: Arc::new(Mutex::new(ToolRuntime {
-                phase: ToolPhase::H2,
                 added: Vec::new(),
                 description_overrides: BTreeMap::new(),
                 generation: 0,
@@ -475,8 +473,8 @@ impl SectionVm {
     /// Binds the model reply for a later epilog in the same environment.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected, the tool
-    /// scope remains open, or the reply cannot be installed.
+    /// Returns [`Error::Lua`] if host values have not been injected or the
+    /// reply cannot be installed.
     ///
     /// # Examples
     /// ```text
@@ -486,7 +484,6 @@ impl SectionVm {
     ///
     /// let mut vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// vm.close_tool_scope(&NullObserver::default(), "Example")?;
     /// vm.bind_reply("model answer", &NullObserver::default(), "Example")?;
     /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
@@ -500,10 +497,6 @@ impl SectionVm {
         observer.observe(&self.execution, section, detail::LUA_REPLY_BINDING_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(&self.execution, section, detail::LUA_REPLY_BINDING_FAILED);
-            return Err(error);
-        }
-        if let Err(error) = self.require_closed_tool_scope("bind a model reply") {
             observer.observe(&self.execution, section, detail::LUA_REPLY_BINDING_FAILED);
             return Err(error);
         }
@@ -531,9 +524,9 @@ impl SectionVm {
     /// this call and reports under `execution` and `section`.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected, the tool
-    /// scope remains open, execution fails, the shared instruction budget is
-    /// exhausted, or the program returns a non-scalar value.
+    /// Returns [`Error::Lua`] if host values have not been injected, execution
+    /// fails, the shared instruction budget is exhausted, or the program
+    /// returns a non-scalar value.
     ///
     /// # Examples
     /// ```text
@@ -551,7 +544,6 @@ impl SectionVm {
     /// )?;
     /// let mut vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// vm.close_tool_scope(&NullObserver::default(), "Example")?;
     /// vm.bind_reply("done", &NullObserver::default(), "Example")?;
     /// assert_eq!(
     ///     vm.run_epilog(&epilog, &NullObserver::default(), "Example")?.as_deref(),
@@ -569,10 +561,6 @@ impl SectionVm {
         observer.observe(&self.execution, section, detail::LUA_EPILOG_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
-            return Err(error);
-        }
-        if let Err(error) = self.require_closed_tool_scope("run an epilog") {
             observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
             return Err(error);
         }
@@ -630,8 +618,8 @@ impl SectionVm {
     /// Executes a compiled epilog with `tasks`, `execute`, `jump`, and optional `fanout`.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected, the tool
-    /// scope is open, or execution fails.
+    /// Returns [`Error::Lua`] if host values have not been injected or
+    /// execution fails.
     pub(crate) fn run_epilog_with_control<E, F>(
         &self,
         program: &LuaProgram,
@@ -648,10 +636,6 @@ impl SectionVm {
         observer.observe(&self.execution, section, detail::LUA_EPILOG_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
-            return Err(error);
-        }
-        if let Err(error) = self.require_closed_tool_scope("run an epilog") {
             observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
             return Err(error);
         }
@@ -675,134 +659,6 @@ impl SectionVm {
             },
         );
         result
-    }
-
-    /// Closes and returns this section's effective tool scope.
-    ///
-    /// Prompt-wide `tools.always` aliases come first, followed by first-seen
-    /// `tools.add` aliases from the H2 prologue. Closing is one-way: retained
-    /// function references cannot add tools during an epilog.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] for a poisoned declaration runtime, a closure
-    /// attempt before host injection, or a second closure attempt.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge_core::lua::{SectionVm, ToolBindings};
-    /// use promptforge_core::model::ModelBindings;
-    /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::StoreRef;
-    /// let mut vm = SectionVm::new_for_section(
-    ///     None,
-    ///     &ToolBindings::default(),
-    ///     &ModelBindings::default(),
-    ///     "example-run",
-    ///     &NullObserver::default(),
-    ///     "Example",
-    /// )?;
-    /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// let scope = vm.close_tool_scope(&NullObserver::default(), "Example")?;
-    /// assert!(scope.bindings().is_empty());
-    /// vm.teardown(&NullObserver::default(), "Example");
-    /// # Ok::<(), promptforge_core::Error>(())
-    /// ```
-    /// Closes and returns this section's effective tool scope.
-    ///
-    /// Also closes model selection recording. Prefer [`Self::close_scopes`] when
-    /// the caller needs the section's `models.use` selection.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] for a poisoned declaration runtime, a closure
-    /// attempt before host injection, or a second closure attempt.
-    #[cfg(test)]
-    pub(crate) fn close_tool_scope(
-        &self,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<ToolScope> {
-        Ok(self.close_scopes(observer, section)?.tools)
-    }
-
-    /// Closes tool and model H2 recording for this section.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] for a poisoned declaration runtime, a closure
-    /// attempt before host injection, or a second closure attempt.
-    pub(crate) fn close_scopes(
-        &self,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<ClosedScopes> {
-        observer.observe(&self.execution, section, detail::TOOL_SCOPE_CLOSING);
-        // LUA-008: validate and compute BOTH scopes before committing either, so
-        // a model-close failure cannot leave the tool scope already committed to
-        // Closed. Phase 1 validates the tool phase and computes the effective
-        // tool scope WITHOUT committing; the model close then validates+resolves;
-        // only after both succeed is the (infallible) tool commit performed.
-        let tools = self.prepare_tool_scope();
-        observer.observe(
-            &self.execution,
-            section,
-            if tools.is_ok() {
-                detail::TOOL_SCOPE_CLOSED
-            } else {
-                detail::TOOL_SCOPE_FAILED
-            },
-        );
-        let tools = tools?;
-        let model = close_model_scope(
-            &self.bound_models,
-            &self.model_runtime,
-            &self.execution,
-            observer,
-            section,
-        )?;
-        // Both scopes validated (and the model phase committed); the tool commit
-        // below only flips an enum and cannot fail.
-        self.commit_tool_scope_closed()?;
-        Ok(ClosedScopes { tools, model })
-    }
-
-    /// Validates the tool phase is open and computes the effective tool scope
-    /// WITHOUT committing the phase transition (see [`Self::close_scopes`]).
-    fn prepare_tool_scope(&self) -> Result<ToolScope> {
-        let bindings = &self.bound_tools;
-        let runtime = self
-            .tool_runtime
-            .lock()
-            .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
-        if runtime.phase != ToolPhase::H2 {
-            return Err(Error::Lua(
-                "tool scope can only close once after H2 recording".to_owned(),
-            ));
-        }
-        let aliases = bindings
-            .always
-            .iter()
-            .chain(runtime.added.iter())
-            .cloned()
-            .collect::<Vec<_>>();
-        let effective = aliases
-            .iter()
-            .map(|alias| binding_for_scope(bindings, &runtime, alias))
-            .collect::<Result<Vec<_>>>()?;
-        Ok(ToolScope {
-            bindings: effective,
-        })
-    }
-
-    /// Commits the tool scope's H2 -> Closed transition. Infallible apart from a
-    /// poisoned lock; only transitions from `H2` so a double call is safe.
-    fn commit_tool_scope_closed(&self) -> Result<()> {
-        let mut runtime = self
-            .tool_runtime
-            .lock()
-            .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
-        if runtime.phase == ToolPhase::H2 {
-            runtime.phase = ToolPhase::Closed;
-        }
-        Ok(())
     }
 
     /// Installs `tools.calls` as a read-only Lua table backed by the shared
@@ -884,20 +740,6 @@ impl SectionVm {
     /// Clears the `model:infer` host hook.
     pub(crate) fn clear_infer_hook(&self) {
         let _ = self.lua.remove_app_data::<ModelInferHook>();
-    }
-
-    fn require_closed_tool_scope(&self, operation: &str) -> Result<()> {
-        let runtime = self
-            .tool_runtime
-            .lock()
-            .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
-        if runtime.phase == ToolPhase::Closed {
-            Ok(())
-        } else {
-            Err(Error::Lua(format!(
-                "tool scope must close before the section VM can {operation}"
-            )))
-        }
     }
 
     /// Destroys this section VM at an explicit observed lifecycle boundary.
@@ -1266,7 +1108,7 @@ pub(crate) fn run_chunk(
 /// unknown key raises a hard Lua error naming the bad key and listing the VM's
 /// in-scope aliases. `declared` is the prompt-wide `tools.need` set used to
 /// distinguish pure unknowns from declared-but-unscoped aliases.
-/// Snapshot-reads always + H2 additions without closing the tool phase.
+/// Snapshot-reads always + H2 additions without mutating the tool runtime.
 pub(crate) fn snapshot_tool_scope(
     bindings: &ToolBindings,
     runtime: &Mutex<ToolRuntime>,
@@ -1287,6 +1129,30 @@ pub(crate) fn snapshot_tool_scope(
     Ok(ToolScope {
         bindings: effective,
     })
+}
+
+/// Reads the section's effective model binding without mutating the model
+/// runtime: the H2 `models.use` selection, else the prompt-wide
+/// `models.always` default.
+pub(crate) fn resolve_model_binding(
+    bindings: &ModelBindings,
+    runtime: &Mutex<ModelRuntime>,
+) -> Result<Option<ModelBinding>> {
+    let alias = {
+        let runtime = runtime
+            .lock()
+            .map_err(|_| Error::Lua("model declaration runtime was poisoned".to_owned()))?;
+        runtime
+            .used()
+            .map(String::from)
+            .or_else(|| bindings.always().map(String::from))
+    };
+    match alias {
+        Some(alias) => Ok(Some(bindings.binding(&alias).cloned().ok_or_else(|| {
+            Error::Lua(format!("model alias {alias:?} has no frozen binding"))
+        })?)),
+        None => Ok(None),
+    }
 }
 
 /// Clones a frozen binding and applies any author model-description override.

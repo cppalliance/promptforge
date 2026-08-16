@@ -1,6 +1,6 @@
 use super::{
     Arc, Error, Lua, LuaSectionHandle, LuaToolHandle, MultiValue, Mutex, Result, ToolBindings,
-    ToolCallCounts, ToolPhase, ToolRuntime, Value, Variadic, validate_alias,
+    ToolCallCounts, ToolRuntime, Value, Variadic, validate_alias,
 };
 
 pub(crate) fn install_lua_tool_calls(
@@ -130,17 +130,6 @@ pub(crate) fn install_h2_tools(
     bindings: &ToolBindings,
     runtime: &Arc<Mutex<ToolRuntime>>,
 ) -> Result<()> {
-    {
-        let state = runtime
-            .lock()
-            .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
-        if state.phase != ToolPhase::H2 {
-            return Err(Error::Lua(
-                "tool scope is not open for H2 recording".to_owned(),
-            ));
-        }
-    }
-
     let tools = lua.create_table().map_err(Error::lua)?;
     for name in ["need", "always"] {
         let operation = name;
@@ -162,11 +151,6 @@ pub(crate) fn install_h2_tools(
             let mut state = state
                 .lock()
                 .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
-            if state.phase != ToolPhase::H2 {
-                return Err(mlua::Error::external(
-                    "tools.add is only available before the H2 tool scope closes",
-                ));
-            }
             for entry in &entries {
                 validate_alias(&entry.alias).map_err(mlua::Error::external)?;
                 if frozen.binding(&entry.alias).is_none() {
