@@ -30,7 +30,7 @@ Historical frontmatter also included fields no longer in the current core contra
 - `version`, an author-owned interface version
 - `tools`, a list parsed for CLI or MCP callers
 
-The current frontmatter keeps `name`, `description`, `promptforge`, `default_return`, and `max_tool_iterations`.
+The current frontmatter keeps `name`, `description`, `promptforge`, and `max_tool_iterations`. (Note: `default_return` was removed; the fall-through chain is now `reply` else `"done"`.)
 
 ## Superseded Lua and substitution surface
 

@@ -75,7 +75,7 @@ Escape literal delimiters with backslash: `\{{` emits `{{`.
 
 ## Control Flow
 
-`jump(target)` transfers control to another section by heading name, clearing conversation context. `execute(target, input)` runs a section as a subroutine with a fresh VM and conversation, returning that section's reply:
+`jump(target)` transfers control to another section by heading name, clearing conversation context. The current `reply` value is preserved across the jump, so the target section can reference it in prose (`{{ reply }}`) or Lua. Clear it explicitly with `reply = nil` before jumping when the target should not inherit the previous reply. `execute(target, input)` runs a section as a subroutine with a fresh VM and conversation, returning that section's reply:
 
 ````markdown
 ## Router
@@ -95,6 +95,32 @@ Research the topic: {{ args }}
 Using this research: {{ var.research }}
 
 Write a summary.
+````
+
+Reply preservation across `jump()` enables routing patterns where one section's analysis determines the next section's context:
+
+````markdown
+## Analyze
+
+Analyze this input for severity. End with exactly CRITICAL or NORMAL.
+
+{{ args }}
+
+```lua
+if reply:find("CRITICAL") then
+    jump("## Alert")
+else
+    jump("## Summary")
+end
+```
+
+## Alert
+
+The analysis found a critical issue:
+
+{{ reply }}
+
+Escalate this with recommended actions.
 ````
 
 `execute()` nests up to 8 levels deep. `jump()` inside an `execute()` subroutine is rejected with a clear error. Sections can be referenced by heading string or by Section objects from the `tasks` table.

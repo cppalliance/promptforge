@@ -16,14 +16,11 @@ When the user says `promptforge <name> [input]`:
    cargo run -p promptforge-mcp-server -- serve local/prompts.toml
    ```
    Wait for the line containing "listening" before proceeding.
-3. Run the prompt as an MCP tool call:
-   ```
-   CallMcpTool(server: "user-promptforge", toolName: "<name>", arguments: { "input": "<input>" })
-   ```
+3. Discover the tool schema once with `GetMcpTools(server: "user-promptforge")`, then call `run_prompt` with the prompt name and input.
 
 The gateway and MCP server persist for the session. Skip steps 1-2 on subsequent runs.
 
-Secrets (`ANTHROPIC_API_KEY`, `BRAVE_API_KEY`, etc.) go in `gateway.env` next to `gateway.toml`. The gateway loads it automatically before resolving `${VAR}` references in the config. The MCP server needs `PROMPTFORGE_MCP_TOKEN` and `PROMPTFORGE_GATEWAY_KEY` in its environment.
+Secrets (`ANTHROPIC_API_KEY`, `BRAVE_API_KEY`, etc.) go in `gateway.env` next to `gateway.toml`. The MCP server secrets (`PROMPTFORGE_MCP_TOKEN`, `PROMPTFORGE_GATEWAY_KEY`) go in `local/prompts.env`. Both servers load their name-matched env file automatically before resolving `${VAR}` references in the config.
 
 **NEVER read, open, cat, or load any `.env` file into context.** These files contain secrets. The gateway reads them at startup - the agent must not.
 
@@ -82,7 +79,6 @@ endpoints = ["anthropic"]
 | `name` | yes | string | Identifier, `^[a-z][a-z0-9_]{0,47}$` |
 | `description` | yes | string | One-line for listings and retrieval |
 | `promptforge` | yes | int | Engine major. Only `1` runs today |
-| `default_return` | no | string | Returned on fall-through |
 | `max_tool_iterations` | no | int 1-1000 | Tool-loop cap (default 24) |
 | `input` | no | object | `path` + `description` of expected store input |
 | `output` | no | object | `path` + `description` of produced store output |
@@ -92,7 +88,7 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 ## Prompt Structure
 
 - Exactly one **H1** - title + H1 Lua (tool/model resolution)
-- One or more **H2** sections - executed top-to-bottom
+- Zero or more **H2** sections - executed top-to-bottom
 - ` ```lua ` fences for executable Lua; ` ```lua shared ` for shared library
 - Prose outside fences becomes model turns
 - Substitution: `{{ args }}`, `{{ var.x }}`, `{{ reply }}`
