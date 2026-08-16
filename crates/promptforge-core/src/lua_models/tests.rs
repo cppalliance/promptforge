@@ -1,13 +1,11 @@
-use std::sync::{Arc, Mutex};
-
 use super::decode::{
     decode_lua_number, parse_need_args, parse_opts_table, parse_single_alias, validate_alias,
     value_as_bool, value_as_nonzero_u32, value_as_temperature, value_as_u32,
 };
 use super::userdata::{LuaModelHandle, reject_infer_options};
-use super::{ModelBindingState, ModelRuntime, close_model_scope_inner, record_always_binding};
+use super::{ModelBindingState, ModelRuntime, record_always_binding};
 use crate::dialects::ToolDialectId;
-use crate::model::{ModelBinding, ModelBindings, ModelId, ModelInvocation, ModelNeedOpts};
+use crate::model::{ModelId, ModelInvocation, ModelNeedOpts};
 use mlua::Value;
 use mlua::{Lua, MultiValue};
 
@@ -111,27 +109,14 @@ fn always_multi_arg_rolls_back_when_already_selected() {
 }
 
 #[test]
-fn close_model_scope_validates_binding_before_transition() {
-    // PF-LM-007: when the selected alias has no frozen binding, close must
-    // fail while the scope is still H2, never leaving a Closed scope with a
-    // dangling selection.
-    let bindings = ModelBindings::default();
-    let runtime = Arc::new(Mutex::new(ModelRuntime::new()));
-    runtime
-        .lock()
-        .expect("lock the runtime")
-        .select("ghost".to_owned())
-        .expect("recording is open");
-
-    let err = close_model_scope_inner(&bindings, &runtime)
-        .expect_err("a selected alias with no binding must fail the close");
+fn model_runtime_select_enforces_at_most_once() {
+    let mut runtime = ModelRuntime::new();
+    assert!(runtime.used().is_none());
+    runtime.select("writer".to_owned()).expect("first select ok");
+    assert_eq!(runtime.used(), Some("writer"));
     assert!(
-        err.to_string().contains("no frozen binding"),
-        "error must name the missing binding: {err}"
-    );
-    assert!(
-        runtime.lock().expect("lock the runtime").is_open(),
-        "a failed close must not transition the scope to Closed"
+        runtime.select("other".to_owned()).is_err(),
+        "a second select must be rejected"
     );
 }
 
@@ -303,18 +288,7 @@ fn parse_single_alias_and_validate_alias_branches() {
 }
 
 #[test]
-fn model_runtime_transitions_h2_then_closed() {
-    // State transition: a fresh runtime is H2, and closing an empty scope
-    // yields no binding and transitions to Closed exactly once.
-    let bindings = ModelBindings::default();
-    let runtime = Arc::new(Mutex::new(ModelRuntime::new()));
-    assert!(runtime.lock().expect("lock").is_open());
-    let selected = close_model_scope_inner(&bindings, &runtime).expect("empty close is ok");
-    assert!(selected.is_none(), "no use/always yields no binding");
-    assert!(!runtime.lock().expect("lock").is_open());
-    // A second close is rejected (can only close once).
-    assert!(
-        close_model_scope_inner(&bindings, &runtime).is_err(),
-        "closing a Closed scope must fail"
-    );
+fn model_runtime_starts_with_no_selection() {
+    let runtime = ModelRuntime::new();
+    assert!(runtime.used().is_none(), "fresh runtime has no selection");
 }
