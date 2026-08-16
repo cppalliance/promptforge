@@ -41,7 +41,7 @@ pub(crate) use serde_json::json;
 
 pub(crate) use crate::lua_models::{LuaModelHandle, ModelInferHook};
 pub(crate) use crate::lua_models::{
-    ModelBindingState, ModelRuntime, close_model_scope, install_h2_models, install_live_models,
+    ModelBindingState, ModelRuntime, install_h2_models, install_live_models,
 };
 pub(crate) use crate::model::{ModelBinding, ModelBindings, ModelResolver};
 pub(crate) use crate::observe::{Observation, Observer, detail};

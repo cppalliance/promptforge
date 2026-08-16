@@ -9,7 +9,6 @@ use std::sync::Mutex;
 use mlua::{Lua, MultiValue, Scope, Table};
 
 use crate::model::{ModelBinding, ModelBindings, ModelNeedOpts, ModelResolver};
-use crate::observe::{Observer, detail};
 use crate::{Error, Result};
 
 mod decode;
@@ -19,66 +18,39 @@ pub(crate) use userdata::{LuaModelHandle, ModelInferHook};
 
 use decode::{parse_need_args, parse_single_alias, validate_alias};
 
-/// H2 model-recording state, as phase-owning variants (PF-LM-006).
-///
-/// A `models.use` selection is only valid while recording is open, so it lives
-/// inside the `Open` variant; a `Closed` scope owns no selection state, making a
-/// "used-after-close" mutation unrepresentable. Fields are private; all access is
-/// through the methods below.
+/// H2 model-recording state: wraps the at-most-once `models.use` selection.
 #[derive(Debug)]
-pub(crate) enum ModelRuntime {
-    /// H2 recording is open; `used` holds an optional `models.use` selection.
-    Open { used: Option<String> },
-    /// Recording has closed; no further selection or close is possible.
-    Closed,
+pub(crate) struct ModelRuntime {
+    used: Option<String>,
 }
 
 impl ModelRuntime {
     pub(crate) fn new() -> Self {
-        ModelRuntime::Open { used: None }
-    }
-
-    /// Whether recording is still open.
-    pub(crate) fn is_open(&self) -> bool {
-        matches!(self, ModelRuntime::Open { .. })
+        ModelRuntime { used: None }
     }
 
     /// The current `models.use` selection, if any.
     pub(crate) fn used(&self) -> Option<&str> {
-        match self {
-            ModelRuntime::Open { used } => used.as_deref(),
-            ModelRuntime::Closed => None,
-        }
+        self.used.as_deref()
     }
 
     /// Records a `models.use` selection.
     ///
     /// # Errors
-    /// Returns [`SelectError::Closed`] if recording has closed, or
-    /// [`SelectError::AlreadyUsed`] if a selection was already recorded.
+    /// Returns [`SelectError::AlreadyUsed`] if a selection was already recorded.
     pub(crate) fn select(&mut self, alias: String) -> std::result::Result<(), SelectError> {
-        match self {
-            ModelRuntime::Open { used } if used.is_some() => Err(SelectError::AlreadyUsed),
-            ModelRuntime::Open { used } => {
-                *used = Some(alias);
-                Ok(())
-            }
-            ModelRuntime::Closed => Err(SelectError::Closed),
+        if self.used.is_some() {
+            Err(SelectError::AlreadyUsed)
+        } else {
+            self.used = Some(alias);
+            Ok(())
         }
-    }
-
-    /// Transitions an open scope to closed. Idempotent-safe: a `Closed` scope
-    /// stays closed.
-    pub(crate) fn close(&mut self) {
-        *self = ModelRuntime::Closed;
     }
 }
 
 /// Why a `models.use` selection was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SelectError {
-    /// The model scope had already closed.
-    Closed,
     /// A `models.use` selection was already recorded this section.
     AlreadyUsed,
 }
@@ -247,17 +219,6 @@ pub(crate) fn install_h2_models(
     bindings: &ModelBindings,
     runtime: &Arc<Mutex<ModelRuntime>>,
 ) -> Result<()> {
-    {
-        let state = runtime
-            .lock()
-            .map_err(|_| Error::Lua("model declaration runtime was poisoned".to_owned()))?;
-        if !state.is_open() {
-            return Err(Error::Lua(
-                "model scope is not open for H2 recording".to_owned(),
-            ));
-        }
-    }
-
     let models = lua.create_table().map_err(Error::lua)?;
 
     let need = lua
@@ -286,11 +247,6 @@ pub(crate) fn install_h2_models(
             let mut state = state
                 .lock()
                 .map_err(|_| mlua::Error::external("model declaration runtime was poisoned"))?;
-            if !state.is_open() {
-                return Err(mlua::Error::external(
-                    "models.use is only available before the H2 model scope closes",
-                ));
-            }
             if frozen.binding(&alias).is_none() {
                 return Err(mlua::Error::external(format!(
                     "models.use alias {alias:?} was not declared by models.need"
@@ -305,59 +261,6 @@ pub(crate) fn install_h2_models(
     models.set("use", use_fn).map_err(Error::lua)?;
 
     globals.raw_set("models", models).map_err(Error::lua)
-}
-
-/// Closes H2 model recording and returns the section's selected binding.
-pub(crate) fn close_model_scope(
-    bindings: &ModelBindings,
-    runtime: &Arc<Mutex<ModelRuntime>>,
-    execution: &str,
-    observer: &dyn Observer,
-    section: &str,
-) -> Result<Option<ModelBinding>> {
-    observer.observe(execution, section, detail::MODEL_SCOPE_CLOSING);
-    let result = close_model_scope_inner(bindings, runtime);
-    observer.observe(
-        execution,
-        section,
-        if result.is_ok() {
-            detail::MODEL_SCOPE_CLOSED
-        } else {
-            detail::MODEL_SCOPE_FAILED
-        },
-    );
-    result
-}
-
-fn close_model_scope_inner(
-    bindings: &ModelBindings,
-    runtime: &Arc<Mutex<ModelRuntime>>,
-) -> Result<Option<ModelBinding>> {
-    let mut runtime = runtime
-        .lock()
-        .map_err(|_| Error::Lua("model declaration runtime was poisoned".to_owned()))?;
-    if !runtime.is_open() {
-        return Err(Error::Lua(
-            "model scope can only close once after H2 recording".to_owned(),
-        ));
-    }
-    // Resolve (and clone) the effective binding BEFORE transitioning to Closed,
-    // so a missing frozen binding fails while the scope is still H2. Otherwise a
-    // failed close would leave a Closed scope whose selected alias has no
-    // binding - an inconsistent state. The close below is infallible.
-    let effective_alias = runtime
-        .used()
-        .map(String::from)
-        .or_else(|| bindings.always().map(String::from));
-    let resolved =
-        match effective_alias {
-            Some(alias) => Some(bindings.binding(&alias).cloned().ok_or_else(|| {
-                Error::Lua(format!("model alias {alias:?} has no frozen binding"))
-            })?),
-            None => None,
-        };
-    runtime.close();
-    Ok(resolved)
 }
 
 #[cfg(test)]
