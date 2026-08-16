@@ -3,4 +3,6 @@
 *.store/
 /vibe-review.md
 /conformance-audit.md
-guide/book/ 
+guide/book/
+/prompts-mcp/
+/prompts-mcp.toml

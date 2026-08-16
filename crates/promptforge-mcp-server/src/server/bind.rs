@@ -17,7 +17,7 @@ use promptforge_tool_picker::{
 };
 use promptforge_webfetch::WebFetch;
 
-use crate::config::{Config, GatewayConfig};
+use crate::config::{Config, GatewayConfig, ToolsConfig};
 use crate::error::PreparedToolsError;
 
 /// The immutable picker, live tools, and model catalog shared by every server run.
@@ -112,7 +112,7 @@ impl PreparedTools {
                 return Err(PreparedToolsError::tools(error));
             }
         };
-        Self::new(gateway, models)
+        Self::new(gateway, &config.tools, models)
     }
 
     /// Builds the live registry and picker over an already-fetched model catalog.
@@ -122,9 +122,10 @@ impl PreparedTools {
     /// or the picker index cannot be built.
     pub(crate) fn new(
         gateway: &GatewayConfig,
+        tools_config: &ToolsConfig,
         models: ModelCatalog,
     ) -> Result<Self, PreparedToolsError> {
-        let live = live_tools(gateway).map_err(PreparedToolsError::tools)?;
+        let live = live_tools(gateway, tools_config).map_err(PreparedToolsError::tools)?;
         let catalog = catalog(&live);
         let picker = ToolPicker::build(catalog, PickerConfig::default())
             .map_err(PreparedToolsError::picker)?;
@@ -142,8 +143,12 @@ impl PreparedTools {
     /// Returns [`PreparedToolsError`] when the new live catalog cannot be
     /// assembled or reindexed.
     #[cfg(test)]
-    pub(crate) fn rebuild(&self, gateway: &GatewayConfig) -> Result<Self, PreparedToolsError> {
-        let live = live_tools(gateway).map_err(PreparedToolsError::tools)?;
+    pub(crate) fn rebuild(
+        &self,
+        gateway: &GatewayConfig,
+        tools_config: &ToolsConfig,
+    ) -> Result<Self, PreparedToolsError> {
+        let live = live_tools(gateway, tools_config).map_err(PreparedToolsError::tools)?;
         let picker = self
             .picker
             .rebuild(catalog(&live))
@@ -194,11 +199,19 @@ fn is_transient(error: &CompletionError) -> bool {
 }
 fn live_tools(
     gateway: &GatewayConfig,
+    tools_config: &ToolsConfig,
 ) -> Result<Vec<Arc<dyn Tool>>, promptforge_core::tools::ToolError> {
-    Ok(vec![
-        Arc::new(WebFetch::new()),
-        Arc::new(WebSearch::new(gateway.url.as_str(), gateway.key.expose())?),
-    ])
+    let mut live: Vec<Arc<dyn Tool>> = Vec::new();
+    if tools_config.web_fetch {
+        live.push(Arc::new(WebFetch::new()));
+    }
+    if tools_config.web_search {
+        live.push(Arc::new(WebSearch::new(
+            gateway.url.as_str(),
+            gateway.key.expose(),
+        )?));
+    }
+    Ok(live)
 }
 fn catalog(live: &[Arc<dyn Tool>]) -> Catalog {
     Catalog::new(live.iter().map(|tool| descriptor(tool.as_ref())).collect())
@@ -245,7 +258,7 @@ mod tests {
 
     fn gateway(extra: &str) -> Config {
         Config::from_toml_str(&format!(
-            "[server]\ntoken = \"t\"\n\n[gateway]\nurl = \"http://127.0.0.1:8081/v1/\"\nkey = \"gw\"\n{extra}"
+            "[server]\ntoken = \"t\"\n\n[gateway]\nurl = \"http://127.0.0.1:8081/v1/\"\nkey = \"gw\"\n\n[tools]\nweb_fetch = true\nweb_search = true\n{extra}"
         ))
         .expect("the fixture configuration parses")
     }
@@ -266,6 +279,7 @@ mod tests {
         let config = gateway("");
         let tools = PreparedTools::new(
             &config.gateway,
+            &config.tools,
             promptforge_core::model::ModelCatalog::empty(),
         )
         .expect("prepare fixture tools");
@@ -291,6 +305,7 @@ mod tests {
         let config = gateway("");
         let tools = PreparedTools::new(
             &config.gateway,
+            &config.tools,
             promptforge_core::model::ModelCatalog::empty(),
         )
         .expect("prepare fixture tools");
@@ -311,7 +326,8 @@ mod tests {
             ThinkingMode::Never,
         )])
         .expect("the test catalog has a single unique model");
-        let tools = PreparedTools::new(&config.gateway, models).expect("prepare repository tools");
+        let tools =
+            PreparedTools::new(&config.gateway, &config.tools, models).expect("prepare repository tools");
         let prompts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts");
         let mut files = Vec::new();
         collect_markdown(&prompts, &mut files);
@@ -364,7 +380,7 @@ return 'resolved'
     /// A configuration whose gateway points at `addr`, for a test stub gateway.
     fn config_for(addr: &str) -> Config {
         Config::from_toml_str(&format!(
-            "[server]\ntoken = \"t\"\n\n[gateway]\nurl = \"http://{addr}/v1/\"\nkey = \"gw\"\n"
+            "[server]\ntoken = \"t\"\n\n[gateway]\nurl = \"http://{addr}/v1/\"\nkey = \"gw\"\n\n[tools]\nweb_fetch = true\nweb_search = true\n"
         ))
         .expect("the fixture configuration parses")
     }
