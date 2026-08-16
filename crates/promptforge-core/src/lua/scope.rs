@@ -1,4 +1,4 @@
-use super::{Arc, BTreeMap, Error, ModelBinding, Mutex, Result, ToolBinding};
+use super::{Arc, BTreeMap, Error, Mutex, Result, ToolBinding};
 
 /// Shared per-VM tool-call counts, pre-seeded at 0 for every in-scope alias.
 ///
@@ -67,7 +67,7 @@ impl ToolCallCounts {
     }
 }
 
-/// A closed H2 tool scope, ordered with prompt-wide aliases first.
+/// A section's effective tool scope, ordered with prompt-wide aliases first.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ToolScope {
     pub(crate) bindings: Vec<ToolBinding>,
@@ -87,25 +87,8 @@ impl ToolScope {
     }
 }
 
-/// Closed H2 tool scope and optional section model selection.
-// No `Eq`: the optional model binding carries an `f64` temperature transitively.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ClosedScopes {
-    /// Effective tool bindings for this section.
-    pub(crate) tools: ToolScope,
-    /// Selected model binding from `models.use` or prompt-wide `models.always`.
-    pub(crate) model: Option<ModelBinding>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ToolPhase {
-    H2,
-    Closed,
-}
-
 #[derive(Debug)]
 pub(crate) struct ToolRuntime {
-    pub(crate) phase: ToolPhase,
     pub(crate) added: Vec<String>,
     /// Per-alias author overrides for model-facing schema descriptions.
     pub(crate) description_overrides: BTreeMap<String, String>,
