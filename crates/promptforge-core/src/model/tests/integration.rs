@@ -49,8 +49,9 @@ fn models_need_resolves_and_use_selects_section_binding() {
     .unwrap();
     vm.run_prologue(&prologue, &NullObserver, "Section")
         .unwrap();
-    let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
-    assert_eq!(scopes.model.unwrap().alias(), "analyst");
+    let (mb, mr) = vm.model_bag_handles();
+    let model = resolve_model_binding(&mb, &mr).unwrap();
+    assert_eq!(model.unwrap().alias(), "analyst");
     vm.teardown(&NullObserver, "Section");
 }
 
@@ -87,8 +88,9 @@ fn no_models_use_or_always_leaves_section_unbound() {
     .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
-    let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
-    assert!(scopes.model.is_none());
+    let (mb, mr) = vm.model_bag_handles();
+    let model = resolve_model_binding(&mb, &mr).unwrap();
+    assert!(model.is_none());
     vm.teardown(&NullObserver, "Section");
 }
 

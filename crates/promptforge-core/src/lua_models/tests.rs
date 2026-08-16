@@ -5,7 +5,7 @@ use super::decode::{
 use super::userdata::{LuaModelHandle, reject_infer_options};
 use super::{ModelBindingState, ModelRuntime, record_only_binding};
 use crate::dialects::ToolDialectId;
-use crate::model::{ModelId, ModelInvocation, ModelNeedOpts};
+use crate::model::{ModelBinding, ModelId, ModelInvocation, ModelNeedOpts};
 use mlua::Value;
 use mlua::{Lua, MultiValue};
 
