@@ -56,3 +56,5 @@
 - [2026-08-15-3-gateway-dotenv-support] config-matched secret sidecars: Associate an optional ignored secret file with each config layer by name rather than adding secret syntax to config.
 - [2026-08-15-3-gateway-dotenv-support] gateway-local secret loading: Keep vendor secret loading inside the gateway; callers retain only gateway connection credentials.
 - [2026-08-15-4-h1-only-prompt-support] remove inert fallback configuration: Do not retain declarative fields that execution no longer honors; fall-through uses actual reply state.
+- [2026-08-16-1-fanout-scope-refactor] fanout input normalization: Accept either a section reference or an explicit string array at the Lua boundary, then execute fanout on normalized items.
+- [2026-08-16-1-fanout-scope-refactor] parsed-list reuse: Expose section items from the parsed prompt instead of reparsing Markdown in author code.
