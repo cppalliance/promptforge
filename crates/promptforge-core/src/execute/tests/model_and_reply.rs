@@ -147,8 +147,9 @@ async fn epilog_runs_after_reply_and_can_return() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\nSay something.\n\n```lua\nstore.write('epilog-ran.txt', 'yes')\nreturn 'epilog result'\n```\n";
     let prompt = bound_for_model(md);
-    assert!(prompt.prompt().entry().prologue().is_none());
-    assert!(prompt.prompt().entry().epilog().is_some());
+    let entry = prompt.prompt().entry().expect("fixture has sections");
+    assert!(entry.prologue().is_none());
+    assert!(entry.epilog().is_some());
 
     let recorder = Arc::new(Recorder::default());
     let store = StoreRef::memory();

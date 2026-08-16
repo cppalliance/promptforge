@@ -410,9 +410,6 @@ impl Prompt {
             .skip(*h1_index + 1)
             .filter(|h| h.level >= 2)
             .collect();
-        if section_headings.is_empty() {
-            return Err(Error::Parse("prompt has no ## sections".into()));
-        }
         let mut pos = 0;
         let sections = build_sections(
             &section_headings,
@@ -435,9 +432,8 @@ impl Prompt {
 
     /// The entry-point section: the first top-level section in file order.
     #[must_use]
-    pub fn entry(&self) -> &Section {
-        // `parse` guarantees `sections` is non-empty.
-        &self.sections[0]
+    pub fn entry(&self) -> Option<&Section> {
+        self.sections.first()
     }
 }
 

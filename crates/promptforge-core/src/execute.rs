@@ -238,6 +238,9 @@ pub async fn run(
         if let Some(value) = h1.returned {
             return Ok(value);
         }
+        if prompt.sections.is_empty() {
+            return Ok(h1.reply.unwrap_or_else(|| "done".to_string()));
+        }
         let analysis = ToolAnalysis::new(&h1.bindings, resolution.picker)?;
         run_sections(
             prompt,
