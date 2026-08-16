@@ -709,6 +709,7 @@ impl SectionVm {
 
     /// Returns frozen model bindings and the live H2 selection runtime.
     #[must_use]
+    #[allow(dead_code)]
     pub(crate) fn model_bag_handles(&self) -> (ModelBindings, Arc<Mutex<ModelRuntime>>) {
         (self.bound_models.clone(), Arc::clone(&self.model_runtime))
     }

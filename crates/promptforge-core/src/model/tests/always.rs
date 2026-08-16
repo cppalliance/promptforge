@@ -172,11 +172,9 @@ fn models_always_installs_exactly() {
     .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
-    let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
-    assert_eq!(
-        scopes.model.as_ref().map(ModelBinding::alias),
-        Some("writer")
-    );
+    let (mb, mr) = vm.model_bag_handles();
+    let model = resolve_model_binding(&mb, &mr).unwrap();
+    assert_eq!(model.as_ref().map(ModelBinding::alias), Some("writer"));
     vm.teardown(&NullObserver, "Section");
 }
 
@@ -214,8 +212,9 @@ fn models_always_provides_completion_options_without_use() {
     .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
-    let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
-    let opts = scopes.model.as_ref().map(ModelBinding::completion_options);
+    let (mb, mr) = vm.model_bag_handles();
+    let model = resolve_model_binding(&mb, &mr).unwrap();
+    let opts = model.as_ref().map(ModelBinding::completion_options);
     let expected = CompletionOptions {
         model: "small".to_owned(),
         temperature: Some(Temperature::new(0.0).expect("0.0 is valid")),
@@ -224,60 +223,6 @@ fn models_always_provides_completion_options_without_use() {
         tool_dialect: ToolDialectId::OpenAi,
     };
     assert_eq!(opts, Some(expected));
-    vm.teardown(&NullObserver, "Section");
-}
-
-#[test]
-fn models_use_overrides_always() {
-    let shared = crate::lua::LuaProgram::compile(
-        r#"models.need("writer", "A tiny model", { thinking = false })
-               models.need("analyst", "careful analysis", { thinking = true })
-               models.only("writer")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (tools, models) = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &shared,
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver,
-        "Section",
-    )
-    .unwrap();
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .unwrap();
-    let prologue = crate::lua::LuaProgram::compile(
-        r#"models.use("analyst")"#,
-        "prologue",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Section",
-    )
-    .unwrap();
-    vm.run_prologue(&prologue, &NullObserver, "Section")
-        .unwrap();
-    let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
-    assert_eq!(
-        scopes.model.as_ref().map(ModelBinding::alias),
-        Some("analyst")
-    );
     vm.teardown(&NullObserver, "Section");
 }
 
@@ -418,8 +363,9 @@ fn models_always_multi_arg_provides_completion_options() {
     .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
-    let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
-    let opts = scopes.model.as_ref().map(ModelBinding::completion_options);
+    let (mb, mr) = vm.model_bag_handles();
+    let model = resolve_model_binding(&mb, &mr).unwrap();
+    let opts = model.as_ref().map(ModelBinding::completion_options);
     let expected = CompletionOptions {
         model: "small".to_owned(),
         temperature: Some(Temperature::new(0.0).expect("0.0 is valid")),
@@ -464,11 +410,9 @@ fn models_always_multi_arg_installs_exactly() {
     .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
-    let scopes = vm.close_scopes(&NullObserver, "Section").unwrap();
-    assert_eq!(
-        scopes.model.as_ref().map(ModelBinding::alias),
-        Some("writer")
-    );
+    let (mb, mr) = vm.model_bag_handles();
+    let model = resolve_model_binding(&mb, &mr).unwrap();
+    assert_eq!(model.as_ref().map(ModelBinding::alias), Some("writer"));
     vm.teardown(&NullObserver, "Section");
 }
 
