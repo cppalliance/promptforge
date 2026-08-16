@@ -37,6 +37,24 @@ async fn sys_id_increments_per_section() {
     assert_eq!(out, "2");
 }
 
+// --- H1-only prompts (no ## sections) ---
+
+#[tokio::test]
+async fn h1_only_lua_return() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Title\n\n```lua\nreturn \"hello\"\n```\n";
+    let out = run_offline(md).await.unwrap();
+    assert_eq!(out, "hello");
+}
+
+#[tokio::test]
+async fn h1_only_lua_no_return() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Title\n\n```lua\nlocal x = 1\n```\n";
+    let out = run_offline(md).await.unwrap();
+    assert_eq!(out, "done");
+}
+
 // --- Version gate at the top of `run` ---
 
 #[tokio::test]

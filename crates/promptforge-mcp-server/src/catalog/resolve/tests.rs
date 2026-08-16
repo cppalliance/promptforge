@@ -229,21 +229,16 @@ fn three_independent_faults_are_all_reported_with_prompt_and_path() {
     // a required field.
     write(root, "unparsable.md", unparsable_source());
     write_prompt(root, "upper.md", "Shouty", "An illegal tool name");
-    write(
-        root,
-        "nosections.md",
-        "---\nname: empty\ndescription: d\npromptforge: 1\n---\n\n# Only a title\n",
-    );
 
     let config = config_at(root, "[catalog]\ninclude = [\"*.md\"]\n");
-    let error = Catalog::resolve(&config, OnBroken::Reject).expect_err("three prompts are broken");
-    assert_eq!(error.faults().len(), 3);
+    let error = Catalog::resolve(&config, OnBroken::Reject).expect_err("two prompts are broken");
+    assert_eq!(error.faults().len(), 2);
     for fault in error.faults() {
         assert!(fault.prompt().is_some(), "{fault}");
         assert!(fault.path().is_some(), "{fault}");
     }
     let text = fault_text(&error);
-    for file in ["unparsable.md", "upper.md", "nosections.md"] {
+    for file in ["unparsable.md", "upper.md"] {
         assert!(text.contains(file), "{text}");
     }
 }
