@@ -2,7 +2,10 @@ use mlua::Lua;
 
 use super::*;
 use crate::Error;
-use crate::lua::{LiveBindingProducer, LuaProgram, SectionVm, ToolBindings, ToolResolver};
+use crate::lua::{
+    LiveBindingProducer, LuaProgram, SectionVm, ToolBindings, ToolResolver,
+    resolve_model_binding,
+};
 use crate::observe::NullObserver;
 use crate::store::StoreRef;
 use crate::tools::ToolRegistry;

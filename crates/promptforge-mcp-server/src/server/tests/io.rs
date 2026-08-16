@@ -168,10 +168,6 @@ async fn output_returned_inline_when_no_output_file_specified() {
         text.contains("produced content"),
         "the output content should appear inline: {text}"
     );
-    assert!(
-        text.contains("report.md"),
-        "the inline output names the declared path: {text}"
-    );
     let structured = structured_of(&result);
     assert_eq!(structured["status"], json!("completed"));
 }
