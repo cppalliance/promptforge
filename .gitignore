@@ -1,9 +1,7 @@
-/target
 /.model-cache/
-*.store/
+/target
 /vibe-review.md
 /conformance-audit.md
-guide/book/
-/prompts-mcp/
-/prompts-mcp.toml
+/local/
+/guide/book/
 *.env
