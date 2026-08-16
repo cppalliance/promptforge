@@ -24,7 +24,7 @@ Secrets (`ANTHROPIC_API_KEY`, `BRAVE_API_KEY`, etc.) go in `gateway.env` next to
 
 If the prompt contains only Lua (no prose outside fences), it runs without a gateway.
 
-Prompts in `prompts-mcp/` use path `prompts-mcp/<name>.md`.
+Prompts in `local/prompts/` use path `local/prompts/<name>.md`.
 
 ## Components
 
@@ -43,7 +43,7 @@ Start the gateway first. The MCP server and dev runner both call through it.
 token = "${PROMPTFORGE_MCP_TOKEN}"
 
 [paths]
-prompts = "prompts-mcp"
+prompts = "local/prompts"
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
@@ -169,7 +169,7 @@ More examples: `prompts/`
 
 ## Local MCP Prompts
 
-- `prompts-mcp/` - gitignored directory for local prompts
-- `prompts-mcp.toml` - config serving that directory (also gitignored)
-- Drop a `.md` prompt file into `prompts-mcp/` and it is live (with `--watch`)
-- Launch: `cargo run -p promptforge-mcp-server -- serve prompts-mcp.toml`
+- `local/prompts/` - gitignored directory for local prompts
+- `local/prompts.toml` - config serving that directory (also gitignored)
+- Drop a `.md` prompt file into `local/prompts/` and it is live (with `--watch`)
+- Launch: `cargo run -p promptforge-mcp-server -- serve local/prompts.toml`

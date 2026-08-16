@@ -42,3 +42,5 @@
 
 ## 2026-08-14 Delete stale docs and fix their references
 
+## 2026-08-15 Move local files under local/ and docs under guide/
+
