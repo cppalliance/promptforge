@@ -7,8 +7,8 @@
 //!
 //! - [`run_sections`] is the top-level walk. It loops over the prompt's
 //!   sections with [`JumpPolicy::Follow`], carries the model reply across
-//!   section boundaries (clearing it on a jump), and computes the run's final
-//!   result (the last reply, else `"done"`).
+//!   section boundaries (preserving it across a jump), and computes the run's
+//!   final result (the last reply, else `"done"`).
 //! - [`run_execute_section`] is the `execute()` subroutine. It drives the
 //!   engine once for one isolated section with [`JumpPolicy::Reject`] and a
 //!   frozen `execute_depth`, then returns that section's reply.
@@ -64,7 +64,7 @@ enum SectionFlow {
     /// A scalar early return ended the section (and, top-level, the run).
     Returned(String),
     /// A `jump(target)` requested control transfer (top-level only).
-    Jumped(String),
+    Jumped { heading: String, reply: Option<String> },
 }
 
 /// The borrowed run context every section in one walk shares.
@@ -177,10 +177,9 @@ pub(crate) async fn run_sections(
         )
         .await?
         {
-            SectionFlow::Jumped(heading) => {
+            SectionFlow::Jumped { heading, reply } => {
                 let target = resolve_h2_index(&heading, &prompt.sections)?;
-                // A jump clears cross-section reply context.
-                last_reply = None;
+                last_reply = reply;
                 index = target;
             }
             SectionFlow::Returned(value) => return Ok(value),
@@ -506,7 +505,7 @@ async fn run_one_section(
         .observe(ctx.execution, &section.name, detail::SECTION_FINISHED);
 
     if let Some(heading) = jump_heading {
-        return Ok(SectionFlow::Jumped(heading));
+        return Ok(SectionFlow::Jumped { heading, reply });
     }
     if let Some(value) = early_return {
         return Ok(SectionFlow::Returned(value));
@@ -775,7 +774,7 @@ async fn run_execute_section(
         // Unreachable under `JumpPolicy::Reject`: a jump returns an error from
         // the engine before it can surface here. Kept typed rather than
         // panicking so a future policy change fails loudly, not silently.
-        SectionFlow::Jumped(_) => Err(Error::Internal(
+        SectionFlow::Jumped { .. } => Err(Error::Internal(
             "execute() subroutine produced a jump despite the reject policy",
         )),
     }

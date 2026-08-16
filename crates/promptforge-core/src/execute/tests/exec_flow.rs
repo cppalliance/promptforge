@@ -145,7 +145,7 @@ return by_name\n\
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jump_transfers_control_and_clears_context() {
+async fn jump_transfers_control_and_preserves_reply() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Check\n\n\
 ```lua\n\
@@ -160,7 +160,7 @@ store.write('seen.txt', 'should-not-run')\n\
 ```lua\nreturn 'accepted'\n```\n\n\
 ## Help\n\n\
 ```lua\n\
-assert(reply == nil, 'jump must clear prior reply context')\n\
+assert(reply == nil, 'no prior reply because no prose ran before the jump')\n\
 return 'helped:' .. store.read('seen.txt')\n\
 ```\n";
     let store = StoreRef::memory();
@@ -169,6 +169,42 @@ return 'helped:' .. store.read('seen.txt')\n\
         .expect("jump must transfer control");
     assert_eq!(out, "helped:check");
     assert_eq!(store.read("seen.txt").expect("seen"), "check");
+}
+
+/// The subroutine walk rejects `jump()` (unlike the top-level walk, which
+/// follows it). Locks the `JumpPolicy::Reject` divergence folded into the
+/// unified section engine.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn jump_preserves_reply_from_prior_section() {
+    let gateway = ScriptedGateway::start(vec![resp_text("model-said-this")]).await;
+    let addr = gateway.addr();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Source\n\n\
+Ask something.\n\n\
+```lua\njump('## Target')\n```\n\n\
+## Target\n\n\
+```lua\n\
+assert(reply ~= nil, 'jump must preserve the prior reply')\n\
+return reply\n\
+```\n";
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: Arc::new(NullObserver),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test").expect("non-empty test key"),
+            )),
+            debug: None,
+        },
+    )
+    .await
+    .expect("jump must preserve the reply from the prior section");
+    assert_eq!(out, "model-said-this");
 }
 
 /// The subroutine walk rejects `jump()` (unlike the top-level walk, which
