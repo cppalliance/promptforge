@@ -138,12 +138,6 @@ pub enum Observation {
     ToolRegistryValidationSucceeded,
     /// Live-registry or one-to-one binding validation failed.
     ToolRegistryValidationFailed,
-    /// A section began closing its effective tool scope.
-    ToolScopeClosing,
-    /// A section's effective tool scope was closed successfully.
-    ToolScopeClosed,
-    /// A section's effective tool scope could not be closed.
-    ToolScopeFailed,
     /// Semantic validation of a model-visible tool scope began.
     ToolScopeValidationStarted,
     /// A model-visible tool scope passed semantic validation.
@@ -156,12 +150,6 @@ pub enum Observation {
     ModelCatalogValidationSucceeded,
     /// Live-catalog model binding validation failed.
     ModelCatalogValidationFailed,
-    /// A section began closing its model selection.
-    ModelScopeClosing,
-    /// A section's model selection was closed successfully.
-    ModelScopeClosed,
-    /// A section's model selection could not be closed.
-    ModelScopeFailed,
     /// A harness-mediated store write succeeded.
     StoreWriteSucceeded,
     /// A harness-mediated store write failed.
@@ -268,18 +256,12 @@ impl Observation {
             Observation::ToolRegistryValidationStarted => "Tool registry validation started",
             Observation::ToolRegistryValidationSucceeded => "Tool registry validation succeeded",
             Observation::ToolRegistryValidationFailed => "Tool registry validation failed",
-            Observation::ToolScopeClosing => "Tool scope closing",
-            Observation::ToolScopeClosed => "Tool scope closed",
-            Observation::ToolScopeFailed => "Tool scope failed",
             Observation::ToolScopeValidationStarted => "Tool scope validation started",
             Observation::ToolScopeValidationSucceeded => "Tool scope validation succeeded",
             Observation::ToolScopeValidationFailed => "Tool scope validation failed",
             Observation::ModelCatalogValidationStarted => "Model catalog validation started",
             Observation::ModelCatalogValidationSucceeded => "Model catalog validation succeeded",
             Observation::ModelCatalogValidationFailed => "Model catalog validation failed",
-            Observation::ModelScopeClosing => "Model scope closing",
-            Observation::ModelScopeClosed => "Model scope closed",
-            Observation::ModelScopeFailed => "Model scope failed",
             Observation::StoreWriteSucceeded => "Store write succeeded",
             Observation::StoreWriteFailed => "Store write failed",
             Observation::StoreAppendSucceeded => "Store append succeeded",
@@ -357,18 +339,12 @@ pub(crate) mod detail {
     pub(crate) const LUA_EPILOG_FAILED: Observation = Observation::LuaEpilogFailed;
     pub(crate) const LUA_TEARDOWN_STARTED: Observation = Observation::LuaTeardownStarted;
     pub(crate) const LUA_TEARDOWN_SUCCEEDED: Observation = Observation::LuaTeardownSucceeded;
-    pub(crate) const TOOL_SCOPE_CLOSING: Observation = Observation::ToolScopeClosing;
-    pub(crate) const TOOL_SCOPE_CLOSED: Observation = Observation::ToolScopeClosed;
-    pub(crate) const TOOL_SCOPE_FAILED: Observation = Observation::ToolScopeFailed;
     pub(crate) const TOOL_SCOPE_VALIDATION_STARTED: Observation =
         Observation::ToolScopeValidationStarted;
     pub(crate) const TOOL_SCOPE_VALIDATION_SUCCEEDED: Observation =
         Observation::ToolScopeValidationSucceeded;
     pub(crate) const TOOL_SCOPE_VALIDATION_FAILED: Observation =
         Observation::ToolScopeValidationFailed;
-    pub(crate) const MODEL_SCOPE_CLOSING: Observation = Observation::ModelScopeClosing;
-    pub(crate) const MODEL_SCOPE_CLOSED: Observation = Observation::ModelScopeClosed;
-    pub(crate) const MODEL_SCOPE_FAILED: Observation = Observation::ModelScopeFailed;
     pub(crate) const STORE_WRITE_SUCCEEDED: Observation = Observation::StoreWriteSucceeded;
     pub(crate) const STORE_WRITE_FAILED: Observation = Observation::StoreWriteFailed;
     pub(crate) const STORE_APPEND_SUCCEEDED: Observation = Observation::StoreAppendSucceeded;

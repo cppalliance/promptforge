@@ -28,10 +28,6 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
                 "First".to_string(),
                 detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
             ),
-            ("First".to_string(), detail::TOOL_SCOPE_CLOSING.to_string()),
-            ("First".to_string(), detail::TOOL_SCOPE_CLOSED.to_string()),
-            ("First".to_string(), detail::MODEL_SCOPE_CLOSING.to_string()),
-            ("First".to_string(), detail::MODEL_SCOPE_CLOSED.to_string()),
             (
                 "First".to_string(),
                 detail::LUA_TEARDOWN_STARTED.to_string()
