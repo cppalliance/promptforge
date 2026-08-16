@@ -475,6 +475,30 @@ fn a_poisoned_backend_lock_surfaces_as_a_backend_error() {
 }
 
 #[test]
+fn with_files_populates_store() {
+    let store = StoreRef::with_files([
+        ("a.txt".to_owned(), "alpha".to_owned()),
+        ("b.txt".to_owned(), "beta".to_owned()),
+    ]).expect("valid paths");
+    assert_eq!(store.read("a.txt").unwrap(), "alpha");
+    assert_eq!(store.read("b.txt").unwrap(), "beta");
+}
+
+#[test]
+fn with_files_rejects_invalid_path() {
+    let result = StoreRef::with_files([
+        ("../escape.txt".to_owned(), "bad".to_owned()),
+    ]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn with_files_empty_is_empty_store() {
+    let store = StoreRef::with_files(std::iter::empty::<(String, String)>()).expect("empty is valid");
+    assert!(!store.exists("anything.txt").unwrap());
+}
+
+#[test]
 fn clones_share_backing_state() {
     let store = StoreRef::memory();
     let clone = store.clone();

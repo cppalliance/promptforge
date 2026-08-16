@@ -23,6 +23,18 @@
           "description": "The prompt's input, as one raw string. Omitting it passes the empty string.",
           "type": "string"
         },
+        "input_file": {
+          "description": "Filesystem path to read into the prompt's store. Mutually exclusive with input_text.",
+          "type": "string"
+        },
+        "input_text": {
+          "description": "Text to place directly in the prompt's store. Mutually exclusive with input_file.",
+          "type": "string"
+        },
+        "output_file": {
+          "description": "Filesystem path to write the prompt's output file to. Omit to return output inline.",
+          "type": "string"
+        },
         "prompt": {
           "description": "The exact name of the prompt to run, as list_prompts reports it.",
           "type": "string"

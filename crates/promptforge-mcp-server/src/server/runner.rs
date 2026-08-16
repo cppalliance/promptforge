@@ -58,6 +58,12 @@ struct Launch {
     name: String,
     /// The run's whole input.
     args: String,
+    /// Filesystem path to read into the prompt's store (empty if unused).
+    input_file: String,
+    /// Text to place directly in the prompt's store (empty if unused).
+    input_text: String,
+    /// Filesystem path to write the prompt's output to (empty if unused).
+    output_file: String,
     /// The complete immutable live registry and prepared picker.
     tools: Arc<PreparedTools>,
     /// Where the run reports itself, and what counts its turns.
@@ -92,6 +98,9 @@ pub(super) async fn run(
     tools: Arc<PreparedTools>,
     entry: &Entry,
     args: &str,
+    input_file: &str,
+    input_text: &str,
+    output_file: &str,
     reporting: Option<Reporting>,
 ) -> Result<CallToolResult, ErrorData> {
     let run_id = new_run_id();
@@ -124,6 +133,9 @@ pub(super) async fn run(
         tools,
         entry,
         args,
+        input_file,
+        input_text,
+        output_file,
         source,
         Observation {
             run_id,
@@ -143,6 +155,9 @@ async fn run_observed(
     tools: Arc<PreparedTools>,
     entry: &Entry,
     args: &str,
+    input_file: &str,
+    input_text: &str,
+    output_file: &str,
     source: &str,
     observation: Observation,
 ) -> Result<CallToolResult, ErrorData> {
@@ -183,6 +198,9 @@ async fn run_observed(
         prompt,
         name: entry.name().to_owned(),
         args: args.to_owned(),
+        input_file: input_file.to_owned(),
+        input_text: input_text.to_owned(),
+        output_file: output_file.to_owned(),
         tools,
         observer,
         client,
@@ -239,6 +257,9 @@ pub(super) async fn run_recorded(
         tools,
         entry,
         args,
+        "",
+        "",
+        "",
         source,
         Observation {
             run_id,
@@ -262,6 +283,9 @@ async fn execute_run(launch: Launch) -> RunResult {
         prompt,
         name,
         args,
+        input_file,
+        input_text,
+        output_file,
         tools,
         observer,
         client,
@@ -270,7 +294,18 @@ async fn execute_run(launch: Launch) -> RunResult {
         cancel,
     } = launch;
 
-    let store = StoreRef::memory();
+    // Build the store from the declared input, if an input source was provided.
+    let store = match mock_store(&prompt, &input_file, &input_text) {
+        Ok(store) => store,
+        Err(message) => {
+            let elapsed = elapsed_ms(started);
+            let turns = observer.turns();
+            drop(observer);
+            drop(slot);
+            return RunResult::failed(run_id, &name, message, turns, elapsed);
+        }
+    };
+
     let config = RunConfig::new(run_id.as_str())
         .observer(Arc::clone(&observer) as Arc<dyn promptforge_core::observe::Observer>)
         .client(client)
@@ -293,14 +328,120 @@ async fn execute_run(launch: Launch) -> RunResult {
     // rather than wait for a frame that will never come.
     drop(observer);
 
-    let result = match outcome {
+    let mut result = match outcome {
         Ok(value) => RunResult::completed(run_id.clone(), &name, value, turns, elapsed),
         Err(error) => RunResult::failed(run_id.clone(), &name, error.to_string(), turns, elapsed),
     };
+
+    // Extract declared output from the store and write to disk or annotate.
+    if result.value().is_some() {
+        extract_output(&prompt, &store, &output_file, &mut result);
+    }
+
     log_terminal_result(&result);
     // Explicit, because returning the slot is the point of having held it.
     drop(slot);
     result
+}
+
+/// Builds the store for a run, pre-populated with the declared input file if
+/// the caller provided an input source.
+///
+/// When the prompt declares an input file and the caller supplied either
+/// `input_file` (a filesystem path to read) or `input_text` (literal content),
+/// the store is created with that content under the declared store-internal
+/// path. When neither is provided, an empty store is returned.
+fn mock_store(prompt: &Prompt, input_file: &str, input_text: &str) -> Result<StoreRef, String> {
+    let declared_input = prompt.frontmatter().input();
+    let content = if !input_file.is_empty() {
+        Some(
+            std::fs::read_to_string(input_file)
+                .map_err(|e| format!("cannot read input_file \"{input_file}\": {e}"))?,
+        )
+    } else if !input_text.is_empty() {
+        Some(input_text.to_owned())
+    } else {
+        None
+    };
+
+    match (declared_input, content) {
+        (Some(decl), Some(content)) => {
+            StoreRef::with_files([(decl.path().to_owned(), content)])
+                .map_err(|e| format!("cannot seed store with declared input: {e}"))
+        }
+        (None, Some(_)) => {
+            Err("input_file or input_text was provided but the prompt declares no input".to_owned())
+        }
+        _ => Ok(StoreRef::memory()),
+    }
+}
+
+/// Extracts the declared output from the store after a successful run.
+///
+/// If the prompt declares an output file, reads it from the store. If
+/// `output_file` was specified, writes the content to disk. If the declared
+/// output was not produced by the prompt, annotates the result but does not
+/// fail it.
+fn extract_output(prompt: &Prompt, store: &StoreRef, output_file: &str, result: &mut RunResult) {
+    let Some(decl) = prompt.frontmatter().output() else {
+        return;
+    };
+    let content = match store.read(decl.path()) {
+        Ok(content) => content,
+        Err(_) => {
+            // The prompt declared an output but did not produce it. Annotate
+            // the result value with a note rather than failing the run.
+            if let Some(value) = result.value().map(str::to_owned) {
+                let annotated = format!(
+                    "{value}\n\n[note: the prompt declares output \"{}\" but it was not produced]",
+                    decl.path()
+                );
+                *result = RunResult::completed(
+                    result.run_id().to_owned(),
+                    result.prompt(),
+                    annotated,
+                    result.turns(),
+                    result.elapsed_ms(),
+                );
+            }
+            return;
+        }
+    };
+
+    if !output_file.is_empty() {
+        if let Err(e) = std::fs::write(output_file, &content) {
+            // Write failed - annotate the result with the error but keep the
+            // run as completed so the caller still gets the value.
+            if let Some(value) = result.value().map(str::to_owned) {
+                let annotated = format!(
+                    "{value}\n\n[note: could not write output to \"{output_file}\": {e}]"
+                );
+                *result = RunResult::completed(
+                    result.run_id().to_owned(),
+                    result.prompt(),
+                    annotated,
+                    result.turns(),
+                    result.elapsed_ms(),
+                );
+            }
+        }
+    } else {
+        // No output_file specified - include the output content inline in the
+        // result value so the caller receives it.
+        if let Some(value) = result.value().map(str::to_owned) {
+            let inline = format!(
+                "{value}\n\n--- output: {} ---\n{content}",
+                decl.path()
+            );
+            *result = RunResult::completed(
+                result.run_id().to_owned(),
+                result.prompt(),
+                inline,
+                result.turns(),
+                result.elapsed_ms(),
+            );
+        }
+    }
 }
 
 /// Converts a parse or preparation failure into a caller-facing failed run.

@@ -47,3 +47,28 @@ Parse errors report stable kind discriminants and optional byte spans for editor
 
 - `max_tool_iterations` - integer between 1 and 1000 (default: 24)
 - `default_return` - string returned when execution falls off the last section
+
+## Input and Output Declarations
+
+A prompt can declare a file it expects to find in the store and a file it will leave there:
+
+```yaml
+---
+name: gate_paper
+description: Produce a gating report for a paper
+promptforge: 2
+input:
+  path: paper.md
+  description: The paper markdown to analyze
+output:
+  path: report.md
+  description: The gating report produced by analysis
+---
+```
+
+Both `input` and `output` are optional. A prompt may declare one, both, or neither.
+
+- `path` is the store-internal filename the prompt uses in Lua (`store.read('paper.md')`)
+- `description` documents the file's purpose and appears in MCP tool listings via `list_prompts`
+
+The declarations are metadata only. The runtime does not enforce that the prompt actually reads the input or writes the output - they tell callers what the prompt expects and produces.

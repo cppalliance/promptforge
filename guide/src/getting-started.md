@@ -81,6 +81,46 @@ Setting a key without a URL is rejected explicitly:
 error: PROMPTFORGE_GATEWAY_KEY is set but PROMPTFORGE_GATEWAY_URL is missing or empty; both are required to reach the gateway
 ```
 
+## File IO
+
+A prompt can declare input and output files. This lets callers pass file content into the prompt's store before execution and collect results from it afterward.
+
+A minimal prompt with file IO:
+
+````markdown
+---
+name: summarize_paper
+description: Summarize a paper in three bullet points
+promptforge: 1
+input:
+  path: paper.md
+  description: The paper to summarize
+---
+
+# Summarize
+
+## Run
+
+```lua
+local content = store.read("paper.md")
+```
+
+Summarize the following paper in exactly three bullet points:
+
+{= content =}
+````
+
+Call it via the MCP server:
+
+```json
+{
+  "prompt": "summarize_paper",
+  "input_file": "/home/user/papers/p2996r7.md"
+}
+```
+
+The server reads the file, seeds `paper.md` in the store, and the prompt accesses it through `store.read()` without knowing where the content came from.
+
 ---
 
 Next, see [Prompt Files](./prompt-files.md) for a detailed look at how prompt files are structured and parsed.

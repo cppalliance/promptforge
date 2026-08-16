@@ -47,3 +47,9 @@ All store paths are validated:
 The `str_replace` operation requires the old text to be unique in the file; ambiguous matches are refused with a count of occurrences.
 
 The default in-memory backend (`StoreRef::memory()`) requires no filesystem or network and drops cleanly with the run. Custom backends implement the `Store` trait.
+
+## Pre-populated Stores
+
+Callers can seed the store with files before a prompt runs. The MCP server does this when `input_file` or `input_text` is provided - it writes the content into the store at the path declared by the prompt's `input:` frontmatter before execution begins.
+
+From the prompt's perspective nothing is different. It calls `store.read('paper.md')` and gets content. It does not know whether that content was placed there by an earlier section, by a caller, or by test scaffolding. This keeps prompts decoupled from their invocation context.
