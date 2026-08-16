@@ -75,8 +75,8 @@ pub(super) fn config_source(root: &Path, extra: &str) -> String {
     // otherwise corrupt the document.
     let prompts = toml::Value::from(root.join("prompts").display().to_string());
     format!(
-        "[server]\ntoken = \"shared\"\n{extra}\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"shared\"\n{extra}\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = {prompts}\n\n\
          [catalog]\ninclude = [\"*.md\"]\n",
     )

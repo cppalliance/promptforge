@@ -49,7 +49,7 @@ enum ConfigErrorRepr {
         message: String,
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
-    /// `[server].token` was present but carried nothing.
+    /// `[server].api_key` was present but carried nothing.
     EmptyToken,
     /// A `${VAR}` referenced an environment variable that was not set.
     UnresolvedVar { name: String },
@@ -87,7 +87,7 @@ impl ConfigError {
         }
     }
 
-    /// `[server].token` was present but carried nothing.
+    /// `[server].api_key` was present but carried nothing.
     pub(crate) fn empty_token() -> ConfigError {
         ConfigError {
             repr: ConfigErrorRepr::EmptyToken,
@@ -126,7 +126,7 @@ impl fmt::Display for ConfigError {
         match &self.repr {
             ConfigErrorRepr::Read { path, .. } => write!(f, "read config {}", path.display()),
             ConfigErrorRepr::Parse { message, .. } => write!(f, "parse config: {message}"),
-            ConfigErrorRepr::EmptyToken => f.write_str("[server].token must not be empty"),
+            ConfigErrorRepr::EmptyToken => f.write_str("[server].api_key must not be empty"),
             ConfigErrorRepr::UnresolvedVar { name } => {
                 write!(f, "unresolved environment variable {name}")
             }
@@ -158,7 +158,7 @@ pub enum ConfigErrorKind {
     Read,
     /// The TOML was invalid, or a value had the wrong shape.
     Parse,
-    /// `[server].token` was present but carried nothing.
+    /// `[server].api_key` was present but carried nothing.
     EmptyToken,
     /// A `${VAR}` referenced an environment variable that was not set.
     UnresolvedVar,

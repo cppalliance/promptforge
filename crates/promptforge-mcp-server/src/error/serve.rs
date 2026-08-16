@@ -21,7 +21,7 @@ pub(crate) struct ServeError {
 /// stays free to change behind [`ServeError::kind`].
 #[derive(Debug)]
 enum ServeErrorRepr {
-    /// `[server].token` was absent and the streamable-HTTP transport has no
+    /// `[server].api_key` was absent and the streamable-HTTP transport has no
     /// shared bearer to check. Refused before the socket is bound, since a
     /// `/mcp` served without one would be open to anything that can reach it.
     MissingToken,
@@ -49,7 +49,7 @@ enum ServeErrorRepr {
 }
 
 impl ServeError {
-    /// `[server].token` was absent and the HTTP transport has no bearer.
+    /// `[server].api_key` was absent and the HTTP transport has no bearer.
     pub(crate) fn missing_token() -> ServeError {
         ServeError {
             repr: ServeErrorRepr::MissingToken,
@@ -91,7 +91,7 @@ impl fmt::Display for ServeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.repr {
             ServeErrorRepr::MissingToken => {
-                f.write_str("[server].token is required to serve over http")
+                f.write_str("[server].api_key is required to serve over http")
             }
             ServeErrorRepr::AllowedHosts { addr } => write!(
                 f,
@@ -123,7 +123,7 @@ impl std::error::Error for ServeError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub(crate) enum ServeErrorKind {
-    /// `[server].token` was absent and the HTTP transport has no bearer.
+    /// `[server].api_key` was absent and the HTTP transport has no bearer.
     MissingToken,
     /// A non-loopback bind was configured without an explicit allowed-host list.
     AllowedHosts,

@@ -45,8 +45,8 @@ fn fixture(root: &Path, prompts: &[(&str, &str)]) -> PathBuf {
     fs::write(
         &config,
         format!(
-            "[server]\nbind = \"127.0.0.1:0\"\ntoken = \"unused\"\n\n\
-             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+            "[server]\nbind = \"127.0.0.1:0\"\napi_key = \"unused\"\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
              [paths]\nprompts = '{}'\n\n\
              [catalog]\ninclude = [\"*.md\"]\n",
             directory.display()

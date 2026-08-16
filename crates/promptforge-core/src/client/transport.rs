@@ -155,7 +155,7 @@ impl GatewayClient {
     /// Build a client from the environment.
     ///
     /// - URL: `PROMPTFORGE_GATEWAY_URL`. Required.
-    /// - Key: `PROMPTFORGE_GATEWAY_KEY`, the gateway's shared bearer. Required.
+    /// - Key: `PROMPTFORGE_GATEWAY_API_KEY`, the gateway's shared bearer. Required.
     ///
     /// # Errors
     /// Returns a [`CompletionError`] with `Config` kind when either variable is
@@ -338,10 +338,10 @@ pub(crate) fn from_env_with(
 ) -> Result<GatewayClient> {
     let base_url = lookup("PROMPTFORGE_GATEWAY_URL")?
         .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_URL".into()))?;
-    let key = lookup("PROMPTFORGE_GATEWAY_KEY")?
-        .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_KEY".into()))?;
+    let key = lookup("PROMPTFORGE_GATEWAY_API_KEY")?
+        .ok_or_else(|| Error::MissingEnv("PROMPTFORGE_GATEWAY_API_KEY".into()))?;
     let endpoint = GatewayEndpoint::new(&base_url).map_err(Error::from)?;
     let key = SecretString::new(key)
-        .map_err(|_| Error::MissingEnv("PROMPTFORGE_GATEWAY_KEY must not be empty".into()))?;
+        .map_err(|_| Error::MissingEnv("PROMPTFORGE_GATEWAY_API_KEY must not be empty".into()))?;
     Ok(GatewayClient::new(endpoint, key))
 }

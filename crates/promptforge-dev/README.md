@@ -19,7 +19,7 @@ promptforge-dev my-prompt.md "summarize this paragraph"
 promptforge-dev --watch my-prompt.md
 ```
 
-Requires a running `promptforge-gateway`. Set `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` before launching.
+Requires a running `promptforge-gateway`. Set `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` before launching.
 
 See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for full documentation.
 

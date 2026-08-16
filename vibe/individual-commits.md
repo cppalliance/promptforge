@@ -44,3 +44,5 @@
 
 ## 2026-08-15 Move local files under local/ and docs under guide/
 
+## 2026-08-16 Rename gateway and MCP credentials to api_key
+

@@ -310,8 +310,8 @@ fn every_setting_a_reload_cannot_apply_is_named() {
     );
 
     let elsewhere = Config::from_toml_str(
-        "[server]\ntoken = \"shared\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:9999/v1\"\nkey = \"gw\"\n",
+        "[server]\napi_key = \"shared\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:9999/v1\"\napi_key = \"gw\"\n",
     )
     .expect("the candidate configuration");
     let named = ignored_changes(&boot, &elsewhere);

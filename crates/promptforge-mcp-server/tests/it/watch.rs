@@ -60,8 +60,8 @@ async fn a_saved_prompt_is_callable_on_the_session_that_was_already_open() {
     fs::write(
         &source,
         format!(
-            "[server]\ntoken = \"shared\"\nwatch_debounce = \"50ms\"\n\n\
-             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+            "[server]\napi_key = \"shared\"\nwatch_debounce = \"50ms\"\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
              [paths]\nprompts = '{}'\n\n\
              [catalog]\ninclude = [\"*.md\"]\n",
             root.join("prompts").display()

@@ -329,10 +329,10 @@ pub(super) fn ignored_changes(boot: &Config, candidate: &Config) -> Vec<&'static
     if boot.server.bind != candidate.server.bind {
         ignored.push("[server].bind");
     }
-    if boot.server.token.as_ref().map(Secret::expose)
-        != candidate.server.token.as_ref().map(Secret::expose)
+    if boot.server.api_key.as_ref().map(Secret::expose)
+        != candidate.server.api_key.as_ref().map(Secret::expose)
     {
-        ignored.push("[server].token");
+        ignored.push("[server].api_key");
     }
     if boot.server.max_concurrent_runs != candidate.server.max_concurrent_runs {
         ignored.push("[server].max_concurrent_runs");
@@ -361,8 +361,8 @@ pub(super) fn ignored_changes(boot: &Config, candidate: &Config) -> Vec<&'static
     if boot.gateway.url != candidate.gateway.url {
         ignored.push("[gateway].url");
     }
-    if boot.gateway.key.expose() != candidate.gateway.key.expose() {
-        ignored.push("[gateway].key");
+    if boot.gateway.api_key.expose() != candidate.gateway.api_key.expose() {
+        ignored.push("[gateway].api_key");
     }
     ignored
 }

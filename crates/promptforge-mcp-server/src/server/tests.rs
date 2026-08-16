@@ -125,8 +125,8 @@ fn server_with(server_lines: &str) -> (TempDir, PromptForgeServer) {
     write(root, "explode.md", &failing_lua_prompt("explode"));
 
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n{server_lines}\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"t\"\n{server_lines}\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
          [catalog]\ninclude = [\"*.md\"]\n",
         root.display()
@@ -277,8 +277,8 @@ fn speaking_server_with(gateway: SocketAddr, server_lines: &str) -> (TempDir, Pr
          ```\n\n## Only\n\nSay something.\n",
     );
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n{server_lines}\n\n\
-         [gateway]\nurl = \"http://{gateway}/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"t\"\n{server_lines}\n\n\
+         [gateway]\nurl = \"http://{gateway}/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
          [catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()

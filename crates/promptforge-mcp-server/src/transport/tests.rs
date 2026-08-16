@@ -41,7 +41,7 @@ fn router() -> (TempDir, axum::Router) {
 /// the configured one. The layer takes the secret as an argument, so a token the
 /// configuration would refuse can still be put behind it here.
 fn router_with(token: Secret) -> (TempDir, axum::Router) {
-    let (dir, config) = fixture(&format!("token = \"{TOKEN}\"\n"));
+    let (dir, config) = fixture(&format!("api_key = \"{TOKEN}\"\n"));
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
     let tools = Arc::new(
@@ -100,7 +100,7 @@ fn fixture(server_lines: &str) -> (TempDir, Config) {
     fs::write(dir.path().join("echo.md"), ECHO).expect("write the fixture prompt");
     let config = Config::from_toml_str(&format!(
         "[server]\n{server_lines}\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
          [catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
@@ -142,7 +142,7 @@ fn initialize(authorization: Option<&str>) -> Request<Body> {
 
 /// A router whose transport validates the `Host` header against `allowed_hosts`.
 fn router_hosts(allowed_hosts: Vec<String>) -> (TempDir, axum::Router) {
-    let (dir, config) = fixture(&format!("token = \"{TOKEN}\"\n"));
+    let (dir, config) = fixture(&format!("api_key = \"{TOKEN}\"\n"));
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
     let tools = Arc::new(

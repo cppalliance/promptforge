@@ -53,8 +53,8 @@ async fn list_prompts_carries_the_problem_that_stops_a_prompt_running() {
         "---\npromptforge: 1\nname: placeholder\n---\n\n## S\n\np\n",
     );
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
         root.display()
     ))

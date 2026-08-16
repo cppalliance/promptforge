@@ -18,7 +18,7 @@ async fn switch_profile_updates_models_catalog() {
             r#"
 [server]
 bind = "127.0.0.1:0"
-key = "test-token"
+api_key = "test-token"
 
 [[endpoint]]
 id = "fake"
@@ -101,7 +101,7 @@ async fn failed_switch_leaves_live_profile_intact() {
         r#"
 [server]
 bind = "127.0.0.1:0"
-key = "test-token"
+api_key = "test-token"
 
 [[endpoint]]
 id = "fake"
@@ -152,7 +152,7 @@ async fn switch_profile_rejects_traversal_name() {
     std::fs::write(
         profiles.path().join("alpha.toml"),
         format!(
-            "[server]\nbind = \"127.0.0.1:0\"\nkey = \"test-token\"\n\n[[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\nbase_url = \"http://{backend}\"\napi_key = \"\"\n\n[[model]]\nname = \"alpha-model\"\ndescription = \"alpha\"\ncontext = 8192\nupstream = \"backend-model\"\nendpoints = [\"fake\"]\n"
+            "[server]\nbind = \"127.0.0.1:0\"\napi_key = \"test-token\"\n\n[[endpoint]]\nid = \"fake\"\nprotocol = \"openai\"\nbase_url = \"http://{backend}\"\napi_key = \"\"\n\n[[model]]\nname = \"alpha-model\"\ndescription = \"alpha\"\ncontext = 8192\nupstream = \"backend-model\"\nendpoints = [\"fake\"]\n"
         ),
     )
     .unwrap();

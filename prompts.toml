@@ -11,7 +11,7 @@ bind = "127.0.0.1:9310"
 # The shared bearer for the HTTP surface: every /mcp request presents it, and
 # `serve` refuses to bind without it. `serve --stdio` never reads it, so this
 # line and its variable may both be left unset for a local harness.
-token = "${PROMPTFORGE_MCP_TOKEN}"
+api_key = "${PROMPTFORGE_MCP_SERVER_API_KEY}"
 
 [paths]
 prompts = "prompts"
@@ -19,7 +19,7 @@ prompts = "prompts"
 # The prompts run against the same gateway the CLI uses; it holds the vendor key.
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-key = "${PROMPTFORGE_GATEWAY_KEY}"
+api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 
 # Live tools: both enabled here to preserve the development profile's behavior.
 # A configuration with no [tools] section runs in a true sandbox.

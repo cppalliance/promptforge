@@ -131,8 +131,8 @@ fn an_include_pattern_that_climbs_above_the_root_is_refused() {
     // directory is refused at the config boundary rather than reaching
     // resolution as a fault.
     let err = crate::config::Config::from_toml_str(
-        "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [catalog]\ninclude = [\"../**/*.md\"]\n",
     )
     .expect_err("an include pattern climbing above the root is refused");
