@@ -6,3 +6,4 @@
 guide/book/
 /prompts-mcp/
 /prompts-mcp.toml
+*.env

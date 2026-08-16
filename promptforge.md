@@ -1,34 +1,42 @@
 # PromptForge Quickref
 
-This file is loaded into an orchestration model's context so it understands how to write and run PromptForge prompts.
+Load this file to write and run PromptForge prompts. The repo root is `c:\Users\Vinnie\src\cursor\promptforge`.
 
-## 1. Gateway
+## Running a prompt
 
-- **What:** HTTP proxy routing model completions to upstream providers (Anthropic, OpenAI, local llama-server). Start first.
-- Command: `cargo run -p promptforge-gateway -- serve gateway.toml`
-- Env: `PROMPTFORGE_GATEWAY_KEY`, plus per-endpoint keys (e.g. `ANTHROPIC_API_KEY`)
-- Default bind: `127.0.0.1:8081`
+When the user says `promptforge <prompt.md> [input]`:
 
-## 2. MCP Server
+1. Check terminals for a running `promptforge-gateway`. If absent, start one in a background terminal from the repo root:
+   ```
+   cargo run -p promptforge-gateway -- serve gateway.toml
+   ```
+   Wait for the line containing "serving" before proceeding.
+2. Run the prompt from the repo root:
+   ```
+   cargo run -p promptforge-dev -- <prompt.md> [input]
+   ```
 
-- **What:** Exposes prompts as MCP tools to an orchestrator (Cursor, Claude Code). Resolves names, runs prompts, streams progress.
-- **Requires:** running gateway.
-- Command: `cargo run -p promptforge-mcp-server -- serve [--stdio] <prompts.toml>`
-- HTTP default: `127.0.0.1:9310/mcp`, bearer auth
-- `--stdio`: JSON-RPC over stdin/stdout (for Cursor MCP config)
-- Env: `PROMPTFORGE_MCP_TOKEN`, `PROMPTFORGE_GATEWAY_KEY`
+The gateway persists for the session. Skip step 1 on subsequent runs.
 
-## 3. Dev Runner
+Secrets (`ANTHROPIC_API_KEY`, `BRAVE_API_KEY`, etc.) go in `gateway.env` next to `gateway.toml`. The gateway loads it automatically before resolving `${VAR}` references in the config. The dev runner needs `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` - put those in the process environment or a wrapper script.
 
-- **What:** Single-prompt edit-run loop for authoring. Runs one prompt, prints result, optionally watches.
-- **Requires:** running gateway.
-- Command: `cargo run -p promptforge-dev -- [--watch] [--capture-raw] <prompt.md> [input]`
-- Env: `PROMPTFORGE_GATEWAY_URL`, `PROMPTFORGE_GATEWAY_KEY`
-- `[input]` becomes `args` in the prompt; `--watch` reruns on save
+**NEVER read, open, cat, or load any `.env` file into context.** These files contain secrets. The gateway reads them at startup - the agent must not.
 
-## 4. `prompts.toml` (MCP server config)
+If the prompt contains only Lua (no prose outside fences), it runs without a gateway.
 
-Minimal:
+Prompts in `prompts-mcp/` use path `prompts-mcp/<name>.md`.
+
+## Components
+
+| Component | Command | Secrets | Default bind |
+|---|---|---|---|
+| Gateway | `cargo run -p promptforge-gateway -- serve gateway.toml` | `gateway.env` (loaded automatically) | `127.0.0.1:8081` |
+| MCP Server | `cargo run -p promptforge-mcp-server -- serve [--stdio] <prompts.toml>` | `PROMPTFORGE_MCP_TOKEN`, `PROMPTFORGE_GATEWAY_KEY` | `127.0.0.1:9310` |
+| Dev Runner | `cargo run -p promptforge-dev -- [--watch] [--capture-raw] <prompt.md> [input]` | `PROMPTFORGE_GATEWAY_URL`, `PROMPTFORGE_GATEWAY_KEY` | n/a |
+
+Start the gateway first. The MCP server and dev runner both call through it.
+
+## `prompts.toml` (MCP server config)
 
 ```toml
 [server]
@@ -46,14 +54,12 @@ web_fetch = true
 web_search = true
 ```
 
-- `[tools]` defaults to nothing enabled (true sandbox). Enable what the prompts need.
-- `[catalog]` optional: `include`/`exclude` globs relative to `[paths].prompts`
-- `[prompts.NAME]` optional: per-prompt overrides (`enabled = false`, `file = "path"`)
+- `[tools]` defaults to nothing enabled (true sandbox). Enable per prompt needs.
+- `[catalog]` optional: `include`/`exclude` globs relative to `[paths].prompts`.
+- `[prompts.NAME]` optional: per-prompt overrides (`enabled = false`).
 - Full schema: `crates/promptforge-mcp-server/design-mcp-server.md`
 
-## 5. `gateway.toml` (gateway config)
-
-Minimal remote:
+## `gateway.toml` (gateway config)
 
 ```toml
 [server]
@@ -76,17 +82,18 @@ upstream = "claude-sonnet-4-6"
 endpoints = ["anthropic"]
 ```
 
-- `[[local_model]]` for GGUF: `source`, `sha256`, `context`, `gpu_layers`, `flash_attention`
-- `[tools.web_search]`: `provider = "brave"`, `api_key = "${BRAVE_API_KEY}"`
+- `[[local_model]]` for GGUF: `source`, `sha256`, `context`, `gpu_layers`, `flash_attention`.
+- `[tools.web_search]`: `provider = "brave"`, `api_key = "${BRAVE_API_KEY}"`.
+- `${VAR}` references resolve from a name-matched env file (`gateway.env` for `gateway.toml`), then from the process environment. When configs use `include`, the full include chain is walked and all found env files are loaded - root values take precedence, included configs supply defaults.
 - Full schema: `crates/promptforge-gateway/design-gateway.md`
 
-## 6. YAML Frontmatter
+## YAML Frontmatter
 
 | Field | Required | Type | Meaning |
 |---|---|---|---|
 | `name` | yes | string | Identifier, `^[a-z][a-z0-9_]{0,47}$` |
 | `description` | yes | string | One-line for listings and retrieval |
-| `promptforge` | yes | int | Engine major version. Only `1` today |
+| `promptforge` | yes | int | Engine major. Only `1` runs today |
 | `default_return` | no | string | Returned on fall-through |
 | `max_tool_iterations` | no | int 1-1000 | Tool-loop cap (default 24) |
 | `input` | no | object | `path` + `description` of expected store input |
@@ -94,27 +101,42 @@ endpoints = ["anthropic"]
 
 Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 
-## 7. Prompt Structure and Lua API
+## Prompt Structure
 
 - Exactly one **H1** - title + H1 Lua (tool/model resolution)
-- One or more **H2** sections - executed top-to-bottom (fall-through)
+- One or more **H2** sections - executed top-to-bottom
 - ` ```lua ` fences for executable Lua; ` ```lua shared ` for shared library
-- Prose becomes model turns; substitution: `{{ args }}`, `{{ var.x }}`, `{{ reply }}`
-- Lua return (scalar) ends the run early
+- Prose outside fences becomes model turns
+- Substitution: `{{ args }}`, `{{ var.x }}`, `{{ reply }}`
+- Scalar `return` from Lua ends the run
 
-Key Lua API:
-- `tools.need(alias, desc)` - resolve a tool by description
-- `tools.add(alias...)` - make resolved tools available to the model
-- `models.always(alias, desc)` / `models.need(alias, desc, opts)` / `models.use(alias)`
-- `store.read(path)`, `store.write(path, content)`, `store.append(path, content)`
-- `store.read_lines(path)`, `store.str_replace(path, old, new)`, `store.delete(path)`
-- `store.glob(pattern)`, `store.exists(path)`, `store.inject(path)`
-- `var.x = ...`, `args`, `reply`, `log(msg)`
-- `return value`, `jump("## Section")`, `execute("## Section", input?)`
+## Lua API
 
-Full reference: `guide/src/prompt-files.md` (structure), `guide/src/lua.md` (Lua API)
+| Function | Effect |
+|---|---|
+| `tools.need(alias, desc)` | Resolve a tool by description |
+| `tools.add(alias...)` | Make resolved tools available to the model |
+| `models.always(alias, desc)` | Bind a model for this section |
+| `models.need(alias, desc, opts)` | Bind with options (thinking, context, temperature) |
+| `models.use(alias)` | Switch to a previously bound model |
+| `store.read(path)` | Read file verbatim |
+| `store.write(path, content)` | Create or overwrite file |
+| `store.append(path, content)` | Append to file |
+| `store.read_lines(path)` | Read with line numbers |
+| `store.str_replace(path, old, new)` | Edit by unique anchor |
+| `store.delete(path)` | Remove file |
+| `store.glob(pattern)` | List matching paths |
+| `store.exists(path)` | Check existence |
+| `store.inject(path)` | Read wrapped in untrusted envelope |
+| `return value` | End run, return value |
+| `jump("## Section")` | Transfer control |
+| `execute("## Section", input?)` | Run section as subroutine |
+| `var.x = ...` | Cross-section state |
+| `log(msg)` | Emit to observer |
 
-## 8. Example
+Full reference: `guide/src/prompt-files.md` (structure), `guide/src/lua.md` (API)
+
+## Example
 
 ```markdown
 ---
@@ -145,9 +167,9 @@ Research this person using live web tools. Return a factual summary.
 
 More examples: `prompts/`
 
-## 9. Local MCP Prompts
+## Local MCP Prompts
 
-- `prompts-mcp/` - gitignored directory for local prompts served by the MCP server
+- `prompts-mcp/` - gitignored directory for local prompts
 - `prompts-mcp.toml` - config serving that directory (also gitignored)
-- Drop any `.md` prompt file into `prompts-mcp/` and it's live (with `--watch`)
+- Drop a `.md` prompt file into `prompts-mcp/` and it is live (with `--watch`)
 - Launch: `cargo run -p promptforge-mcp-server -- serve prompts-mcp.toml`

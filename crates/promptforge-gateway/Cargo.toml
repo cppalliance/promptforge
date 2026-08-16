@@ -18,6 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 axum.workspace = true
+dotenvy.workspace = true
 async-trait.workspace = true
 flate2.workspace = true
 indicatif.workspace = true
