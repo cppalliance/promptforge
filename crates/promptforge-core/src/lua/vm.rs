@@ -707,6 +707,12 @@ impl SectionVm {
         (self.bound_tools.clone(), Arc::clone(&self.tool_runtime))
     }
 
+    /// Returns frozen model bindings and the live H2 selection runtime.
+    #[must_use]
+    pub(crate) fn model_bag_handles(&self) -> (ModelBindings, Arc<Mutex<ModelRuntime>>) {
+        (self.bound_models.clone(), Arc::clone(&self.model_runtime))
+    }
+
     /// Returns the shared tool-call counts slot for `model:infer`.
     #[must_use]
     pub(crate) fn counts_slot(&self) -> Arc<Mutex<Option<ToolCallCounts>>> {
@@ -1133,7 +1139,7 @@ pub(crate) fn snapshot_tool_scope(
 
 /// Reads the section's effective model binding without mutating the model
 /// runtime: the H2 `models.use` selection, else the prompt-wide
-/// `models.always` default.
+/// `models.only` default.
 pub(crate) fn resolve_model_binding(
     bindings: &ModelBindings,
     runtime: &Mutex<ModelRuntime>,
@@ -1145,7 +1151,7 @@ pub(crate) fn resolve_model_binding(
         runtime
             .used()
             .map(String::from)
-            .or_else(|| bindings.always().map(String::from))
+            .or_else(|| bindings.only().map(String::from))
     };
     match alias {
         Some(alias) => Ok(Some(bindings.binding(&alias).cloned().ok_or_else(|| {

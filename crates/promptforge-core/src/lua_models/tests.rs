@@ -3,7 +3,7 @@ use super::decode::{
     value_as_bool, value_as_nonzero_u32, value_as_temperature, value_as_u32,
 };
 use super::userdata::{LuaModelHandle, reject_infer_options};
-use super::{ModelBindingState, ModelRuntime, record_always_binding};
+use super::{ModelBindingState, ModelRuntime, record_only_binding};
 use crate::dialects::ToolDialectId;
 use crate::model::{ModelId, ModelInvocation, ModelNeedOpts};
 use mlua::Value;
@@ -65,8 +65,8 @@ fn dialect_getter_returns_the_closed_dialect_id() {
 }
 
 #[test]
-fn always_multi_arg_rolls_back_when_already_selected() {
-    // PF-LM-003: a second multi-arg `models.always` must be rejected WITHOUT
+fn only_multi_arg_rolls_back_when_already_selected() {
+    // PF-LM-003: a second multi-arg `models.only` must be rejected WITHOUT
     // leaving a half-recorded binding behind.
     let resolver = |_: &str, _: &ModelNeedOpts| {
         Ok(crate::model::ResolvedModel {
@@ -77,25 +77,25 @@ fn always_multi_arg_rolls_back_when_already_selected() {
         })
     };
     let mut state = ModelBindingState::default();
-    record_always_binding(
+    record_only_binding(
         &mut state,
         &resolver,
         "a",
         "desc",
         &ModelNeedOpts::default(),
     )
-    .expect("the first models.always must succeed");
+    .expect("the first models.only must succeed");
     assert_eq!(state.bindings.len(), 1);
-    assert_eq!(state.always.as_deref(), Some("a"));
+    assert_eq!(state.only.as_deref(), Some("a"));
 
-    let err = record_always_binding(
+    let err = record_only_binding(
         &mut state,
         &resolver,
         "b",
         "desc",
         &ModelNeedOpts::default(),
     )
-    .expect_err("a second models.always must be rejected");
+    .expect_err("a second models.only must be rejected");
     assert!(
         err.to_string().contains("at most once"),
         "error must explain the at-most-once rule: {err}"
@@ -103,9 +103,9 @@ fn always_multi_arg_rolls_back_when_already_selected() {
     assert_eq!(
         state.bindings.len(),
         1,
-        "a rejected second models.always must not record a binding (rollback)"
+        "a rejected second models.only must not record a binding (rollback)"
     );
-    assert_eq!(state.always.as_deref(), Some("a"));
+    assert_eq!(state.only.as_deref(), Some("a"));
 }
 
 #[test]
@@ -272,12 +272,12 @@ fn parse_single_alias_and_validate_alias_branches() {
     let lua = Lua::new();
     let ok: MultiValue = [lua_string(&lua, "writer")].into_iter().collect();
     assert_eq!(
-        parse_single_alias(&ok, "models.always").expect("string alias"),
+        parse_single_alias(&ok, "models.only").expect("string alias"),
         "writer"
     );
     let bad: MultiValue = [Value::Integer(1)].into_iter().collect();
     assert!(
-        parse_single_alias(&bad, "models.always").is_err(),
+        parse_single_alias(&bad, "models.only").is_err(),
         "a non-string alias must be rejected"
     );
 

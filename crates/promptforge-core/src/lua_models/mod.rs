@@ -59,12 +59,12 @@ pub(crate) enum SelectError {
 #[derive(Debug, Default)]
 pub(crate) struct ModelBindingState {
     pub(crate) bindings: Vec<ModelBinding>,
-    pub(crate) always: Option<String>,
+    pub(crate) only: Option<String>,
     pub(crate) callback_error: Option<Error>,
 }
 
 /// Records one `models.need` binding into the accumulator. Shared by
-/// `models.need` and the multi-arg `models.always` form.
+/// `models.need` and the multi-arg `models.only` form.
 fn record_need_binding(
     state: &mut ModelBindingState,
     resolver: &dyn ModelResolver,
@@ -101,45 +101,45 @@ fn record_need_binding(
     Ok(binding)
 }
 
-/// Records a `models.always` selection, enforcing at-most-once.
-fn record_always_selection(state: &mut ModelBindingState, alias: String) -> mlua::Result<()> {
-    if state.always.is_some() {
+/// Records a `models.only` selection, enforcing at-most-once.
+fn record_only_selection(state: &mut ModelBindingState, alias: String) -> mlua::Result<()> {
+    if state.only.is_some() {
         return Err(mlua::Error::external(
-            "models.always may be called at most once per prompt",
+            "models.only may be called at most once per prompt",
         ));
     }
-    state.always = Some(alias);
+    state.only = Some(alias);
     Ok(())
 }
 
-/// Records the multi-argument `models.always(alias, description, opts)` form
+/// Records the multi-argument `models.only(alias, description, opts)` form
 /// atomically.
 ///
-/// All preconditions (the at-most-once `always` rule and, via
+/// All preconditions (the at-most-once `only` rule and, via
 /// [`record_need_binding`], the duplicate-alias and resolution rules) are
 /// checked BEFORE any state is mutated, so a rejected call can never leave a
 /// half-recorded binding with no matching default alias behind. Only when every
 /// precondition passes are the binding and the default alias committed together.
-fn record_always_binding(
+fn record_only_binding(
     state: &mut ModelBindingState,
     resolver: &dyn ModelResolver,
     alias: &str,
     description: &str,
     opts: &ModelNeedOpts,
 ) -> mlua::Result<ModelBinding> {
-    if state.always.is_some() {
+    if state.only.is_some() {
         return Err(mlua::Error::external(
-            "models.always may be called at most once per prompt",
+            "models.only may be called at most once per prompt",
         ));
     }
     // `record_need_binding` only pushes after its own preconditions pass, and we
-    // have already verified `always` is unset, so this commit is atomic.
+    // have already verified `only` is unset, so this commit is atomic.
     let binding = record_need_binding(state, resolver, alias, description, opts)?;
-    state.always = Some(alias.to_owned());
+    state.only = Some(alias.to_owned());
     Ok(binding)
 }
 
-/// Installs live H1 `models.need` / `models.always` resolvers.
+/// Installs live H1 `models.need` / `models.only` resolvers.
 ///
 /// Each call resolves immediately and records the resulting frozen binding.
 /// `models.use` remains unavailable until section execution.
@@ -165,22 +165,22 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
         .map_err(Error::lua)?;
     models.set("need", need).map_err(Error::lua)?;
 
-    let always_state = Arc::clone(state);
-    let always = scope
+    let only_state = Arc::clone(state);
+    let only = scope
         .create_function(move |_, args: MultiValue| -> mlua::Result<LuaModelHandle> {
             if args.len() >= 2 {
                 let (alias, description, opts) = parse_need_args(args)?;
                 validate_alias(&alias).map_err(mlua::Error::external)?;
-                let mut guard = always_state
+                let mut guard = only_state
                     .lock()
                     .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
                 let binding =
-                    record_always_binding(&mut guard, resolver, &alias, &description, &opts)?;
+                    record_only_binding(&mut guard, resolver, &alias, &description, &opts)?;
                 Ok(LuaModelHandle::from_binding(&binding))
             } else {
-                let alias = parse_single_alias(&args, "models.always")?;
+                let alias = parse_single_alias(&args, "models.only")?;
                 validate_alias(&alias).map_err(mlua::Error::external)?;
-                let mut guard = always_state
+                let mut guard = only_state
                     .lock()
                     .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
                 let binding = guard
@@ -190,15 +190,15 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
                     .cloned()
                     .ok_or_else(|| {
                         mlua::Error::external(format!(
-                            "models.always alias {alias:?} was not declared by models.need"
+                            "models.only alias {alias:?} was not declared by models.need"
                         ))
                     })?;
-                record_always_selection(&mut guard, alias)?;
+                record_only_selection(&mut guard, alias)?;
                 Ok(LuaModelHandle::from_binding(&binding))
             }
         })
         .map_err(Error::lua)?;
-    models.set("always", always).map_err(Error::lua)?;
+    models.set("only", only).map_err(Error::lua)?;
 
     let use_fn = scope
         .create_function(|_, _: MultiValue| -> mlua::Result<()> {
@@ -230,35 +230,46 @@ pub(crate) fn install_h2_models(
         .map_err(Error::lua)?;
     models.set("need", need).map_err(Error::lua)?;
 
-    let always_fn = lua
+    let only_fn = lua
         .create_function(|_, _: MultiValue| -> mlua::Result<()> {
             Err(mlua::Error::external(
-                "models.always is only available during live H1 execution",
+                "models.only is only available during live H1 execution",
             ))
         })
         .map_err(Error::lua)?;
-    models.set("always", always_fn).map_err(Error::lua)?;
+    models.set("only", only_fn).map_err(Error::lua)?;
 
-    let frozen = bindings.clone();
-    let state = Arc::clone(runtime);
-    let use_fn = lua
-        .create_function(move |_, alias: String| {
-            validate_alias(&alias).map_err(mlua::Error::external)?;
-            let mut state = state
-                .lock()
-                .map_err(|_| mlua::Error::external("model declaration runtime was poisoned"))?;
-            if frozen.binding(&alias).is_none() {
-                return Err(mlua::Error::external(format!(
-                    "models.use alias {alias:?} was not declared by models.need"
-                )));
-            }
-            state.select(alias).map_err(|_| {
-                mlua::Error::external("models.use may be called at most once per section")
-            })?;
-            Ok(())
-        })
-        .map_err(Error::lua)?;
-    models.set("use", use_fn).map_err(Error::lua)?;
+    if bindings.only().is_some() {
+        let use_fn = lua
+            .create_function(|_, _: String| -> mlua::Result<()> {
+                Err(mlua::Error::external(
+                    "models.use is unavailable: models.only was called in H1",
+                ))
+            })
+            .map_err(Error::lua)?;
+        models.set("use", use_fn).map_err(Error::lua)?;
+    } else {
+        let frozen = bindings.clone();
+        let state = Arc::clone(runtime);
+        let use_fn = lua
+            .create_function(move |_, alias: String| {
+                validate_alias(&alias).map_err(mlua::Error::external)?;
+                let mut state = state
+                    .lock()
+                    .map_err(|_| mlua::Error::external("model declaration runtime was poisoned"))?;
+                if frozen.binding(&alias).is_none() {
+                    return Err(mlua::Error::external(format!(
+                        "models.use alias {alias:?} was not declared by models.need"
+                    )));
+                }
+                state.select(alias).map_err(|_| {
+                    mlua::Error::external("models.use may be called at most once per section")
+                })?;
+                Ok(())
+            })
+            .map_err(Error::lua)?;
+        models.set("use", use_fn).map_err(Error::lua)?;
+    }
 
     globals.raw_set("models", models).map_err(Error::lua)
 }

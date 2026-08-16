@@ -260,8 +260,6 @@ fn direct_output_is_absent_in_every_executable_lua_vm() {
         "Section",
     )
     .expect("prologue must not expose direct output");
-    vm.close_tool_scope(&NullObserver, "Section")
-        .expect("scope must close");
     vm.run_epilog(
         &program("assert(print == nil); assert(warn == nil)"),
         &NullObserver,
@@ -296,8 +294,6 @@ fn logs_are_correlated_and_ordered_across_h2_phases() {
         .expect("host must inject");
     vm.run_prologue(&program("log('prologue checkpoint')"), &recorder, "Gather")
         .expect("prologue log must succeed");
-    vm.close_tool_scope(&recorder, "Gather")
-        .expect("scope must close");
     vm.run_epilog(&program("log('epilog checkpoint')"), &recorder, "Gather")
         .expect("epilog log must succeed");
     vm.teardown(&recorder, "Gather");
@@ -569,8 +565,6 @@ fn retained_log_functions_expire_with_their_phase_observer() {
         "the phase must not retain its observer"
     );
 
-    vm.close_tool_scope(&NullObserver, "Section")
-        .expect("scope must close before the epilog");
     let second = Recorder::default();
     vm.run_epilog(
         &program(
@@ -820,9 +814,9 @@ fn h2_recording_closes_to_always_then_added_scope() {
         .expect("host must inject");
     vm.run_prologue(&prologue, &NullObserver, "Section")
         .expect("H2 additions must record");
-    let scope = vm
-        .close_tool_scope(&NullObserver, "Section")
-        .expect("scope must close");
+    let (bindings, runtime) = vm.tool_bag_handles();
+    let scope = snapshot_tool_scope(&bindings, &runtime)
+        .expect("tool scope must snapshot");
 
     assert_eq!(
         scope
@@ -832,14 +826,6 @@ fn h2_recording_closes_to_always_then_added_scope() {
             .collect::<Vec<_>>(),
         ["search", "fetch"]
     );
-    assert!(
-        vm.close_tool_scope(&NullObserver, "Section").is_err(),
-        "scope closure must be one-way"
-    );
-    let error = vm
-        .run_epilog(&program("tools.add('fetch')"), &NullObserver, "Section")
-        .expect_err("epilogs cannot mutate a closed scope");
-    assert!(error.to_string().contains("scope closes"));
 }
 
 #[test]
@@ -888,9 +874,9 @@ fn h2_add_accepts_tool_objects_and_arrays() {
         .expect("host must inject");
     vm.run_prologue(&prologue, &NullObserver, "Section")
         .expect("tools.add must accept Tool objects, strings, and arrays");
-    let scope = vm
-        .close_tool_scope(&NullObserver, "Section")
-        .expect("scope must close");
+    let (bindings, runtime) = vm.tool_bag_handles();
+    let scope = snapshot_tool_scope(&bindings, &runtime)
+        .expect("tool scope must snapshot");
 
     assert_eq!(
         scope
@@ -921,9 +907,9 @@ fn empty_add_is_a_no_op_and_failed_variadic_add_is_atomic() {
         .expect("host must inject");
     vm.run_prologue(&prologue, &NullObserver, "Section")
         .expect("caught failed add must not poison recording");
-    let scope = vm
-        .close_tool_scope(&NullObserver, "Section")
-        .expect("scope must close");
+    let (bindings, runtime) = vm.tool_bag_handles();
+    let scope = snapshot_tool_scope(&bindings, &runtime)
+        .expect("tool scope must snapshot");
 
     assert_eq!(
         scope
@@ -933,35 +919,6 @@ fn empty_add_is_a_no_op_and_failed_variadic_add_is_atomic() {
             .collect::<Vec<_>>(),
         ["fetch"],
         "empty add changes nothing and failed add records no partial aliases"
-    );
-}
-
-#[test]
-fn bound_reply_and_epilog_require_closed_scope() {
-    let (shared, bindings) = fixture_bindings("tools.need('search', 'search the web')");
-    let mut vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
-        .expect("captured bindings must install");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .expect("host must inject");
-
-    let reply_error = vm
-        .bind_reply("answer", &NullObserver, "Section")
-        .expect_err("reply binding must not bypass scope closure");
-    assert!(reply_error.to_string().contains("scope must close"));
-    let epilog_error = vm
-        .run_epilog(&program("return reply"), &NullObserver, "Section")
-        .expect_err("epilog must not bypass scope closure");
-    assert!(epilog_error.to_string().contains("scope must close"));
-
-    vm.close_tool_scope(&NullObserver, "Section")
-        .expect("scope must close");
-    vm.bind_reply("answer", &NullObserver, "Section")
-        .expect("reply may bind after closure");
-    assert_eq!(
-        vm.run_epilog(&program("return reply"), &NullObserver, "Section")
-            .expect("epilog may run after closure")
-            .as_deref(),
-        Some("answer")
     );
 }
 
@@ -1015,24 +972,9 @@ fn captured_bindings_are_installed_without_payload_reports() {
         .expect("captured binding installation must succeed");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
-    vm.close_tool_scope(&recorder, "Section")
-        .expect("empty H2 scope must close");
     let trace = format!("{:?}", recorder.observations());
     assert!(!trace.contains("private_alias"));
     assert!(!trace.contains("private capability"));
-}
-
-#[test]
-fn scope_closure_reports_exact_payload_free_sequence() {
-    let recorder = Recorder::default();
-    let vm =
-        SectionVm::new(None, EXECUTION, &recorder, "private section").expect("VM must construct");
-    let scope = vm
-        .close_tool_scope(&recorder, "private section")
-        .expect("empty scope may close before host injection");
-    assert!(scope.bindings().is_empty());
-
-    assert!(recorder.observations().is_empty());
 }
 
 #[test]
@@ -1078,8 +1020,6 @@ fn section_vm_preserves_one_environment_across_all_phases() {
         "1| <input>"
     );
 
-    vm.close_tool_scope(&NullObserver, "Test")
-        .expect("scope must close");
     vm.bind_reply("model answer", &NullObserver, "Test")
         .expect("reply must bind into the same environment");
     assert_eq!(
@@ -1141,8 +1081,6 @@ fn section_vm_reports_store_operations_in_each_phase() {
 
     vm.run_prologue(&write, &recorder, "Gather")
         .expect("prologue write must run");
-    vm.close_tool_scope(&recorder, "Gather")
-        .expect("scope must close");
     vm.bind_reply("private reply", &recorder, "Gather")
         .expect("reply must bind");
     vm.run_epilog(&read, &recorder, "Gather")
@@ -1232,9 +1170,6 @@ fn section_vms_isolate_mutated_shared_globals() {
             .as_deref(),
         Some("1")
     );
-    first
-        .close_tool_scope(&NullObserver, "First")
-        .expect("first scope must close");
     assert_eq!(
         first
             .run_epilog(&increment, &NullObserver, "First")
@@ -1323,8 +1258,6 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
         .expect("host values must inject");
     vm.run_prologue(&prologue, &recorder, "Gather")
         .expect("prologue must run");
-    vm.close_tool_scope(&recorder, "Gather")
-        .expect("scope must close");
     vm.bind_reply("private reply", &recorder, "Gather")
         .expect("reply must bind");
     vm.run_epilog(&epilog, &recorder, "Gather")
@@ -1861,13 +1794,13 @@ fn add_with_a_description_argument_fails_alias_validation() {
 }
 
 #[test]
-fn a_section_vm_without_declarations_closes_to_an_empty_scope() {
+fn a_section_vm_without_declarations_snapshots_to_an_empty_scope() {
     let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
-    let scope = vm
-        .close_tool_scope(&NullObserver, "Test")
-        .expect("an empty scope must close");
+    let (bindings, runtime) = vm.tool_bag_handles();
+    let scope = snapshot_tool_scope(&bindings, &runtime)
+        .expect("an empty scope must snapshot");
     assert!(scope.bindings().is_empty());
     vm.teardown(&NullObserver, "Test");
 }

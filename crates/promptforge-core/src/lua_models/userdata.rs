@@ -1,4 +1,4 @@
-//! Inspectable Lua userdata returned by `models.need` / `models.always`.
+//! Inspectable Lua userdata returned by `models.need` / `models.only`.
 //!
 //! Presentation only: the userdata exposes a frozen [`ModelBinding`]'s fields to
 //! Lua and dispatches `model:infer` through the executor's installed hook.
@@ -17,7 +17,7 @@ use crate::model::ModelBinding;
 pub(crate) type ModelInferHook =
     Arc<dyn Fn(&Lua, &ModelBinding, &str) -> mlua::Result<String> + Send + Sync>;
 
-/// Inspectable Lua userdata returned by `models.need` / `models.always`.
+/// Inspectable Lua userdata returned by `models.need` / `models.only`.
 #[derive(Debug, Clone)]
 pub(crate) struct LuaModelHandle {
     binding: ModelBinding,

@@ -417,7 +417,7 @@ async fn model_required_when_non_empty_prose_has_no_binding() {
 async fn shared_function_sees_sys_model_unknown_before_scope_close() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
-```lua\nmodels.always('writer', 'A general model for tests')\n```\n\n\
+```lua\nmodels.only('writer', 'A general model for tests')\n```\n\n\
 ```lua shared\nfunction read_sys_model()\n  return sys.model\nend\n```\n\n\
 ## Only\n\n```lua\nreturn read_sys_model()\n```\n\nprose\n";
     let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
