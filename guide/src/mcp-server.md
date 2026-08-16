@@ -122,6 +122,30 @@ Call `run_prompt` with `prompt` (required) and `args` (optional):
 }
 ```
 
+### File Parameters
+
+Three additional parameters support file-based input and output:
+
+- `input_file` - filesystem path; the server reads this file and places its content in the store at the prompt's declared input path
+- `input_text` - literal text; the server places it in the store directly at the prompt's declared input path
+- `output_file` - filesystem path; after the run completes, the server writes the output store file here
+
+`input_file` and `input_text` are mutually exclusive. Providing both is an error.
+
+If `output_file` is omitted, the output content is returned inline in the result's `value` field as usual.
+
+The prompt itself never touches the real filesystem. It reads and writes through MemStore only - the server handles marshalling between the filesystem and the store boundary.
+
+```json
+{
+  "prompt": "gate_paper",
+  "input_file": "/home/user/papers/p2996r7.md",
+  "output_file": "/home/user/reports/p2996-gate.md"
+}
+```
+
+`list_prompts` shows which prompts declare inputs and outputs, so callers know which file parameters apply.
+
 ### What Happens
 
 1. **Name resolution** - The name is matched case-normalized against the catalog. An unresolvable name returns all enabled names nearest-first so the model can correct itself.

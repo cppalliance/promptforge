@@ -75,11 +75,27 @@ pub(super) fn list_prompts_result(
         .unwrap_or(&[])
         .iter()
         .map(|entry| {
-            json!({
+            let mut obj = json!({
                 "name": entry.name(),
                 "description": entry.description(),
                 "problem": entry.problem(),
-            })
+            });
+            if let Some(prompt) = entry.prompt() {
+                let fm = prompt.frontmatter();
+                if let Some(input) = fm.input() {
+                    obj.as_object_mut().unwrap().insert(
+                        "input".to_owned(),
+                        json!({ "path": input.path(), "description": input.description() }),
+                    );
+                }
+                if let Some(output) = fm.output() {
+                    obj.as_object_mut().unwrap().insert(
+                        "output".to_owned(),
+                        json!({ "path": output.path(), "description": output.description() }),
+                    );
+                }
+            }
+            obj
         })
         .collect();
     let mut structured = json!({ "prompts": prompts });

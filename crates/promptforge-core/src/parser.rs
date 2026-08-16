@@ -18,7 +18,7 @@ mod build;
 mod fence;
 mod list;
 
-pub use build::{Frontmatter, MAX_TOOL_ITERATIONS, MaxToolIterations, promptforge_version};
+pub use build::{FileDecl, Frontmatter, MAX_TOOL_ITERATIONS, MaxToolIterations, promptforge_version};
 use build::{Heading, build_sections, collect_headings, line_add, split_frontmatter};
 use fence::{exact_shared_openings, split_h1};
 

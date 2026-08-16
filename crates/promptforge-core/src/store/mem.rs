@@ -5,6 +5,7 @@ use std::fmt::Write as _;
 
 use super::StoreError;
 use super::glob::{compile_glob, matches_tokens};
+use super::path::StorePath;
 
 /// A backend for run-scoped virtual files addressed by logical string paths.
 ///
@@ -232,6 +233,34 @@ impl MemStore {
     #[must_use]
     pub fn new() -> MemStore {
         MemStore::default()
+    }
+
+    /// Creates a store pre-populated with the given files.
+    ///
+    /// Each path is validated through [`StorePath::parse`](super::StorePath) at
+    /// construction time, so the store never holds a path unreachable through
+    /// the normal read/write API.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::InvalidPath`] if any path fails validation.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::store::{MemStore, Store};
+    ///
+    /// let fs = MemStore::with_files([
+    ///     ("input.md".to_owned(), "# Hello".to_owned()),
+    /// ])?;
+    /// assert_eq!(fs.read("input.md")?, "# Hello");
+    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// ```
+    pub fn with_files(files: impl IntoIterator<Item = (String, String)>) -> Result<MemStore, StoreError> {
+        let mut map = BTreeMap::new();
+        for (path, contents) in files {
+            let validated = StorePath::parse(&path)?;
+            map.insert(validated.as_str().to_owned(), contents);
+        }
+        Ok(MemStore { files: map })
     }
 }
 
