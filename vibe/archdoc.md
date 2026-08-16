@@ -36,7 +36,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A34. A subroutine call starts a fresh VM and returns; a transfer clears context, stops the caller, and does not return.
 - A35. The H1 program executes exactly once with live host resolution; no separate declaration or bind replay phase exists.
 
-- A37. A clean workspace build requires no secret environment variable or manually provisioned artifact.
 
 
 
@@ -46,6 +45,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A42. External file I/O ends at the trusted host; prompts see only validated store paths.
 
 - A43. Hosts expose no live tools by default; each capability requires explicit enablement.
+
+- A44. Secret resolution is deterministic: process values override root profile values, which override included defaults.
 
 ## Principles
 

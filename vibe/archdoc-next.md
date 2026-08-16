@@ -53,3 +53,5 @@
 - [2026-08-15-1-store-input-files] declared file contract: Prompts declare logical input and output paths while hosts choose how external content is supplied or returned.
 - [2026-08-15-1-store-input-files] best-effort declared output: Report a missing declared output distinctly without retroactively failing an otherwise completed run.
 - [2026-08-15-2-quickref-file] compressed operational reference: Keep an LLM-loadable quick reference factual and point each schema or language topic to its authoritative source.
+- [2026-08-15-3-gateway-dotenv-support] config-matched secret sidecars: Associate an optional ignored secret file with each config layer by name rather than adding secret syntax to config.
+- [2026-08-15-3-gateway-dotenv-support] gateway-local secret loading: Keep vendor secret loading inside the gateway; callers retain only gateway connection credentials.
