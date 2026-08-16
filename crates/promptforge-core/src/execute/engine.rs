@@ -161,7 +161,7 @@ pub(crate) async fn run_sections(
         initial_var,
     };
 
-    let mut last_reply: Option<String> = None;
+    let mut reply: Option<String> = None;
     let mut index = 0usize;
     while index < prompt.sections.len() {
         let section = &prompt.sections[index];
@@ -172,26 +172,26 @@ pub(crate) async fn run_sections(
             section,
             index + 1,
             0,
-            last_reply.as_deref(),
+            reply.as_deref(),
             &mut client,
         )
         .await?
         {
-            SectionFlow::Jumped { heading, reply } => {
+            SectionFlow::Jumped { heading, reply: r } => {
                 let target = resolve_h2_index(&heading, &prompt.sections)?;
-                last_reply = reply;
+                reply = r;
                 index = target;
             }
             SectionFlow::Returned(value) => return Ok(value),
-            SectionFlow::FellThrough { reply } => {
-                last_reply = reply;
+            SectionFlow::FellThrough { reply: r } => {
+                reply = r;
                 index += 1;
             }
         }
     }
 
     // Ran off the end.
-    Ok(last_reply.unwrap_or_else(|| "done".to_string()))
+    Ok(reply.unwrap_or_else(|| "done".to_string()))
 }
 
 /// Execute one section's block lifecycle over the shared [`WalkContext`].
