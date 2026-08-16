@@ -10,7 +10,7 @@ Lua blocks in the H1 region execute once in source order before any H2 section. 
 # My Prompt
 
 ```lua
-models.always("writer", "a capable writing model")
+models.only("writer", "a capable writing model")
 tools.need("search", "web search capability")
 tools.always("search")
 var.topic = "Rust async patterns"
@@ -52,7 +52,7 @@ Each section VM provides these globals:
 | `reply` | Previous section's model answer |
 | `tasks` | Section handles for control flow |
 
-The `sys` table includes `when`, `now`, `id`, `section_name`, `execution`, `section_count`, `model` (after scope closure), and `reply_finish_reason` (after inference). It is sealed - writes raise errors and the metatable cannot be replaced.
+The `sys` table includes `when`, `now`, `id`, `section_name`, `execution`, `section_count`, `model` (after first model interaction), and `reply_finish_reason` (after inference). It is sealed - writes raise errors and the metatable cannot be replaced.
 
 ## Template Substitution
 

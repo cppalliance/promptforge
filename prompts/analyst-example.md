@@ -10,7 +10,7 @@ promptforge: 1
 models.need("analyst", "A model suited for careful analysis", { thinking = false, temperature = 0, context = 40000 })
 ```
 
-Demonstrates prompt-local model resolution. H1 `models.need` resolves against the host's gateway catalog. A section that calls `models.use` runs every completion under that model object's frozen invocation; a section that omits `models.use` inherits the prompt-wide `models.always` model when one is declared.
+Demonstrates prompt-local model resolution. H1 `models.need` resolves against the host's gateway catalog. A section that calls `models.use` runs every completion under that model object's frozen invocation; a section that omits `models.use` inherits the prompt-wide `models.only` model when one is declared.
 
 ## Analyze
 

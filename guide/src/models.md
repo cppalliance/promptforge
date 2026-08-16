@@ -14,16 +14,16 @@ models.need("writer", "a creative writing model", {
 })
 
 -- Set it as the prompt-wide default
-models.always("writer")
+models.only("writer")
 ```
 
-The `models.always(alias, description, opts)` form declares and designates in one atomic call. Within sections, `models.use(alias)` selects a specific model:
+The `models.only(alias, description, opts)` form declares and designates in one atomic call. Within sections, `models.use(alias)` selects a specific model:
 
 ```lua
 models.use("analyst")
 ```
 
-Sections without `models.use` inherit the `models.always` default. Sections with non-empty prose but no model binding receive a clear error.
+Sections without `models.use` inherit the `models.only` default. Sections with non-empty prose but no model binding receive a clear error.
 
 ## Hard Constraints
 
@@ -34,7 +34,7 @@ The opts table filters the catalog before semantic resolution:
 - `temperature` - float in range 0.0 to 2.0
 - `max_tokens` - positive integer
 
-Duplicate model aliases or duplicate `models.always` calls are rejected atomically.
+Duplicate model aliases or duplicate `models.only` calls are rejected atomically.
 
 ## Model Inference from Lua
 
