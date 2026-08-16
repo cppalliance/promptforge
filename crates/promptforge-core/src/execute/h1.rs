@@ -117,7 +117,7 @@ pub(crate) async fn execute_live_h1(
             }
             Block::Prose { text, loop_capable } => {
                 let (tool_bindings, model_bindings) = h1_try!(runtime.bindings());
-                let Some(alias) = model_bindings.always() else {
+                let Some(alias) = model_bindings.only() else {
                     vm.teardown(observer, &prompt.title);
                     return Err(Error::ModelRequired {
                         section: prompt.title.clone(),

@@ -1,6 +1,6 @@
 //! Shared value decoding for the `models.*` host tables.
 //!
-//! Parses Lua argument shapes (`models.need`/`models.always` args and the opts
+//! Parses Lua argument shapes (`models.need`/`models.only` args and the opts
 //! table) and validates scalar option values at the Lua trust boundary.
 
 use std::num::NonZeroU32;

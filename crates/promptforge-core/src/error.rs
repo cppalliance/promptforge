@@ -466,7 +466,7 @@ pub(crate) enum Error {
     UnknownScopedTool(String),
 
     /// A model-facing section has non-empty prose but no `models.use` or
-    /// prompt-wide `models.always` binding.
+    /// prompt-wide `models.only` binding.
     #[error("model binding required for section {section}")]
     #[non_exhaustive]
     ModelRequired {
