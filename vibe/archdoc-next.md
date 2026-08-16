@@ -50,3 +50,5 @@
 - [2026-08-12-1-mdbook-guide] release sequencing: Complete guide, package metadata, and dry-run validation before changing the release version or publishing artifacts.
 - [2026-08-14-1-file-backed-store] backend-transparent execution: Keep the executor unaware of whether a run-scoped store is memory-backed or file-backed.
 - [2026-08-14-1-file-backed-store] prompt-owned resume: Express resume and skip behavior through ordinary store operations in prompt code, not special engine logic.
+- [2026-08-15-1-store-input-files] declared file contract: Prompts declare logical input and output paths while hosts choose how external content is supplied or returned.
+- [2026-08-15-1-store-input-files] best-effort declared output: Report a missing declared output distinctly without retroactively failing an otherwise completed run.
