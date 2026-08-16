@@ -84,7 +84,7 @@ impl PreparedTools {
     /// so prompts without `models.need` keep working.
     pub async fn load(config: &Config) -> Result<Self, PreparedToolsError> {
         let gateway = &config.gateway;
-        let models = match fetch_model_catalog(gateway.url.as_str(), gateway.key.expose()).await {
+        let models = match fetch_model_catalog(gateway.url.as_str(), gateway.api_key.expose()).await {
             Ok(catalog) => catalog,
             Err(error) if is_transient(&error) => {
                 // A momentary outage: warn and serve on with an empty catalog,
@@ -208,7 +208,7 @@ fn live_tools(
     if tools_config.web_search {
         live.push(Arc::new(WebSearch::new(
             gateway.url.as_str(),
-            gateway.key.expose(),
+            gateway.api_key.expose(),
         )?));
     }
     Ok(live)
@@ -224,7 +224,7 @@ pub(super) fn gateway_client(
     gateway: &GatewayConfig,
 ) -> Result<GatewayClient, promptforge_core::model::CompletionError> {
     let endpoint = promptforge_core::client::GatewayEndpoint::new(gateway.url.as_str())?;
-    let key = promptforge_core::client::SecretString::new(gateway.key.expose())?;
+    let key = promptforge_core::client::SecretString::new(gateway.api_key.expose())?;
     Ok(GatewayClient::new(endpoint, key))
 }
 /// Derives one abstract descriptor from its callable live instance.
@@ -258,7 +258,7 @@ mod tests {
 
     fn gateway(extra: &str) -> Config {
         Config::from_toml_str(&format!(
-            "[server]\ntoken = \"t\"\n\n[gateway]\nurl = \"http://127.0.0.1:8081/v1/\"\nkey = \"gw\"\n\n[tools]\nweb_fetch = true\nweb_search = true\n{extra}"
+            "[server]\napi_key = \"t\"\n\n[gateway]\nurl = \"http://127.0.0.1:8081/v1/\"\napi_key = \"gw\"\n\n[tools]\nweb_fetch = true\nweb_search = true\n{extra}"
         ))
         .expect("the fixture configuration parses")
     }
@@ -380,7 +380,7 @@ return 'resolved'
     /// A configuration whose gateway points at `addr`, for a test stub gateway.
     fn config_for(addr: &str) -> Config {
         Config::from_toml_str(&format!(
-            "[server]\ntoken = \"t\"\n\n[gateway]\nurl = \"http://{addr}/v1/\"\nkey = \"gw\"\n\n[tools]\nweb_fetch = true\nweb_search = true\n"
+            "[server]\napi_key = \"t\"\n\n[gateway]\nurl = \"http://{addr}/v1/\"\napi_key = \"gw\"\n\n[tools]\nweb_fetch = true\nweb_search = true\n"
         ))
         .expect("the fixture configuration parses")
     }

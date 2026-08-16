@@ -9,7 +9,7 @@ fn write(dir: &Path, name: &str, body: &str) {
 const MINIMAL_CONFIG: &str = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"
@@ -34,7 +34,7 @@ fn include_merges_and_child_overrides_by_name() {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -101,7 +101,7 @@ fn include_paths_are_relative_to_including_file() {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"
@@ -147,7 +147,7 @@ fn rejects_runaway_include_depth() {
             r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 "#
             .to_owned()
         } else {
@@ -168,7 +168,7 @@ fn later_scalar_wins() {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "base-token"
+api_key = "base-token"
 
 [queue]
 max_depth = 10
@@ -181,14 +181,14 @@ max_depth = 10
 include = ["base.toml"]
 
 [server]
-key = "child-token"
+api_key = "child-token"
 
 [queue]
 max_depth = 50
 "#,
     );
     let config = load_path(&tmp.path().join("child.toml")).unwrap();
-    assert_eq!(config.server.key.expose(), "child-token");
+    assert_eq!(config.server.api_key.expose(), "child-token");
     assert_eq!(config.queue.max_depth, 50);
     assert_eq!(config.server.bind.to_string(), "127.0.0.1:8081");
 }
@@ -222,7 +222,7 @@ fn load_named_reads_from_profiles_dir() {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"
@@ -255,7 +255,7 @@ fn load_named_accepts_single_component_name_containing_dot_dot() {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"
@@ -284,7 +284,7 @@ fn local_model_override_by_name() {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[local_model]]
 name = "q"
@@ -323,7 +323,7 @@ fn include_merges_devices_and_nested_lanes() {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[device]]
 id = "anthropic"
@@ -378,7 +378,7 @@ fn include_attaches_orphan_device_lanes_from_child() {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[device]]
 id = "local-gpu"
@@ -430,7 +430,7 @@ fn non_array_inherited_collection_is_a_located_error() {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [endpoint]
 id = "not-an-array"
@@ -477,7 +477,7 @@ fn merge_type_error_includes_path_and_line() {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [device]
 id = "not-an-array"

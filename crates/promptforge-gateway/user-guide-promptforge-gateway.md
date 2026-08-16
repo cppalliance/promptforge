@@ -19,7 +19,7 @@ A minimal configuration defines a server (bind address and bearer key), one endp
 ```toml
 [server]
 bind = "127.0.0.1:8080"
-key = "${GATEWAY_KEY}"
+api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 
 [[endpoint]]
 id = "anthropic"
@@ -119,7 +119,7 @@ The response carries the caller's model name, not the backend's.
 
 ## Authentication and Errors
 
-Every route except `GET /health` checks `Authorization: Bearer <token>` against `server.key`. The comparison is constant-time: both values are SHA-256 hashed to fixed-length digests, then compared with the `subtle` crate's `ConstantTimeEq`. A missing or wrong token returns 401 with no detail.
+Every route except `GET /health` checks `Authorization: Bearer <token>` against `server.api_key`. The comparison is constant-time: both values are SHA-256 hashed to fixed-length digests, then compared with the `subtle` crate's `ConstantTimeEq`. A missing or wrong token returns 401 with no detail.
 
 `GET /health` is unauthenticated and always returns `{"status": "serving"}` while the process is up.
 

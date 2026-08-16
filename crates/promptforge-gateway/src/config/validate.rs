@@ -23,7 +23,7 @@ impl Config {
     /// out-of-vocabulary freshness/safesearch default, an invalid
     /// `[[local_model]]`, `queue.max_depth` below 1, or a concurrency below 1.
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
-        if self.server.key.is_empty() {
+        if self.server.api_key.is_empty() {
             return Err(ConfigError::Validation(
                 "server.key must not be empty".to_string(),
             ));

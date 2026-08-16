@@ -55,7 +55,7 @@ The variable `report` captures exactly what the prompt returned.
 Gateway credentials come from two environment variables:
 
 - `PROMPTFORGE_GATEWAY_URL` - the gateway base URL
-- `PROMPTFORGE_GATEWAY_KEY` - the bearer token
+- `PROMPTFORGE_GATEWAY_API_KEY` - the bearer token
 
 There are no CLI flags for credentials. This is deliberate: secrets never appear in `argv`, where `ps` and shell history can expose them.
 
@@ -65,7 +65,7 @@ There are no CLI flags for credentials. This is deliberate: secrets never appear
 
 ```bash
 export PROMPTFORGE_GATEWAY_URL="https://gateway.example.com/v1"
-export PROMPTFORGE_GATEWAY_KEY="your-bearer-token"
+export PROMPTFORGE_GATEWAY_API_KEY="your-bearer-token"
 promptforge run prompts/search-demo.md "latest Rust news"
 ```
 
@@ -74,7 +74,7 @@ This enables the `web_search` tool and fetches the remote model catalog, so prom
 Setting a key without a URL is rejected explicitly:
 
 ```
-error: PROMPTFORGE_GATEWAY_KEY is set but PROMPTFORGE_GATEWAY_URL is missing or empty; both are required to reach the gateway
+error: PROMPTFORGE_GATEWAY_API_KEY is set but PROMPTFORGE_GATEWAY_URL is missing or empty; both are required to reach the gateway
 ```
 
 ### Tools
@@ -83,7 +83,7 @@ Two tools are available to prompts, depending on the gateway configuration:
 
 **`web_fetch`** runs locally and is always available regardless of gateway mode. It needs no credentials.
 
-**`web_search`** proxies through the gateway and is available only when both `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` are set. When the gateway is not configured, `web_search` is omitted entirely rather than advertised as a tool that would fail on its first call.
+**`web_search`** proxies through the gateway and is available only when both `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` are set. When the gateway is not configured, `web_search` is omitted entirely rather than advertised as a tool that would fail on its first call.
 
 The tool picker resolves `tools.need` calls from prompts against the live tool set. Picker descriptors are derived from the same live tool instances, so the registry and catalog have identical entries by construction. If a prompt needs a tool that is not available (for example, `web_search` without gateway credentials), the resolution produces the standard absent-capability error before any section executes.
 
@@ -139,7 +139,7 @@ A minimal configuration defines a server (bind address and bearer key), one endp
 ```toml
 [server]
 bind = "127.0.0.1:8080"
-key = "${GATEWAY_KEY}"
+api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 
 [[endpoint]]
 id = "anthropic"
@@ -239,7 +239,7 @@ The response carries the caller's model name, not the backend's.
 
 ### Authentication and Errors
 
-Every route except `GET /health` checks `Authorization: Bearer <token>` against `server.key`. The comparison is constant-time: both values are SHA-256 hashed to fixed-length digests, then compared with the `subtle` crate's `ConstantTimeEq`. A missing or wrong token returns 401 with no detail.
+Every route except `GET /health` checks `Authorization: Bearer <token>` against `server.api_key`. The comparison is constant-time: both values are SHA-256 hashed to fixed-length digests, then compared with the `subtle` crate's `ConstantTimeEq`. A missing or wrong token returns 401 with no detail.
 
 `GET /health` is unauthenticated and always returns `{"status": "serving"}` while the process is up.
 
@@ -403,6 +403,8 @@ endpoints = ["anthropic"]
 ```
 
 Includes resolve depth-first relative to the including file. Max nesting depth is 16. Cycles are detected and rejected.
+
+Each config file in the include chain gets its name-matched `.env` file loaded (e.g., `gateway.env` for `gateway.toml`). Root values take precedence.
 
 Merge rules:
 - Arrays (`[[endpoint]]`, `[[model]]`, `[[local_model]]`, `[[device]]`): merged by append. An entry with the same `id` or `name` replaces the earlier definition.
@@ -982,7 +984,7 @@ Set two environment variables:
 
 ```bash
 export PROMPTFORGE_GATEWAY_URL="https://your-gateway.example.com"
-export PROMPTFORGE_GATEWAY_KEY="your-bearer-token"
+export PROMPTFORGE_GATEWAY_API_KEY="your-bearer-token"
 ```
 
 Or construct programmatically:
@@ -1058,7 +1060,7 @@ promptforge-mcp-server runs PromptForge prompts for agentic harnesses like Curso
 promptforge-mcp-server serve prompts.toml
 ````
 
-This binds the streamable-HTTP transport at `http://127.0.0.1:9310/mcp`. Every request to `/mcp` must carry an `Authorization: Bearer <token>` header matching `[server].token`.
+This binds the streamable-HTTP transport at `http://127.0.0.1:9310/mcp`. Every request to `/mcp` must carry an `Authorization: Bearer <token>` header matching `[server].api_key`.
 
 For a harness that spawns the server as a child process:
 
@@ -1066,29 +1068,29 @@ For a harness that spawns the server as a child process:
 promptforge-mcp-server serve --stdio prompts.toml
 ````
 
-Stdio speaks JSON-RPC over standard input and output, binds no port, and ignores `[server].token` entirely. Logs go to stderr so they do not corrupt the wire.
+Stdio speaks JSON-RPC over standard input and output, binds no port, and ignores `[server].api_key` entirely. Logs go to stderr so they do not corrupt the wire.
 
 ### Configuration
 
-A single `prompts.toml` carries everything the server needs. The minimal configuration:
+A single `prompts.toml` carries everything the server needs. The MCP server uses a flat configuration - one `.toml` file with one name-matched `.env` file. There is no `include` or config chain. The minimal configuration:
 
 ````toml
 [server]
-token = "shared-bearer"
+api_key = "shared-bearer"
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-key = "gateway-bearer"
+api_key = "gateway-bearer"
 ````
 
-Every string value supports `${VAR}` interpolation from the process environment. Use `$$` for a literal dollar. An unset variable fails the load everywhere except `[server].token`, where it drops the token silently so a stdio install can boot without a credential its transport never reads.
+Every string value supports `${VAR}` interpolation from the process environment. Use `$$` for a literal dollar. An unset variable fails the load everywhere except `[server].api_key`, where it drops the key silently so a stdio install can boot without a credential its transport never reads.
 
 #### Full configuration
 
 ````toml
 [server]
 bind = "127.0.0.1:9310"
-token = "${PROMPTFORGE_TOKEN}"
+api_key = "${PROMPTFORGE_MCP_SERVER_API_KEY}"
 max_concurrent_runs = 4
 admission_timeout = "30s"
 reply_deadline = "240s"
@@ -1102,7 +1104,7 @@ prompts = "prompts"
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-key = "${GATEWAY_KEY}"
+api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 
 [catalog]
 include = ["*.md", "governance/**/*.md"]
@@ -1138,7 +1140,7 @@ Unknown keys are rejected outright - a misspelled key fails the load rather than
 
 **`[paths]`** - The prompts directory. Catalog patterns and `[prompts.NAME].file` paths are both relative to it.
 
-**`[gateway]`** - The model gateway every run goes through. `url` must be a valid http/https URL with a host. `key` is the bearer credential sent on every model call.
+**`[gateway]`** - The model gateway every run goes through. `url` must be a valid http/https URL with a host. `api_key` is the bearer credential sent on every model call.
 
 **`[catalog]`** - Glob patterns that assemble the catalog. `include` names what to resolve; `exclude` subtracts from it. `*` does not cross a separator, `**` does.
 
@@ -1809,7 +1811,7 @@ promptforge-dev requires a running `promptforge-gateway`. Start it yourself, the
 
 ````sh
 export PROMPTFORGE_GATEWAY_URL=http://127.0.0.1:8081/v1
-export PROMPTFORGE_GATEWAY_KEY=<bearer from your gateway profile>
+export PROMPTFORGE_GATEWAY_API_KEY=<bearer from your gateway profile>
 ````
 
 Both must be set and non-empty. If either is missing, the binary fails immediately with a message naming the missing variable and reminding you to start the gateway. No prompt file is read until both are validated.
@@ -1836,7 +1838,7 @@ Model runtime parameters - context window, thinking mode, max tokens - are not C
 
 Each invocation follows a fixed pipeline:
 
-1. **Validate environment.** Confirm `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` are set.
+1. **Validate environment.** Confirm `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` are set.
 2. **Fetch the model catalog.** One HTTP call to the gateway. The catalog is fetched once and reused across watch-mode reruns.
 3. **Build the tool set.** Two tools are always constructed: `web_fetch` (runs locally) and `web_search` (proxies through the gateway). A semantic tool picker is derived from the same live set, so no picker descriptor can advertise a tool without a matching callable.
 4. **Parse the prompt.** The file must declare `promptforge:` in its YAML frontmatter. A file without it is refused: "is not a promptforge prompt."

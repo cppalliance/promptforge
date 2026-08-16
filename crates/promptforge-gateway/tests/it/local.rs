@@ -24,7 +24,7 @@ async fn local_model_chat_completion_returns_text() {
         r#"
 [server]
 bind = "127.0.0.1:0"
-key = "test-token"
+api_key = "test-token"
 
 [local]
 cache_dir = "{cache}"

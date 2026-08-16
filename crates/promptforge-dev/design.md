@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-`promptforge-dev` is the author-facing interactive loop for editing a PromptForge prompt against a gateway that is already up. It reads one file, prepares live resolution inputs, executes H1 once and then the sections, dumps the store for inspection, and optionally watches for saves. Infrastructure - spawning `promptforge-gateway`, downloading GGUF weights, launching `llama-server`, choosing context size or thinking mode for a local profile - is out of scope. Authors set `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` after starting the gateway themselves.
+`promptforge-dev` is the author-facing interactive loop for editing a PromptForge prompt against a gateway that is already up. It reads one file, prepares live resolution inputs, executes H1 once and then the sections, dumps the store for inspection, and optionally watches for saves. Infrastructure - spawning `promptforge-gateway`, downloading GGUF weights, launching `llama-server`, choosing context size or thinking mode for a local profile - is out of scope. Authors set `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` after starting the gateway themselves.
 
 ## Owns
 

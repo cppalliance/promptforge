@@ -3,7 +3,7 @@ use super::*;
 const SAMPLE: &str = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -35,7 +35,7 @@ fn rejects_model_missing_description() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -60,7 +60,7 @@ fn rejects_model_missing_context() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -85,7 +85,7 @@ fn rejects_empty_server_key() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = ""
+api_key = ""
 
 [[endpoint]]
 id = "e"
@@ -111,7 +111,7 @@ fn rejects_web_search_default_count_over_max() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"
@@ -144,7 +144,7 @@ fn rejects_remote_device_with_lanes() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[device]]
 id = "gpu"
@@ -178,7 +178,7 @@ fn rejects_web_search_non_http_base_url() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"
@@ -211,7 +211,7 @@ fn rejects_plaintext_http_local_model_source() {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[local_model]]
 name = "m"
@@ -232,7 +232,7 @@ fn rejects_unknown_model_key() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -259,7 +259,7 @@ fn parses_thinking_modes() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -295,7 +295,7 @@ fn interpolation_ignores_comments_and_keys() {
 # a comment mentioning ${PROMPTFORGE_DEFINITELY_UNSET_VAR_XYZ}
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"

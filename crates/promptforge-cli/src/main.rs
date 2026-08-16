@@ -5,7 +5,7 @@
 //! string exposed to the prompt as `args`; it defaults to empty. The file must
 //! be a promptforge prompt - its frontmatter must declare a `promptforge:`
 //! version - or the CLI declines to run it. Gateway credentials come only from
-//! `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY`.
+//! `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY`.
 //!
 //! `main` is the process boundary: it parses arguments, installs the Ctrl-C
 //! signal, invokes the application runner, prints its output or error chain, and

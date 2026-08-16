@@ -1,7 +1,7 @@
 //! Interactive PromptForge prompt runner against an already-running gateway.
 //!
 //! `promptforge-dev [--watch] [--capture-raw] <prompt.md> [input]` requires
-//! `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY`, then runs one
+//! `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY`, then runs one
 //! prompt file. Context, thinking, and max tokens are declared on the prompt
 //! (`models.need` / `models.always`); this binary does not accept those flags.
 //!

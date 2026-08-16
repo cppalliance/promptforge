@@ -381,7 +381,7 @@ pub(crate) fn render_profile(
     format!(
         r#"[server]
 bind = "{LOOPBACK}:{port}"
-key = "{token}"
+api_key = "{token}"
 
 [[local_model]]
 name = "{model_name}"

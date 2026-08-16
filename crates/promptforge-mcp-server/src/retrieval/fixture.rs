@@ -63,8 +63,8 @@ pub(crate) fn catalog(prompts: &[(&str, &str)]) -> Prompts {
     }
     let prompts = toml::Value::String(dir.path().display().to_string()).to_string();
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = {prompts}\n\n\
          [catalog]\ninclude = [\"*.md\"]\n",
     ))

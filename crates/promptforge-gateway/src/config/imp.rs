@@ -72,7 +72,7 @@ impl Config {
     /// A clone of the server's bearer key.
     #[must_use]
     pub(crate) fn server_key(&self) -> Secret {
-        self.server.key.clone()
+        self.server.api_key.clone()
     }
 
     /// The web-search configuration, when `[tools.web_search]` is present.

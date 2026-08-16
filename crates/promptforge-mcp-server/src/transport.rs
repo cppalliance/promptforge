@@ -21,7 +21,7 @@
 //!
 //! stdio is the local case. It binds no port, constructs no auth layer, and
 //! therefore reads no token: a harness that spawned this process already has
-//! whatever authority the process has. That is why `[server].token` is
+//! whatever authority the process has. That is why `[server].api_key` is
 //! optional in the file and required here: the transport that checks it
 //! refuses to bind without one, and the transport that never reads it boots
 //! without one.
@@ -156,7 +156,7 @@ fn resolve_allowed_hosts(
 /// # Errors
 /// Returns a [`ServeError`] of kind
 /// [`MissingToken`](crate::error::ServeErrorKind::MissingToken) if
-/// `[server].token` is absent, since this transport is the one that checks it,
+/// `[server].api_key` is absent, since this transport is the one that checks it,
 /// [`Bind`](crate::error::ServeErrorKind::Bind) if the configured address
 /// cannot be bound, and [`Http`](crate::error::ServeErrorKind::Http) if the
 /// accept loop stops with an error.
@@ -172,7 +172,7 @@ pub(crate) async fn serve_http(
     let token = Arc::new(
         config
             .server
-            .token
+            .api_key
             .clone()
             .ok_or_else(ServeError::missing_token)?,
     );
@@ -205,7 +205,7 @@ pub(crate) async fn serve_http(
 ///
 /// No port is bound and no token is checked: the harness that spawned this
 /// process is the only thing that can talk to it. `[server].bind` and
-/// `[server].token` are read by nothing here, so a configuration that sets
+/// `[server].api_key` are read by nothing here, so a configuration that sets
 /// either is logged as ignored rather than silently obeyed, and one that omits
 /// the token serves anyway.
 ///
@@ -224,7 +224,7 @@ pub(crate) async fn serve_stdio(
     shutdown: impl Future<Output = ()> + Send,
 ) -> Result<(), ServeError> {
     tracing::info!(
-        "promptforge-mcp-server serving on stdio; [server].bind ({}) and [server].token are not used on this transport",
+        "promptforge-mcp-server serving on stdio; [server].bind ({}) and [server].api_key are not used on this transport",
         config.server.bind
     );
     let server = PromptForgeServer::new(config, catalog, tools);

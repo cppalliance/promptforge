@@ -44,8 +44,8 @@ pub(super) fn write_prompt(root: &Path, relative: &str, name: &str, description:
 pub(super) fn config_at(root: &Path, extra: &str) -> Config {
     let prompts = toml_string(&root.display().to_string());
     let toml = format!(
-        "[server]\ntoken = \"shared\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"shared\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = {prompts}\n\n{extra}",
     );
     Config::from_toml_str(&toml).expect("the fixture configuration parses")

@@ -196,7 +196,7 @@ pub(crate) fn gateway_config(backend: SocketAddr) -> Config {
         r#"
 [server]
 bind = "127.0.0.1:0"
-key = "test-token"
+api_key = "test-token"
 
 [[endpoint]]
 id = "fake"
@@ -247,7 +247,7 @@ pub(crate) async fn gateway_with_web_search(brave: SocketAddr) -> TestServer {
         r#"
 [server]
 bind = "127.0.0.1:0"
-key = "test-token"
+api_key = "test-token"
 
 [[endpoint]]
 id = "fake"
@@ -311,7 +311,7 @@ pub(crate) async fn gateway_with_queue(
         r#"
 [server]
 bind = "127.0.0.1:0"
-key = "test-token"
+api_key = "test-token"
 
 [queue]
 max_depth = {max_depth}

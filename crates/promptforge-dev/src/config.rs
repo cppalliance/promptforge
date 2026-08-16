@@ -43,11 +43,11 @@ impl std::fmt::Debug for GatewayKey {
 pub(crate) struct GatewayEnv {
     /// The gateway API root (`PROMPTFORGE_GATEWAY_URL`).
     pub(crate) base_url: String,
-    /// The bearer credential (`PROMPTFORGE_GATEWAY_KEY`).
+    /// The bearer credential (`PROMPTFORGE_GATEWAY_API_KEY`).
     pub(crate) key: GatewayKey,
 }
 
-/// Reads and validates `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY`
+/// Reads and validates `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY`
 /// from the process environment.
 ///
 /// # Errors
@@ -63,23 +63,23 @@ pub(crate) fn require_gateway_env_from(
     lookup: impl Fn(&str) -> Option<String>,
 ) -> Result<GatewayEnv> {
     let base_url = lookup("PROMPTFORGE_GATEWAY_URL").filter(|value| !value.is_empty());
-    let key = lookup("PROMPTFORGE_GATEWAY_KEY").filter(|value| !value.is_empty());
+    let key = lookup("PROMPTFORGE_GATEWAY_API_KEY").filter(|value| !value.is_empty());
     match (base_url, key) {
         (Some(base_url), Some(key)) => Ok(GatewayEnv {
             base_url,
             key: GatewayKey::new(key),
         }),
         (None, None) => bail!(
-            "missing environment variables PROMPTFORGE_GATEWAY_URL and PROMPTFORGE_GATEWAY_KEY\n\
+            "missing environment variables PROMPTFORGE_GATEWAY_URL and PROMPTFORGE_GATEWAY_API_KEY\n\
              start promptforge-gateway first, then export both before running promptforge-dev"
         ),
         (None, Some(_)) => bail!(
             "missing environment variable PROMPTFORGE_GATEWAY_URL\n\
-             start promptforge-gateway first, then export PROMPTFORGE_GATEWAY_URL and PROMPTFORGE_GATEWAY_KEY"
+             start promptforge-gateway first, then export PROMPTFORGE_GATEWAY_URL and PROMPTFORGE_GATEWAY_API_KEY"
         ),
         (Some(_), None) => bail!(
-            "missing environment variable PROMPTFORGE_GATEWAY_KEY\n\
-             start promptforge-gateway first, then export PROMPTFORGE_GATEWAY_URL and PROMPTFORGE_GATEWAY_KEY"
+            "missing environment variable PROMPTFORGE_GATEWAY_API_KEY\n\
+             start promptforge-gateway first, then export PROMPTFORGE_GATEWAY_URL and PROMPTFORGE_GATEWAY_API_KEY"
         ),
     }
 }
@@ -105,14 +105,14 @@ mod tests {
         let message = format!("{error:#}");
         assert!(
             message.contains("PROMPTFORGE_GATEWAY_URL")
-                && message.contains("PROMPTFORGE_GATEWAY_KEY"),
+                && message.contains("PROMPTFORGE_GATEWAY_API_KEY"),
             "unexpected missing-env message: {message}"
         );
     }
 
     #[test]
     fn missing_url_alone_fails_with_a_friendly_message() {
-        let error = require_gateway_env_from(lookup_from(&[("PROMPTFORGE_GATEWAY_KEY", "secret")]))
+        let error = require_gateway_env_from(lookup_from(&[("PROMPTFORGE_GATEWAY_API_KEY", "secret")]))
             .expect_err("URL missing must fail");
         assert!(
             format!("{error:#}")
@@ -128,7 +128,7 @@ mod tests {
                 .expect_err("key missing must fail");
         assert!(
             format!("{error:#}")
-                .starts_with("missing environment variable PROMPTFORGE_GATEWAY_KEY\n"),
+                .starts_with("missing environment variable PROMPTFORGE_GATEWAY_API_KEY\n"),
             "unexpected missing-key message: {error:#}"
         );
     }
@@ -137,7 +137,7 @@ mod tests {
     fn empty_gateway_vars_count_as_missing() {
         let error = require_gateway_env_from(lookup_from(&[
             ("PROMPTFORGE_GATEWAY_URL", ""),
-            ("PROMPTFORGE_GATEWAY_KEY", ""),
+            ("PROMPTFORGE_GATEWAY_API_KEY", ""),
         ]))
         .expect_err("empty vars must fail");
         assert!(
@@ -150,7 +150,7 @@ mod tests {
     fn present_gateway_vars_are_accepted() {
         let gateway = require_gateway_env_from(lookup_from(&[
             ("PROMPTFORGE_GATEWAY_URL", "http://10.0.0.7:9999/v1"),
-            ("PROMPTFORGE_GATEWAY_KEY", "dev-secret"),
+            ("PROMPTFORGE_GATEWAY_API_KEY", "dev-secret"),
         ]))
         .expect("both vars present must succeed");
         assert_eq!(gateway.base_url, "http://10.0.0.7:9999/v1");

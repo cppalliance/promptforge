@@ -2,7 +2,7 @@
 //! the server reads.
 //!
 //! One file carries everything the service needs: the socket and the shared
-//! token, the timings that keep a long run inside a client's call ceiling, the
+//! API key, the timings that keep a long run inside a client's call ceiling, the
 //! prompts directory, the gateway the runs go through, and which prompts the
 //! harness sees. The run is configured here rather than in the process
 //! environment because setting an environment variable is `unsafe` under
@@ -41,11 +41,11 @@ pub(crate) use self::types::{GatewayUrl, GlobPattern, PromptName, RelativePrompt
 ///
 /// let config: Config = r#"
 /// [server]
-/// token = "shared-bearer"
+/// api_key = "shared-bearer"
 ///
 /// [gateway]
 /// url = "http://127.0.0.1:8081/v1"
-/// key = "gateway-bearer"
+/// api_key = "gateway-bearer"
 /// "#
 /// .parse()?;
 /// assert_eq!(config, config.clone());
@@ -54,7 +54,7 @@ pub(crate) use self::types::{GatewayUrl, GlobPattern, PromptName, RelativePrompt
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Config {
-    /// Socket, shared token, concurrency, and the reload and timing settings.
+    /// Socket, shared API key, concurrency, and the reload and timing settings.
     pub(crate) server: ServerConfig,
     /// Where the prompts live.
     pub(crate) paths: PathsConfig,
@@ -96,26 +96,26 @@ impl TryFrom<RawConfig> for Config {
 
     fn try_from(raw: RawConfig) -> Result<Config, ConfigError> {
         // The shared bearer is optional, but present it must carry something:
-        // an empty token would compare equal to a request presenting no
+        // an empty key would compare equal to a request presenting no
         // credential. The blank rejection lives in [`Secret`]; it is mapped
-        // back onto the token here so the public error keeps its
+        // back onto the key here so the public error keeps its
         // [`EmptyToken`](crate::ConfigErrorKind::EmptyToken) kind and message.
-        let token = raw
+        let api_key = raw
             .server
-            .token
+            .api_key
             .map(|value| Secret::try_from(value).map_err(|_| ConfigError::empty_token()))
             .transpose()?;
         // The gateway credential is required and read on every run, so a blank
         // one is refused where it is read rather than surfacing later as an
         // opaque authentication failure against the gateway. The endpoint's own
         // shape is enforced by [`GatewayUrl`]'s validating conversion.
-        let key = Secret::try_from(raw.gateway.key)
-            .map_err(|_| ConfigError::parse("[gateway].key must not be empty"))?;
+        let gateway_api_key = Secret::try_from(raw.gateway.api_key)
+            .map_err(|_| ConfigError::parse("[gateway].api_key must not be empty"))?;
         Ok(Config {
             server: ServerConfig {
                 bind: raw.server.bind,
                 allowed_hosts: raw.server.allowed_hosts,
-                token,
+                api_key,
                 max_concurrent_runs: raw.server.max_concurrent_runs,
                 admission_timeout: raw.server.admission_timeout,
                 reply_deadline: raw.server.reply_deadline,
@@ -126,7 +126,7 @@ impl TryFrom<RawConfig> for Config {
             paths: raw.paths,
             gateway: GatewayConfig {
                 url: raw.gateway.url,
-                key,
+                api_key: gateway_api_key,
             },
             catalog: raw.catalog,
             tools: raw.tools,
@@ -137,7 +137,7 @@ impl TryFrom<RawConfig> for Config {
 
 /// The unvalidated shape of the `[server]` section.
 ///
-/// Carries the shared token as a raw `String` so a blank one reaches the
+/// Carries the shared API key as a raw `String` so a blank one reaches the
 /// validating [`TryFrom`](Config) rather than being rejected mid-deserialize,
 /// which is what lets the public error keep its
 /// [`EmptyToken`](crate::ConfigErrorKind::EmptyToken) kind.
@@ -149,7 +149,7 @@ struct RawServerConfig {
     #[serde(default)]
     allowed_hosts: Vec<String>,
     #[serde(default)]
-    token: Option<String>,
+    api_key: Option<String>,
     #[serde(default = "default_max_concurrent_runs")]
     max_concurrent_runs: NonZeroUsize,
     #[serde(default = "default_admission_timeout", with = "humantime_serde")]
@@ -166,14 +166,15 @@ struct RawServerConfig {
 
 /// The unvalidated shape of the `[gateway]` section.
 ///
-/// Carries the key as a raw `String` so a blank one reaches the validating
+/// Carries the API key as a raw `String` so a blank one reaches the validating
 /// [`TryFrom`](Config) and the public error keeps its
-/// [`Parse`](crate::ConfigErrorKind::Parse) kind and `[gateway].key` message.
+/// [`Parse`](crate::ConfigErrorKind::Parse) kind and `[gateway].api_key`
+/// message.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawGatewayConfig {
     url: GatewayUrl,
-    key: String,
+    api_key: String,
 }
 
 /// Server-level settings.
@@ -193,15 +194,15 @@ pub(crate) struct ServerConfig {
     /// (`["example.com", "example.com:8080"]`) instead. Read by the HTTP
     /// transport alone; stdio ignores it.
     pub(crate) allowed_hosts: Vec<String>,
-    /// The shared bearer token every `/mcp` request must present.
+    /// The shared API key every `/mcp` request must present.
     ///
-    /// Optional, because the token is a property of the HTTP surface alone:
+    /// Optional, because the key is a property of the HTTP surface alone:
     /// `serve` refuses to bind without one and `serve --stdio` never reads it.
-    /// A `${VAR}` here that the environment does not set leaves the token
+    /// A `${VAR}` here that the environment does not set leaves the key
     /// absent rather than failing the load, so a local stdio install is not
     /// stopped by a credential its transport never reads. Present, it must
     /// carry something.
-    pub(crate) token: Option<Secret>,
+    pub(crate) api_key: Option<Secret>,
     /// How many prompts may run at once before a call waits for admission.
     pub(crate) max_concurrent_runs: NonZeroUsize,
     /// How long a call waits for a run slot before it is refused.
@@ -244,8 +245,8 @@ impl Default for PathsConfig {
 pub(crate) struct GatewayConfig {
     /// The gateway base URL, for example `http://127.0.0.1:8081/v1`.
     pub(crate) url: GatewayUrl,
-    /// The shared key the gateway requires.
-    pub(crate) key: Secret,
+    /// The shared API key the gateway requires.
+    pub(crate) api_key: Secret,
 }
 
 /// The globs that assemble the catalog.
@@ -323,8 +324,8 @@ impl Config {
     /// [`UnresolvedVar`](crate::ConfigErrorKind::UnresolvedVar) if a `${VAR}` is
     /// malformed or unset, [`Parse`](crate::ConfigErrorKind::Parse) if the TOML
     /// is invalid, carries an unknown key, or exceeds the size cap, and
-    /// [`EmptyToken`](crate::ConfigErrorKind::EmptyToken) if `[server].token` is
-    /// present and carries nothing.
+    /// [`EmptyToken`](crate::ConfigErrorKind::EmptyToken) if `[server].api_key`
+    /// is present and carries nothing.
     ///
     /// # Examples
     /// ```no_run
@@ -359,28 +360,28 @@ impl Config {
     ///
     /// The TOML is parsed first and every string value interpolated after, so
     /// an unset `${VAR}` is attributed to the field that carried it. That is
-    /// what lets `[server].token` alone survive one: it is optional, and the
+    /// what lets `[server].api_key` alone survive one: it is optional, and the
     /// transport that reads it refuses to bind without it.
     ///
     /// # Errors
     /// Returns a [`ConfigError`] whose [`kind`](ConfigError::kind) is
     /// [`Interpolation`](crate::ConfigErrorKind::Interpolation) or
     /// [`UnresolvedVar`](crate::ConfigErrorKind::UnresolvedVar) for a malformed
-    /// or unset `${VAR}` outside `[server].token`,
+    /// or unset `${VAR}` outside `[server].api_key`,
     /// [`Parse`](crate::ConfigErrorKind::Parse) for invalid TOML or an unknown
     /// key, and [`EmptyToken`](crate::ConfigErrorKind::EmptyToken) for a
-    /// `[server].token` that is present and empty or whitespace alone.
+    /// `[server].api_key` that is present and empty or whitespace alone.
     ///
     /// # Examples
     /// ```
     /// let config = promptforge_mcp_server::Config::from_toml_str(
     ///     r#"
     /// [server]
-    /// token = "shared-bearer"
+    /// api_key = "shared-bearer"
     ///
     /// [gateway]
     /// url = "http://127.0.0.1:8081/v1"
-    /// key = "gateway-bearer"
+    /// api_key = "gateway-bearer"
     /// "#,
     /// )?;
     /// let _config = config;
