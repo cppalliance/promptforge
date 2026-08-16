@@ -10,7 +10,7 @@ promptforge: 2
 ---
 ```
 
-Below the frontmatter, the document has one H1 title and one or more H2 sections. Execution walks the H2 sections top to bottom in fall-through order. The H1 region runs first, resolving tools and models before any section begins.
+Below the frontmatter, the document has one H1 title and zero or more H2 sections. A prompt with H2 sections walks them top to bottom in fall-through order. A prompt with no H2 sections executes the H1 blocks and returns the model reply. The H1 region always runs first, resolving tools and models before any section begins.
 
 ## Minimal Prompt File
 
@@ -34,7 +34,7 @@ The parser compiles Lua code at parse time. A successfully parsed prompt is synt
 
 The parser enforces strict structure:
 
-- The first and every root heading must be exactly H2.
+- When H2 sections are present, the first and every root heading must be exactly H2.
 - Sibling section names must be unique; duplicates produce a diagnostic naming both heading locations.
 - Orphan deep headings (H4 under H2 with no H3) are rejected rather than silently reparented.
 - Unknown frontmatter fields are rejected so misspelled keys fail loudly.
@@ -46,7 +46,28 @@ Parse errors report stable kind discriminants and optional byte spans for editor
 ## Optional Frontmatter Fields
 
 - `max_tool_iterations` - integer between 1 and 1000 (default: 24)
-- `default_return` - string returned when execution falls off the last section
+
+## H1-Only Prompts
+
+A prompt with no H2 sections is valid. The H1 blocks execute, the model reply becomes the run result, and no section walk occurs:
+
+````markdown
+---
+name: summarize
+description: Summarize the input
+promptforge: 1
+---
+
+# Summarize
+
+```lua
+models.always("m", "A model suited for careful analysis")
+```
+
+Summarize this text in one paragraph.
+
+{{ args }}
+````
 
 ## Input and Output Declarations
 

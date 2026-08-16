@@ -219,6 +219,9 @@ Reach:      every multi-section prompt; the only in-Lua way to end a run early
 Seen by:    the prompt author
 
 ### E-007  Running off the last section resolves the result: default_return, else the last model reply, else "done"
+
+(Resolved: `default_return` field removed. The fall-through chain is now `reply` else `"done"`.)
+
 Element:    run_sections tail, crates/promptforge-core/src/execute.rs:305-310
 Kind:       public API contract / frontmatter behaviour
 Hypotheses: H1 the three-rung precedence is deliberate: an author's declared default outranks a runtime reply, which outranks a generic fallback
@@ -246,6 +249,9 @@ Proposal:   Candidate evidence found, but it does not settle the open question. 
             line, comment, or commit argues the ordering. Verdict NARROWED unchanged.
 
 ### E-008  Three frontmatter fields are required; the rest are optional
+
+(Note: `default_return` was subsequently removed from the optional fields.)
+
 Element:    Frontmatter, crates/promptforge-core/src/parser.rs
 Kind:       public API / on-disk format
 Hypotheses: H1 name, description, and version are the fields every consumer reads regardless of what a prompt does, so a file lacking them is unusable

@@ -4,7 +4,7 @@
 
 `promptforge-core` turns one PromptForge Markdown source into a validated run result. A host creates one execution id, parses the source into `Prompt`, then supplies that prompt, one raw input string, a prepared tool picker, a complete live tool registry, a model catalog, a run-scoped virtual file store, and an observer to `execute::run` under the same id.
 
-The language requires one H1 and executes top-level H2 sections in file order. Ordinary H1 blocks alternate exactly like section blocks:
+The language requires one H1 and executes top-level H2 sections in file order when present. A prompt with no H2 sections executes H1 blocks and returns the model reply. Ordinary H1 blocks alternate exactly like section blocks:
 
 ```
 [lua] [prose] [lua] [prose] ... [lua]
@@ -16,7 +16,7 @@ Each section is an ordered sequence of alternating `lua` and prose blocks sharin
 
 **Principle: prose in Markdown, code in Lua, no mixing.** Model-facing text lives in prose blocks. Programmable logic lives in exact `lua` fences. A `lua` fence in the middle of prose is prose; substitution never rewrites Lua source.
 
-Prompts depend on semantic aliases, never deployment vendor strings. Live H1 resolution captures one-to-one alias maps for section VMs. The observer reports deterministic borrowed `(execution, section, detail)` strings and cannot steer behavior. Expected failures return errors. The authoritative result is one string: scalar Lua return, frontmatter `default_return`, last model reply, or `"done"`.
+Prompts depend on semantic aliases, never deployment vendor strings. Live H1 resolution captures one-to-one alias maps for section VMs. The observer reports deterministic borrowed `(execution, section, detail)` strings and cannot steer behavior. Expected failures return errors. The authoritative result is one string: scalar Lua return, last model reply, or `"done"`.
 
 ## Standing rule
 
@@ -36,7 +36,7 @@ A prompt declares tools, models, context, thinking, and temperature. The host su
 
 5. **Non-final prose is single-shot; final prose is the tool loop.** At parse time the last prose block is marked `loop_capable`. Non-final prose runs one model round (tool calls allowed in that round) then control continues to the next lua block. Final prose keeps calling tools until the model produces text - the same loop as before. A section with no prose (lua-only early return) still works. Want two full loops in one logical unit: call `execute` on another section.
 
-6. **One conversation accumulates across all blocks in a section.** Context grows through every prose and every `model:infer` within the section. Between sections the conversation is discarded. `jump` also clears cross-section `reply` context before the target runs.
+6. **One conversation accumulates across all blocks in a section.** Context grows through every prose and every `model:infer` within the section. Between sections the conversation is discarded. `jump` clears the conversation but preserves the `reply` value so the target section can reference it. The author clears reply explicitly with `reply = nil` before jumping when unwanted.
 
 7. **Lua compiles at parse time; bytecode stays process-local.** `LuaProgram` retains source for diagnostics and private Lua 5.4 bytecode. A successful `Prompt` is syntactically executable; bytecode is never persisted.
 
@@ -84,7 +84,7 @@ A prompt declares tools, models, context, thinking, and temperature. The host su
 
 `Prompt::parse(source, execution, observer)` validates structure, compiles executable Lua, and returns a `Prompt` containing frontmatter, title, `h1_blocks`, optional `replay`, and the top-level section tree.
 
-`execute::run(prompt, args, ResolutionContext, tools, store, RunOptions)` gates the engine major, executes `h1_blocks` live exactly once, captures resolved Tool and Model objects plus the serialized H1 `var`, then walks top-level H2 sections in source order while honoring `jump` transfers. `ResolutionContext` carries the picker, complete tool registry, and model catalog. After first prose or scope close, a selected `models.use` or prompt-wide `models.always` supplies `CompletionOptions`. The model loop and infer path are capped by `max_tool_iterations` (default 24). Falling off the last section returns `default_return`, else last model reply, else `"done"`.
+`execute::run(prompt, args, ResolutionContext, tools, store, RunOptions)` gates the engine major, executes `h1_blocks` live exactly once, captures resolved Tool and Model objects plus the serialized H1 `var`, then walks top-level H2 sections in source order while honoring `jump` transfers. `ResolutionContext` carries the picker, complete tool registry, and model catalog. After first prose or scope close, a selected `models.use` or prompt-wide `models.always` supplies `CompletionOptions`. The model loop and infer path are capped by `max_tool_iterations` (default 24). Falling off the last section returns the last model reply, else `"done"`.
 
 ## Exact grammar keeps Markdown examples inert
 
@@ -104,7 +104,7 @@ For each top-level section:
 4. Lua blocks run on the live VM. Scalar return ends the run or the `execute` subroutine. `jump` stops the section and transfers.
 5. Before the first prose, close tool/model scope, seed `tools.calls`, enrich `sys.model`, and prepare effective tool schemas.
 6. Non-empty prose substitutes, then runs single-shot or full loop per `loop_capable`. Empty or whitespace prose skips the model. Bind non-empty final text to `reply`; publish `sys.reply_finish_reason`.
-7. Teardown the VM. On jump: clear `reply`, jump to the target index. On scalar return: end the run. Else fall through.
+7. Teardown the VM. On jump: preserve `reply`, jump to the target index. On scalar return: end the run. Else fall through.
 
 ## Observation
 
