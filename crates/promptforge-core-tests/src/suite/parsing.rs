@@ -105,11 +105,12 @@ fn verify_minimal(prompt: &Prompt) {
     assert!(prompt.replay().is_none());
     assert!(prompt.h1_blocks().is_empty());
     assert_eq!(prompt.sections().len(), 1);
-    assert_eq!(prompt.entry().name(), "Run");
-    assert_eq!(prompt.entry().level(), 2);
-    assert_eq!(prompt.entry().prose(), "Done.");
-    assert!(prompt.entry().prologue().is_none());
-    assert!(prompt.entry().epilog().is_none());
+    let entry = prompt.entry().expect("fixture has sections");
+    assert_eq!(entry.name(), "Run");
+    assert_eq!(entry.level(), 2);
+    assert_eq!(entry.prose(), "Done.");
+    assert!(entry.prologue().is_none());
+    assert!(entry.epilog().is_none());
 }
 
 fn verify_shared_library(prompt: &Prompt) {
@@ -161,7 +162,7 @@ fn verify_prologue_prose_epilog(prompt: &Prompt) {
     assert!(prompt.replay().is_none());
     assert_eq!(prompt.sections().len(), 2);
 
-    let transform = prompt.entry();
+    let transform = prompt.entry().expect("fixture has sections");
     assert_eq!(transform.name(), "Transform");
     assert_eq!(
         transform.prologue().map(LuaProgram::source),

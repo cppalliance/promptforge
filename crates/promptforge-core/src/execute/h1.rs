@@ -30,6 +30,7 @@ pub(crate) struct LiveH1State {
     pub(crate) models: ModelBindings,
     pub(crate) var: serde_json::Value,
     pub(crate) returned: Option<String>,
+    pub(crate) reply: Option<String>,
 }
 
 #[expect(
@@ -215,5 +216,6 @@ pub(crate) async fn execute_live_h1(
         models,
         var,
         returned,
+        reply,
     })
 }

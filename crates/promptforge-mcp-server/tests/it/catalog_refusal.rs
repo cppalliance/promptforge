@@ -67,7 +67,6 @@ async fn a_catalog_with_two_faults_refuses_to_serve_and_prints_both() {
         &[
             ("echo.md", ECHO),
             ("upper.md", SHOUTY),
-            ("hollow.md", NO_SECTIONS),
         ],
     );
 
@@ -95,8 +94,8 @@ async fn a_catalog_with_two_faults_refuses_to_serve_and_prints_both() {
         output.status
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("catalog has 2 fault"), "{stderr}");
-    for named in ["upper.md", "Shouty", "hollow.md"] {
+    assert!(stderr.contains("catalog has 1 fault"), "{stderr}");
+    for named in ["upper.md", "Shouty"] {
         assert!(
             stderr.contains(named),
             "every fault names its prompt and its file: {stderr}"

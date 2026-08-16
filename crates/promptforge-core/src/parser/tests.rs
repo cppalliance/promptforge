@@ -185,9 +185,10 @@ fn missing_frontmatter_delimiter_errors() {
 }
 
 #[test]
-fn no_sections_errors() {
-    let src = "---\nname: x\ndescription: d\n---\n\n# Only a title\n\nText.\n";
-    assert!(Prompt::parse(src, "test", &NullObserver).is_err());
+fn h1_only_prompt_parses_with_empty_sections() {
+    let src = "---\nname: x\ndescription: d\npromptforge: 1\n---\n\n# Only a title\n\nText.\n";
+    let prompt = Prompt::parse(src, "test", &NullObserver).expect("H1-only prompt must parse");
+    assert!(prompt.sections.is_empty());
 }
 
 #[test]
@@ -203,7 +204,7 @@ fn preface_before_h1_is_ignored() {
     let prompt = Prompt::parse(src, "test", &NullObserver).expect("preface is not semantic");
     assert_eq!(prompt.title, "T");
     assert_eq!(prompt.description_text, "Description.");
-    assert_eq!(prompt.entry().name, "S");
+    assert_eq!(prompt.entry().expect("has sections").name, "S");
 }
 
 #[test]
@@ -295,8 +296,9 @@ fn lua_prompt_form_after_prose_is_ordinary_prose() {
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua prompt\nnot compiled =\n```\n";
     let prompt = Prompt::parse(in_section, "test", &NullObserver)
         .expect("the removed form in a section is ordinary Markdown");
-    assert!(prompt.entry().prologue().is_none());
-    assert!(prompt.entry().prose().contains("```lua prompt"));
+    let entry = prompt.entry().expect("has sections");
+    assert!(entry.prologue().is_none());
+    assert!(entry.prose().contains("```lua prompt"));
 }
 
 #[test]
@@ -439,7 +441,7 @@ fn section_compiles_prologue_and_epilog_around_prose() {
     let src = "---\r\nname: x\r\ndescription: d\r\n---\r\n\r\n# T\r\n\r\n## Transform\r\n\r\n \t\r\n```lua\r\nvar.before = args\r\n```\r\n\r\nAsk about {{ var.before }}.\r\n\r\n```lua\r\nreturn reply\r\n```\r\n";
     let prompt =
         Prompt::parse(src, "test", &NullObserver).expect("both exact section phases must compile");
-    let section = prompt.entry();
+    let section = prompt.entry().expect("has sections");
 
     assert_eq!(
         section.prologue().map(LuaProgram::source),
@@ -457,7 +459,7 @@ fn section_compiles_epilog_after_prose_without_prologue() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Transform\n\nAsk the model.\n\n```lua\nreturn reply\n```\n";
     let prompt =
         Prompt::parse(src, "test", &NullObserver).expect("the trailing epilog must compile");
-    let section = prompt.entry();
+    let section = prompt.entry().expect("has sections");
 
     assert!(section.prologue().is_none());
     assert_eq!(section.prose(), "Ask the model.");
@@ -472,7 +474,7 @@ fn exact_middle_lua_fences_become_compiled_blocks() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nBefore.\n\n```lua\nvar.mid = 1\n```\n\nAfter.\n";
     let prompt =
         Prompt::parse(src, "test", &NullObserver).expect("middle Lua fences compile as blocks");
-    let section = prompt.entry();
+    let section = prompt.entry().expect("has sections");
 
     assert!(section.prologue().is_none());
     assert!(section.epilog().is_none());
@@ -513,15 +515,17 @@ fn invalid_middle_lua_fence_fails_parse() {
 fn one_exact_fence_is_the_prologue_and_two_can_surround_empty_prose() {
     let one = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.x = 1\n```\n";
     let prompt = Prompt::parse(one, "test", &NullObserver).expect("one fence is the prologue");
-    assert!(prompt.entry().prologue().is_some());
-    assert!(prompt.entry().epilog().is_none());
+    let entry = prompt.entry().expect("has sections");
+    assert!(entry.prologue().is_some());
+    assert!(entry.epilog().is_none());
 
     let two = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.x = 1\n```\n\n```lua\nreturn reply\n```\n";
     let prompt =
         Prompt::parse(two, "test", &NullObserver).expect("two fences can enclose empty prose");
-    assert_eq!(prompt.entry().prose(), "");
-    assert!(prompt.entry().prologue().is_some());
-    assert!(prompt.entry().epilog().is_some());
+    let entry = prompt.entry().expect("has sections");
+    assert_eq!(entry.prose(), "");
+    assert!(entry.prologue().is_some());
+    assert!(entry.epilog().is_some());
 }
 
 #[test]
@@ -535,9 +539,10 @@ fn section_fence_markers_must_be_exact() {
         let src = format!("---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n{near_miss}\n");
         let prompt =
             Prompt::parse(&src, "test", &NullObserver).expect("near-miss fence must remain prose");
-        assert!(prompt.entry().prologue().is_none());
-        assert!(prompt.entry().epilog().is_none());
-        assert_eq!(prompt.entry().prose(), near_miss.trim());
+        let entry = prompt.entry().expect("has sections");
+        assert!(entry.prologue().is_none());
+        assert!(entry.epilog().is_none());
+        assert_eq!(entry.prose(), near_miss.trim());
     }
 }
 
@@ -547,9 +552,10 @@ fn section_markers_inside_longer_fences_remain_prose() {
     let prompt =
         Prompt::parse(src, "test", &NullObserver).expect("nested markers must remain prose");
 
-    assert!(prompt.entry().prologue().is_none());
-    assert!(prompt.entry().epilog().is_none());
-    assert!(prompt.entry().prose().contains("```lua"));
+    let entry = prompt.entry().expect("has sections");
+    assert!(entry.prologue().is_none());
+    assert!(entry.epilog().is_none());
+    assert!(entry.prose().contains("```lua"));
 }
 
 #[test]
@@ -826,7 +832,7 @@ fn first_h2_is_entry_regardless_of_name() {
     let src =
         "---\nname: x\ndescription: d\n---\n\n# T\n\n## Zebra\n\nfirst\n\n## Main\n\nsecond\n";
     let p = Prompt::parse(src, "test", &NullObserver).unwrap();
-    assert_eq!(p.entry().name, "Zebra");
+    assert_eq!(p.entry().expect("has sections").name, "Zebra");
 }
 
 #[test]
@@ -958,7 +964,7 @@ fn epilog_source_line_maps_runtime_error_to_absolute_line() {
     // 15: ```
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Check\n\nAsk the model.\n\n```lua\nlocal a = 1\nassert(false)\n```\n";
     let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
-    let epilog = prompt.entry().epilog().expect("epilog must exist");
+    let epilog = prompt.entry().expect("has sections").epilog().expect("epilog must exist");
 
     assert_eq!(
         epilog.source_line().get(),
@@ -1001,7 +1007,7 @@ fn prologue_source_line_maps_correctly() {
     // 14: Do the work.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Work\n\n```lua\nassert(false)\n```\n\nDo the work.\n";
     let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
-    let prologue = prompt.entry().prologue().expect("prologue must exist");
+    let prologue = prompt.entry().expect("has sections").prologue().expect("prologue must exist");
 
     assert_eq!(
         prologue.source_line().get(),
@@ -1040,7 +1046,7 @@ fn multi_line_chunk_maps_inner_line_correctly() {
     // 16: ```
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nProse.\n\n```lua\nlocal x = 1\nlocal y = 2\nassert(false)\n```\n";
     let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
-    let epilog = prompt.entry().epilog().expect("epilog must exist");
+    let epilog = prompt.entry().expect("has sections").epilog().expect("epilog must exist");
 
     assert_eq!(epilog.source_line().get(), 13);
 

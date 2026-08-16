@@ -64,7 +64,7 @@ Final ask.\n\n\
         "1| lua1\n2| lua2\n3| lua3"
     );
 
-    let section = parse(md).entry().clone();
+    let section = parse(md).entry().expect("fixture has sections").clone();
     assert_eq!(section.blocks.len(), 5);
     assert!(matches!(
         &section.blocks[1],
