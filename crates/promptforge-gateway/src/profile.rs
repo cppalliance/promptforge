@@ -118,15 +118,47 @@ pub(crate) fn load_named(dir: &Path, name: &ProfileName) -> Result<Config, Confi
 
 /// Loads a profile TOML path with recursive include resolution.
 ///
+/// Before interpolating `${VAR}` references, walks the include chain for
+/// name-matched env files (e.g. `gateway.env` for `gateway.toml`). Every
+/// found env file is loaded into the process environment, root first; values
+/// already set are not overridden, so the root config's env file takes
+/// precedence and included configs supply defaults.
+///
 /// # Errors
 /// Returns [`ConfigError`] on read, include, parse, or validation failure.
 pub(crate) fn load_path(path: &Path) -> Result<Config, ConfigError> {
+    let (value, config_chain) = collect_config_chain(path)?;
+    load_env_chain(&config_chain);
+    Config::from_value(value)
+}
+
+/// Collects config file paths in include-chain order (root first, depth-first)
+/// alongside the merged TOML value.
+///
+/// The returned path list drives env-file loading and is testable without
+/// touching the process environment.
+///
+/// # Errors
+/// Returns [`ConfigError`] on read, include, parse, or validation failure.
+pub(crate) fn collect_config_chain(path: &Path) -> Result<(Value, Vec<PathBuf>), ConfigError> {
     let mut stack = Vec::new();
     let mut visiting = HashSet::new();
-    let value = load_value(path, 0, &mut stack, &mut visiting)?;
-    // Interpolate and deserialize the merged include tree directly from the
-    // `toml::Value`, avoiding a re-serialize round-trip (and its ser error).
-    Config::from_value(value)
+    let mut config_chain = Vec::new();
+    let value = load_value(path, 0, &mut stack, &mut visiting, &mut config_chain)?;
+    Ok((value, config_chain))
+}
+
+/// Loads env files from the config chain into the process environment.
+///
+/// Root values take precedence because [`dotenvy::from_path`] does not
+/// override existing vars. Missing env files are silently skipped.
+pub(crate) fn load_env_chain(config_chain: &[PathBuf]) {
+    for config_path in config_chain {
+        let env_path = config_path.with_extension("env");
+        if env_path.exists() {
+            let _ = dotenvy::from_path(&env_path);
+        }
+    }
 }
 
 fn load_value(
@@ -134,6 +166,7 @@ fn load_value(
     depth: usize,
     stack: &mut Vec<PathBuf>,
     visiting: &mut HashSet<PathBuf>,
+    config_chain: &mut Vec<PathBuf>,
 ) -> Result<Value, ConfigError> {
     if depth > MAX_INCLUDE_DEPTH {
         return Err(ConfigError::IncludeDepth {
@@ -150,6 +183,7 @@ fn load_value(
         });
     }
     stack.push(canonical.clone());
+    config_chain.push(path.to_path_buf());
 
     let raw = fs::read_to_string(path).map_err(|source| ConfigError::Read {
         path: path.to_owned(),
@@ -166,7 +200,7 @@ fn load_value(
     let mut merged = Value::Table(toml::map::Map::new());
     for include_name in &includes {
         let include_path = resolve_include(base_dir, include_name)?;
-        let parent_doc = load_value(&include_path, depth + 1, stack, visiting)?;
+        let parent_doc = load_value(&include_path, depth + 1, stack, visiting, config_chain)?;
         merge_docs(&mut merged, parent_doc, &include_path)?;
     }
     merge_docs(&mut merged, doc, path)?;
