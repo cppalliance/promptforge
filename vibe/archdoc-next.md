@@ -52,3 +52,4 @@
 - [2026-08-14-1-file-backed-store] prompt-owned resume: Express resume and skip behavior through ordinary store operations in prompt code, not special engine logic.
 - [2026-08-15-1-store-input-files] declared file contract: Prompts declare logical input and output paths while hosts choose how external content is supplied or returned.
 - [2026-08-15-1-store-input-files] best-effort declared output: Report a missing declared output distinctly without retroactively failing an otherwise completed run.
+- [2026-08-15-2-quickref-file] compressed operational reference: Keep an LLM-loadable quick reference factual and point each schema or language topic to its authoritative source.
