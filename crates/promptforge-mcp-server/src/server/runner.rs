@@ -426,21 +426,15 @@ fn extract_output(prompt: &Prompt, store: &StoreRef, output_file: &str, result: 
             }
         }
     } else {
-        // No output_file specified - include the output content inline in the
-        // result value so the caller receives it.
-        if let Some(value) = result.value().map(str::to_owned) {
-            let inline = format!(
-                "{value}\n\n--- output: {} ---\n{content}",
-                decl.path()
-            );
-            *result = RunResult::completed(
-                result.run_id().to_owned(),
-                result.prompt(),
-                inline,
-                result.turns(),
-                result.elapsed_ms(),
-            );
-        }
+        // No output_file specified - the output content replaces the result
+        // value so the caller receives exactly what the prompt produced.
+        *result = RunResult::completed(
+            result.run_id().to_owned(),
+            result.prompt(),
+            content,
+            result.turns(),
+            result.elapsed_ms(),
+        );
     }
 }
 
