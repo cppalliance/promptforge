@@ -14,11 +14,11 @@ use url::Url;
 use crate::error::ConfigError;
 use crate::relpath::reject_traversal;
 
-/// A secret string (the shared bearer or the gateway token) that never
+/// A secret string (the shared bearer or the gateway API key) that never
 /// serializes and redacts in both `Debug` and `Display`.
 ///
 /// Constructed only through its `TryFrom`, so a `Secret` cannot hold a blank
-/// value: a token or key that carries nothing usable is refused at the type
+/// value: an API key that carries nothing usable is refused at the type
 /// boundary rather than compared equal to a request presenting no credential
 /// or sent to the gateway as an empty bearer. The config layer maps the
 /// rejection onto the field that carried it, so the public `ConfigError`

@@ -8,7 +8,7 @@ use crate::error::ConfigErrorKind;
 const FULL: &str = r#"
 [server]
 bind = "127.0.0.1:9310"
-token = "shared-bearer"
+api_key = "shared-bearer"
 max_concurrent_runs = 4
 admission_timeout = "30s"
 reply_deadline = "240s"
@@ -21,7 +21,7 @@ prompts = 'C:\ProgramData\promptforge\prompts'
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-key = "gateway-bearer"
+api_key = "gateway-bearer"
 
 [catalog]
 include = ["*.md", "governance/**/*.md"]
@@ -37,11 +37,11 @@ file = "experiments/staker-v3.md"
 /// The smallest configuration that parses: the two required sections.
 const MINIMAL: &str = r#"
 [server]
-token = "shared-bearer"
+api_key = "shared-bearer"
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-key = "gateway-bearer"
+api_key = "gateway-bearer"
 "#;
 
 #[test]
@@ -50,7 +50,7 @@ fn parses_a_full_config() {
 
     assert_eq!(config.server.bind.port(), 9310);
     assert_eq!(
-        config.server.token.as_ref().map(Secret::expose),
+        config.server.api_key.as_ref().map(Secret::expose),
         Some("shared-bearer")
     );
     assert_eq!(config.server.max_concurrent_runs.get(), 4);
@@ -66,7 +66,7 @@ fn parses_a_full_config() {
     );
 
     assert_eq!(config.gateway.url.as_str(), "http://127.0.0.1:8081/v1");
-    assert_eq!(config.gateway.key.expose(), "gateway-bearer");
+    assert_eq!(config.gateway.api_key.expose(), "gateway-bearer");
 
     let include: Vec<&str> = config
         .catalog
@@ -134,8 +134,8 @@ fn a_named_block_can_carry_a_file() {
 }
 
 #[test]
-fn a_config_with_no_server_token_loads() {
-    // The token is a property of the HTTP surface: `serve` refuses to bind
+fn a_config_with_no_server_api_key_loads() {
+    // The API key is a property of the HTTP surface: `serve` refuses to bind
     // without one, and `serve --stdio` never reads it. Requiring it here is
     // what stopped a local stdio install over a credential its transport does
     // not use.
@@ -145,52 +145,52 @@ bind = "127.0.0.1:9310"
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-key = "t"
+api_key = "t"
 "#;
-    let config = Config::from_toml_str(toml).expect("a config with no token loads");
-    assert!(config.server.token.is_none());
-    assert_eq!(config.gateway.key.expose(), "t");
+    let config = Config::from_toml_str(toml).expect("a config with no api_key loads");
+    assert!(config.server.api_key.is_none());
+    assert_eq!(config.gateway.api_key.expose(), "t");
 }
 
 #[test]
-fn an_unset_variable_in_the_server_token_leaves_it_absent() {
+fn an_unset_variable_in_the_server_api_key_leaves_it_absent() {
     // Interpolation happens after the parse, so an unset variable is
     // attributed to the field that carried it. This is the one field that
-    // survives one, because stdio boots without a token at all.
+    // survives one, because stdio boots without an API key at all.
     let toml = MINIMAL.replace(
-        "token = \"shared-bearer\"",
-        "token = \"${NOT_SET_ANYWHERE}\"",
+        "api_key = \"shared-bearer\"",
+        "api_key = \"${NOT_SET_ANYWHERE}\"",
     );
-    let config = Config::from_toml_str(&toml).expect("an unset server token is not a load failure");
-    assert!(config.server.token.is_none());
+    let config = Config::from_toml_str(&toml).expect("an unset server api_key is not a load failure");
+    assert!(config.server.api_key.is_none());
 }
 
 #[test]
-fn an_unset_variable_outside_the_server_token_is_still_an_error() {
-    // The gateway token is required on both transports, so an unset variable
+fn an_unset_variable_outside_the_server_api_key_is_still_an_error() {
+    // The gateway API key is required on both transports, so an unset variable
     // there fails the load rather than starting with a blank credential.
-    let toml = MINIMAL.replace("key = \"gateway-bearer\"", "key = \"${NOT_SET_ANYWHERE}\"");
-    let err = Config::from_toml_str(&toml).expect_err("an unset gateway key is refused");
+    let toml = MINIMAL.replace("api_key = \"gateway-bearer\"", "api_key = \"${NOT_SET_ANYWHERE}\"");
+    let err = Config::from_toml_str(&toml).expect_err("an unset gateway api_key is refused");
     assert_eq!(err.kind(), ConfigErrorKind::UnresolvedVar, "{err}");
     assert!(err.to_string().contains("NOT_SET_ANYWHERE"), "{err}");
 }
 
 #[test]
-fn an_empty_or_whitespace_server_token_is_an_error() {
+fn an_empty_or_whitespace_server_api_key_is_an_error() {
     // An empty shared bearer would make a request presenting no credential
-    // compare equal, so a token that carries nothing is refused where it is
+    // compare equal, so an API key that carries nothing is refused where it is
     // read. Whitespace alone is the same mistake with a space in it.
-    // The third spelling reaches TOML as an escape, so the parsed token is a
+    // The third spelling reaches TOML as an escape, so the parsed key is a
     // real tab and a real newline rather than four characters of prose.
-    for token in ["", " ", r"\t\n"] {
+    for api_key in ["", " ", r"\t\n"] {
         let toml = format!(
-            "[server]\ntoken = \"{token}\"\n\n\
-             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"t\"\n"
+            "[server]\napi_key = \"{api_key}\"\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"t\"\n"
         );
-        let err = Config::from_toml_str(&toml).expect_err("a token carrying nothing is refused");
+        let err = Config::from_toml_str(&toml).expect_err("an api_key carrying nothing is refused");
         assert_eq!(err.kind(), ConfigErrorKind::EmptyToken, "{err}");
         let text = err.to_string();
-        assert!(text.contains("token"), "{text}");
+        assert!(text.contains("api_key"), "{text}");
         assert!(text.contains("must not be empty"), "{text}");
     }
 }
@@ -298,33 +298,33 @@ fn from_str_agrees_with_from_toml_str() {
     let parsed: Config = MINIMAL.parse().expect("FromStr parses the minimal config");
     let direct = Config::from_toml_str(MINIMAL).expect("from_toml_str parses it too");
     assert_eq!(parsed.gateway.url.as_str(), direct.gateway.url.as_str());
-    assert_eq!(parsed.gateway.key.expose(), direct.gateway.key.expose());
+    assert_eq!(parsed.gateway.api_key.expose(), direct.gateway.api_key.expose());
 }
 
 #[test]
-fn a_blank_gateway_key_is_refused() {
+fn a_blank_gateway_api_key_is_refused() {
     let source = r#"
 [server]
-token = "shared-bearer"
+api_key = "shared-bearer"
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-key = "   "
+api_key = "   "
 "#;
-    let err = Config::from_toml_str(source).expect_err("a blank gateway key is refused");
+    let err = Config::from_toml_str(source).expect_err("a blank gateway api_key is refused");
     assert_eq!(err.kind(), ConfigErrorKind::Parse, "{err}");
-    assert!(err.to_string().contains("[gateway].key"), "{err}");
+    assert!(err.to_string().contains("[gateway].api_key"), "{err}");
 }
 
 #[test]
 fn an_empty_gateway_url_is_refused() {
     let source = r#"
 [server]
-token = "shared-bearer"
+api_key = "shared-bearer"
 
 [gateway]
 url = ""
-key = "gateway-bearer"
+api_key = "gateway-bearer"
 "#;
     let err = Config::from_toml_str(source).expect_err("an empty gateway url is refused");
     assert_eq!(err.kind(), ConfigErrorKind::Parse, "{err}");
@@ -338,11 +338,11 @@ fn a_schemeless_gateway_url_is_refused() {
     // endpoint it cannot use.
     let source = r#"
 [server]
-token = "shared-bearer"
+api_key = "shared-bearer"
 
 [gateway]
 url = "127.0.0.1:8081/v1"
-key = "gateway-bearer"
+api_key = "gateway-bearer"
 "#;
     let err = Config::from_toml_str(source).expect_err("a schemeless gateway url is refused");
     assert_eq!(err.kind(), ConfigErrorKind::Parse, "{err}");
@@ -388,12 +388,12 @@ fn interpolation_reaches_array_and_nested_table_values() {
     let pkg = std::env::var("CARGO_PKG_NAME").expect("cargo sets CARGO_PKG_NAME");
     let toml = "\
 [server]
-token = \"shared-bearer\"
+api_key = \"shared-bearer\"
 allowed_hosts = [\"${CARGO_PKG_NAME}\", \"static-host\"]
 
 [gateway]
 url = \"http://127.0.0.1:8081/v1\"
-key = \"gateway-bearer\"
+api_key = \"gateway-bearer\"
 
 [prompts.example]
 file = \"${CARGO_PKG_NAME}.md\"
@@ -418,23 +418,23 @@ fn malformed_values_are_refused_at_parse() {
     let cases = [
         (
             "zero concurrency",
-            "[server]\ntoken = \"t\"\nmax_concurrent_runs = 0\n\n\
-             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"k\"\n",
+            "[server]\napi_key = \"t\"\nmax_concurrent_runs = 0\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"k\"\n",
         ),
         (
             "invalid bind address",
-            "[server]\ntoken = \"t\"\nbind = \"not-an-address\"\n\n\
-             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"k\"\n",
+            "[server]\napi_key = \"t\"\nbind = \"not-an-address\"\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"k\"\n",
         ),
         (
             "invalid duration",
-            "[server]\ntoken = \"t\"\nadmission_timeout = \"not-a-duration\"\n\n\
-             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"k\"\n",
+            "[server]\napi_key = \"t\"\nadmission_timeout = \"not-a-duration\"\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"k\"\n",
         ),
-        ("a missing gateway section", "[server]\ntoken = \"t\"\n"),
+        ("a missing gateway section", "[server]\napi_key = \"t\"\n"),
         (
             "a missing gateway url",
-            "[server]\ntoken = \"t\"\n\n[gateway]\nkey = \"k\"\n",
+            "[server]\napi_key = \"t\"\n\n[gateway]\napi_key = \"k\"\n",
         ),
     ];
     for (label, toml) in cases {

@@ -10,7 +10,7 @@ Bind the streamable-HTTP transport:
 promptforge-mcp-server serve prompts.toml
 ```
 
-This serves at `http://127.0.0.1:9310/mcp`. Every request to `/mcp` must carry an `Authorization: Bearer <token>` header matching `[server].token`.
+This serves at `http://127.0.0.1:9310/mcp`. Every request to `/mcp` must carry an `Authorization: Bearer <token>` header matching `[server].api_key`.
 
 For a harness that spawns the server as a child process:
 
@@ -18,31 +18,31 @@ For a harness that spawns the server as a child process:
 promptforge-mcp-server serve --stdio prompts.toml
 ```
 
-Stdio speaks JSON-RPC over standard input and output, binds no port, and ignores `[server].token` entirely. Logs go to stderr so they do not corrupt the wire.
+Stdio speaks JSON-RPC over standard input and output, binds no port, and ignores `[server].api_key` entirely. Logs go to stderr so they do not corrupt the wire.
 
 ## Configuration
 
-A single `prompts.toml` carries everything the server needs.
+A single `prompts.toml` carries everything the server needs. The MCP server uses a flat configuration - one `.toml` file with one name-matched `.env` file. There is no `include` or config chain.
 
 ### Minimal Configuration
 
 ```toml
 [server]
-token = "shared-bearer"
+api_key = "shared-bearer"
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-key = "gateway-bearer"
+api_key = "gateway-bearer"
 ```
 
-Every string value supports `${VAR}` interpolation from the process environment. Use `$$` for a literal dollar. An unset variable fails the load everywhere except `[server].token`, where it drops the token silently so a stdio install can boot without a credential its transport never reads.
+Every string value supports `${VAR}` interpolation from the process environment. Use `$$` for a literal dollar. An unset variable fails the load everywhere except `[server].api_key`, where it drops the key silently so a stdio install can boot without a credential its transport never reads.
 
 ### Full Configuration
 
 ```toml
 [server]
 bind = "127.0.0.1:9310"
-token = "${PROMPTFORGE_TOKEN}"
+api_key = "${PROMPTFORGE_MCP_SERVER_API_KEY}"
 max_concurrent_runs = 4
 admission_timeout = "30s"
 reply_deadline = "240s"
@@ -56,7 +56,7 @@ prompts = "prompts"
 
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-key = "${GATEWAY_KEY}"
+api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 
 [catalog]
 include = ["*.md", "governance/**/*.md"]
@@ -92,7 +92,7 @@ Unknown keys are rejected outright - a misspelled key fails the load rather than
 
 **`[paths]`** - The prompts directory. Catalog patterns and `[prompts.NAME].file` paths are both relative to it.
 
-**`[gateway]`** - The model gateway every run goes through. `url` must be a valid http/https URL with a host. `key` is the bearer credential sent on every model call.
+**`[gateway]`** - The model gateway every run goes through. `url` must be a valid http/https URL with a host. `api_key` is the bearer credential sent on every model call.
 
 **`[catalog]`** - Glob patterns that assemble the catalog. `include` names what to resolve; `exclude` subtracts from it. `*` does not cross a separator, `**` does.
 

@@ -128,8 +128,8 @@ async fn the_runner_resolves_and_executes_against_the_shared_registry() {
         ),
     );
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n\n\
          [tools]\nweb_fetch = true\nweb_search = true\n",
         dir.path().display()
@@ -166,8 +166,8 @@ async fn an_unresolvable_capability_fails_during_execution() {
         ),
     );
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
     ))
@@ -246,8 +246,8 @@ async fn a_hyphen_resolves_to_the_underscore_it_stands_for() {
         &echo_prompt("research_person", "Research one person"),
     );
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
     ))

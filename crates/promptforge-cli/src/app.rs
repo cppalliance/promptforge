@@ -89,7 +89,7 @@ pub(crate) async fn run(request: RunRequest<'_>) -> Result<String> {
 /// Reads the gateway environment variables and validates them into a [`Gateway`].
 fn gateway_from_env() -> Result<Gateway> {
     let url = env_optional("PROMPTFORGE_GATEWAY_URL")?;
-    let key = env_optional("PROMPTFORGE_GATEWAY_KEY")?;
+    let key = env_optional("PROMPTFORGE_GATEWAY_API_KEY")?;
     gateway_from_parts(url.as_deref(), key.as_deref())
 }
 
@@ -120,7 +120,7 @@ fn gateway_from_parts(url: Option<&str>, key: Option<&str>) -> Result<Gateway> {
     match (token, endpoint) {
         (Some(token), Some(endpoint)) => Ok(Gateway::Remote(Remote::new(endpoint, token)?)),
         (Some(_), None) => bail!(
-            "PROMPTFORGE_GATEWAY_KEY is set but PROMPTFORGE_GATEWAY_URL is missing or empty; both are required to reach the gateway"
+            "PROMPTFORGE_GATEWAY_API_KEY is set but PROMPTFORGE_GATEWAY_URL is missing or empty; both are required to reach the gateway"
         ),
         (None, _) => Ok(Gateway::LocalOnly),
     }

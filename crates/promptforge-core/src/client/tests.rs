@@ -39,7 +39,7 @@ fn from_env_surfaces_non_unicode_value_instead_of_dropping_it() {
 
 #[test]
 fn from_env_missing_gateway_url() {
-    let err = from_env_with(lookup_from(&[("PROMPTFORGE_GATEWAY_KEY", "tok")]))
+    let err = from_env_with(lookup_from(&[("PROMPTFORGE_GATEWAY_API_KEY", "tok")]))
         .expect_err("missing URL must fail");
     assert!(matches!(
         err,
@@ -56,7 +56,7 @@ fn from_env_missing_gateway_key() {
     .expect_err("missing key must fail");
     assert!(matches!(
         err,
-        Error::MissingEnv(name) if name == "PROMPTFORGE_GATEWAY_KEY"
+        Error::MissingEnv(name) if name == "PROMPTFORGE_GATEWAY_API_KEY"
     ));
 }
 

@@ -18,12 +18,12 @@ use crate::transport::{
 use super::{fixture, initialize_host, router_hosts, server_fixture};
 
 #[tokio::test]
-async fn serving_over_http_without_a_token_is_refused_by_name() {
-    // The token is optional in the file because stdio never reads it. This
+async fn serving_over_http_without_an_api_key_is_refused_by_name() {
+    // The API key is optional in the file because stdio never reads it. This
     // transport is the one that does, so it refuses before it binds, naming the
     // field the operator has to add rather than serving an unguarded `/mcp`.
     let (_dir, config) = fixture("bind = \"127.0.0.1:0\"\n");
-    assert!(config.server.token.is_none());
+    assert!(config.server.api_key.is_none());
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
     let tools = Arc::new(
@@ -45,7 +45,7 @@ async fn serving_over_http_without_a_token_is_refused_by_name() {
     .expect_err("http will not serve without a shared bearer");
 
     assert_eq!(error.kind(), ServeErrorKind::MissingToken, "{error}");
-    assert!(error.to_string().contains("[server].token"), "{error}");
+    assert!(error.to_string().contains("[server].api_key"), "{error}");
 }
 
 #[test]
@@ -119,7 +119,7 @@ async fn http_serves_and_then_shuts_down_cleanly() {
     // Bind an ephemeral port, hand serve_http a shutdown it can trip, and prove
     // the accept loop drains and returns Ok once the signal fires rather than
     // running until the test is torn down.
-    let (_dir, config) = fixture("bind = \"127.0.0.1:0\"\ntoken = \"shared-bearer\"\n");
+    let (_dir, config) = fixture("bind = \"127.0.0.1:0\"\napi_key = \"shared-bearer\"\n");
     let catalog =
         Catalog::resolve(&config, OnBroken::Reject).expect("the fixture catalog resolves");
     let tools = Arc::new(
@@ -160,7 +160,7 @@ async fn stdio_serves_and_then_shuts_down_cleanly() {
     // Tripping the shutdown must still return Ok promptly rather than hang,
     // which is the case a serve that only cancelled an established session
     // would miss.
-    let (_dir, _config, server) = server_fixture("token = \"shared-bearer\"\n");
+    let (_dir, _config, server) = server_fixture("api_key = \"shared-bearer\"\n");
     let (client, server_io) = tokio::io::duplex(4096);
     let (read, write) = tokio::io::split(server_io);
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();

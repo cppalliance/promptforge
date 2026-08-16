@@ -285,7 +285,7 @@ pub(crate) struct ServerConfig {
     pub bind: SocketAddr,
     /// The shared bearer key every `/v1/*` request must present.
     #[serde(deserialize_with = "de_secret")]
-    pub key: Secret,
+    pub api_key: Secret,
 }
 
 /// One backend the gateway can forward to.

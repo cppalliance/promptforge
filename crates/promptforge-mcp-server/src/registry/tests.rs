@@ -21,8 +21,8 @@ use crate::result::{NO_TURNS, RunResult, RunStatus};
 /// A registry over a `[server]` table carrying `lines` on top of the defaults.
 fn registry(lines: &str) -> Arc<RunRegistry> {
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n{lines}\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n"
+        "[server]\napi_key = \"t\"\n{lines}\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n"
     ))
     .expect("the fixture configuration parses");
     Arc::new(RunRegistry::new(&config.server))

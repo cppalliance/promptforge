@@ -42,7 +42,7 @@ fn fixture(root: &Path, prompts: &[(&str, &str)]) -> PathBuf {
     fixture_with(
         root,
         prompts,
-        "bind = \"127.0.0.1:0\"\ntoken = \"unused-on-stdio\"\n",
+        "bind = \"127.0.0.1:0\"\napi_key = \"unused-on-stdio\"\n",
     )
 }
 
@@ -58,7 +58,7 @@ fn fixture_with(root: &Path, prompts: &[(&str, &str)], server_lines: &str) -> Pa
         &config,
         format!(
             "[server]\n{server_lines}\n\
-             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+             [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
              [paths]\nprompts = '{}'\n\n\
              [catalog]\ninclude = [\"*.md\"]\n",
             directory.display()
@@ -207,7 +207,7 @@ async fn stdio_leaves_the_configured_bind_address_unlistened() {
     let config = fixture_with(
         dir.path(),
         &[("echo.md", ECHO)],
-        &format!("bind = \"{addr}\"\ntoken = \"unused-on-stdio\"\n"),
+        &format!("bind = \"{addr}\"\napi_key = \"unused-on-stdio\"\n"),
     );
     let mut session = Session::spawn_at(dir, &config);
 
@@ -256,8 +256,8 @@ async fn stdio_leaves_the_configured_bind_address_unlistened() {
 
 #[tokio::test]
 async fn stdio_serves_a_configuration_that_carries_no_token() {
-    // `[server].token` is a property of the HTTP surface. A local install is
-    // spawned by its harness and reads no token at all, so requiring one in the
+    // `[server].api_key` is a property of the HTTP surface. A local install is
+    // spawned by its harness and reads no api_key at all, so requiring one in the
     // file stopped that install over a credential it never uses.
     let dir = tempfile::tempdir().expect("create a temporary directory");
     let config = fixture_with(dir.path(), &[("echo.md", ECHO)], "");
@@ -280,7 +280,7 @@ async fn stdio_serves_a_configuration_that_carries_no_token() {
     assert_eq!(
         initialized["result"]["serverInfo"]["name"],
         json!("promptforge-mcp-server"),
-        "the file carries no [server].token and stdio serves anyway"
+        "the file carries no [server].api_key and stdio serves anyway"
     );
 
     session.child.kill().await.expect("stop the server");

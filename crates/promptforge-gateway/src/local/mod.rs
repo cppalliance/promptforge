@@ -319,7 +319,7 @@ mod tests {
             r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"
@@ -347,7 +347,7 @@ endpoints = ["e"]
             r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"

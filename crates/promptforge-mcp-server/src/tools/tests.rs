@@ -58,7 +58,7 @@ fn names() -> Vec<String> {
 /// per test: neither depends on the catalog, and the listing reads neither.
 fn fixture_server_parts() -> (Arc<Config>, Arc<PreparedTools>) {
     let config = Config::from_toml_str(
-        "[server]\ntoken = \"t\"\n\n[gateway]\nurl = \"http://127.0.0.1:8081/v1/\"\nkey = \"gw\"\n",
+        "[server]\napi_key = \"t\"\n\n[gateway]\nurl = \"http://127.0.0.1:8081/v1/\"\napi_key = \"gw\"\n",
     )
     .expect("the fixture configuration parses");
     let tools = Arc::new(

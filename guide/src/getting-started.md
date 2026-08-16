@@ -55,7 +55,7 @@ The variable `report` captures exactly what the prompt returned.
 Gateway credentials come from two environment variables:
 
 - `PROMPTFORGE_GATEWAY_URL` - the gateway base URL
-- `PROMPTFORGE_GATEWAY_KEY` - the bearer token
+- `PROMPTFORGE_GATEWAY_API_KEY` - the bearer token
 
 There are no CLI flags for credentials. This is deliberate: secrets never appear in `argv`, where `ps` and shell history can expose them.
 
@@ -69,7 +69,7 @@ Remote mode activates when both variables are set:
 
 ```bash
 export PROMPTFORGE_GATEWAY_URL="https://gateway.example.com/v1"
-export PROMPTFORGE_GATEWAY_KEY="your-bearer-token"
+export PROMPTFORGE_GATEWAY_API_KEY="your-bearer-token"
 promptforge run prompts/search-demo.md "latest Rust news"
 ```
 
@@ -78,7 +78,7 @@ This enables the `web_search` tool and fetches the remote model catalog, so prom
 Setting a key without a URL is rejected explicitly:
 
 ```text
-error: PROMPTFORGE_GATEWAY_KEY is set but PROMPTFORGE_GATEWAY_URL is missing or empty; both are required to reach the gateway
+error: PROMPTFORGE_GATEWAY_API_KEY is set but PROMPTFORGE_GATEWAY_URL is missing or empty; both are required to reach the gateway
 ```
 
 ## File IO

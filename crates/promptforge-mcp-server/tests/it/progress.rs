@@ -70,8 +70,8 @@ async fn trio_server() -> (TempDir, PromptForgeServer) {
     let dir = tempfile::tempdir().expect("create a temporary prompts directory");
     fs::write(dir.path().join("trio.md"), TRIO).expect("write the fixture prompt");
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n\
          [catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()

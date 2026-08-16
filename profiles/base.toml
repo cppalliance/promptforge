@@ -3,7 +3,7 @@
 
 [server]
 bind = "127.0.0.1:8081"
-key = "${PROMPTFORGE_GATEWAY_KEY}"
+api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 
 [queue]
 max_depth = 100

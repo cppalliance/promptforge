@@ -464,7 +464,7 @@ Set two environment variables:
 
 ```bash
 export PROMPTFORGE_GATEWAY_URL="https://your-gateway.example.com"
-export PROMPTFORGE_GATEWAY_KEY="your-bearer-token"
+export PROMPTFORGE_GATEWAY_API_KEY="your-bearer-token"
 ```
 
 Or construct programmatically:

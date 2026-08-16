@@ -7,7 +7,7 @@ fn rejects_remote_local_model_without_digest() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[local_model]]
 name = "q"
@@ -26,7 +26,7 @@ fn rejects_duplicate_endpoint_names() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "dup"
@@ -58,7 +58,7 @@ fn rejects_model_naming_undefined_endpoint() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "real"
@@ -84,7 +84,7 @@ fn rejects_model_with_no_endpoints() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "real"
@@ -110,7 +110,7 @@ fn parses_web_search_tool_config() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -148,7 +148,7 @@ fn parses_web_search_tool_config_explicit_defaults() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -203,7 +203,7 @@ fn parses_queue_and_endpoint_concurrency() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [queue]
 max_depth = 50
@@ -242,7 +242,7 @@ fn rejects_zero_endpoint_concurrency() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "anthropic"
@@ -269,7 +269,7 @@ fn rejects_zero_queue_max_depth() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [queue]
 max_depth = 0
@@ -298,7 +298,7 @@ fn parses_local_model_with_defaults() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[local_model]]
 name = "qwen-local"
@@ -329,7 +329,7 @@ fn parses_local_model_knobs_and_cache_dir() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [local]
 cache_dir = "/tmp/pf-models"
@@ -364,7 +364,7 @@ fn rejects_duplicate_name_across_remote_and_local() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"
@@ -396,7 +396,7 @@ fn rejects_invalid_local_model_sha256() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[local_model]]
 name = "q"
@@ -416,7 +416,7 @@ fn rejects_empty_local_model_source() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[local_model]]
 name = "q"
@@ -435,7 +435,7 @@ fn parses_devices_lanes_and_endpoint_device() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[device]]
 id = "anthropic"
@@ -493,7 +493,7 @@ fn rejects_endpoint_naming_undefined_device() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"
@@ -522,7 +522,7 @@ fn config_with_endpoint(endpoint_block: &str) -> String {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 {endpoint_block}
 
@@ -596,7 +596,7 @@ fn config_with_web_search_knobs(freshness: &str, safesearch: &str) -> String {
         r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"
@@ -666,7 +666,7 @@ fn rejects_web_search_non_url_base() {
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
-key = "t"
+api_key = "t"
 
 [[endpoint]]
 id = "e"

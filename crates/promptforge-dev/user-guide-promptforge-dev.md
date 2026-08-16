@@ -8,7 +8,7 @@ promptforge-dev requires a running `promptforge-gateway`. Start it yourself, the
 
 ````sh
 export PROMPTFORGE_GATEWAY_URL=http://127.0.0.1:8081/v1
-export PROMPTFORGE_GATEWAY_KEY=<bearer from your gateway profile>
+export PROMPTFORGE_GATEWAY_API_KEY=<bearer from your gateway profile>
 ````
 
 Both must be set and non-empty. If either is missing, the binary fails immediately with a message naming the missing variable and reminding you to start the gateway. No prompt file is read until both are validated.
@@ -35,7 +35,7 @@ Model runtime parameters - context window, thinking mode, max tokens - are not C
 
 Each invocation follows a fixed pipeline:
 
-1. **Validate environment.** Confirm `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` are set.
+1. **Validate environment.** Confirm `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` are set.
 2. **Fetch the model catalog.** One HTTP call to the gateway. The catalog is fetched once and reused across watch-mode reruns.
 3. **Build the tool set.** Two tools are always constructed: `web_fetch` (runs locally) and `web_search` (proxies through the gateway). A semantic tool picker is derived from the same live set, so no picker descriptor can advertise a tool without a matching callable.
 4. **Parse the prompt.** The file must declare `promptforge:` in its YAML frontmatter. A file without it is refused: "is not a promptforge prompt."

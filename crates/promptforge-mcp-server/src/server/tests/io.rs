@@ -63,8 +63,8 @@ async fn input_declared_but_not_provided_fails_the_run() {
         &input_prompt("reader", "paper.md"),
     );
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
     ))
@@ -99,8 +99,8 @@ async fn input_text_seeds_the_store_for_the_prompt() {
         &input_prompt("reader", "paper.md"),
     );
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
     ))
@@ -142,8 +142,8 @@ async fn output_returned_inline_when_no_output_file_specified() {
         &output_prompt("writer", "report.md"),
     );
     let config = Config::from_toml_str(&format!(
-        "[server]\ntoken = \"t\"\n\n\
-         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\nkey = \"gw\"\n\n\
+        "[server]\napi_key = \"t\"\n\n\
+         [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
          [paths]\nprompts = '{}'\n\n[catalog]\ninclude = [\"*.md\"]\n",
         dir.path().display()
     ))

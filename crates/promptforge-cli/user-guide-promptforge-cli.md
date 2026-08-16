@@ -49,7 +49,7 @@ The variable `report` captures exactly what the prompt returned.
 Gateway credentials come from two environment variables:
 
 - `PROMPTFORGE_GATEWAY_URL` - the gateway base URL
-- `PROMPTFORGE_GATEWAY_KEY` - the bearer token
+- `PROMPTFORGE_GATEWAY_API_KEY` - the bearer token
 
 There are no CLI flags for credentials. This is deliberate: secrets never appear in `argv`, where `ps` and shell history can expose them.
 
@@ -59,7 +59,7 @@ There are no CLI flags for credentials. This is deliberate: secrets never appear
 
 ```bash
 export PROMPTFORGE_GATEWAY_URL="https://gateway.example.com/v1"
-export PROMPTFORGE_GATEWAY_KEY="your-bearer-token"
+export PROMPTFORGE_GATEWAY_API_KEY="your-bearer-token"
 promptforge run prompts/search-demo.md "latest Rust news"
 ```
 
@@ -68,7 +68,7 @@ This enables the `web_search` tool and fetches the remote model catalog, so prom
 Setting a key without a URL is rejected explicitly:
 
 ```
-error: PROMPTFORGE_GATEWAY_KEY is set but PROMPTFORGE_GATEWAY_URL is missing or empty; both are required to reach the gateway
+error: PROMPTFORGE_GATEWAY_API_KEY is set but PROMPTFORGE_GATEWAY_URL is missing or empty; both are required to reach the gateway
 ```
 
 ## Tools
@@ -77,7 +77,7 @@ Two tools are available to prompts, depending on the gateway configuration:
 
 **`web_fetch`** runs locally and is always available regardless of gateway mode. It needs no credentials.
 
-**`web_search`** proxies through the gateway and is available only when both `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_KEY` are set. When the gateway is not configured, `web_search` is omitted entirely rather than advertised as a tool that would fail on its first call.
+**`web_search`** proxies through the gateway and is available only when both `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` are set. When the gateway is not configured, `web_search` is omitted entirely rather than advertised as a tool that would fail on its first call.
 
 The tool picker resolves `tools.need` calls from prompts against the live tool set. Picker descriptors are derived from the same live tool instances, so the registry and catalog have identical entries by construction. If a prompt needs a tool that is not available (for example, `web_search` without gateway credentials), the resolution produces the standard absent-capability error before any section executes.
 

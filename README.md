@@ -69,7 +69,7 @@ Two processes: the gateway holds the vendor credential; the client points at it.
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-export PROMPTFORGE_GATEWAY_KEY=dev-secret
+export PROMPTFORGE_GATEWAY_API_KEY=dev-secret
 cargo run -p promptforge-gateway -- serve gateway.toml &
 
 export PROMPTFORGE_GATEWAY_URL=http://127.0.0.1:8081/v1
