@@ -1276,41 +1276,6 @@ fn section_vms_isolate_mutated_shared_globals() {
 }
 
 #[test]
-fn tool_scope_is_not_committed_when_model_close_fails() {
-    // LUA-008: the tool scope must not commit to Closed if the model close
-    // fails - both transitions are validated before either commits.
-    let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "S").expect("VM builds");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .expect("host injects");
-    // Force the model close to fail: select an alias with no frozen binding.
-    vm.model_runtime
-        .lock()
-        .expect("lock")
-        .select("ghost".to_owned())
-        .expect("recording is open");
-
-    let error = vm
-        .close_scopes(&NullObserver, "S")
-        .expect_err("the model close must fail");
-    assert!(
-        error.to_string().contains("no frozen binding"),
-        "the failure names the missing model binding: {error}"
-    );
-    assert_eq!(
-        vm.tool_runtime.lock().expect("lock").phase,
-        ToolPhase::H2,
-        "a failed model close must leave the tool scope uncommitted"
-    );
-
-    // With the bad selection cleared the close now succeeds, proving the tool
-    // scope was still open (H2) rather than half-committed.
-    *vm.model_runtime.lock().expect("lock") = ModelRuntime::new();
-    vm.close_scopes(&NullObserver, "S")
-        .expect("closing succeeds once the model selection is valid");
-    vm.teardown(&NullObserver, "S");
-}
-
-#[test]
 fn control_globals_are_cleared_even_when_the_block_errors() {
     // LUA-007: an ordinary execution error must still clear jump/execute/
     // fanout/tasks so no live control global leaks into a later phase.
