@@ -9,7 +9,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
 
     let tool = ScopedFixtureTool::new("concrete", "canonical_wire", "Concrete description.");
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua shared\ntools.need('local_alias', 'capability')\nmodels.always('writer', 'A general model for tests')\n```\n\n\
+# Test prompt\n\n```lua shared\ntools.need('local_alias', 'capability')\nmodels.only('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\nAsk without tools.\n";
     let prompt = bound_with_tools(md, Vec::new());
     let out = run(
@@ -53,7 +53,7 @@ async fn always_advertises_concrete_schema_under_local_alias_and_dispatches_by_i
 # Test prompt\n\n```lua shared\n\
 tools.need('local_alias', 'capability')\n\
 tools.always('local_alias')\n\
-models.always('writer', 'A general model for tests')\n```\n\n\
+models.only('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\nUse the tool.\n",
         Vec::new(),
     );
@@ -106,7 +106,7 @@ async fn h2_add_scopes_an_alias_and_dispatches_the_concrete_tool() {
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua shared\n\
 tools.need('section_tool', 'capability')\n\
-models.always('writer', 'A general model for tests')\n```\n\n\
+models.only('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\n```lua\ntools.add('section_tool')\n```\n\nUse the tool.\n",
         Vec::new(),
     );
@@ -168,7 +168,7 @@ async fn near_duplicate_tools_are_valid_when_isolated_in_separate_sections() {
 # Test prompt\n\n```lua shared\n\
 tools.need('first_local', 'first')\n\
 tools.need('second_local', 'second')\n\
-models.always('writer', 'A general model for tests')\n```\n\n\
+models.only('writer', 'A general model for tests')\n```\n\n\
 ## First\n\n```lua\ntools.add('first_local')\n```\n\nFirst model turn.\n\n\
 ## Second\n\n```lua\ntools.add('second_local')\n```\n\nSecond model turn.\n",
         vec![(first_descriptor, second_descriptor)],

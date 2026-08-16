@@ -439,7 +439,7 @@ impl CompletionOptions {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct ModelBindings {
     bindings: Vec<ModelBinding>,
-    always: Option<String>,
+    only: Option<String>,
 }
 
 impl ModelBindings {
@@ -449,18 +449,18 @@ impl ModelBindings {
         &self.bindings
     }
 
-    /// Returns the prompt-wide default alias set by `models.always`, if any.
+    /// Returns the prompt-wide default alias set by `models.only`, if any.
     #[must_use]
-    pub(crate) fn always(&self) -> Option<&str> {
-        self.always.as_deref()
+    pub(crate) fn only(&self) -> Option<&str> {
+        self.only.as_deref()
     }
 
     pub(crate) fn binding(&self, alias: &str) -> Option<&ModelBinding> {
         self.bindings.iter().find(|binding| binding.alias == alias)
     }
 
-    pub(crate) fn from_parts(bindings: Vec<ModelBinding>, always: Option<String>) -> Self {
-        Self { bindings, always }
+    pub(crate) fn from_parts(bindings: Vec<ModelBinding>, only: Option<String>) -> Self {
+        Self { bindings, only }
     }
 }
 

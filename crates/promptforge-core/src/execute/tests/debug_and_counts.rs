@@ -117,7 +117,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
         # Test prompt\n\n```lua shared\n\
         tools.need('echo', 'echo tool')\n\
         tools.always('echo')\n\
-        writer = models.always('writer', 'A general model for tests')\n```\n\n\
+        writer = models.only('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
         local text = writer:infer('say hello')\n\
@@ -203,7 +203,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         # Test prompt\n\n```lua shared\n\
         tools.need('echo', 'echo tool')\n\
         tools.always('echo')\n\
-        models.always('writer', 'A general model for tests')\n```\n\n\
+        models.only('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\nUse the tool.\n\n\
         ```lua\nassert(tools.calls['echo'] == 1, \
         'expected 1 call, got ' .. tostring(tools.calls['echo']))\n\
@@ -298,7 +298,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         tools.need('search', 'search tool')\n\
-        models.always('writer', 'A general model for tests')\n```\n\n\
+        models.only('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n```lua\ntools.add('search')\n```\n\n\
         ```lua\nassert(tools.calls['search'] > 0, 'search was never called')\n\
         return 'unreached'\n```\n";
@@ -334,7 +334,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
         tools.need('search', 'search tool')\n\
-        models.always('writer', 'A general model for tests')\n```\n\n\
+        models.only('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n```lua\ntools.add('search')\n```\n\n\
         ```lua\nlocal _ = tools.calls['serach']\n\
         return 'unreached'\n```\n";
@@ -381,7 +381,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
         tools.need('scoped', 'scoped tool')\n\
         tools.need('global_tool', 'global tool')\n\
         tools.always('scoped')\n\
-        models.always('writer', 'A general model for tests')\n```\n\n\
+        models.only('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\nUse the tool.\n";
     let prompt = bound_with_tools(md, Vec::new());
     let error = run(
@@ -439,7 +439,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
         # Test prompt\n\n```lua shared\n\
         tools.need('echo', 'echo tool')\n\
         tools.always('echo')\n\
-        models.always('writer', 'A general model for tests')\n```\n\n\
+        models.only('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\nUse the tool.\n";
     let prompt = bound_with_tools(md, Vec::new());
     let error = run(
@@ -493,7 +493,7 @@ async fn model_infer_single_shot_returns_text() {
         # Test prompt\n\n```lua shared\n\
         tools.need('echo', 'echo tool')\n\
         tools.always('echo')\n\
-        writer = models.always('writer', 'A general model for tests')\n```\n\n\
+        writer = models.only('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
         local text = writer:infer('say hello')\n\

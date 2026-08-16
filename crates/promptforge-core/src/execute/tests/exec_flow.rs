@@ -286,7 +286,7 @@ async fn fanout_exhausted_arm_exposes_failure_metadata() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\nmax_tool_iterations: 2\n---\n\n\
 # Test prompt\n\n```lua shared\n\
 tools.need('echo', 'echo tool')\n\
-models.always('writer', 'A general model for tests')\n```\n\n\
+models.only('writer', 'A general model for tests')\n```\n\n\
 ## Parent\n\n\
 ```lua\n\
 local r = fanout('### Worker', '### Items')\n\

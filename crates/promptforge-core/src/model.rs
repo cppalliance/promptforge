@@ -5,7 +5,7 @@
 //! under hard constraints, freezes invocation parameters, and stores the result
 //! in the run's crate-private model bindings. H2 `models.use` selects at most
 //! one binding per
-//! section; H1 `models.always` supplies the prompt-wide default for sections
+//! section; H1 `models.only` supplies the prompt-wide default for sections
 //! that omit `models.use`. Model-facing sections with neither binding fail with
 //! a model-binding failure surfaced through [`crate::RunError`].
 

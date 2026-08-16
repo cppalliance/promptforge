@@ -48,7 +48,7 @@ const fn _public_execution_types_are_send_sync_static() {
 const DEFAULT_MAX_TOOL_ITERATIONS: usize = 24;
 
 const MODEL_ALWAYS_SHARED: &str =
-    "```lua shared\nmodels.always('writer', 'A general model for tests')\n```\n\n";
+    "```lua shared\nmodels.only('writer', 'A general model for tests')\n```\n\n";
 
 /// Lua-only prompts never build the gateway client, so these run offline.
 fn parse(md: &str) -> Prompt {
@@ -105,7 +105,7 @@ fn test_completion_options() -> CompletionOptions {
 fn ensure_model_h1(md: &str) -> String {
     let first_section = md.find("\n\n## ");
     let mut source = md.to_string();
-    if source.contains("models.always") || source.contains("models.need") {
+    if source.contains("models.only") || source.contains("models.need") {
         source = source
             .replace("```lua shared\nmodels.", "```lua\nmodels.")
             .replace("```lua shared\n  models.", "```lua\n  models.");

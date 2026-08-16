@@ -1,4 +1,4 @@
-//! Lua-driven `models.need`/`models.use`/`models.always` integration tests.
+//! Lua-driven `models.need`/`models.use`/`models.only` integration tests.
 
 use super::*;
 
