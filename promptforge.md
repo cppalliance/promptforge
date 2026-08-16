@@ -101,7 +101,7 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 |---|---|
 | `tools.need(alias, desc)` | Resolve a tool by description |
 | `tools.add(alias...)` | Make resolved tools available to the model |
-| `models.always(alias, desc)` | Bind a model for this section |
+| `models.only(alias, desc)` | Bind a model for this section |
 | `models.need(alias, desc, opts)` | Bind with options (thinking, context, temperature) |
 | `models.use(alias)` | Switch to a previously bound model |
 | `store.read(path)` | Read file verbatim |
@@ -136,7 +136,7 @@ max_tool_iterations: 20
 ```lua
 tools.need("search", "Search the web and return results.")
 tools.need("fetch", "Fetch a web page as markdown.")
-models.always("researcher", "A model suited for careful analysis")
+models.only("researcher", "A model suited for careful analysis")
 ```
 
 ## Research
