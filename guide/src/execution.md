@@ -1,6 +1,6 @@
 # Execution
 
-A prompt file is a Markdown document with YAML frontmatter that promptforge compiles into an executable pipeline. The frontmatter declares identity (`name`, `description`) and a version tag (`promptforge: 2`). Below the frontmatter, an H1 title heads the prompt and zero or more H2 sections supply the instructions, Lua logic, and prose that the runtime walks at execution time.
+A prompt file is a Markdown document with YAML frontmatter that promptforge compiles into an executable pipeline. The frontmatter declares identity (`name`, `description`) and a version tag (`promptforge: 1`). Below the frontmatter, an H1 title heads the prompt and zero or more H2 sections supply the instructions, Lua logic, and prose that the runtime walks at execution time.
 
 ## The Run Function
 

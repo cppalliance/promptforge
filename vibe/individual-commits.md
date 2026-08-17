@@ -46,3 +46,5 @@
 
 ## 2026-08-16 Rename gateway and MCP credentials to api_key
 
+## 2026-08-17 Correct promptforge version in doc examples to 1
+
