@@ -532,7 +532,7 @@ A prompt file is a Markdown document with YAML frontmatter. The frontmatter must
 ---
 name: summarizer
 description: Summarize a document into bullet points
-promptforge: 2
+promptforge: 1
 ---
 ```
 
@@ -544,7 +544,7 @@ Below the frontmatter, the document has one H1 title and zero or more H2 section
 ---
 name: hello
 description: A greeting prompt
-promptforge: 2
+promptforge: 1
 ---
 
 # Hello
