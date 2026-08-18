@@ -58,3 +58,4 @@
 - [2026-08-15-4-h1-only-prompt-support] remove inert fallback configuration: Do not retain declarative fields that execution no longer honors; fall-through uses actual reply state.
 - [2026-08-16-1-fanout-scope-refactor] fanout input normalization: Accept either a section reference or an explicit string array at the Lua boundary, then execute fanout on normalized items.
 - [2026-08-16-1-fanout-scope-refactor] parsed-list reuse: Expose section items from the parsed prompt instead of reparsing Markdown in author code.
+- [2026-08-18-1-tools-local] section-lifetime host APIs: Install store, logging, and control callbacks once per section VM so all chunks and handlers share one coherent environment.
