@@ -101,6 +101,89 @@ fn read_missing_file_errors() {
 }
 
 #[test]
+fn read_range_with_start_only_reads_to_end() {
+    let store = StoreRef::memory();
+    store.write("a.txt", "one\ntwo\nthree\n").expect("write");
+    assert_eq!(
+        store.read_range("a.txt", 2, None).expect("read_range"),
+        "two\nthree"
+    );
+}
+
+#[test]
+fn read_range_with_start_and_end_slices_inclusively() {
+    let store = StoreRef::memory();
+    store.write("a.txt", "one\ntwo\nthree\n").expect("write");
+    assert_eq!(
+        store.read_range("a.txt", 2, Some(2)).expect("read_range"),
+        "two"
+    );
+    assert_eq!(
+        store.read_range("a.txt", 1, Some(2)).expect("read_range"),
+        "one\ntwo"
+    );
+}
+
+#[test]
+fn read_range_clamps_end_to_the_last_line() {
+    let store = StoreRef::memory();
+    store.write("a.txt", "one\ntwo\nthree\n").expect("write");
+    assert_eq!(
+        store.read_range("a.txt", 2, Some(99)).expect("read_range"),
+        "two\nthree"
+    );
+}
+
+#[test]
+fn read_range_beyond_eof_is_empty() {
+    let store = StoreRef::memory();
+    store.write("a.txt", "one\ntwo\nthree\n").expect("write");
+    assert_eq!(store.read_range("a.txt", 4, None).expect("read_range"), "");
+    // The end bound is never evaluated when the range starts beyond EOF.
+    assert_eq!(
+        store.read_range("a.txt", 4, Some(1)).expect("read_range"),
+        ""
+    );
+}
+
+#[test]
+fn read_range_empty_file_is_empty_string() {
+    let store = StoreRef::memory();
+    store.write("e.txt", "").expect("write");
+    assert_eq!(store.read_range("e.txt", 1, None).expect("read_range"), "");
+}
+
+#[test]
+fn read_range_start_below_one_errors() {
+    let store = StoreRef::memory();
+    store.write("a.txt", "one\ntwo\n").expect("write");
+    let err = store.read_range("a.txt", 0, None).expect_err("start of 0");
+    assert_eq!(err.kind(), StoreErrorKind::InvalidRange);
+    assert!(matches!(err, StoreError::InvalidRange { .. }));
+    assert_eq!(err.path(), Some("a.txt"));
+}
+
+#[test]
+fn read_range_end_before_start_errors() {
+    let store = StoreRef::memory();
+    store.write("a.txt", "one\ntwo\nthree\n").expect("write");
+    let err = store
+        .read_range("a.txt", 3, Some(2))
+        .expect_err("end before start");
+    assert_eq!(err.kind(), StoreErrorKind::InvalidRange);
+    assert!(matches!(err, StoreError::InvalidRange { .. }));
+}
+
+#[test]
+fn read_range_missing_file_errors() {
+    let store = StoreRef::memory();
+    let err = store
+        .read_range("absent.txt", 1, None)
+        .expect_err("should fail");
+    assert!(matches!(err, StoreError::NotFound { .. }));
+}
+
+#[test]
 fn read_lines_missing_file_errors() {
     let store = StoreRef::memory();
     let err = store.read_lines("absent.txt").expect_err("should fail");
@@ -479,22 +562,22 @@ fn with_files_populates_store() {
     let store = StoreRef::with_files([
         ("a.txt".to_owned(), "alpha".to_owned()),
         ("b.txt".to_owned(), "beta".to_owned()),
-    ]).expect("valid paths");
+    ])
+    .expect("valid paths");
     assert_eq!(store.read("a.txt").unwrap(), "alpha");
     assert_eq!(store.read("b.txt").unwrap(), "beta");
 }
 
 #[test]
 fn with_files_rejects_invalid_path() {
-    let result = StoreRef::with_files([
-        ("../escape.txt".to_owned(), "bad".to_owned()),
-    ]);
+    let result = StoreRef::with_files([("../escape.txt".to_owned(), "bad".to_owned())]);
     assert!(result.is_err());
 }
 
 #[test]
 fn with_files_empty_is_empty_store() {
-    let store = StoreRef::with_files(std::iter::empty::<(String, String)>()).expect("empty is valid");
+    let store =
+        StoreRef::with_files(std::iter::empty::<(String, String)>()).expect("empty is valid");
     assert!(!store.exists("anything.txt").unwrap());
 }
 

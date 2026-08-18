@@ -6,8 +6,10 @@
 //! handle the runtime hands to both the Lua VM and (later) the model's file
 //! tools. Three read shapes are available: [`StoreRef::read_lines`] returns
 //! numbered lines for navigation, [`StoreRef::read`] returns verbatim
-//! contents for trusted handoff, and [`StoreRef::inject`] wraps verbatim
-//! contents in an untrusted guard envelope for model-facing re-injection.
+//! contents for trusted handoff ([`StoreRef::read_range`] slices a 1-based
+//! inclusive line range out of the same verbatim contents), and
+//! [`StoreRef::inject`] wraps verbatim contents in an untrusted guard
+//! envelope for model-facing re-injection.
 //! Edits are anchor-based ([`Store::str_replace`]) rather than offset-based,
 //! the shape that works for a model.
 //!
@@ -99,7 +101,9 @@ impl StoreRef {
     /// assert_eq!(store.read("data.txt")?, "contents");
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
-    pub fn with_files(files: impl IntoIterator<Item = (String, String)>) -> Result<StoreRef, StoreError> {
+    pub fn with_files(
+        files: impl IntoIterator<Item = (String, String)>,
+    ) -> Result<StoreRef, StoreError> {
         Ok(StoreRef::new(Box::new(MemStore::with_files(files)?)))
     }
 
@@ -207,6 +211,58 @@ impl StoreRef {
     pub fn read(&self, path: &str) -> Result<String, StoreError> {
         let path = StorePath::parse(path)?;
         self.lock()?.read(path.as_str())
+    }
+
+    /// Reads lines `start..=end` of the file at `path`, 1-based and
+    /// inclusive, joined with `"\n"` and no trailing newline.
+    ///
+    /// Bounds are evaluated in a fixed order: a `start` below 1 is an error;
+    /// a `start` past the last line reads as the empty string; an omitted
+    /// `end` means the last line, and a given `end` clamps down to it; an
+    /// `end` before `start` at that point is an error.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::NotFound`] if no file exists at `path`, or
+    /// [`StoreError::InvalidRange`] if `start` is less than 1 or `end` is
+    /// before `start`.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// store.write("a.txt", "one\ntwo\nthree\n")?;
+    /// assert_eq!(store.read_range("a.txt", 2, None)?, "two\nthree");
+    /// assert_eq!(store.read_range("a.txt", 2, Some(99))?, "two\nthree");
+    /// assert_eq!(store.read_range("a.txt", 99, None)?, "");
+    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// ```
+    pub fn read_range(
+        &self,
+        path: &str,
+        start: usize,
+        end: Option<usize>,
+    ) -> Result<String, StoreError> {
+        let path = StorePath::parse(path)?;
+        let contents = self.lock()?.read(path.as_str())?;
+        if start == 0 {
+            return Err(StoreError::InvalidRange {
+                path: path.as_str().to_owned(),
+                reason: "start must be at least 1",
+            });
+        }
+        let lines: Vec<&str> = contents.lines().collect();
+        if start > lines.len() {
+            return Ok(String::new());
+        }
+        let end = end.unwrap_or(lines.len()).min(lines.len());
+        if end < start {
+            return Err(StoreError::InvalidRange {
+                path: path.as_str().to_owned(),
+                reason: "end must not be before start",
+            });
+        }
+        Ok(lines[start - 1..end].join("\n"))
     }
 
     /// Reads the file at `path` verbatim and wraps it in an untrusted guard
