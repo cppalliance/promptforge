@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use crate::client::ToolSchema;
 use crate::debug::DebugCapture;
 use crate::lua::{
-    LiveBindingProducer, ModelInferHook, SectionVm, ToolBindings, ToolCallCounts, ToolRuntime,
-    ToolScope, install_lua_tool_calls, snapshot_tool_scope,
+    LiveBindingProducer, LocalTools, ModelInferHook, SectionVm, ToolBinding, ToolBindings,
+    ToolCallCounts, ToolRuntime, current_tool_bindings, install_lua_tool_calls,
 };
 use crate::model::ModelBinding;
 use crate::observe::Observer;
@@ -24,7 +24,7 @@ use super::tool_loop::{SectionProgress, run_tool_loop};
 /// Cached schemas/dispatch for one tool-bag generation.
 struct CachedToolState {
     generation: u64,
-    scope: ToolScope,
+    bindings: Vec<ToolBinding>,
     schemas: Vec<ToolSchema>,
     dispatch: BTreeMap<String, ToolId>,
 }
@@ -32,7 +32,7 @@ struct CachedToolState {
 /// Result of preparing the model-visible tool set for one `model:infer` call.
 pub(crate) struct PreparedTools {
     /// Effective bindings in model-advertisement order.
-    pub(crate) scope: ToolScope,
+    pub(crate) bindings: Vec<ToolBinding>,
     /// Schemas advertised to the model for this infer.
     pub(crate) schemas: Vec<ToolSchema>,
     /// Alias-to-identity dispatch map for this infer.
@@ -45,23 +45,30 @@ pub(crate) struct PreparedTools {
 
 /// Effective tool set with a generation-tracked schema/dispatch cache.
 ///
-/// Mutations via `tools.add` bump [`ToolRuntime::generation`]. Each
-/// [`Self::prepare`] call rebuilds schemas and dispatch only when that
+/// Mutations via `tools.add` or `tools.local` bump [`ToolRuntime::generation`].
+/// Each [`Self::prepare`] call rebuilds schemas and dispatch only when that
 /// generation no longer matches the cache. Used by `model:infer`; the
 /// implicit prose path still builds scope through `prepare_effective_scope`.
 pub(crate) struct ToolBag {
     bindings: ToolBindings,
     runtime: Arc<Mutex<ToolRuntime>>,
+    local: LocalTools,
     cached: Option<CachedToolState>,
 }
 
 impl ToolBag {
-    /// Creates a bag over frozen bindings and the live H2 addition runtime.
+    /// Creates a bag over frozen bindings, the live H2 addition runtime, and
+    /// the section VM's local-tool registry.
     #[must_use]
-    pub(crate) fn new(bindings: ToolBindings, runtime: Arc<Mutex<ToolRuntime>>) -> Self {
+    pub(crate) fn new(
+        bindings: ToolBindings,
+        runtime: Arc<Mutex<ToolRuntime>>,
+        local: LocalTools,
+    ) -> Self {
         Self {
             bindings,
             runtime,
+            local,
             cached: None,
         }
     }
@@ -88,7 +95,7 @@ impl ToolBag {
             && cached.generation == generation
         {
             return Ok(PreparedTools {
-                scope: cached.scope.clone(),
+                bindings: cached.bindings.clone(),
                 schemas: cached.schemas.clone(),
                 dispatch: cached.dispatch.clone(),
                 #[cfg(test)]
@@ -96,16 +103,16 @@ impl ToolBag {
             });
         }
 
-        let scope = snapshot_tool_scope(&self.bindings, &self.runtime)?;
-        let (schemas, dispatch) = prepare_scoped_tools(&scope, registry)?;
+        let bindings = current_tool_bindings(&self.bindings, &self.runtime)?;
+        let (schemas, dispatch) = prepare_scoped_tools(&bindings, &self.local.schemas(), registry)?;
         self.cached = Some(CachedToolState {
             generation,
-            scope: scope.clone(),
+            bindings: bindings.clone(),
             schemas: schemas.clone(),
             dispatch: dispatch.clone(),
         });
         Ok(PreparedTools {
-            scope,
+            bindings,
             schemas,
             dispatch,
             #[cfg(test)]
@@ -143,21 +150,21 @@ impl InferContext {
     ) -> mlua::Result<(PreparedTools, Vec<String>)> {
         if let Some(live) = &self.live_bindings {
             let bindings = live.bindings().map_err(mlua::Error::external)?.0;
-            let scope = ToolScope::from_bindings(
-                bindings
-                    .always()
-                    .iter()
-                    .filter_map(|alias| {
-                        bindings
-                            .bindings()
-                            .iter()
-                            .find(|binding| binding.alias() == alias)
-                            .cloned()
-                    })
-                    .collect(),
-            );
+            // H1 has no local tools (`tools.local` is H2-only), so the local
+            // schema list stays empty on the live path.
+            let scope: Vec<ToolBinding> = bindings
+                .always()
+                .iter()
+                .filter_map(|alias| {
+                    bindings
+                        .bindings()
+                        .iter()
+                        .find(|binding| binding.alias() == alias)
+                        .cloned()
+                })
+                .collect();
             let (schemas, dispatch) =
-                prepare_scoped_tools(&scope, registry).map_err(mlua::Error::external)?;
+                prepare_scoped_tools(&scope, &[], registry).map_err(mlua::Error::external)?;
             let declared = bindings
                 .bindings()
                 .iter()
@@ -165,7 +172,7 @@ impl InferContext {
                 .collect();
             return Ok((
                 PreparedTools {
-                    scope,
+                    bindings: scope,
                     schemas,
                     dispatch,
                     #[cfg(test)]
@@ -181,7 +188,7 @@ impl InferContext {
             .map_err(|_| mlua::Error::external("tool bag mutex was poisoned"))?;
         let prepared = bag.prepare(registry).map_err(mlua::Error::external)?;
         if let Some(analysis) = &self.analysis {
-            validate_effective_scope_inner(analysis, &prepared.scope)
+            validate_effective_scope_inner(analysis, &prepared.bindings)
                 .map_err(mlua::Error::external)?;
         }
         let declared = bag
@@ -207,21 +214,15 @@ impl InferContext {
                 .counts_slot
                 .lock()
                 .map_err(|_| mlua::Error::external("tool call counts mutex was poisoned"))?;
+            // Seed from the dispatch keys so both registry and local tool
+            // aliases are countable.
             if let Some(existing) = slot.as_ref() {
-                for tool in prepared.scope.bindings() {
-                    existing
-                        .ensure(tool.alias())
-                        .map_err(mlua::Error::external)?;
+                for alias in prepared.dispatch.keys() {
+                    existing.ensure(alias).map_err(mlua::Error::external)?;
                 }
                 existing.clone()
             } else {
-                let created = ToolCallCounts::new(
-                    prepared
-                        .scope
-                        .bindings()
-                        .iter()
-                        .map(|b| b.alias().to_owned()),
-                );
+                let created = ToolCallCounts::new(prepared.dispatch.keys().cloned());
                 *slot = Some(created.clone());
                 created
             }
@@ -293,6 +294,7 @@ pub(crate) fn attach_infer_hook(
     live_bindings: Option<LiveBindingProducer>,
 ) {
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
+    let local_tools = vm.local_tools_handle();
     let ctx = Arc::new(InferContext {
         client,
         shared_tools: shared_tools.clone(),
@@ -307,7 +309,7 @@ pub(crate) fn attach_infer_hook(
         turns: Arc::clone(turns),
         analysis: analysis.cloned(),
         live_bindings,
-        tool_bag: Mutex::new(ToolBag::new(tool_bindings, tool_runtime)),
+        tool_bag: Mutex::new(ToolBag::new(tool_bindings, tool_runtime, local_tools)),
         counts_slot: vm.counts_slot(),
         sys_live: vm.sys_live_handle(),
     });

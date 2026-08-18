@@ -5,7 +5,7 @@ use super::{
     Function, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram,
     LuaSectionHandle, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook,
     ModelRuntime, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution, StdLib,
-    StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, ToolScope, Value,
+    StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, Value,
     default_log_byte_budget, detail, harden, install_h2_models, install_h2_tools,
     install_instruction_budget, install_log, install_log_scoped, install_lua_tool_calls,
     install_store_table, install_tasks_table, resolve_section_target, scalar_return, seal_sys,
@@ -91,6 +91,27 @@ impl LocalTools {
             .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?
             .push((alias, schema, handler));
         Ok(())
+    }
+
+    /// Returns the schemas of every registered local tool.
+    #[must_use]
+    pub(crate) fn schemas(&self) -> Vec<ToolSchema> {
+        self.entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .map(|(_, schema, _)| schema.clone())
+            .collect()
+    }
+
+    /// Returns whether `alias` names a registered local tool.
+    #[must_use]
+    pub(crate) fn contains(&self, alias: &str) -> bool {
+        self.entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .iter()
+            .any(|(name, _, _)| name == alias)
     }
 }
 
@@ -642,20 +663,23 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when installing the `tools.calls` index fails.
-    pub(crate) fn install_tool_call_counts(&mut self, scope: &ToolScope) -> Result<ToolCallCounts> {
+    pub(crate) fn install_tool_call_counts(
+        &self,
+        bindings: &[ToolBinding],
+    ) -> Result<ToolCallCounts> {
         let counts = {
             let mut slot = self
                 .counts_slot
                 .lock()
                 .map_err(|_| Error::Lua("tool call counts mutex was poisoned".to_owned()))?;
             if let Some(existing) = slot.as_ref() {
-                for binding in scope.bindings() {
+                for binding in bindings {
                     existing.ensure(binding.alias())?;
                 }
                 existing.clone()
             } else {
                 let created =
-                    ToolCallCounts::new(scope.bindings().iter().map(|b| b.alias().to_owned()));
+                    ToolCallCounts::new(bindings.iter().map(|b| b.alias().to_owned()));
                 *slot = Some(created.clone());
                 created
             }
@@ -721,27 +745,21 @@ impl SectionVm {
 
     /// Returns the schemas of every registered local tool.
     #[must_use]
-    #[allow(dead_code)] // wired up by the local-tools plan steps
     pub(crate) fn local_tool_schemas(&self) -> Vec<ToolSchema> {
-        self.local_tools
-            .entries
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .iter()
-            .map(|(_, schema, _)| schema.clone())
-            .collect()
+        self.local_tools.schemas()
+    }
+
+    /// Returns the shared local-tools registry for the `model:infer` tool bag.
+    #[must_use]
+    pub(crate) fn local_tools_handle(&self) -> LocalTools {
+        self.local_tools.clone()
     }
 
     /// Returns whether `alias` names a registered local tool.
     #[must_use]
-    #[allow(dead_code)] // wired up by the local-tools plan steps
+    #[allow(dead_code)] // wired up by the local-tools dispatch step
     pub(crate) fn has_local_tool(&self, alias: &str) -> bool {
-        self.local_tools
-            .entries
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .iter()
-            .any(|(name, _, _)| name == alias)
+        self.local_tools.contains(alias)
     }
 
     /// Applies the run's Lua resource limits to this VM.
@@ -977,33 +995,26 @@ pub(crate) fn run_chunk(
     Ok(LuaOutcome { returned, var })
 }
 
-/// Installs `tools.calls` on the existing `tools` global as a read-only table.
+/// Reads the section's effective tool bindings without mutating the tool
+/// runtime: prompt-wide `always` aliases followed by H2 `tools.add`
+/// additions, each resolved against the frozen bindings with any author
+/// description override applied.
 ///
-/// Reading a known alias returns its current count from `counts`. Indexing an
-/// unknown key raises a hard Lua error naming the bad key and listing the VM's
-/// in-scope aliases. `declared` is the prompt-wide `tools.need` set used to
-/// distinguish pure unknowns from declared-but-unscoped aliases.
-/// Snapshot-reads always + H2 additions without mutating the tool runtime.
-pub(crate) fn snapshot_tool_scope(
+/// Rebuilt on every prose block so `tools.add` and `tools.local` calls
+/// between blocks reach the next model turn.
+pub(crate) fn current_tool_bindings(
     bindings: &ToolBindings,
     runtime: &Mutex<ToolRuntime>,
-) -> Result<ToolScope> {
+) -> Result<Vec<ToolBinding>> {
     let runtime = runtime
         .lock()
         .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
-    let aliases = bindings
+    bindings
         .always
         .iter()
         .chain(runtime.added.iter())
-        .cloned()
-        .collect::<Vec<_>>();
-    let effective = aliases
-        .iter()
         .map(|alias| binding_for_scope(bindings, &runtime, alias))
-        .collect::<Result<Vec<_>>>()?;
-    Ok(ToolScope {
-        bindings: effective,
-    })
+        .collect()
 }
 
 /// Reads the section's effective model binding without mutating the model
