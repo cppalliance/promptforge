@@ -6,8 +6,8 @@ use serde_json::json;
 use std::sync::Arc;
 
 use super::{
-    Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, call, echo_prompt, input_prompt,
-    output_prompt, prepared, server, structured_of, text_of, write,
+    Catalog, CatalogHandle, Config, OnBroken, PromptForgeServer, call, input_prompt, output_prompt,
+    prepared, server, structured_of, text_of, write,
 };
 
 // ---- validation ----

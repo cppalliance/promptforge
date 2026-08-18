@@ -80,16 +80,19 @@ pub(super) fn list_prompts_result(
                 "description": entry.description(),
                 "problem": entry.problem(),
             });
-            if let Some(prompt) = entry.prompt() {
+            // `obj` is a `json!` object literal, so it is always an object.
+            if let Some(prompt) = entry.prompt()
+                && let Some(object) = obj.as_object_mut()
+            {
                 let fm = prompt.frontmatter();
                 if let Some(input) = fm.input() {
-                    obj.as_object_mut().unwrap().insert(
+                    object.insert(
                         "input".to_owned(),
                         json!({ "path": input.path(), "description": input.description() }),
                     );
                 }
                 if let Some(output) = fm.output() {
-                    obj.as_object_mut().unwrap().insert(
+                    object.insert(
                         "output".to_owned(),
                         json!({ "path": output.path(), "description": output.description() }),
                     );
