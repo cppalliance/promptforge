@@ -2069,3 +2069,59 @@ fn store_observations_happen_before_later_lua_side_effects() {
         ]
     );
 }
+
+#[test]
+fn untrusted_global_escapes_and_envelopes_any_string() {
+    let outcome = run("return untrusted('a < b')", "").expect("untrusted must run");
+    let wrapped = outcome.returned.expect("untrusted returns a string");
+    assert!(
+        wrapped.starts_with("The text inside the untrusted_input_"),
+        "the envelope opens with the preface, got:\n{wrapped}"
+    );
+    assert!(
+        wrapped.contains("\na &lt; b\n"),
+        "every literal '<' is escaped in the body, got:\n{wrapped}"
+    );
+    assert_eq!(
+        wrapped.matches("<untrusted_input_").count(),
+        1,
+        "exactly one live open tag, got:\n{wrapped}"
+    );
+    assert_eq!(
+        wrapped.matches("</untrusted_input_").count(),
+        1,
+        "exactly one live close tag, got:\n{wrapped}"
+    );
+}
+
+#[test]
+fn untrusted_global_mints_a_fresh_nonce_per_call() {
+    let outcome = run(
+        "return untrusted('same') .. '\\n@@SPLIT@@\\n' .. untrusted('same')",
+        "",
+    )
+    .expect("untrusted must run");
+    let wrapped = outcome.returned.expect("two envelopes");
+    let (first, second) = wrapped.split_once("\n@@SPLIT@@\n").expect("two envelopes");
+    assert_ne!(first, second, "each call must mint a fresh nonce");
+}
+
+#[test]
+fn untrusted_global_is_callable_from_the_shared_library() {
+    let shared = program(
+        "local wrapped = untrusted('a < b')\n\
+         assert(wrapped:find('a &lt; b', 1, true), 'shared sees the escaped body')",
+    );
+    let vm = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "Test")
+        .expect("the shared library must call untrusted during load");
+    vm.teardown(&NullObserver, "Test");
+}
+
+#[test]
+fn untrusted_global_rejects_a_non_string_argument() {
+    let error = run("return untrusted({})", "").expect_err("a table is not a string");
+    assert!(
+        matches!(error, Error::Lua(_) | Error::LuaRuntime { .. }),
+        "a non-string argument must surface as a Lua error, got {error:?}"
+    );
+}

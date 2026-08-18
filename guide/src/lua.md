@@ -146,6 +146,7 @@ Escalate this with recommended actions.
 | `execute("## Section", input?)` | Run section as subroutine |
 | `fanout(worker, list)` | Map a worker over a list section in parallel |
 | `log(msg)` | Emit a diagnostic to the observer |
+| `untrusted(s)` | Wrap a string in the untrusted guard envelope |
 
 ## Local Tools
 
