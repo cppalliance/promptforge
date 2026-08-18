@@ -37,7 +37,7 @@ promptforge: 1
 # Summarize
 
 ```lua
-models.only("m", "A model suited for careful analysis")
+models.default("m", "A model suited for careful analysis")
 ```
 
 Summarize this text in one paragraph.

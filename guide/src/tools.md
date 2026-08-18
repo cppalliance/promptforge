@@ -61,6 +61,52 @@ end
 
 Counts increment even when a tool call fails. Mistyped aliases produce a hard error with the available tools listed.
 
+## Local Tools
+
+`tools.add_local(alias, description, params, handler)` declares a tool backed by a Lua function, available from any H2 Lua block. When the model calls the tool, the handler runs synchronously in the declaring section's VM rather than reaching an external service:
+
+```lua
+tools.add_local("grab", "Grab a value from the store", {
+    key = {"string", "Store path to read"},
+}, function(args)
+    return store.read(args.key)
+end)
+```
+
+The four positional arguments:
+
+- `alias` - tool name, same rules as `tools.need` (`[A-Za-z][A-Za-z0-9_-]{0,63}`)
+- `description` - one-sentence description the model sees
+- `params` - flat table of parameter declarations (see below)
+- `handler` - function receiving an `args` table, returning a string
+
+Each params value is either a bare type string or a `{type, description}` array:
+
+```lua
+-- Bare types
+{ name = "string", count = "integer" }
+
+-- Type plus per-parameter description (helps small models)
+{ name = {"string", "Section heading text"},
+  start_line = {"integer", "1-based first line"} }
+
+-- Mixed
+{ name = {"string", "Section heading text"}, count = "integer" }
+```
+
+Supported types are `"string"`, `"integer"`, `"number"`, and `"boolean"`. All declared parameters are required; there are no optional parameters. The engine converts the table into a JSON Schema `parameters` object for the model.
+
+Handler rules:
+
+- Receives the arguments as a Lua table with the named fields; returns a string
+- Runs in the section's VM with access to `store`, `var`, and section globals (accumulator patterns work)
+- May call `execute()`, `fanout`, and `model:infer`
+- Cannot call `jump()` - it is disabled for the duration of the call
+- Lua errors propagate as tool-call failures
+- Output is trusted: no nonce envelope, since the prompt author wrote the handler
+
+A local tool becomes visible to the model starting from the next prose block or `model:infer` call. Local tools are H2-only; declaring one in H1 is not supported.
+
 ## Implementing Custom Tools
 
 A custom tool requires:

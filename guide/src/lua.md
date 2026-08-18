@@ -10,7 +10,7 @@ Lua blocks in the H1 region execute once in source order before any H2 section. 
 # My Prompt
 
 ```lua
-models.only("writer", "a capable writing model")
+models.default("writer", "a capable writing model")
 tools.need("search", "web search capability")
 tools.always("search")
 var.topic = "Rust async patterns"
@@ -123,7 +123,46 @@ The analysis found a critical issue:
 Escalate this with recommended actions.
 ````
 
-`execute()` nests up to 8 levels deep. `jump()` inside an `execute()` subroutine is rejected with a clear error. Sections can be referenced by heading string or by Section objects from the `tasks` table.
+`execute()` nests up to 8 levels deep. A subroutine starts with `reply` set to nil - pass context through the `input` parameter instead. `jump()` inside an `execute()` subroutine is rejected with a clear error. Sections can be referenced by heading string or by Section objects from the `tasks` table.
+
+## Lua API Summary
+
+| Function | Effect |
+|----------|--------|
+| `tools.need(alias, desc)` | Resolve a tool by capability description |
+| `tools.always(alias...)` | Make resolved tools available in every section |
+| `tools.add(alias...)` | Make resolved tools available in this section |
+| `tools.add_local(alias, desc, params, handler)` | Declare a Lua-backed tool (H2 only) |
+| `models.need(alias, desc, opts?)` | Resolve a model by capability description |
+| `models.default(alias, desc, opts?)` | Declare and set the prompt-wide baseline model (H1) |
+| `models.use(alias)` | Select a declared model for this section; returns its handle |
+| `models.get(alias)` | Return a declared model's handle without changing the section model |
+| `models.infer(prompt)` | One tool-free inference round on the section's current model |
+| `handle:infer(prompt)` | Tool-loop inference on a specific model handle |
+| `store.*` | Virtual filesystem operations |
+| `jump("## Section")` | Transfer control |
+| `execute("## Section", input?)` | Run section as subroutine |
+| `fanout(worker, list)` | Map a worker over a list section in parallel |
+| `log(msg)` | Emit a diagnostic to the observer |
+
+## Local Tools
+
+`tools.add_local(alias, description, params, handler)` declares a tool backed by a Lua function. When the model calls it during the tool loop, the handler runs synchronously in the section's VM instead of reaching an external service:
+
+```lua
+tools.add_local("extract_section", "Extract a range of lines from the paper", {
+    name = {"string", "Section heading text"},
+    start_line = {"integer", "1-based line number where the section begins"},
+    end_line = {"integer", "1-based line number where the section ends"},
+}, function(args)
+    local lines = store.read_lines("paper.md")
+    return "extracted " .. args.name
+end)
+```
+
+The params table maps each parameter name to either a bare type string or a `{type, description}` array. Supported types are `"string"`, `"integer"`, `"number"`, and `"boolean"`. All declared parameters are required. The engine converts the table into the JSON Schema the model sees.
+
+The handler receives the arguments as a Lua table with the named fields and returns a string; Lua errors surface as tool-call failures. The handler shares the section's VM, so it can use `store`, `var`, and section globals, and it may call `execute()`, `fanout`, and `model:infer`. It cannot call `jump()` - `jump` is disabled for the duration of the call. Local tool output is trusted (no nonce envelope), since the prompt author wrote the handler. A local tool becomes visible to the model starting from the next prose block or `model:infer` call.
 
 ## Sandbox Constraints
 
