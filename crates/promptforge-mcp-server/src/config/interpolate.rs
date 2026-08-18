@@ -16,48 +16,54 @@ use crate::error::{ConfigError, ConfigErrorKind};
 /// so failing the load would stop a local install over a credential it does not
 /// use. Everywhere else an unset variable still fails the load, which is what
 /// keeps the gateway from starting with a blank credential.
-pub(super) fn interpolate_document(document: &mut toml::Table) -> Result<(), ConfigError> {
+pub(super) fn interpolate_document(
+    document: &mut toml::Table,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Result<(), ConfigError> {
     if let Some(server) = document
         .get_mut("server")
         .and_then(toml::Value::as_table_mut)
         && let Some(toml::Value::String(api_key)) = server.get("api_key")
-        && interpolate(api_key).is_err_and(|e| e.kind() == ConfigErrorKind::UnresolvedVar)
+        && interpolate_with(api_key, lookup)
+            .is_err_and(|e| e.kind() == ConfigErrorKind::UnresolvedVar)
     {
         server.remove("api_key");
     }
-    interpolate_table(document)
+    interpolate_table(document, lookup)
 }
 
 /// Expands `${VAR}` in every string under one table.
-fn interpolate_table(table: &mut toml::Table) -> Result<(), ConfigError> {
+fn interpolate_table(
+    table: &mut toml::Table,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Result<(), ConfigError> {
     for (_, value) in table.iter_mut() {
-        interpolate_value(value)?;
+        interpolate_value(value, lookup)?;
     }
     Ok(())
 }
 
 /// Expands `${VAR}` in one value, reaching through arrays and tables. A number,
 /// a boolean, and a datetime carry no text to expand.
-fn interpolate_value(value: &mut toml::Value) -> Result<(), ConfigError> {
+fn interpolate_value(
+    value: &mut toml::Value,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Result<(), ConfigError> {
     match value {
-        toml::Value::String(text) => *text = interpolate(text)?,
+        toml::Value::String(text) => *text = interpolate_with(text, lookup)?,
         toml::Value::Array(items) => {
             for item in items {
-                interpolate_value(item)?;
+                interpolate_value(item, lookup)?;
             }
         }
-        toml::Value::Table(table) => interpolate_table(table)?,
+        toml::Value::Table(table) => interpolate_table(table, lookup)?,
         _ => {}
     }
     Ok(())
 }
 
-/// Expands `${VAR}` from the process environment; `$$` is a literal `$`.
-fn interpolate(input: &str) -> Result<String, ConfigError> {
-    interpolate_with(input, &|name| std::env::var(name).ok())
-}
-
-/// Expands `${VAR}` through `lookup`, which answers `None` for an unset name.
+/// Expands `${VAR}` through `lookup`, which answers `None` for an unset name;
+/// `$$` is a literal `$`.
 pub(super) fn interpolate_with(
     input: &str,
     lookup: &dyn Fn(&str) -> Option<String>,

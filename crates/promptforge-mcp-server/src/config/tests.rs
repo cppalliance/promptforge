@@ -161,7 +161,8 @@ fn an_unset_variable_in_the_server_api_key_leaves_it_absent() {
         "api_key = \"shared-bearer\"",
         "api_key = \"${NOT_SET_ANYWHERE}\"",
     );
-    let config = Config::from_toml_str(&toml).expect("an unset server api_key is not a load failure");
+    let config =
+        Config::from_toml_str(&toml).expect("an unset server api_key is not a load failure");
     assert!(config.server.api_key.is_none());
 }
 
@@ -169,7 +170,10 @@ fn an_unset_variable_in_the_server_api_key_leaves_it_absent() {
 fn an_unset_variable_outside_the_server_api_key_is_still_an_error() {
     // The gateway API key is required on both transports, so an unset variable
     // there fails the load rather than starting with a blank credential.
-    let toml = MINIMAL.replace("api_key = \"gateway-bearer\"", "api_key = \"${NOT_SET_ANYWHERE}\"");
+    let toml = MINIMAL.replace(
+        "api_key = \"gateway-bearer\"",
+        "api_key = \"${NOT_SET_ANYWHERE}\"",
+    );
     let err = Config::from_toml_str(&toml).expect_err("an unset gateway api_key is refused");
     assert_eq!(err.kind(), ConfigErrorKind::UnresolvedVar, "{err}");
     assert!(err.to_string().contains("NOT_SET_ANYWHERE"), "{err}");
@@ -276,6 +280,100 @@ fn loads_from_a_file() {
 }
 
 #[test]
+fn an_env_file_beside_the_config_resolves_variables() {
+    // The name-matched env file supplies values the process environment does
+    // not set. The variable name is unique to this test so no real environment
+    // can satisfy it first.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("prompts.toml");
+    let toml = MINIMAL.replace(
+        "api_key = \"gateway-bearer\"",
+        "api_key = \"${PROMPTFORGE_TEST_ENV_FILE_ONLY_KEY}\"",
+    );
+    std::fs::write(&path, toml).expect("write config");
+    std::fs::write(
+        path.with_extension("env"),
+        "PROMPTFORGE_TEST_ENV_FILE_ONLY_KEY=from-env-file\n",
+    )
+    .expect("write env file");
+
+    let config = Config::load(&path).expect("config loads");
+    assert_eq!(config.gateway.api_key.expose(), "from-env-file");
+}
+
+#[test]
+fn the_process_environment_wins_over_the_env_file() {
+    // The stub map stands in for the process environment: precedence is
+    // asserted through the injected lookup rather than `std::env::set_var`,
+    // which is `unsafe` under edition 2024 and forbidden in this workspace.
+    let process_env = BTreeMap::from([("SHARED_KEY".to_string(), "from-process".to_string())]);
+    let env_file = BTreeMap::from([("SHARED_KEY".to_string(), "from-file".to_string())]);
+    let lookup = |name: &str| {
+        process_env
+            .get(name)
+            .cloned()
+            .or_else(|| env_file.get(name).cloned())
+    };
+    let toml = MINIMAL.replace(
+        "api_key = \"gateway-bearer\"",
+        "api_key = \"${SHARED_KEY}\"",
+    );
+
+    let config = Config::from_toml_str_with(&toml, &lookup).expect("config parses");
+    assert_eq!(config.gateway.api_key.expose(), "from-process");
+}
+
+#[test]
+fn a_missing_env_file_is_skipped() {
+    // No `prompts.env` exists beside the config; every variable resolves from
+    // the process environment, which cargo populates for the test binary.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("prompts.toml");
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR");
+    let toml = format!("{MINIMAL}\n[paths]\nprompts = '${{CARGO_MANIFEST_DIR}}'\n");
+    std::fs::write(&path, toml).expect("write config");
+
+    let config = Config::load(&path).expect("config loads with no env file");
+    assert_eq!(config.paths.prompts, PathBuf::from(manifest_dir));
+}
+
+#[test]
+fn a_malformed_env_file_is_ignored() {
+    // A line with no `=` fails dotenvy's parse. The load still succeeds on
+    // process-environment values, with a warning rather than an error.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("prompts.toml");
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR");
+    let toml = format!("{MINIMAL}\n[paths]\nprompts = '${{CARGO_MANIFEST_DIR}}'\n");
+    std::fs::write(&path, toml).expect("write config");
+    std::fs::write(path.with_extension("env"), "this line has no separator\n").expect("write env");
+
+    let config = Config::load(&path).expect("a malformed env file never fails the load");
+    assert_eq!(config.paths.prompts, PathBuf::from(manifest_dir));
+}
+
+#[test]
+fn env_file_values_do_not_leak_into_the_process_environment() {
+    // The env file is parsed into an in-memory map, so a value it carries is
+    // still absent from the process environment after the load.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("prompts.toml");
+    std::fs::write(&path, MINIMAL).expect("write config");
+    std::fs::write(
+        path.with_extension("env"),
+        "PROMPTFORGE_TEST_LEAK_CHECK=from-env-file\n",
+    )
+    .expect("write env file");
+    assert!(std::env::var("PROMPTFORGE_TEST_LEAK_CHECK").is_err());
+
+    Config::load(&path).expect("config loads");
+    assert!(
+        std::env::var("PROMPTFORGE_TEST_LEAK_CHECK").is_err(),
+        "the env file must not mutate the process environment"
+    );
+}
+
+#[test]
 fn an_unreadable_file_names_its_path_and_a_not_found_source() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("absent.toml");
@@ -298,7 +396,10 @@ fn from_str_agrees_with_from_toml_str() {
     let parsed: Config = MINIMAL.parse().expect("FromStr parses the minimal config");
     let direct = Config::from_toml_str(MINIMAL).expect("from_toml_str parses it too");
     assert_eq!(parsed.gateway.url.as_str(), direct.gateway.url.as_str());
-    assert_eq!(parsed.gateway.api_key.expose(), direct.gateway.api_key.expose());
+    assert_eq!(
+        parsed.gateway.api_key.expose(),
+        direct.gateway.api_key.expose()
+    );
 }
 
 #[test]
