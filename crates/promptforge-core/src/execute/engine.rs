@@ -243,6 +243,10 @@ async fn run_one_section(
         vm.teardown(ctx.observer, &section.name);
         return Err(error);
     }
+    if let Err(error) = vm.install_host_apis(ctx.observer_arc, &section.name) {
+        vm.teardown(ctx.observer, &section.name);
+        return Err(error);
+    }
 
     // The infer hook carries a lazy client source (F5): a nested `model:infer`
     // surfaces a concrete construction error on first use instead of the setup
