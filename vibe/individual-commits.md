@@ -48,3 +48,5 @@
 
 ## 2026-08-17 Correct promptforge version in doc examples to 1
 
+## 2026-08-18 Fix gateway doctests to set api_key in [server]
+
