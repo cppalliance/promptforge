@@ -42,7 +42,7 @@ fn tool_bag_caches_on_unchanged_generation() {
         "Bag",
     )
     .expect("prologue must compile");
-    vm.run_prologue(&add_echo, &NullObserver, "Bag")
+    vm.run_chunk(&add_echo, &NullObserver, "Bag")
         .expect("tools.add(echo) must succeed");
 
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
@@ -94,7 +94,7 @@ fn tool_bag_caches_on_unchanged_generation() {
         "Bag",
     )
     .expect("second prologue must compile");
-    vm.run_prologue(&add_fetch, &NullObserver, "Bag")
+    vm.run_chunk(&add_fetch, &NullObserver, "Bag")
         .expect("tools.add(fetch) must succeed");
     {
         let runtime = tool_runtime.lock().expect("runtime mutex");
@@ -170,7 +170,7 @@ fn tool_description_override_appears_in_model_schema() {
     )
     .expect("prologue must compile");
     default_vm
-        .run_prologue(&add_default, &NullObserver, "Override")
+        .run_chunk(&add_default, &NullObserver, "Override")
         .expect("tools.add(echo) without override must succeed");
     let (default_bindings, default_runtime) = default_vm.tool_bag_handles();
     let mut default_bag = ToolBag::new(default_bindings, Arc::clone(&default_runtime));
@@ -217,7 +217,7 @@ fn tool_description_override_appears_in_model_schema() {
         "Override",
     )
     .expect("prologue must compile");
-    vm.run_prologue(&add_override, &NullObserver, "Override")
+    vm.run_chunk(&add_override, &NullObserver, "Override")
         .expect("description override before tools.add must succeed");
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
     let mut bag = ToolBag::new(tool_bindings, Arc::clone(&tool_runtime));
