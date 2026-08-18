@@ -105,7 +105,7 @@ fn run(source: &str, args: &str) -> Result<LuaOutcome> {
         &json!({ "id": 1, "when": "t" }),
         &StoreRef::memory(),
         EXECUTION,
-        &NullObserver,
+        &null_observer(),
         "Test",
     )
 }
@@ -119,9 +119,14 @@ fn run_with(source: &str, store: &StoreRef) -> Result<LuaOutcome> {
         &json!({ "id": 1, "when": "t" }),
         store,
         EXECUTION,
-        &NullObserver,
+        &null_observer(),
         "Test",
     )
+}
+
+/// A null observer in the owned form the persistent host-API install takes.
+fn null_observer() -> Arc<dyn Observer> {
+    Arc::new(NullObserver)
 }
 
 /// Runs one chunk on an existing VM and unwraps the scalar return, failing
@@ -211,23 +216,41 @@ fn execute_live_tool_needs(
 }
 
 fn section_vm_with_bindings(
-    _source: &LuaProgram,
     bindings: &ToolBindings,
     execution: &str,
     observer: &dyn Observer,
     section: &str,
 ) -> Result<SectionVm> {
-    SectionVm::new_for_section(
-        None,
+    let vm = SectionVm::new_for_section(
         bindings,
         &<ModelBindings as Default>::default(),
         execution,
         observer,
         section,
-    )
+    )?;
+    vm.install_captured_bindings()?;
+    Ok(vm)
 }
 
-fn fixture_bindings(source: &str) -> (LuaProgram, ToolBindings) {
+/// Builds a section VM through the engine's startup order for a shared
+/// library: construction, host injection, persistent host APIs, then the
+/// shared replay. Tests that need control globals or captured bindings add
+/// them by hand.
+fn section_vm_with_shared(
+    shared: &LuaProgram,
+    args: &str,
+    store: &StoreRef,
+    observer: &Arc<dyn Observer>,
+    section: &str,
+) -> Result<SectionVm> {
+    let mut vm = SectionVm::new(EXECUTION, observer.as_ref(), section)?;
+    vm.inject_host(args, &json!({}), store, None)?;
+    vm.install_host_apis(observer, section)?;
+    vm.replay_shared(shared, observer.as_ref(), section)?;
+    Ok(vm)
+}
+
+fn fixture_bindings(source: &str) -> ToolBindings {
     let shared = program(source);
     let resolver = |description: &str| {
         Ok(ToolId::new(
@@ -240,16 +263,21 @@ fn fixture_bindings(source: &str) -> (LuaProgram, ToolBindings) {
         )
         .expect("valid id"))
     };
-    let bindings = execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
-        .expect("fixture needs must resolve");
-    (shared, bindings)
+    execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+        .expect("fixture needs must resolve")
 }
 
 #[test]
 fn direct_output_is_absent_in_every_executable_lua_vm() {
     let library = program("assert(print == nil); assert(warn == nil); log('library load')");
-    let library_vm = SectionVm::new(Some(&library), EXECUTION, &NullObserver, "Section")
-        .expect("library VM must not expose direct output");
+    let library_vm = section_vm_with_shared(
+        &library,
+        "",
+        &StoreRef::memory(),
+        &null_observer(),
+        "Section",
+    )
+    .expect("library VM must not expose direct output");
     library_vm.teardown(&NullObserver, "Section");
 
     let shared = program(
@@ -260,7 +288,7 @@ fn direct_output_is_absent_in_every_executable_lua_vm() {
     let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
     let bindings = execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
         .expect("live H1 VM must not expose direct output");
-    let mut vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("section VM must not expose direct output");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
@@ -300,14 +328,8 @@ fn logs_are_correlated_and_ordered_across_chunks() {
         )],
         Vec::new(),
     );
-    let mut vm = section_vm_with_bindings(
-        &program(""),
-        &bindings,
-        EXECUTION,
-        recorder.as_ref(),
-        "Gather",
-    )
-    .expect("section VM must install captured bindings");
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, recorder.as_ref(), "Gather")
+        .expect("section VM must install captured bindings");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
     let observer: Arc<dyn Observer> = recorder.clone();
@@ -345,7 +367,8 @@ fn logs_are_correlated_and_ordered_across_chunks() {
 
 #[test]
 fn compatibility_chunk_logs_interleave_with_host_operations() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
+    let observer: Arc<dyn Observer> = recorder.clone();
     run_chunk(
         "log('before write')\n\
              store.write('state.txt', 'value')\n\
@@ -354,7 +377,7 @@ fn compatibility_chunk_logs_interleave_with_host_operations() {
         &json!({}),
         &StoreRef::memory(),
         "compatibility-run",
-        &recorder,
+        &observer,
         "Compatibility",
     )
     .expect("compatibility logging must succeed");
@@ -405,14 +428,15 @@ fn log_accepts_exactly_one_bounded_control_free_utf8_string() {
         ),
     ];
     for (source, expected) in invalid {
-        let recorder = Recorder::default();
+        let recorder = Arc::new(Recorder::default());
+        let observer: Arc<dyn Observer> = recorder.clone();
         let error = run_chunk(
             source,
             "",
             &json!({}),
             &StoreRef::memory(),
             EXECUTION,
-            &recorder,
+            &observer,
             "Validation",
         )
         .expect_err("invalid log input must fail");
@@ -443,14 +467,15 @@ fn log_accepts_exactly_one_bounded_control_free_utf8_string() {
         "log({})",
         serde_json::to_string(&maximum).expect("test string must serialize")
     );
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
+    let observer: Arc<dyn Observer> = recorder.clone();
     run_chunk(
         &source,
         "",
         &json!({}),
         &StoreRef::memory(),
         EXECUTION,
-        &recorder,
+        &observer,
         "Validation",
     )
     .expect("256 Unicode characters must succeed");
@@ -471,7 +496,7 @@ fn log_cumulative_byte_budget_is_enforced_before_the_event_budget() {
     // 400-byte messages (200 two-byte chars each) exceed it on the third
     // call, while only three of the four events have been spent - so the
     // BYTE ceiling, not the event ceiling, is what refuses the call.
-    let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Budget").expect("VM builds");
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Budget").expect("VM builds");
     vm.apply_lua_limits(DEFAULT_LUA_MEMORY_BYTES, 4)
         .expect("limits apply");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
@@ -518,14 +543,15 @@ fn logging_does_not_change_results_or_store_effects_with_null_observer() {
                       store.write('answer.txt', args)\n\
                       return var.answer";
     let recorded_store = StoreRef::memory();
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
+    let observer: Arc<dyn Observer> = recorder.clone();
     let observed_outcome = run_chunk(
         source,
         "same",
         &json!({}),
         &recorded_store,
         EXECUTION,
-        &recorder,
+        &observer,
         "Equivalence",
     )
     .expect("recorded execution must succeed");
@@ -536,7 +562,7 @@ fn logging_does_not_change_results_or_store_effects_with_null_observer() {
         &json!({}),
         &null_store,
         EXECUTION,
-        &NullObserver,
+        &null_observer(),
         "Equivalence",
     )
     .expect("silent execution must succeed");
@@ -559,8 +585,7 @@ fn installed_log_persists_across_chunks() {
     // reference stays live for every later chunk in the same VM.
     let recorder = Arc::new(Recorder::default());
     let observer: Arc<dyn Observer> = recorder.clone();
-    let mut vm =
-        SectionVm::new(None, EXECUTION, &NullObserver, "Section").expect("VM must construct");
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Section").expect("VM must construct");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
     vm.install_host_apis(&observer, "Section")
@@ -597,13 +622,14 @@ fn concurrent_logs_keep_execution_ids_and_local_order() {
     for execution in ["execution-a", "execution-b"] {
         let recorder = Arc::clone(&recorder);
         workers.push(std::thread::spawn(move || {
+            let observer: Arc<dyn Observer> = recorder.clone();
             run_chunk(
                 "log('first'); log('second')",
                 "",
                 &json!({}),
                 &StoreRef::memory(),
                 execution,
-                recorder.as_ref(),
+                &observer,
                 "Concurrent",
             )
             .expect("concurrent log run must succeed");
@@ -634,7 +660,7 @@ fn binding_records_exact_aliases_descriptions_identities_and_always_scope() {
     let source = "tools.need('web_search', 'search the web')\n\
                       tools.need('web_fetch2', 'fetch a page')\n\
                       tools.always('web_search')";
-    let (_, bindings) = fixture_bindings(source);
+    let bindings = fixture_bindings(source);
 
     assert_eq!(
         bindings
@@ -666,7 +692,7 @@ fn tool_need_returns_inspectable_object() {
         .expect("tools.need must return an inspectable Tool object");
     assert_eq!(bindings.bindings()[0].alias(), "search");
 
-    let vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+    let vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("section install must expose the same inspectable Tool object");
     vm.teardown(&NullObserver, "Section");
 }
@@ -756,16 +782,10 @@ fn binding_rejects_unknown_and_duplicate_always_aliases() {
 
 #[test]
 fn captured_bindings_do_not_execute_h1_source() {
-    let (_, bindings) =
+    let bindings =
         fixture_bindings("tools.need('search', 'search the web'); tools.always('search')");
-    let mut vm = section_vm_with_bindings(
-        &program("h1_was_executed = true"),
-        &bindings,
-        EXECUTION,
-        &NullObserver,
-        "Section",
-    )
-    .expect("captured bindings must install without executing H1");
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
+        .expect("captured bindings must install without executing H1");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
     run_scalar(
@@ -779,13 +799,13 @@ fn captured_bindings_do_not_execute_h1_source() {
 
 #[test]
 fn h2_recording_closes_to_always_then_added_scope() {
-    let (shared, bindings) = fixture_bindings(
+    let bindings = fixture_bindings(
         "tools.need('search', 'search the web'); \
              tools.need('fetch', 'fetch a page'); \
              tools.always('search')",
     );
     let prologue = program("tools.add('fetch', 'search', 'fetch')");
-    let mut vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
@@ -830,7 +850,7 @@ fn h2_add_accepts_tool_objects_and_arrays() {
         "H1 tools.add(Tool) must report the phase error, not a type error: {h1_error}"
     );
 
-    let (shared, bindings) = fixture_bindings(
+    let bindings = fixture_bindings(
         "search = tools.need('search', 'search the web'); \
              fetch = tools.need('fetch', 'fetch a page')",
     );
@@ -839,7 +859,7 @@ fn h2_add_accepts_tool_objects_and_arrays() {
              tools.add({fetch}); \
              tools.add(search, 'fetch', {search, fetch})",
     );
-    let mut vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
@@ -857,7 +877,7 @@ fn h2_add_accepts_tool_objects_and_arrays() {
 
 #[test]
 fn empty_add_is_a_no_op_and_failed_variadic_add_is_atomic() {
-    let (shared, bindings) = fixture_bindings(
+    let bindings = fixture_bindings(
         "tools.need('search', 'search the web'); \
              tools.need('fetch', 'fetch a page')",
     );
@@ -867,7 +887,7 @@ fn empty_add_is_a_no_op_and_failed_variadic_add_is_atomic() {
              if ok then error('invalid add unexpectedly succeeded') end; \
              tools.add('fetch')",
     );
-    let mut vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
@@ -885,8 +905,8 @@ fn empty_add_is_a_no_op_and_failed_variadic_add_is_atomic() {
 
 #[test]
 fn tool_operations_enforce_their_lifecycle_phase_even_when_captured() {
-    let (shared, bindings) = fixture_bindings("tools.need('search', 'search the web')");
-    let mut vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+    let bindings = fixture_bindings("tools.need('search', 'search the web')");
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
@@ -907,8 +927,8 @@ fn tool_operations_enforce_their_lifecycle_phase_even_when_captured() {
 
 #[test]
 fn unknown_h2_alias_fails_before_scope_closure() {
-    let (shared, bindings) = fixture_bindings("tools.need('search', 'search the web')");
-    let mut vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Section")
+    let bindings = fixture_bindings("tools.need('search', 'search the web')");
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
@@ -933,7 +953,7 @@ fn captured_bindings_are_installed_without_payload_reports() {
         Vec::new(),
     );
     let recorder = Recorder::default();
-    let mut vm = section_vm_with_bindings(&program(""), &bindings, EXECUTION, &recorder, "Section")
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &recorder, "Section")
         .expect("captured binding installation must succeed");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
@@ -950,8 +970,13 @@ fn section_vm_is_send() {
 
 #[test]
 fn section_vm_preserves_one_environment_across_all_phases() {
+    // The shared library replays as the section's first chunk with the full
+    // host environment installed, so its top level reads `args` and `store`
+    // at load; the functions it defines resolve the same globals when later
+    // chunks call them.
     let shared = program(
         "shared_saw_args = args\n\
+             shared_saw_store = store.read('seed.txt')\n\
              function decorate(value) return '<' .. value .. '>' end",
     );
     let prologue = program(
@@ -959,15 +984,19 @@ fn section_vm_preserves_one_environment_across_all_phases() {
              store.write('phase.txt', var.from_shared)",
     );
     let epilog =
-        program("return shared_saw_args == nil and decorate(reply) or 'host leaked early'");
+        program("return decorate(reply) .. ':' .. shared_saw_args .. ':' .. shared_saw_store");
     let store = StoreRef::memory();
-    let mut vm = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "Test")
-        .expect("shared program must run");
+    store
+        .write("seed.txt", "seeded")
+        .expect("the memory store can seed a file");
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Test").expect("VM must build");
     vm.inject_host("input", &json!({ "id": 7 }), &store, None)
         .expect("host values must inject");
     let null_observer: Arc<dyn Observer> = Arc::new(NullObserver);
     vm.install_host_apis(&null_observer, "Test")
         .expect("host APIs must install");
+    vm.replay_shared(&shared, &NullObserver, "Test")
+        .expect("shared program must run with the full environment");
 
     assert_eq!(
         run_scalar(&vm, &prologue, &NullObserver, "Test").expect("prologue must run"),
@@ -991,7 +1020,7 @@ fn section_vm_preserves_one_environment_across_all_phases() {
         run_scalar(&vm, &epilog, &NullObserver, "Test")
             .expect("epilog must run")
             .as_deref(),
-        Some("<model answer>")
+        Some("<model answer>:input:seeded")
     );
 }
 
@@ -999,7 +1028,7 @@ fn section_vm_preserves_one_environment_across_all_phases() {
 fn section_vm_requires_delayed_single_host_injection() {
     let no_op = program("return args");
     let store = StoreRef::memory();
-    let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Test").expect("VM must build");
 
     let error = run_scalar(&vm, &no_op, &NullObserver, "Test")
         .expect_err("programs cannot run before host injection");
@@ -1015,22 +1044,47 @@ fn section_vm_requires_delayed_single_host_injection() {
 
 #[test]
 fn section_vm_host_injection_bypasses_shared_global_metatables() {
+    // Host values inject before the shared replay, and the captured alias
+    // globals raw-set after it, so a metatable the shared library installs on
+    // `_G` intercepts neither.
     let shared = program(
         "captured = {}\n\
              setmetatable(_G, { __newindex = function(_, key, value) captured[key] = value end })",
     );
-    let inspect =
-        program("return tostring(captured.args) .. ',' .. tostring(captured.store) .. ',' .. args");
-    let mut vm = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "Test")
-        .expect("shared program must run");
+    let inspect = program(
+        "return tostring(captured.args) .. ',' .. tostring(captured.search) .. ',' .. args .. ',' .. type(search)",
+    );
+    let bindings = ToolBindings::for_test(
+        vec![ToolBinding::for_test(
+            "search",
+            "search the web",
+            ToolId::new("fixtures", "search").expect("valid id"),
+        )],
+        Vec::new(),
+    );
+    let mut vm = SectionVm::new_for_section(
+        &bindings,
+        &<ModelBindings as Default>::default(),
+        EXECUTION,
+        &NullObserver,
+        "Test",
+    )
+    .expect("VM must build");
     vm.inject_host("private input", &json!({}), &StoreRef::memory(), None)
-        .expect("raw host injection must bypass the shared metatable");
+        .expect("host values must inject");
+    let observer = null_observer();
+    vm.install_host_apis(&observer, "Test")
+        .expect("host APIs must install");
+    vm.replay_shared(&shared, &NullObserver, "Test")
+        .expect("shared program must run");
+    vm.install_captured_bindings()
+        .expect("captured bindings must install");
 
     assert_eq!(
         run_scalar(&vm, &inspect, &NullObserver, "Test")
             .expect("inspection must run")
             .as_deref(),
-        Some("nil,nil,private input")
+        Some("nil,nil,private input,userdata")
     );
 }
 
@@ -1039,7 +1093,7 @@ fn section_vm_reports_store_operations_in_each_chunk() {
     let write = program("store.write('state.txt', args)");
     let read = program("return store.read('state.txt')");
     let recorder = Arc::new(Recorder::default());
-    let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Gather").expect("VM must build");
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Gather").expect("VM must build");
     vm.inject_host("private input", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
     let observer: Arc<dyn Observer> = recorder.clone();
@@ -1089,7 +1143,7 @@ fn section_vm_accepts_only_scalar_top_level_returns() {
         ("return true", Some("true")),
         ("return nil", None),
     ] {
-        let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
+        let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Test").expect("VM must build");
         vm.inject_host("", &json!({}), &store, None)
             .expect("host values must inject");
         assert_eq!(
@@ -1100,7 +1154,7 @@ fn section_vm_accepts_only_scalar_top_level_returns() {
         );
     }
 
-    let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Test").expect("VM must build");
     vm.inject_host("", &json!({}), &store, None)
         .expect("host values must inject");
     let error = run_scalar(&vm, &program("return {}"), &NullObserver, "Test")
@@ -1113,16 +1167,10 @@ fn section_vms_isolate_mutated_shared_globals() {
     let shared = program("counter = 0");
     let increment = program("counter = counter + 1; return counter");
     let store = StoreRef::memory();
-    let mut first = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "First")
+    let first = section_vm_with_shared(&shared, "", &store, &null_observer(), "First")
         .expect("first VM must build");
-    let mut second = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "Second")
+    let second = section_vm_with_shared(&shared, "", &store, &null_observer(), "Second")
         .expect("second VM must build");
-    first
-        .inject_host("", &json!({}), &store, None)
-        .expect("first host must inject");
-    second
-        .inject_host("", &json!({}), &store, None)
-        .expect("second host must inject");
 
     assert_eq!(
         run_scalar(&first, &increment, &NullObserver, "First")
@@ -1146,11 +1194,11 @@ fn section_vms_isolate_mutated_shared_globals() {
 
 #[test]
 fn shared_program_consumes_the_later_phase_instruction_budget() {
+    // The replay shares the section VM's single instruction counter, so work
+    // the shared library does at load shrinks the budget left for chunks.
     let work = program("for i = 1, 3000000 do local value = i end");
-    let mut vm = SectionVm::new(Some(&work), EXECUTION, &NullObserver, "Test")
+    let vm = section_vm_with_shared(&work, "", &StoreRef::memory(), &null_observer(), "Test")
         .expect("shared work must fit the budget");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .expect("host values must inject");
 
     let error = run_scalar(&vm, &work, &NullObserver, "Test")
         .expect_err("the prologue must exhaust the budget left by shared execution");
@@ -1167,20 +1215,224 @@ fn shared_program_consumes_the_later_phase_instruction_budget() {
 }
 
 #[test]
+fn shared_replay_consumes_the_configured_log_budget() {
+    // `apply_lua_limits` lands before the replay, so the replay spends the
+    // configured log budget rather than the construction defaults.
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Budget").expect("VM builds");
+    vm.apply_lua_limits(DEFAULT_LUA_MEMORY_BYTES, 1)
+        .expect("limits apply");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host injects");
+    let observer = null_observer();
+    vm.install_host_apis(&observer, "Budget")
+        .expect("host APIs must install");
+    let error = vm
+        .replay_shared(&program("log('one')\nlog('two')"), &NullObserver, "Budget")
+        .expect_err("the second log must exhaust the configured budget");
+    assert!(
+        matches!(
+            error,
+            Error::LuaQuota {
+                resource: "log event"
+            }
+        ),
+        "log-budget exhaustion must surface as a typed LuaQuota: {error:?}"
+    );
+    vm.teardown(&NullObserver, "Budget");
+}
+
+#[test]
+fn jump_during_shared_replay_is_a_hard_error() {
+    // Load-time control transfer has no section walk to transfer into, so a
+    // recorded jump fails the replay outright.
+    let shared = program("jump('## Anywhere')");
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Test").expect("VM must build");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host values must inject");
+    let observer = null_observer();
+    vm.install_host_apis(&observer, "Test")
+        .expect("host APIs must install");
+    vm.install_control_globals(
+        &[],
+        |_, _| Err(Error::Lua("execute is not needed here".to_owned())),
+        |_, _| Err(Error::Lua("fanout is not needed here".to_owned())),
+    )
+    .expect("control globals must install");
+    let error = vm
+        .replay_shared(&shared, &NullObserver, "Test")
+        .expect_err("jump during the shared replay must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("jump is not available during shared library load"),
+        "the hard error must name the phase: {error}"
+    );
+    vm.teardown(&NullObserver, "Test");
+}
+
+#[test]
+fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
+    // The `tools`/`models` tables install with host injection, before the
+    // replay, so shared top-level code may scope tools at load. The bare
+    // alias globals install only after the replay, so a declared alias wins
+    // over a same-named shared global.
+    let bindings = ToolBindings::for_test(
+        vec![ToolBinding::for_test(
+            "search",
+            "search the web",
+            ToolId::new("fixtures", "search").expect("valid id"),
+        )],
+        Vec::new(),
+    );
+    let shared = program(
+        "tools.add('search')\n\
+         assert(search == nil, 'the bare alias global installs after the replay')",
+    );
+    let mut vm = SectionVm::new_for_section(
+        &bindings,
+        &<ModelBindings as Default>::default(),
+        EXECUTION,
+        &NullObserver,
+        "Test",
+    )
+    .expect("VM must build");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host values must inject");
+    let observer = null_observer();
+    vm.install_host_apis(&observer, "Test")
+        .expect("host APIs must install");
+    vm.replay_shared(&shared, &NullObserver, "Test")
+        .expect("the tools table must work during the shared replay");
+    vm.install_captured_bindings()
+        .expect("captured bindings must install");
+
+    assert_eq!(
+        run_scalar(&vm, &program("return type(search)"), &NullObserver, "Test")
+            .expect("the alias global installs after the replay")
+            .as_deref(),
+        Some("userdata")
+    );
+    let (bindings, runtime) = vm.tool_bag_handles();
+    let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
+    assert_eq!(
+        scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
+        ["search"],
+        "the load-time tools.add must be recorded"
+    );
+}
+
+#[test]
+fn shared_functions_resolve_host_globals_when_called_from_a_later_chunk() {
+    // A shared function body resolves `tools`/`var` through the real globals
+    // at call time, so a later chunk can drive host mutations through it.
+    let bindings = ToolBindings::for_test(
+        vec![ToolBinding::for_test(
+            "search",
+            "search the web",
+            ToolId::new("fixtures", "search").expect("valid id"),
+        )],
+        Vec::new(),
+    );
+    let shared = program(
+        "function scope_and_store(alias)\n\
+             tools.add(alias)\n\
+             var.scoped = alias\n\
+             return var.scoped\n\
+         end",
+    );
+    let mut vm = SectionVm::new_for_section(
+        &bindings,
+        &<ModelBindings as Default>::default(),
+        EXECUTION,
+        &NullObserver,
+        "Test",
+    )
+    .expect("VM must build");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host values must inject");
+    let observer = null_observer();
+    vm.install_host_apis(&observer, "Test")
+        .expect("host APIs must install");
+    vm.replay_shared(&shared, &NullObserver, "Test")
+        .expect("shared library must load");
+    vm.install_captured_bindings()
+        .expect("captured bindings must install");
+
+    assert_eq!(
+        run_scalar(
+            &vm,
+            &program("return scope_and_store('search')"),
+            &NullObserver,
+            "Test",
+        )
+        .expect("the shared function must mutate host state when called")
+        .as_deref(),
+        Some("search")
+    );
+    let (bindings, runtime) = vm.tool_bag_handles();
+    let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
+    assert_eq!(
+        scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
+        ["search"]
+    );
+}
+
+#[test]
+fn absent_shared_library_replays_an_empty_chunk_on_the_same_path() {
+    // No `lua shared` fence: startup still replays, with an empty compiled
+    // chunk, and reports the same load boundary.
+    let recorder = Arc::new(Recorder::default());
+    let mut vm = SectionVm::new(EXECUTION, recorder.as_ref(), "Test").expect("VM must build");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host values must inject");
+    let observer: Arc<dyn Observer> = recorder.clone();
+    vm.install_host_apis(&observer, "Test")
+        .expect("host APIs must install");
+    vm.replay_shared(
+        &LuaProgram::empty().expect("the empty chunk compiles"),
+        recorder.as_ref(),
+        "Test",
+    )
+    .expect("the empty replay must succeed");
+    assert_eq!(
+        run_scalar(&vm, &program("return 42"), recorder.as_ref(), "Test")
+            .expect("a chunk runs after the empty replay")
+            .as_deref(),
+        Some("42")
+    );
+    assert_eq!(
+        recorder.observations(),
+        [
+            detail::LUA_SHARED_LOAD_STARTED,
+            detail::LUA_SHARED_LOAD_SUCCEEDED,
+            detail::LUA_CHUNK_STARTED,
+            detail::LUA_CHUNK_SUCCEEDED,
+        ]
+        .into_iter()
+        .map(|detail| ("Test".to_owned(), detail.clone()))
+        .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
     let shared = program("private_global = 'shared secret'");
     let prologue = program("var.value = args");
     let epilog = program("return reply");
-    let recorder = Recorder::default();
-    let mut vm = SectionVm::new(Some(&shared), EXECUTION, &recorder, "Gather")
-        .expect("shared program must run");
+    let recorder = Arc::new(Recorder::default());
+    let mut vm = SectionVm::new(EXECUTION, recorder.as_ref(), "Gather").expect("VM must build");
     vm.inject_host("private input", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
-    run_scalar(&vm, &prologue, &recorder, "Gather").expect("prologue must run");
-    vm.bind_reply("private reply", &recorder, "Gather")
+    let observer: Arc<dyn Observer> = recorder.clone();
+    vm.install_host_apis(&observer, "Gather")
+        .expect("host APIs must install");
+    vm.replay_shared(&shared, recorder.as_ref(), "Gather")
+        .expect("shared program must run");
+    run_scalar(&vm, &prologue, recorder.as_ref(), "Gather").expect("prologue must run");
+    vm.bind_reply("private reply", recorder.as_ref(), "Gather")
         .expect("reply must bind");
-    run_scalar(&vm, &epilog, &recorder, "Gather").expect("epilog must run");
-    vm.teardown(&recorder, "Gather");
+    run_scalar(&vm, &epilog, recorder.as_ref(), "Gather").expect("epilog must run");
+    vm.teardown(recorder.as_ref(), "Gather");
 
     let observations = recorder.observations();
     assert_eq!(
@@ -1209,10 +1461,17 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
 
 #[test]
 fn section_lifecycle_failures_report_their_phase() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let failing_shared = program("error('private shared failure')");
-    SectionVm::new(Some(&failing_shared), EXECUTION, &recorder, "Shared")
+    let mut vm = SectionVm::new(EXECUTION, recorder.as_ref(), "Shared").expect("VM must build");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host values must inject");
+    let observer: Arc<dyn Observer> = recorder.clone();
+    vm.install_host_apis(&observer, "Shared")
+        .expect("host APIs must install");
+    vm.replay_shared(&failing_shared, recorder.as_ref(), "Shared")
         .expect_err("shared execution must fail");
+    vm.teardown(recorder.as_ref(), "Shared");
     assert_eq!(
         recorder.observations(),
         [
@@ -1227,7 +1486,7 @@ fn section_lifecycle_failures_report_their_phase() {
     );
 
     let recorder = Recorder::default();
-    let vm = SectionVm::new(None, EXECUTION, &NullObserver, "Prologue").expect("VM must build");
+    let vm = SectionVm::new(EXECUTION, &NullObserver, "Prologue").expect("VM must build");
     run_scalar(&vm, &program("return nil"), &recorder, "Prologue")
         .expect_err("prologue before injection must fail");
     assert!(
@@ -1300,7 +1559,7 @@ fn current_sys_returns_fallback_when_unset_and_errors_on_poison() {
     // LUA-006: an unset live slot is a legitimate state and yields the
     // fallback; a poisoned lock is a real failure and must NOT masquerade as
     // the fallback.
-    let vm = SectionVm::new(None, EXECUTION, &NullObserver, "Section").expect("VM must build");
+    let vm = SectionVm::new(EXECUTION, &NullObserver, "Section").expect("VM must build");
     let fallback = json!({ "id": 7 });
     let got = vm
         .current_sys(&fallback)
@@ -1654,7 +1913,7 @@ fn add_without_declarations_fails_as_undeclared_in_a_chunk() {
 
 #[test]
 fn add_without_declarations_fails_in_a_prologue_without_a_shared_library() {
-    let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Test").expect("VM must build");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
     let error = run_scalar(
@@ -1680,7 +1939,7 @@ fn add_with_empty_frozen_needs_fails_as_undeclared() {
     let bindings = execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
         .expect("a need-free H1 program must execute");
     assert!(bindings.bindings().is_empty());
-    let mut vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Test")
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Test")
         .expect("empty captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
@@ -1700,8 +1959,8 @@ fn add_with_empty_frozen_needs_fails_as_undeclared() {
 
 #[test]
 fn add_with_a_description_argument_fails_alias_validation() {
-    let (shared, bindings) = fixture_bindings("tools.need('search', 'search the web')");
-    let mut vm = section_vm_with_bindings(&shared, &bindings, EXECUTION, &NullObserver, "Test")
+    let bindings = fixture_bindings("tools.need('search', 'search the web')");
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Test")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
@@ -1721,7 +1980,7 @@ fn add_with_a_description_argument_fails_alias_validation() {
 
 #[test]
 fn a_section_vm_without_declarations_snapshots_to_an_empty_scope() {
-    let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Test").expect("VM must build");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
     let (bindings, runtime) = vm.tool_bag_handles();
@@ -2051,7 +2310,7 @@ fn installed_store_read_honors_line_bounds() {
     store
         .write("a.txt", "one\ntwo\nthree\n")
         .expect("the memory store can prepare a file");
-    let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Test").expect("VM must build");
     vm.inject_host("", &json!({}), &store, None)
         .expect("host values must inject");
     let observer: Arc<dyn Observer> = Arc::new(NullObserver);
@@ -2086,7 +2345,7 @@ fn installed_store_read_numbered_honors_line_bounds() {
     store
         .write("a.txt", "one\ntwo\nthree\n")
         .expect("the memory store can prepare a file");
-    let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Test").expect("VM must build");
     vm.inject_host("", &json!({}), &store, None)
         .expect("host values must inject");
     let observer: Arc<dyn Observer> = Arc::new(NullObserver);
@@ -2185,7 +2444,8 @@ fn store_writes_are_visible_on_the_shared_handle() {
 
 #[test]
 fn store_reports_are_ordered_exact_and_payload_free_on_failure() {
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
+    let observer: Arc<dyn Observer> = recorder.clone();
     let store = StoreRef::memory();
     let source = "store.write('secret/path.txt', 'private contents')\n\
                       store.read('secret/path.txt')\n\
@@ -2196,7 +2456,7 @@ fn store_reports_are_ordered_exact_and_payload_free_on_failure() {
         &json!({ "id": 1, "when": "t" }),
         &store,
         EXECUTION,
-        &recorder,
+        &observer,
         "Gather",
     )
     .expect_err("the missing anchor must fail");
@@ -2307,14 +2567,15 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
     for case in cases {
         let store = StoreRef::memory();
         (case.prepare)(&store);
-        let recorder = Recorder::default();
+        let recorder = Arc::new(Recorder::default());
+        let observer: Arc<dyn Observer> = recorder.clone();
         run_chunk(
             case.source,
             "",
             &json!({}),
             &store,
             EXECUTION,
-            &recorder,
+            &observer,
             "StoreRef",
         )
         .expect("the memory store operation succeeds");
@@ -2326,14 +2587,15 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
         );
 
         let store = StoreRef::new(Box::new(FailingStore));
-        let recorder = Recorder::default();
+        let recorder = Arc::new(Recorder::default());
+        let observer: Arc<dyn Observer> = recorder.clone();
         let error = run_chunk(
             case.source,
             "",
             &json!({}),
             &store,
             EXECUTION,
-            &recorder,
+            &observer,
             "StoreRef",
         )
         .expect_err("the failing backend rejects every operation");
@@ -2350,10 +2612,11 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
 #[test]
 fn store_observations_happen_before_later_lua_side_effects() {
     let store = StoreRef::memory();
-    let recorder = BoundaryRecorder {
+    let recorder = Arc::new(BoundaryRecorder {
         store: store.clone(),
         snapshots: Mutex::new(Vec::new()),
-    };
+    });
+    let observer: Arc<dyn Observer> = recorder.clone();
 
     run_chunk(
         "store.write('first.txt', '')\nstore.write('second.txt', '')",
@@ -2361,7 +2624,7 @@ fn store_observations_happen_before_later_lua_side_effects() {
         &json!({}),
         &store,
         EXECUTION,
-        &recorder,
+        &observer,
         "StoreRef",
     )
     .expect("both writes succeed");
@@ -2420,7 +2683,8 @@ fn untrusted_global_is_callable_from_the_shared_library() {
         "local wrapped = untrusted('a < b')\n\
          assert(wrapped:find('a &lt; b', 1, true), 'shared sees the escaped body')",
     );
-    let vm = SectionVm::new(Some(&shared), EXECUTION, &NullObserver, "Test")
+    let vm = SectionVm::new(EXECUTION, &NullObserver, "Test").expect("VM must build");
+    vm.replay_shared(&shared, &NullObserver, "Test")
         .expect("the shared library must call untrusted during load");
     vm.teardown(&NullObserver, "Test");
 }

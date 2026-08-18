@@ -69,6 +69,10 @@ Summarize this text in one paragraph.
 {{ args }}
 ````
 
+## Shared Libraries
+
+A `lua shared` fence in the H1 region defines a library compiled once at parse time and replayed into every section VM as its first chunk - before any of the section's own Lua blocks run. The replay runs with the full section environment installed (`args`, `sys`, `var`, `reply`, `store`, `log`, the `tools`/`models` tables, and the control globals), so top-level shared code may use them at load. Two exclusions apply: the captured tool/model alias globals install only after the replay (a declared alias wins over a same-named shared global), and `jump` during the load is a hard error. A scalar top-level return is discarded - the replay loads a library, it does not produce the section's result.
+
 ## Input and Output Declarations
 
 A prompt can declare a file it expects to find in the store and a file it will leave there:

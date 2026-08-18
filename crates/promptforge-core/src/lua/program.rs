@@ -140,6 +140,34 @@ impl LuaProgram {
         })
     }
 
+    /// Returns a compiled empty chunk standing in for an absent shared library.
+    ///
+    /// Section startup replays the shared library unconditionally; a prompt
+    /// without a `lua shared` fence replays this chunk instead, so the
+    /// startup sequence carries no `Option` branch. The compilation is
+    /// internal bookkeeping and emits no observations.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the temporary compiler VM cannot be created.
+    pub(crate) fn empty() -> Result<Self> {
+        let lua = Lua::new_with(
+            StdLib::STRING | StdLib::TABLE | StdLib::MATH,
+            LuaOptions::default(),
+        )
+        .map_err(Error::lua)?;
+        let function = lua
+            .load("")
+            .set_name("shared library")
+            .into_function()
+            .map_err(Error::lua)?;
+        Ok(Self {
+            source: String::new(),
+            bytecode: function.dump(false),
+            location: "shared library".to_owned(),
+            source_line: NonZeroU32::MIN,
+        })
+    }
+
     /// Returns the original Lua source retained for diagnostics.
     #[must_use]
     pub fn source(&self) -> &str {

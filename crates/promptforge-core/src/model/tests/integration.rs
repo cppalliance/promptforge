@@ -27,15 +27,9 @@ fn models_need_resolves_and_use_selects_section_binding() {
     assert_eq!(models.bindings()[0].id().name(), "analyst");
     assert_eq!(models.bindings()[0].invocation().thinking, Some(false));
 
-    let mut vm = section_vm_with_model_bindings(
-        &shared,
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver,
-        "Section",
-    )
-    .unwrap();
+    let mut vm =
+        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
+            .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let prologue = crate::lua::LuaProgram::compile(
@@ -76,15 +70,9 @@ fn no_models_use_or_always_leaves_section_unbound() {
         "Prompt",
     )
     .unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &shared,
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver,
-        "Section",
-    )
-    .unwrap();
+    let mut vm =
+        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
+            .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let (mb, mr) = vm.model_bag_handles();
@@ -140,15 +128,9 @@ fn undeclared_models_use_fails_loudly() {
         "Prompt",
     )
     .unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &shared,
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver,
-        "Section",
-    )
-    .unwrap();
+    let mut vm =
+        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
+            .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let prologue = crate::lua::LuaProgram::compile(

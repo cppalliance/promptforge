@@ -29,7 +29,7 @@ pub(crate) struct ArmPayload {
     pub(crate) execution: String,
     pub(crate) when: String,
     pub(crate) last_reply: Option<String>,
-    pub(crate) shared: Option<LuaProgram>,
+    pub(crate) shared: LuaProgram,
     pub(crate) bindings: ToolBindings,
     pub(crate) models: ModelBindings,
     pub(crate) analysis: crate::execute::ToolAnalysis,
@@ -139,20 +139,14 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         worker.name.clone(),
     );
 
-    let mut vm = match SectionVm::new_for_section(
-        shared.as_ref(),
-        &bindings,
-        &models,
-        &execution,
-        observer,
-        &worker.name,
-    ) {
-        Ok(vm) => vm,
-        Err(error) => {
-            finalizer.finish(detail::FANOUT_ARM_FAILED);
-            return Err(error);
-        }
-    };
+    let mut vm =
+        match SectionVm::new_for_section(&bindings, &models, &execution, observer, &worker.name) {
+            Ok(vm) => vm,
+            Err(error) => {
+                finalizer.finish(detail::FANOUT_ARM_FAILED);
+                return Err(error);
+            }
+        };
 
     // The body performs no teardown; every fallible step uses `?`. It returns the
     // arm result paired with its distinct terminal event.
@@ -190,6 +184,13 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
                 ))
             },
         )?;
+
+        // The shared library replays as the arm's first chunk with the full
+        // host environment installed; the captured alias globals install only
+        // after the replay, so a declared alias wins over a same-named shared
+        // global.
+        vm.replay_shared(&shared, observer, &worker.name)?;
+        vm.install_captured_bindings()?;
 
         if let Some(program) = worker.prologue() {
             match vm.run_chunk(program, observer, &worker.name)? {

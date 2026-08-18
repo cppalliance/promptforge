@@ -163,6 +163,7 @@ async fn pre_cancelled_fanout_returns_interrupted() {
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;
     let observer = NullObserver;
+    let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = FanoutContext {
         args: "",
         store: &store,
@@ -170,7 +171,7 @@ async fn pre_cancelled_fanout_returns_interrupted() {
         observer: &observer,
         client: &client,
         debug: None,
-        shared: None,
+        shared: &shared,
         bindings: &bindings,
         models: &models,
         analysis: &analysis,
@@ -236,6 +237,7 @@ async fn fatal_arm_aborts_and_drops_blocked_siblings() {
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;
     let observer = NullObserver;
+    let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = FanoutContext {
         args: "",
         store: &store,
@@ -243,7 +245,7 @@ async fn fatal_arm_aborts_and_drops_blocked_siblings() {
         observer: &observer,
         client: &client,
         debug: None,
-        shared: None,
+        shared: &shared,
         bindings: &bindings,
         models: &models,
         analysis: &analysis,
@@ -359,6 +361,7 @@ async fn fanout_rejects_a_list_over_the_item_cap() {
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;
     let observer = NullObserver;
+    let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = FanoutContext {
         args: "",
         store: &store,
@@ -366,7 +369,7 @@ async fn fanout_rejects_a_list_over_the_item_cap() {
         observer: &observer,
         client: &client,
         debug: None,
-        shared: None,
+        shared: &shared,
         bindings: &bindings,
         models: &models,
         analysis: &analysis,
@@ -418,6 +421,7 @@ async fn model_required_when_arm_prose_has_no_binding() {
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;
     let observer = NullObserver;
+    let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = FanoutContext {
         args: "",
         store: &store,
@@ -425,7 +429,7 @@ async fn model_required_when_arm_prose_has_no_binding() {
         observer: &observer,
         client: &client,
         debug: None,
-        shared: None,
+        shared: &shared,
         bindings: &bindings,
         models: &models,
         analysis: &analysis,
@@ -506,7 +510,8 @@ fn lua_worker(source: &str) -> Section {
 
 #[expect(
     clippy::ref_option,
-    reason = "FanoutContext.client borrows an Option<GatewayClient>, so the helper must too"
+    clippy::too_many_arguments,
+    reason = "FanoutContext.client borrows an Option<GatewayClient>, so the helper must too; the argument list mirrors the context's fields"
 )]
 fn terminal_ctx<'a>(
     observer: &'a dyn Observer,
@@ -516,6 +521,7 @@ fn terminal_ctx<'a>(
     analysis: &'a crate::execute::ToolAnalysis,
     shared_tools: &'a SharedTools,
     client: &'a Option<GatewayClient>,
+    shared: &'a LuaProgram,
 ) -> FanoutContext<'a> {
     FanoutContext {
         args: "",
@@ -524,7 +530,7 @@ fn terminal_ctx<'a>(
         observer,
         client,
         debug: None,
-        shared: None,
+        shared,
         bindings,
         models,
         analysis,
@@ -555,6 +561,7 @@ async fn each_arm_emits_a_distinct_succeeded_terminal_event() {
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;
     let recorder = EventRecorder::default();
+    let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = terminal_ctx(
         &recorder,
         &store,
@@ -563,6 +570,7 @@ async fn each_arm_emits_a_distinct_succeeded_terminal_event() {
         &analysis,
         &shared_tools,
         &client,
+        &shared,
     );
 
     let results = run_fanout_arms(&worker, &items, &ctx)
@@ -593,6 +601,7 @@ async fn a_hard_failing_arm_emits_a_failed_terminal_event() {
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;
     let recorder = EventRecorder::default();
+    let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = terminal_ctx(
         &recorder,
         &store,
@@ -601,6 +610,7 @@ async fn a_hard_failing_arm_emits_a_failed_terminal_event() {
         &analysis,
         &shared_tools,
         &client,
+        &shared,
     );
 
     run_fanout_arms(&worker, &items, &ctx)
@@ -654,6 +664,7 @@ async fn an_in_flight_fanout_arm_is_cancelled_cooperatively() {
     let observer = SignalOnLog {
         tx: std::sync::Mutex::new(Some(ready_tx)),
     };
+    let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = terminal_ctx(
         &observer,
         &store,
@@ -662,6 +673,7 @@ async fn an_in_flight_fanout_arm_is_cancelled_cooperatively() {
         &analysis,
         &shared_tools,
         &client,
+        &shared,
     );
 
     let cancel = CancelHandle::new();

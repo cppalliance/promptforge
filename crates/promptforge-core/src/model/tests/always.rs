@@ -72,15 +72,8 @@ fn models_always_returns_inspectable_object() {
     assert_eq!(models.default(), Some("writer"));
     assert_eq!(models.bindings()[0].context().get(), 8_192);
 
-    let vm = section_vm_with_model_bindings(
-        &shared,
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver,
-        "Section",
-    )
-    .expect("section install must expose the same inspectable Model object");
+    let vm = section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
+        .expect("section install must expose the same inspectable Model object");
     vm.teardown(&NullObserver, "Section");
 }
 
@@ -161,15 +154,9 @@ fn models_always_installs_exactly() {
         "Prompt",
     )
     .unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &shared,
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver,
-        "Section",
-    )
-    .unwrap();
+    let mut vm =
+        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
+            .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let (mb, mr) = vm.model_bag_handles();
@@ -201,15 +188,9 @@ fn models_always_provides_completion_options_without_use() {
         "Prompt",
     )
     .unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &shared,
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver,
-        "Section",
-    )
-    .unwrap();
+    let mut vm =
+        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
+            .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let (mb, mr) = vm.model_bag_handles();
@@ -248,15 +229,9 @@ fn models_always_from_h2_prologue_fails() {
         "Prompt",
     )
     .unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &shared,
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver,
-        "Section",
-    )
-    .unwrap();
+    let mut vm =
+        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
+            .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let prologue = crate::lua::LuaProgram::compile(
@@ -352,15 +327,9 @@ fn models_always_multi_arg_provides_completion_options() {
         "Prompt",
     )
     .unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &shared,
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver,
-        "Section",
-    )
-    .unwrap();
+    let mut vm =
+        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
+            .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let (mb, mr) = vm.model_bag_handles();
@@ -399,15 +368,9 @@ fn models_always_multi_arg_installs_exactly() {
         "Prompt",
     )
     .unwrap();
-    let mut vm = section_vm_with_model_bindings(
-        &shared,
-        &tools,
-        &models,
-        EXECUTION,
-        &NullObserver,
-        "Section",
-    )
-    .unwrap();
+    let mut vm =
+        section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
+            .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let (mb, mr) = vm.model_bag_handles();

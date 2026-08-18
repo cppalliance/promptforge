@@ -3,8 +3,7 @@ use mlua::Lua;
 use super::*;
 use crate::Error;
 use crate::lua::{
-    LiveBindingProducer, LuaProgram, SectionVm, ToolBindings, ToolResolver,
-    resolve_model_binding,
+    LiveBindingProducer, LuaProgram, SectionVm, ToolBindings, ToolResolver, resolve_model_binding,
 };
 use crate::observe::NullObserver;
 use crate::store::StoreRef;
@@ -90,14 +89,15 @@ fn resolve_live_declarations_for_test(
 }
 
 fn section_vm_with_model_bindings(
-    _source: &LuaProgram,
     tools: &ToolBindings,
     models: &ModelBindings,
     execution: &str,
     observer: &dyn crate::observe::Observer,
     section: &str,
 ) -> Result<SectionVm> {
-    SectionVm::new_for_section(None, tools, models, execution, observer, section)
+    let vm = SectionVm::new_for_section(tools, models, execution, observer, section)?;
+    vm.install_captured_bindings()?;
+    Ok(vm)
 }
 
 #[test]
