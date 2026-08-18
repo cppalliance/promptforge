@@ -108,6 +108,7 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 | `models.get(alias)` | Return a declared model's handle without changing the section model |
 | `models.infer(prompt)` | One tool-free inference round on the section's current model |
 | `store.read(path[, start[, end]])` | Read file verbatim, optionally lines `start` to `end` (1-based, inclusive) |
+| `store.read_numbered(path[, start[, end]])` | Read with absolute line numbers, optionally lines `start` to `end` (1-based, inclusive) |
 | `store.write(path, content)` | Create or overwrite file |
 | `store.append(path, content)` | Append to file |
 | `store.read_lines(path)` | Read with line numbers |

@@ -1915,6 +1915,123 @@ fn store_read_end_without_start_raises() {
 }
 
 #[test]
+fn store_read_numbered_without_bounds_matches_read_lines() {
+    let store = StoreRef::memory();
+    let out = run_with(
+        "store.write('a.txt', 'first\\nsecond')\nreturn store.read_numbered('a.txt')",
+        &store,
+    )
+    .unwrap();
+    let expected = store.read_lines("a.txt").expect("read_lines");
+    assert_eq!(
+        out.returned.as_deref(),
+        Some(expected.as_str()),
+        "an unbounded read_numbered must equal read_lines byte-for-byte"
+    );
+}
+
+#[test]
+fn store_read_numbered_numbers_a_slice_absolutely() {
+    let store = StoreRef::memory();
+    let mut body = String::new();
+    for n in 1..=85 {
+        use std::fmt::Write as _;
+        let _ = writeln!(body, "line{n}");
+    }
+    store.write("a.txt", &body).expect("write");
+    let out = run_with("return store.read_numbered('a.txt', 84, 85)", &store).unwrap();
+    assert_eq!(out.returned.as_deref(), Some("84| line84\n85| line85"));
+}
+
+#[test]
+fn store_read_numbered_pads_across_the_hundred_boundary() {
+    let store = StoreRef::memory();
+    let mut body = String::new();
+    for n in 1..=100 {
+        use std::fmt::Write as _;
+        let _ = writeln!(body, "line{n}");
+    }
+    store.write("a.txt", &body).expect("write");
+    let out = run_with("return store.read_numbered('a.txt', 99, 100)", &store).unwrap();
+    assert_eq!(out.returned.as_deref(), Some(" 99| line99\n100| line100"));
+}
+
+#[test]
+fn store_read_numbered_clamps_end_to_the_last_line() {
+    let out = run(
+        "store.write('a.txt', 'one\\ntwo\\nthree')\nreturn store.read_numbered('a.txt', 2, 99)",
+        "",
+    )
+    .unwrap();
+    assert_eq!(out.returned.as_deref(), Some("2| two\n3| three"));
+}
+
+#[test]
+fn store_read_numbered_beyond_eof_returns_empty() {
+    let out = run(
+        "store.write('a.txt', 'one\\ntwo\\nthree')\nreturn store.read_numbered('a.txt', 99)",
+        "",
+    )
+    .unwrap();
+    assert_eq!(out.returned.as_deref(), Some(""));
+}
+
+#[test]
+fn store_read_numbered_start_below_one_raises() {
+    for source in [
+        "store.write('a.txt', 'one')\nreturn store.read_numbered('a.txt', 0)",
+        "store.write('a.txt', 'one')\nreturn store.read_numbered('a.txt', -1)",
+    ] {
+        let err = run(source, "").expect_err("a start below 1 must raise");
+        let msg = match &err {
+            Error::Lua(msg) => msg.clone(),
+            Error::LuaRuntime { message, .. } => message.clone(),
+            other => panic!("expected a Lua-category error, got {other:?}"),
+        };
+        assert!(
+            msg.contains("invalid line range"),
+            "the Lua error must carry the range message, got: {msg}"
+        );
+    }
+}
+
+#[test]
+fn store_read_numbered_end_before_start_raises() {
+    let err = run(
+        "store.write('a.txt', 'one\\ntwo\\nthree')\nreturn store.read_numbered('a.txt', 3, 2)",
+        "",
+    )
+    .expect_err("an end before start must raise");
+    let msg = match &err {
+        Error::Lua(msg) => msg.clone(),
+        Error::LuaRuntime { message, .. } => message.clone(),
+        other => panic!("expected a Lua-category error, got {other:?}"),
+    };
+    assert!(
+        msg.contains("invalid line range"),
+        "the Lua error must carry the range message, got: {msg}"
+    );
+}
+
+#[test]
+fn store_read_numbered_end_without_start_raises() {
+    let err = run(
+        "store.write('a.txt', 'one')\nreturn store.read_numbered('a.txt', nil, 1)",
+        "",
+    )
+    .expect_err("an end without a start must raise");
+    let msg = match &err {
+        Error::Lua(msg) => msg.clone(),
+        Error::LuaRuntime { message, .. } => message.clone(),
+        other => panic!("expected a Lua-category error, got {other:?}"),
+    };
+    assert!(
+        msg.contains("invalid line range"),
+        "the Lua error must carry the range message, got: {msg}"
+    );
+}
+
+#[test]
 fn installed_store_read_honors_line_bounds() {
     let store = StoreRef::memory();
     store
@@ -1939,6 +2056,50 @@ fn installed_store_read_honors_line_bounds() {
     let err = run_scalar(
         &vm,
         &program("return store.read('a.txt', 0)"),
+        &NullObserver,
+        "Test",
+    )
+    .expect_err("a start below 1 must raise");
+    assert!(
+        err.to_string().contains("invalid line range"),
+        "the error must carry the range message, got: {err}"
+    );
+}
+
+#[test]
+fn installed_store_read_numbered_honors_line_bounds() {
+    let store = StoreRef::memory();
+    store
+        .write("a.txt", "one\ntwo\nthree\n")
+        .expect("the memory store can prepare a file");
+    let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
+    vm.inject_host("", &json!({}), &store, None)
+        .expect("host values must inject");
+    let observer: Arc<dyn Observer> = Arc::new(NullObserver);
+    vm.install_host_apis(&observer, "Test")
+        .expect("host APIs must install");
+
+    let numbered = run_scalar(
+        &vm,
+        &program("return store.read_numbered('a.txt', 2, 3)"),
+        &NullObserver,
+        "Test",
+    )
+    .expect("a bounded numbered read must run");
+    assert_eq!(numbered.as_deref(), Some("2| two\n3| three"));
+
+    let whole = run_scalar(
+        &vm,
+        &program("return store.read_numbered('a.txt')"),
+        &NullObserver,
+        "Test",
+    )
+    .expect("an unbounded numbered read must run");
+    assert_eq!(whole.as_deref(), Some("1| one\n2| two\n3| three"));
+
+    let err = run_scalar(
+        &vm,
+        &program("return store.read_numbered('a.txt', 0)"),
         &NullObserver,
         "Test",
     )
@@ -2104,6 +2265,18 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
             source: "store.read('a.txt', 1, 1)",
             success: detail::STORE_READ_SUCCEEDED,
             failure: detail::STORE_READ_FAILED,
+            prepare: existing,
+        },
+        Case {
+            source: "store.read_numbered('a.txt')",
+            success: detail::STORE_READ_NUMBERED_SUCCEEDED,
+            failure: detail::STORE_READ_NUMBERED_FAILED,
+            prepare: existing,
+        },
+        Case {
+            source: "store.read_numbered('a.txt', 1, 1)",
+            success: detail::STORE_READ_NUMBERED_SUCCEEDED,
+            failure: detail::STORE_READ_NUMBERED_FAILED,
             prepare: existing,
         },
         Case {

@@ -9,6 +9,7 @@ store.append("log.txt", "processed: " .. args .. "\n")
 local content = store.read("notes/summary.md")
 local slice = store.read("notes/summary.md", 20, 40) -- lines 20-40 only
 local numbered = store.read_lines("notes/summary.md")
+local numbered_slice = store.read_numbered("notes/summary.md", 20, 40) -- "20| ..." to "40| ..."
 
 store.str_replace("notes/summary.md", "old text", "new text")
 
@@ -21,6 +22,8 @@ store.delete("notes/summary.md")
 ## Bounded Reads
 
 `store.read` takes optional 1-based inclusive line bounds: `store.read("log.txt", 20, 40)` returns lines 20 through 40 joined by newlines, with no trailing newline. `store.read("log.txt", 20)` reads from line 20 to the end of the file. An `end` past the last line clamps to it, and a `start` past the last line returns an empty string. A `start` below 1 or an `end` before `start` raises an error.
+
+`store.read_numbered` takes the same optional bounds and returns the lines with absolute line numbers: each line is prefixed with its number, right-aligned to the width of the largest number emitted, followed by `"| "`. With no bounds the whole file is numbered from 1, identical to `store.read_lines`. A bounded slice keeps its absolute numbers, so `store.read_numbered("log.txt", 20, 40)` yields `20| ...` through `40| ...` - cite a line by its number and the reader can verify it against the whole-file numbering.
 
 ## Safe Injection
 

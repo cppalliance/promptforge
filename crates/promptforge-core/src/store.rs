@@ -7,7 +7,8 @@
 //! tools. Three read shapes are available: [`StoreRef::read_lines`] returns
 //! numbered lines for navigation, [`StoreRef::read`] returns verbatim
 //! contents for trusted handoff ([`StoreRef::read_range`] slices a 1-based
-//! inclusive line range out of the same verbatim contents), and
+//! inclusive line range out of the same verbatim contents, and
+//! [`StoreRef::read_range_numbered`] numbers such a slice absolutely), and
 //! [`StoreRef::inject`] wraps verbatim contents in an untrusted guard
 //! envelope for model-facing re-injection.
 //! Edits are anchor-based ([`Store::str_replace`]) rather than offset-based,
@@ -245,24 +246,59 @@ impl StoreRef {
     ) -> Result<String, StoreError> {
         let path = StorePath::parse(path)?;
         let contents = self.lock()?.read(path.as_str())?;
-        if start == 0 {
-            return Err(StoreError::InvalidRange {
-                path: path.as_str().to_owned(),
-                reason: "start must be at least 1",
-            });
-        }
         let lines: Vec<&str> = contents.lines().collect();
-        if start > lines.len() {
+        let Some((start, end)) = resolve_line_range(path.as_str(), lines.len(), start, end)? else {
             return Ok(String::new());
-        }
-        let end = end.unwrap_or(lines.len()).min(lines.len());
-        if end < start {
-            return Err(StoreError::InvalidRange {
-                path: path.as_str().to_owned(),
-                reason: "end must not be before start",
-            });
-        }
+        };
         Ok(lines[start - 1..end].join("\n"))
+    }
+
+    /// Reads lines `start..=end` of the file at `path` as numbered lines,
+    /// 1-based and inclusive, numbered absolutely from `start`.
+    ///
+    /// The slice carries the same format as [`StoreRef::read_lines`]: each
+    /// line is prefixed with its number, right-aligned to the width of the
+    /// largest emitted number, followed by `"| "`; lines are joined with
+    /// `"\n"` and there is no trailing newline. With `start` of 1 and no
+    /// `end` the whole file is numbered from 1, byte-for-byte identical to
+    /// [`StoreRef::read_lines`]. Bounds are evaluated exactly as in
+    /// [`StoreRef::read_range`]: a `start` below 1 is an error; a `start`
+    /// past the last line reads as the empty string; an omitted `end` means
+    /// the last line, and a given `end` clamps down to it; an `end` before
+    /// `start` at that point is an error.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::NotFound`] if no file exists at `path`, or
+    /// [`StoreError::InvalidRange`] if `start` is less than 1 or `end` is
+    /// before `start`.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_core::store::StoreRef;
+    ///
+    /// let store = StoreRef::memory();
+    /// store.write("a.txt", "one\ntwo\nthree\n")?;
+    /// assert_eq!(
+    ///     store.read_range_numbered("a.txt", 1, None)?,
+    ///     "1| one\n2| two\n3| three"
+    /// );
+    /// assert_eq!(store.read_range_numbered("a.txt", 2, Some(3))?, "2| two\n3| three");
+    /// assert_eq!(store.read_range_numbered("a.txt", 99, None)?, "");
+    /// # Ok::<(), promptforge_core::store::StoreError>(())
+    /// ```
+    pub fn read_range_numbered(
+        &self,
+        path: &str,
+        start: usize,
+        end: Option<usize>,
+    ) -> Result<String, StoreError> {
+        let path = StorePath::parse(path)?;
+        let contents = self.lock()?.read(path.as_str())?;
+        let lines: Vec<&str> = contents.lines().collect();
+        let Some((start, end)) = resolve_line_range(path.as_str(), lines.len(), start, end)? else {
+            return Ok(String::new());
+        };
+        Ok(mem::number_lines_from(&lines[start - 1..end], start))
     }
 
     /// Reads the file at `path` verbatim and wraps it in an untrusted guard
@@ -414,6 +450,37 @@ impl StoreRef {
         let path = StorePath::parse(path)?;
         self.lock()?.exists(path.as_str())
     }
+}
+
+/// Resolves 1-based inclusive bounds against `line_count` into the effective
+/// `(start, end)`, or `None` when the range falls entirely past the last
+/// line. Evaluation order is fixed: a `start` below 1 is an error; a `start`
+/// past the last line reads as empty; an omitted `end` means the last line,
+/// and a given `end` clamps down to it; an `end` before `start` at that
+/// point is an error.
+fn resolve_line_range(
+    path: &str,
+    line_count: usize,
+    start: usize,
+    end: Option<usize>,
+) -> Result<Option<(usize, usize)>, StoreError> {
+    if start == 0 {
+        return Err(StoreError::InvalidRange {
+            path: path.to_owned(),
+            reason: "start must be at least 1",
+        });
+    }
+    if start > line_count {
+        return Ok(None);
+    }
+    let end = end.unwrap_or(line_count).min(line_count);
+    if end < start {
+        return Err(StoreError::InvalidRange {
+            path: path.to_owned(),
+            reason: "end must not be before start",
+        });
+    }
+    Ok(Some((start, end)))
 }
 
 #[cfg(test)]
