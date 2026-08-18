@@ -32,10 +32,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A30. Fan-out arms run concurrently, return in input order, and abort siblings on the first error.
 - A35. The H1 program executes exactly once with live host resolution; no separate declaration or bind replay phase exists.
 
-
-
-
-
 - A41. Store persistence and root selection are caller policy; the executor is backend-agnostic.
 
 - A42. External file I/O ends at the trusted host; prompts see only validated store paths.
@@ -43,15 +39,14 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A43. Hosts expose no live tools by default; each capability requires explicit enablement.
 
 
-- A46. H2 sections are optional; an H1 can be the complete program.
-
 - A47. Model and tool declarations are read live at each interaction and end with VM teardown.
 
-- A48. Jumps preserve reply unless cleared; subroutines start empty and receive explicit input.
-- A49. Prompt-local tools have explicit schemas and run as trusted code in their declaring VM.
 
 - A50. An empty stop turn is valid only after a successful tool call; other empty replies fail.
 - A51. Config secret sidecars supply defaults through local lookup and never mutate process state.
+
+- A52. Every untrusted string is guard-wrapped explicitly at the model-facing insertion boundary, independent of its origin.
+- A53. Shared Lua replays as each section's first chunk under the section's limits and host environment; replay cannot transfer control.
 
 ## Principles
 

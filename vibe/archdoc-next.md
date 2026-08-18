@@ -60,3 +60,4 @@
 - [2026-08-16-1-fanout-scope-refactor] parsed-list reuse: Expose section items from the parsed prompt instead of reparsing Markdown in author code.
 - [2026-08-18-1-tools-local] section-lifetime host APIs: Install store, logging, and control callbacks once per section VM so all chunks and handlers share one coherent environment.
 - [2026-08-18-2-empty-turn-and-mcp-env] soft sidecar parse failure: A missing or malformed optional env sidecar does not block config loading when required values resolve elsewhere.
+- [2026-08-18-3-untrusted-global-vm-reorder] inclusive store ranges: Keep public line bounds 1-based, inclusive, and clamping so citation call sites copy source coordinates directly.
