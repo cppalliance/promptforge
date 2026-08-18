@@ -39,7 +39,7 @@ pub(crate) use mlua::{
 pub(crate) use serde_json::Value as Json;
 pub(crate) use serde_json::json;
 
-pub(crate) use crate::lua_models::{LuaModelHandle, ModelInferHook};
+pub(crate) use crate::lua_models::{LuaModelHandle, ModelInferHook, ModelsInferHook};
 pub(crate) use crate::lua_models::{
     ModelBindingState, ModelRuntime, install_h2_models, install_live_models,
 };

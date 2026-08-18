@@ -17,6 +17,17 @@ use crate::model::ModelBinding;
 pub(crate) type ModelInferHook =
     Arc<dyn Fn(&Lua, &ModelBinding, &str) -> mlua::Result<String> + Send + Sync>;
 
+/// Host hook that runs `models.infer` from Lua via the executor's shared
+/// context.
+///
+/// Takes only the prompt: the hook resolves the section's current model
+/// binding itself, because the executor side knows the section name needed
+/// for a typed [`crate::Error::ModelRequired`] and, on the live H1 path, the
+/// bindings are still being recorded into the run's producer. Installed as
+/// Lua app data alongside [`ModelInferHook`]; absent app data means
+/// `models.infer` is unavailable in that context.
+pub(crate) type ModelsInferHook = Arc<dyn Fn(&Lua, &str) -> mlua::Result<String> + Send + Sync>;
+
 /// Inspectable Lua userdata returned by `models.need` / `models.default`.
 #[derive(Debug, Clone)]
 pub(crate) struct LuaModelHandle {
