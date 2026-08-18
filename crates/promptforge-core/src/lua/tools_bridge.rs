@@ -126,10 +126,10 @@ pub(crate) fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<V
     Ok(entries)
 }
 
-/// Builds the JSON Schema `parameters` object from a `tools.local` params
+/// Builds the JSON Schema `parameters` object from a `tools.add_local` params
 /// table. Each value is a bare type string or a `{type, description}` array;
 /// every declared parameter is required.
-fn local_params_schema(params: &mlua::Table) -> mlua::Result<Json> {
+fn add_local_params_schema(params: &mlua::Table) -> mlua::Result<Json> {
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
     for pair in params.pairs::<String, Value>() {
@@ -139,13 +139,13 @@ fn local_params_schema(params: &mlua::Table) -> mlua::Result<Json> {
             Value::Table(t) => (t.get::<String>(1)?, t.get::<Option<String>>(2)?),
             _ => {
                 return Err(mlua::Error::external(format!(
-                    "tools.local param {name:?} must be a type string or a {{type, description}} array"
+                    "tools.add_local param {name:?} must be a type string or a {{type, description}} array"
                 )));
             }
         };
         if !matches!(ty.as_str(), "string" | "integer" | "number" | "boolean") {
             return Err(mlua::Error::external(format!(
-                "tools.local param {name:?} has unsupported type {ty:?}: \
+                "tools.add_local param {name:?} has unsupported type {ty:?}: \
                  expected \"string\", \"integer\", \"number\", or \"boolean\""
             )));
         }
@@ -236,7 +236,7 @@ pub(crate) fn install_h2_tools(
 
     let local = local_tools.clone();
     let state = Arc::clone(runtime);
-    let local_fn = lua
+    let add_local_fn = lua
         .create_function(
             move |lua,
                   (alias, description, params, handler): (
@@ -246,7 +246,7 @@ pub(crate) fn install_h2_tools(
                 Function,
             )| {
                 validate_alias(&alias).map_err(mlua::Error::external)?;
-                let parameters = local_params_schema(&params)?;
+                let parameters = add_local_params_schema(&params)?;
                 let schema = ToolSchema::new(alias.clone(), description, parameters)
                     .map_err(mlua::Error::external)?;
                 let key = lua.create_registry_value(handler)?;
@@ -261,7 +261,7 @@ pub(crate) fn install_h2_tools(
             },
         )
         .map_err(Error::lua)?;
-    tools.set("local", local_fn).map_err(Error::lua)?;
+    tools.set("add_local", add_local_fn).map_err(Error::lua)?;
 
     globals.raw_set("tools", tools).map_err(Error::lua)
 }

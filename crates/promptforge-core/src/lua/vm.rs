@@ -68,7 +68,7 @@ pub(crate) struct SectionVm {
 ///
 /// Each entry holds the tool alias, its prebuilt schema, and the registry key
 /// for the Lua handler function captured at registration time. The entries are
-/// shared with the `tools.local` Lua callback, which must be `Send`, hence the
+/// shared with the `tools.add_local` Lua callback, which must be `Send`, hence the
 /// `Mutex`; the VM is single-threaded, so the lock never contends.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct LocalTools {
@@ -1033,7 +1033,7 @@ pub(crate) fn run_chunk(
 /// additions, each resolved against the frozen bindings with any author
 /// description override applied.
 ///
-/// Rebuilt on every prose block so `tools.add` and `tools.local` calls
+/// Rebuilt on every prose block so `tools.add` and `tools.add_local` calls
 /// between blocks reach the next model turn.
 pub(crate) fn current_tool_bindings(
     bindings: &ToolBindings,

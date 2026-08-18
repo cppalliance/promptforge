@@ -1,4 +1,4 @@
-//! End-to-end tests for `tools.local` - Lua-backed tools dispatched on the
+//! End-to-end tests for `tools.add_local` - Lua-backed tools dispatched on the
 //! section VM - plus the `tools.add`-between-prose-blocks regression.
 
 use super::super::*;
@@ -61,7 +61,7 @@ async fn local_tool_handler_result_returns_to_the_model() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n\
 ```lua\n\
-tools['local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  return 'got ' .. args.value\nend)\n\
+tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  return 'got ' .. args.value\nend)\n\
 ```\n\n\
 Use the tool.\n";
     let out = run_local(&bound_for_model(md), addr, &StoreRef::memory())
@@ -96,7 +96,7 @@ async fn local_tool_handler_store_writes_persist() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n\
 ```lua\n\
-tools['local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  store.write('tool-out.txt', args.value)\n  return 'stored'\nend)\n\
+tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  store.write('tool-out.txt', args.value)\n  return 'stored'\nend)\n\
 ```\n\n\
 Use the tool.\n";
     let store = StoreRef::memory();
@@ -120,7 +120,7 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n\
 ```lua\n\
-tools['local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  store.append('calls.txt', args.value .. ';')\n  return 'ok ' .. args.value\nend)\n\
+tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  store.append('calls.txt', args.value .. ';')\n  return 'ok ' .. args.value\nend)\n\
 ```\n\n\
 Use the tool.\n";
     let store = StoreRef::memory();
@@ -149,7 +149,7 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n\
 ```lua\n\
-tools['local']('grab', 'Grab a value', { value = 'string' }, function(_args)\n  error('handler exploded')\nend)\n\
+tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(_args)\n  error('handler exploded')\nend)\n\
 ```\n\n\
 Use the tool.\n";
     let recorder = Arc::new(Recorder::default());
@@ -200,7 +200,7 @@ async fn local_tool_handler_shares_section_globals_with_later_chunks() {
 ## Only\n\n\
 ```lua\n\
 collected = {}\n\
-tools['local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  table.insert(collected, args.value)\n  return 'noted ' .. args.value\nend)\n\
+tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  table.insert(collected, args.value)\n  return 'noted ' .. args.value\nend)\n\
 ```\n\n\
 Use the tool.\n\n\
 ```lua\nreturn 'sum:' .. table.concat(collected, ',')\n```\n";
@@ -221,7 +221,7 @@ async fn local_tool_handler_cannot_jump() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n\
 ```lua\n\
-tools['local']('grab', 'Grab a value', { value = 'string' }, function(_args)\n  jump('## Nowhere')\n  return 'x'\nend)\n\
+tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(_args)\n  jump('## Nowhere')\n  return 'x'\nend)\n\
 ```\n\n\
 Use the tool.\n\n\
 ## Nowhere\n\n\

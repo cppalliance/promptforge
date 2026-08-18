@@ -371,7 +371,7 @@ async fn run_one_section(
     let mut conversation: Vec<Message> = Vec::new();
     // Gates the one-time model resolution and counts install at the first
     // prose block below. Schemas and dispatch rebuild on EVERY prose block so
-    // `tools.add`/`tools.local` between blocks reach the next model turn.
+    // `tools.add`/`tools.add_local` between blocks reach the next model turn.
     let mut seen_prose = false;
     let mut counts: Option<ToolCallCounts> = None;
     let mut model_binding: Option<ModelBinding> = None;
@@ -458,7 +458,7 @@ async fn run_one_section(
                 }
                 let local_schemas = vm.local_tool_schemas();
                 // Seed aliases added since the first prose block (via
-                // `tools.add` or `tools.local`) so the tool loop can count
+                // `tools.add` or `tools.add_local`) so the tool loop can count
                 // their calls; `ensure` is idempotent on existing aliases.
                 if let Some(counts) = counts.as_ref() {
                     let new_aliases = effective_bindings
