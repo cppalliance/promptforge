@@ -97,7 +97,7 @@ impl Gateway {
     /// let toml = r#"
     /// [server]
     /// bind = "127.0.0.1:0"
-    /// key = "secret"
+    /// api_key = "secret"
     ///
     /// [[endpoint]]
     /// id = "e"
