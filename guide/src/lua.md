@@ -158,7 +158,7 @@ tools.add_local("extract_section", "Extract a range of lines from the paper", {
     start_line = {"integer", "1-based line number where the section begins"},
     end_line = {"integer", "1-based line number where the section ends"},
 }, function(args)
-    local lines = store.read_lines("paper.md")
+    local lines = store.read_numbered("paper.md")
     return "extracted " .. args.name
 end)
 ```

@@ -105,18 +105,18 @@ async fn store_persists_across_sections() {
     // transition. The read lands in `var`, so it round-trips the value.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Writer\n\n```lua\nstore.write('note.txt', 'carried across')\n```\n\n\
-## Reader\n\n```lua\nvar.seen = store.read_lines('note.txt')\nreturn var.seen\n```\n";
+## Reader\n\n```lua\nvar.seen = store.read('note.txt')\nreturn var.seen\n```\n";
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent()).await.unwrap();
     assert_eq!(
-        out, "1| carried across",
+        out, "carried across",
         "the second section must read what the first wrote"
     );
     // The very same handle still holds the file after the run, confirming
     // both sections shared one store rather than each getting a fresh one.
     assert_eq!(
-        store.read_lines("note.txt").expect("read_lines"),
-        "1| carried across",
+        store.read("note.txt").expect("read"),
+        "carried across",
         "the run's store must retain the written file"
     );
 }

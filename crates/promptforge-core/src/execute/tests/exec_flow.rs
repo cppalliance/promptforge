@@ -60,8 +60,8 @@ Final ask.\n\n\
     assert_eq!(out, "reply-2");
     assert_eq!(calls.load(Ordering::Relaxed), 2);
     assert_eq!(
-        store.read_lines("order.txt").expect("order log"),
-        "1| lua1\n2| lua2\n3| lua3"
+        store.read("order.txt").expect("order log"),
+        "lua1\nlua2\nlua3\n"
     );
 
     let section = parse(md).entry().expect("fixture has sections").clone();

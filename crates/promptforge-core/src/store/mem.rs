@@ -1,7 +1,6 @@
 //! The [`Store`] backend contract and its in-memory implementation.
 
 use std::collections::BTreeMap;
-use std::fmt::Write as _;
 
 use super::StoreError;
 use super::glob::{compile_glob, matches_tokens};
@@ -10,9 +9,10 @@ use super::path::StorePath;
 /// A backend for run-scoped virtual files addressed by logical string paths.
 ///
 /// All operations are synchronous. Implementors store text keyed by path; the
-/// runtime shares one behind a [`StoreRef`](super::StoreRef) handle. Numbered
-/// reads use [`Store::read_lines`]; verbatim reads use [`Store::read`]; edits
-/// are anchored (see [`Store::str_replace`]).
+/// runtime shares one behind a [`StoreRef`](super::StoreRef) handle. Reads are
+/// verbatim (see [`Store::read`]); numbered reads are derived at the
+/// [`StoreRef`](super::StoreRef) layer. Edits are anchored (see
+/// [`Store::str_replace`]).
 ///
 /// # Examples
 /// ```
@@ -20,7 +20,6 @@ use super::path::StorePath;
 ///
 /// let mut fs = MemStore::new();
 /// fs.write("greeting.txt", "hello")?;
-/// assert_eq!(fs.read_lines("greeting.txt")?, "1| hello");
 /// assert_eq!(fs.read("greeting.txt")?, "hello");
 /// # Ok::<(), promptforge_core::store::StoreError>(())
 /// ```
@@ -42,7 +41,7 @@ pub trait Store: Send {
     /// let mut fs = MemStore::new();
     /// fs.write("a.txt", "one")?;
     /// fs.write("a.txt", "two")?;
-    /// assert_eq!(fs.read_lines("a.txt")?, "1| two");
+    /// assert_eq!(fs.read("a.txt")?, "two");
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     fn write(&mut self, path: &str, contents: &str) -> Result<(), StoreError>;
@@ -60,38 +59,16 @@ pub trait Store: Send {
     /// let mut fs = MemStore::new();
     /// fs.append("log.txt", "first\n")?;
     /// fs.append("log.txt", "second")?;
-    /// assert_eq!(fs.read_lines("log.txt")?, "1| first\n2| second");
+    /// assert_eq!(fs.read("log.txt")?, "first\nsecond");
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     fn append(&mut self, path: &str, contents: &str) -> Result<(), StoreError>;
 
-    /// Returns the file's contents as numbered lines.
-    ///
-    /// Each line is prefixed with its 1-based number, right-aligned to the
-    /// width of the highest number, followed by `"| "`; lines are joined with
-    /// `"\n"` and there is no trailing newline. An empty file reads as the
-    /// empty string. The numbering is for navigation and error messages, not a
-    /// wire format.
-    ///
-    /// # Errors
-    /// Returns [`StoreError::NotFound`] if no file exists at `path`.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge_core::store::{Store, MemStore};
-    ///
-    /// let mut fs = MemStore::new();
-    /// fs.write("poem.txt", "roses\nviolets")?;
-    /// assert_eq!(fs.read_lines("poem.txt")?, "1| roses\n2| violets");
-    /// # Ok::<(), promptforge_core::store::StoreError>(())
-    /// ```
-    fn read_lines(&self, path: &str) -> Result<String, StoreError>;
-
     /// Returns the file's contents exactly as stored, with no line numbering.
     ///
     /// This is the accessor for verbatim handoff, clean dumps, and trusted
-    /// re-injection. Use [`Store::read_lines`] when numbered output is
-    /// needed for navigation.
+    /// re-injection. Numbered output for navigation is derived from a read at
+    /// the [`StoreRef`](super::StoreRef) layer.
     ///
     /// # Errors
     /// Returns [`StoreError::NotFound`] if no file exists at `path`.
@@ -126,7 +103,7 @@ pub trait Store: Send {
     /// let mut fs = MemStore::new();
     /// fs.write("a.txt", "the quick brown fox")?;
     /// fs.str_replace("a.txt", "quick", "slow")?;
-    /// assert_eq!(fs.read_lines("a.txt")?, "1| the slow brown fox");
+    /// assert_eq!(fs.read("a.txt")?, "the slow brown fox");
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     fn str_replace(&mut self, path: &str, old: &str, new: &str) -> Result<(), StoreError>;
@@ -280,13 +257,6 @@ impl Store for MemStore {
         Ok(())
     }
 
-    fn read_lines(&self, path: &str) -> Result<String, StoreError> {
-        let contents = self.files.get(path).ok_or_else(|| StoreError::NotFound {
-            path: path.to_string(),
-        })?;
-        Ok(number_lines(contents))
-    }
-
     fn read(&self, path: &str) -> Result<String, StoreError> {
         self.files
             .get(path)
@@ -345,30 +315,4 @@ impl Store for MemStore {
     fn exists(&self, path: &str) -> Result<bool, StoreError> {
         Ok(self.files.contains_key(path))
     }
-}
-
-/// Renders `content` as numbered lines, right-aligned to the widest number.
-pub(super) fn number_lines(content: &str) -> String {
-    number_lines_from(&content.lines().collect::<Vec<_>>(), 1)
-}
-
-/// Renders `lines` numbered absolutely from `start`, each number
-/// right-aligned to the width of the largest emitted number, followed by
-/// `"| "`; lines are joined with `"\n"` and there is no trailing newline.
-pub(super) fn number_lines_from(lines: &[&str], start: usize) -> String {
-    if lines.is_empty() {
-        return String::new();
-    }
-    let last = start + lines.len() - 1;
-    let width = last.to_string().len();
-    let mut out = String::new();
-    for (index, line) in lines.iter().enumerate() {
-        if index > 0 {
-            out.push('\n');
-        }
-        let number = start + index;
-        // Writing to a String is infallible; the result carries no information.
-        let _ = write!(out, "{number:>width$}| {line}");
-    }
-    out
 }

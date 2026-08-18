@@ -168,7 +168,7 @@ async fn epilog_runs_after_reply_and_can_return() {
     .unwrap();
 
     assert_eq!(out, "epilog result");
-    assert_eq!(store.read_lines("epilog-ran.txt").unwrap(), "1| yes");
+    assert_eq!(store.read("epilog-ran.txt").unwrap(), "yes");
     assert_eq!(
         recorder.events(),
         vec![
@@ -269,7 +269,7 @@ This prose must not reach a model.\n\n\
     let out = run(&fixture(md), "", &[], &store, silent()).await.unwrap();
 
     assert_eq!(out, "early");
-    assert!(store.read_lines("epilog-ran.txt").is_err());
+    assert!(store.read("epilog-ran.txt").is_err());
 }
 
 #[tokio::test]
@@ -697,11 +697,13 @@ Ask the model.\n";
 
     assert_eq!(out, "hello from the mock");
     assert_eq!(
-        store.read_lines("handle.txt").unwrap(),
-        "1| analyst",
+        store.read("handle.txt").unwrap(),
+        "analyst",
         "models.get must return the analyst handle"
     );
-    let body = gateway.last_request().expect("complete must reach the gateway");
+    let body = gateway
+        .last_request()
+        .expect("complete must reach the gateway");
     assert_eq!(
         body["model"], "writer-model",
         "models.get must not change the section's model"
@@ -724,7 +726,9 @@ async fn models_infer_uses_the_section_model_without_touching_reply() {
         "models.infer must not bind the section's reply"
     );
 
-    let body = gateway.last_request().expect("complete must reach the gateway");
+    let body = gateway
+        .last_request()
+        .expect("complete must reach the gateway");
     assert_eq!(body["model"], "claude-sonnet-4-6");
     assert!(
         body.get("tools").is_none(),
@@ -758,7 +762,9 @@ models.need('analyst', 'A careful analysis model')\n\
         .await
         .unwrap();
     assert_eq!(out, "pong");
-    let body = gateway.last_request().expect("complete must reach the gateway");
+    let body = gateway
+        .last_request()
+        .expect("complete must reach the gateway");
     assert_eq!(
         body["model"], "analyst-model",
         "handle:infer must use the handle's model, not the section default"
@@ -824,6 +830,8 @@ async fn models_get_infer_works_without_any_section_model() {
         .await
         .unwrap();
     assert_eq!(out, "pong");
-    let body = gateway.last_request().expect("complete must reach the gateway");
+    let body = gateway
+        .last_request()
+        .expect("complete must reach the gateway");
     assert_eq!(body["model"], "analyst-model");
 }

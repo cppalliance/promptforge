@@ -58,10 +58,6 @@ impl Store for FailingStore {
         Err(Self::error(path))
     }
 
-    fn read_lines(&self, path: &str) -> std::result::Result<String, StoreError> {
-        Err(Self::error(path))
-    }
-
     fn read(&self, path: &str) -> std::result::Result<String, StoreError> {
         Err(Self::error(path))
     }
@@ -985,10 +981,8 @@ fn section_vm_preserves_one_environment_across_all_phases() {
         Some("<input>")
     );
     assert_eq!(
-        store
-            .read_lines("phase.txt")
-            .expect("shared store must read_lines"),
-        "1| <input>"
+        store.read("phase.txt").expect("shared store must read"),
+        "<input>"
     );
 
     vm.bind_reply("model answer", &NullObserver, "Test")
@@ -1043,7 +1037,7 @@ fn section_vm_host_injection_bypasses_shared_global_metatables() {
 #[test]
 fn section_vm_reports_store_operations_in_each_chunk() {
     let write = program("store.write('state.txt', args)");
-    let read = program("return store.read_lines('state.txt')");
+    let read = program("return store.read('state.txt')");
     let recorder = Arc::new(Recorder::default());
     let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Gather").expect("VM must build");
     vm.inject_host("private input", &json!({}), &StoreRef::memory(), None)
@@ -1073,10 +1067,7 @@ fn section_vm_reports_store_operations_in_each_chunk() {
                 detail::LUA_REPLY_BINDING_SUCCEEDED.clone(),
             ),
             ("Gather".to_owned(), detail::LUA_CHUNK_STARTED.clone(),),
-            (
-                "Gather".to_owned(),
-                detail::STORE_READ_LINES_SUCCEEDED.clone(),
-            ),
+            ("Gather".to_owned(), detail::STORE_READ_SUCCEEDED.clone(),),
             ("Gather".to_owned(), detail::LUA_CHUNK_SUCCEEDED.clone(),),
             ("Gather".to_owned(), detail::LUA_TEARDOWN_STARTED.clone(),),
             ("Gather".to_owned(), detail::LUA_TEARDOWN_SUCCEEDED.clone(),),
@@ -1772,9 +1763,9 @@ fn store_exists_returns_boolean() {
 }
 
 #[test]
-fn store_write_then_read_lines_returns_numbered_content() {
+fn store_write_then_read_numbered_returns_numbered_content() {
     let out = run(
-        "store.write('a.txt', 'first\\nsecond')\nreturn store.read_lines('a.txt')",
+        "store.write('a.txt', 'first\\nsecond')\nreturn store.read_numbered('a.txt')",
         "",
     )
     .unwrap();
@@ -1784,7 +1775,7 @@ fn store_write_then_read_lines_returns_numbered_content() {
 #[test]
 fn store_append_extends_the_file() {
     let out = run(
-            "store.append('log.txt', 'one\\n')\nstore.append('log.txt', 'two')\nreturn store.read_lines('log.txt')",
+            "store.append('log.txt', 'one\\n')\nstore.append('log.txt', 'two')\nreturn store.read_numbered('log.txt')",
             "",
         )
         .unwrap();
@@ -1794,7 +1785,7 @@ fn store_append_extends_the_file() {
 #[test]
 fn store_str_replace_edits_in_place() {
     let out = run(
-            "store.write('a.txt', 'the quick brown fox')\nstore.str_replace('a.txt', 'quick', 'slow')\nreturn store.read_lines('a.txt')",
+            "store.write('a.txt', 'the quick brown fox')\nstore.str_replace('a.txt', 'quick', 'slow')\nreturn store.read_numbered('a.txt')",
             "",
         )
         .unwrap();
@@ -1804,10 +1795,10 @@ fn store_str_replace_edits_in_place() {
 #[test]
 fn store_delete_then_read_raises() {
     let err = run(
-            "store.write('a.txt', 'gone soon')\nstore.delete('a.txt')\nreturn store.read_lines('a.txt')",
-            "",
-        )
-        .expect_err("reading a deleted file must raise");
+        "store.write('a.txt', 'gone soon')\nstore.delete('a.txt')\nreturn store.read('a.txt')",
+        "",
+    )
+    .expect_err("reading a deleted file must raise");
     let msg = match &err {
         Error::Lua(msg) => msg.clone(),
         Error::LuaRuntime { message, .. } => message.clone(),
@@ -1830,6 +1821,20 @@ fn store_inject_is_absent() {
     assert!(
         run("store.inject('a.txt')", "").is_err(),
         "calling the removed store.inject must raise"
+    );
+}
+
+#[test]
+fn store_read_lines_is_absent() {
+    let out = run("return tostring(store.read_lines)", "").unwrap();
+    assert_eq!(
+        out.returned.as_deref(),
+        Some("nil"),
+        "store.read_lines was removed; indexing it must yield nil"
+    );
+    assert!(
+        run("store.read_lines('a.txt')", "").is_err(),
+        "calling the removed store.read_lines must raise"
     );
 }
 
@@ -1929,19 +1934,14 @@ fn store_read_end_without_start_raises() {
 }
 
 #[test]
-fn store_read_numbered_without_bounds_matches_read_lines() {
+fn store_read_numbered_without_bounds_numbers_from_one() {
     let store = StoreRef::memory();
     let out = run_with(
         "store.write('a.txt', 'first\\nsecond')\nreturn store.read_numbered('a.txt')",
         &store,
     )
     .unwrap();
-    let expected = store.read_lines("a.txt").expect("read_lines");
-    assert_eq!(
-        out.returned.as_deref(),
-        Some(expected.as_str()),
-        "an unbounded read_numbered must equal read_lines byte-for-byte"
-    );
+    assert_eq!(out.returned.as_deref(), Some("1| first\n2| second"));
 }
 
 #[test]
@@ -2177,8 +2177,8 @@ fn store_writes_are_visible_on_the_shared_handle() {
     let store = StoreRef::memory();
     run_with("store.write('shared.txt', 'from lua')", &store).unwrap();
     assert_eq!(
-        store.read_lines("shared.txt").expect("read_lines"),
-        "1| from lua",
+        store.read("shared.txt").expect("read"),
+        "from lua",
         "a Lua write must land in the shared store"
     );
 }
@@ -2188,7 +2188,7 @@ fn store_reports_are_ordered_exact_and_payload_free_on_failure() {
     let recorder = Recorder::default();
     let store = StoreRef::memory();
     let source = "store.write('secret/path.txt', 'private contents')\n\
-                      store.read_lines('secret/path.txt')\n\
+                      store.read('secret/path.txt')\n\
                       store.str_replace('secret/path.txt', 'missing secret', 'replacement')";
     let error = run_chunk(
         source,
@@ -2207,10 +2207,7 @@ fn store_reports_are_ordered_exact_and_payload_free_on_failure() {
         observations,
         vec![
             ("Gather".to_string(), detail::STORE_WRITE_SUCCEEDED.clone()),
-            (
-                "Gather".to_string(),
-                detail::STORE_READ_LINES_SUCCEEDED.clone(),
-            ),
+            ("Gather".to_string(), detail::STORE_READ_SUCCEEDED.clone()),
             ("Gather".to_string(), detail::STORE_REPLACE_FAILED.clone()),
         ]
     );
@@ -2262,12 +2259,6 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
             success: detail::STORE_APPEND_SUCCEEDED,
             failure: detail::STORE_APPEND_FAILED,
             prepare: empty,
-        },
-        Case {
-            source: "store.read_lines('a.txt')",
-            success: detail::STORE_READ_LINES_SUCCEEDED,
-            failure: detail::STORE_READ_LINES_FAILED,
-            prepare: existing,
         },
         Case {
             source: "store.read('a.txt')",

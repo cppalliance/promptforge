@@ -4,11 +4,10 @@
 //! string paths. [`Store`] is the backend contract, [`MemStore`] is an
 //! in-memory backend, and [`StoreRef`] is the cheaply cloneable, thread-safe
 //! handle the runtime hands to both the Lua VM and (later) the model's file
-//! tools. Two read shapes are available: [`StoreRef::read_lines`] returns
-//! numbered lines for navigation, and [`StoreRef::read`] returns verbatim
-//! contents for trusted handoff ([`StoreRef::read_range`] slices a 1-based
-//! inclusive line range out of the same verbatim contents, and
-//! [`StoreRef::read_range_numbered`] numbers such a slice absolutely). For
+//! tools. [`StoreRef::read`] returns verbatim contents for trusted handoff,
+//! [`StoreRef::read_range`] slices a 1-based inclusive line range out of the
+//! same verbatim contents, and [`StoreRef::read_range_numbered`] numbers such
+//! a slice absolutely (with no bounds it numbers the whole file from 1). For
 //! model-facing re-injection the caller wraps a verbatim read in an
 //! untrusted guard envelope (the `untrusted` Lua global).
 //! Edits are anchor-based ([`Store::str_replace`]) rather than offset-based,
@@ -18,6 +17,7 @@
 //! backend only.
 
 use std::fmt;
+use std::fmt::Write as _;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 mod error;
@@ -51,7 +51,6 @@ use path::StorePath;
 /// let store = StoreRef::memory();
 /// let clone = store.clone();
 /// store.write("shared.txt", "state")?;
-/// assert_eq!(clone.read_lines("shared.txt")?, "1| state");
 /// assert_eq!(clone.read("shared.txt")?, "state");
 /// # Ok::<(), promptforge_core::store::StoreError>(())
 /// ```
@@ -174,26 +173,6 @@ impl StoreRef {
         self.lock()?.append(path.as_str(), contents)
     }
 
-    /// Reads the file at `path` as numbered lines. See
-    /// [`Store::read_lines`].
-    ///
-    /// # Errors
-    /// Returns [`StoreError::NotFound`] if no file exists at `path`.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge_core::store::StoreRef;
-    ///
-    /// let store = StoreRef::memory();
-    /// store.write("a.txt", "hi")?;
-    /// assert_eq!(store.read_lines("a.txt")?, "1| hi");
-    /// # Ok::<(), promptforge_core::store::StoreError>(())
-    /// ```
-    pub fn read_lines(&self, path: &str) -> Result<String, StoreError> {
-        let path = StorePath::parse(path)?;
-        self.lock()?.read_lines(path.as_str())
-    }
-
     /// Reads the file at `path` exactly as stored, with no line numbering.
     /// See [`Store::read`].
     ///
@@ -256,16 +235,14 @@ impl StoreRef {
     /// Reads lines `start..=end` of the file at `path` as numbered lines,
     /// 1-based and inclusive, numbered absolutely from `start`.
     ///
-    /// The slice carries the same format as [`StoreRef::read_lines`]: each
-    /// line is prefixed with its number, right-aligned to the width of the
-    /// largest emitted number, followed by `"| "`; lines are joined with
+    /// Each line is prefixed with its number, right-aligned to the width of
+    /// the largest emitted number, followed by `"| "`; lines are joined with
     /// `"\n"` and there is no trailing newline. With `start` of 1 and no
-    /// `end` the whole file is numbered from 1, byte-for-byte identical to
-    /// [`StoreRef::read_lines`]. Bounds are evaluated exactly as in
-    /// [`StoreRef::read_range`]: a `start` below 1 is an error; a `start`
-    /// past the last line reads as the empty string; an omitted `end` means
-    /// the last line, and a given `end` clamps down to it; an `end` before
-    /// `start` at that point is an error.
+    /// `end` the whole file is numbered from 1. Bounds are evaluated exactly
+    /// as in [`StoreRef::read_range`]: a `start` below 1 is an error; a
+    /// `start` past the last line reads as the empty string; an omitted `end`
+    /// means the last line, and a given `end` clamps down to it; an `end`
+    /// before `start` at that point is an error.
     ///
     /// # Errors
     /// Returns [`StoreError::NotFound`] if no file exists at `path`, or
@@ -298,7 +275,7 @@ impl StoreRef {
         let Some((start, end)) = resolve_line_range(path.as_str(), lines.len(), start, end)? else {
             return Ok(String::new());
         };
-        Ok(mem::number_lines_from(&lines[start - 1..end], start))
+        Ok(number_lines_from(&lines[start - 1..end], start))
     }
 
     /// Replaces the unique occurrence of `old` with `new`. See
@@ -315,7 +292,7 @@ impl StoreRef {
     /// let store = StoreRef::memory();
     /// store.write("a.txt", "one two")?;
     /// store.str_replace("a.txt", "two", "three")?;
-    /// assert_eq!(store.read_lines("a.txt")?, "1| one three");
+    /// assert_eq!(store.read("a.txt")?, "one three");
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     pub fn str_replace(&self, path: &str, old: &str, new: &str) -> Result<(), StoreError> {
@@ -457,6 +434,27 @@ fn resolve_line_range(
         });
     }
     Ok(Some((start, end)))
+}
+
+/// Renders `lines` numbered absolutely from `start`, each number
+/// right-aligned to the width of the largest emitted number, followed by
+/// `"| "`; lines are joined with `"\n"` and there is no trailing newline.
+fn number_lines_from(lines: &[&str], start: usize) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    let last = start + lines.len() - 1;
+    let width = last.to_string().len();
+    let mut out = String::new();
+    for (index, line) in lines.iter().enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        let number = start + index;
+        // Writing to a String is infallible; the result carries no information.
+        let _ = write!(out, "{number:>width$}| {line}");
+    }
+    out
 }
 
 #[cfg(test)]

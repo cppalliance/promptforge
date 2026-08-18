@@ -219,7 +219,7 @@ fn read_store_numbered(
 }
 
 /// Expose an always-on `store` table whose methods (`write`, `append`,
-/// `read`, `read_numbered`, `read_lines`, `str_replace`, `delete`,
+/// `read`, `read_numbered`, `str_replace`, `delete`,
 /// `glob`, `exists`) are backed by the run-scoped [`StoreRef`] handle.
 /// Installed once per section with [`Lua::create_function`], so the table
 /// stays valid across every chunk the VM runs without a live [`mlua::Scope`].
@@ -229,11 +229,10 @@ fn read_store_numbered(
 /// nil; `read` returns the file verbatim, optionally bounded to a 1-based
 /// inclusive line range (`read(path, start)` reads to end of file,
 /// `read(path, start, end)` slices); `read_numbered` returns it with
-/// absolute line numbers under the same optional bounds; `read_lines`
-/// returns it numbered from 1; `glob` returns an array table of matching
-/// paths. A [`StoreError`] from any op is mapped into an `mlua` error via
-/// [`mlua::Error::external`], so it aborts the chunk and surfaces as
-/// [`Error::Lua`].
+/// absolute line numbers under the same optional bounds; `glob` returns an
+/// array table of matching paths. A [`StoreError`] from any op is mapped into
+/// an `mlua` error via [`mlua::Error::external`], so it aborts the chunk and
+/// surfaces as [`Error::Lua`].
 ///
 /// The `StoreRef` handle locks a mutex internally per call and is synchronous, so
 /// nothing is held across an await.
@@ -293,21 +292,6 @@ pub(crate) fn install_store_table(
         })
         .map_err(Error::lua)?;
     table.set("append", append).map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let report = Arc::clone(&reporter);
-    let read_lines = lua
-        .create_function(move |_, path: String| {
-            let result = handle.read_lines(&path);
-            report.report(
-                result.is_ok(),
-                detail::STORE_READ_LINES_SUCCEEDED,
-                detail::STORE_READ_LINES_FAILED,
-            );
-            result.map_err(mlua::Error::external)
-        })
-        .map_err(Error::lua)?;
-    table.set("read_lines", read_lines).map_err(Error::lua)?;
 
     let handle = store.clone();
     let report = Arc::clone(&reporter);
@@ -457,23 +441,6 @@ pub(crate) fn install_store_table_scoped<'scope, 'env: 'scope>(
         })
         .map_err(Error::lua)?;
     table.set("append", append).map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let read_lines = scope
-        .create_function(move |_, path: String| {
-            let result = handle.read_lines(&path);
-            observe_store_result(
-                execution,
-                observer,
-                section,
-                result.is_ok(),
-                detail::STORE_READ_LINES_SUCCEEDED,
-                detail::STORE_READ_LINES_FAILED,
-            );
-            result.map_err(mlua::Error::external)
-        })
-        .map_err(Error::lua)?;
-    table.set("read_lines", read_lines).map_err(Error::lua)?;
 
     let handle = store.clone();
     let read = scope
