@@ -328,6 +328,63 @@ impl SectionVm {
         )
     }
 
+    /// Installs `tasks`, `execute`, `jump`, and `fanout` as persistent
+    /// globals for the section's whole lifecycle.
+    ///
+    /// Called once by the engine after host injection. Both callbacks own
+    /// their run context, so the closures stay valid across every chunk this
+    /// VM runs without a live [`mlua::Scope`]. The `jump` closure captures a
+    /// clone of the VM's jump slot; the slot is reset before each chunk and
+    /// read after it by the control-run path.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if any global cannot be installed.
+    pub(crate) fn install_control_globals<E, F>(
+        &self,
+        tasks: &[LuaSectionHandle],
+        execute_callback: E,
+        fanout_callback: F,
+    ) -> Result<()>
+    where
+        E: Fn(Value, Option<String>) -> std::result::Result<String, Error> + Send + 'static,
+        F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, Error> + Send + 'static,
+    {
+        install_tasks_table(&self.lua, tasks)?;
+        let globals = self.lua.globals();
+        let execute_fn = self
+            .lua
+            .create_function(move |_, (target, input): (Value, Option<String>)| {
+                execute_callback(target, input).map_err(mlua::Error::external)
+            })
+            .map_err(Error::lua)?;
+        globals.raw_set("execute", execute_fn).map_err(Error::lua)?;
+        let jump_slot = Arc::clone(&self.jump_slot);
+        let jump_fn = self
+            .lua
+            .create_function(move |_, target: Value| -> mlua::Result<()> {
+                let heading = resolve_section_target(target)?;
+                let mut slot = jump_slot
+                    .lock()
+                    .map_err(|_| mlua::Error::external("jump slot poisoned"))?;
+                *slot = Some(heading);
+                Err(mlua::Error::external("jump transfer"))
+            })
+            .map_err(Error::lua)?;
+        globals.raw_set("jump", jump_fn).map_err(Error::lua)?;
+        let fanout_fn = self
+            .lua
+            .create_function(move |lua, (worker, list): (String, String)| {
+                let replies = fanout_callback(worker, list).map_err(mlua::Error::external)?;
+                let table = lua.create_table_with_capacity(replies.len(), 0)?;
+                for (i, reply) in replies.into_iter().enumerate() {
+                    table.raw_set(i + 1, reply)?;
+                }
+                Ok(table)
+            })
+            .map_err(Error::lua)?;
+        globals.raw_set("fanout", fanout_fn).map_err(Error::lua)
+    }
+
     /// Executes one live H1 Lua block with call-time capability resolution.
     ///
     /// Resolver callbacks are scoped to this block and reinstalled for each
@@ -463,37 +520,31 @@ impl SectionVm {
         result
     }
 
-    /// Executes a compiled prologue with `tasks`, `execute`, `jump`, and optional `fanout`.
+    /// Executes a compiled prologue with the installed control globals.
+    ///
+    /// `tasks`, `execute`, `jump`, and `fanout` must already be installed by
+    /// [`install_control_globals`](Self::install_control_globals).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected or
     /// execution fails.
-    pub(crate) fn run_prologue_with_control<E, F>(
+    pub(crate) fn run_prologue_with_control(
         &self,
         program: &LuaProgram,
         observer: &dyn Observer,
         section: &str,
-        tasks: &[LuaSectionHandle],
-        execute_callback: Option<&E>,
-        fanout_callback: Option<&F>,
-    ) -> Result<LuaBlockResult>
-    where
-        E: Fn(Value, Option<String>) -> std::result::Result<String, Error>,
-        F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, Error>,
-    {
+    ) -> Result<LuaBlockResult> {
         observer.observe(&self.execution, section, detail::LUA_PROLOGUE_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
             observer.observe(&self.execution, section, detail::LUA_PROLOGUE_FAILED);
             return Err(error);
         }
-        let result =
-            self.run_loaded_with_control(program, tasks, execute_callback, fanout_callback);
-        let ok = result.is_ok();
+        let result = self.run_loaded_with_control(program);
         observer.observe(
             &self.execution,
             section,
-            if ok {
+            if result.is_ok() {
                 detail::LUA_PROLOGUE_SUCCEEDED
             } else {
                 detail::LUA_PROLOGUE_FAILED
@@ -647,37 +698,31 @@ impl SectionVm {
         self.lua.globals().raw_set(name, value).map_err(Error::lua)
     }
 
-    /// Executes a compiled epilog with `tasks`, `execute`, `jump`, and optional `fanout`.
+    /// Executes a compiled epilog with the installed control globals.
+    ///
+    /// `tasks`, `execute`, `jump`, and `fanout` must already be installed by
+    /// [`install_control_globals`](Self::install_control_globals).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected or
     /// execution fails.
-    pub(crate) fn run_epilog_with_control<E, F>(
+    pub(crate) fn run_epilog_with_control(
         &self,
         program: &LuaProgram,
         observer: &dyn Observer,
         section: &str,
-        tasks: &[LuaSectionHandle],
-        execute_callback: Option<&E>,
-        fanout_callback: Option<&F>,
-    ) -> Result<LuaBlockResult>
-    where
-        E: Fn(Value, Option<String>) -> std::result::Result<String, Error>,
-        F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, Error>,
-    {
+    ) -> Result<LuaBlockResult> {
         observer.observe(&self.execution, section, detail::LUA_EPILOG_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
             observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
             return Err(error);
         }
-        let result =
-            self.run_loaded_with_control(program, tasks, execute_callback, fanout_callback);
-        let ok = result.is_ok();
+        let result = self.run_loaded_with_control(program);
         observer.observe(
             &self.execution,
             section,
-            if ok {
+            if result.is_ok() {
                 detail::LUA_EPILOG_SUCCEEDED
             } else {
                 detail::LUA_EPILOG_FAILED
@@ -864,17 +909,7 @@ impl SectionVm {
         Ok(slot.take())
     }
 
-    fn run_loaded_with_control<E, F>(
-        &self,
-        program: &LuaProgram,
-        tasks: &[LuaSectionHandle],
-        execute_callback: Option<&E>,
-        fanout_callback: Option<&F>,
-    ) -> Result<LuaBlockResult>
-    where
-        E: Fn(Value, Option<String>) -> std::result::Result<String, Error>,
-        F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, Error>,
-    {
+    fn run_loaded_with_control(&self, program: &LuaProgram) -> Result<LuaBlockResult> {
         {
             let mut slot = self
                 .jump_slot
@@ -882,98 +917,16 @@ impl SectionVm {
                 .map_err(|_| Error::Lua("jump slot was poisoned".to_owned()))?;
             *slot = None;
         }
-        let jump_slot = Arc::clone(&self.jump_slot);
-        let result = self.lua.scope(|scope| {
-            install_tasks_table(&self.lua, tasks).map_err(mlua::Error::external)?;
-            if let Some(execute_callback) = execute_callback {
-                let execute_fn = scope
-                    .create_function(|_, (target, input): (Value, Option<String>)| {
-                        execute_callback(target, input).map_err(mlua::Error::external)
-                    })
-                    .map_err(mlua::Error::external)?;
-                self.lua
-                    .globals()
-                    .raw_set("execute", execute_fn)
-                    .map_err(mlua::Error::external)?;
-            }
-            let jump_fn = scope
-                .create_function(move |_, target: Value| -> mlua::Result<()> {
-                    let heading = resolve_section_target(target)?;
-                    let mut slot = jump_slot
-                        .lock()
-                        .map_err(|_| mlua::Error::external("jump slot poisoned"))?;
-                    *slot = Some(heading);
-                    Err(mlua::Error::external("jump transfer"))
-                })
-                .map_err(mlua::Error::external)?;
-            self.lua
-                .globals()
-                .raw_set("jump", jump_fn)
-                .map_err(mlua::Error::external)?;
-            if let Some(fanout_callback) = fanout_callback {
-                let fanout_fn = scope
-                    .create_function(|lua, (worker, list): (String, String)| {
-                        let replies =
-                            fanout_callback(worker, list).map_err(mlua::Error::external)?;
-                        let table = lua.create_table_with_capacity(replies.len(), 0)?;
-                        for (i, reply) in replies.into_iter().enumerate() {
-                            table.raw_set(i + 1, reply)?;
-                        }
-                        Ok(table)
-                    })
-                    .map_err(mlua::Error::external)?;
-                self.lua
-                    .globals()
-                    .raw_set("fanout", fanout_fn)
-                    .map_err(mlua::Error::external)?;
-            }
-            program
-                .load(&self.lua)
-                .map_err(mlua::Error::external)?
-                .call(())
-        });
-        // Control-global cleanup runs on EVERY exit (jump, success, or ordinary
-        // execution error), so a failing block never leaks live `jump`/`execute`/
-        // `fanout`/`tasks` globals into a later phase (LUA-007). Cleanup failures
-        // are combined with the execution outcome rather than discarded.
-        let jump = self.take_jump();
-        let cleanup = self.clear_control_globals();
-        // Cleanup ran first, so control globals never leak (LUA-007) even when
-        // the jump slot was poisoned; only then is the poison propagated
-        // instead of being coerced into "no jump" (discarded-error-001).
-        let jump = jump?;
-        if let Some(heading) = jump {
-            cleanup?;
+        let result = program.load(&self.lua)?.call(());
+        // A recorded jump takes precedence over the chunk's error: that error
+        // is the jump's own transfer marker, not a real failure. A poisoned
+        // slot propagates rather than coercing into "no jump"
+        // (discarded-error-001).
+        if let Some(heading) = self.take_jump()? {
             return Ok(LuaBlockResult::Jump(heading));
         }
-        let returned = result.map_err(|error| program.map_runtime_error(&error));
-        match (returned, cleanup) {
-            // Execution error is the primary cause; it takes precedence.
-            (Err(execution), _) => Err(execution),
-            // Execution succeeded but cleanup failed: surface the cleanup error.
-            (Ok(_), Err(cleanup)) => Err(cleanup),
-            (Ok(values), Ok(())) => Ok(LuaBlockResult::Returned(scalar_return(values)?)),
-        }
-    }
-
-    /// Clears the phase's control-flow globals, returning the first failure.
-    ///
-    /// Always attempts to clear every global even if an earlier clear fails, so
-    /// no live control function is left installed for the next phase.
-    fn clear_control_globals(&self) -> Result<()> {
-        let globals = self.lua.globals();
-        let mut first_error: Option<Error> = None;
-        for name in ["jump", "execute", "fanout", "tasks"] {
-            if let Err(error) = globals.raw_set(name, Value::Nil)
-                && first_error.is_none()
-            {
-                first_error = Some(Error::lua(error));
-            }
-        }
-        match first_error {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
+        let returned = result.map_err(|error| program.map_runtime_error(&error))?;
+        Ok(LuaBlockResult::Returned(scalar_return(returned)?))
     }
 
     #[cfg(test)]
