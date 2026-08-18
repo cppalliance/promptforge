@@ -174,7 +174,7 @@ pub(crate) fn prepare_scoped_tools(
     }
     // Local tools dispatch under a sentinel identity the tool loop recognizes
     // by server name; they never enter the registry. The alias was validated
-    // at `tools.local` registration, so identity construction cannot fail.
+    // at `tools.add_local` registration, so identity construction cannot fail.
     for schema in local_schemas {
         dispatch.insert(
             schema.name.clone(),

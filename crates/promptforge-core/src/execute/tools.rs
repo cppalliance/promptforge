@@ -47,7 +47,7 @@ pub(crate) struct PreparedTools {
 
 /// Effective tool set with a generation-tracked schema/dispatch cache.
 ///
-/// Mutations via `tools.add` or `tools.local` bump [`ToolRuntime::generation`].
+/// Mutations via `tools.add` or `tools.add_local` bump [`ToolRuntime::generation`].
 /// Each [`Self::prepare`] call rebuilds schemas and dispatch only when that
 /// generation no longer matches the cache. Used by `model:infer`; the
 /// implicit prose path still builds scope through `prepare_effective_scope`.
@@ -159,7 +159,7 @@ impl InferContext {
     ) -> mlua::Result<(PreparedTools, Vec<String>)> {
         if let Some(live) = &self.live_bindings {
             let bindings = live.bindings().map_err(mlua::Error::external)?.0;
-            // H1 has no local tools (`tools.local` is H2-only), so the local
+            // H1 has no local tools (`tools.add_local` is H2-only), so the local
             // schema list stays empty on the live path.
             let scope: Vec<ToolBinding> = bindings
                 .always()
