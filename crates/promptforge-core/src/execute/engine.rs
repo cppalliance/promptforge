@@ -28,7 +28,7 @@ use crate::client::{GatewayClient, Message};
 use crate::debug::DebugCapture;
 use crate::fanout;
 use crate::lua::{
-    LuaBlockResult, LuaSectionHandle, SectionVm, ToolBindings, ToolCallCounts,
+    LuaBlockResult, LuaSectionHandle, SectionVm, ToolBinding, ToolBindings, ToolCallCounts,
     current_tool_bindings, resolve_section_target,
 };
 use crate::model::{CompletionOptions, ModelBinding, ModelBindings};
@@ -413,14 +413,14 @@ async fn run_one_section(
                 }
             }
             Block::Prose { text, loop_capable } => {
-                let effective_bindings =
-                    match current_tool_bindings(ctx.bindings, &vm.tool_runtime) {
-                        Ok(bindings) => bindings,
-                        Err(error) => {
-                            vm.teardown(ctx.observer, &section.name);
-                            return Err(error);
-                        }
-                    };
+                let effective_bindings = match current_tool_bindings(ctx.bindings, &vm.tool_runtime)
+                {
+                    Ok(bindings) => bindings,
+                    Err(error) => {
+                        vm.teardown(ctx.observer, &section.name);
+                        return Err(error);
+                    }
+                };
                 if !seen_prose {
                     seen_prose = true;
                     counts = match vm.install_tool_call_counts(&effective_bindings) {
@@ -463,7 +463,7 @@ async fn run_one_section(
                 if let Some(counts) = counts.as_ref() {
                     let new_aliases = effective_bindings
                         .iter()
-                        .map(|binding| binding.alias())
+                        .map(ToolBinding::alias)
                         .chain(local_schemas.iter().map(|schema| schema.name.as_str()));
                     for alias in new_aliases {
                         if let Err(error) = counts.ensure(alias) {
@@ -547,7 +547,7 @@ async fn run_one_section(
                 // Local tools are Lua functions on this section VM; route
                 // their calls back into it rather than the registry.
                 let local_dispatch =
-                    |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, args);
+                    |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, &args);
                 let outcome = match run_prose_inference(
                     active_client,
                     &schemas,

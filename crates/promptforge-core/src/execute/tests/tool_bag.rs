@@ -138,6 +138,10 @@ fn tool_bag_caches_on_unchanged_generation() {
     vm.teardown(&NullObserver, "Bag");
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one narrative test: override setup plus schema assertions stay together"
+)]
 #[test]
 fn tool_description_override_appears_in_model_schema() {
     let bindings = crate::lua::ToolBindings::for_test(

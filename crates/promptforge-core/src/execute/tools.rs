@@ -247,7 +247,7 @@ impl InferContext {
         // the hook was invoked on - so route their calls back into it.
         let local_tools = self.local_tools.clone();
         let local_dispatch =
-            move |alias: &str, args: serde_json::Value| local_tools.call(lua, alias, args);
+            move |alias: &str, args: serde_json::Value| local_tools.call(lua, alias, &args);
         let (text, finish_reason) = bridge_blocking(run_tool_loop(
             &client,
             &prepared.schemas,
@@ -417,7 +417,11 @@ pub(crate) fn attach_infer_hook(
         turns: Arc::clone(turns),
         analysis: analysis.cloned(),
         live_bindings,
-        tool_bag: Mutex::new(ToolBag::new(tool_bindings, tool_runtime, local_tools.clone())),
+        tool_bag: Mutex::new(ToolBag::new(
+            tool_bindings,
+            tool_runtime,
+            local_tools.clone(),
+        )),
         local_tools,
         counts_slot: vm.counts_slot(),
         sys_live: vm.sys_live_handle(),

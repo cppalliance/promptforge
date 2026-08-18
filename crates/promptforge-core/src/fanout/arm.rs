@@ -261,7 +261,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
                 // Local tools are Lua functions on the arm's VM; route their
                 // calls back into it rather than the registry.
                 let local_dispatch =
-                    |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, args);
+                    |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, &args);
                 match crate::execute::run_tool_loop(
                     client,
                     &schemas,
