@@ -30,7 +30,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A26. Artifact credentials are read from process secrets at request time and are never persisted or logged.
 - A27. Model tool-wire dialects are resolved from runtime evidence and applied at one normalization boundary; prompts remain dialect-agnostic.
 - A30. Fan-out arms run concurrently, return in input order, and abort siblings on the first error.
-- A34. A subroutine call starts a fresh VM and returns; a transfer clears context, stops the caller, and does not return.
 - A35. The H1 program executes exactly once with live host resolution; no separate declaration or bind replay phase exists.
 
 
@@ -43,7 +42,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A43. Hosts expose no live tools by default; each capability requires explicit enablement.
 
-- A44. Secret resolution is deterministic: process values override root profile values, which override included defaults.
 
 - A46. H2 sections are optional; an H1 can be the complete program.
 
@@ -51,6 +49,9 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A48. Jumps preserve reply unless cleared; subroutines start empty and receive explicit input.
 - A49. Prompt-local tools have explicit schemas and run as trusted code in their declaring VM.
+
+- A50. An empty stop turn is valid only after a successful tool call; other empty replies fail.
+- A51. Config secret sidecars supply defaults through local lookup and never mutate process state.
 
 ## Principles
 
