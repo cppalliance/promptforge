@@ -65,7 +65,7 @@ pub(crate) async fn execute_live_h1(
         "execution": execution,
         "section_count": prompt.sections.len(),
     });
-    let mut vm = SectionVm::new(None, execution, observer, &prompt.title)?;
+    let mut vm = SectionVm::new(execution, observer, &prompt.title)?;
     vm.apply_lua_limits(limits.lua_memory().get(), limits.lua_logs().get())?;
     vm.inject_host(args, &sys, store, None)?;
     macro_rules! h1_try {
@@ -141,8 +141,11 @@ pub(crate) async fn execute_live_h1(
                     }
                 }
                 // H1 registers no local tools; the list is always empty here.
-                let (schemas, dispatch) =
-                    h1_try!(prepare_scoped_tools(&scope, &vm.local_tool_schemas(), registry));
+                let (schemas, dispatch) = h1_try!(prepare_scoped_tools(
+                    &scope,
+                    &vm.local_tool_schemas(),
+                    registry
+                ));
                 let var = h1_try!(vm.var());
                 let prose = h1_try!(subst::substitute(
                     text,
@@ -164,9 +167,8 @@ pub(crate) async fn execute_live_h1(
                         "gateway client was not initialized for H1 prose".to_owned(),
                     ));
                 };
-                let counts = ToolCallCounts::new(
-                    scope.iter().map(|binding| binding.alias().to_owned()),
-                );
+                let counts =
+                    ToolCallCounts::new(scope.iter().map(|binding| binding.alias().to_owned()));
                 let mode = if *loop_capable {
                     ProseMode::Loop {
                         max_tool_iterations: prompt

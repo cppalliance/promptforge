@@ -1,10 +1,9 @@
 use super::{
     Arc, AtomicU32, AtomicUsize, Error, LUA_LOG_CHARACTER_LIMIT, Lua, MultiValue, Observation,
-    Observer, Ordering, Result, Scope, StoreRef, Value, detail,
+    Observer, Ordering, Result, StoreRef, Value, detail,
 };
 
-/// Shared body of the `log(message)` host callback, used by both the
-/// persistent per-section install and the scope-bound shared-phase install.
+/// Shared body of the persistent per-section `log(message)` host callback.
 fn log_checkpoint(
     execution: &str,
     observer: &dyn Observer,
@@ -86,32 +85,6 @@ pub(crate) fn install_log(
     lua.globals().raw_set("log", log).map_err(Error::lua)
 }
 
-/// Scope-bound `log` install for the shared-load phase, which runs before
-/// host injection with only a borrowed observer available.
-pub(crate) fn install_log_scoped<'scope, 'env: 'scope>(
-    lua: &Lua,
-    scope: &'scope Scope<'scope, 'env>,
-    execution: &'env str,
-    observer: &'env dyn Observer,
-    section: &'env str,
-    log_budget: &'env AtomicU32,
-    log_byte_budget: &'env AtomicUsize,
-) -> Result<()> {
-    let log = scope
-        .create_function(move |_, arguments: MultiValue| {
-            log_checkpoint(
-                execution,
-                observer,
-                section,
-                log_budget,
-                log_byte_budget,
-                arguments,
-            )
-        })
-        .map_err(Error::lua)?;
-    lua.globals().raw_set("log", log).map_err(Error::lua)
-}
-
 pub(crate) fn is_log_line_break_or_control(character: char) -> bool {
     character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')
 }
@@ -165,8 +138,7 @@ pub(crate) fn observe_store_result(
     );
 }
 
-/// Shared body of the `store.read` host callback, used by both the
-/// persistent per-section install and the scope-bound test-harness install.
+/// Shared body of the persistent per-section `store.read` host callback.
 ///
 /// No `start` reads the whole file; a present `start` slices a 1-based
 /// inclusive line range. A negative bound converts to 0, which
@@ -192,8 +164,8 @@ fn read_store(
     }
 }
 
-/// Shared body of the `store.read_numbered` host callback, used by both the
-/// persistent per-section install and the scope-bound test-harness install.
+/// Shared body of the persistent per-section `store.read_numbered` host
+/// callback.
 ///
 /// Bounds follow `read_store`: no `start` numbers the whole file from 1, a
 /// present `start` slices a 1-based inclusive line range numbered absolutely
@@ -379,165 +351,6 @@ pub(crate) fn install_store_table(
 
     let handle = store.clone();
     let exists = lua
-        .create_function(move |_, path: String| handle.exists(&path).map_err(mlua::Error::external))
-        .map_err(Error::lua)?;
-    table.set("exists", exists).map_err(Error::lua)?;
-
-    globals.raw_set("store", table).map_err(Error::lua)?;
-    Ok(())
-}
-
-/// Scope-bound `store` install retained for the `run_chunk` test harness,
-/// which has only a borrowed observer. Production sections use
-/// [`install_store_table`].
-#[cfg(test)]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one table installs all store operations beside their matching observation outcomes"
-)]
-pub(crate) fn install_store_table_scoped<'scope, 'env: 'scope>(
-    lua: &Lua,
-    scope: &'scope Scope<'scope, 'env>,
-    globals: &mlua::Table,
-    store: &StoreRef,
-    execution: &'env str,
-    observer: &'env dyn Observer,
-    section: &'env str,
-) -> Result<()> {
-    let table = lua.create_table().map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let write = scope
-        .create_function(move |_, (path, contents): (String, String)| {
-            let result = handle.write(&path, &contents);
-            observe_store_result(
-                execution,
-                observer,
-                section,
-                result.is_ok(),
-                detail::STORE_WRITE_SUCCEEDED,
-                detail::STORE_WRITE_FAILED,
-            );
-            result.map_err(mlua::Error::external)?;
-            Ok(())
-        })
-        .map_err(Error::lua)?;
-    table.set("write", write).map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let append = scope
-        .create_function(move |_, (path, contents): (String, String)| {
-            let result = handle.append(&path, &contents);
-            observe_store_result(
-                execution,
-                observer,
-                section,
-                result.is_ok(),
-                detail::STORE_APPEND_SUCCEEDED,
-                detail::STORE_APPEND_FAILED,
-            );
-            result.map_err(mlua::Error::external)?;
-            Ok(())
-        })
-        .map_err(Error::lua)?;
-    table.set("append", append).map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let read = scope
-        .create_function(
-            move |_, (path, start, end): (String, Option<i64>, Option<i64>)| {
-                let result = read_store(&handle, &path, start, end);
-                observe_store_result(
-                    execution,
-                    observer,
-                    section,
-                    result.is_ok(),
-                    detail::STORE_READ_SUCCEEDED,
-                    detail::STORE_READ_FAILED,
-                );
-                result.map_err(mlua::Error::external)
-            },
-        )
-        .map_err(Error::lua)?;
-    table.set("read", read).map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let read_numbered = scope
-        .create_function(
-            move |_, (path, start, end): (String, Option<i64>, Option<i64>)| {
-                let result = read_store_numbered(&handle, &path, start, end);
-                observe_store_result(
-                    execution,
-                    observer,
-                    section,
-                    result.is_ok(),
-                    detail::STORE_READ_NUMBERED_SUCCEEDED,
-                    detail::STORE_READ_NUMBERED_FAILED,
-                );
-                result.map_err(mlua::Error::external)
-            },
-        )
-        .map_err(Error::lua)?;
-    table
-        .set("read_numbered", read_numbered)
-        .map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let str_replace = scope
-        .create_function(move |_, (path, old, new): (String, String, String)| {
-            let result = handle.str_replace(&path, &old, &new);
-            observe_store_result(
-                execution,
-                observer,
-                section,
-                result.is_ok(),
-                detail::STORE_REPLACE_SUCCEEDED,
-                detail::STORE_REPLACE_FAILED,
-            );
-            result.map_err(mlua::Error::external)?;
-            Ok(())
-        })
-        .map_err(Error::lua)?;
-    table.set("str_replace", str_replace).map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let delete = scope
-        .create_function(move |_, path: String| {
-            let result = handle.delete(&path);
-            observe_store_result(
-                execution,
-                observer,
-                section,
-                result.is_ok(),
-                detail::STORE_DELETE_SUCCEEDED,
-                detail::STORE_DELETE_FAILED,
-            );
-            result.map_err(mlua::Error::external)?;
-            Ok(())
-        })
-        .map_err(Error::lua)?;
-    table.set("delete", delete).map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let glob = scope
-        .create_function(move |lua, pattern: String| {
-            let result = handle.glob(&pattern);
-            observe_store_result(
-                execution,
-                observer,
-                section,
-                result.is_ok(),
-                detail::STORE_GLOB_SUCCEEDED,
-                detail::STORE_GLOB_FAILED,
-            );
-            let paths = result.map_err(mlua::Error::external)?;
-            lua.create_sequence_from(paths)
-        })
-        .map_err(Error::lua)?;
-    table.set("glob", glob).map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let exists = scope
         .create_function(move |_, path: String| handle.exists(&path).map_err(mlua::Error::external))
         .map_err(Error::lua)?;
     table.set("exists", exists).map_err(Error::lua)?;

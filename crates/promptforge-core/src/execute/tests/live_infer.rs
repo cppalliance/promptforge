@@ -61,7 +61,7 @@ async fn live_h1_infer_runs_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn shared_library_loads_before_host_and_resolves_host_when_called() {
+async fn shared_function_resolves_host_globals_when_called() {
     let source = "---\nname: shared-host\ndescription: d\npromptforge: 1\n---\n\n\
         # Shared Host\n\n\
         ```lua shared\n\
@@ -88,40 +88,41 @@ async fn shared_library_loads_before_host_and_resolves_host_when_called() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn shared_library_cannot_call_host_at_load_time() {
+async fn shared_library_calls_host_apis_at_load_time() {
+    // The shared library replays as each section's first chunk with the full
+    // host environment installed, so top-level shared code may use `store`,
+    // `log`, and `args` at load.
     let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
         .expect("empty tool picker must build");
     let models = test_model_catalog();
-    for (host, call) in [
-        ("store", "store.write('forbidden.txt', 'not written')"),
-        ("log", "log('forbidden')"),
-    ] {
-        let source = format!(
-            "---\nname: shared-host-error\ndescription: d\npromptforge: 1\n---\n\n\
-             # Shared Host Error\n\n\
-             ```lua shared\n\
-             {call}\n\
-             ```\n\n\
-             ## Result\n\n\
-             ```lua\nreturn 'unreachable'\n```\n"
-        );
-        let prompt = parse(&source);
-        let error = super::super::run(
-            &prompt,
-            "",
-            ResolutionContext::new(&picker, &models),
-            &[],
-            &StoreRef::memory(),
-            to_config(silent()),
-        )
-        .await
-        .expect_err("top-level shared host call must fail");
+    let store = StoreRef::memory();
+    let source = "---\nname: shared-host-load\ndescription: d\npromptforge: 1\n---\n\n\
+        # Shared Host Load\n\n\
+        ```lua shared\n\
+        store.write('loaded.txt', args)\n\
+        log('shared loaded')\n\
+        ```\n\n\
+        ## Result\n\n\
+        ```lua\nreturn store.read('loaded.txt')\n```\n";
+    let prompt = parse(source);
+    let out = super::super::run(
+        &prompt,
+        "load-time args",
+        ResolutionContext::new(&picker, &models),
+        &[],
+        &store,
+        to_config(silent()),
+    )
+    .await
+    .expect("top-level shared host calls must succeed");
 
-        assert!(
-            error.to_string().contains(host),
-            "failure must identify unavailable host global {host}: {error}"
-        );
-    }
+    assert_eq!(out, "load-time args");
+    assert_eq!(
+        store
+            .read("loaded.txt")
+            .expect("the load-time write persists"),
+        "load-time args"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

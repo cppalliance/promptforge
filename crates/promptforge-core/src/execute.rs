@@ -1,8 +1,9 @@
 //! Section lifecycle execution and fall-through.
 //!
 //! The run walks top-level sections in file order, creating one isolated
-//! section VM for each. Shared Lua loads before host injection,
-//! then ordered section blocks use that same VM. Lua before the first prose is
+//! section VM for each. The VM is fully equipped (host values, store, log,
+//! control globals) before the shared Lua library replays as the section's
+//! first chunk, then ordered section blocks use that same VM. Lua before the first prose is
 //! prologue-style; Lua after is epilog-style. Non-final prose is single-shot;
 //! final prose runs the full tool loop. A scalar early Lua return ends the
 //! section; a scalar late Lua return ends the run.

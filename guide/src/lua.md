@@ -27,7 +27,7 @@ Returning a scalar value (string, integer, number, or boolean) from H1 skips all
 
 ## Shared Libraries
 
-A `lua shared` fence in the H1 defines a reusable library compiled once and loaded into every section VM:
+A `lua shared` fence in the H1 defines a reusable library compiled once and replayed into every section VM as its first chunk, with the full section environment already installed:
 
 ````markdown
 ```lua shared
@@ -37,7 +37,7 @@ end
 ```
 ````
 
-Shared functions resolve host globals (`store`, `log`, `args`) at call time, not load time - so a shared function can reference `store` even though it doesn't exist when the library loads.
+The replay sees everything a later chunk sees - `args`, `sys`, `var`, `reply`, `store`, `log`, the `tools`/`models` tables, and the control globals - so top-level shared code may read `args` or write `store` files at load. Only the captured tool/model alias globals (the bare `search`, `analyst` handles) install after the replay, so a declared alias always wins over a same-named shared global. A scalar top-level return is discarded: the replay is a library load, not a result. `jump` is the one exclusion - calling it during the load fails the run with "jump is not available during shared library load".
 
 ## Section Environment
 

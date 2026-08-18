@@ -90,7 +90,7 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 
 - Exactly one **H1** - title + H1 Lua (tool/model resolution)
 - Zero or more **H2** sections - executed top-to-bottom
-- ` ```lua ` fences for executable Lua; ` ```lua shared ` for shared library
+- ` ```lua ` fences for executable Lua; ` ```lua shared ` for a shared library (replays as each section VM's first chunk with the full environment; `jump` excluded)
 - Prose outside fences becomes model turns
 - Substitution: `{{ args }}`, `{{ var.x }}`, `{{ reply }}`
 - Scalar `return` from Lua ends the run

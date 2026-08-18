@@ -81,7 +81,9 @@ struct WalkContext<'a> {
     observer_arc: &'a Arc<dyn Observer>,
     debug: Option<&'a dyn DebugCapture>,
     debug_arc: Option<&'a Arc<dyn DebugCapture>>,
-    shared: Option<&'a crate::lua::LuaProgram>,
+    /// The shared library replayed as every section's first chunk; an empty
+    /// compiled chunk when the prompt declares no `lua shared` library.
+    shared: &'a crate::lua::LuaProgram,
     bindings: &'a ToolBindings,
     models: &'a ModelBindings,
     analysis: &'a ToolAnalysis,
@@ -140,6 +142,16 @@ pub(crate) async fn run_sections(
         .resolve(default_max_tool_iterations);
 
     let task_handles = section_handles(&prompt.sections);
+    // Section startup replays the shared library unconditionally; a prompt
+    // without one replays an empty compiled chunk instead, so the startup
+    // sequence carries no `Option` branch.
+    let empty_shared;
+    let shared = if let Some(program) = prompt.replay.as_ref() {
+        program
+    } else {
+        empty_shared = crate::lua::LuaProgram::empty()?;
+        &empty_shared
+    };
     let ctx = WalkContext {
         args,
         store,
@@ -148,7 +160,7 @@ pub(crate) async fn run_sections(
         observer_arc,
         debug,
         debug_arc,
-        shared: prompt.replay.as_ref(),
+        shared,
         bindings,
         models,
         analysis,
@@ -222,7 +234,6 @@ async fn run_one_section(
         .observe(ctx.execution, &section.name, detail::SECTION_STARTED);
 
     let mut vm = SectionVm::new_for_section(
-        ctx.shared,
         ctx.bindings,
         ctx.models,
         ctx.execution,
@@ -250,7 +261,7 @@ async fn run_one_section(
         let exec_args = ctx.args.to_string();
         let exec_execution = ctx.execution.to_string();
         let exec_when = ctx.when.to_string();
-        let exec_shared = ctx.shared.cloned();
+        let exec_shared = ctx.shared.to_owned();
         let exec_bindings = ctx.bindings.clone();
         let exec_models = ctx.models.clone();
         let exec_client = client.clone();
@@ -284,7 +295,7 @@ async fn run_one_section(
                 &exec_observer,
                 exec_debug.as_deref(),
                 exec_debug.as_ref(),
-                exec_shared.as_ref(),
+                &exec_shared,
                 &exec_bindings,
                 &exec_models,
                 &exec_analysis,
@@ -306,7 +317,7 @@ async fn run_one_section(
         let fanout_execution = ctx.execution.to_string();
         let fanout_when = ctx.when.to_string();
         let fanout_last_reply = incoming_reply.map(str::to_owned);
-        let fanout_shared = ctx.shared.cloned();
+        let fanout_shared = ctx.shared.to_owned();
         let fanout_bindings = ctx.bindings.clone();
         let fanout_models = ctx.models.clone();
         let fanout_client = client.clone();
@@ -329,7 +340,7 @@ async fn run_one_section(
                 fanout_observer.as_ref(),
                 fanout_client.as_ref(),
                 fanout_debug.as_deref(),
-                fanout_shared.as_ref(),
+                &fanout_shared,
                 &fanout_bindings,
                 &fanout_models,
                 &fanout_analysis,
@@ -346,6 +357,19 @@ async fn run_one_section(
     if let Err(error) =
         vm.install_control_globals(ctx.task_handles, execute_callback, fanout_callback)
     {
+        vm.teardown(ctx.observer, &section.name);
+        return Err(error);
+    }
+
+    // The shared library replays as the section's first chunk with the full
+    // host environment installed; the captured alias globals install only
+    // after the replay, so a declared alias wins over a same-named shared
+    // global.
+    if let Err(error) = vm.replay_shared(ctx.shared, ctx.observer, &section.name) {
+        vm.teardown(ctx.observer, &section.name);
+        return Err(error);
+    }
+    if let Err(error) = vm.install_captured_bindings() {
         vm.teardown(ctx.observer, &section.name);
         return Err(error);
     }
@@ -673,7 +697,7 @@ async fn run_execute_section(
     observer_arc: &Arc<dyn Observer>,
     debug: Option<&dyn DebugCapture>,
     debug_arc: Option<&Arc<dyn DebugCapture>>,
-    shared: Option<&crate::lua::LuaProgram>,
+    shared: &crate::lua::LuaProgram,
     bindings: &ToolBindings,
     models: &ModelBindings,
     analysis: &ToolAnalysis,
@@ -737,7 +761,7 @@ fn make_fanout_callback(
     observer: &dyn Observer,
     client: Option<&GatewayClient>,
     debug: Option<&dyn DebugCapture>,
-    shared: Option<&crate::lua::LuaProgram>,
+    shared: &crate::lua::LuaProgram,
     bindings: &ToolBindings,
     models: &ModelBindings,
     analysis: &ToolAnalysis,
