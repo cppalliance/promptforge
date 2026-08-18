@@ -116,6 +116,20 @@ pub(crate) fn is_log_line_break_or_control(character: char) -> bool {
     character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')
 }
 
+/// Installs `untrusted(s)` as a persistent global valid for the section's
+/// whole lifecycle. The closure captures nothing and every string input
+/// succeeds, so the install needs no observer, no budget, and no
+/// [`mlua::Scope`]; a non-string argument fails through mlua's automatic
+/// type error.
+pub(crate) fn install_untrusted(lua: &Lua) -> Result<()> {
+    let untrusted = lua
+        .create_function(|_, s: String| Ok(crate::untrusted::wrap(&s)))
+        .map_err(Error::lua)?;
+    lua.globals()
+        .raw_set("untrusted", untrusted)
+        .map_err(Error::lua)
+}
+
 /// Owned observation context captured by the persistent `store` closures.
 struct StoreReporter {
     execution: String,
@@ -159,8 +173,9 @@ pub(crate) fn observe_store_result(
 ///
 /// The table is a deterministic host capability, present regardless of tool
 /// scoping. The mutating ops (`write`/`append`/`str_replace`/`delete`) return
-/// nil; `read` returns the file's numbered-line string; `glob` returns an
-/// array table of matching paths. A [`StoreError`] from any op is mapped into
+/// nil; `read` returns the file verbatim and `read_lines` returns it with
+/// line numbers; `glob` returns an array table of matching paths. A
+/// [`StoreError`] from any op is mapped into
 /// an `mlua` error via [`mlua::Error::external`], so it aborts the chunk and
 /// surfaces as [`Error::Lua`].
 ///
