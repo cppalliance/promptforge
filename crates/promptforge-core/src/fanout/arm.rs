@@ -258,6 +258,10 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             if let Some(client) = client.as_ref() {
                 let global_aliases = Some(&analysis.alias_to_id);
                 let debug_ref = debug.as_deref();
+                // Local tools are Lua functions on the arm's VM; route their
+                // calls back into it rather than the registry.
+                let local_dispatch =
+                    |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, args);
                 match crate::execute::run_tool_loop(
                     client,
                     &schemas,
@@ -275,6 +279,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
                     },
                     counts.as_ref(),
                     global_aliases,
+                    Some(&local_dispatch),
                 )
                 .await
                 {
