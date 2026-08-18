@@ -4,10 +4,12 @@ use super::{
     LuaSectionHandle, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook,
     ModelRuntime, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution, StdLib,
     StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, ToolScope, Value,
-    default_log_byte_budget, detail, finish_log_phase, harden, install_h2_models, install_h2_tools,
-    install_instruction_budget, install_log, install_lua_tool_calls, install_store_table,
-    install_tasks_table, resolve_section_target, scalar_return, seal_sys,
+    default_log_byte_budget, detail, harden, install_h2_models, install_h2_tools,
+    install_instruction_budget, install_log, install_log_scoped, install_lua_tool_calls,
+    install_store_table, install_tasks_table, resolve_section_target, scalar_return, seal_sys,
 };
+#[cfg(test)]
+use super::install_store_table_scoped;
 
 /// One hardened, isolated Lua VM for a section's complete lifecycle.
 ///
@@ -289,6 +291,43 @@ impl SectionVm {
         Ok(())
     }
 
+    /// Installs `log` and `store` as persistent globals for the section's
+    /// whole lifecycle.
+    ///
+    /// Called once after [`inject_host_with_var`](Self::inject_host_with_var).
+    /// The closures capture owned strings and Arc clones of the observer, the
+    /// log budget counters, and the store handle, so they stay valid across
+    /// every chunk this VM runs without a live [`mlua::Scope`].
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if host values have not been injected or the
+    /// globals cannot be installed.
+    pub(crate) fn install_host_apis(
+        &self,
+        observer: &Arc<dyn Observer>,
+        section: &str,
+    ) -> Result<()> {
+        let store = self.store.as_ref().ok_or_else(|| {
+            Error::Lua("section VM host values have not been injected".to_owned())
+        })?;
+        install_log(
+            &self.lua,
+            &self.execution,
+            observer,
+            section,
+            &self.log_budget,
+            &self.log_byte_budget,
+        )?;
+        install_store_table(
+            &self.lua,
+            &self.lua.globals(),
+            store,
+            &self.execution,
+            observer,
+            section,
+        )
+    }
+
     /// Executes one live H1 Lua block with call-time capability resolution.
     ///
     /// Resolver callbacks are scoped to this block and reinstalled for each
@@ -411,7 +450,7 @@ impl SectionVm {
             observer.observe(&self.execution, section, detail::LUA_PROLOGUE_FAILED);
             return Err(error);
         }
-        let result = self.run_loaded_with_host(program, observer, section);
+        let result = self.run_loaded_without_host(program);
         observer.observe(
             &self.execution,
             section,
@@ -448,15 +487,8 @@ impl SectionVm {
             observer.observe(&self.execution, section, detail::LUA_PROLOGUE_FAILED);
             return Err(error);
         }
-        let result = self.run_loaded_with_control(
-            program,
-            observer,
-            section,
-            tasks,
-            execute_callback,
-            fanout_callback,
-            true,
-        );
+        let result =
+            self.run_loaded_with_control(program, tasks, execute_callback, fanout_callback);
         let ok = result.is_ok();
         observer.observe(
             &self.execution,
@@ -564,7 +596,7 @@ impl SectionVm {
             observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
             return Err(error);
         }
-        let result = self.run_loaded_with_host(program, observer, section);
+        let result = self.run_loaded_without_host(program);
         observer.observe(
             &self.execution,
             section,
@@ -639,15 +671,8 @@ impl SectionVm {
             observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
             return Err(error);
         }
-        let result = self.run_loaded_with_control(
-            program,
-            observer,
-            section,
-            tasks,
-            execute_callback,
-            fanout_callback,
-            true,
-        );
+        let result =
+            self.run_loaded_with_control(program, tasks, execute_callback, fanout_callback);
         let ok = result.is_ok();
         observer.observe(
             &self.execution,
@@ -790,7 +815,7 @@ impl SectionVm {
         let returned: MultiValue = self
             .lua
             .scope(|scope| {
-                install_log(
+                install_log_scoped(
                     &self.lua,
                     scope,
                     &self.execution,
@@ -804,7 +829,14 @@ impl SectionVm {
                     .load(&self.lua)
                     .map_err(mlua::Error::external)?
                     .call(());
-                finish_log_phase(&self.lua, result)
+                // The phase-local scoped callback dies with the scope; clear
+                // the global so no dangling reference survives into the
+                // host-injected phase.
+                let cleanup = self.lua.globals().raw_set("log", Value::Nil);
+                match (result, cleanup) {
+                    (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+                    (Ok(value), Ok(())) => Ok(value),
+                }
             })
             .map_err(|error| program.map_runtime_error(&error))?;
         scalar_return(returned)
@@ -814,48 +846,6 @@ impl SectionVm {
         let returned: MultiValue = program
             .load(&self.lua)?
             .call(())
-            .map_err(|error| program.map_runtime_error(&error))?;
-        scalar_return(returned)
-    }
-
-    fn run_loaded_with_host(
-        &self,
-        program: &LuaProgram,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<Option<String>> {
-        let store = self.store.as_ref().ok_or_else(|| {
-            Error::Lua("section VM host values have not been injected".to_owned())
-        })?;
-        let returned: MultiValue = self
-            .lua
-            .scope(|scope| {
-                install_log(
-                    &self.lua,
-                    scope,
-                    &self.execution,
-                    observer,
-                    section,
-                    &self.log_budget,
-                    &self.log_byte_budget,
-                )
-                .map_err(mlua::Error::external)?;
-                install_store_table(
-                    &self.lua,
-                    scope,
-                    &self.lua.globals(),
-                    store,
-                    &self.execution,
-                    observer,
-                    section,
-                )
-                .map_err(mlua::Error::external)?;
-                let result = program
-                    .load(&self.lua)
-                    .map_err(mlua::Error::external)?
-                    .call(());
-                finish_log_phase(&self.lua, result)
-            })
             .map_err(|error| program.map_runtime_error(&error))?;
         scalar_return(returned)
     }
@@ -874,27 +864,17 @@ impl SectionVm {
         Ok(slot.take())
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "control-flow host fns are installed together for one Lua phase"
-    )]
     fn run_loaded_with_control<E, F>(
         &self,
         program: &LuaProgram,
-        observer: &dyn Observer,
-        section: &str,
         tasks: &[LuaSectionHandle],
         execute_callback: Option<&E>,
         fanout_callback: Option<&F>,
-        jump_enabled: bool,
     ) -> Result<LuaBlockResult>
     where
         E: Fn(Value, Option<String>) -> std::result::Result<String, Error>,
         F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, Error>,
     {
-        let store = self.store.as_ref().ok_or_else(|| {
-            Error::Lua("section VM host values have not been injected".to_owned())
-        })?;
         {
             let mut slot = self
                 .jump_slot
@@ -904,26 +884,6 @@ impl SectionVm {
         }
         let jump_slot = Arc::clone(&self.jump_slot);
         let result = self.lua.scope(|scope| {
-            install_log(
-                &self.lua,
-                scope,
-                &self.execution,
-                observer,
-                section,
-                &self.log_budget,
-                &self.log_byte_budget,
-            )
-            .map_err(mlua::Error::external)?;
-            install_store_table(
-                &self.lua,
-                scope,
-                &self.lua.globals(),
-                store,
-                &self.execution,
-                observer,
-                section,
-            )
-            .map_err(mlua::Error::external)?;
             install_tasks_table(&self.lua, tasks).map_err(mlua::Error::external)?;
             if let Some(execute_callback) = execute_callback {
                 let execute_fn = scope
@@ -936,22 +896,20 @@ impl SectionVm {
                     .raw_set("execute", execute_fn)
                     .map_err(mlua::Error::external)?;
             }
-            if jump_enabled {
-                let jump_fn = scope
-                    .create_function(move |_, target: Value| -> mlua::Result<()> {
-                        let heading = resolve_section_target(target)?;
-                        let mut slot = jump_slot
-                            .lock()
-                            .map_err(|_| mlua::Error::external("jump slot poisoned"))?;
-                        *slot = Some(heading);
-                        Err(mlua::Error::external("jump transfer"))
-                    })
-                    .map_err(mlua::Error::external)?;
-                self.lua
-                    .globals()
-                    .raw_set("jump", jump_fn)
-                    .map_err(mlua::Error::external)?;
-            }
+            let jump_fn = scope
+                .create_function(move |_, target: Value| -> mlua::Result<()> {
+                    let heading = resolve_section_target(target)?;
+                    let mut slot = jump_slot
+                        .lock()
+                        .map_err(|_| mlua::Error::external("jump slot poisoned"))?;
+                    *slot = Some(heading);
+                    Err(mlua::Error::external("jump transfer"))
+                })
+                .map_err(mlua::Error::external)?;
+            self.lua
+                .globals()
+                .raw_set("jump", jump_fn)
+                .map_err(mlua::Error::external)?;
             if let Some(fanout_callback) = fanout_callback {
                 let fanout_fn = scope
                     .create_function(|lua, (worker, list): (String, String)| {
@@ -969,11 +927,10 @@ impl SectionVm {
                     .raw_set("fanout", fanout_fn)
                     .map_err(mlua::Error::external)?;
             }
-            let result = program
+            program
                 .load(&self.lua)
                 .map_err(mlua::Error::external)?
-                .call(());
-            finish_log_phase(&self.lua, result)
+                .call(())
         });
         // Control-global cleanup runs on EVERY exit (jump, success, or ordinary
         // execution error), so a failing block never leaks live `jump`/`execute`/
@@ -1032,7 +989,7 @@ impl SectionVm {
         let returned: MultiValue = self
             .lua
             .scope(|scope| {
-                install_log(
+                install_log_scoped(
                     &self.lua,
                     scope,
                     &self.execution,
@@ -1042,7 +999,7 @@ impl SectionVm {
                     &self.log_byte_budget,
                 )
                 .map_err(mlua::Error::external)?;
-                install_store_table(
+                install_store_table_scoped(
                     &self.lua,
                     scope,
                     &self.lua.globals(),
@@ -1053,7 +1010,11 @@ impl SectionVm {
                 )
                 .map_err(mlua::Error::external)?;
                 let result = self.lua.load(source).eval();
-                finish_log_phase(&self.lua, result)
+                let cleanup = self.lua.globals().raw_set("log", Value::Nil);
+                match (result, cleanup) {
+                    (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+                    (Ok(value), Ok(())) => Ok(value),
+                }
             })
             .map_err(Error::lua)?;
         scalar_return(returned)
