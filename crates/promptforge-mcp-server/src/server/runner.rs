@@ -92,6 +92,10 @@ struct Observation {
 /// Returns `-32603` when the result cannot be serialized. Everything the
 /// calling model can act on - a broken prompt, an unresolvable capability, a refused
 /// admission, a run that failed - is an `Ok` result carrying `isError`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the entry point threads the call's borrowed context and the run's four inputs through to run_observed"
+)]
 pub(super) async fn run(
     config: &Config,
     registry: &Arc<RunRegistry>,
@@ -149,6 +153,10 @@ pub(super) async fn run(
 /// Runs one validated source snapshot under an already-created observation
 /// context. Keeping this boundary explicit lets the runner regression retain
 /// the observer while exercising the same parse-to-run path as production.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "keeps the run's borrowed context and inputs explicit so the run_recorded test seam exercises the same parse-to-run path"
+)]
 async fn run_observed(
     config: &Config,
     registry: &Arc<RunRegistry>,
@@ -386,46 +394,26 @@ fn extract_output(prompt: &Prompt, store: &StoreRef, output_file: &str, result: 
     let Some(decl) = prompt.frontmatter().output() else {
         return;
     };
-    let content = match store.read(decl.path()) {
-        Ok(content) => content,
-        Err(_) => {
-            // The prompt declared an output but did not produce it. Annotate
-            // the result value with a note rather than failing the run.
-            if let Some(value) = result.value().map(str::to_owned) {
-                let annotated = format!(
-                    "{value}\n\n[note: the prompt declares output \"{}\" but it was not produced]",
-                    decl.path()
-                );
-                *result = RunResult::completed(
-                    result.run_id().to_owned(),
-                    result.prompt(),
-                    annotated,
-                    result.turns(),
-                    result.elapsed_ms(),
-                );
-            }
-            return;
+    let Ok(content) = store.read(decl.path()) else {
+        // The prompt declared an output but did not produce it. Annotate
+        // the result value with a note rather than failing the run.
+        if let Some(value) = result.value().map(str::to_owned) {
+            let annotated = format!(
+                "{value}\n\n[note: the prompt declares output \"{}\" but it was not produced]",
+                decl.path()
+            );
+            *result = RunResult::completed(
+                result.run_id().to_owned(),
+                result.prompt(),
+                annotated,
+                result.turns(),
+                result.elapsed_ms(),
+            );
         }
+        return;
     };
 
-    if !output_file.is_empty() {
-        if let Err(e) = std::fs::write(output_file, &content) {
-            // Write failed - annotate the result with the error but keep the
-            // run as completed so the caller still gets the value.
-            if let Some(value) = result.value().map(str::to_owned) {
-                let annotated = format!(
-                    "{value}\n\n[note: could not write output to \"{output_file}\": {e}]"
-                );
-                *result = RunResult::completed(
-                    result.run_id().to_owned(),
-                    result.prompt(),
-                    annotated,
-                    result.turns(),
-                    result.elapsed_ms(),
-                );
-            }
-        }
-    } else {
+    if output_file.is_empty() {
         // No output_file specified - the output content replaces the result
         // value so the caller receives exactly what the prompt produced.
         *result = RunResult::completed(
@@ -435,6 +423,20 @@ fn extract_output(prompt: &Prompt, store: &StoreRef, output_file: &str, result: 
             result.turns(),
             result.elapsed_ms(),
         );
+    } else if let Err(e) = std::fs::write(output_file, &content) {
+        // Write failed - annotate the result with the error but keep the
+        // run as completed so the caller still gets the value.
+        if let Some(value) = result.value().map(str::to_owned) {
+            let annotated =
+                format!("{value}\n\n[note: could not write output to \"{output_file}\": {e}]");
+            *result = RunResult::completed(
+                result.run_id().to_owned(),
+                result.prompt(),
+                annotated,
+                result.turns(),
+                result.elapsed_ms(),
+            );
+        }
     }
 }
 

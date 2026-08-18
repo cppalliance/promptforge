@@ -25,10 +25,6 @@ const ECHO: &str = "---\nname: echo\ndescription: Returns its argument\npromptfo
 const SHOUTY: &str = "---\nname: Shouty\ndescription: An illegal tool name\npromptforge: 1\n---\n\n\
 # Test prompt\n\n## Main\n\n```lua\nreturn args\n```\n";
 
-/// A prompt that declares itself one and then carries no section.
-const NO_SECTIONS: &str =
-    "---\nname: hollow\ndescription: No sections at all\npromptforge: 1\n---\n\n# Only a title\n";
-
 /// How long the child may take to refuse before the test kills it and fails.
 const PATIENCE: Duration = Duration::from_secs(20);
 
