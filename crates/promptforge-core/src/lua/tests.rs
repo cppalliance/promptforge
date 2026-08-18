@@ -795,14 +795,10 @@ fn h2_recording_closes_to_always_then_added_scope() {
         .expect("host must inject");
     run_scalar(&vm, &prologue, &NullObserver, "Section").expect("H2 additions must record");
     let (bindings, runtime) = vm.tool_bag_handles();
-    let scope = snapshot_tool_scope(&bindings, &runtime).expect("tool scope must snapshot");
+    let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
-        scope
-            .bindings()
-            .iter()
-            .map(ToolBinding::alias)
-            .collect::<Vec<_>>(),
+        scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
         ["search", "fetch"]
     );
 }
@@ -854,14 +850,10 @@ fn h2_add_accepts_tool_objects_and_arrays() {
     run_scalar(&vm, &prologue, &NullObserver, "Section")
         .expect("tools.add must accept Tool objects, strings, and arrays");
     let (bindings, runtime) = vm.tool_bag_handles();
-    let scope = snapshot_tool_scope(&bindings, &runtime).expect("tool scope must snapshot");
+    let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
-        scope
-            .bindings()
-            .iter()
-            .map(ToolBinding::alias)
-            .collect::<Vec<_>>(),
+        scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
         ["search", "fetch"]
     );
     vm.teardown(&NullObserver, "Section");
@@ -886,14 +878,10 @@ fn empty_add_is_a_no_op_and_failed_variadic_add_is_atomic() {
     run_scalar(&vm, &prologue, &NullObserver, "Section")
         .expect("caught failed add must not poison recording");
     let (bindings, runtime) = vm.tool_bag_handles();
-    let scope = snapshot_tool_scope(&bindings, &runtime).expect("tool scope must snapshot");
+    let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
-        scope
-            .bindings()
-            .iter()
-            .map(ToolBinding::alias)
-            .collect::<Vec<_>>(),
+        scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
         ["fetch"],
         "empty add changes nothing and failed add records no partial aliases"
     );
@@ -1746,8 +1734,8 @@ fn a_section_vm_without_declarations_snapshots_to_an_empty_scope() {
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
     let (bindings, runtime) = vm.tool_bag_handles();
-    let scope = snapshot_tool_scope(&bindings, &runtime).expect("an empty scope must snapshot");
-    assert!(scope.bindings().is_empty());
+    let scope = current_tool_bindings(&bindings, &runtime).expect("an empty scope must snapshot");
+    assert!(scope.is_empty());
     vm.teardown(&NullObserver, "Test");
 }
 

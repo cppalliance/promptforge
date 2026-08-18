@@ -54,7 +54,11 @@ fn tool_bag_caches_on_unchanged_generation() {
             "first tools.add must bump generation"
         );
     }
-    let mut bag = ToolBag::new(tool_bindings, Arc::clone(&tool_runtime));
+    let mut bag = ToolBag::new(
+        tool_bindings,
+        Arc::clone(&tool_runtime),
+        vm.local_tools_handle(),
+    );
     let echo = EchoTool;
     let fetch = FetchTool;
     let registry =
@@ -120,7 +124,7 @@ fn tool_bag_caches_on_unchanged_generation() {
     );
 
     // Counts persist across prepare/infer; new tools seed at 0.
-    let counts = ToolCallCounts::new(first.scope.bindings().iter().map(|b| b.alias().to_owned()));
+    let counts = ToolCallCounts::new(first.bindings.iter().map(|b| b.alias().to_owned()));
     counts.increment("echo").expect("echo must be seeded");
     assert_eq!(counts.get("echo").unwrap(), Some(1));
     counts.ensure("fetch").expect("new tool seeds at 0");
@@ -173,7 +177,11 @@ fn tool_description_override_appears_in_model_schema() {
         .run_chunk(&add_default, &NullObserver, "Override")
         .expect("tools.add(echo) without override must succeed");
     let (default_bindings, default_runtime) = default_vm.tool_bag_handles();
-    let mut default_bag = ToolBag::new(default_bindings, Arc::clone(&default_runtime));
+    let mut default_bag = ToolBag::new(
+        default_bindings,
+        Arc::clone(&default_runtime),
+        default_vm.local_tools_handle(),
+    );
     let default_prepared = default_bag
         .prepare(&registry)
         .expect("default prepare must build schemas");
@@ -184,14 +192,11 @@ fn tool_description_override_appears_in_model_schema() {
         "unmutated Tool object must still advertise the registry description"
     );
     assert_eq!(
-        default_prepared.scope.bindings()[0].description(),
+        default_prepared.bindings[0].description(),
         "echo capability for live matching",
         "live capability text must stay on the binding"
     );
-    assert_eq!(
-        default_prepared.scope.bindings()[0].model_description(),
-        None
-    );
+    assert_eq!(default_prepared.bindings[0].model_description(), None);
     default_vm.teardown(&NullObserver, "Override");
 
     // Mutating .description before tools.add overrides the model-facing schema.
@@ -220,7 +225,11 @@ fn tool_description_override_appears_in_model_schema() {
     vm.run_chunk(&add_override, &NullObserver, "Override")
         .expect("description override before tools.add must succeed");
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
-    let mut bag = ToolBag::new(tool_bindings, Arc::clone(&tool_runtime));
+    let mut bag = ToolBag::new(
+        tool_bindings,
+        Arc::clone(&tool_runtime),
+        vm.local_tools_handle(),
+    );
     let prepared = bag
         .prepare(&registry)
         .expect("override prepare must build schemas");
@@ -230,12 +239,12 @@ fn tool_description_override_appears_in_model_schema() {
         "Author override for the model"
     );
     assert_eq!(
-        prepared.scope.bindings()[0].description(),
+        prepared.bindings[0].description(),
         "echo capability for live matching",
         "override must not rewrite the live capability description"
     );
     assert_eq!(
-        prepared.scope.bindings()[0].model_description(),
+        prepared.bindings[0].model_description(),
         Some("Author override for the model")
     );
 

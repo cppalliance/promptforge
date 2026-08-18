@@ -1,4 +1,4 @@
-use super::{Arc, BTreeMap, Error, Mutex, Result, ToolBinding};
+use super::{Arc, BTreeMap, Error, Mutex, Result};
 
 /// Shared per-VM tool-call counts, pre-seeded at 0 for every in-scope alias.
 ///
@@ -64,26 +64,6 @@ impl ToolCallCounts {
     /// Returns [`Error::Lua`] if the mutex is poisoned.
     pub(crate) fn aliases(&self) -> Result<Vec<String>> {
         Ok(self.lock()?.keys().cloned().collect())
-    }
-}
-
-/// A section's effective tool scope, ordered with prompt-wide aliases first.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ToolScope {
-    pub(crate) bindings: Vec<ToolBinding>,
-}
-
-impl ToolScope {
-    /// Builds a scope from already resolved bindings.
-    #[must_use]
-    pub(crate) fn from_bindings(bindings: Vec<ToolBinding>) -> Self {
-        Self { bindings }
-    }
-
-    /// Returns the effective bindings in model-advertisement order.
-    #[must_use]
-    pub(crate) fn bindings(&self) -> &[ToolBinding] {
-        &self.bindings
     }
 }
 

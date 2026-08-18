@@ -208,8 +208,14 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             }
         }
 
-        let scope = crate::lua::snapshot_tool_scope(&bindings, &vm.tool_runtime)?;
+        let scope = crate::lua::current_tool_bindings(&bindings, &vm.tool_runtime)?;
         let counts = Some(vm.install_tool_call_counts(&scope)?);
+        let local_schemas = vm.local_tool_schemas();
+        if let Some(counts) = counts.as_ref() {
+            for schema in &local_schemas {
+                counts.ensure(&schema.name)?;
+            }
+        }
         let model = crate::lua::resolve_model_binding(&models, &vm.model_runtime)?;
 
         let sys = if let Some(model_binding) = model.as_ref() {
@@ -243,6 +249,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             let (schemas, dispatch) = crate::execute::prepare_effective_scope(
                 &analysis,
                 &scope,
+                &local_schemas,
                 &registry,
                 &execution,
                 observer,

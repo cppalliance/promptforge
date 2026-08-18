@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use promptforge_tool_picker::{ToolId as PickerToolId, ToolPicker};
 
 use crate::client::ToolSchema;
-use crate::lua::{ToolBindings, ToolScope};
+use crate::lua::{ToolBinding, ToolBindings};
 use crate::observe::{Observer, detail};
 use crate::tools::{ToolId, ToolRegistry};
 use crate::{Error, NearDuplicateDiagnostic, Result};
@@ -78,15 +78,16 @@ impl ToolAnalysis {
 
 pub(crate) fn prepare_effective_scope(
     analysis: &ToolAnalysis,
-    scope: &ToolScope,
+    bindings: &[ToolBinding],
+    local_schemas: &[ToolSchema],
     registry: &ToolRegistry<'_>,
     execution: &str,
     observer: &dyn Observer,
     section: &str,
 ) -> Result<(Vec<ToolSchema>, BTreeMap<String, ToolId>)> {
     observer.observe(execution, section, detail::TOOL_SCOPE_VALIDATION_STARTED);
-    let result = validate_effective_scope_inner(analysis, scope)
-        .and_then(|()| prepare_scoped_tools(scope, registry));
+    let result = validate_effective_scope_inner(analysis, bindings)
+        .and_then(|()| prepare_scoped_tools(bindings, local_schemas, registry));
     observer.observe(
         execution,
         section,
@@ -101,10 +102,9 @@ pub(crate) fn prepare_effective_scope(
 
 pub(crate) fn validate_effective_scope_inner(
     analysis: &ToolAnalysis,
-    scope: &ToolScope,
+    bindings: &[ToolBinding],
 ) -> Result<()> {
-    let effective = scope
-        .bindings()
+    let effective = bindings
         .iter()
         .map(crate::lua::ToolBinding::id)
         .collect::<BTreeSet<_>>();
@@ -140,12 +140,13 @@ pub(crate) fn validate_effective_scope_inner(
 }
 
 pub(crate) fn prepare_scoped_tools(
-    scope: &ToolScope,
+    bindings: &[ToolBinding],
+    local_schemas: &[ToolSchema],
     registry: &ToolRegistry<'_>,
 ) -> Result<(Vec<ToolSchema>, BTreeMap<String, ToolId>)> {
-    let mut schemas = Vec::with_capacity(scope.bindings().len());
+    let mut schemas = Vec::with_capacity(bindings.len() + local_schemas.len());
     let mut dispatch = BTreeMap::new();
-    for binding in scope.bindings() {
+    for binding in bindings {
         let tool = registry
             .get(binding.id())
             .ok_or_else(|| Error::UnknownScopedTool(binding.alias().to_owned()))?;
@@ -170,6 +171,16 @@ pub(crate) fn prepare_scoped_tools(
         })?;
         schemas.push(schema);
         dispatch.insert(binding.alias().to_owned(), binding.id().clone());
+    }
+    // Local tools dispatch under a sentinel identity the tool loop recognizes
+    // by server name; they never enter the registry. The alias was validated
+    // at `tools.local` registration, so identity construction cannot fail.
+    for schema in local_schemas {
+        dispatch.insert(
+            schema.name.clone(),
+            ToolId::from_validated("local", schema.name.clone()),
+        );
+        schemas.push(schema.clone());
     }
     Ok((schemas, dispatch))
 }

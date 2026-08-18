@@ -205,10 +205,10 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
     let second = ScopedFixtureTool::new("second", "second_wire", "Second concrete.");
     let first_id = ToolId::new("tests", "first").expect("valid id");
     let second_id = ToolId::new("tests", "second").expect("valid id");
-    let scope = crate::lua::ToolScope::from_bindings(vec![
+    let bindings = vec![
         crate::lua::ToolBinding::for_test("first_local", "first", first_id.clone()),
         crate::lua::ToolBinding::for_test("second_local", "second", second_id.clone()),
-    ]);
+    ];
     let analysis = ToolAnalysis {
         alias_to_id: BTreeMap::from([
             ("first_local".to_owned(), first_id.clone()),
@@ -230,7 +230,8 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
 
     let error = prepare_effective_scope(
         &analysis,
-        &scope,
+        &bindings,
+        &[],
         &registry,
         EXECUTION,
         recorder.as_ref(),
