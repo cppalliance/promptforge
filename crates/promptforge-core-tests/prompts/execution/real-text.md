@@ -8,7 +8,7 @@ max_tool_iterations: 1
 # Real Text
 
 ```lua
-models.only("writer", "A careful analysis model suited to structured reasoning and long-context review")
+models.default("writer", "A careful analysis model suited to structured reasoning and long-context review")
 ```
 
 ## Complete

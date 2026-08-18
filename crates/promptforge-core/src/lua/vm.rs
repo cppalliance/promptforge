@@ -116,7 +116,7 @@ impl SectionVm {
             execution: execution.to_owned(),
             lua,
             bound_tools: ToolBindings::default(),
-            bound_models: ModelBindings::default(),
+            bound_models: <ModelBindings as Default>::default(),
             tool_runtime: Arc::new(Mutex::new(ToolRuntime {
                 added: Vec::new(),
                 description_overrides: BTreeMap::new(),
@@ -912,7 +912,7 @@ pub(crate) fn snapshot_tool_scope(
 
 /// Reads the section's effective model binding without mutating the model
 /// runtime: the H2 `models.use` selection, else the prompt-wide
-/// `models.only` default.
+/// `models.default` baseline.
 pub(crate) fn resolve_model_binding(
     bindings: &ModelBindings,
     runtime: &Mutex<ModelRuntime>,
@@ -924,7 +924,7 @@ pub(crate) fn resolve_model_binding(
         runtime
             .used()
             .map(String::from)
-            .or_else(|| bindings.only().map(String::from))
+            .or_else(|| bindings.default().map(String::from))
     };
     match alias {
         Some(alias) => Ok(Some(bindings.binding(&alias).cloned().ok_or_else(
