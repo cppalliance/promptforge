@@ -6,8 +6,7 @@ use super::{
     LuaSectionHandle, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook,
     ModelRuntime, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result,
     RuntimeResolution, StdLib, StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime,
-    Value,
-    default_log_byte_budget, detail, harden, install_h2_models, install_h2_tools,
+    Value, default_log_byte_budget, detail, harden, install_h2_models, install_h2_tools,
     install_instruction_budget, install_log, install_log_scoped, install_lua_tool_calls,
     install_store_table, install_tasks_table, resolve_section_target, scalar_return, seal_sys,
 };
@@ -99,7 +98,7 @@ impl LocalTools {
     pub(crate) fn schemas(&self) -> Vec<ToolSchema> {
         self.entries
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .map(|(_, schema, _)| schema.clone())
             .collect()
@@ -110,7 +109,7 @@ impl LocalTools {
     pub(crate) fn contains(&self, alias: &str) -> bool {
         self.entries
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .any(|(name, _, _)| name == alias)
     }
@@ -126,7 +125,7 @@ impl LocalTools {
     /// Returns [`Error::Lua`] if no local tool is registered under `alias`,
     /// the args cannot be bridged, the jump guard cannot be applied or
     /// restored, the handler fails, or it returns a non-scalar value.
-    pub(crate) fn call(&self, lua: &Lua, alias: &str, args: Json) -> Result<String> {
+    pub(crate) fn call(&self, lua: &Lua, alias: &str, args: &Json) -> Result<String> {
         let handler: Function = {
             let entries = self
                 .entries
@@ -139,7 +138,7 @@ impl LocalTools {
                 .ok_or_else(|| Error::Lua(format!("local tool {alias:?} is not registered")))?;
             lua.registry_value(key).map_err(Error::lua)?
         };
-        let table = lua.to_value(&args).map_err(Error::lua)?;
+        let table = lua.to_value(args).map_err(Error::lua)?;
         let globals = lua.globals();
         let saved_jump: Value = globals.raw_get("jump").map_err(Error::lua)?;
         globals.raw_set("jump", Value::Nil).map_err(Error::lua)?;
@@ -719,8 +718,7 @@ impl SectionVm {
                 }
                 existing.clone()
             } else {
-                let created =
-                    ToolCallCounts::new(bindings.iter().map(|b| b.alias().to_owned()));
+                let created = ToolCallCounts::new(bindings.iter().map(|b| b.alias().to_owned()));
                 *slot = Some(created.clone());
                 created
             }
@@ -766,7 +764,7 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if no local tool is registered under `alias`,
     /// the args cannot be bridged, the handler fails, or it returns a
     /// non-scalar value.
-    pub(crate) fn call_local_tool(&self, alias: &str, args: Json) -> Result<String> {
+    pub(crate) fn call_local_tool(&self, alias: &str, args: &Json) -> Result<String> {
         self.local_tools.call(&self.lua, alias, args)
     }
 
