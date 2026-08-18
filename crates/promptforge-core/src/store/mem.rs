@@ -237,7 +237,7 @@ impl MemStore {
 
     /// Creates a store pre-populated with the given files.
     ///
-    /// Each path is validated through [`StorePath::parse`](super::StorePath) at
+    /// Each path is validated through `StorePath::parse` at
     /// construction time, so the store never holds a path unreachable through
     /// the normal read/write API.
     ///

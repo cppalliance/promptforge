@@ -119,7 +119,7 @@ Lua blocks in the H1 region execute once in source order before any H2 section. 
 # My Prompt
 
 ```lua
-models.only("writer", "a capable writing model")
+models.default("writer", "a capable writing model")
 tools.need("search", "web search capability")
 tools.always("search")
 var.topic = "Rust async patterns"
@@ -206,7 +206,7 @@ Using this research: {{ var.research }}
 Write a summary.
 ````
 
-`execute()` nests up to 8 levels deep. `jump()` inside an `execute()` subroutine is rejected with a clear error. Sections can be referenced by heading string or by Section objects from the `tasks` table.
+`execute()` nests up to 8 levels deep. A subroutine starts with `reply` set to nil - pass context through the `input` parameter instead. `jump()` inside an `execute()` subroutine is rejected with a clear error. Sections can be referenced by heading string or by Section objects from the `tasks` table.
 
 ### Sandbox Constraints
 
@@ -231,17 +231,17 @@ models.need("writer", "a creative writing model", {
     max_tokens = 4096
 })
 
--- Set it as the prompt-wide default
-models.only("writer")
+-- Set it as the prompt-wide baseline
+models.default("writer")
 ```
 
-The `models.only(alias, description, opts)` form declares and designates in one atomic call. Within sections, `models.use(alias)` selects a specific model:
+The `models.default(alias, description, opts)` form declares and designates in one atomic call; the single-alias form designates a model already declared with `models.need`. Within sections, `models.use(alias)` selects a specific model and returns its handle:
 
 ```lua
-models.use("analyst")
+local analyst = models.use("analyst")
 ```
 
-Sections without `models.use` inherit the `models.only` default. Sections with non-empty prose but no model binding receive a clear error.
+Sections without `models.use` inherit the `models.default` baseline. A prompt can carry both - the baseline applies everywhere a section does not override it. Sections with non-empty prose but no model binding receive a clear error.
 
 ### Hard Constraints
 
@@ -252,11 +252,11 @@ The opts table filters the catalog before semantic resolution:
 - `temperature` - float in range 0.0 to 2.0
 - `max_tokens` - positive integer
 
-Duplicate model aliases or duplicate `models.only` calls are rejected atomically.
+Duplicate model aliases or duplicate `models.default` calls are rejected atomically. `models.use` may be called at most once per section.
 
 ### Model Inference from Lua
 
-`model:infer(prompt)` runs a nested model inference with tool dispatch from inside any Lua block:
+`handle:infer(prompt)` runs a nested model inference with tool dispatch from inside any Lua block, using that handle's specific model:
 
 ```lua
 local analysis = model:infer("Classify this text: " .. args)
@@ -264,6 +264,15 @@ var.classification = analysis
 ```
 
 After inference, `reply` holds the model's response and `sys.reply_finish_reason` holds the finish metadata.
+
+`models.infer(prompt)` is the lighter path: one direct, tool-free inference round on a fresh conversation using the section's current model (the `models.use` selection, else the `models.default` baseline). It does not touch `reply` or `sys.reply_finish_reason`.
+
+`models.get(alias)` returns the handle for a declared model without changing the section's model selection. Combined with `handle:infer`, it is the way to consult a different model inside a section:
+
+```lua
+local critic = models.get("critic")
+local review = critic:infer("Critique this draft: " .. reply)
+```
 
 ### Inspecting Model Properties
 
@@ -340,6 +349,20 @@ end
 
 Counts increment even when a tool call fails. Mistyped aliases produce a hard error with the available scope listed.
 
+### Local Tools
+
+`tools.add_local(alias, description, params, handler)` declares a tool backed by a Lua function, available from any H2 Lua block. When the model calls the tool, the handler runs synchronously in the declaring section's VM rather than reaching an external service:
+
+```lua
+tools.add_local("grab", "Grab a value from the store", {
+    key = {"string", "Store path to read"},
+}, function(args)
+    return store.read(args.key)
+end)
+```
+
+The params table maps each parameter name to a bare type string or a `{type, description}` array. Supported types are `"string"`, `"integer"`, `"number"`, and `"boolean"`; all declared parameters are required. The handler receives the arguments as a Lua table and returns a string. It shares the section's VM (store, `var`, globals), may call `execute()`, `fanout`, and `model:infer`, and cannot call `jump()`. Local tool output is trusted - no nonce envelope. A local tool becomes visible to the model starting from the next prose block or `model:infer` call.
+
 ### Implementing Custom Tools
 
 A custom tool requires:
@@ -387,10 +410,10 @@ Worker and list sections are referenced by markdown heading address (level + nam
 
 Each arm receives the current item text as the `item` variable and a `sys.taskid` identifying its position. The arm can:
 
-- Run a Lua prologue that short-circuits (enabling pure-Lua map operations)
+- Run Lua blocks that short-circuit before any prose (enabling pure-Lua map operations)
 - Substitute `{{ item }}` in prose
 - Run the full model tool loop
-- Execute an epilog for post-processing
+- Run Lua blocks after the prose for post-processing
 
 Results are returned in list order (not finish order). Each result has `.text`, `.ok`, `.item`, and `.exhausted` fields. The result array supports `table.concat` since objects coerce via `__tostring`.
 

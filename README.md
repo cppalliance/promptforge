@@ -31,7 +31,7 @@ promptforge: 1
 # Greet
 
 ```lua
-models.only("writer", "A model suited for careful analysis, coding, and general assistance")
+models.default("writer", "A model suited for careful analysis, coding, and general assistance")
 ```
 
 ## Main
@@ -92,7 +92,7 @@ Parse a promptforge markdown file, bind the tools and models it needs, then exec
 flowchart LR
   MD[Markdown prompt] --> Parse[Parse and bind]
   Parse --> Sec[H2 sections]
-  Sec --> Lua[Lua prologue]
+  Sec --> Lua[Lua blocks]
   Lua --> Model[Model turn]
   Model --> Tools[Tools via gateway or local]
   Model --> Store[Store artifacts]

@@ -101,9 +101,12 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 |---|---|
 | `tools.need(alias, desc)` | Resolve a tool by description |
 | `tools.add(alias...)` | Make resolved tools available to the model |
-| `models.only(alias, desc)` | Bind a model for this section |
+| `tools.add_local(alias, desc, params, handler)` | Declare a Lua-backed tool (H2 only) |
+| `models.default(alias, desc)` | Declare and set the prompt-wide baseline model |
 | `models.need(alias, desc, opts)` | Bind with options (thinking, context, temperature) |
-| `models.use(alias)` | Switch to a previously bound model |
+| `models.use(alias)` | Select a declared model for this section; returns its handle |
+| `models.get(alias)` | Return a declared model's handle without changing the section model |
+| `models.infer(prompt)` | One tool-free inference round on the section's current model |
 | `store.read(path)` | Read file verbatim |
 | `store.write(path, content)` | Create or overwrite file |
 | `store.append(path, content)` | Append to file |
@@ -136,7 +139,7 @@ max_tool_iterations: 20
 ```lua
 tools.need("search", "Search the web and return results.")
 tools.need("fetch", "Fetch a web page as markdown.")
-models.only("researcher", "A model suited for careful analysis")
+models.default("researcher", "A model suited for careful analysis")
 ```
 
 ## Research
