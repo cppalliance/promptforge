@@ -183,6 +183,136 @@ fn read_range_missing_file_errors() {
     assert!(matches!(err, StoreError::NotFound { .. }));
 }
 
+/// Writes `line1` through `line<line_count>` into `path`.
+fn numbered_fixture(store: &StoreRef, path: &str, line_count: usize) {
+    let mut body = String::new();
+    for n in 1..=line_count {
+        use std::fmt::Write as _;
+        let _ = writeln!(body, "line{n}");
+    }
+    store.write(path, &body).expect("write");
+}
+
+#[test]
+fn read_range_numbered_without_bounds_matches_read_lines() {
+    let store = StoreRef::memory();
+    numbered_fixture(&store, "a.txt", 12);
+    assert_eq!(
+        store
+            .read_range_numbered("a.txt", 1, None)
+            .expect("numbered"),
+        store.read_lines("a.txt").expect("read_lines"),
+        "an unbounded numbered read must equal read_lines byte-for-byte"
+    );
+}
+
+#[test]
+fn read_range_numbered_empty_file_matches_read_lines() {
+    let store = StoreRef::memory();
+    store.write("e.txt", "").expect("write");
+    assert_eq!(
+        store
+            .read_range_numbered("e.txt", 1, None)
+            .expect("numbered"),
+        store.read_lines("e.txt").expect("read_lines"),
+    );
+    assert_eq!(
+        store
+            .read_range_numbered("e.txt", 1, None)
+            .expect("numbered"),
+        ""
+    );
+}
+
+#[test]
+fn read_range_numbered_numbers_a_slice_absolutely() {
+    let store = StoreRef::memory();
+    numbered_fixture(&store, "a.txt", 85);
+    assert_eq!(
+        store
+            .read_range_numbered("a.txt", 84, Some(85))
+            .expect("numbered"),
+        "84| line84\n85| line85"
+    );
+}
+
+#[test]
+fn read_range_numbered_pads_across_the_hundred_boundary() {
+    let store = StoreRef::memory();
+    numbered_fixture(&store, "a.txt", 100);
+    assert_eq!(
+        store
+            .read_range_numbered("a.txt", 99, Some(100))
+            .expect("numbered"),
+        " 99| line99\n100| line100"
+    );
+}
+
+#[test]
+fn read_range_numbered_clamps_end_to_the_last_line() {
+    let store = StoreRef::memory();
+    numbered_fixture(&store, "a.txt", 100);
+    assert_eq!(
+        store
+            .read_range_numbered("a.txt", 99, Some(999))
+            .expect("numbered"),
+        " 99| line99\n100| line100"
+    );
+    assert_eq!(
+        store
+            .read_range_numbered("a.txt", 2, None)
+            .expect("numbered"),
+        store
+            .read_range_numbered("a.txt", 2, Some(100))
+            .expect("numbered"),
+        "an omitted end must mean the last line"
+    );
+}
+
+#[test]
+fn read_range_numbered_beyond_eof_is_empty() {
+    let store = StoreRef::memory();
+    store.write("a.txt", "one\ntwo\nthree\n").expect("write");
+    assert_eq!(
+        store
+            .read_range_numbered("a.txt", 4, None)
+            .expect("numbered"),
+        ""
+    );
+}
+
+#[test]
+fn read_range_numbered_start_below_one_errors() {
+    let store = StoreRef::memory();
+    store.write("a.txt", "one\ntwo\n").expect("write");
+    let err = store
+        .read_range_numbered("a.txt", 0, None)
+        .expect_err("start of 0");
+    assert_eq!(err.kind(), StoreErrorKind::InvalidRange);
+    assert!(matches!(err, StoreError::InvalidRange { .. }));
+    assert_eq!(err.path(), Some("a.txt"));
+}
+
+#[test]
+fn read_range_numbered_end_before_start_errors() {
+    let store = StoreRef::memory();
+    store.write("a.txt", "one\ntwo\nthree\n").expect("write");
+    let err = store
+        .read_range_numbered("a.txt", 3, Some(2))
+        .expect_err("end before start");
+    assert_eq!(err.kind(), StoreErrorKind::InvalidRange);
+    assert!(matches!(err, StoreError::InvalidRange { .. }));
+}
+
+#[test]
+fn read_range_numbered_missing_file_errors() {
+    let store = StoreRef::memory();
+    let err = store
+        .read_range_numbered("absent.txt", 1, None)
+        .expect_err("should fail");
+    assert!(matches!(err, StoreError::NotFound { .. }));
+}
+
 #[test]
 fn read_lines_missing_file_errors() {
     let store = StoreRef::memory();
