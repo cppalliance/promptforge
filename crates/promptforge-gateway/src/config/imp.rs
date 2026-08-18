@@ -163,7 +163,7 @@ impl Config {
     /// let toml = r#"
     /// [server]
     /// bind = "127.0.0.1:8080"
-    /// key = "secret"
+    /// api_key = "secret"
     ///
     /// [[endpoint]]
     /// id = "e"
