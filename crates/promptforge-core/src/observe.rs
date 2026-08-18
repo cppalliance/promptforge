@@ -152,10 +152,6 @@ pub enum Observation {
     StoreAppendSucceeded,
     /// A harness-mediated store append failed.
     StoreAppendFailed,
-    /// A harness-mediated store read_lines succeeded.
-    StoreReadLinesSucceeded,
-    /// A harness-mediated store read_lines failed.
-    StoreReadLinesFailed,
     /// A harness-mediated store read (verbatim) succeeded.
     StoreReadSucceeded,
     /// A harness-mediated store read (verbatim) failed.
@@ -257,8 +253,6 @@ impl Observation {
             Observation::StoreWriteFailed => "Store write failed",
             Observation::StoreAppendSucceeded => "Store append succeeded",
             Observation::StoreAppendFailed => "Store append failed",
-            Observation::StoreReadLinesSucceeded => "Store read_lines succeeded",
-            Observation::StoreReadLinesFailed => "Store read_lines failed",
             Observation::StoreReadSucceeded => "Store read succeeded",
             Observation::StoreReadFailed => "Store read failed",
             Observation::StoreReadNumberedSucceeded => "Store read_numbered succeeded",
@@ -337,8 +331,6 @@ pub(crate) mod detail {
     pub(crate) const STORE_WRITE_FAILED: Observation = Observation::StoreWriteFailed;
     pub(crate) const STORE_APPEND_SUCCEEDED: Observation = Observation::StoreAppendSucceeded;
     pub(crate) const STORE_APPEND_FAILED: Observation = Observation::StoreAppendFailed;
-    pub(crate) const STORE_READ_LINES_SUCCEEDED: Observation = Observation::StoreReadLinesSucceeded;
-    pub(crate) const STORE_READ_LINES_FAILED: Observation = Observation::StoreReadLinesFailed;
     pub(crate) const STORE_READ_SUCCEEDED: Observation = Observation::StoreReadSucceeded;
     pub(crate) const STORE_READ_FAILED: Observation = Observation::StoreReadFailed;
     pub(crate) const STORE_READ_NUMBERED_SUCCEEDED: Observation =
@@ -462,8 +454,8 @@ mod tests {
     fn display_renders_stable_strings() {
         assert_eq!(Observation::RunStarted.to_string(), "Run started");
         assert_eq!(
-            Observation::StoreReadLinesSucceeded.to_string(),
-            "Store read_lines succeeded"
+            Observation::StoreReadNumberedSucceeded.to_string(),
+            "Store read_numbered succeeded"
         );
         assert_eq!(Observation::Lua("hi".to_owned()).to_string(), "Lua: hi");
         assert_eq!(Observation::Other("x".to_owned()).to_string(), "x");

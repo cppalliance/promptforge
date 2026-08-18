@@ -1,6 +1,6 @@
 ---
 name: store_triad
-description: Exercise read_lines (numbered) vs read (verbatim) vs untrusted-wrapped reads
+description: Exercise read_numbered (numbered) vs read (verbatim) vs untrusted-wrapped reads
 promptforge: 1
 ---
 
@@ -15,7 +15,7 @@ store.write("data.txt", "alpha\nbeta")
 ## Read
 
 ```lua
-local numbered = store.read_lines("data.txt")
+local numbered = store.read_numbered("data.txt")
 local verbatim = store.read("data.txt")
 local wrapped = untrusted(store.read("data.txt"))
 var.numbered = numbered

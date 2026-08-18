@@ -102,7 +102,7 @@ Use the tool.\n";
     let store = StoreRef::memory();
     let out = run_local(&bound_for_model(md), addr, &store).await.unwrap();
     assert_eq!(out, "final answer");
-    assert_eq!(store.read_lines("tool-out.txt").unwrap(), "1| hi");
+    assert_eq!(store.read("tool-out.txt").unwrap(), "hi");
 }
 
 #[tokio::test]
@@ -126,7 +126,7 @@ Use the tool.\n";
     let store = StoreRef::memory();
     let out = run_local(&bound_for_model(md), addr, &store).await.unwrap();
     assert_eq!(out, "final answer");
-    assert_eq!(store.read_lines("calls.txt").unwrap(), "1| a;b;");
+    assert_eq!(store.read("calls.txt").unwrap(), "a;b;");
 
     let bodies = gateway.requests();
     let tool_turns = bodies[1]["messages"]
@@ -135,7 +135,10 @@ Use the tool.\n";
         .iter()
         .filter(|m| m["role"] == "tool")
         .count();
-    assert_eq!(tool_turns, 2, "both handler results must go back: {bodies:?}");
+    assert_eq!(
+        tool_turns, 2,
+        "both handler results must go back: {bodies:?}"
+    );
 }
 
 #[tokio::test]
@@ -287,8 +290,7 @@ Second ask.\n",
         "the first prose block predates tools.add: {bodies:?}"
     );
     assert_eq!(
-        bodies[1]["tools"][0]["function"]["name"],
-        "section_tool",
+        bodies[1]["tools"][0]["function"]["name"], "section_tool",
         "the second prose block must see the added tool: {bodies:?}"
     );
 }

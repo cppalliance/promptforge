@@ -17,5 +17,5 @@ store.write("handoff.txt", args)
 
 ```lua
 log("reading state")
-return store.read_lines("handoff.txt")
+return store.read("handoff.txt")
 ```
