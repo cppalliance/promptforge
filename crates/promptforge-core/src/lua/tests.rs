@@ -1820,6 +1820,136 @@ fn store_delete_then_read_raises() {
 }
 
 #[test]
+fn store_read_with_start_only_reads_to_eof() {
+    let out = run(
+        "store.write('a.txt', 'one\\ntwo\\nthree')\nreturn store.read('a.txt', 2)",
+        "",
+    )
+    .unwrap();
+    assert_eq!(out.returned.as_deref(), Some("two\nthree"));
+}
+
+#[test]
+fn store_read_with_start_and_end_slices_inclusively() {
+    let out = run(
+        "store.write('a.txt', 'one\\ntwo\\nthree')\nreturn store.read('a.txt', 2, 2)",
+        "",
+    )
+    .unwrap();
+    assert_eq!(out.returned.as_deref(), Some("two"));
+}
+
+#[test]
+fn store_read_clamps_end_to_the_last_line() {
+    let out = run(
+        "store.write('a.txt', 'one\\ntwo\\nthree')\nreturn store.read('a.txt', 2, 99)",
+        "",
+    )
+    .unwrap();
+    assert_eq!(out.returned.as_deref(), Some("two\nthree"));
+}
+
+#[test]
+fn store_read_beyond_eof_returns_empty() {
+    let out = run(
+        "store.write('a.txt', 'one\\ntwo\\nthree')\nreturn store.read('a.txt', 99)",
+        "",
+    )
+    .unwrap();
+    assert_eq!(out.returned.as_deref(), Some(""));
+}
+
+#[test]
+fn store_read_start_below_one_raises() {
+    for source in [
+        "store.write('a.txt', 'one')\nreturn store.read('a.txt', 0)",
+        "store.write('a.txt', 'one')\nreturn store.read('a.txt', -1)",
+    ] {
+        let err = run(source, "").expect_err("a start below 1 must raise");
+        let msg = match &err {
+            Error::Lua(msg) => msg.clone(),
+            Error::LuaRuntime { message, .. } => message.clone(),
+            other => panic!("expected a Lua-category error, got {other:?}"),
+        };
+        assert!(
+            msg.contains("invalid line range"),
+            "the Lua error must carry the range message, got: {msg}"
+        );
+    }
+}
+
+#[test]
+fn store_read_end_before_start_raises() {
+    let err = run(
+        "store.write('a.txt', 'one\\ntwo\\nthree')\nreturn store.read('a.txt', 3, 2)",
+        "",
+    )
+    .expect_err("an end before start must raise");
+    let msg = match &err {
+        Error::Lua(msg) => msg.clone(),
+        Error::LuaRuntime { message, .. } => message.clone(),
+        other => panic!("expected a Lua-category error, got {other:?}"),
+    };
+    assert!(
+        msg.contains("invalid line range"),
+        "the Lua error must carry the range message, got: {msg}"
+    );
+}
+
+#[test]
+fn store_read_end_without_start_raises() {
+    let err = run(
+        "store.write('a.txt', 'one')\nreturn store.read('a.txt', nil, 1)",
+        "",
+    )
+    .expect_err("an end without a start must raise");
+    let msg = match &err {
+        Error::Lua(msg) => msg.clone(),
+        Error::LuaRuntime { message, .. } => message.clone(),
+        other => panic!("expected a Lua-category error, got {other:?}"),
+    };
+    assert!(
+        msg.contains("invalid line range"),
+        "the Lua error must carry the range message, got: {msg}"
+    );
+}
+
+#[test]
+fn installed_store_read_honors_line_bounds() {
+    let store = StoreRef::memory();
+    store
+        .write("a.txt", "one\ntwo\nthree\n")
+        .expect("the memory store can prepare a file");
+    let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
+    vm.inject_host("", &json!({}), &store, None)
+        .expect("host values must inject");
+    let observer: Arc<dyn Observer> = Arc::new(NullObserver);
+    vm.install_host_apis(&observer, "Test")
+        .expect("host APIs must install");
+
+    let sliced = run_scalar(
+        &vm,
+        &program("return store.read('a.txt', 2, 2)"),
+        &NullObserver,
+        "Test",
+    )
+    .expect("a bounded read must run");
+    assert_eq!(sliced.as_deref(), Some("two"));
+
+    let err = run_scalar(
+        &vm,
+        &program("return store.read('a.txt', 0)"),
+        &NullObserver,
+        "Test",
+    )
+    .expect_err("a start below 1 must raise");
+    assert!(
+        err.to_string().contains("invalid line range"),
+        "the error must carry the range message, got: {err}"
+    );
+}
+
+#[test]
 fn store_glob_returns_a_sorted_array() {
     let out = run(
             "store.write('src/b.rs', '')\nstore.write('src/a.rs', '')\nlocal g = store.glob('src/*.rs')\nreturn g[1] .. ',' .. g[2]",
@@ -1966,6 +2096,12 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
         },
         Case {
             source: "store.read('a.txt')",
+            success: detail::STORE_READ_SUCCEEDED,
+            failure: detail::STORE_READ_FAILED,
+            prepare: existing,
+        },
+        Case {
+            source: "store.read('a.txt', 1, 1)",
             success: detail::STORE_READ_SUCCEEDED,
             failure: detail::STORE_READ_FAILED,
             prepare: existing,

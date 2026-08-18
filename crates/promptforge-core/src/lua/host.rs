@@ -165,6 +165,33 @@ pub(crate) fn observe_store_result(
     );
 }
 
+/// Shared body of the `store.read` host callback, used by both the
+/// persistent per-section install and the scope-bound test-harness install.
+///
+/// No `start` reads the whole file; a present `start` slices a 1-based
+/// inclusive line range. A negative bound converts to 0, which
+/// [`StoreRef::read_range`] rejects with the same error a zero bound earns,
+/// and an `end` without a `start` is refused rather than silently ignored.
+fn read_store(
+    handle: &StoreRef,
+    path: &str,
+    start: Option<i64>,
+    end: Option<i64>,
+) -> std::result::Result<String, crate::store::StoreError> {
+    match start {
+        None if end.is_none() => handle.read(path),
+        None => Err(crate::store::StoreError::InvalidRange {
+            path: path.to_owned(),
+            reason: "start is required when end is given",
+        }),
+        Some(start) => handle.read_range(
+            path,
+            usize::try_from(start).unwrap_or(0),
+            end.map(|line| usize::try_from(line).unwrap_or(0)),
+        ),
+    }
+}
+
 /// Expose an always-on `store` table whose methods (`write`, `append`,
 /// `read`, `read_lines`, `inject`, `str_replace`, `delete`, `glob`,
 /// `exists`) are backed by the run-scoped [`StoreRef`] handle. Installed once
@@ -173,7 +200,9 @@ pub(crate) fn observe_store_result(
 ///
 /// The table is a deterministic host capability, present regardless of tool
 /// scoping. The mutating ops (`write`/`append`/`str_replace`/`delete`) return
-/// nil; `read` returns the file verbatim and `read_lines` returns it with
+/// nil; `read` returns the file verbatim, optionally bounded to a 1-based
+/// inclusive line range (`read(path, start)` reads to end of file,
+/// `read(path, start, end)` slices), and `read_lines` returns it with
 /// line numbers; `glob` returns an array table of matching paths. A
 /// [`StoreError`] from any op is mapped into
 /// an `mlua` error via [`mlua::Error::external`], so it aborts the chunk and
@@ -256,15 +285,17 @@ pub(crate) fn install_store_table(
     let handle = store.clone();
     let report = Arc::clone(&reporter);
     let read = lua
-        .create_function(move |_, path: String| {
-            let result = handle.read(&path);
-            report.report(
-                result.is_ok(),
-                detail::STORE_READ_SUCCEEDED,
-                detail::STORE_READ_FAILED,
-            );
-            result.map_err(mlua::Error::external)
-        })
+        .create_function(
+            move |_, (path, start, end): (String, Option<i64>, Option<i64>)| {
+                let result = read_store(&handle, &path, start, end);
+                report.report(
+                    result.is_ok(),
+                    detail::STORE_READ_SUCCEEDED,
+                    detail::STORE_READ_FAILED,
+                );
+                result.map_err(mlua::Error::external)
+            },
+        )
         .map_err(Error::lua)?;
     table.set("read", read).map_err(Error::lua)?;
 
@@ -415,18 +446,20 @@ pub(crate) fn install_store_table_scoped<'scope, 'env: 'scope>(
 
     let handle = store.clone();
     let read = scope
-        .create_function(move |_, path: String| {
-            let result = handle.read(&path);
-            observe_store_result(
-                execution,
-                observer,
-                section,
-                result.is_ok(),
-                detail::STORE_READ_SUCCEEDED,
-                detail::STORE_READ_FAILED,
-            );
-            result.map_err(mlua::Error::external)
-        })
+        .create_function(
+            move |_, (path, start, end): (String, Option<i64>, Option<i64>)| {
+                let result = read_store(&handle, &path, start, end);
+                observe_store_result(
+                    execution,
+                    observer,
+                    section,
+                    result.is_ok(),
+                    detail::STORE_READ_SUCCEEDED,
+                    detail::STORE_READ_FAILED,
+                );
+                result.map_err(mlua::Error::external)
+            },
+        )
         .map_err(Error::lua)?;
     table.set("read", read).map_err(Error::lua)?;
 

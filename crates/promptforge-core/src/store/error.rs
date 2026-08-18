@@ -75,6 +75,8 @@ pub enum StoreErrorKind {
     InvalidPath,
     /// A caller-supplied glob pattern failed validation.
     InvalidPattern,
+    /// A caller-supplied line range failed validation.
+    InvalidRange,
     /// The backend itself failed.
     Backend,
 }
@@ -151,6 +153,17 @@ pub enum StoreError {
         reason: String,
     },
 
+    /// A caller-supplied line range was rejected before any lines were
+    /// sliced.
+    #[error("invalid line range for {path}: {reason}")]
+    #[non_exhaustive]
+    InvalidRange {
+        /// The logical path the read targeted.
+        path: String,
+        /// A short human-readable reason the range was rejected.
+        reason: &'static str,
+    },
+
     /// The backend failed for a reason of its own, kept as an opaque source.
     #[error("store backend failure")]
     #[non_exhaustive]
@@ -181,6 +194,7 @@ impl StoreError {
             }
             StoreError::InvalidPath { .. } => StoreErrorKind::InvalidPath,
             StoreError::InvalidPattern { .. } => StoreErrorKind::InvalidPattern,
+            StoreError::InvalidRange { .. } => StoreErrorKind::InvalidRange,
             StoreError::Backend { .. } => StoreErrorKind::Backend,
         }
     }
@@ -215,7 +229,8 @@ impl StoreError {
             | StoreError::InvalidAnchor { path, .. }
             | StoreError::AnchorNotFound { path, .. }
             | StoreError::AnchorAmbiguous { path, .. }
-            | StoreError::InvalidPath { path, .. } => Some(path),
+            | StoreError::InvalidPath { path, .. }
+            | StoreError::InvalidRange { path, .. } => Some(path),
             StoreError::InvalidPattern { .. } | StoreError::Backend { .. } => None,
         }
     }
