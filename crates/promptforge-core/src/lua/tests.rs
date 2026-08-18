@@ -224,7 +224,7 @@ fn section_vm_with_bindings(
     SectionVm::new_for_section(
         None,
         bindings,
-        &ModelBindings::default(),
+        &<ModelBindings as Default>::default(),
         execution,
         observer,
         section,

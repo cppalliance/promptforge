@@ -28,7 +28,7 @@ async fn live_h1_infer_runs_once() {
     let source = "---\nname: live-h1\ndescription: d\npromptforge: 1\n---\n\n\
         # Live H1\n\n\
         ```lua\n\
-        local writer = models.only('writer', 'A general model for tests')\n\
+        local writer = models.default('writer', 'A general model for tests')\n\
         var.answer = writer:infer('answer once')\n\
         ```\n\n\
         ## Result\n\n\
@@ -199,7 +199,7 @@ async fn live_h1_infer_sees_tools_resolved_in_the_same_block() {
          ```lua\n\
          local echo = tools.need('echo', {capability})\n\
          tools.always(echo.name)\n\
-         local writer = models.only('writer', 'A general model for tests')\n\
+         local writer = models.default('writer', 'A general model for tests')\n\
          var.answer = writer:infer('use echo')\n\
          ```\n\n\
          ## Result\n\n\
@@ -254,7 +254,7 @@ async fn nested_lua_infer_emits_model_and_tool_observations() {
          ```lua\n\
          local echo = tools.need('echo', {capability})\n\
          tools.always(echo.name)\n\
-         local writer = models.only('writer', 'A general model for tests')\n\
+         local writer = models.default('writer', 'A general model for tests')\n\
          var.answer = writer:infer('use echo')\n\
          ```\n\n\
          ## Result\n\n\
@@ -328,7 +328,7 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
          ```lua\n\
          tools.need('echo', {capability})\n\
          tools.always('echo')\n\
-         models.only('writer', 'A general model for tests')\n\
+         models.default('writer', 'A general model for tests')\n\
          var.executions = (var.executions or 0) + 1\n\
          ```\n\n\
          Ask for one tool call.\n\n\

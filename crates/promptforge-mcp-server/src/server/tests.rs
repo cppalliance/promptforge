@@ -273,7 +273,7 @@ fn speaking_server_with(gateway: SocketAddr, server_lines: &str) -> (TempDir, Pr
         "speak.md",
         "---\nname: speak\ndescription: Say something\npromptforge: 1\n---\n\n\
          # Test prompt\n\n```lua\n\
-         models.only(\"writer\", \"A model suited for careful analysis, coding, and general assistance\")\n\
+         models.default(\"writer\", \"A model suited for careful analysis, coding, and general assistance\")\n\
          ```\n\n## Only\n\nSay something.\n",
     );
     let config = Config::from_toml_str(&format!(

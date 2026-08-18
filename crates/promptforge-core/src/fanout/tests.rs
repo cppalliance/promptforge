@@ -158,7 +158,7 @@ async fn pre_cancelled_fanout_returns_interrupted() {
     let items = vec!["alpha".to_string(), "beta".to_string()];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
-    let models = ModelBindings::default();
+    let models = <ModelBindings as Default>::default();
     let analysis = crate::execute::ToolAnalysis::default();
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;
@@ -231,7 +231,7 @@ async fn fatal_arm_aborts_and_drops_blocked_siblings() {
     let items = vec!["boom".to_string(), "beta".to_string(), "gamma".to_string()];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
-    let models = ModelBindings::default();
+    let models = <ModelBindings as Default>::default();
     let analysis = crate::execute::ToolAnalysis::default();
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;
@@ -354,7 +354,7 @@ async fn fanout_rejects_a_list_over_the_item_cap() {
     let items: Vec<String> = (0..5).map(|i| i.to_string()).collect();
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
-    let models = ModelBindings::default();
+    let models = <ModelBindings as Default>::default();
     let analysis = crate::execute::ToolAnalysis::default();
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;
@@ -413,7 +413,7 @@ async fn model_required_when_arm_prose_has_no_binding() {
     let items = vec!["alpha".to_string()];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
-    let models = ModelBindings::default();
+    let models = <ModelBindings as Default>::default();
     let analysis = crate::execute::ToolAnalysis::default();
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;
@@ -550,7 +550,7 @@ async fn each_arm_emits_a_distinct_succeeded_terminal_event() {
     let items = vec!["a".to_string(), "b".to_string()];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
-    let models = ModelBindings::default();
+    let models = <ModelBindings as Default>::default();
     let analysis = crate::execute::ToolAnalysis::default();
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;
@@ -588,7 +588,7 @@ async fn a_hard_failing_arm_emits_a_failed_terminal_event() {
     let items = vec!["a".to_string()];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
-    let models = ModelBindings::default();
+    let models = <ModelBindings as Default>::default();
     let analysis = crate::execute::ToolAnalysis::default();
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;
@@ -645,7 +645,7 @@ async fn an_in_flight_fanout_arm_is_cancelled_cooperatively() {
     let items = vec!["only".to_string()];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
-    let models = ModelBindings::default();
+    let models = <ModelBindings as Default>::default();
     let analysis = crate::execute::ToolAnalysis::default();
     let shared_tools = SharedTools::default();
     let client: Option<GatewayClient> = None;

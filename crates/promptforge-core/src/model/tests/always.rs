@@ -1,4 +1,4 @@
-//! `models.only` (single- and multi-arg) integration tests.
+//! `models.default` (single- and multi-arg) integration tests.
 
 use super::*;
 
@@ -6,7 +6,7 @@ use super::*;
 fn models_always_records_binding() {
     let shared = crate::lua::LuaProgram::compile(
         r#"models.need("writer", "A tiny model", { thinking = false, temperature = 0 })
-               models.only("writer")"#,
+               models.default("writer")"#,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -25,7 +25,7 @@ fn models_always_records_binding() {
         "Prompt",
     )
     .unwrap();
-    assert_eq!(models.only(), Some("writer"));
+    assert_eq!(models.default(), Some("writer"));
 }
 
 #[test]
@@ -42,7 +42,7 @@ fn models_always_returns_inspectable_object() {
                assert(needed.temperature == 0)
                assert(needed.max_tokens == 256)
                assert(needed.dialect == "openai")
-               local model = models.only("writer")
+               local model = models.default("writer")
                assert(model.name == "writer")
                assert(model.model_id == "small")
                assert(model.description == "A tiny model")
@@ -69,7 +69,7 @@ fn models_always_returns_inspectable_object() {
         "Prompt",
     )
     .expect("models.need/always must return an inspectable Model object");
-    assert_eq!(models.only(), Some("writer"));
+    assert_eq!(models.default(), Some("writer"));
     assert_eq!(models.bindings()[0].context().get(), 8_192);
 
     let vm = section_vm_with_model_bindings(
@@ -87,7 +87,7 @@ fn models_always_returns_inspectable_object() {
 #[test]
 fn models_always_without_prior_need_fails() {
     let shared = crate::lua::LuaProgram::compile(
-        r#"models.only("writer")"#,
+        r#"models.default("writer")"#,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -114,8 +114,8 @@ fn models_always_without_prior_need_fails() {
 fn models_always_duplicate_fails() {
     let shared = crate::lua::LuaProgram::compile(
         r#"models.need("writer", "A tiny model")
-               models.only("writer")
-               models.only("writer")"#,
+               models.default("writer")
+               models.default("writer")"#,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -142,7 +142,7 @@ fn models_always_duplicate_fails() {
 fn models_always_installs_exactly() {
     let shared = crate::lua::LuaProgram::compile(
         r#"models.need("writer", "A tiny model")
-               models.only("writer")"#,
+               models.default("writer")"#,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -182,7 +182,7 @@ fn models_always_installs_exactly() {
 fn models_always_provides_completion_options_without_use() {
     let shared = crate::lua::LuaProgram::compile(
         r#"models.need("writer", "A tiny model", { thinking = false, temperature = 0 })
-               models.only("writer")"#,
+               models.default("writer")"#,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -260,7 +260,7 @@ fn models_always_from_h2_prologue_fails() {
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
     let prologue = crate::lua::LuaProgram::compile(
-        r#"models.only("writer")"#,
+        r#"models.default("writer")"#,
         "prologue",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -281,7 +281,7 @@ fn models_always_from_h2_prologue_fails() {
 #[test]
 fn models_always_multi_arg_records_need_and_always() {
     let shared = crate::lua::LuaProgram::compile(
-        r#"models.only("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
+        r#"models.default("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -300,14 +300,14 @@ fn models_always_multi_arg_records_need_and_always() {
         "Prompt",
     )
     .unwrap();
-    assert_eq!(models.only(), Some("writer"));
+    assert_eq!(models.default(), Some("writer"));
     assert!(models.binding("writer").is_some());
 }
 
 #[test]
 fn models_always_multi_arg_two_args() {
     let shared = crate::lua::LuaProgram::compile(
-        r#"models.only("writer", "A tiny model")"#,
+        r#"models.default("writer", "A tiny model")"#,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -326,14 +326,14 @@ fn models_always_multi_arg_two_args() {
         "Prompt",
     )
     .unwrap();
-    assert_eq!(models.only(), Some("writer"));
+    assert_eq!(models.default(), Some("writer"));
     assert!(models.binding("writer").is_some());
 }
 
 #[test]
 fn models_always_multi_arg_provides_completion_options() {
     let shared = crate::lua::LuaProgram::compile(
-        r#"models.only("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
+        r#"models.default("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -380,7 +380,7 @@ fn models_always_multi_arg_provides_completion_options() {
 #[test]
 fn models_always_multi_arg_installs_exactly() {
     let shared = crate::lua::LuaProgram::compile(
-        r#"models.only("writer", "A tiny model", { thinking = false })"#,
+        r#"models.default("writer", "A tiny model", { thinking = false })"#,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -420,7 +420,7 @@ fn models_always_multi_arg_installs_exactly() {
 fn models_always_multi_arg_and_single_arg_cannot_both_be_called() {
     let shared = crate::lua::LuaProgram::compile(
         r#"models.need("analyst", "careful analysis")
-               models.only("writer", "A tiny model")"#,
+               models.default("writer", "A tiny model")"#,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -439,12 +439,12 @@ fn models_always_multi_arg_and_single_arg_cannot_both_be_called() {
         "Prompt",
     )
     .unwrap();
-    assert_eq!(models.only(), Some("writer"));
+    assert_eq!(models.default(), Some("writer"));
 
     // Now verify that a second always (single-arg) after multi-arg always fails.
     let shared2 = crate::lua::LuaProgram::compile(
-        r#"models.only("writer", "A tiny model")
-               models.only("writer")"#,
+        r#"models.default("writer", "A tiny model")
+               models.default("writer")"#,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -469,7 +469,7 @@ fn models_always_multi_arg_and_single_arg_cannot_both_be_called() {
 fn models_always_multi_arg_duplicate_alias_fails() {
     let shared = crate::lua::LuaProgram::compile(
         r#"models.need("writer", "A tiny model")
-               models.only("writer", "A tiny model")"#,
+               models.default("writer", "A tiny model")"#,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,

@@ -25,7 +25,7 @@ fn tool_bag_caches_on_unchanged_generation() {
     let mut vm = SectionVm::new_for_section(
         None,
         &bindings,
-        &ModelBindings::default(),
+        &<ModelBindings as Default>::default(),
         EXECUTION,
         &NullObserver,
         "Bag",
@@ -151,7 +151,7 @@ fn tool_description_override_appears_in_model_schema() {
     let mut default_vm = SectionVm::new_for_section(
         None,
         &bindings,
-        &ModelBindings::default(),
+        &<ModelBindings as Default>::default(),
         EXECUTION,
         &NullObserver,
         "Override",
@@ -198,7 +198,7 @@ fn tool_description_override_appears_in_model_schema() {
     let mut vm = SectionVm::new_for_section(
         None,
         &bindings,
-        &ModelBindings::default(),
+        &<ModelBindings as Default>::default(),
         EXECUTION,
         &NullObserver,
         "Override",
