@@ -251,7 +251,6 @@ async fn run_one_section(
         let exec_args = ctx.args.to_string();
         let exec_execution = ctx.execution.to_string();
         let exec_when = ctx.when.to_string();
-        let exec_last_reply = incoming_reply.map(str::to_owned);
         let exec_shared = ctx.shared.cloned();
         let exec_bindings = ctx.bindings.clone();
         let exec_models = ctx.models.clone();
@@ -294,7 +293,7 @@ async fn run_one_section(
                 exec_client.as_ref(),
                 max_tool_iterations,
                 limits,
-                exec_last_reply.as_deref(),
+                None,
                 &exec_when,
                 &exec_turns,
                 next_depth,
