@@ -16,7 +16,7 @@
 ## Refuses
 
 1. **Starting a gateway or llama-server.** No `GatewayGuard`, `GatewayProfile`, `DevServerOptions`, or process spawn of those binaries.
-2. **CLI knobs for model runtime.** Context, thinking, and max tokens belong on `models.need` / `models.only` in the prompt file.
+2. **CLI knobs for model runtime.** Context, thinking, and max tokens belong on `models.need` / `models.default` in the prompt file.
 3. **Live-gateway integration tests in this crate.** Offline unit tests only; the scenario harness stays in `promptforge-core-tests`.
 
 ## Module map

@@ -13,17 +13,17 @@ models.need("writer", "a creative writing model", {
     max_tokens = 4096
 })
 
--- Set it as the prompt-wide default
-models.only("writer")
+-- Set it as the prompt-wide baseline
+models.default("writer")
 ```
 
-The `models.only(alias, description, opts)` form declares and designates in one atomic call. Within sections, `models.use(alias)` selects a specific model:
+The `models.default(alias, description, opts)` form declares and designates in one atomic call; the single-alias form designates a model already declared with `models.need`. Within sections, `models.use(alias)` selects a specific model and returns its handle:
 
 ```lua
-models.use("analyst")
+local analyst = models.use("analyst")
 ```
 
-Sections without `models.use` inherit the `models.only` default. Sections with non-empty prose but no model binding receive a clear error.
+Sections without `models.use` inherit the `models.default` baseline. A prompt can carry both - the baseline applies everywhere a section does not override it. Sections with non-empty prose but no model binding receive a clear error.
 
 ## Hard Constraints
 
@@ -34,11 +34,11 @@ The opts table filters the catalog before semantic resolution:
 - `temperature` - float in range 0.0 to 2.0
 - `max_tokens` - positive integer
 
-Duplicate model aliases or duplicate `models.only` calls are rejected atomically.
+Duplicate model aliases or duplicate `models.default` calls are rejected atomically. `models.use` may be called at most once per section.
 
 ## Model Inference from Lua
 
-`model:infer(prompt)` runs a nested model inference with tool dispatch from inside any Lua block:
+`handle:infer(prompt)` runs a nested model inference with tool dispatch from inside any Lua block, using that handle's specific model:
 
 ```lua
 local analysis = model:infer("Classify this text: " .. args)
@@ -46,6 +46,19 @@ var.classification = analysis
 ```
 
 After inference, `reply` holds the model's response and `sys.reply_finish_reason` holds the finish metadata.
+
+`models.infer(prompt)` is the lighter path: one direct, tool-free inference round on a fresh conversation using the section's current model (the `models.use` selection, else the `models.default` baseline). It does not touch `reply` or `sys.reply_finish_reason`:
+
+```lua
+local tag = models.infer("One-word sentiment of: " .. args)
+```
+
+`models.get(alias)` returns the handle for a declared model without changing the section's model selection. Combined with `handle:infer`, it is the way to consult a different model inside a section:
+
+```lua
+local critic = models.get("critic")
+local review = critic:infer("Critique this draft: " .. reply)
+```
 
 ## Inspecting Model Properties
 
