@@ -13,7 +13,7 @@ pub(crate) struct BindingState {
 /// Run-scoped accumulator populated by live H1 capability calls.
 ///
 /// The producer is installed into one H1 VM. Every executed `tools.need`,
-/// `models.need`, and `models.only` call resolves immediately, while skipped
+/// `models.need`, and `models.default` call resolves immediately, while skipped
 /// Lua branches produce no binding.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LiveBindingProducer {
@@ -77,7 +77,7 @@ impl LiveBindingProducer {
                 bindings: tools.bindings.clone(),
                 always: tools.always.clone(),
             },
-            ModelBindings::from_parts(models.bindings.clone(), models.only.clone()),
+            ModelBindings::from_parts(models.bindings.clone(), models.default.clone()),
         ))
     }
 }
