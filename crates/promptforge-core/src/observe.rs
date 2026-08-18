@@ -164,10 +164,6 @@ pub enum Observation {
     StoreReadNumberedSucceeded,
     /// A harness-mediated store read_numbered failed.
     StoreReadNumberedFailed,
-    /// A harness-mediated store inject succeeded.
-    StoreInjectSucceeded,
-    /// A harness-mediated store inject failed.
-    StoreInjectFailed,
     /// A harness-mediated store replacement succeeded.
     StoreReplaceSucceeded,
     /// A harness-mediated store replacement failed.
@@ -267,8 +263,6 @@ impl Observation {
             Observation::StoreReadFailed => "Store read failed",
             Observation::StoreReadNumberedSucceeded => "Store read_numbered succeeded",
             Observation::StoreReadNumberedFailed => "Store read_numbered failed",
-            Observation::StoreInjectSucceeded => "Store inject succeeded",
-            Observation::StoreInjectFailed => "Store inject failed",
             Observation::StoreReplaceSucceeded => "Store replace succeeded",
             Observation::StoreReplaceFailed => "Store replace failed",
             Observation::StoreDeleteSucceeded => "Store delete succeeded",
@@ -350,8 +344,6 @@ pub(crate) mod detail {
     pub(crate) const STORE_READ_NUMBERED_SUCCEEDED: Observation =
         Observation::StoreReadNumberedSucceeded;
     pub(crate) const STORE_READ_NUMBERED_FAILED: Observation = Observation::StoreReadNumberedFailed;
-    pub(crate) const STORE_INJECT_SUCCEEDED: Observation = Observation::StoreInjectSucceeded;
-    pub(crate) const STORE_INJECT_FAILED: Observation = Observation::StoreInjectFailed;
     pub(crate) const STORE_REPLACE_SUCCEEDED: Observation = Observation::StoreReplaceSucceeded;
     pub(crate) const STORE_REPLACE_FAILED: Observation = Observation::StoreReplaceFailed;
     pub(crate) const STORE_DELETE_SUCCEEDED: Observation = Observation::StoreDeleteSucceeded;

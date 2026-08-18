@@ -1820,6 +1820,20 @@ fn store_delete_then_read_raises() {
 }
 
 #[test]
+fn store_inject_is_absent() {
+    let out = run("return tostring(store.inject)", "").unwrap();
+    assert_eq!(
+        out.returned.as_deref(),
+        Some("nil"),
+        "store.inject was removed; indexing it must yield nil"
+    );
+    assert!(
+        run("store.inject('a.txt')", "").is_err(),
+        "calling the removed store.inject must raise"
+    );
+}
+
+#[test]
 fn store_read_with_start_only_reads_to_eof() {
     let out = run(
         "store.write('a.txt', 'one\\ntwo\\nthree')\nreturn store.read('a.txt', 2)",
@@ -2277,12 +2291,6 @@ fn every_store_operation_reports_its_exact_success_and_failure() {
             source: "store.read_numbered('a.txt', 1, 1)",
             success: detail::STORE_READ_NUMBERED_SUCCEEDED,
             failure: detail::STORE_READ_NUMBERED_FAILED,
-            prepare: existing,
-        },
-        Case {
-            source: "store.inject('a.txt')",
-            success: detail::STORE_INJECT_SUCCEEDED,
-            failure: detail::STORE_INJECT_FAILED,
             prepare: existing,
         },
         Case {

@@ -116,7 +116,6 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 | `store.delete(path)` | Remove file |
 | `store.glob(pattern)` | List matching paths |
 | `store.exists(path)` | Check existence |
-| `store.inject(path)` | Read wrapped in untrusted envelope |
 | `untrusted(s)` | Wrap a string in the untrusted guard envelope |
 | `return value` | End run, return value |
 | `jump("## Section")` | Transfer control |
