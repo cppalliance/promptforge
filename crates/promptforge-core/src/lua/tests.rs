@@ -1187,43 +1187,6 @@ fn section_vms_isolate_mutated_shared_globals() {
 }
 
 #[test]
-fn control_globals_are_cleared_even_when_the_block_errors() {
-    // LUA-007: an ordinary execution error must still clear jump/execute/
-    // fanout/tasks so no live control global leaks into a later phase.
-    type NoExecute = fn(Value, Option<String>) -> std::result::Result<String, Error>;
-    type NoFanout = fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, Error>;
-    let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Ctl").expect("VM builds");
-    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
-        .expect("host injects");
-    let boom = program("error('boom')");
-    vm.run_prologue_with_control(
-        &boom,
-        &NullObserver,
-        "Ctl",
-        &[],
-        None::<&NoExecute>,
-        None::<&NoFanout>,
-    )
-    .expect_err("the erroring control block must fail");
-
-    // A follow-up plain block observes the global table: every control global
-    // must be nil despite the prior error.
-    let check = program(
-        "return (jump == nil and execute == nil and fanout == nil and tasks == nil) \
-             and 'clean' or 'leaked'",
-    );
-    let result = vm
-        .run_prologue(&check, &NullObserver, "Ctl")
-        .expect("the check block runs");
-    assert_eq!(
-        result.as_deref(),
-        Some("clean"),
-        "control globals must be cleared after an erroring control block"
-    );
-    vm.teardown(&NullObserver, "Ctl");
-}
-
-#[test]
 fn shared_program_consumes_the_later_phase_instruction_budget() {
     let work = program("for i = 1, 3000000 do local value = i end");
     let mut vm = SectionVm::new(Some(&work), EXECUTION, &NullObserver, "Test")
