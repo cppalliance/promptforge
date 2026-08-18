@@ -2,7 +2,7 @@
 use super::install_store_table_scoped;
 use super::{
     Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
-    Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram,
+    Function, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram,
     LuaSectionHandle, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook,
     ModelRuntime, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution, StdLib,
     StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, ToolScope, Value,
@@ -10,6 +10,8 @@ use super::{
     install_instruction_budget, install_log, install_log_scoped, install_lua_tool_calls,
     install_store_table, install_tasks_table, resolve_section_target, scalar_return, seal_sys,
 };
+use crate::client::ToolSchema;
+use std::cell::RefCell;
 
 /// One hardened, isolated Lua VM for a section's complete lifecycle.
 ///
@@ -58,6 +60,21 @@ pub(crate) struct SectionVm {
     /// Remaining cumulative `log()` message bytes this VM may emit. Bounds total
     /// log volume even when each event is under the per-event ceilings.
     log_byte_budget: Arc<AtomicUsize>,
+    /// Local tools registered by Lua code, dispatched back into this VM.
+    #[allow(dead_code)] // wired up by the local-tools plan steps
+    local_tools: LocalTools,
+}
+
+/// Local tool registrations owned by a section VM.
+///
+/// Each entry holds the tool alias, its prebuilt schema, and the registry key
+/// for the Lua handler function captured at registration time. Interior
+/// mutability lets registration happen through the `&self` methods the VM
+/// exposes; the VM is single-threaded, so the borrow never contends.
+#[derive(Debug, Default)]
+pub(crate) struct LocalTools {
+    #[allow(dead_code)] // wired up by the local-tools plan steps
+    entries: RefCell<Vec<(String, ToolSchema, mlua::RegistryKey)>>,
 }
 
 impl SectionVm {
@@ -132,6 +149,7 @@ impl SectionVm {
             log_byte_budget: Arc::new(AtomicUsize::new(default_log_byte_budget(
                 DEFAULT_LUA_LOG_EVENTS,
             ))),
+            local_tools: LocalTools::default(),
         };
         if let Err(error) = harden(&vm.lua) {
             return vm.construction_failed(error, observer, section);
@@ -646,6 +664,70 @@ impl SectionVm {
     #[must_use]
     pub(crate) fn counts_slot(&self) -> Arc<Mutex<Option<ToolCallCounts>>> {
         Arc::clone(&self.counts_slot)
+    }
+
+    /// Registers a local tool: alias, prebuilt schema, and the registry key
+    /// of the Lua handler function.
+    #[allow(dead_code)] // wired up by the local-tools plan steps
+    pub(crate) fn register_local_tool(
+        &self,
+        alias: String,
+        schema: ToolSchema,
+        handler: mlua::RegistryKey,
+    ) {
+        self.local_tools
+            .entries
+            .borrow_mut()
+            .push((alias, schema, handler));
+    }
+
+    /// Calls the local tool registered under `alias` with JSON `args`.
+    ///
+    /// The handler is fetched from the Lua registry, invoked with the args
+    /// converted to a Lua table, and its scalar return value is rendered as a
+    /// string. A nil return yields an empty string.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if no local tool is registered under `alias`,
+    /// the args cannot be bridged, the handler fails, or it returns a
+    /// non-scalar value.
+    #[allow(dead_code)] // wired up by the local-tools plan steps
+    pub(crate) fn call_local_tool(&self, alias: &str, args: Json) -> Result<String> {
+        let handler: Function = {
+            let entries = self.local_tools.entries.borrow();
+            let key = entries
+                .iter()
+                .find(|(name, _, _)| name == alias)
+                .map(|(_, _, key)| key)
+                .ok_or_else(|| Error::Lua(format!("local tool {alias:?} is not registered")))?;
+            self.lua.registry_value(key).map_err(Error::lua)?
+        };
+        let table = self.lua.to_value(&args).map_err(Error::lua)?;
+        let returned: MultiValue = handler.call(table).map_err(Error::lua)?;
+        Ok(scalar_return(returned)?.unwrap_or_default())
+    }
+
+    /// Returns the schemas of every registered local tool.
+    #[must_use]
+    #[allow(dead_code)] // wired up by the local-tools plan steps
+    pub(crate) fn local_tool_schemas(&self) -> Vec<ToolSchema> {
+        self.local_tools
+            .entries
+            .borrow()
+            .iter()
+            .map(|(_, schema, _)| schema.clone())
+            .collect()
+    }
+
+    /// Returns whether `alias` names a registered local tool.
+    #[must_use]
+    #[allow(dead_code)] // wired up by the local-tools plan steps
+    pub(crate) fn has_local_tool(&self, alias: &str) -> bool {
+        self.local_tools
+            .entries
+            .borrow()
+            .iter()
+            .any(|(name, _, _)| name == alias)
     }
 
     /// Applies the run's Lua resource limits to this VM.
