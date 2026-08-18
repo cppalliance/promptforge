@@ -171,6 +171,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         });
 
         vm.inject_host(&args, &sys, &store, last_reply.as_deref())?;
+        vm.install_host_apis(&(observer_arc.clone() as Arc<dyn Observer>), &worker.name)?;
         vm.set_global_string("item", &item_text)?;
 
         // Arms get the same control globals as a walked section, but nested
