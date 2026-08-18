@@ -192,21 +192,48 @@ fn read_store(
     }
 }
 
+/// Shared body of the `store.read_numbered` host callback, used by both the
+/// persistent per-section install and the scope-bound test-harness install.
+///
+/// Bounds follow `read_store`: no `start` numbers the whole file from 1, a
+/// present `start` slices a 1-based inclusive line range numbered absolutely
+/// from `start`, and an `end` without a `start` is refused.
+fn read_store_numbered(
+    handle: &StoreRef,
+    path: &str,
+    start: Option<i64>,
+    end: Option<i64>,
+) -> std::result::Result<String, crate::store::StoreError> {
+    match start {
+        None if end.is_none() => handle.read_range_numbered(path, 1, None),
+        None => Err(crate::store::StoreError::InvalidRange {
+            path: path.to_owned(),
+            reason: "start is required when end is given",
+        }),
+        Some(start) => handle.read_range_numbered(
+            path,
+            usize::try_from(start).unwrap_or(0),
+            end.map(|line| usize::try_from(line).unwrap_or(0)),
+        ),
+    }
+}
+
 /// Expose an always-on `store` table whose methods (`write`, `append`,
-/// `read`, `read_lines`, `inject`, `str_replace`, `delete`, `glob`,
-/// `exists`) are backed by the run-scoped [`StoreRef`] handle. Installed once
-/// per section with [`Lua::create_function`], so the table stays valid across
-/// every chunk the VM runs without a live [`mlua::Scope`].
+/// `read`, `read_numbered`, `read_lines`, `inject`, `str_replace`, `delete`,
+/// `glob`, `exists`) are backed by the run-scoped [`StoreRef`] handle.
+/// Installed once per section with [`Lua::create_function`], so the table
+/// stays valid across every chunk the VM runs without a live [`mlua::Scope`].
 ///
 /// The table is a deterministic host capability, present regardless of tool
 /// scoping. The mutating ops (`write`/`append`/`str_replace`/`delete`) return
 /// nil; `read` returns the file verbatim, optionally bounded to a 1-based
 /// inclusive line range (`read(path, start)` reads to end of file,
-/// `read(path, start, end)` slices), and `read_lines` returns it with
-/// line numbers; `glob` returns an array table of matching paths. A
-/// [`StoreError`] from any op is mapped into
-/// an `mlua` error via [`mlua::Error::external`], so it aborts the chunk and
-/// surfaces as [`Error::Lua`].
+/// `read(path, start, end)` slices); `read_numbered` returns it with
+/// absolute line numbers under the same optional bounds; `read_lines`
+/// returns it numbered from 1; `glob` returns an array table of matching
+/// paths. A [`StoreError`] from any op is mapped into an `mlua` error via
+/// [`mlua::Error::external`], so it aborts the chunk and surfaces as
+/// [`Error::Lua`].
 ///
 /// The `StoreRef` handle locks a mutex internally per call and is synchronous, so
 /// nothing is held across an await.
@@ -298,6 +325,25 @@ pub(crate) fn install_store_table(
         )
         .map_err(Error::lua)?;
     table.set("read", read).map_err(Error::lua)?;
+
+    let handle = store.clone();
+    let report = Arc::clone(&reporter);
+    let read_numbered = lua
+        .create_function(
+            move |_, (path, start, end): (String, Option<i64>, Option<i64>)| {
+                let result = read_store_numbered(&handle, &path, start, end);
+                report.report(
+                    result.is_ok(),
+                    detail::STORE_READ_NUMBERED_SUCCEEDED,
+                    detail::STORE_READ_NUMBERED_FAILED,
+                );
+                result.map_err(mlua::Error::external)
+            },
+        )
+        .map_err(Error::lua)?;
+    table
+        .set("read_numbered", read_numbered)
+        .map_err(Error::lua)?;
 
     let handle = store.clone();
     let report = Arc::clone(&reporter);
@@ -462,6 +508,27 @@ pub(crate) fn install_store_table_scoped<'scope, 'env: 'scope>(
         )
         .map_err(Error::lua)?;
     table.set("read", read).map_err(Error::lua)?;
+
+    let handle = store.clone();
+    let read_numbered = scope
+        .create_function(
+            move |_, (path, start, end): (String, Option<i64>, Option<i64>)| {
+                let result = read_store_numbered(&handle, &path, start, end);
+                observe_store_result(
+                    execution,
+                    observer,
+                    section,
+                    result.is_ok(),
+                    detail::STORE_READ_NUMBERED_SUCCEEDED,
+                    detail::STORE_READ_NUMBERED_FAILED,
+                );
+                result.map_err(mlua::Error::external)
+            },
+        )
+        .map_err(Error::lua)?;
+    table
+        .set("read_numbered", read_numbered)
+        .map_err(Error::lua)?;
 
     let handle = store.clone();
     let inject = scope

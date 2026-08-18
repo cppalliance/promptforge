@@ -254,7 +254,9 @@ impl MemStore {
     /// assert_eq!(fs.read("input.md")?, "# Hello");
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
-    pub fn with_files(files: impl IntoIterator<Item = (String, String)>) -> Result<MemStore, StoreError> {
+    pub fn with_files(
+        files: impl IntoIterator<Item = (String, String)>,
+    ) -> Result<MemStore, StoreError> {
         let mut map = BTreeMap::new();
         for (path, contents) in files {
             let validated = StorePath::parse(&path)?;
@@ -347,17 +349,24 @@ impl Store for MemStore {
 
 /// Renders `content` as numbered lines, right-aligned to the widest number.
 pub(super) fn number_lines(content: &str) -> String {
-    let total = content.lines().count();
-    if total == 0 {
+    number_lines_from(&content.lines().collect::<Vec<_>>(), 1)
+}
+
+/// Renders `lines` numbered absolutely from `start`, each number
+/// right-aligned to the width of the largest emitted number, followed by
+/// `"| "`; lines are joined with `"\n"` and there is no trailing newline.
+pub(super) fn number_lines_from(lines: &[&str], start: usize) -> String {
+    if lines.is_empty() {
         return String::new();
     }
-    let width = total.to_string().len();
+    let last = start + lines.len() - 1;
+    let width = last.to_string().len();
     let mut out = String::new();
-    for (index, line) in content.lines().enumerate() {
+    for (index, line) in lines.iter().enumerate() {
         if index > 0 {
             out.push('\n');
         }
-        let number = index + 1;
+        let number = start + index;
         // Writing to a String is infallible; the result carries no information.
         let _ = write!(out, "{number:>width$}| {line}");
     }
