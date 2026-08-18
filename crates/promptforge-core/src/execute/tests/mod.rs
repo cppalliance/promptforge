@@ -1347,6 +1347,7 @@ mod debug_and_counts;
 mod exec_flow;
 mod exit_rules;
 mod live_infer;
+mod local_tools;
 mod model_and_reply;
 mod observations;
 mod tool_bag;
