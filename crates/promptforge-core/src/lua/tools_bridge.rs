@@ -1,7 +1,9 @@
 use super::{
-    Arc, Error, Lua, LuaSectionHandle, LuaToolHandle, MultiValue, Mutex, Result, ToolBindings,
-    ToolCallCounts, ToolRuntime, Value, Variadic, validate_alias,
+    Arc, Error, Function, Json, LocalTools, Lua, LuaSectionHandle, LuaToolHandle, MultiValue,
+    Mutex, Result, ToolBindings, ToolCallCounts, ToolRuntime, Value, Variadic, json,
+    validate_alias,
 };
+use crate::client::ToolSchema;
 
 pub(crate) fn install_lua_tool_calls(
     lua: &Lua,
@@ -124,11 +126,49 @@ pub(crate) fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<V
     Ok(entries)
 }
 
+/// Builds the JSON Schema `parameters` object from a `tools.local` params
+/// table. Each value is a bare type string or a `{type, description}` array;
+/// every declared parameter is required.
+fn local_params_schema(params: &mlua::Table) -> mlua::Result<Json> {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    for pair in params.pairs::<String, Value>() {
+        let (name, spec) = pair?;
+        let (ty, description) = match spec {
+            Value::String(s) => (s.to_string_lossy(), None),
+            Value::Table(t) => (t.get::<String>(1)?, t.get::<Option<String>>(2)?),
+            _ => {
+                return Err(mlua::Error::external(format!(
+                    "tools.local param {name:?} must be a type string or a {{type, description}} array"
+                )));
+            }
+        };
+        if !matches!(ty.as_str(), "string" | "integer" | "number" | "boolean") {
+            return Err(mlua::Error::external(format!(
+                "tools.local param {name:?} has unsupported type {ty:?}: \
+                 expected \"string\", \"integer\", \"number\", or \"boolean\""
+            )));
+        }
+        let mut property = json!({ "type": ty });
+        if let Some(description) = description {
+            property["description"] = Json::String(description);
+        }
+        properties.insert(name.clone(), property);
+        required.push(Json::String(name));
+    }
+    Ok(json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+    }))
+}
+
 pub(crate) fn install_h2_tools(
     lua: &Lua,
     globals: &mlua::Table,
     bindings: &ToolBindings,
     runtime: &Arc<Mutex<ToolRuntime>>,
+    local_tools: &LocalTools,
 ) -> Result<()> {
     let tools = lua.create_table().map_err(Error::lua)?;
     for name in ["need", "always"] {
@@ -193,6 +233,36 @@ pub(crate) fn install_h2_tools(
         })
         .map_err(Error::lua)?;
     tools.set("add", add).map_err(Error::lua)?;
+
+    let local = local_tools.clone();
+    let state = Arc::clone(runtime);
+    let local_fn = lua
+        .create_function(
+            move |lua,
+                  (alias, description, params, handler): (
+                String,
+                String,
+                mlua::Table,
+                Function,
+            )| {
+                validate_alias(&alias).map_err(mlua::Error::external)?;
+                let parameters = local_params_schema(&params)?;
+                let schema = ToolSchema::new(alias.clone(), description, parameters)
+                    .map_err(mlua::Error::external)?;
+                let key = lua.create_registry_value(handler)?;
+                local
+                    .register(alias, schema, key)
+                    .map_err(mlua::Error::external)?;
+                let mut state = state
+                    .lock()
+                    .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
+                state.generation = state.generation.saturating_add(1);
+                Ok(())
+            },
+        )
+        .map_err(Error::lua)?;
+    tools.set("local", local_fn).map_err(Error::lua)?;
+
     globals.raw_set("tools", tools).map_err(Error::lua)
 }
 
