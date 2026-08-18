@@ -6,11 +6,9 @@
 //! table are exposed; a writable `var` table is provided for the block to
 //! populate; an always-on `store` table gives the block the run's virtual
 //! files; and an instruction-count hook aborts a runaway block.
-//! Direct `print` and `warn` are unavailable. During each executable Lua phase,
-//! a borrowed `log(message)` callback accepts one bounded, single-line UTF-8
-//! string and reports it through the run's [`Observer`] as `Lua: <message>`.
-//! The callback expires at the end of that phase and is never retained across
-//! a model await.
+//! Direct `print` and `warn` are unavailable. A persistent `log(message)`
+//! callback accepts one bounded, single-line UTF-8 string and reports it
+//! through the run's [`Observer`] as `Lua: <message>`.
 //!
 //! The chunk's top-level return value becomes the section's result (the finish
 //! case of the exit rule). The `var` table is read back afterward as JSON for
@@ -33,8 +31,8 @@ pub(crate) use std::sync::Mutex;
 pub(crate) use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 pub(crate) use mlua::{
-    Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, MetaMethod, MultiValue, Scope, StdLib,
-    UserData, UserDataFields, UserDataMethods, Value, Variadic, VmState,
+    Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, MetaMethod, MultiValue, StdLib, UserData,
+    UserDataFields, UserDataMethods, Value, Variadic, VmState,
 };
 pub(crate) use serde_json::Value as Json;
 pub(crate) use serde_json::json;

@@ -23,7 +23,6 @@ fn tool_bag_caches_on_unchanged_generation() {
         Vec::new(),
     );
     let mut vm = SectionVm::new_for_section(
-        None,
         &bindings,
         &<ModelBindings as Default>::default(),
         EXECUTION,
@@ -31,6 +30,8 @@ fn tool_bag_caches_on_unchanged_generation() {
         "Bag",
     )
     .expect("captured bindings must install");
+    vm.install_captured_bindings()
+        .expect("alias globals must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
     let add_echo = LuaProgram::compile(
@@ -157,7 +158,6 @@ fn tool_description_override_appears_in_model_schema() {
 
     // tools.add(Tool) without mutating .description keeps the registry text.
     let mut default_vm = SectionVm::new_for_section(
-        None,
         &bindings,
         &<ModelBindings as Default>::default(),
         EXECUTION,
@@ -165,6 +165,9 @@ fn tool_description_override_appears_in_model_schema() {
         "Override",
     )
     .expect("captured bindings must install");
+    default_vm
+        .install_captured_bindings()
+        .expect("alias globals must install");
     default_vm
         .inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
@@ -205,7 +208,6 @@ fn tool_description_override_appears_in_model_schema() {
 
     // Mutating .description before tools.add overrides the model-facing schema.
     let mut vm = SectionVm::new_for_section(
-        None,
         &bindings,
         &<ModelBindings as Default>::default(),
         EXECUTION,
@@ -213,6 +215,8 @@ fn tool_description_override_appears_in_model_schema() {
         "Override",
     )
     .expect("captured bindings must install");
+    vm.install_captured_bindings()
+        .expect("alias globals must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
     let add_override = LuaProgram::compile(

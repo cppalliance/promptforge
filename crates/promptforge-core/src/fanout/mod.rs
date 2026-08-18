@@ -109,7 +109,9 @@ pub(crate) struct FanoutContext<'a> {
     pub observer: &'a dyn Observer,
     pub client: &'a Option<GatewayClient>,
     pub debug: Option<&'a dyn DebugCapture>,
-    pub shared: Option<&'a LuaProgram>,
+    /// The shared library every arm replays as its first chunk; an empty
+    /// compiled chunk when the prompt declares no `lua shared` library.
+    pub shared: &'a LuaProgram,
     pub bindings: &'a ToolBindings,
     pub models: &'a ModelBindings,
     pub analysis: &'a crate::execute::ToolAnalysis,
@@ -194,7 +196,7 @@ pub(crate) async fn run_fanout_arms(
             execution: ctx.execution.to_owned(),
             when: ctx.when.to_owned(),
             last_reply: ctx.last_reply.map(str::to_owned),
-            shared: ctx.shared.cloned(),
+            shared: ctx.shared.to_owned(),
             bindings: ctx.bindings.clone(),
             models: ctx.models.clone(),
             analysis: ctx.analysis.clone(),

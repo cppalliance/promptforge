@@ -1,5 +1,3 @@
-#[cfg(test)]
-use super::install_store_table_scoped;
 use super::{
     Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
     Function, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram,
@@ -7,20 +5,24 @@ use super::{
     ModelRuntime, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result,
     RuntimeResolution, StdLib, StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime,
     Value, default_log_byte_budget, detail, harden, install_h2_models, install_h2_tools,
-    install_instruction_budget, install_log, install_log_scoped, install_lua_tool_calls,
-    install_store_table, install_tasks_table, install_untrusted, resolve_section_target,
-    scalar_return, seal_sys,
+    install_instruction_budget, install_log, install_lua_tool_calls, install_store_table,
+    install_tasks_table, install_untrusted, resolve_section_target, scalar_return, seal_sys,
 };
 use crate::client::ToolSchema;
 
 /// One hardened, isolated Lua VM for a section's complete lifecycle.
 ///
-/// The VM owns one Lua environment from construction until drop. An optional
-/// shared program runs before host values are installed, then Lua chunks
-/// loaded with [`run_chunk`](Self::run_chunk) see that same environment.
-/// [`bind_reply`](Self::bind_reply) inserts the model reply into it between
-/// chunks. A single instruction counter covers every program run by this
-/// VM, so splitting work across chunks cannot reset the budget.
+/// The VM owns one Lua environment from construction until drop. Construction
+/// hardens the sandbox and installs `untrusted`; the caller then drives one
+/// linear startup: apply the run's limits, inject the host values, install
+/// the persistent host APIs and the control globals, replay the shared
+/// library as the section's first chunk
+/// ([`replay_shared`](Self::replay_shared)), install the captured tool/model
+/// alias globals, and only then walk the section's blocks with
+/// [`run_chunk`](Self::run_chunk). [`bind_reply`](Self::bind_reply) inserts
+/// the model reply into the same environment between chunks. A single
+/// instruction counter covers every program run by this VM, so splitting
+/// work across chunks cannot reset the budget.
 ///
 /// `SectionVm` deliberately does not expose its underlying [`Lua`]. This keeps
 /// hardening, host injection, instruction accounting, and report delivery on
@@ -34,7 +36,7 @@ use crate::client::ToolSchema;
 /// use promptforge_core::lua::SectionVm;
 /// use promptforge_core::observe::NullObserver;
 ///
-/// let vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
+/// let vm = SectionVm::new("example-run", &NullObserver::default(), "Example")?;
 /// vm.teardown(&NullObserver::default(), "Example");
 /// # Ok::<(), promptforge_core::Error>(())
 /// ```
@@ -157,14 +159,15 @@ impl LocalTools {
 }
 
 impl SectionVm {
-    /// Creates a hardened section VM and optionally executes a shared program.
+    /// Creates a hardened section VM.
     ///
-    /// The shared program runs before `args`, `sys`, `var`, `tools`, `store`,
-    /// and `reply` are installed. This delayed injection prevents shared code
-    /// from retaining a host value before section execution begins. The VM
-    /// retains `execution` for every later lifecycle report. Shared execution
-    /// receives a phase-local `log(message)` callback; direct `print` is
-    /// unavailable.
+    /// Construction installs only the sandbox, the default resource ceilings,
+    /// the instruction budget, and `untrusted`. Everything else - the run's
+    /// limits, the host values, the persistent host APIs, the control
+    /// globals, the shared-library replay, and the captured alias globals -
+    /// is a separate explicit step the caller drives in that order (see the
+    /// type-level docs). The VM retains `execution` for every later
+    /// lifecycle report.
     ///
     /// The VM carries no frozen tool bindings, so the validating `tools.add`
     /// installed by [`inject_host`](Self::inject_host) rejects every alias as
@@ -172,32 +175,18 @@ impl SectionVm {
     /// tools.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if the VM cannot be built or hardened, or if the
-    /// shared program fails or returns a non-scalar value.
+    /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
     ///
     /// # Examples
     /// ```text
-    /// use promptforge_core::lua::{LuaProgram, SectionVm};
+    /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     ///
-    /// let shared = LuaProgram::compile(
-    ///     "function decorate(s) return '<' .. s .. '>' end",
-    ///     "shared",
-    ///     1,
-    ///     "example-run",
-    ///     &NullObserver::default(),
-    ///     "Example",
-    /// )?;
-    /// let vm = SectionVm::new(Some(&shared), "example-run", &NullObserver::default(), "Example")?;
+    /// let vm = SectionVm::new("example-run", &NullObserver::default(), "Example")?;
     /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
-    pub(crate) fn new(
-        shared: Option<&LuaProgram>,
-        execution: &str,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<Self> {
+    pub(crate) fn new(execution: &str, observer: &dyn Observer, section: &str) -> Result<Self> {
         let lua = Lua::new_with(
             StdLib::STRING | StdLib::TABLE | StdLib::MATH,
             LuaOptions::default(),
@@ -237,58 +226,85 @@ impl SectionVm {
             return vm.construction_failed(error, observer, section);
         }
         install_instruction_budget(&vm.lua);
-        if let Some(program) = shared {
-            observer.observe(execution, section, detail::LUA_SHARED_LOAD_STARTED);
-            match vm.run_loaded_with_log(program, observer, section) {
-                Ok(_) => observer.observe(execution, section, detail::LUA_SHARED_LOAD_SUCCEEDED),
-                Err(error) => {
-                    observer.observe(execution, section, detail::LUA_SHARED_LOAD_FAILED);
-                    return vm.construction_failed(error, observer, section);
-                }
-            }
-        }
         Ok(vm)
     }
 
-    /// Creates a section VM, loads its shared library, then installs captured bindings.
+    /// Creates a section VM carrying the prompt's frozen tool and model bindings.
     ///
-    /// The shared program runs before any host API, including `log`, or captured
-    /// binding exists.
-    /// Its functions may refer to those globals because Lua resolves globals
-    /// when a function is called. Rust installs each captured Tool and Model
-    /// object directly after the shared load, without replaying H1 code.
+    /// The bindings back the validating `tools`/`models` tables that
+    /// [`inject_host_with_var`](Self::inject_host_with_var) installs, and the
+    /// bare alias globals that
+    /// [`install_captured_bindings`](Self::install_captured_bindings)
+    /// installs after the shared replay. H1 code is never replayed into a
+    /// section VM.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if VM construction, shared-library execution, or
-    /// captured-binding installation fails.
+    /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
     pub(crate) fn new_for_section(
-        replay: Option<&LuaProgram>,
         tools: &ToolBindings,
         models: &ModelBindings,
         execution: &str,
         observer: &dyn Observer,
         section: &str,
     ) -> Result<Self> {
-        let mut vm = Self::new(None, execution, observer, section)?;
-        if let Some(program) = replay {
-            observer.observe(execution, section, detail::LUA_SHARED_LOAD_STARTED);
-            match vm.run_loaded_without_host(program) {
-                Ok(_) => observer.observe(execution, section, detail::LUA_SHARED_LOAD_SUCCEEDED),
-                Err(error) => {
-                    observer.observe(execution, section, detail::LUA_SHARED_LOAD_FAILED);
-                    return vm.construction_failed(error, observer, section);
-                }
-            }
-        }
+        let mut vm = Self::new(execution, observer, section)?;
         vm.bound_tools = tools.clone();
         vm.bound_models = models.clone();
-        if let Err(error) = vm.install_captured_bindings() {
-            return vm.construction_failed(error, observer, section);
-        }
         Ok(vm)
     }
 
-    fn install_captured_bindings(&self) -> Result<()> {
+    /// Replays the shared library as the section's first chunk.
+    ///
+    /// The replay runs through the normal chunk path with the full host
+    /// environment already installed: `args`, `sys`, `var`, `reply`, `log`,
+    /// `store`, the `tools`/`models` tables, and the control globals are all
+    /// visible to shared top-level code. Only the captured tool/model alias
+    /// globals are absent; they install afterward via
+    /// [`install_captured_bindings`](Self::install_captured_bindings) so a
+    /// declared alias wins over a same-named shared global. A scalar
+    /// top-level return is discarded: the replay is a library load, not a
+    /// result.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the shared program fails or returns a
+    /// non-scalar value, or if it calls `jump`: load-time control transfer
+    /// has no coherent meaning, so a recorded jump becomes the hard error
+    /// "jump is not available during shared library load".
+    pub(crate) fn replay_shared(
+        &self,
+        program: &LuaProgram,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<()> {
+        observer.observe(&self.execution, section, detail::LUA_SHARED_LOAD_STARTED);
+        match self.run_loaded_with_control(program) {
+            Ok(LuaBlockResult::Returned(_)) => {
+                observer.observe(&self.execution, section, detail::LUA_SHARED_LOAD_SUCCEEDED);
+                Ok(())
+            }
+            Ok(LuaBlockResult::Jump(_)) => {
+                observer.observe(&self.execution, section, detail::LUA_SHARED_LOAD_FAILED);
+                Err(Error::Lua(
+                    "jump is not available during shared library load".to_owned(),
+                ))
+            }
+            Err(error) => {
+                observer.observe(&self.execution, section, detail::LUA_SHARED_LOAD_FAILED);
+                Err(error)
+            }
+        }
+    }
+
+    /// Installs the captured tool and model alias globals.
+    ///
+    /// Each frozen binding becomes a bare global holding its handle userdata.
+    /// The engine calls this after [`replay_shared`](Self::replay_shared), so
+    /// a declared alias wins over a same-named shared global; the raw install
+    /// also bypasses any metatable the shared library set on `_G`.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if a handle cannot be created or installed.
+    pub(crate) fn install_captured_bindings(&self) -> Result<()> {
         let globals = self.lua.globals();
         for binding in self.bound_tools.bindings() {
             let handle =
@@ -310,7 +326,7 @@ impl SectionVm {
         Ok(())
     }
 
-    /// Installs the section's host values after the shared program has run.
+    /// Installs the section's host values, ahead of the shared replay.
     ///
     /// This operation may be called exactly once. The store callbacks own a
     /// clone of the run-scoped store. `log` and `store` are installed once for
@@ -328,7 +344,7 @@ impl SectionVm {
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
     ///
-    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
+    /// let mut vm = SectionVm::new("example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &StoreRef::memory(), None)?;
     /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
@@ -622,7 +638,7 @@ impl SectionVm {
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
     ///
-    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
+    /// let mut vm = SectionVm::new("example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
     /// vm.bind_reply("model answer", &NullObserver::default(), "Example")?;
     /// vm.teardown(&NullObserver::default(), "Example");
@@ -669,7 +685,7 @@ impl SectionVm {
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
     ///
-    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
+    /// let mut vm = SectionVm::new("example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
     /// assert_eq!(vm.var()?, serde_json::json!({}));
     /// vm.teardown(&NullObserver::default(), "Example");
@@ -795,8 +811,9 @@ impl SectionVm {
     ///
     /// Sets the heap ceiling (`lua_memory_bytes`) and resets the `log()` event
     /// budget (`lua_log_events`). Called by the executor right after
-    /// construction so a VM honors the caller's [`RunLimits`] rather than only
-    /// the safe non-env defaults installed in [`SectionVm::new`].
+    /// construction, ahead of the shared replay, so the replay already spends
+    /// the caller's [`RunLimits`] rather than only the safe non-env defaults
+    /// installed in [`SectionVm::new`].
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the underlying VM rejects the memory limit.
@@ -836,7 +853,7 @@ impl SectionVm {
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     ///
-    /// let vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
+    /// let vm = SectionVm::new("example-run", &NullObserver::default(), "Example")?;
     /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
@@ -856,50 +873,6 @@ impl SectionVm {
     ) -> Result<Self> {
         self.teardown(observer, section);
         Err(error)
-    }
-
-    fn run_loaded_with_log(
-        &self,
-        program: &LuaProgram,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<Option<String>> {
-        let returned: MultiValue = self
-            .lua
-            .scope(|scope| {
-                install_log_scoped(
-                    &self.lua,
-                    scope,
-                    &self.execution,
-                    observer,
-                    section,
-                    &self.log_budget,
-                    &self.log_byte_budget,
-                )
-                .map_err(mlua::Error::external)?;
-                let result = program
-                    .load(&self.lua)
-                    .map_err(mlua::Error::external)?
-                    .call(());
-                // The phase-local scoped callback dies with the scope; clear
-                // the global so no dangling reference survives into the
-                // host-injected phase.
-                let cleanup = self.lua.globals().raw_set("log", Value::Nil);
-                match (result, cleanup) {
-                    (Err(error), _) | (Ok(_), Err(error)) => Err(error),
-                    (Ok(value), Ok(())) => Ok(value),
-                }
-            })
-            .map_err(|error| program.map_runtime_error(&error))?;
-        scalar_return(returned)
-    }
-
-    fn run_loaded_without_host(&self, program: &LuaProgram) -> Result<Option<String>> {
-        let returned: MultiValue = program
-            .load(&self.lua)?
-            .call(())
-            .map_err(|error| program.map_runtime_error(&error))?;
-        scalar_return(returned)
     }
 
     /// Takes any recorded jump target, propagating a poisoned jump-slot lock
@@ -935,50 +908,6 @@ impl SectionVm {
         let returned = result.map_err(|error| program.map_runtime_error(&error))?;
         Ok(LuaBlockResult::Returned(scalar_return(returned)?))
     }
-
-    #[cfg(test)]
-    fn run_source(
-        &self,
-        source: &str,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<Option<String>> {
-        let store = self.store.as_ref().ok_or_else(|| {
-            Error::Lua("section VM host values have not been injected".to_owned())
-        })?;
-        let returned: MultiValue = self
-            .lua
-            .scope(|scope| {
-                install_log_scoped(
-                    &self.lua,
-                    scope,
-                    &self.execution,
-                    observer,
-                    section,
-                    &self.log_budget,
-                    &self.log_byte_budget,
-                )
-                .map_err(mlua::Error::external)?;
-                install_store_table_scoped(
-                    &self.lua,
-                    scope,
-                    &self.lua.globals(),
-                    store,
-                    &self.execution,
-                    observer,
-                    section,
-                )
-                .map_err(mlua::Error::external)?;
-                let result = self.lua.load(source).eval();
-                let cleanup = self.lua.globals().raw_set("log", Value::Nil);
-                match (result, cleanup) {
-                    (Err(error), _) | (Ok(_), Err(error)) => Err(error),
-                    (Ok(value), Ok(())) => Ok(value),
-                }
-            })
-            .map_err(Error::lua)?;
-        scalar_return(returned)
-    }
 }
 
 /// The result of running a section's Lua block.
@@ -996,7 +925,7 @@ pub(crate) struct LuaOutcome {
 /// chunk's return value and the final `var`. Harness-mediated store operations
 /// report safe outcomes to `observer` under `execution` and `section`.
 /// `log(message)` reports constrained author checkpoints through the same
-/// observer for this call only; direct `print` is unavailable.
+/// observer; direct `print` is unavailable.
 ///
 /// `store` is the run-scoped virtual-file handle; every section in a run is
 /// given the same handle, so files a section writes persist for later sections
@@ -1019,12 +948,14 @@ pub(crate) fn run_chunk(
     sys: &Json,
     store: &StoreRef,
     execution: &str,
-    observer: &dyn Observer,
+    observer: &Arc<dyn Observer>,
     section: &str,
 ) -> Result<LuaOutcome> {
-    let mut vm = SectionVm::new(None, execution, observer, section)?;
+    let mut vm = SectionVm::new(execution, observer.as_ref(), section)?;
     vm.inject_host(args, sys, store, None)?;
-    let returned = vm.run_source(source, observer, section)?;
+    vm.install_host_apis(observer, section)?;
+    let returned: MultiValue = vm.lua.load(source).eval().map_err(Error::lua)?;
+    let returned = scalar_return(returned)?;
     let var = vm.var()?;
 
     Ok(LuaOutcome { returned, var })

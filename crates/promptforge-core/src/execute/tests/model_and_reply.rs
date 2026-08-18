@@ -110,6 +110,14 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
             (
                 "Only".to_string(),
+                detail::LUA_SHARED_LOAD_STARTED.to_string(),
+            ),
+            (
+                "Only".to_string(),
+                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
+            ),
+            (
+                "Only".to_string(),
                 detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
             ),
             (
@@ -190,6 +198,14 @@ async fn epilog_runs_after_reply_and_can_return() {
                 detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
             ),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
+            (
+                "Only".to_string(),
+                detail::LUA_SHARED_LOAD_STARTED.to_string(),
+            ),
+            (
+                "Only".to_string(),
+                detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
+            ),
             (
                 "Only".to_string(),
                 detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
