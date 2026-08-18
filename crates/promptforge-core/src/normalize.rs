@@ -4,8 +4,11 @@
 //! runtime can stay model-agnostic. A normalized turn must yield either
 //! non-empty tool calls or non-empty text; anything else is
 //! [`Error::EmptyModelReply`], carrying the choice's `finish_reason` so the
-//! tool loop can classify the empty turn. Reasoning fields are a side channel
-//! only and are never promoted into the answer.
+//! tool loop can classify the empty turn. The loop may still accept such a
+//! turn as its clean exit - empty text with `finish_reason == "stop"` after
+//! at least one successful tool dispatch - but normalization always raises
+//! and lets the loop decide. Reasoning fields are a side channel only and
+//! are never promoted into the answer.
 
 use serde_json::Value;
 

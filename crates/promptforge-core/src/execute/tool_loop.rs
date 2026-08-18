@@ -118,7 +118,9 @@ pub(crate) async fn run_tool_loop(
 /// Append `prose` to `conversation` and run model inference under `mode`.
 ///
 /// Returns text when the model produces it. For [`ProseMode::SingleShot`],
-/// text may be `None` after one round that only issued tool calls.
+/// text may be `None` after one round that only issued tool calls. In the
+/// loop mode, an empty reply with `finish_reason == "stop"` after at least
+/// one successful tool dispatch is accepted as a clean exit with empty text.
 /// Conversation history accumulates for later prose blocks.
 ///
 /// # Errors
@@ -170,6 +172,10 @@ pub(crate) async fn run_prose_inference(
         } => max_tool_iterations,
     };
 
+    // Completed dispatches only: a tool handler failure aborts the loop, so
+    // reaching the next round already proves the earlier calls succeeded.
+    let mut successful_tool_calls: usize = 0;
+
     for _ in 0..max_tool_iterations {
         let completion = tokio::select! {
             biased;
@@ -178,6 +184,29 @@ pub(crate) async fn run_prose_inference(
         };
         if let Err(Error::Interrupted) = &completion {
             return Err(Error::Interrupted);
+        }
+        // A turn whose reply is empty is the model's clean exit from the loop
+        // when it stopped deliberately (`finish_reason == "stop"`) after doing
+        // its work through tool calls; the section reply is then "". Every
+        // other empty turn (no prior tool calls, or a missing/non-"stop"
+        // finish reason) stays an `EmptyModelReply` failure. SingleShot needs
+        // no clause: its sole round is the first turn, where the dispatch
+        // count is always zero, so the conditions can never hold there.
+        if let Err(Error::EmptyModelReply { finish_reason, .. }) = &completion
+            && finish_reason.as_deref() == Some("stop")
+            && successful_tool_calls > 0
+        {
+            let finish_reason = finish_reason.clone();
+            // The accepted exit is still a completed turn: count it and report
+            // it so observers and turn totals match a text-reply exit. No
+            // debug capture fires here because the failed completion carries
+            // no request/response bodies to record.
+            advance_turn(turns);
+            observer.observe(execution, section, detail::MODEL_TURN_COMPLETED);
+            return Ok(ProseInferenceResult {
+                text: Some(String::new()),
+                finish_reason,
+            });
         }
         if completion.is_err() {
             observer.observe(execution, section, detail::MODEL_TURN_FAILED);
@@ -292,6 +321,7 @@ pub(crate) async fn run_prose_inference(
                         );
                         call_result.map_err(Error::tool)?
                     };
+                    successful_tool_calls += 1;
                     // Trust travels with the output: an untrusted result is
                     // nonce-wrapped before it can reach the next model turn. A
                     // FRESH CSPRNG nonce is drawn per wrap so a guard tag is
