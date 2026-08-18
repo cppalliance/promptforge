@@ -1,6 +1,6 @@
 ---
 name: store_triad
-description: Exercise read_lines (numbered) vs read (verbatim) vs inject (wrapped)
+description: Exercise read_lines (numbered) vs read (verbatim) vs untrusted-wrapped reads
 promptforge: 1
 ---
 
@@ -17,9 +17,9 @@ store.write("data.txt", "alpha\nbeta")
 ```lua
 local numbered = store.read_lines("data.txt")
 local verbatim = store.read("data.txt")
-local injected = store.inject("data.txt")
+local wrapped = untrusted(store.read("data.txt"))
 var.numbered = numbered
 var.verbatim = verbatim
-var.has_tags = string.find(injected, "untrusted_input_") ~= nil
+var.has_tags = string.find(wrapped, "untrusted_input_") ~= nil
 return numbered .. "|" .. verbatim
 ```

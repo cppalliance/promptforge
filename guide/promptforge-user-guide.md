@@ -966,12 +966,12 @@ store.delete("notes/summary.md")
 
 #### Safe Injection
 
-`store.inject(path)` reads content wrapped in an untrusted-input guard envelope for safe re-injection into model prompts. Forged close-tags in stored content are escaped, so injected data cannot break out of the envelope:
+Wrap stored content in the untrusted-input guard envelope with the `untrusted(s)` global before re-injecting it into model prompts: `untrusted(store.read(path))`. Forged close-tags in stored content are escaped, so injected data cannot break out of the envelope:
 
 ```lua
 store.write("user-data.txt", user_provided_content)
 -- Later, safely inject into a prompt context:
-local safe = store.inject("user-data.txt")
+local safe = untrusted(store.read("user-data.txt"))
 ```
 
 #### Path Validation

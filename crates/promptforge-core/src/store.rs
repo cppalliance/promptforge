@@ -4,13 +4,13 @@
 //! string paths. [`Store`] is the backend contract, [`MemStore`] is an
 //! in-memory backend, and [`StoreRef`] is the cheaply cloneable, thread-safe
 //! handle the runtime hands to both the Lua VM and (later) the model's file
-//! tools. Three read shapes are available: [`StoreRef::read_lines`] returns
-//! numbered lines for navigation, [`StoreRef::read`] returns verbatim
+//! tools. Two read shapes are available: [`StoreRef::read_lines`] returns
+//! numbered lines for navigation, and [`StoreRef::read`] returns verbatim
 //! contents for trusted handoff ([`StoreRef::read_range`] slices a 1-based
 //! inclusive line range out of the same verbatim contents, and
-//! [`StoreRef::read_range_numbered`] numbers such a slice absolutely), and
-//! [`StoreRef::inject`] wraps verbatim contents in an untrusted guard
-//! envelope for model-facing re-injection.
+//! [`StoreRef::read_range_numbered`] numbers such a slice absolutely). For
+//! model-facing re-injection the caller wraps a verbatim read in an
+//! untrusted guard envelope (the `untrusted` Lua global).
 //! Edits are anchor-based ([`Store::str_replace`]) rather than offset-based,
 //! the shape that works for a model.
 //!
@@ -299,30 +299,6 @@ impl StoreRef {
             return Ok(String::new());
         };
         Ok(mem::number_lines_from(&lines[start - 1..end], start))
-    }
-
-    /// Reads the file at `path` verbatim and wraps it in an untrusted guard
-    /// envelope with a fresh nonce. Use this when stored content will be
-    /// re-injected into a model-facing prompt.
-    ///
-    /// # Errors
-    /// Returns [`StoreError::NotFound`] if no file exists at `path`.
-    ///
-    /// # Examples
-    /// ```
-    /// use promptforge_core::store::StoreRef;
-    ///
-    /// let store = StoreRef::memory();
-    /// store.write("a.txt", "data")?;
-    /// let wrapped = store.inject("a.txt")?;
-    /// assert!(wrapped.contains("data"));
-    /// assert!(wrapped.contains("untrusted_input_"));
-    /// # Ok::<(), promptforge_core::store::StoreError>(())
-    /// ```
-    pub fn inject(&self, path: &str) -> Result<String, StoreError> {
-        let path = StorePath::parse(path)?;
-        let contents = self.lock()?.read(path.as_str())?;
-        Ok(crate::untrusted::wrap(&contents))
     }
 
     /// Replaces the unique occurrence of `old` with `new`. See

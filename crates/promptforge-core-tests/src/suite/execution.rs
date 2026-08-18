@@ -265,7 +265,7 @@ async fn reply_nil_in_section_one() {
 }
 
 #[tokio::test]
-async fn store_triad_numbered_vs_verbatim_vs_inject() {
+async fn store_triad_numbered_vs_verbatim_vs_wrapped() {
     let run = run_fixture(
         STORE_TRIAD,
         "execution/store-triad.md",

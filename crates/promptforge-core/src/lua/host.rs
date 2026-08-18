@@ -219,7 +219,7 @@ fn read_store_numbered(
 }
 
 /// Expose an always-on `store` table whose methods (`write`, `append`,
-/// `read`, `read_numbered`, `read_lines`, `inject`, `str_replace`, `delete`,
+/// `read`, `read_numbered`, `read_lines`, `str_replace`, `delete`,
 /// `glob`, `exists`) are backed by the run-scoped [`StoreRef`] handle.
 /// Installed once per section with [`Lua::create_function`], so the table
 /// stays valid across every chunk the VM runs without a live [`mlua::Scope`].
@@ -344,21 +344,6 @@ pub(crate) fn install_store_table(
     table
         .set("read_numbered", read_numbered)
         .map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let report = Arc::clone(&reporter);
-    let inject = lua
-        .create_function(move |_, path: String| {
-            let result = handle.inject(&path);
-            report.report(
-                result.is_ok(),
-                detail::STORE_INJECT_SUCCEEDED,
-                detail::STORE_INJECT_FAILED,
-            );
-            result.map_err(mlua::Error::external)
-        })
-        .map_err(Error::lua)?;
-    table.set("inject", inject).map_err(Error::lua)?;
 
     let handle = store.clone();
     let report = Arc::clone(&reporter);
@@ -529,23 +514,6 @@ pub(crate) fn install_store_table_scoped<'scope, 'env: 'scope>(
     table
         .set("read_numbered", read_numbered)
         .map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let inject = scope
-        .create_function(move |_, path: String| {
-            let result = handle.inject(&path);
-            observe_store_result(
-                execution,
-                observer,
-                section,
-                result.is_ok(),
-                detail::STORE_INJECT_SUCCEEDED,
-                detail::STORE_INJECT_FAILED,
-            );
-            result.map_err(mlua::Error::external)
-        })
-        .map_err(Error::lua)?;
-    table.set("inject", inject).map_err(Error::lua)?;
 
     let handle = store.clone();
     let str_replace = scope

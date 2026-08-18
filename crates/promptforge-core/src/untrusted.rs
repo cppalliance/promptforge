@@ -1,9 +1,10 @@
 //! Guard-wrapping for untrusted external data.
 //!
-//! Tool results from untrusted sources and store-injected content are wrapped
-//! in an XML-style envelope whose tag name includes a random nonce, so fetched
-//! content cannot forge the closing delimiter and break out of the block. Both
-//! the tool loop and [`crate::store::StoreRef::inject`] call [`wrap`].
+//! Tool results from untrusted sources and stored content bound for a model
+//! are wrapped in an XML-style envelope whose tag name includes a random
+//! nonce, so fetched content cannot forge the closing delimiter and break out
+//! of the block. The tool loop calls [`wrap`] directly; Lua prompts reach it
+//! through the `untrusted(s)` global.
 //!
 //! The envelope is defense in depth, not a security boundary: the preface tells
 //! the model the block is data, the nonce makes the real closing delimiter
