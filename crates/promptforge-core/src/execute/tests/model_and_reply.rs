@@ -620,3 +620,210 @@ async fn reply_substitution_nil_is_a_hard_error() {
         "error must mention reply, got: {err}"
     );
 }
+
+// --- models.get / models.infer / handle:infer ---
+
+/// A two-model catalog: `writer` resolves to `writer-model`, `analyst` to
+/// `analyst-model`, so a test can tell which model a request used.
+fn writer_and_analyst_catalog() -> ModelCatalog {
+    let context = NonZeroU32::new(131_072).expect("131072 is non-zero");
+    ModelCatalog::new([
+        ModelDescriptor::new(
+            ModelId::gateway("writer-model").expect("the writer model id is valid"),
+            "A general model for tests",
+            context,
+            ThinkingMode::Switchable,
+        ),
+        ModelDescriptor::new(
+            ModelId::gateway("analyst-model").expect("the analyst model id is valid"),
+            "A careful analysis model",
+            context,
+            ThinkingMode::Switchable,
+        ),
+    ])
+    .expect("the test catalog has two unique models")
+}
+
+fn analyst_only_catalog() -> ModelCatalog {
+    ModelCatalog::new([ModelDescriptor::new(
+        ModelId::gateway("analyst-model").expect("the analyst model id is valid"),
+        "A careful analysis model",
+        NonZeroU32::new(131_072).expect("131072 is non-zero"),
+        ThinkingMode::Switchable,
+    )])
+    .expect("the test catalog has a single unique model")
+}
+
+/// Run a parsed prompt against a scripted gateway with no external tools.
+async fn run_with_gateway(test: &TestPrompt, addr: SocketAddr, store: &StoreRef) -> Result<String> {
+    run(
+        test,
+        "",
+        &[],
+        store,
+        RunOptions {
+            execution: EXECUTION,
+            observer: Arc::new(NullObserver),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test").expect("non-empty test key"),
+            )),
+            debug: None,
+        },
+    )
+    .await
+}
+
+#[tokio::test]
+async fn models_get_returns_a_handle_without_changing_the_section_model() {
+    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
+    let addr = gateway.addr();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# T\n\n\
+```lua\n\
+models.default('writer', 'A general model for tests')\n\
+models.need('analyst', 'A careful analysis model')\n\
+```\n\n\
+## Only\n\n\
+```lua\nstore.write('handle.txt', models.get('analyst').name)\n```\n\n\
+Ask the model.\n";
+    let prompt = TestPrompt {
+        prompt: parse(md),
+        models: writer_and_analyst_catalog(),
+        picker_catalog: None,
+    };
+    let store = StoreRef::memory();
+    let out = run_with_gateway(&prompt, addr, &store).await.unwrap();
+
+    assert_eq!(out, "hello from the mock");
+    assert_eq!(
+        store.read_lines("handle.txt").unwrap(),
+        "1| analyst",
+        "models.get must return the analyst handle"
+    );
+    let body = gateway.last_request().expect("complete must reach the gateway");
+    assert_eq!(
+        body["model"], "writer-model",
+        "models.get must not change the section's model"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn models_infer_uses_the_section_model_without_touching_reply() {
+    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
+    let addr = gateway.addr();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n\
+```lua\nvar.r = models.infer('ping')\n```\n\n\
+```lua\nreturn var.r .. ':' .. tostring(reply)\n```\n";
+    let out = run_with_gateway(&bound_for_model(md), addr, &StoreRef::memory())
+        .await
+        .unwrap();
+    assert_eq!(
+        out, "pong:nil",
+        "models.infer must not bind the section's reply"
+    );
+
+    let body = gateway.last_request().expect("complete must reach the gateway");
+    assert_eq!(body["model"], "claude-sonnet-4-6");
+    assert!(
+        body.get("tools").is_none(),
+        "models.infer advertises no tools: {body}"
+    );
+    assert_eq!(
+        body["messages"].as_array().expect("messages array").len(),
+        1,
+        "models.infer runs on a fresh context: {body}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn handle_infer_uses_that_model_regardless_of_the_section_model() {
+    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
+    let addr = gateway.addr();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# T\n\n\
+```lua\n\
+models.default('writer', 'A general model for tests')\n\
+models.need('analyst', 'A careful analysis model')\n\
+```\n\n\
+## Only\n\n\
+```lua\nreturn models.get('analyst'):infer('ping')\n```\n";
+    let prompt = TestPrompt {
+        prompt: parse(md),
+        models: writer_and_analyst_catalog(),
+        picker_catalog: None,
+    };
+    let out = run_with_gateway(&prompt, addr, &StoreRef::memory())
+        .await
+        .unwrap();
+    assert_eq!(out, "pong");
+    let body = gateway.last_request().expect("complete must reach the gateway");
+    assert_eq!(
+        body["model"], "analyst-model",
+        "handle:infer must use the handle's model, not the section default"
+    );
+}
+
+#[tokio::test]
+async fn models_use_after_prose_errors() {
+    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
+    let addr = gateway.addr();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n\
+```lua\nmodels.use('writer')\n```\n\n\
+Ask the model.\n\n\
+```lua\nmodels.use('writer')\n```\n";
+    let error = run_with_gateway(&bound_for_model(md), addr, &StoreRef::memory())
+        .await
+        .expect_err("a second models.use after prose must fail");
+    assert!(
+        error.to_string().contains("at most once per section"),
+        "the error must report the at-most-once rule: {error}"
+    );
+}
+
+#[tokio::test]
+async fn models_infer_without_use_or_default_errors() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# T\n\n\
+```lua\nmodels.need('analyst', 'A careful analysis model')\n```\n\n\
+## Only\n\n\
+```lua\nreturn models.infer('ping')\n```\n";
+    let prompt = TestPrompt {
+        prompt: parse(md),
+        models: analyst_only_catalog(),
+        picker_catalog: None,
+    };
+    let error = run(&prompt, "", &[], &StoreRef::memory(), silent())
+        .await
+        .expect_err("models.infer with no current model must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("model binding required for section Only"),
+        "the error must name the section: {error}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn models_get_infer_works_without_any_section_model() {
+    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
+    let addr = gateway.addr();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# T\n\n\
+```lua\nmodels.need('analyst', 'A careful analysis model')\n```\n\n\
+## Only\n\n\
+```lua\nreturn models.get('analyst'):infer('ping')\n```\n";
+    let prompt = TestPrompt {
+        prompt: parse(md),
+        models: analyst_only_catalog(),
+        picker_catalog: None,
+    };
+    let out = run_with_gateway(&prompt, addr, &StoreRef::memory())
+        .await
+        .unwrap();
+    assert_eq!(out, "pong");
+    let body = gateway.last_request().expect("complete must reach the gateway");
+    assert_eq!(body["model"], "analyst-model");
+}
