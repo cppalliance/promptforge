@@ -79,9 +79,9 @@ async fn log_fixture_reports_exact_author_checkpoints() {
     assert_eq!(result, "logged");
     assert_eq!(
         run.store
-            .read_lines("state.txt")
+            .read("state.txt")
             .expect("the prepare section writes state"),
-        "1| prepared"
+        "prepared"
     );
     assert_eq!(
         checkpoints(&run.recorder.records(), LOG_EXECUTION),
@@ -110,7 +110,7 @@ async fn prologue_return_fixture_skips_model_and_epilog() {
 
     assert_eq!(result, "early result");
     assert!(
-        run.store.read_lines("unreachable.txt").is_err(),
+        run.store.read("unreachable.txt").is_err(),
         "the epilog after a scalar prologue return must not run"
     );
     assert_eq!(
@@ -137,12 +137,12 @@ async fn store_fixture_persists_state_across_fall_through() {
         .result
         .expect("the store fall-through fixture must execute offline");
 
-    assert_eq!(result, "1| carried value");
+    assert_eq!(result, "carried value");
     assert_eq!(
         run.store
-            .read_lines("handoff.txt")
+            .read("handoff.txt")
             .expect("the handoff remains stored"),
-        "1| carried value"
+        "carried value"
     );
     assert_eq!(
         checkpoints(&run.recorder.records(), STORE_EXECUTION),

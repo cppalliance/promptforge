@@ -434,7 +434,7 @@ store.write("notes/summary.md", "# Summary\n" .. reply)
 store.append("log.txt", "processed: " .. args .. "\n")
 
 local content = store.read("notes/summary.md")
-local numbered = store.read_lines("notes/summary.md")
+local numbered = store.read_numbered("notes/summary.md")
 
 store.str_replace("notes/summary.md", "old text", "new text")
 

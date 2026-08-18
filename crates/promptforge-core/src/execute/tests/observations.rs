@@ -79,8 +79,8 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         "observer choice must not change store side effects"
     );
     assert_eq!(
-        recorded_store.read_lines("state.txt").unwrap(),
-        null_store.read_lines("state.txt").unwrap(),
+        recorded_store.read("state.txt").unwrap(),
+        null_store.read("state.txt").unwrap(),
         "observer choice must not change stored contents"
     );
 
@@ -226,10 +226,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     .expect("the lifecycle fixture must run");
 
     assert_eq!(result, "aliased final");
-    assert_eq!(
-        store.read_lines("state.txt").unwrap(),
-        "1| before\n2| after"
-    );
+    assert_eq!(store.read("state.txt").unwrap(), "before\nafter");
     assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
     let records = recorder.records();
     assert!(!records.is_empty());

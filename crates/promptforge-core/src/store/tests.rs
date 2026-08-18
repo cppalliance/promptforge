@@ -17,9 +17,6 @@ impl Store for GlobSpyStore {
     fn append(&mut self, _path: &str, _contents: &str) -> Result<(), StoreError> {
         Ok(())
     }
-    fn read_lines(&self, _path: &str) -> Result<String, StoreError> {
-        Ok(String::new())
-    }
     fn read(&self, _path: &str) -> Result<String, StoreError> {
         Ok(String::new())
     }
@@ -59,17 +56,19 @@ fn glob_snapshots_and_matches_outside_the_lock() {
 }
 
 #[test]
-fn write_then_read_lines_numbers_lines() {
+fn write_then_read_numbered_numbers_lines() {
     let store = StoreRef::memory();
     store.write("a.txt", "first\nsecond\nthird").expect("write");
     assert_eq!(
-        store.read_lines("a.txt").expect("read_lines"),
+        store
+            .read_range_numbered("a.txt", 1, None)
+            .expect("numbered"),
         "1| first\n2| second\n3| third"
     );
 }
 
 #[test]
-fn read_lines_pads_numbers_to_width() {
+fn read_numbered_pads_numbers_to_width() {
     let store = StoreRef::memory();
     let mut body = String::new();
     for n in 1..=10 {
@@ -77,7 +76,9 @@ fn read_lines_pads_numbers_to_width() {
         let _ = writeln!(body, "line{n}");
     }
     store.write("a.txt", &body).expect("write");
-    let numbered = store.read_lines("a.txt").expect("read_lines");
+    let numbered = store
+        .read_range_numbered("a.txt", 1, None)
+        .expect("numbered");
     assert!(numbered.starts_with(" 1| line1\n"));
     assert!(numbered.contains("\n10| line10"));
 }
@@ -88,7 +89,9 @@ fn read_returns_contents_verbatim() {
     store.write("a.txt", "first\nsecond\n").expect("write");
     assert_eq!(store.read("a.txt").expect("read"), "first\nsecond\n");
     assert_eq!(
-        store.read_lines("a.txt").expect("read_lines"),
+        store
+            .read_range_numbered("a.txt", 1, None)
+            .expect("numbered"),
         "1| first\n2| second"
     );
 }
@@ -194,28 +197,21 @@ fn numbered_fixture(store: &StoreRef, path: &str, line_count: usize) {
 }
 
 #[test]
-fn read_range_numbered_without_bounds_matches_read_lines() {
+fn read_range_numbered_without_bounds_numbers_from_one() {
     let store = StoreRef::memory();
     numbered_fixture(&store, "a.txt", 12);
     assert_eq!(
         store
             .read_range_numbered("a.txt", 1, None)
             .expect("numbered"),
-        store.read_lines("a.txt").expect("read_lines"),
-        "an unbounded numbered read must equal read_lines byte-for-byte"
+        " 1| line1\n 2| line2\n 3| line3\n 4| line4\n 5| line5\n 6| line6\n 7| line7\n 8| line8\n 9| line9\n10| line10\n11| line11\n12| line12"
     );
 }
 
 #[test]
-fn read_range_numbered_empty_file_matches_read_lines() {
+fn read_range_numbered_empty_file_is_empty_string() {
     let store = StoreRef::memory();
     store.write("e.txt", "").expect("write");
-    assert_eq!(
-        store
-            .read_range_numbered("e.txt", 1, None)
-            .expect("numbered"),
-        store.read_lines("e.txt").expect("read_lines"),
-    );
     assert_eq!(
         store
             .read_range_numbered("e.txt", 1, None)
@@ -314,25 +310,11 @@ fn read_range_numbered_missing_file_errors() {
 }
 
 #[test]
-fn read_lines_missing_file_errors() {
-    let store = StoreRef::memory();
-    let err = store.read_lines("absent.txt").expect_err("should fail");
-    assert!(matches!(err, StoreError::NotFound { .. }));
-}
-
-#[test]
 fn write_overwrites() {
     let store = StoreRef::memory();
     store.write("a.txt", "old").expect("write");
     store.write("a.txt", "new").expect("overwrite");
-    assert_eq!(store.read_lines("a.txt").expect("read_lines"), "1| new");
-}
-
-#[test]
-fn read_lines_empty_file_is_empty_string() {
-    let store = StoreRef::memory();
-    store.write("e.txt", "").expect("write");
-    assert_eq!(store.read_lines("e.txt").expect("read_lines"), "");
+    assert_eq!(store.read("a.txt").expect("read"), "new");
 }
 
 #[test]
@@ -340,10 +322,7 @@ fn append_creates_then_extends() {
     let store = StoreRef::memory();
     store.append("log.txt", "one\n").expect("create via append");
     store.append("log.txt", "two").expect("extend");
-    assert_eq!(
-        store.read_lines("log.txt").expect("read_lines"),
-        "1| one\n2| two"
-    );
+    assert_eq!(store.read("log.txt").expect("read"), "one\ntwo");
 }
 
 #[test]
@@ -353,10 +332,7 @@ fn str_replace_replaces_unique() {
     store
         .str_replace("a.txt", "quick", "slow")
         .expect("replace");
-    assert_eq!(
-        store.read_lines("a.txt").expect("read_lines"),
-        "1| the slow brown fox"
-    );
+    assert_eq!(store.read("a.txt").expect("read"), "the slow brown fox");
 }
 
 #[test]
@@ -392,11 +368,11 @@ fn str_replace_on_missing_file_errors() {
 }
 
 #[test]
-fn delete_then_read_lines_errors() {
+fn delete_then_read_errors() {
     let store = StoreRef::memory();
     store.write("a.txt", "gone soon").expect("write");
     store.delete("a.txt").expect("delete");
-    let err = store.read_lines("a.txt").expect_err("should fail");
+    let err = store.read("a.txt").expect_err("should fail");
     assert!(matches!(err, StoreError::NotFound { .. }));
 }
 
@@ -673,14 +649,11 @@ fn clones_share_backing_state() {
         .write("shared.txt", "written by original")
         .expect("write");
     assert_eq!(
-        clone.read_lines("shared.txt").expect("read_lines"),
-        "1| written by original"
+        clone.read("shared.txt").expect("read"),
+        "written by original"
     );
     clone
         .write("second.txt", "written by clone")
         .expect("write");
-    assert_eq!(
-        store.read_lines("second.txt").expect("read_lines"),
-        "1| written by clone"
-    );
+    assert_eq!(store.read("second.txt").expect("read"), "written by clone");
 }

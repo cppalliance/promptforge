@@ -111,7 +111,6 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 | `store.read_numbered(path[, start[, end]])` | Read with absolute line numbers, optionally lines `start` to `end` (1-based, inclusive) |
 | `store.write(path, content)` | Create or overwrite file |
 | `store.append(path, content)` | Append to file |
-| `store.read_lines(path)` | Read with line numbers |
 | `store.str_replace(path, old, new)` | Edit by unique anchor |
 | `store.delete(path)` | Remove file |
 | `store.glob(pattern)` | List matching paths |

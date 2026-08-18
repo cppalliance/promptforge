@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use super::StoreError;
 use super::glob::{compile_glob, matches_tokens};
-use super::mem::{Store, number_lines};
+use super::mem::Store;
 
 /// A [`Store`] backend that persists virtual files as real files on disk.
 ///
@@ -134,17 +134,6 @@ impl Store for FileStore {
             .map_err(StoreError::backend)
     }
 
-    fn read_lines(&self, path: &str) -> Result<String, StoreError> {
-        let fs_path = self.resolve(path)?;
-        match fs::read_to_string(&fs_path) {
-            Ok(contents) => Ok(number_lines(&contents)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(StoreError::NotFound {
-                path: path.to_owned(),
-            }),
-            Err(e) => Err(StoreError::backend(e)),
-        }
-    }
-
     fn read(&self, path: &str) -> Result<String, StoreError> {
         let fs_path = self.resolve(path)?;
         match fs::read_to_string(&fs_path) {
@@ -242,16 +231,6 @@ mod tests {
         store.append("log.txt", "first\n").expect("append 1");
         store.append("log.txt", "second").expect("append 2");
         assert_eq!(store.read("log.txt").expect("read"), "first\nsecond");
-    }
-
-    #[test]
-    fn read_lines_numbers_content() {
-        let (_dir, mut store) = temp_store();
-        store.write("poem.txt", "roses\nviolets").expect("write");
-        assert_eq!(
-            store.read_lines("poem.txt").expect("read_lines"),
-            "1| roses\n2| violets"
-        );
     }
 
     #[test]
