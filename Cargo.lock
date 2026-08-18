@@ -2940,6 +2940,7 @@ version = "0.1.0"
 dependencies = [
  "arc-swap",
  "axum",
+ "dotenvy",
  "fastrand",
  "futures-util",
  "glob",
