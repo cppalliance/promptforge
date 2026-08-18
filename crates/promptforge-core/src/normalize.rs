@@ -3,8 +3,9 @@
 //! Wire dialects and the empty-response invariant live here so the rest of the
 //! runtime can stay model-agnostic. A normalized turn must yield either
 //! non-empty tool calls or non-empty text; anything else is
-//! [`Error::EmptyModelReply`]. Reasoning fields are a side channel only and
-//! are never promoted into the answer.
+//! [`Error::EmptyModelReply`], carrying the choice's `finish_reason` so the
+//! tool loop can classify the empty turn. Reasoning fields are a side channel
+//! only and are never promoted into the answer.
 
 use serde_json::Value;
 
@@ -117,14 +118,16 @@ pub(crate) fn turn_context(body: &Value) -> Result<TurnContext<'_>> {
 }
 
 /// The empty-reply error for a turn with no product, noting whether an ignored
-/// reasoning side channel was present.
-pub(crate) fn empty_reply_error(reasoning_present: bool) -> Error {
+/// reasoning side channel was present and carrying the choice's
+/// `finish_reason` so the tool loop can classify the empty turn.
+pub(crate) fn empty_reply_error(reasoning_present: bool, finish_reason: Option<String>) -> Error {
     Error::EmptyModelReply {
         detail: if reasoning_present {
             EMPTY_REPLY_REASONING_IGNORED
         } else {
             EMPTY_REPLY
         },
+        finish_reason,
     }
 }
 
@@ -177,7 +180,10 @@ impl CompletionNormalizer for OpenAiChatNormalizer {
             });
         }
 
-        Err(empty_reply_error(reasoning_content.is_some()))
+        Err(empty_reply_error(
+            reasoning_content.is_some(),
+            finish_reason,
+        ))
     }
 }
 
@@ -629,8 +635,16 @@ mod tests {
         });
 
         match normalize(&body) {
-            Err(Error::EmptyModelReply { detail }) => {
+            Err(Error::EmptyModelReply {
+                detail,
+                finish_reason,
+            }) => {
                 assert_eq!(detail, EMPTY_REPLY_REASONING_IGNORED);
+                assert_eq!(
+                    finish_reason.as_deref(),
+                    Some("stop"),
+                    "the choice's finish_reason must survive on the error"
+                );
             }
             other => panic!("expected EmptyModelReply, got {other:?}"),
         }
@@ -645,7 +659,13 @@ mod tests {
         });
 
         match normalize(&body) {
-            Err(Error::EmptyModelReply { detail }) => assert_eq!(detail, EMPTY_REPLY),
+            Err(Error::EmptyModelReply {
+                detail,
+                finish_reason,
+            }) => {
+                assert_eq!(detail, EMPTY_REPLY);
+                assert_eq!(finish_reason, None, "no finish_reason on the wire");
+            }
             other => panic!("expected EmptyModelReply, got {other:?}"),
         }
     }
@@ -659,9 +679,36 @@ mod tests {
         });
 
         match normalize(&body) {
-            Err(Error::EmptyModelReply { detail }) => assert_eq!(detail, EMPTY_REPLY),
+            Err(Error::EmptyModelReply { detail, .. }) => assert_eq!(detail, EMPTY_REPLY),
             other => panic!("expected EmptyModelReply, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn empty_reply_error_stores_the_finish_reason() {
+        let with_reason = empty_reply_error(false, Some("length".to_owned()));
+        assert!(
+            matches!(
+                with_reason,
+                Error::EmptyModelReply {
+                    finish_reason: Some(ref reason),
+                    ..
+                } if reason == "length"
+            ),
+            "a supplied finish_reason must be stored: {with_reason:?}"
+        );
+
+        let without_reason = empty_reply_error(true, None);
+        assert!(
+            matches!(
+                without_reason,
+                Error::EmptyModelReply {
+                    finish_reason: None,
+                    ..
+                }
+            ),
+            "a missing finish_reason stays missing: {without_reason:?}"
+        );
     }
 
     #[test]

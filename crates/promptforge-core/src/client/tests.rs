@@ -355,6 +355,12 @@ async fn complete_hard_fails_on_empty_model_reply() {
         .complete(&[Message::user("hi")], None, &options)
         .await
         .expect_err("empty product must fail");
+    assert_eq!(err.kind(), crate::model::CompletionErrorKind::EmptyReply);
+    assert_eq!(
+        err.finish_reason(),
+        Some("stop"),
+        "the finish_reason must survive the conversion into CompletionError"
+    );
     assert!(matches!(Error::from(err), Error::EmptyModelReply { .. }));
 }
 

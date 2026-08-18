@@ -170,6 +170,7 @@ impl ToolDialect for Gemma3ToolCodeDialect {
 
         Err(crate::normalize::empty_reply_error(
             reasoning_content.is_some(),
+            finish_reason,
         ))
     }
 
@@ -294,6 +295,27 @@ mod tests {
                 );
             }
             CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
+        }
+    }
+
+    #[test]
+    fn empty_content_carries_the_wire_finish_reason() {
+        let dialect = Gemma3ToolCodeDialect;
+        let body = serde_json::json!({
+            "choices": [{
+                "message": { "role": "assistant", "content": "" },
+                "finish_reason": "stop"
+            }]
+        });
+        match dialect.parse_turn(&body) {
+            Err(Error::EmptyModelReply { finish_reason, .. }) => {
+                assert_eq!(
+                    finish_reason.as_deref(),
+                    Some("stop"),
+                    "the choice's finish_reason must survive on the error"
+                );
+            }
+            other => panic!("expected EmptyModelReply, got {other:?}"),
         }
     }
 
