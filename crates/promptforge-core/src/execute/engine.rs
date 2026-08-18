@@ -248,6 +248,116 @@ async fn run_one_section(
         return Err(error);
     }
 
+    // Control globals are installed once for the section's whole lifecycle.
+    // Both callbacks own clones of the run context so the persistent Lua
+    // closures hold no borrows; the observer and debug captures go through
+    // their Arc handles for the same reason.
+    let execute_callback = {
+        let exec_store = ctx.store.clone();
+        let exec_args = ctx.args.to_string();
+        let exec_execution = ctx.execution.to_string();
+        let exec_when = ctx.when.to_string();
+        let exec_last_reply = incoming_reply.map(str::to_owned);
+        let exec_shared = ctx.shared.cloned();
+        let exec_bindings = ctx.bindings.clone();
+        let exec_models = ctx.models.clone();
+        let exec_client = client.as_ref().cloned();
+        let exec_tools = ctx.shared_tools.clone();
+        let exec_sections = ctx.top_sections.to_vec();
+        let exec_turns = Arc::clone(ctx.turns);
+        let exec_analysis = ctx.analysis.clone();
+        let exec_observer = Arc::clone(ctx.observer_arc);
+        let exec_debug = ctx.debug_arc.cloned();
+        let limits = ctx.limits;
+        let max_tool_iterations = ctx.max_tool_iterations;
+        move |target: LuaValue, input: Option<String>| -> std::result::Result<String, Error> {
+            let heading = resolve_section_target(target).map_err(Error::lua)?;
+            let next_depth = execute_depth + 1;
+            if next_depth > MAX_EXECUTE_DEPTH {
+                return Err(Error::Lua(format!(
+                    "execute recursion exceeded cap of {MAX_EXECUTE_DEPTH}"
+                )));
+            }
+            let worker = resolve_h2_section(&heading, &exec_sections)?;
+            let call_args = input.as_deref().unwrap_or(&exec_args);
+            // Return the structured error directly (LUA-012): the typed error and
+            // its source cross the Lua boundary via `mlua::Error::external` rather
+            // than being flattened to a string here.
+            bridge_blocking(run_execute_section(
+                worker,
+                call_args,
+                &exec_store,
+                &exec_execution,
+                exec_observer.as_ref(),
+                &exec_observer,
+                exec_debug.as_deref(),
+                exec_debug.as_ref(),
+                exec_shared.as_ref(),
+                &exec_bindings,
+                &exec_models,
+                &exec_analysis,
+                &exec_tools,
+                exec_client.as_ref(),
+                max_tool_iterations,
+                limits,
+                exec_last_reply.as_deref(),
+                &exec_when,
+                &exec_turns,
+                next_depth,
+                &exec_sections,
+            ))
+        }
+    };
+    let fanout_callback = {
+        let fanout_store = ctx.store.clone();
+        let fanout_args = ctx.args.to_string();
+        let fanout_execution = ctx.execution.to_string();
+        let fanout_when = ctx.when.to_string();
+        let fanout_last_reply = incoming_reply.map(str::to_owned);
+        let fanout_shared = ctx.shared.cloned();
+        let fanout_bindings = ctx.bindings.clone();
+        let fanout_models = ctx.models.clone();
+        let fanout_client = client.as_ref().cloned();
+        let fanout_tools = ctx.shared_tools.clone();
+        let fanout_analysis = ctx.analysis.clone();
+        let fanout_observer = Arc::clone(ctx.observer_arc);
+        let fanout_debug = ctx.debug_arc.cloned();
+        let children = section.children.clone();
+        let section_count = ctx.top_sections.len();
+        let limits = ctx.limits;
+        let max_tool_iterations = ctx.max_tool_iterations;
+        move |worker_heading: String, list_heading: String| {
+            make_fanout_callback(
+                &worker_heading,
+                &list_heading,
+                &children,
+                &fanout_args,
+                &fanout_store,
+                &fanout_execution,
+                fanout_observer.as_ref(),
+                fanout_client.as_ref(),
+                fanout_debug.as_deref(),
+                fanout_shared.as_ref(),
+                &fanout_bindings,
+                &fanout_models,
+                &fanout_analysis,
+                &fanout_tools,
+                max_tool_iterations,
+                limits,
+                fanout_last_reply.as_deref(),
+                &fanout_when,
+                section_id,
+                section_count,
+            )
+        }
+    };
+    if let Err(error) =
+        vm.install_control_globals(ctx.task_handles, execute_callback, fanout_callback)
+    {
+        vm.teardown(ctx.observer, &section.name);
+        return Err(error);
+    }
+
     // The infer hook carries a lazy client source (F5): a nested `model:infer`
     // surfaces a concrete construction error on first use instead of the setup
     // swallowing it. The direct prose path below still builds `client` and
@@ -266,7 +376,6 @@ async fn run_one_section(
         None,
     );
 
-    let has_children = !section.children.is_empty();
     let mut conversation: Vec<Message> = Vec::new();
     // Tracks whether the walk has passed the first prose block, which splits
     // Lua blocks into prologue (before) and epilog (after) and gates the
@@ -288,35 +397,11 @@ async fn run_one_section(
     for block in &section.blocks {
         match block {
             Block::Lua(program) => {
-                let returned = run_section_lua(
-                    &vm,
-                    program,
-                    !seen_prose,
-                    has_children,
-                    section,
-                    ctx.store,
-                    ctx.args,
-                    ctx.execution,
-                    ctx.observer,
-                    ctx.observer_arc,
-                    ctx.debug,
-                    ctx.debug_arc,
-                    ctx.shared,
-                    ctx.bindings,
-                    ctx.models,
-                    ctx.analysis,
-                    ctx.shared_tools,
-                    client.as_ref(),
-                    ctx.max_tool_iterations,
-                    ctx.limits,
-                    reply.as_deref(),
-                    ctx.when,
-                    section_id,
-                    ctx.task_handles,
-                    ctx.top_sections,
-                    ctx.turns,
-                    execute_depth,
-                );
+                let returned = if !seen_prose {
+                    vm.run_prologue_with_control(program, ctx.observer, &section.name)
+                } else {
+                    vm.run_epilog_with_control(program, ctx.observer, &section.name)
+                };
                 match returned {
                     Ok(LuaBlockResult::Returned(Some(value))) => {
                         early_return = Some(value);
@@ -516,158 +601,6 @@ async fn run_one_section(
         return Ok(SectionFlow::Returned(value));
     }
     Ok(SectionFlow::FellThrough { reply })
-}
-
-/// Runs one section Lua block with tasks/execute/jump and optional fanout.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "mirrors make_fanout_callback's borrowed run context"
-)]
-#[expect(
-    clippy::too_many_lines,
-    reason = "builds execute and fanout closures that share the full run context"
-)]
-fn run_section_lua(
-    vm: &SectionVm,
-    program: &crate::lua::LuaProgram,
-    before_prose: bool,
-    has_children: bool,
-    section: &Section,
-    store: &StoreRef,
-    args: &str,
-    execution: &str,
-    observer: &dyn Observer,
-    observer_arc: &Arc<dyn Observer>,
-    debug: Option<&dyn DebugCapture>,
-    debug_arc: Option<&Arc<dyn DebugCapture>>,
-    shared: Option<&crate::lua::LuaProgram>,
-    bindings: &ToolBindings,
-    models: &ModelBindings,
-    analysis: &ToolAnalysis,
-    shared_tools: &SharedTools,
-    client: Option<&GatewayClient>,
-    max_tool_iterations: usize,
-    limits: RunLimits,
-    last_reply: Option<&str>,
-    when: &str,
-    parent_id: usize,
-    tasks: &[LuaSectionHandle],
-    top_sections: &[Section],
-    turns: &Arc<AtomicU32>,
-    execute_depth: usize,
-) -> Result<LuaBlockResult> {
-    let fanout_store = store.clone();
-    let fanout_args = args.to_string();
-    let fanout_execution = execution.to_string();
-    let fanout_when = when.to_string();
-    let fanout_last_reply = last_reply.map(str::to_owned);
-    let fanout_shared = shared.cloned();
-    let fanout_bindings = bindings.clone();
-    let fanout_models = models.clone();
-    let fanout_client = client.cloned();
-    let fanout_tools = shared_tools.clone();
-    let children = section.children.clone();
-    let fanout_callback = if has_children {
-        Some(move |worker_heading: String, list_heading: String| {
-            make_fanout_callback(
-                &worker_heading,
-                &list_heading,
-                &children,
-                &fanout_args,
-                &fanout_store,
-                &fanout_execution,
-                observer,
-                fanout_client.as_ref(),
-                debug,
-                fanout_shared.as_ref(),
-                &fanout_bindings,
-                &fanout_models,
-                analysis,
-                &fanout_tools,
-                max_tool_iterations,
-                limits,
-                fanout_last_reply.as_deref(),
-                &fanout_when,
-                parent_id,
-                top_sections.len(),
-            )
-        })
-    } else {
-        None
-    };
-
-    let exec_store = store.clone();
-    let exec_args = args.to_string();
-    let exec_execution = execution.to_string();
-    let exec_when = when.to_string();
-    let exec_last_reply = last_reply.map(str::to_owned);
-    let exec_shared = shared.cloned();
-    let exec_bindings = bindings.clone();
-    let exec_models = models.clone();
-    let exec_client = client.cloned();
-    let exec_tools = shared_tools.clone();
-    let exec_sections = top_sections.to_vec();
-    let exec_turns = Arc::clone(turns);
-    let exec_analysis = analysis.clone();
-    let exec_observer = Arc::clone(observer_arc);
-    let execute_callback =
-        move |target: LuaValue, input: Option<String>| -> std::result::Result<String, Error> {
-            let heading = resolve_section_target(target).map_err(Error::lua)?;
-            let next_depth = execute_depth + 1;
-            if next_depth > MAX_EXECUTE_DEPTH {
-                return Err(Error::Lua(format!(
-                    "execute recursion exceeded cap of {MAX_EXECUTE_DEPTH}"
-                )));
-            }
-            let worker = resolve_h2_section(&heading, &exec_sections)?;
-            let call_args = input.as_deref().unwrap_or(&exec_args);
-            // Return the structured error directly (LUA-012): the typed error and
-            // its source cross the Lua boundary via `mlua::Error::external` rather
-            // than being flattened to a string here.
-            bridge_blocking(run_execute_section(
-                worker,
-                call_args,
-                &exec_store,
-                &exec_execution,
-                observer,
-                &exec_observer,
-                debug,
-                debug_arc,
-                exec_shared.as_ref(),
-                &exec_bindings,
-                &exec_models,
-                &exec_analysis,
-                &exec_tools,
-                exec_client.as_ref(),
-                max_tool_iterations,
-                limits,
-                exec_last_reply.as_deref(),
-                &exec_when,
-                &exec_turns,
-                next_depth,
-                &exec_sections,
-            ))
-        };
-
-    if before_prose {
-        vm.run_prologue_with_control(
-            program,
-            observer,
-            &section.name,
-            tasks,
-            Some(&execute_callback),
-            fanout_callback.as_ref(),
-        )
-    } else {
-        vm.run_epilog_with_control(
-            program,
-            observer,
-            &section.name,
-            tasks,
-            Some(&execute_callback),
-            fanout_callback.as_ref(),
-        )
-    }
 }
 
 fn section_handles(sections: &[Section]) -> Vec<LuaSectionHandle> {
