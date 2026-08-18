@@ -4,8 +4,9 @@ use super::{
     Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
     Function, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram,
     LuaSectionHandle, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook,
-    ModelRuntime, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution, StdLib,
-    StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, Value,
+    ModelRuntime, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result,
+    RuntimeResolution, StdLib, StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime,
+    Value,
     default_log_byte_budget, detail, harden, install_h2_models, install_h2_tools,
     install_instruction_budget, install_log, install_log_scoped, install_lua_tool_calls,
     install_store_table, install_tasks_table, resolve_section_target, scalar_return, seal_sys,
@@ -812,9 +813,15 @@ impl SectionVm {
         self.lua.set_app_data(hook);
     }
 
-    /// Clears the `model:infer` host hook.
+    /// Installs the `models.infer` host hook for this VM's Lua state.
+    pub(crate) fn set_models_infer_hook(&self, hook: ModelsInferHook) {
+        self.lua.set_app_data(hook);
+    }
+
+    /// Clears the `model:infer` and `models.infer` host hooks.
     pub(crate) fn clear_infer_hook(&self) {
         let _ = self.lua.remove_app_data::<ModelInferHook>();
+        let _ = self.lua.remove_app_data::<ModelsInferHook>();
     }
 
     /// Destroys this section VM at an explicit observed lifecycle boundary.
