@@ -297,6 +297,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
         },
         None,
         None,
+        None,
     )
     .await
     .unwrap();

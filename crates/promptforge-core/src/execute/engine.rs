@@ -544,6 +544,10 @@ async fn run_one_section(
                 } else {
                     ProseMode::SingleShot
                 };
+                // Local tools are Lua functions on this section VM; route
+                // their calls back into it rather than the registry.
+                let local_dispatch =
+                    |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, args);
                 let outcome = match run_prose_inference(
                     active_client,
                     &schemas,
@@ -562,6 +566,7 @@ async fn run_one_section(
                     },
                     counts.as_ref(),
                     global_aliases,
+                    Some(&local_dispatch),
                 )
                 .await
                 {

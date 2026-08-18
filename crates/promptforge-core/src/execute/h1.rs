@@ -83,6 +83,7 @@ pub(crate) async fn execute_live_h1(
     // surfaces a concrete construction error on first use instead of the setup
     // swallowing it (F5). `active_client` stays lazy for the direct H1 prose
     // path below, which builds and propagates its own error via `h1_try!`.
+    h1_try!(vm.install_host_apis(observer_arc, &prompt.title));
     let active_client = client.cloned();
     attach_infer_hook(
         &vm,
@@ -195,6 +196,9 @@ pub(crate) async fn execute_live_h1(
                             completion_options: &completion_options,
                         },
                         Some(&counts),
+                        None,
+                        // H1 registers no local tools, so there is no local
+                        // dispatcher to thread through.
                         None,
                     )
                     .await

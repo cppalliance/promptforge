@@ -32,6 +32,7 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
         silent_progress(&turns, &options),
         None,
         None,
+        None,
     )
     .await
     .expect_err("a never-converging model should exhaust the loop");
@@ -71,6 +72,7 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
         "loop forever".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&turns, &options),
+        None,
         None,
         None,
     )
@@ -134,6 +136,7 @@ async fn tool_loop_errors_on_unknown_tool() {
         silent_progress(&turns, &options),
         None,
         None,
+        None,
     )
     .await
     .expect_err("an unprovided tool should be rejected");
@@ -188,6 +191,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
             debug: None,
             completion_options: &options,
         },
+        None,
         None,
         None,
     )
@@ -258,6 +262,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
             debug: None,
             completion_options: &options,
         },
+        None,
         None,
         None,
     )

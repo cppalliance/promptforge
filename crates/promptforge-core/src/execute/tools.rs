@@ -138,6 +138,9 @@ pub(crate) struct InferContext {
     analysis: Option<ToolAnalysis>,
     live_bindings: Option<LiveBindingProducer>,
     tool_bag: Mutex<ToolBag>,
+    /// The section VM's local-tool registry, called back into on the `lua`
+    /// state the infer hook receives when the model invokes a local tool.
+    local_tools: LocalTools,
     counts_slot: Arc<Mutex<Option<ToolCallCounts>>>,
     /// Live sealed `sys` JSON so infer can publish `reply_finish_reason`.
     sys_live: Arc<Mutex<Option<serde_json::Value>>>,
@@ -234,6 +237,11 @@ impl InferContext {
         // here, at the first attempted inference, rather than being swallowed at
         // setup (F5).
         let client = self.client.resolve().map_err(mlua::Error::external)?;
+        // Local tools are Lua functions on this VM's state - the very `lua`
+        // the hook was invoked on - so route their calls back into it.
+        let local_tools = self.local_tools.clone();
+        let local_dispatch =
+            move |alias: &str, args: serde_json::Value| local_tools.call(lua, alias, args);
         let (text, finish_reason) = bridge_blocking(run_tool_loop(
             &client,
             &prepared.schemas,
@@ -253,6 +261,7 @@ impl InferContext {
             },
             Some(&counts),
             Some(&prepared.dispatch),
+            Some(&local_dispatch),
         ))
         .map_err(mlua::Error::external)?;
 
@@ -309,7 +318,8 @@ pub(crate) fn attach_infer_hook(
         turns: Arc::clone(turns),
         analysis: analysis.cloned(),
         live_bindings,
-        tool_bag: Mutex::new(ToolBag::new(tool_bindings, tool_runtime, local_tools)),
+        tool_bag: Mutex::new(ToolBag::new(tool_bindings, tool_runtime, local_tools.clone())),
+        local_tools,
         counts_slot: vm.counts_slot(),
         sys_live: vm.sys_live_handle(),
     });

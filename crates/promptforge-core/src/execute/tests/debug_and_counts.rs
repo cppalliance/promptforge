@@ -274,6 +274,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
         },
         Some(&counts),
         None,
+        None,
     )
     .await
     .expect_err("a tool whose call fails must fail the loop");
