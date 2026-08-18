@@ -8,7 +8,8 @@ use super::{
     RuntimeResolution, StdLib, StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime,
     Value, default_log_byte_budget, detail, harden, install_h2_models, install_h2_tools,
     install_instruction_budget, install_log, install_log_scoped, install_lua_tool_calls,
-    install_store_table, install_tasks_table, resolve_section_target, scalar_return, seal_sys,
+    install_store_table, install_tasks_table, install_untrusted, resolve_section_target,
+    scalar_return, seal_sys,
 };
 use crate::client::ToolSchema;
 
@@ -230,6 +231,9 @@ impl SectionVm {
             local_tools: LocalTools::default(),
         };
         if let Err(error) = harden(&vm.lua) {
+            return vm.construction_failed(error, observer, section);
+        }
+        if let Err(error) = install_untrusted(&vm.lua) {
             return vm.construction_failed(error, observer, section);
         }
         install_instruction_budget(&vm.lua);
