@@ -11,7 +11,6 @@ use super::{
     install_store_table, install_tasks_table, resolve_section_target, scalar_return, seal_sys,
 };
 use crate::client::ToolSchema;
-use std::cell::RefCell;
 
 /// One hardened, isolated Lua VM for a section's complete lifecycle.
 ///
@@ -61,20 +60,38 @@ pub(crate) struct SectionVm {
     /// log volume even when each event is under the per-event ceilings.
     log_byte_budget: Arc<AtomicUsize>,
     /// Local tools registered by Lua code, dispatched back into this VM.
-    #[allow(dead_code)] // wired up by the local-tools plan steps
     local_tools: LocalTools,
 }
 
 /// Local tool registrations owned by a section VM.
 ///
 /// Each entry holds the tool alias, its prebuilt schema, and the registry key
-/// for the Lua handler function captured at registration time. Interior
-/// mutability lets registration happen through the `&self` methods the VM
-/// exposes; the VM is single-threaded, so the borrow never contends.
-#[derive(Debug, Default)]
+/// for the Lua handler function captured at registration time. The entries are
+/// shared with the `tools.local` Lua callback, which must be `Send`, hence the
+/// `Mutex`; the VM is single-threaded, so the lock never contends.
+#[derive(Debug, Default, Clone)]
 pub(crate) struct LocalTools {
-    #[allow(dead_code)] // wired up by the local-tools plan steps
-    entries: RefCell<Vec<(String, ToolSchema, mlua::RegistryKey)>>,
+    entries: Arc<Mutex<Vec<(String, ToolSchema, mlua::RegistryKey)>>>,
+}
+
+impl LocalTools {
+    /// Registers a local tool: alias, prebuilt schema, and the registry key
+    /// of the Lua handler function.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the entries lock was poisoned.
+    pub(crate) fn register(
+        &self,
+        alias: String,
+        schema: ToolSchema,
+        handler: mlua::RegistryKey,
+    ) -> Result<()> {
+        self.entries
+            .lock()
+            .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?
+            .push((alias, schema, handler));
+        Ok(())
+    }
 }
 
 impl SectionVm {
@@ -296,7 +313,13 @@ impl SectionVm {
             None => Value::Table(self.lua.create_table().map_err(Error::lua)?),
         };
         globals.raw_set("var", var).map_err(Error::lua)?;
-        install_h2_tools(&self.lua, &globals, &self.bound_tools, &self.tool_runtime)?;
+        install_h2_tools(
+            &self.lua,
+            &globals,
+            &self.bound_tools,
+            &self.tool_runtime,
+            &self.local_tools,
+        )?;
         install_h2_models(&self.lua, &globals, &self.bound_models, &self.model_runtime)?;
         let reply_value = match last_reply {
             Some(text) => Value::String(self.lua.create_string(text).map_err(Error::lua)?),
@@ -666,21 +689,6 @@ impl SectionVm {
         Arc::clone(&self.counts_slot)
     }
 
-    /// Registers a local tool: alias, prebuilt schema, and the registry key
-    /// of the Lua handler function.
-    #[allow(dead_code)] // wired up by the local-tools plan steps
-    pub(crate) fn register_local_tool(
-        &self,
-        alias: String,
-        schema: ToolSchema,
-        handler: mlua::RegistryKey,
-    ) {
-        self.local_tools
-            .entries
-            .borrow_mut()
-            .push((alias, schema, handler));
-    }
-
     /// Calls the local tool registered under `alias` with JSON `args`.
     ///
     /// The handler is fetched from the Lua registry, invoked with the args
@@ -694,7 +702,11 @@ impl SectionVm {
     #[allow(dead_code)] // wired up by the local-tools plan steps
     pub(crate) fn call_local_tool(&self, alias: &str, args: Json) -> Result<String> {
         let handler: Function = {
-            let entries = self.local_tools.entries.borrow();
+            let entries = self
+                .local_tools
+                .entries
+                .lock()
+                .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?;
             let key = entries
                 .iter()
                 .find(|(name, _, _)| name == alias)
@@ -713,7 +725,8 @@ impl SectionVm {
     pub(crate) fn local_tool_schemas(&self) -> Vec<ToolSchema> {
         self.local_tools
             .entries
-            .borrow()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .iter()
             .map(|(_, schema, _)| schema.clone())
             .collect()
@@ -725,7 +738,8 @@ impl SectionVm {
     pub(crate) fn has_local_tool(&self, alias: &str) -> bool {
         self.local_tools
             .entries
-            .borrow()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .iter()
             .any(|(name, _, _)| name == alias)
     }
