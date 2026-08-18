@@ -47,8 +47,7 @@ fn models_need_resolves_and_use_selects_section_binding() {
         "Section",
     )
     .unwrap();
-    vm.run_prologue(&prologue, &NullObserver, "Section")
-        .unwrap();
+    vm.run_chunk(&prologue, &NullObserver, "Section").unwrap();
     let (mb, mr) = vm.model_bag_handles();
     let model = resolve_model_binding(&mb, &mr).unwrap();
     assert_eq!(model.unwrap().alias(), "analyst");
@@ -161,9 +160,6 @@ fn undeclared_models_use_fails_loudly() {
         "Section",
     )
     .unwrap();
-    assert!(
-        vm.run_prologue(&prologue, &NullObserver, "Section")
-            .is_err()
-    );
+    assert!(vm.run_chunk(&prologue, &NullObserver, "Section").is_err());
     vm.teardown(&NullObserver, "Section");
 }

@@ -1,3 +1,5 @@
+#[cfg(test)]
+use super::install_store_table_scoped;
 use super::{
     Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
     Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram,
@@ -8,18 +10,15 @@ use super::{
     install_instruction_budget, install_log, install_log_scoped, install_lua_tool_calls,
     install_store_table, install_tasks_table, resolve_section_target, scalar_return, seal_sys,
 };
-#[cfg(test)]
-use super::install_store_table_scoped;
 
 /// One hardened, isolated Lua VM for a section's complete lifecycle.
 ///
 /// The VM owns one Lua environment from construction until drop. An optional
-/// shared program runs before host values are installed, then prologue and
-/// epilog programs loaded with [`run_prologue`](Self::run_prologue) and
-/// [`run_epilog`](Self::run_epilog) see that same environment.
+/// shared program runs before host values are installed, then Lua chunks
+/// loaded with [`run_chunk`](Self::run_chunk) see that same environment.
 /// [`bind_reply`](Self::bind_reply) inserts the model reply into it between
-/// those phases. A single instruction counter covers every program run by this
-/// VM, so splitting work across lifecycle phases cannot reset the budget.
+/// chunks. A single instruction counter covers every program run by this
+/// VM, so splitting work across chunks cannot reset the budget.
 ///
 /// `SectionVm` deliberately does not expose its underlying [`Lua`]. This keeps
 /// hardening, host injection, instruction accounting, and report delivery on
@@ -214,10 +213,10 @@ impl SectionVm {
     /// Installs the section's host values after the shared program has run.
     ///
     /// This operation may be called exactly once. The store callbacks own a
-    /// clone of the run-scoped store. StoreRef functions are installed with
-    /// phase-local borrowed observation context by
-    /// [`run_prologue`](Self::run_prologue) and [`run_epilog`](Self::run_epilog),
-    /// so no observer reference is retained while the VM waits for a model reply.
+    /// clone of the run-scoped store. `log` and `store` are installed once for
+    /// the section's whole lifecycle by
+    /// [`install_host_apis`](Self::install_host_apis), which captures an
+    /// observer `Arc` rather than a per-chunk borrow.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values cannot be bridged or if host
@@ -405,11 +404,16 @@ impl SectionVm {
             resolution
                 .install(&self.lua, scope)
                 .map_err(mlua::Error::external)?;
-            self.run_prologue(program, observer, section)
+            self.run_chunk(program, observer, section)
                 .map_err(mlua::Error::external)
         });
         match result {
-            Ok(value) => Ok(value),
+            Ok(LuaBlockResult::Returned(value)) => Ok(value),
+            // Control globals are never installed on the H1 VM, so `jump` is
+            // nil there; this arm is defensive against a recorded jump.
+            Ok(LuaBlockResult::Jump(heading)) => Err(Error::Lua(format!(
+                "jump({heading}) is not available in live H1 Lua"
+            ))),
             Err(error) => match resolution.take_callback_error()? {
                 Some(error) => Err(error),
                 None => Err(Error::lua(error)),
@@ -461,83 +465,30 @@ impl SectionVm {
         Ok(guard.clone().unwrap_or_else(|| fallback.clone()))
     }
 
-    /// Executes a compiled prologue in this VM's persistent environment.
+    /// Executes a compiled Lua chunk in this VM's persistent environment.
     ///
-    /// StoreRef-operation reports recorded by host callbacks are delivered in
-    /// operation order before this method returns, including when execution
-    /// fails. A nil or absent top-level return produces `None`; strings,
-    /// integers, numbers, and booleans produce their scalar string form.
-    /// `log(message)` is available only for this call and reports under
-    /// `execution` and `section`.
+    /// This is the one path for running a section's Lua blocks. StoreRef and
+    /// `log` reports go to the observer captured by
+    /// [`install_host_apis`](Self::install_host_apis); a nil or absent
+    /// top-level return produces [`LuaBlockResult::Returned`]`(None)`. When
+    /// the chunk may call `tasks`, `execute`, `jump`, or `fanout`, those must
+    /// already be installed by
+    /// [`install_control_globals`](Self::install_control_globals).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected, execution
     /// fails, the shared instruction budget is exhausted, or the program
     /// returns a non-scalar value.
-    ///
-    /// # Examples
-    /// ```text
-    /// use promptforge_core::lua::{LuaProgram, SectionVm};
-    /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::StoreRef;
-    ///
-    /// let prologue = LuaProgram::compile(
-    ///     "var.answer = 42",
-    ///     "prologue",
-    ///     1,
-    ///     "example-run",
-    ///     &NullObserver::default(),
-    ///     "Example",
-    /// )?;
-    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
-    /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// assert_eq!(vm.run_prologue(&prologue, &NullObserver::default(), "Example")?, None);
-    /// vm.teardown(&NullObserver::default(), "Example");
-    /// # Ok::<(), promptforge_core::Error>(())
-    /// ```
-    pub(crate) fn run_prologue(
-        &self,
-        program: &LuaProgram,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<Option<String>> {
-        observer.observe(&self.execution, section, detail::LUA_PROLOGUE_STARTED);
-        if !self.host_injected {
-            let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(&self.execution, section, detail::LUA_PROLOGUE_FAILED);
-            return Err(error);
-        }
-        let result = self.run_loaded_without_host(program);
-        observer.observe(
-            &self.execution,
-            section,
-            if result.is_ok() {
-                detail::LUA_PROLOGUE_SUCCEEDED
-            } else {
-                detail::LUA_PROLOGUE_FAILED
-            },
-        );
-        result
-    }
-
-    /// Executes a compiled prologue with the installed control globals.
-    ///
-    /// `tasks`, `execute`, `jump`, and `fanout` must already be installed by
-    /// [`install_control_globals`](Self::install_control_globals).
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected or
-    /// execution fails.
-    pub(crate) fn run_prologue_with_control(
+    pub(crate) fn run_chunk(
         &self,
         program: &LuaProgram,
         observer: &dyn Observer,
         section: &str,
     ) -> Result<LuaBlockResult> {
-        observer.observe(&self.execution, section, detail::LUA_PROLOGUE_STARTED);
+        observer.observe(&self.execution, section, detail::LUA_CHUNK_STARTED);
         if !self.host_injected {
             let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(&self.execution, section, detail::LUA_PROLOGUE_FAILED);
+            observer.observe(&self.execution, section, detail::LUA_CHUNK_FAILED);
             return Err(error);
         }
         let result = self.run_loaded_with_control(program);
@@ -545,15 +496,15 @@ impl SectionVm {
             &self.execution,
             section,
             if result.is_ok() {
-                detail::LUA_PROLOGUE_SUCCEEDED
+                detail::LUA_CHUNK_SUCCEEDED
             } else {
-                detail::LUA_PROLOGUE_FAILED
+                detail::LUA_CHUNK_FAILED
             },
         );
         result
     }
 
-    /// Binds the model reply for a later epilog in the same environment.
+    /// Binds the model reply for later chunks in the same environment.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected or the
@@ -600,66 +551,6 @@ impl SectionVm {
         result
     }
 
-    /// Executes a compiled epilog in this VM's persistent environment.
-    ///
-    /// StoreRef-operation reports are delivered in operation order between the
-    /// epilog's start and outcome reports. `log(message)` is available only for
-    /// this call and reports under `execution` and `section`.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected, execution
-    /// fails, the shared instruction budget is exhausted, or the program
-    /// returns a non-scalar value.
-    ///
-    /// # Examples
-    /// ```text
-    /// use promptforge_core::lua::{LuaProgram, SectionVm};
-    /// use promptforge_core::observe::NullObserver;
-    /// use promptforge_core::store::StoreRef;
-    ///
-    /// let epilog = LuaProgram::compile(
-    ///     "return reply",
-    ///     "epilog",
-    ///     1,
-    ///     "example-run",
-    ///     &NullObserver::default(),
-    ///     "Example",
-    /// )?;
-    /// let mut vm = SectionVm::new(None, "example-run", &NullObserver::default(), "Example")?;
-    /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
-    /// vm.bind_reply("done", &NullObserver::default(), "Example")?;
-    /// assert_eq!(
-    ///     vm.run_epilog(&epilog, &NullObserver::default(), "Example")?.as_deref(),
-    ///     Some("done"),
-    /// );
-    /// vm.teardown(&NullObserver::default(), "Example");
-    /// # Ok::<(), promptforge_core::Error>(())
-    /// ```
-    pub(crate) fn run_epilog(
-        &self,
-        program: &LuaProgram,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<Option<String>> {
-        observer.observe(&self.execution, section, detail::LUA_EPILOG_STARTED);
-        if !self.host_injected {
-            let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
-            return Err(error);
-        }
-        let result = self.run_loaded_without_host(program);
-        observer.observe(
-            &self.execution,
-            section,
-            if result.is_ok() {
-                detail::LUA_EPILOG_SUCCEEDED
-            } else {
-                detail::LUA_EPILOG_FAILED
-            },
-        );
-        result
-    }
-
     /// Returns the current `var` table as JSON.
     ///
     /// # Errors
@@ -696,39 +587,6 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if the global cannot be set.
     pub(crate) fn set_global_string(&self, name: &str, value: &str) -> Result<()> {
         self.lua.globals().raw_set(name, value).map_err(Error::lua)
-    }
-
-    /// Executes a compiled epilog with the installed control globals.
-    ///
-    /// `tasks`, `execute`, `jump`, and `fanout` must already be installed by
-    /// [`install_control_globals`](Self::install_control_globals).
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if host values have not been injected or
-    /// execution fails.
-    pub(crate) fn run_epilog_with_control(
-        &self,
-        program: &LuaProgram,
-        observer: &dyn Observer,
-        section: &str,
-    ) -> Result<LuaBlockResult> {
-        observer.observe(&self.execution, section, detail::LUA_EPILOG_STARTED);
-        if !self.host_injected {
-            let error = Error::Lua("section VM host values have not been injected".to_owned());
-            observer.observe(&self.execution, section, detail::LUA_EPILOG_FAILED);
-            return Err(error);
-        }
-        let result = self.run_loaded_with_control(program);
-        observer.observe(
-            &self.execution,
-            section,
-            if result.is_ok() {
-                detail::LUA_EPILOG_SUCCEEDED
-            } else {
-                detail::LUA_EPILOG_FAILED
-            },
-        );
-        result
     }
 
     /// Installs `tools.calls` as a read-only Lua table backed by the shared
@@ -1069,9 +927,9 @@ pub(crate) fn resolve_model_binding(
             .or_else(|| bindings.only().map(String::from))
     };
     match alias {
-        Some(alias) => Ok(Some(bindings.binding(&alias).cloned().ok_or_else(|| {
-            Error::Lua(format!("model alias {alias:?} has no frozen binding"))
-        })?)),
+        Some(alias) => Ok(Some(bindings.binding(&alias).cloned().ok_or_else(
+            || Error::Lua(format!("model alias {alias:?} has no frozen binding")),
+        )?)),
         None => Ok(None),
     }
 }

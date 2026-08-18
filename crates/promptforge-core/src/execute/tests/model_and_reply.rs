@@ -93,11 +93,11 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             (
                 "Test prompt".to_string(),
-                detail::LUA_PROLOGUE_STARTED.to_string(),
+                detail::LUA_CHUNK_STARTED.to_string(),
             ),
             (
                 "Test prompt".to_string(),
-                detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
+                detail::LUA_CHUNK_SUCCEEDED.to_string(),
             ),
             (
                 "Test prompt".to_string(),
@@ -175,11 +175,11 @@ async fn epilog_runs_after_reply_and_can_return() {
             ("Test prompt".to_string(), detail::RUN_STARTED.to_string()),
             (
                 "Test prompt".to_string(),
-                detail::LUA_PROLOGUE_STARTED.to_string(),
+                detail::LUA_CHUNK_STARTED.to_string(),
             ),
             (
                 "Test prompt".to_string(),
-                detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
+                detail::LUA_CHUNK_SUCCEEDED.to_string(),
             ),
             (
                 "Test prompt".to_string(),
@@ -207,12 +207,12 @@ async fn epilog_runs_after_reply_and_can_return() {
                 "Only".to_string(),
                 detail::LUA_REPLY_BINDING_SUCCEEDED.to_string(),
             ),
-            ("Only".to_string(), detail::LUA_EPILOG_STARTED.to_string()),
+            ("Only".to_string(), detail::LUA_CHUNK_STARTED.to_string()),
             (
                 "Only".to_string(),
                 detail::STORE_WRITE_SUCCEEDED.to_string(),
             ),
-            ("Only".to_string(), detail::LUA_EPILOG_SUCCEEDED.to_string(),),
+            ("Only".to_string(), detail::LUA_CHUNK_SUCCEEDED.to_string(),),
             ("Only".to_string(), detail::LUA_TEARDOWN_STARTED.to_string()),
             (
                 "Only".to_string(),
@@ -308,11 +308,11 @@ Ask using {{ var.question }}.\n\n\
             ("Test prompt".to_owned(), detail::RUN_STARTED.to_string()),
             (
                 "Test prompt".to_owned(),
-                detail::LUA_PROLOGUE_STARTED.to_string(),
+                detail::LUA_CHUNK_STARTED.to_string(),
             ),
             (
                 "Test prompt".to_owned(),
-                detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
+                detail::LUA_CHUNK_SUCCEEDED.to_string(),
             ),
             (
                 "Test prompt".to_owned(),
@@ -331,11 +331,8 @@ Ask using {{ var.question }}.\n\n\
                 "Only".to_owned(),
                 detail::LUA_SHARED_LOAD_SUCCEEDED.to_string(),
             ),
-            ("Only".to_owned(), detail::LUA_PROLOGUE_STARTED.to_string()),
-            (
-                "Only".to_owned(),
-                detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
-            ),
+            ("Only".to_owned(), detail::LUA_CHUNK_STARTED.to_string()),
+            ("Only".to_owned(), detail::LUA_CHUNK_SUCCEEDED.to_string(),),
             (
                 "Only".to_owned(),
                 detail::TOOL_SCOPE_VALIDATION_STARTED.to_string(),
@@ -353,8 +350,8 @@ Ask using {{ var.question }}.\n\n\
                 "Only".to_owned(),
                 detail::LUA_REPLY_BINDING_SUCCEEDED.to_string(),
             ),
-            ("Only".to_owned(), detail::LUA_EPILOG_STARTED.to_string()),
-            ("Only".to_owned(), detail::LUA_EPILOG_SUCCEEDED.to_string(),),
+            ("Only".to_owned(), detail::LUA_CHUNK_STARTED.to_string()),
+            ("Only".to_owned(), detail::LUA_CHUNK_SUCCEEDED.to_string(),),
             ("Only".to_owned(), detail::LUA_TEARDOWN_STARTED.to_string()),
             (
                 "Only".to_owned(),
