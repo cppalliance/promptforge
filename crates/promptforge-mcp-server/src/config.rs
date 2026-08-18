@@ -282,7 +282,7 @@ pub(crate) struct PromptConfig {
 ///
 /// Defaults to nothing enabled, so a prompt with no `[tools]` section runs in
 /// a true sandbox with no network access.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub(crate) struct ToolsConfig {
@@ -292,15 +292,6 @@ pub(crate) struct ToolsConfig {
     /// Register the web_search tool (searches the web via the gateway).
     #[serde(default)]
     pub(crate) web_search: bool,
-}
-
-impl Default for ToolsConfig {
-    fn default() -> Self {
-        Self {
-            web_fetch: false,
-            web_search: false,
-        }
-    }
 }
 
 /// The largest a `prompts.toml` may be. A configuration is a handful of
@@ -316,6 +307,14 @@ impl Config {
     /// The read is capped at four mebibytes: a file larger than that is refused
     /// rather than read into memory, since a real configuration is a handful of
     /// sections and anything larger is a wrong path or a mistake.
+    ///
+    /// Before interpolation, the name-matched env file (`prompts.env` beside
+    /// `prompts.toml`) is parsed into an in-memory map that supplies `${VAR}`
+    /// values the process environment does not set; a set environment variable
+    /// always wins over the file. The map never touches the process
+    /// environment, because mutating it is `unsafe` under edition 2024. A
+    /// missing env file is skipped silently and a malformed one is ignored
+    /// with a warning, so the env file never fails a load.
     ///
     /// # Errors
     /// Returns a [`ConfigError`] whose [`kind`](ConfigError::kind) is
@@ -353,7 +352,13 @@ impl Config {
                 path.display()
             )));
         }
-        Config::from_toml_str(&raw)
+        let env_file = load_env_file(path);
+        let lookup = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .or_else(|| env_file.get(name).cloned())
+        };
+        Config::from_toml_str_with(&raw, &lookup)
     }
 
     /// Interpolates and parses a configuration from a TOML string.
@@ -388,12 +393,61 @@ impl Config {
     /// # Ok::<(), promptforge_mcp_server::ConfigError>(())
     /// ```
     pub fn from_toml_str(raw: &str) -> Result<Config, ConfigError> {
+        Self::from_toml_str_with(raw, &|name| std::env::var(name).ok())
+    }
+
+    /// Interpolates and parses a configuration from a TOML string, resolving
+    /// `${VAR}` through `lookup` rather than through the process environment
+    /// alone. [`Config::load`] builds the lookup over the process environment
+    /// and the name-matched env file; tests inject one outright.
+    fn from_toml_str_with(
+        raw: &str,
+        lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Config, ConfigError> {
         let mut document: toml::Table = toml::from_str(raw).map_err(ConfigError::parse_toml)?;
-        interpolate_document(&mut document)?;
+        interpolate_document(&mut document, lookup)?;
         let raw_config: RawConfig = toml::Value::Table(document)
             .try_into()
             .map_err(ConfigError::parse_toml)?;
         Config::try_from(raw_config)
+    }
+}
+
+/// Parses the name-matched env file beside `path` into an in-memory map.
+///
+/// Mirrors the gateway's env-file loading without its process-environment
+/// mutation: `std::env::set_var` is `unsafe` under edition 2024 and this
+/// workspace forbids unsafe, so the values live in a map threaded into
+/// interpolation instead. A missing file is skipped silently and a malformed
+/// one is ignored with a warning, so the env file never fails a load the TOML
+/// would have passed.
+fn load_env_file(path: &Path) -> BTreeMap<String, String> {
+    let env_path = path.with_extension("env");
+    if !env_path.exists() {
+        return BTreeMap::new();
+    }
+    let parsed = dotenvy::from_path_iter(&env_path)
+        .and_then(Iterator::collect::<Result<BTreeMap<String, String>, _>>);
+    match parsed {
+        Ok(map) => map,
+        // A `LineParse` error's Display embeds the offending line, which can
+        // carry a secret value, so only its line index reaches the log.
+        Err(dotenvy::Error::LineParse(_, line_index)) => {
+            tracing::warn!(
+                path = %env_path.display(),
+                line_index,
+                "ignoring env file that did not parse"
+            );
+            BTreeMap::new()
+        }
+        Err(error) => {
+            tracing::warn!(
+                path = %env_path.display(),
+                %error,
+                "ignoring env file that could not be read"
+            );
+            BTreeMap::new()
+        }
     }
 }
 

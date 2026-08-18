@@ -35,7 +35,7 @@ url = "http://127.0.0.1:8081/v1"
 api_key = "gateway-bearer"
 ```
 
-Every string value supports `${VAR}` interpolation from the process environment. Use `$$` for a literal dollar. An unset variable fails the load everywhere except `[server].api_key`, where it drops the key silently so a stdio install can boot without a credential its transport never reads.
+Every string value supports `${VAR}` interpolation. A variable resolves from the process environment first, then from the name-matched `.env` file beside the TOML (for example `prompts.env` beside `prompts.toml`), so the file supplies defaults and the environment overrides them. A missing `.env` file is skipped; a malformed one is ignored with a warning. Use `$$` for a literal dollar. An unset variable fails the load everywhere except `[server].api_key`, where it drops the key silently so a stdio install can boot without a credential its transport never reads.
 
 ### Full Configuration
 

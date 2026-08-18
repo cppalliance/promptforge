@@ -19,6 +19,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 arc-swap.workspace = true
 axum.workspace = true
+# `from_path_iter` parses the name-matched env file into an in-memory map:
+# iterator-only, so no value ever enters the process environment.
+dotenvy.workspace = true
 fastrand.workspace = true
 # `StreamExt::next` over the framed stdio reader and `SinkExt::send` over its
 # writer: the bounded transport is a `FramedRead`/`FramedWrite` pair.
