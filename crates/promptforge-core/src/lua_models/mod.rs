@@ -14,9 +14,24 @@ use crate::{Error, Result};
 mod decode;
 mod userdata;
 
-pub(crate) use userdata::{LuaModelHandle, ModelInferHook};
+pub(crate) use userdata::{LuaModelHandle, ModelInferHook, ModelsInferHook};
 
 use decode::{parse_need_args, parse_single_alias, validate_alias};
+
+/// Dispatches a `models.infer(prompt)` call through the executor-installed
+/// [`ModelsInferHook`] app data.
+///
+/// Shared by the live H1 and H2 `models` tables; the hook carries everything
+/// else (current-model resolution, gateway client, section identity).
+fn call_models_infer_hook(lua: &Lua, prompt: &str) -> mlua::Result<String> {
+    let hook = lua
+        .app_data_ref::<ModelsInferHook>()
+        .ok_or_else(|| {
+            mlua::Error::external("models.infer is not available outside section execution")
+        })?
+        .clone();
+    hook(lua, prompt)
+}
 
 /// H2 model-recording state: wraps the at-most-once `models.use` selection.
 #[derive(Debug)]
@@ -139,10 +154,13 @@ fn record_default_binding(
     Ok(binding)
 }
 
-/// Installs live H1 `models.need` / `models.default` resolvers.
+/// Installs live H1 `models.need` / `models.default` resolvers and
+/// `models.infer`.
 ///
 /// Each call resolves immediately and records the resulting frozen binding.
-/// `models.use` remains unavailable until section execution.
+/// `models.use` remains unavailable until section execution. `models.infer`
+/// dispatches through the executor-installed hook, which resolves the current
+/// model from the live binding state.
 pub(crate) fn install_live_models<'scope, 'env: 'scope>(
     lua: &'env Lua,
     scope: &'scope Scope<'scope, 'env>,
@@ -209,10 +227,16 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
         .map_err(Error::lua)?;
     models.set("use", use_fn).map_err(Error::lua)?;
 
+    let infer = scope
+        .create_function(|lua, prompt: String| call_models_infer_hook(lua, &prompt))
+        .map_err(Error::lua)?;
+    models.set("infer", infer).map_err(Error::lua)?;
+
     lua.globals().raw_set("models", models).map_err(Error::lua)
 }
 
-/// Switches to H2: forbids `models.need`, installs `models.use`.
+/// Switches to H2: forbids `models.need`, installs `models.use`,
+/// `models.get`, and `models.infer`.
 pub(crate) fn install_h2_models(
     lua: &Lua,
     globals: &Table,
@@ -262,6 +286,28 @@ pub(crate) fn install_h2_models(
         })
         .map_err(Error::lua)?;
     models.set("use", use_fn).map_err(Error::lua)?;
+
+    let frozen = bindings.clone();
+    let get_fn = lua
+        .create_function(move |_, alias: String| -> mlua::Result<LuaModelHandle> {
+            validate_alias(&alias).map_err(mlua::Error::external)?;
+            let binding = frozen
+                .binding(&alias)
+                .cloned()
+                .ok_or_else(|| {
+                    mlua::Error::external(format!(
+                        "models.get alias {alias:?} was not declared by models.need"
+                    ))
+                })?;
+            Ok(LuaModelHandle::from_binding(&binding))
+        })
+        .map_err(Error::lua)?;
+    models.set("get", get_fn).map_err(Error::lua)?;
+
+    let infer = lua
+        .create_function(|lua, prompt: String| call_models_infer_hook(lua, &prompt))
+        .map_err(Error::lua)?;
+    models.set("infer", infer).map_err(Error::lua)?;
 
     globals.raw_set("models", models).map_err(Error::lua)
 }

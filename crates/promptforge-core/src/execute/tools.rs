@@ -5,20 +5,22 @@ use std::collections::BTreeMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
-use crate::client::ToolSchema;
-use crate::debug::DebugCapture;
+use crate::cancel;
+use crate::client::{CompletionResult, Message, ToolSchema};
+use crate::debug::{DebugCapture, DebugEvent};
 use crate::lua::{
-    LiveBindingProducer, LocalTools, ModelInferHook, SectionVm, ToolBinding, ToolBindings,
-    ToolCallCounts, ToolRuntime, current_tool_bindings, install_lua_tool_calls,
+    LiveBindingProducer, LocalTools, ModelBindings, ModelInferHook, ModelRuntime, ModelsInferHook,
+    SectionVm, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, current_tool_bindings,
+    install_lua_tool_calls, resolve_model_binding,
 };
 use crate::model::ModelBinding;
-use crate::observe::Observer;
+use crate::observe::{Observer, detail};
 use crate::tools::{SharedTools, ToolId, ToolRegistry};
 use crate::{Error, Result};
 
 use super::gateway::GatewaySource;
 use super::scope::{ToolAnalysis, prepare_scoped_tools, validate_effective_scope_inner};
-use super::support::bridge_blocking;
+use super::support::{advance_turn, bridge_blocking};
 use super::tool_loop::{SectionProgress, run_tool_loop};
 
 /// Cached schemas/dispatch for one tool-bag generation.
@@ -144,6 +146,10 @@ pub(crate) struct InferContext {
     counts_slot: Arc<Mutex<Option<ToolCallCounts>>>,
     /// Live sealed `sys` JSON so infer can publish `reply_finish_reason`.
     sys_live: Arc<Mutex<Option<serde_json::Value>>>,
+    /// Frozen prompt-level model bindings for `models.infer` resolution.
+    model_bindings: ModelBindings,
+    /// The section's `models.use` selection runtime for `models.infer`.
+    model_runtime: Arc<Mutex<ModelRuntime>>,
 }
 
 impl InferContext {
@@ -283,6 +289,98 @@ impl InferContext {
         }
         Ok(text)
     }
+
+    /// Resolves the section's current model binding for `models.infer`.
+    ///
+    /// On the live H1 path the bindings are still being recorded, so the
+    /// snapshot comes from the run's producer; on the H2 path the VM's frozen
+    /// bindings are used. The current alias is the H2 `models.use` selection,
+    /// else the prompt-wide `models.default` baseline.
+    fn current_model_binding(&self) -> mlua::Result<ModelBinding> {
+        let bindings = if let Some(live) = &self.live_bindings {
+            live.bindings().map_err(mlua::Error::external)?.1
+        } else {
+            self.model_bindings.clone()
+        };
+        resolve_model_binding(&bindings, &self.model_runtime)
+            .map_err(mlua::Error::external)?
+            .ok_or_else(|| {
+                mlua::Error::external(Error::ModelRequired {
+                    section: self.section.clone(),
+                })
+            })
+    }
+
+    /// Runs `models.infer`: one direct, tool-free gateway round on a fresh
+    /// conversation with the section's current model.
+    ///
+    /// Unlike [`Self::infer`], this is not a tool loop: no schemas are
+    /// advertised, and neither `reply` nor `sys.reply_finish_reason` is
+    /// touched. Turn counting, observation, and debug capture match a single
+    /// prose round so nested inference is not lost (observe F1, F4).
+    fn infer_direct(&self, prompt: &str) -> mlua::Result<String> {
+        let binding = self.current_model_binding()?;
+        let completion_options = binding.completion_options();
+        let client = self.client.resolve().map_err(mlua::Error::external)?;
+        let conversation = [Message::user(prompt)];
+        let completion = bridge_blocking(async {
+            tokio::select! {
+                biased;
+                () = cancel::wait_cancelled() => Err(Error::Interrupted),
+                result = client.complete(&conversation, None, &completion_options) => {
+                    result.map_err(Error::from)
+                }
+            }
+        })
+        .map_err(mlua::Error::external);
+        if completion.is_err() {
+            self.observer
+                .observe(&self.execution, &self.section, detail::MODEL_TURN_FAILED);
+        }
+        let completion = completion?;
+
+        let turn = advance_turn(&self.turns);
+        if let Some(capture) = self.debug.as_deref() {
+            capture.on_event(
+                &self.execution,
+                &self.section,
+                turn,
+                DebugEvent::Request {
+                    body: completion.request_body,
+                },
+            );
+            capture.on_event(
+                &self.execution,
+                &self.section,
+                turn,
+                DebugEvent::Response {
+                    body: completion.response_body.clone(),
+                    finish_reason: completion.finish_reason.clone(),
+                    reasoning_content: completion.reasoning_content.clone(),
+                },
+            );
+        }
+        self.observer
+            .observe(&self.execution, &self.section, detail::MODEL_TURN_COMPLETED);
+
+        match completion.result {
+            CompletionResult::Text(text) => {
+                if completion.finish_reason.as_deref() == Some("length") {
+                    self.observer.observe(
+                        &self.execution,
+                        &self.section,
+                        detail::MODEL_TURN_TRUNCATED,
+                    );
+                }
+                Ok(text)
+            }
+            // No tools were advertised, so a tool-call turn is a backend
+            // protocol violation rather than something to dispatch.
+            CompletionResult::ToolCalls(_) => Err(mlua::Error::external(
+                "models.infer received tool calls but no tools were advertised",
+            )),
+        }
+    }
 }
 
 #[expect(
@@ -303,6 +401,7 @@ pub(crate) fn attach_infer_hook(
     live_bindings: Option<LiveBindingProducer>,
 ) {
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
+    let (model_bindings, model_runtime) = vm.model_bag_handles();
     let local_tools = vm.local_tools_handle();
     let ctx = Arc::new(InferContext {
         client,
@@ -322,8 +421,13 @@ pub(crate) fn attach_infer_hook(
         local_tools,
         counts_slot: vm.counts_slot(),
         sys_live: vm.sys_live_handle(),
+        model_bindings,
+        model_runtime,
     });
+    let direct = Arc::clone(&ctx);
     let hook: ModelInferHook =
         Arc::new(move |lua, binding, prompt| ctx.infer(lua, binding, prompt));
     vm.set_infer_hook(hook);
+    let models_hook: ModelsInferHook = Arc::new(move |_, prompt| direct.infer_direct(prompt));
+    vm.set_models_infer_hook(models_hook);
 }
