@@ -19,25 +19,24 @@
 //! (the prose tool loop, scope validation, cancellation, teardown, and every
 //! observation) is shared, so a fix lands in one place for both paths.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 use serde_json::json;
 
-use crate::client::{GatewayClient, Message, ToolSchema};
+use crate::client::{GatewayClient, Message};
 use crate::debug::DebugCapture;
 use crate::fanout;
 use crate::lua::{
     LuaBlockResult, LuaSectionHandle, SectionVm, ToolBindings, ToolCallCounts,
-    resolve_section_target, snapshot_tool_scope,
+    current_tool_bindings, resolve_section_target,
 };
 use crate::model::{CompletionOptions, ModelBinding, ModelBindings};
 use crate::observe::{Observer, detail};
 use crate::parser::{Block, Prompt, Section};
 use crate::store::StoreRef;
 use crate::subst;
-use crate::tools::{SharedTools, ToolId};
+use crate::tools::SharedTools;
 use crate::{Error, Result};
 use mlua::Value as LuaValue;
 
@@ -370,12 +369,12 @@ async fn run_one_section(
     );
 
     let mut conversation: Vec<Message> = Vec::new();
-    // Gates the one-time tool/model snapshot at the first prose block below.
+    // Gates the one-time model resolution and counts install at the first
+    // prose block below. Schemas and dispatch rebuild on EVERY prose block so
+    // `tools.add`/`tools.local` between blocks reach the next model turn.
     let mut seen_prose = false;
     let mut counts: Option<ToolCallCounts> = None;
     let mut model_binding: Option<ModelBinding> = None;
-    let mut schemas: Vec<ToolSchema> = Vec::new();
-    let mut dispatch: BTreeMap<String, ToolId> = BTreeMap::new();
     let mut completion_options: Option<CompletionOptions> = None;
     let mut sys = sys;
     let mut early_return: Option<String> = None;
@@ -414,16 +413,17 @@ async fn run_one_section(
                 }
             }
             Block::Prose { text, loop_capable } => {
-                if !seen_prose {
-                    seen_prose = true;
-                    let scope = match snapshot_tool_scope(ctx.bindings, &vm.tool_runtime) {
-                        Ok(scope) => scope,
+                let effective_bindings =
+                    match current_tool_bindings(ctx.bindings, &vm.tool_runtime) {
+                        Ok(bindings) => bindings,
                         Err(error) => {
                             vm.teardown(ctx.observer, &section.name);
                             return Err(error);
                         }
                     };
-                    counts = match vm.install_tool_call_counts(&scope) {
+                if !seen_prose {
+                    seen_prose = true;
+                    counts = match vm.install_tool_call_counts(&effective_bindings) {
                         Ok(c) => Some(c),
                         Err(error) => {
                             vm.teardown(ctx.observer, &section.name);
@@ -455,23 +455,38 @@ async fn run_one_section(
                         completion_options = Some(binding.completion_options());
                     }
                     model_binding = resolved_model;
-                    let (prepared_schemas, prepared_dispatch) = match prepare_effective_scope(
-                        ctx.analysis,
-                        &scope,
-                        &registry,
-                        ctx.execution,
-                        ctx.observer,
-                        &section.name,
-                    ) {
-                        Ok(prepared) => prepared,
-                        Err(error) => {
+                }
+                let local_schemas = vm.local_tool_schemas();
+                // Seed aliases added since the first prose block (via
+                // `tools.add` or `tools.local`) so the tool loop can count
+                // their calls; `ensure` is idempotent on existing aliases.
+                if let Some(counts) = counts.as_ref() {
+                    let new_aliases = effective_bindings
+                        .iter()
+                        .map(|binding| binding.alias())
+                        .chain(local_schemas.iter().map(|schema| schema.name.as_str()));
+                    for alias in new_aliases {
+                        if let Err(error) = counts.ensure(alias) {
                             vm.teardown(ctx.observer, &section.name);
                             return Err(error);
                         }
-                    };
-                    schemas = prepared_schemas;
-                    dispatch = prepared_dispatch;
+                    }
                 }
+                let (schemas, dispatch) = match prepare_effective_scope(
+                    ctx.analysis,
+                    &effective_bindings,
+                    &local_schemas,
+                    &registry,
+                    ctx.execution,
+                    ctx.observer,
+                    &section.name,
+                ) {
+                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        vm.teardown(ctx.observer, &section.name);
+                        return Err(error);
+                    }
+                };
 
                 let var = match vm.var() {
                     Ok(var) => var,
