@@ -107,7 +107,7 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 | `models.use(alias)` | Select a declared model for this section; returns its handle |
 | `models.get(alias)` | Return a declared model's handle without changing the section model |
 | `models.infer(prompt)` | One tool-free inference round on the section's current model |
-| `store.read(path)` | Read file verbatim |
+| `store.read(path[, start[, end]])` | Read file verbatim, optionally lines `start` to `end` (1-based, inclusive) |
 | `store.write(path, content)` | Create or overwrite file |
 | `store.append(path, content)` | Append to file |
 | `store.read_lines(path)` | Read with line numbers |
