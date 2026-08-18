@@ -780,6 +780,7 @@ async fn tool_loop_dispatches_then_returns_text() {
         silent_progress(&turns, &options),
         None,
         None,
+        None,
     )
     .await
     .unwrap();
@@ -867,6 +868,7 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
             silent_progress(&turns, &options),
             None,
             None,
+            None,
         ),
     )
     .await;
@@ -905,6 +907,7 @@ async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(Strin
             debug: None,
             completion_options: &options,
         },
+        None,
         None,
         None,
     )
@@ -1007,6 +1010,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
         silent_progress(&turns, &options),
         None,
         None,
+        None,
     )
     .await
     .unwrap();
@@ -1078,6 +1082,7 @@ async fn untrusted_nonce_is_fresh_per_round() {
         silent_progress(&turns, &options),
         None,
         None,
+        None,
     )
     .await
     .unwrap();
@@ -1119,6 +1124,7 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&turns, &options),
+        None,
         None,
         None,
     )
@@ -1172,6 +1178,7 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         silent_progress(&turns, &options),
+        None,
         None,
         None,
     )

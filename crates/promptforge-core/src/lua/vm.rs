@@ -113,6 +113,46 @@ impl LocalTools {
             .iter()
             .any(|(name, _, _)| name == alias)
     }
+
+    /// Calls the handler registered under `alias` with JSON `args`.
+    ///
+    /// The `jump` global is nilled for the handler's duration and restored
+    /// afterward: a local tool runs outside any chunk's control flow, so a
+    /// jump recorded here would surface stale at the next chunk boundary.
+    /// Handlers may still call `execute()`, `fanout`, and `model:infer`.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if no local tool is registered under `alias`,
+    /// the args cannot be bridged, the jump guard cannot be applied or
+    /// restored, the handler fails, or it returns a non-scalar value.
+    pub(crate) fn call(&self, lua: &Lua, alias: &str, args: Json) -> Result<String> {
+        let handler: Function = {
+            let entries = self
+                .entries
+                .lock()
+                .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?;
+            let key = entries
+                .iter()
+                .find(|(name, _, _)| name == alias)
+                .map(|(_, _, key)| key)
+                .ok_or_else(|| Error::Lua(format!("local tool {alias:?} is not registered")))?;
+            lua.registry_value(key).map_err(Error::lua)?
+        };
+        let table = lua.to_value(&args).map_err(Error::lua)?;
+        let globals = lua.globals();
+        let saved_jump: Value = globals.raw_get("jump").map_err(Error::lua)?;
+        globals.raw_set("jump", Value::Nil).map_err(Error::lua)?;
+        let returned = handler.call(table);
+        // Restore even on handler failure; a restore failure on top of a
+        // handler failure reports the handler's error, which came first.
+        let restore = globals.raw_set("jump", saved_jump).map_err(Error::lua);
+        let returned: MultiValue = match (returned, restore) {
+            (Ok(values), Ok(())) => values,
+            (Err(error), _) => return Err(Error::lua(error)),
+            (Ok(_), Err(error)) => return Err(error),
+        };
+        Ok(scalar_return(returned)?.unwrap_or_default())
+    }
 }
 
 impl SectionVm {
@@ -717,30 +757,16 @@ impl SectionVm {
     ///
     /// The handler is fetched from the Lua registry, invoked with the args
     /// converted to a Lua table, and its scalar return value is rendered as a
-    /// string. A nil return yields an empty string.
+    /// string. A nil return yields an empty string. The `jump` global is
+    /// nilled for the handler's duration and restored afterward (see
+    /// [`LocalTools::call`]).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if no local tool is registered under `alias`,
     /// the args cannot be bridged, the handler fails, or it returns a
     /// non-scalar value.
-    #[allow(dead_code)] // wired up by the local-tools plan steps
     pub(crate) fn call_local_tool(&self, alias: &str, args: Json) -> Result<String> {
-        let handler: Function = {
-            let entries = self
-                .local_tools
-                .entries
-                .lock()
-                .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?;
-            let key = entries
-                .iter()
-                .find(|(name, _, _)| name == alias)
-                .map(|(_, _, key)| key)
-                .ok_or_else(|| Error::Lua(format!("local tool {alias:?} is not registered")))?;
-            self.lua.registry_value(key).map_err(Error::lua)?
-        };
-        let table = self.lua.to_value(&args).map_err(Error::lua)?;
-        let returned: MultiValue = handler.call(table).map_err(Error::lua)?;
-        Ok(scalar_return(returned)?.unwrap_or_default())
+        self.local_tools.call(&self.lua, alias, args)
     }
 
     /// Returns the schemas of every registered local tool.

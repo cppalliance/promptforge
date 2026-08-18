@@ -85,6 +85,26 @@ impl ToolId {
     pub fn name(&self) -> &str {
         &self.name
     }
+
+    /// Returns whether this identity is the local-tool sentinel.
+    ///
+    /// Local tools are Lua functions registered by the prompt itself; they
+    /// dispatch under the reserved `local` server name and never enter the
+    /// live registry, so the tool loop routes them back into the section VM.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge_core::tools::ToolId;
+    ///
+    /// let id = ToolId::new("local", "my_handler")?;
+    /// assert!(id.is_local());
+    /// # Ok::<(), promptforge_core::tools::ToolIdError>(())
+    /// ```
+    #[must_use]
+    pub fn is_local(&self) -> bool {
+        self.server == "local"
+    }
 }
 /// A stable, matchable classification of a [`ToolIdError`].
 ///
