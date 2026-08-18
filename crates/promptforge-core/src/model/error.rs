@@ -82,6 +82,20 @@ impl CompletionError {
         }
     }
 
+    /// Returns the choice's `finish_reason`, when the failure was an empty
+    /// model reply and the backend supplied one.
+    ///
+    /// The tool loop gates on this: an empty turn with `Some("stop")` after
+    /// successful tool calls is a clean exit, while a missing or `"length"`
+    /// reason stays a hard failure.
+    #[must_use]
+    pub fn finish_reason(&self) -> Option<&str> {
+        match &self.inner {
+            Error::EmptyModelReply { finish_reason, .. } => finish_reason.as_deref(),
+            _ => None,
+        }
+    }
+
     /// Returns the bounded, control-escaped backend error body, when the failure
     /// was a non-success backend status.
     ///

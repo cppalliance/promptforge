@@ -170,12 +170,17 @@ pub(crate) enum Error {
     /// The model returned neither non-empty tool calls nor non-empty text.
     ///
     /// Reasoning side-channel text, when present, is never promoted into the
-    /// answer; `detail` may note that it was ignored, without pasting it.
+    /// answer; `detail` may note that it was ignored, without pasting it. The
+    /// choice's `finish_reason` rides along so the tool loop can classify the
+    /// empty turn (a `"stop"` exit differs from a truncation or a missing
+    /// reason).
     #[error("{detail}")]
     #[non_exhaustive]
     EmptyModelReply {
         /// Fixed phrase naming the empty product (and ignored reasoning).
         detail: &'static str,
+        /// The choice's `finish_reason`, when the backend supplied one.
+        finish_reason: Option<String>,
     },
 
     /// The host cancelled the run (for example Ctrl-C during fanout).
