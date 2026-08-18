@@ -64,7 +64,10 @@ enum SectionFlow {
     /// A scalar early return ended the section (and, top-level, the run).
     Returned(String),
     /// A `jump(target)` requested control transfer (top-level only).
-    Jumped { heading: String, reply: Option<String> },
+    Jumped {
+        heading: String,
+        reply: Option<String>,
+    },
 }
 
 /// The borrowed run context every section in one walk shares.
@@ -167,16 +170,7 @@ pub(crate) async fn run_sections(
         let section = &prompt.sections[index];
         // `id` counts sections entered, so the first is 1, and serves as the
         // section's parent id for nested execute/fanout.
-        match run_one_section(
-            &ctx,
-            section,
-            index + 1,
-            0,
-            reply.as_deref(),
-            &mut client,
-        )
-        .await?
-        {
+        match run_one_section(&ctx, section, index + 1, 0, reply.as_deref(), &mut client).await? {
             SectionFlow::Jumped { heading, reply: r } => {
                 let target = resolve_h2_index(&heading, &prompt.sections)?;
                 reply = r;
@@ -261,7 +255,7 @@ async fn run_one_section(
         let exec_shared = ctx.shared.cloned();
         let exec_bindings = ctx.bindings.clone();
         let exec_models = ctx.models.clone();
-        let exec_client = client.as_ref().cloned();
+        let exec_client = client.clone();
         let exec_tools = ctx.shared_tools.clone();
         let exec_sections = ctx.top_sections.to_vec();
         let exec_turns = Arc::clone(ctx.turns);
@@ -317,7 +311,7 @@ async fn run_one_section(
         let fanout_shared = ctx.shared.cloned();
         let fanout_bindings = ctx.bindings.clone();
         let fanout_models = ctx.models.clone();
-        let fanout_client = client.as_ref().cloned();
+        let fanout_client = client.clone();
         let fanout_tools = ctx.shared_tools.clone();
         let fanout_analysis = ctx.analysis.clone();
         let fanout_observer = Arc::clone(ctx.observer_arc);
@@ -377,9 +371,7 @@ async fn run_one_section(
     );
 
     let mut conversation: Vec<Message> = Vec::new();
-    // Tracks whether the walk has passed the first prose block, which splits
-    // Lua blocks into prologue (before) and epilog (after) and gates the
-    // one-time tool/model snapshot below.
+    // Gates the one-time tool/model snapshot at the first prose block below.
     let mut seen_prose = false;
     let mut counts: Option<ToolCallCounts> = None;
     let mut model_binding: Option<ModelBinding> = None;
@@ -397,11 +389,7 @@ async fn run_one_section(
     for block in &section.blocks {
         match block {
             Block::Lua(program) => {
-                let returned = if !seen_prose {
-                    vm.run_prologue_with_control(program, ctx.observer, &section.name)
-                } else {
-                    vm.run_epilog_with_control(program, ctx.observer, &section.name)
-                };
+                let returned = vm.run_chunk(program, ctx.observer, &section.name);
                 match returned {
                     Ok(LuaBlockResult::Returned(Some(value))) => {
                         early_return = Some(value);
@@ -443,16 +431,14 @@ async fn run_one_section(
                             return Err(error);
                         }
                     };
-                    let resolved_model = match crate::lua::resolve_model_binding(
-                        ctx.models,
-                        &vm.model_runtime,
-                    ) {
-                        Ok(model) => model,
-                        Err(error) => {
-                            vm.teardown(ctx.observer, &section.name);
-                            return Err(error);
-                        }
-                    };
+                    let resolved_model =
+                        match crate::lua::resolve_model_binding(ctx.models, &vm.model_runtime) {
+                            Ok(model) => model,
+                            Err(error) => {
+                                vm.teardown(ctx.observer, &section.name);
+                                return Err(error);
+                            }
+                        };
                     if let Some(binding) = resolved_model.as_ref() {
                         let current = match vm.current_sys(&sys) {
                             Ok(current) => current,

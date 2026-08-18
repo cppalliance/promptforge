@@ -128,6 +128,20 @@ fn run_with(source: &str, store: &StoreRef) -> Result<LuaOutcome> {
     )
 }
 
+/// Runs one chunk on an existing VM and unwraps the scalar return, failing
+/// the test on a `jump` transfer.
+fn run_scalar(
+    vm: &SectionVm,
+    program: &LuaProgram,
+    observer: &dyn Observer,
+    section: &str,
+) -> Result<Option<String>> {
+    match vm.run_chunk(program, observer, section)? {
+        LuaBlockResult::Returned(value) => Ok(value),
+        LuaBlockResult::Jump(heading) => Err(Error::Lua(format!("unexpected jump to {heading}"))),
+    }
+}
+
 fn program(source: &str) -> LuaProgram {
     LuaProgram::compile(
         source,
@@ -254,13 +268,15 @@ fn direct_output_is_absent_in_every_executable_lua_vm() {
         .expect("section VM must not expose direct output");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
-    vm.run_prologue(
+    run_scalar(
+        &vm,
         &program("assert(print == nil); assert(warn == nil)"),
         &NullObserver,
         "Section",
     )
     .expect("prologue must not expose direct output");
-    vm.run_epilog(
+    run_scalar(
+        &vm,
         &program("assert(print == nil); assert(warn == nil)"),
         &NullObserver,
         "Section",
@@ -278,8 +294,8 @@ fn direct_output_is_absent_in_every_executable_lua_vm() {
 }
 
 #[test]
-fn logs_are_correlated_and_ordered_across_h2_phases() {
-    let recorder = Recorder::default();
+fn logs_are_correlated_and_ordered_across_chunks() {
+    let recorder = Arc::new(Recorder::default());
     let bindings = ToolBindings::for_test(
         vec![ToolBinding::for_test(
             "search",
@@ -288,15 +304,34 @@ fn logs_are_correlated_and_ordered_across_h2_phases() {
         )],
         Vec::new(),
     );
-    let mut vm = section_vm_with_bindings(&program(""), &bindings, EXECUTION, &recorder, "Gather")
-        .expect("section VM must install captured bindings");
+    let mut vm = section_vm_with_bindings(
+        &program(""),
+        &bindings,
+        EXECUTION,
+        recorder.as_ref(),
+        "Gather",
+    )
+    .expect("section VM must install captured bindings");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
-    vm.run_prologue(&program("log('prologue checkpoint')"), &recorder, "Gather")
-        .expect("prologue log must succeed");
-    vm.run_epilog(&program("log('epilog checkpoint')"), &recorder, "Gather")
-        .expect("epilog log must succeed");
-    vm.teardown(&recorder, "Gather");
+    let observer: Arc<dyn Observer> = recorder.clone();
+    vm.install_host_apis(&observer, "Gather")
+        .expect("host APIs must install");
+    run_scalar(
+        &vm,
+        &program("log('prologue checkpoint')"),
+        recorder.as_ref(),
+        "Gather",
+    )
+    .expect("first chunk log must succeed");
+    run_scalar(
+        &vm,
+        &program("log('epilog checkpoint')"),
+        recorder.as_ref(),
+        "Gather",
+    )
+    .expect("second chunk log must succeed");
+    vm.teardown(recorder.as_ref(), "Gather");
 
     let details = recorder
         .records()
@@ -445,15 +480,17 @@ fn log_cumulative_byte_budget_is_enforced_before_the_event_budget() {
         .expect("limits apply");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host injects");
+    let recorder = Arc::new(Recorder::default());
+    let observer: Arc<dyn Observer> = recorder.clone();
+    vm.install_host_apis(&observer, "Budget")
+        .expect("host APIs must install");
     let program = program(
         "log(string.rep('é', 200))\n\
              log(string.rep('é', 200))\n\
              log(string.rep('é', 200))\n\
              return 'unreached'",
     );
-    let recorder = Recorder::default();
-    let error = vm
-        .run_prologue(&program, &recorder, "Budget")
+    let error = run_scalar(&vm, &program, recorder.as_ref(), "Budget")
         .expect_err("the cumulative byte budget must refuse the third message");
     // LUA-002: the refusal is the stable typed quota error, not an opaque
     // Lua authoring string.
@@ -521,97 +558,40 @@ fn logging_does_not_change_results_or_store_effects_with_null_observer() {
 }
 
 #[test]
-fn retained_log_functions_expire_with_their_phase_observer() {
-    struct DropRecorder {
-        dropped: Arc<std::sync::atomic::AtomicBool>,
-        records: Arc<Mutex<Vec<(String, String, Observation)>>>,
-    }
-
-    impl Observer for DropRecorder {
-        fn observe(&self, execution: &str, section: &str, event: Observation) {
-            self.records
-                .lock()
-                .expect("the recorder mutex must not be poisoned")
-                .push((execution.to_owned(), section.to_owned(), event));
-        }
-    }
-
-    impl Drop for DropRecorder {
-        fn drop(&mut self) {
-            self.dropped
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-    }
-
-    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let first_records = Arc::new(Mutex::new(Vec::new()));
-    let first = DropRecorder {
-        dropped: Arc::clone(&dropped),
-        records: Arc::clone(&first_records),
-    };
+fn installed_log_persists_across_chunks() {
+    // `log` is installed once per section by `install_host_apis`, so a saved
+    // reference stays live for every later chunk in the same VM.
+    let recorder = Arc::new(Recorder::default());
+    let observer: Arc<dyn Observer> = recorder.clone();
     let mut vm =
         SectionVm::new(None, EXECUTION, &NullObserver, "Section").expect("VM must construct");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
-    vm.run_prologue(
-        &program("saved_log = log; log('first phase')"),
-        &first,
+    vm.install_host_apis(&observer, "Section")
+        .expect("host APIs must install");
+    run_scalar(
+        &vm,
+        &program("saved_log = log; log('first chunk')"),
+        recorder.as_ref(),
         "Section",
     )
-    .expect("first phase log must succeed");
-    drop(first);
-    assert!(
-        dropped.load(std::sync::atomic::Ordering::SeqCst),
-        "the phase must not retain its observer"
-    );
-
-    let second = Recorder::default();
-    vm.run_epilog(
-        &program(
-            "local ok = pcall(saved_log, 'stale callback')\n\
-                 if ok then error('retained log callback remained live') end\n\
-                 log('second phase')",
-        ),
-        &second,
+    .expect("first chunk log must succeed");
+    run_scalar(
+        &vm,
+        &program("saved_log('retained call')"),
+        recorder.as_ref(),
         "Section",
     )
-    .expect("a fresh epilog callback must replace the expired callback");
-    vm.teardown(&second, "Section");
+    .expect("a retained log reference stays live for the section's lifecycle");
+    vm.teardown(recorder.as_ref(), "Section");
 
-    assert_eq!(
-        *first_records
-            .lock()
-            .expect("the recorder mutex must not be poisoned"),
-        [
-            (
-                EXECUTION.to_owned(),
-                "Section".to_owned(),
-                detail::LUA_PROLOGUE_STARTED.clone(),
-            ),
-            (
-                EXECUTION.to_owned(),
-                "Section".to_owned(),
-                Observation::Lua("first phase".to_owned()),
-            ),
-            (
-                EXECUTION.to_owned(),
-                "Section".to_owned(),
-                detail::LUA_PROLOGUE_SUCCEEDED.clone(),
-            ),
-        ]
-    );
-    assert!(
-        second
-            .records()
-            .iter()
-            .any(|(_, _, detail)| detail.to_string() == "Lua: second phase")
-    );
-    assert!(
-        second
-            .records()
-            .iter()
-            .all(|(_, _, detail)| detail.to_string() != "Lua: stale callback")
-    );
+    let details = recorder
+        .records()
+        .into_iter()
+        .map(|(_, _, detail)| detail.to_string())
+        .collect::<Vec<_>>();
+    assert!(details.contains(&"Lua: first chunk".to_owned()));
+    assert!(details.contains(&"Lua: retained call".to_owned()));
 }
 
 #[test]
@@ -792,7 +772,8 @@ fn captured_bindings_do_not_execute_h1_source() {
     .expect("captured bindings must install without executing H1");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
-    vm.run_prologue(
+    run_scalar(
+        &vm,
         &program("assert(h1_was_executed == nil); tools.add('search')"),
         &NullObserver,
         "Section",
@@ -812,11 +793,9 @@ fn h2_recording_closes_to_always_then_added_scope() {
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
-    vm.run_prologue(&prologue, &NullObserver, "Section")
-        .expect("H2 additions must record");
+    run_scalar(&vm, &prologue, &NullObserver, "Section").expect("H2 additions must record");
     let (bindings, runtime) = vm.tool_bag_handles();
-    let scope = snapshot_tool_scope(&bindings, &runtime)
-        .expect("tool scope must snapshot");
+    let scope = snapshot_tool_scope(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
         scope
@@ -872,11 +851,10 @@ fn h2_add_accepts_tool_objects_and_arrays() {
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
-    vm.run_prologue(&prologue, &NullObserver, "Section")
+    run_scalar(&vm, &prologue, &NullObserver, "Section")
         .expect("tools.add must accept Tool objects, strings, and arrays");
     let (bindings, runtime) = vm.tool_bag_handles();
-    let scope = snapshot_tool_scope(&bindings, &runtime)
-        .expect("tool scope must snapshot");
+    let scope = snapshot_tool_scope(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
         scope
@@ -905,11 +883,10 @@ fn empty_add_is_a_no_op_and_failed_variadic_add_is_atomic() {
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
-    vm.run_prologue(&prologue, &NullObserver, "Section")
+    run_scalar(&vm, &prologue, &NullObserver, "Section")
         .expect("caught failed add must not poison recording");
     let (bindings, runtime) = vm.tool_bag_handles();
-    let scope = snapshot_tool_scope(&bindings, &runtime)
-        .expect("tool scope must snapshot");
+    let scope = snapshot_tool_scope(&bindings, &runtime).expect("tool scope must snapshot");
 
     assert_eq!(
         scope
@@ -930,13 +907,13 @@ fn tool_operations_enforce_their_lifecycle_phase_even_when_captured() {
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
 
-    let error = vm
-        .run_prologue(
-            &program("tools.need('other', 'fetch a page')"),
-            &NullObserver,
-            "Section",
-        )
-        .expect_err("current H2 table must reject need");
+    let error = run_scalar(
+        &vm,
+        &program("tools.need('other', 'fetch a page')"),
+        &NullObserver,
+        "Section",
+    )
+    .expect_err("current H2 table must reject need");
     assert!(
         error
             .to_string()
@@ -951,9 +928,13 @@ fn unknown_h2_alias_fails_before_scope_closure() {
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
-    let error = vm
-        .run_prologue(&program("tools.add('missing')"), &NullObserver, "Section")
-        .expect_err("only declared aliases may enter H2 scope");
+    let error = run_scalar(
+        &vm,
+        &program("tools.add('missing')"),
+        &NullObserver,
+        "Section",
+    )
+    .expect_err("only declared aliases may enter H2 scope");
     assert!(error.to_string().contains("not declared"));
 }
 
@@ -1000,10 +981,12 @@ fn section_vm_preserves_one_environment_across_all_phases() {
         .expect("shared program must run");
     vm.inject_host("input", &json!({ "id": 7 }), &store, None)
         .expect("host values must inject");
+    let null_observer: Arc<dyn Observer> = Arc::new(NullObserver);
+    vm.install_host_apis(&null_observer, "Test")
+        .expect("host APIs must install");
 
     assert_eq!(
-        vm.run_prologue(&prologue, &NullObserver, "Test")
-            .expect("prologue must run"),
+        run_scalar(&vm, &prologue, &NullObserver, "Test").expect("prologue must run"),
         None
     );
     assert_eq!(
@@ -1023,7 +1006,7 @@ fn section_vm_preserves_one_environment_across_all_phases() {
     vm.bind_reply("model answer", &NullObserver, "Test")
         .expect("reply must bind into the same environment");
     assert_eq!(
-        vm.run_epilog(&epilog, &NullObserver, "Test")
+        run_scalar(&vm, &epilog, &NullObserver, "Test")
             .expect("epilog must run")
             .as_deref(),
         Some("<model answer>")
@@ -1036,8 +1019,7 @@ fn section_vm_requires_delayed_single_host_injection() {
     let store = StoreRef::memory();
     let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
 
-    let error = vm
-        .run_prologue(&no_op, &NullObserver, "Test")
+    let error = run_scalar(&vm, &no_op, &NullObserver, "Test")
         .expect_err("programs cannot run before host injection");
     assert!(error.to_string().contains("not been injected"));
 
@@ -1063,7 +1045,7 @@ fn section_vm_host_injection_bypasses_shared_global_metatables() {
         .expect("raw host injection must bypass the shared metatable");
 
     assert_eq!(
-        vm.run_prologue(&inspect, &NullObserver, "Test")
+        run_scalar(&vm, &inspect, &NullObserver, "Test")
             .expect("inspection must run")
             .as_deref(),
         Some("nil,nil,private input")
@@ -1071,28 +1053,29 @@ fn section_vm_host_injection_bypasses_shared_global_metatables() {
 }
 
 #[test]
-fn section_vm_reports_store_operations_in_each_phase() {
+fn section_vm_reports_store_operations_in_each_chunk() {
     let write = program("store.write('state.txt', args)");
     let read = program("return store.read_lines('state.txt')");
-    let recorder = Recorder::default();
+    let recorder = Arc::new(Recorder::default());
     let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Gather").expect("VM must build");
     vm.inject_host("private input", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
+    let observer: Arc<dyn Observer> = recorder.clone();
+    vm.install_host_apis(&observer, "Gather")
+        .expect("host APIs must install");
 
-    vm.run_prologue(&write, &recorder, "Gather")
-        .expect("prologue write must run");
-    vm.bind_reply("private reply", &recorder, "Gather")
+    run_scalar(&vm, &write, recorder.as_ref(), "Gather").expect("first chunk write must run");
+    vm.bind_reply("private reply", recorder.as_ref(), "Gather")
         .expect("reply must bind");
-    vm.run_epilog(&read, &recorder, "Gather")
-        .expect("epilog read must run");
-    vm.teardown(&recorder, "Gather");
+    run_scalar(&vm, &read, recorder.as_ref(), "Gather").expect("second chunk read must run");
+    vm.teardown(recorder.as_ref(), "Gather");
 
     assert_eq!(
         recorder.observations(),
         vec![
-            ("Gather".to_owned(), detail::LUA_PROLOGUE_STARTED.clone(),),
+            ("Gather".to_owned(), detail::LUA_CHUNK_STARTED.clone(),),
             ("Gather".to_owned(), detail::STORE_WRITE_SUCCEEDED.clone(),),
-            ("Gather".to_owned(), detail::LUA_PROLOGUE_SUCCEEDED.clone(),),
+            ("Gather".to_owned(), detail::LUA_CHUNK_SUCCEEDED.clone(),),
             (
                 "Gather".to_owned(),
                 detail::LUA_REPLY_BINDING_STARTED.clone(),
@@ -1101,12 +1084,12 @@ fn section_vm_reports_store_operations_in_each_phase() {
                 "Gather".to_owned(),
                 detail::LUA_REPLY_BINDING_SUCCEEDED.clone(),
             ),
-            ("Gather".to_owned(), detail::LUA_EPILOG_STARTED.clone(),),
+            ("Gather".to_owned(), detail::LUA_CHUNK_STARTED.clone(),),
             (
                 "Gather".to_owned(),
                 detail::STORE_READ_LINES_SUCCEEDED.clone(),
             ),
-            ("Gather".to_owned(), detail::LUA_EPILOG_SUCCEEDED.clone(),),
+            ("Gather".to_owned(), detail::LUA_CHUNK_SUCCEEDED.clone(),),
             ("Gather".to_owned(), detail::LUA_TEARDOWN_STARTED.clone(),),
             ("Gather".to_owned(), detail::LUA_TEARDOWN_SUCCEEDED.clone(),),
         ]
@@ -1131,7 +1114,7 @@ fn section_vm_accepts_only_scalar_top_level_returns() {
         vm.inject_host("", &json!({}), &store, None)
             .expect("host values must inject");
         assert_eq!(
-            vm.run_prologue(&program(source), &NullObserver, "Test")
+            run_scalar(&vm, &program(source), &NullObserver, "Test")
                 .expect("scalar return must work")
                 .as_deref(),
             expected
@@ -1141,8 +1124,7 @@ fn section_vm_accepts_only_scalar_top_level_returns() {
     let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
     vm.inject_host("", &json!({}), &store, None)
         .expect("host values must inject");
-    let error = vm
-        .run_prologue(&program("return {}"), &NullObserver, "Test")
+    let error = run_scalar(&vm, &program("return {}"), &NullObserver, "Test")
         .expect_err("table returns must be refused");
     assert!(error.to_string().contains("cannot return a table"));
 }
@@ -1164,22 +1146,19 @@ fn section_vms_isolate_mutated_shared_globals() {
         .expect("second host must inject");
 
     assert_eq!(
-        first
-            .run_prologue(&increment, &NullObserver, "First")
+        run_scalar(&first, &increment, &NullObserver, "First")
             .expect("first increment must run")
             .as_deref(),
         Some("1")
     );
     assert_eq!(
-        first
-            .run_epilog(&increment, &NullObserver, "First")
+        run_scalar(&first, &increment, &NullObserver, "First")
             .expect("second first-VM increment must run")
             .as_deref(),
         Some("2")
     );
     assert_eq!(
-        second
-            .run_prologue(&increment, &NullObserver, "Second")
+        run_scalar(&second, &increment, &NullObserver, "Second")
             .expect("second VM increment must run")
             .as_deref(),
         Some("1")
@@ -1194,8 +1173,7 @@ fn shared_program_consumes_the_later_phase_instruction_budget() {
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
 
-    let error = vm
-        .run_prologue(&work, &NullObserver, "Test")
+    let error = run_scalar(&vm, &work, &NullObserver, "Test")
         .expect_err("the prologue must exhaust the budget left by shared execution");
     // LUA-002: an exhausted instruction budget is the typed quota error.
     assert!(
@@ -1219,12 +1197,10 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
         .expect("shared program must run");
     vm.inject_host("private input", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
-    vm.run_prologue(&prologue, &recorder, "Gather")
-        .expect("prologue must run");
+    run_scalar(&vm, &prologue, &recorder, "Gather").expect("prologue must run");
     vm.bind_reply("private reply", &recorder, "Gather")
         .expect("reply must bind");
-    vm.run_epilog(&epilog, &recorder, "Gather")
-        .expect("epilog must run");
+    run_scalar(&vm, &epilog, &recorder, "Gather").expect("epilog must run");
     vm.teardown(&recorder, "Gather");
 
     let observations = recorder.observations();
@@ -1233,12 +1209,12 @@ fn section_lifecycle_reports_are_ordered_exact_and_payload_free() {
         [
             detail::LUA_SHARED_LOAD_STARTED,
             detail::LUA_SHARED_LOAD_SUCCEEDED,
-            detail::LUA_PROLOGUE_STARTED,
-            detail::LUA_PROLOGUE_SUCCEEDED,
+            detail::LUA_CHUNK_STARTED,
+            detail::LUA_CHUNK_SUCCEEDED,
             detail::LUA_REPLY_BINDING_STARTED,
             detail::LUA_REPLY_BINDING_SUCCEEDED,
-            detail::LUA_EPILOG_STARTED,
-            detail::LUA_EPILOG_SUCCEEDED,
+            detail::LUA_CHUNK_STARTED,
+            detail::LUA_CHUNK_SUCCEEDED,
             detail::LUA_TEARDOWN_STARTED,
             detail::LUA_TEARDOWN_SUCCEEDED,
         ]
@@ -1273,13 +1249,13 @@ fn section_lifecycle_failures_report_their_phase() {
 
     let recorder = Recorder::default();
     let vm = SectionVm::new(None, EXECUTION, &NullObserver, "Prologue").expect("VM must build");
-    vm.run_prologue(&program("return nil"), &recorder, "Prologue")
+    run_scalar(&vm, &program("return nil"), &recorder, "Prologue")
         .expect_err("prologue before injection must fail");
     assert!(
         recorder
             .observations()
             .iter()
-            .any(|(_, event)| *event == detail::LUA_PROLOGUE_FAILED)
+            .any(|(_, event)| *event == detail::LUA_CHUNK_FAILED)
     );
 }
 
@@ -1702,9 +1678,13 @@ fn add_without_declarations_fails_in_a_prologue_without_a_shared_library() {
     let mut vm = SectionVm::new(None, EXECUTION, &NullObserver, "Test").expect("VM must build");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
-    let error = vm
-        .run_prologue(&program("tools.add('web_search')"), &NullObserver, "Test")
-        .expect_err("an undeclared alias must fail loudly");
+    let error = run_scalar(
+        &vm,
+        &program("tools.add('web_search')"),
+        &NullObserver,
+        "Test",
+    )
+    .expect_err("an undeclared alias must fail loudly");
     assert!(
         error.to_string().contains("not declared by tools.need"),
         "the error must report the missing declaration: {error}"
@@ -1725,9 +1705,13 @@ fn add_with_empty_frozen_needs_fails_as_undeclared() {
         .expect("empty captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
-    let error = vm
-        .run_prologue(&program("tools.add('web_search')"), &NullObserver, "Test")
-        .expect_err("an undeclared alias must fail loudly");
+    let error = run_scalar(
+        &vm,
+        &program("tools.add('web_search')"),
+        &NullObserver,
+        "Test",
+    )
+    .expect_err("an undeclared alias must fail loudly");
     assert!(
         error.to_string().contains("not declared by tools.need"),
         "the error must report the missing declaration: {error}"
@@ -1742,13 +1726,13 @@ fn add_with_a_description_argument_fails_alias_validation() {
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
-    let error = vm
-        .run_prologue(
-            &program("tools.add('search', 'Search the web for pages matching a query.')"),
-            &NullObserver,
-            "Test",
-        )
-        .expect_err("a description passed to tools.add must fail alias validation");
+    let error = run_scalar(
+        &vm,
+        &program("tools.add('search', 'Search the web for pages matching a query.')"),
+        &NullObserver,
+        "Test",
+    )
+    .expect_err("a description passed to tools.add must fail alias validation");
     assert!(
         error.to_string().contains("invalid tool alias"),
         "the error must report the invalid alias: {error}"
@@ -1762,8 +1746,7 @@ fn a_section_vm_without_declarations_snapshots_to_an_empty_scope() {
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
     let (bindings, runtime) = vm.tool_bag_handles();
-    let scope = snapshot_tool_scope(&bindings, &runtime)
-        .expect("an empty scope must snapshot");
+    let scope = snapshot_tool_scope(&bindings, &runtime).expect("an empty scope must snapshot");
     assert!(scope.bindings().is_empty());
     vm.teardown(&NullObserver, "Test");
 }

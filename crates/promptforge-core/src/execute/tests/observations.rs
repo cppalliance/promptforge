@@ -20,14 +20,8 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
                 detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
             ),
             ("First".to_string(), detail::SECTION_STARTED.to_string()),
-            (
-                "First".to_string(),
-                detail::LUA_PROLOGUE_STARTED.to_string()
-            ),
-            (
-                "First".to_string(),
-                detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
-            ),
+            ("First".to_string(), detail::LUA_CHUNK_STARTED.to_string()),
+            ("First".to_string(), detail::LUA_CHUNK_SUCCEEDED.to_string(),),
             (
                 "First".to_string(),
                 detail::LUA_TEARDOWN_STARTED.to_string()
@@ -38,13 +32,10 @@ async fn a_two_section_run_reports_the_exact_observation_sequence() {
             ),
             ("First".to_string(), detail::SECTION_FINISHED.to_string()),
             ("Second".to_string(), detail::SECTION_STARTED.to_string()),
+            ("Second".to_string(), detail::LUA_CHUNK_STARTED.to_string(),),
             (
                 "Second".to_string(),
-                detail::LUA_PROLOGUE_STARTED.to_string(),
-            ),
-            (
-                "Second".to_string(),
-                detail::LUA_PROLOGUE_SUCCEEDED.to_string(),
+                detail::LUA_CHUNK_SUCCEEDED.to_string(),
             ),
             (
                 "Second".to_string(),
@@ -161,8 +152,8 @@ async fn a_failing_run_still_reports_run_finished() {
                 detail::LUA_TEARDOWN_SUCCEEDED.to_string(),
             ),
             ("Only".to_string(), detail::SECTION_STARTED.to_string()),
-            ("Only".to_string(), detail::LUA_PROLOGUE_STARTED.to_string()),
-            ("Only".to_string(), detail::LUA_PROLOGUE_FAILED.to_string()),
+            ("Only".to_string(), detail::LUA_CHUNK_STARTED.to_string()),
+            ("Only".to_string(), detail::LUA_CHUNK_FAILED.to_string()),
             ("Only".to_string(), detail::LUA_TEARDOWN_STARTED.to_string()),
             (
                 "Only".to_string(),
@@ -256,11 +247,11 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         detail::PARSE_STARTED,
         detail::RUN_STARTED,
         detail::SECTION_STARTED,
-        detail::LUA_PROLOGUE_STARTED,
+        detail::LUA_CHUNK_STARTED,
         detail::STORE_WRITE_SUCCEEDED,
         detail::MODEL_TURN_COMPLETED,
         detail::TOOL_CALL_SUCCEEDED,
-        detail::LUA_EPILOG_STARTED,
+        detail::LUA_CHUNK_STARTED,
         detail::STORE_APPEND_SUCCEEDED,
         detail::RUN_SUCCEEDED,
     ] {

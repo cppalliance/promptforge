@@ -110,24 +110,18 @@ pub enum Observation {
     LuaSharedLoadSucceeded,
     /// A section VM failed to load or execute its shared program.
     LuaSharedLoadFailed,
-    /// A section VM began executing its prologue.
-    LuaPrologueStarted,
-    /// A section VM executed its prologue successfully.
-    LuaPrologueSucceeded,
-    /// A section VM failed to execute its prologue.
-    LuaPrologueFailed,
+    /// A section VM began executing a Lua chunk.
+    LuaChunkStarted,
+    /// A section VM executed a Lua chunk successfully.
+    LuaChunkSucceeded,
+    /// A section VM failed to execute a Lua chunk.
+    LuaChunkFailed,
     /// A section VM began binding a model reply.
     LuaReplyBindingStarted,
     /// A section VM bound a model reply successfully.
     LuaReplyBindingSucceeded,
     /// A section VM failed to bind a model reply.
     LuaReplyBindingFailed,
-    /// A section VM began executing its epilog.
-    LuaEpilogStarted,
-    /// A section VM executed its epilog successfully.
-    LuaEpilogSucceeded,
-    /// A section VM failed to execute its epilog.
-    LuaEpilogFailed,
     /// A section VM began teardown.
     LuaTeardownStarted,
     /// A section VM completed teardown.
@@ -242,15 +236,12 @@ impl Observation {
             Observation::LuaSharedLoadStarted => "Lua shared load started",
             Observation::LuaSharedLoadSucceeded => "Lua shared load succeeded",
             Observation::LuaSharedLoadFailed => "Lua shared load failed",
-            Observation::LuaPrologueStarted => "Lua prologue started",
-            Observation::LuaPrologueSucceeded => "Lua prologue succeeded",
-            Observation::LuaPrologueFailed => "Lua prologue failed",
+            Observation::LuaChunkStarted => "Lua chunk started",
+            Observation::LuaChunkSucceeded => "Lua chunk succeeded",
+            Observation::LuaChunkFailed => "Lua chunk failed",
             Observation::LuaReplyBindingStarted => "Lua reply binding started",
             Observation::LuaReplyBindingSucceeded => "Lua reply binding succeeded",
             Observation::LuaReplyBindingFailed => "Lua reply binding failed",
-            Observation::LuaEpilogStarted => "Lua epilog started",
-            Observation::LuaEpilogSucceeded => "Lua epilog succeeded",
-            Observation::LuaEpilogFailed => "Lua epilog failed",
             Observation::LuaTeardownStarted => "Lua teardown started",
             Observation::LuaTeardownSucceeded => "Lua teardown succeeded",
             Observation::ToolRegistryValidationStarted => "Tool registry validation started",
@@ -327,16 +318,13 @@ pub(crate) mod detail {
     pub(crate) const LUA_SHARED_LOAD_STARTED: Observation = Observation::LuaSharedLoadStarted;
     pub(crate) const LUA_SHARED_LOAD_SUCCEEDED: Observation = Observation::LuaSharedLoadSucceeded;
     pub(crate) const LUA_SHARED_LOAD_FAILED: Observation = Observation::LuaSharedLoadFailed;
-    pub(crate) const LUA_PROLOGUE_STARTED: Observation = Observation::LuaPrologueStarted;
-    pub(crate) const LUA_PROLOGUE_SUCCEEDED: Observation = Observation::LuaPrologueSucceeded;
-    pub(crate) const LUA_PROLOGUE_FAILED: Observation = Observation::LuaPrologueFailed;
+    pub(crate) const LUA_CHUNK_STARTED: Observation = Observation::LuaChunkStarted;
+    pub(crate) const LUA_CHUNK_SUCCEEDED: Observation = Observation::LuaChunkSucceeded;
+    pub(crate) const LUA_CHUNK_FAILED: Observation = Observation::LuaChunkFailed;
     pub(crate) const LUA_REPLY_BINDING_STARTED: Observation = Observation::LuaReplyBindingStarted;
     pub(crate) const LUA_REPLY_BINDING_SUCCEEDED: Observation =
         Observation::LuaReplyBindingSucceeded;
     pub(crate) const LUA_REPLY_BINDING_FAILED: Observation = Observation::LuaReplyBindingFailed;
-    pub(crate) const LUA_EPILOG_STARTED: Observation = Observation::LuaEpilogStarted;
-    pub(crate) const LUA_EPILOG_SUCCEEDED: Observation = Observation::LuaEpilogSucceeded;
-    pub(crate) const LUA_EPILOG_FAILED: Observation = Observation::LuaEpilogFailed;
     pub(crate) const LUA_TEARDOWN_STARTED: Observation = Observation::LuaTeardownStarted;
     pub(crate) const LUA_TEARDOWN_SUCCEEDED: Observation = Observation::LuaTeardownSucceeded;
     pub(crate) const TOOL_SCOPE_VALIDATION_STARTED: Observation =

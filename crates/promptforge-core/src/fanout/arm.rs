@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
-use crate::lua::{LuaFanoutResult, LuaProgram, SectionVm, ToolBindings};
+use crate::lua::{LuaBlockResult, LuaFanoutResult, LuaProgram, SectionVm, ToolBindings};
 use crate::model::ModelBindings;
 use crate::observe::{Observation, Observer, detail};
 use crate::parser::Section;
@@ -173,13 +173,38 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         vm.inject_host(&args, &sys, &store, last_reply.as_deref())?;
         vm.set_global_string("item", &item_text)?;
 
-        if let Some(program) = worker.prologue()
-            && let Some(value) = vm.run_prologue(program, observer, &worker.name)?
-        {
-            return Ok((
-                LuaFanoutResult::success(&item_text, value),
-                detail::FANOUT_ARM_SUCCEEDED,
-            ));
+        // Arms get the same control globals as a walked section, but nested
+        // execute/fanout have no walk to re-enter here, so both fail loudly.
+        // `jump` records into the arm VM's slot and is rejected below.
+        vm.install_control_globals(
+            &[],
+            |_, _| {
+                Err(Error::Lua(
+                    "execute() is not available inside a fanout arm".to_owned(),
+                ))
+            },
+            |_, _| {
+                Err(Error::Lua(
+                    "fanout() is not available inside a fanout arm".to_owned(),
+                ))
+            },
+        )?;
+
+        if let Some(program) = worker.prologue() {
+            match vm.run_chunk(program, observer, &worker.name)? {
+                LuaBlockResult::Returned(Some(value)) => {
+                    return Ok((
+                        LuaFanoutResult::success(&item_text, value),
+                        detail::FANOUT_ARM_SUCCEEDED,
+                    ));
+                }
+                LuaBlockResult::Returned(None) => {}
+                LuaBlockResult::Jump(heading) => {
+                    return Err(Error::Lua(format!(
+                        "jump({heading}) is not allowed inside a fanout arm"
+                    )));
+                }
+            }
         }
 
         let scope = crate::lua::snapshot_tool_scope(&bindings, &vm.tool_runtime)?;
@@ -271,7 +296,14 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         }
 
         let epilog_return = if let Some(program) = worker.epilog() {
-            vm.run_epilog(program, observer, &worker.name)?
+            match vm.run_chunk(program, observer, &worker.name)? {
+                LuaBlockResult::Returned(value) => value,
+                LuaBlockResult::Jump(heading) => {
+                    return Err(Error::Lua(format!(
+                        "jump({heading}) is not allowed inside a fanout arm"
+                    )));
+                }
+            }
         } else {
             None
         };

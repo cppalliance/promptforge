@@ -268,7 +268,7 @@ fn models_always_from_h2_prologue_fails() {
         "Section",
     )
     .unwrap();
-    let result = vm.run_prologue(&prologue, &NullObserver, "Section");
+    let result = vm.run_chunk(&prologue, &NullObserver, "Section");
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
