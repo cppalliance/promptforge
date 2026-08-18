@@ -81,7 +81,7 @@ A prompt declares tools, models, context, thinking, and temperature. The host su
 
 24. **Untrusted and executable content stay visibly separated.** Restricted Lua VM, instruction budget, no `print`/loaders/reflection. Untrusted tool results are nonce-framed before model history.
 
-25. **Tool dialects own prepare, parse, and history echo.** `openai` and `gemma3_tool_code` ship. Author prompts never name a dialect. Empty model product is always `Error::EmptyModelReply`.
+25. **Tool dialects own prepare, parse, and history echo.** `openai` and `gemma3_tool_code` ship. Author prompts never name a dialect. Empty model product is `Error::EmptyModelReply`, with one exception: the tool loop accepts an empty turn with `finish_reason == "stop"` after at least one successful tool dispatch as a clean exit, yielding an empty reply.
 
 26. **Complete prompt fixtures live at the public crate boundary** in unpublished `promptforge-core-tests`. Ordinary tests stay offline; opt-in real-model scenarios go through a temporary gateway sidecar. Interactive authoring is `promptforge-dev` against an already-running gateway.
 
@@ -108,7 +108,7 @@ For each top-level section:
 3. Walk `blocks` in order.
 4. Lua blocks run on the live VM. Scalar return ends the run or the `execute` subroutine. `jump` stops the section and transfers.
 5. At the first prose, resolve the model, seed `tools.calls`, and enrich `sys.model` (one-shot). On every prose block, rebuild effective tool schemas and dispatch from the live bindings so `tools.add` and `tools.add_local` between blocks take effect.
-6. Non-empty prose substitutes, then runs single-shot or full loop per `loop_capable`. Empty or whitespace prose skips the model. Bind non-empty final text to `reply`; publish `sys.reply_finish_reason`.
+6. Non-empty prose substitutes, then runs single-shot or full loop per `loop_capable`. Empty or whitespace prose skips the model. Bind non-empty final text to `reply`; publish `sys.reply_finish_reason`. A loop may also end silently: an empty final turn with `finish_reason == "stop"` after at least one successful tool call is a clean exit, binding `""` to `reply`.
 7. Teardown the VM. On jump: preserve `reply`, jump to the target index. On scalar return: end the run. Else fall through.
 
 ## Observation
@@ -119,7 +119,7 @@ pub trait Observer: Send + Sync {
 }
 ```
 
-Fixed vocabulary in `observe::detail`. After successful non-empty final-text bind, `finish_reason == "length"` also reports `Model turn truncated`. Empty product hard-fails as `EmptyModelReply` / `Model turn failed`.
+Fixed vocabulary in `observe::detail`. After successful non-empty final-text bind, `finish_reason == "length"` also reports `Model turn truncated`. Empty product hard-fails as `EmptyModelReply` / `Model turn failed`, except the loop's clean stop-exit (empty text, `finish_reason == "stop"`, at least one successful tool call), which reports `Model turn completed` like any other finished turn.
 
 ```rust
 pub trait DebugCapture: Send + Sync {

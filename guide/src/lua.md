@@ -2,6 +2,8 @@
 
 A prompt is built from alternating Lua and prose blocks. Each section can contain any number of Lua blocks interleaved with prose segments. The last prose block in a section runs a full tool-call loop; earlier prose blocks run single-shot (one model round, then control continues to the next Lua block).
 
+A tool-call loop may end silently: when the model finishes with `finish_reason: "stop"` and an empty reply after completing at least one tool call, the loop accepts that as a clean exit and the section's `reply` is `""`. This supports "record everything via tools, output nothing" prompts. Any other empty reply - no prior tool calls, or a missing or non-`"stop"` finish reason - fails the run with an empty-model-reply error.
+
 ## The H1 Phase
 
 Lua blocks in the H1 region execute once in source order before any H2 section. The H1 phase declares tools and models, sets variables, and can short-circuit the entire run:

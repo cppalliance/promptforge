@@ -884,19 +884,27 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
     );
 }
 
-async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(String, String)>, u32) {
+/// Run the loop against `addr` with `tools` in scope, recording observations
+/// and the turn count so tests can assert on the accepted or failed turn.
+async fn run_tool_loop_recorded(
+    addr: SocketAddr,
+    tools: &[&dyn Tool],
+) -> (Result<String>, Vec<(String, String)>, u32) {
     let client = GatewayClient::new(
         GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
         SecretString::new("test").expect("non-empty test key"),
     );
     let recorder = Arc::new(Recorder::default());
+    let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let out = run_tool_loop(
         &client,
-        &[],
-        &BTreeMap::new(),
-        &ToolRegistry::new(std::iter::empty()).expect("unique test registry"),
+        &schemas,
+        &dispatch,
+        &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         SectionProgress {
@@ -918,9 +926,11 @@ async fn run_tool_loop_recorded(addr: SocketAddr) -> (Result<String>, Vec<(Strin
 
 #[tokio::test]
 async fn empty_final_text_fails_the_turn() {
+    // No prior tool calls: an empty "stop" turn on the first round is a
+    // failure, not a clean exit.
     let gateway = ScriptedGateway::start(vec![resp_text_finish("", "stop")]).await;
     let addr = gateway.addr();
-    let (out, events, turns) = run_tool_loop_recorded(addr).await;
+    let (out, events, turns) = run_tool_loop_recorded(addr, &[]).await;
     assert!(matches!(out, Err(Error::EmptyModelReply { .. })));
     assert_eq!(turns, 0);
     assert_eq!(
@@ -933,7 +943,7 @@ async fn empty_final_text_fails_the_turn() {
 async fn length_finish_reason_reports_model_turn_truncated() {
     let gateway = ScriptedGateway::start(vec![resp_text_finish("partial answer", "length")]).await;
     let addr = gateway.addr();
-    let (out, events, turns) = run_tool_loop_recorded(addr).await;
+    let (out, events, turns) = run_tool_loop_recorded(addr, &[]).await;
     assert_eq!(out.unwrap(), "partial answer");
     assert_eq!(turns, 1);
     assert_eq!(
@@ -953,14 +963,96 @@ async fn length_finish_reason_reports_model_turn_truncated() {
 
 #[tokio::test]
 async fn empty_truncated_final_text_fails_without_truncation_detail() {
+    // `finish_reason: "length"` is never a clean exit, even with empty text.
     let gateway = ScriptedGateway::start(vec![resp_text_finish("", "length")]).await;
     let addr = gateway.addr();
-    let (out, events, turns) = run_tool_loop_recorded(addr).await;
+    let (out, events, turns) = run_tool_loop_recorded(addr, &[]).await;
     assert!(matches!(out, Err(Error::EmptyModelReply { .. })));
     assert_eq!(turns, 0);
     assert_eq!(
         events,
         vec![("Gather".to_string(), detail::MODEL_TURN_FAILED.to_string(),)]
+    );
+}
+
+#[tokio::test]
+async fn empty_stop_turn_after_tool_call_is_a_clean_exit() {
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
+        resp_text_finish("", "stop"),
+    ])
+    .await;
+    let addr = gateway.addr();
+    let echo = EchoTool;
+    let (out, events, turns) = run_tool_loop_recorded(addr, &[&echo]).await;
+    assert_eq!(
+        out.as_deref().expect("the run must succeed"),
+        "",
+        "a clean stop-exit yields an empty reply"
+    );
+    assert_eq!(turns, 2, "the tool-call turn and the accepted empty turn");
+    assert_eq!(
+        events,
+        vec![
+            (
+                "Gather".to_string(),
+                detail::MODEL_TURN_COMPLETED.to_string(),
+            ),
+            (
+                "Gather".to_string(),
+                detail::TOOL_CALL_SUCCEEDED.to_string(),
+            ),
+            (
+                "Gather".to_string(),
+                detail::MODEL_TURN_COMPLETED.to_string(),
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn empty_stop_turn_without_tool_calls_fails() {
+    // Zero prior dispatches: the acceptance conditions cannot hold, so the
+    // empty "stop" turn stays an `EmptyModelReply` failure.
+    let gateway = ScriptedGateway::start(vec![resp_text_finish("", "stop")]).await;
+    let addr = gateway.addr();
+    let echo = EchoTool;
+    let (out, events, turns) = run_tool_loop_recorded(addr, &[&echo]).await;
+    assert!(matches!(out, Err(Error::EmptyModelReply { .. })));
+    assert_eq!(turns, 0);
+    assert_eq!(
+        events,
+        vec![("Gather".to_string(), detail::MODEL_TURN_FAILED.to_string(),)]
+    );
+}
+
+#[tokio::test]
+async fn empty_turn_without_finish_reason_after_tool_call_fails() {
+    // Fail closed: a missing finish reason is not "stop", so the empty turn
+    // is an error even after a successful dispatch.
+    let gateway = ScriptedGateway::start(vec![
+        resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
+        resp_text(""),
+    ])
+    .await;
+    let addr = gateway.addr();
+    let echo = EchoTool;
+    let (out, events, turns) = run_tool_loop_recorded(addr, &[&echo]).await;
+    assert!(matches!(out, Err(Error::EmptyModelReply { .. })));
+    assert_eq!(turns, 1, "only the tool-call turn completed");
+    assert_eq!(
+        events,
+        vec![
+            (
+                "Gather".to_string(),
+                detail::MODEL_TURN_COMPLETED.to_string(),
+            ),
+            (
+                "Gather".to_string(),
+                detail::TOOL_CALL_SUCCEEDED.to_string(),
+            ),
+            ("Gather".to_string(), detail::MODEL_TURN_FAILED.to_string(),),
+        ]
     );
 }
 
