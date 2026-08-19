@@ -232,11 +232,14 @@ jump(m)\n\
 /// Nested `execute()` is capped at [`MAX_EXECUTE_DEPTH`]. Locks the
 /// `execute_depth` divergence threaded through the unified engine (the
 /// top-level walk always enters at depth 0; the subroutine carries its depth).
+/// The caller is not in its own visible set, so the recursion is mutual.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execute_recursion_is_capped() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Loop\n\n\
-```lua\nreturn execute('## Loop')\n```\n";
+## A\n\n\
+```lua\nreturn execute('## B')\n```\n\n\
+## B\n\n\
+```lua\nreturn execute('## A')\n```\n";
     let error = run_offline(md)
         .await
         .expect_err("unbounded execute recursion must fail");
@@ -244,6 +247,31 @@ async fn execute_recursion_is_capped() {
     assert!(
         rendered.contains("recursion exceeded cap"),
         "expected a recursion-cap error, got: {rendered}"
+    );
+}
+
+/// The caller is outside its own visible set (decision 3): naming its own
+/// heading resolves as not-found for both `execute` and `jump`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn section_cannot_address_itself() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Self\n\n\
+```lua\nreturn execute('## Self')\n```\n";
+    let error = run_offline(md).await.expect_err("self-execute must fail");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("not found"),
+        "the caller is not in its own visible set: {rendered}"
+    );
+
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Self\n\n\
+```lua\njump('## Self')\n```\n";
+    let error = run_offline(md).await.expect_err("self-jump must fail");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("not found"),
+        "the caller is not in its own visible set: {rendered}"
     );
 }
 
@@ -365,6 +393,362 @@ async fn fall_through_after_a_jumped_off_walk_section_skips_again() {
         .await
         .expect("fall-through after an addressed off-walk section must resume skipping");
     assert_eq!(out, "d-ran");
+}
+
+/// A jump to an H3 child starts a child-level walk at the target: it falls
+/// through to the target's following siblings under the same rules as the
+/// top-level walk, and when the level exhausts the parent walk resumes after
+/// the jumper.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn jump_to_a_child_starts_the_child_level_walk() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+store.append('order.txt', 'A\\n')\n\
+jump('### X')\n\
+```\n\n\
+### X\n\n\
+```lua\n\
+store.append('order.txt', 'X\\n')\n\
+```\n\n\
+### Y\n\n\
+```lua\n\
+store.append('order.txt', 'Y\\n')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+store.append('order.txt', 'B\\n')\n\
+return store.read('order.txt')\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("a jump to a child must start the child-level walk");
+    assert_eq!(out, "A\nX\nY\nB\n");
+}
+
+/// The reply thread follows the detour: the jumper's reply reaches the
+/// sub-walk's first section, each section of the sub-walk rolls it forward,
+/// and the sub-walk's last reply resumes the parent chain.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn child_walk_reply_thread_follows_the_detour() {
+    let gateway = ScriptedGateway::start(vec![
+        resp_text("reply-a"),
+        resp_text("reply-x"),
+        resp_text("reply-y"),
+    ])
+    .await;
+    let addr = gateway.addr();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+Ask A.\n\n\
+```lua\n\
+jump('### X')\n\
+```\n\n\
+### X\n\n\
+```lua\n\
+assert(reply == 'reply-a', 'the jumper reply reaches the first child')\n\
+```\n\n\
+Ask X.\n\n\
+### Y\n\n\
+```lua\n\
+assert(reply == 'reply-x', 'the child walk rolls the reply forward')\n\
+```\n\n\
+Ask Y.\n\n\
+## B\n\n\
+```lua\n\
+assert(reply == 'reply-y', 'the sub-walk last reply resumes the parent chain')\n\
+return reply\n\
+```\n";
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: Arc::new(NullObserver),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test").expect("non-empty test key"),
+            )),
+            debug: None,
+        },
+    )
+    .await
+    .expect("the reply thread must follow the detour");
+    assert_eq!(out, "reply-y");
+}
+
+/// The child-level rule recurses: a jump from an H3 child to an H4 grandchild
+/// starts an H4-level walk, and each level's exhaustion resumes its parent
+/// after the jumper.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn child_walk_recurses_to_h4() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+store.append('order.txt', 'A\\n')\n\
+jump('### X')\n\
+```\n\n\
+### X\n\n\
+```lua\n\
+store.append('order.txt', 'X\\n')\n\
+jump('#### P')\n\
+```\n\n\
+#### P\n\n\
+```lua\n\
+store.append('order.txt', 'P\\n')\n\
+```\n\n\
+#### Q\n\n\
+```lua\n\
+store.append('order.txt', 'Q\\n')\n\
+```\n\n\
+### Y\n\n\
+```lua\n\
+store.append('order.txt', 'Y\\n')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+store.append('order.txt', 'B\\n')\n\
+return store.read('order.txt')\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("the child-level rule must recurse to H4");
+    assert_eq!(out, "A\nX\nP\nQ\nY\nB\n");
+}
+
+/// The off-walk flag applies at every walked level: an off-walk H3 is skipped
+/// by the child-level walk's fall-through.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn off_walk_child_is_skipped_by_the_child_walk() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+jump('### X')\n\
+```\n\n\
+### X\n\n\
+```lua\n\
+store.append('order.txt', 'X\\n')\n\
+```\n\n\
+### Off\n\n\
+---\n\n\
+```lua\n\
+store.append('order.txt', 'Off\\n')\n\
+```\n\n\
+### Y\n\n\
+```lua\n\
+store.append('order.txt', 'Y\\n')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+return store.read('order.txt')\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("the child walk must skip the off-walk child");
+    assert_eq!(out, "X\nY\n");
+}
+
+/// An off-walk child stays addressable: a jump to it runs it (and the
+/// fall-through that follows skips nothing addressed).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn jump_to_an_off_walk_child_runs_it() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+jump('### Off')\n\
+```\n\n\
+### X\n\n\
+```lua\n\
+store.append('order.txt', 'X\\n')\n\
+```\n\n\
+### Off\n\n\
+---\n\n\
+```lua\n\
+store.append('order.txt', 'Off\\n')\n\
+```\n\n\
+### Y\n\n\
+```lua\n\
+store.append('order.txt', 'Y\\n')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+return store.read('order.txt')\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("a jump to an off-walk child must run it");
+    assert_eq!(out, "Off\nY\n");
+}
+
+/// `execute` to a child runs it as a single-section subroutine: no
+/// fall-through to the target's following siblings (the chain contract is a
+/// later step).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn execute_to_a_child_runs_single_section() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Main\n\n\
+```lua\n\
+local r = execute('### Sub')\n\
+return 'got:' .. r\n\
+```\n\n\
+### Sub\n\n\
+```lua\n\
+return 'sub-reply'\n\
+```\n\n\
+### After\n\n\
+```lua\n\
+error('execute must not fall through to the next child')\n\
+```\n";
+    let out = run_offline(md)
+        .await
+        .expect("execute to a child must run it as a subroutine");
+    assert_eq!(out, "got:sub-reply");
+}
+
+/// The top-level walk never descends: a section's children do not run unless
+/// addressed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn walk_never_descends_into_children() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+store.append('order.txt', 'A\\n')\n\
+```\n\n\
+### Child\n\n\
+```lua\n\
+error('a child must not run by fall-through')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+store.append('order.txt', 'B\\n')\n\
+return store.read('order.txt')\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("the walk must never descend into children");
+    assert_eq!(out, "A\nB\n");
+}
+
+/// A running child's visible set is its own siblings plus its own children:
+/// it can execute a child and jump to a sibling.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn running_child_addresses_its_own_siblings_and_children() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+jump('### X')\n\
+```\n\n\
+### X\n\n\
+```lua\n\
+local r = execute('#### Grand')\n\
+store.append('order.txt', 'X:' .. r .. '\\n')\n\
+jump('### Y')\n\
+```\n\n\
+#### Grand\n\n\
+```lua\n\
+return 'grand-ran'\n\
+```\n\n\
+### Y\n\n\
+```lua\n\
+store.append('order.txt', 'Y\\n')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+return store.read('order.txt')\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("a running child must address its own siblings and children");
+    assert_eq!(out, "X:grand-ran\nY\n");
+}
+
+/// A running child cannot address a top-level section: the parent level is
+/// not in its visible set, so the jump resolves as not-found.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn running_child_cannot_address_a_top_level_section() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+jump('### X')\n\
+```\n\n\
+### X\n\n\
+```lua\n\
+jump('## B')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+return 'b-ran'\n\
+```\n";
+    let error = run_offline(md)
+        .await
+        .expect_err("a child jumping to a top-level section must fail");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("not found"),
+        "a top-level section is not in a child's visible set: {rendered}"
+    );
+}
+
+/// A sibling's child (a niece or nephew) is not in the visible set: the jump
+/// resolves as not-found.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn jump_to_a_niece_errors() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+jump('### Niece')\n\
+```\n\n\
+## B\n\n\
+### Niece\n\n\
+```lua\n\
+return 'niece-ran'\n\
+```\n";
+    let error = run_offline(md)
+        .await
+        .expect_err("a jump to a niece must fail");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("not found"),
+        "a niece is not in the visible set: {rendered}"
+    );
+}
+
+/// `sys.id` counts the sections the walk has entered run-wide: the detour
+/// into a child level continues the count rather than restarting it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sys_id_counts_sections_entered_run_wide() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+store.append('ids.txt', tostring(sys.id) .. '\\n')\n\
+jump('### X')\n\
+```\n\n\
+### X\n\n\
+```lua\n\
+store.append('ids.txt', tostring(sys.id) .. '\\n')\n\
+```\n\n\
+### Y\n\n\
+```lua\n\
+store.append('ids.txt', tostring(sys.id) .. '\\n')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+store.append('ids.txt', tostring(sys.id) .. '\\n')\n\
+return store.read('ids.txt')\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("sys.id must count sections entered run-wide");
+    assert_eq!(out, "1\n2\n3\n4\n");
 }
 
 /// An off-walk child section still runs as a fanout worker.
@@ -557,8 +941,8 @@ fn list_from_section_ambiguous_error_is_loud() {
 /// Two top-level sections sharing one name error loudly as ambiguous rather
 /// than silently resolving to the first (the retired `resolve_h2_section`
 /// first-match behavior). Unreachable through a real prompt (the parser
-/// forbids duplicate sibling names), so the resolver jump and execute share
-/// is exercised directly with a synthetic top-level slice.
+/// forbids duplicate sibling names), so the walk's jump-target resolution is
+/// exercised directly with a synthetic sibling slice.
 #[test]
 fn duplicate_top_level_section_names_error_loudly() {
     fn top(name: &str) -> crate::parser::Section {
@@ -571,9 +955,9 @@ fn duplicate_top_level_section_names_error_loudly() {
             off_walk: false,
         }
     }
-    let sections = vec![top("Dup"), top("Dup")];
-    let error = super::super::engine::resolve_top_level_index("## Dup", &sections)
-        .expect_err("two top-level sections with one name must be ambiguous");
+    let sections = vec![top("Main"), top("Dup"), top("Dup")];
+    let error = super::super::engine::resolve_jump_target("## Dup", &sections, &sections[0])
+        .expect_err("two visible sections with one name must be ambiguous");
     let rendered = error.to_string();
     assert!(rendered.contains("ambiguous"), "error was: {rendered}");
 }
