@@ -146,7 +146,7 @@ pub(crate) struct FanoutContext<'a> {
 )]
 pub(crate) async fn run_fanout_arms(
     worker: &Section,
-    items: &[String],
+    items: &[serde_json::Value],
     ctx: &FanoutContext<'_>,
 ) -> Result<Vec<LuaFanoutResult>> {
     // Reject an oversized list before scheduling anything, so a pathological
@@ -188,7 +188,7 @@ pub(crate) async fn run_fanout_arms(
     let spawn_arm = |index: usize, join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>| {
         let payload = ArmPayload {
             worker: worker.clone(),
-            item_text: items[index].clone(),
+            item: items[index].clone(),
             index,
             store: ctx.store.clone(),
             client: ctx.client.clone(),

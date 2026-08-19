@@ -1,5 +1,7 @@
 use std::num::NonZeroU32;
 
+use serde_json::json;
+
 use super::arm::ArmFinalizer;
 use super::proxies::ProxyObserver;
 use super::*;
@@ -161,7 +163,7 @@ async fn pre_cancelled_fanout_returns_interrupted() {
         items: Vec::new(),
         off_walk: false,
     };
-    let items = vec!["alpha".to_string(), "beta".to_string()];
+    let items = vec![json!("alpha"), json!("beta")];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
     let models = <ModelBindings as Default>::default();
@@ -236,7 +238,7 @@ async fn fatal_arm_aborts_and_drops_blocked_siblings() {
     };
     // The fatal item is dispatched first; with concurrency 1 the siblings stay
     // queued and must never be spawned once the first arm fails.
-    let items = vec!["boom".to_string(), "beta".to_string(), "gamma".to_string()];
+    let items = vec![json!("boom"), json!("beta"), json!("gamma")];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
     let models = <ModelBindings as Default>::default();
@@ -361,7 +363,7 @@ async fn fanout_rejects_a_list_over_the_item_cap() {
         items: Vec::new(),
         off_walk: false,
     };
-    let items: Vec<String> = (0..5).map(|i| i.to_string()).collect();
+    let items: Vec<serde_json::Value> = (0..5).map(|i| json!(i.to_string())).collect();
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
     let models = <ModelBindings as Default>::default();
@@ -422,7 +424,7 @@ async fn model_required_when_arm_prose_has_no_binding() {
         items: Vec::new(),
         off_walk: false,
     };
-    let items = vec!["alpha".to_string()];
+    let items = vec![json!("alpha")];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
     let models = <ModelBindings as Default>::default();
@@ -563,7 +565,7 @@ async fn each_arm_emits_a_distinct_succeeded_terminal_event() {
     // terminal event. Two arms whose prologue returns a value each emit one
     // `started` and one `succeeded`, and nothing else.
     let worker = lua_worker("return item");
-    let items = vec!["a".to_string(), "b".to_string()];
+    let items = vec![json!("a"), json!("b")];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
     let models = <ModelBindings as Default>::default();
@@ -603,7 +605,7 @@ async fn a_hard_failing_arm_emits_a_failed_terminal_event() {
     // FANOUT-004: a hard arm error emits a distinct `failed` terminal event,
     // never `succeeded`.
     let worker = lua_worker("error('boom')");
-    let items = vec!["a".to_string()];
+    let items = vec![json!("a")];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
     let models = <ModelBindings as Default>::default();
@@ -662,7 +664,7 @@ async fn an_in_flight_fanout_arm_is_cancelled_cooperatively() {
     use crate::cancel::{self, CancelHandle};
 
     let worker = lua_worker("log('running')\nwhile true do end\nreturn item");
-    let items = vec!["only".to_string()];
+    let items = vec![json!("only")];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
     let models = <ModelBindings as Default>::default();
