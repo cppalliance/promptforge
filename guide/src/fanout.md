@@ -33,6 +33,7 @@ Each arm receives the current member as the `item` variable and a `sys.taskid` i
 - Substitute `{{ item }}` in prose (strings verbatim, numbers and booleans in their natural string form, tables as compact JSON)
 - Run the full model tool loop
 - Execute an epilog for post-processing
+- Call `execute`, `fanout`, and `list_from_section`, resolved against the worker's visible sections (the set the worker was resolved from, minus the worker, plus its children), and transfer control with `jump` - the arm's remaining blocks are skipped and the arm's text becomes the jumped-to walk's reply. Recursion depth accumulates across the fanout boundary: each arm runs one `execute` level deeper than its caller, so the 8-level cap bounds mixed `execute`/`fanout` nesting uniformly
 
 Results are returned in collection order (array part first, then the hash part), not finish order. Each result has `.text`, `.ok`, `.item`, and `.exhausted` fields; `.item` carries the member value back - a pair table for hash members - so the caller can correlate results with rich items. The result array supports `table.concat` since objects coerce via `__tostring`.
 

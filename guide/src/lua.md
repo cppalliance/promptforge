@@ -131,7 +131,7 @@ The analysis found a critical issue:
 Escalate this with recommended actions.
 ````
 
-`execute()` nests up to 8 levels deep. A chain starts with `reply` set to nil - pass context through the `input` parameter instead. A `jump()` inside a chain moves within the chain, and a `return` inside a chain ends the chain, not the run. Sections can be referenced by heading string or by Section objects from the `tasks` table.
+`execute()` nests up to 8 levels deep, and the count accumulates across `fanout` boundaries - each arm runs one level deeper than the section or arm that spawned it. A chain starts with `reply` set to nil - pass context through the `input` parameter instead. A `jump()` inside a chain moves within the chain, and a `return` inside a chain ends the chain, not the run. Sections can be referenced by heading string or by Section objects from the `tasks` table.
 
 `fanout(worker, collection)` maps the worker over any Lua table, resolved against the same visible set. The collection is always a table, never a section name - a non-table second parameter is an error that points at `list_from_section`. The array part (`1..#t`) iterates in order first, then the hash part in undefined order. An array member arrives as the arm's `item` unchanged - a string stays a string, a number a number, a table a table - while a hash member arrives as a pair table with `item.key` and `item.value`. Keys must be strings, numbers, or booleans; a function or userdata member is an error naming its index. Each arm result's `.item` carries the member value back, so the caller can correlate results with rich items. An empty collection returns an empty table. To fanout over a list section's pre-parsed items, pass `list_from_section("### List")` as the collection.
 
