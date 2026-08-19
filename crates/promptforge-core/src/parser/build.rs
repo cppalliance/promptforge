@@ -9,7 +9,7 @@ use std::ops::Range;
 
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
-use super::fence::{RawBlock, lua_block_location, split_section_blocks};
+use super::fence::{RawBlock, lua_block_location, split_rule_roles, split_section_blocks};
 use super::list::{is_all_list_markers, parse_bullet_items};
 use super::{Block, ParseErrorKind, Section};
 use crate::lua::LuaProgram;
@@ -414,7 +414,11 @@ pub(crate) fn build_sections(
         let content_abs_line = line_add(frontmatter_lines, h.content_start_line)?;
         let heading_abs_line = line_add(frontmatter_lines, h.source_line)?;
         let heading_span = h.span.clone();
-        let raw_blocks = split_section_blocks(&h.content, &name)?;
+        // The `---` marker seam: a leading rule takes the section off the
+        // walk, and the first non-leading rule ends its executable content.
+        // Blocks and list items parse only from what survives.
+        let (off_walk, content) = split_rule_roles(&h.content)?;
+        let raw_blocks = split_section_blocks(content.as_ref(), &name)?;
         let has_prose = raw_blocks
             .iter()
             .any(|block| matches!(block, RawBlock::Prose(_)));
@@ -491,6 +495,7 @@ pub(crate) fn build_sections(
             blocks,
             children,
             items,
+            off_walk,
         });
     }
     Ok(result)

@@ -7,6 +7,12 @@
 //! so on through H6). The last prose block is marked loop-capable at parse time.
 //! Classic prologue/prose/epilog is exactly `[Lua, Prose, Lua]`.
 //!
+//! A `---` thematic break carries two roles by position. As a section's first
+//! content (only whitespace before it) it marks the section off-walk: the walk
+//! skips it and it runs only when addressed. Anywhere else it is a comment
+//! boundary: everything below it (until the next heading) is reader-only - no
+//! Lua compiles, no prose reaches the model, no items parse from it.
+//!
 //! The parser does no execution. It turns bytes into a [`Prompt`] tree.
 
 use crate::observe::{Observer, detail};
@@ -18,7 +24,9 @@ mod build;
 mod fence;
 mod list;
 
-pub use build::{FileDecl, Frontmatter, MAX_TOOL_ITERATIONS, MaxToolIterations, promptforge_version};
+pub use build::{
+    FileDecl, Frontmatter, MAX_TOOL_ITERATIONS, MaxToolIterations, promptforge_version,
+};
 use build::{Heading, build_sections, collect_headings, line_add, split_frontmatter};
 use fence::{exact_shared_openings, split_h1};
 
@@ -157,6 +165,8 @@ pub struct Section {
     /// Pre-parsed bullet items for list-only sections (no lua blocks).
     /// Empty for non-list sections.
     pub(crate) items: Vec<String>,
+    /// True when a leading `---` rule marked this section off-walk.
+    pub(crate) off_walk: bool,
 }
 
 impl Section {
@@ -188,6 +198,16 @@ impl Section {
     #[must_use]
     pub fn items(&self) -> &[String] {
         &self.items
+    }
+
+    /// Returns true when a leading `---` rule marked this section off-walk.
+    ///
+    /// An off-walk section stays in the section tree and remains addressable
+    /// by `execute`/`jump`/`fanout`, but the section walk skips it in
+    /// fall-through order. Content below the marker parses and runs normally.
+    #[must_use]
+    pub fn is_off_walk(&self) -> bool {
+        self.off_walk
     }
 
     /// Classic leading Lua fence when the first block is Lua.
