@@ -50,3 +50,5 @@
 
 ## 2026-08-18 Fix gateway doctests to set api_key in [server]
 
+## 2026-08-19 Delete the list-h3-with-lua invalid-prompt fixture
+
