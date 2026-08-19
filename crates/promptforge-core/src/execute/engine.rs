@@ -194,7 +194,7 @@ pub(crate) async fn run_sections(
         // section's parent id for nested execute/fanout.
         match run_one_section(&ctx, section, index + 1, 0, reply.as_deref(), &mut client).await? {
             SectionFlow::Jumped { heading, reply: r } => {
-                let target = resolve_h2_index(&heading, &prompt.sections)?;
+                let target = resolve_top_level_index(&heading, &prompt.sections)?;
                 reply = r;
                 index = target;
                 jumped = true;
@@ -293,7 +293,7 @@ async fn run_one_section(
                     "execute recursion exceeded cap of {MAX_EXECUTE_DEPTH}"
                 )));
             }
-            let worker = resolve_h2_section(&heading, &exec_sections)?;
+            let worker = fanout::resolve_sibling(&heading, &exec_sections)?;
             let call_args = input.as_deref().unwrap_or(&exec_args);
             // Return the structured error directly (LUA-012): the typed error and
             // its source cross the Lua boundary via `mlua::Error::external` rather
@@ -715,37 +715,21 @@ fn require_pre_parsed_items(section: &Section) -> Result<&[String]> {
     Ok(&section.items)
 }
 
-fn resolve_h2_section<'a>(heading: &str, sections: &'a [Section]) -> Result<&'a Section> {
-    let stripped = heading.trim();
-    if !stripped.starts_with("##") || stripped.starts_with("###") {
-        return Err(Error::Lua(format!(
-            "section heading must use ## markers, got: {stripped}"
-        )));
-    }
-    let name = stripped.trim_start_matches('#').trim();
-    if name.is_empty() {
-        return Err(Error::Lua(format!(
-            "section heading has no name: {stripped}"
-        )));
-    }
+/// Resolves `heading` against the top-level section slice and returns the
+/// matched section's index.
+///
+/// Resolution is an exact `(level, name)` match (see
+/// [`fanout::resolve_sibling`]): two top-level sections sharing a name error
+/// loudly as ambiguous instead of silently resolving to the first.
+///
+/// # Errors
+/// Returns [`Error::Lua`] when the heading is malformed, matches no top-level
+/// section, or matches more than one.
+pub(crate) fn resolve_top_level_index(heading: &str, sections: &[Section]) -> Result<usize> {
+    let section = fanout::resolve_sibling(heading, sections)?;
     sections
         .iter()
-        .find(|section| section.name == name)
-        .ok_or_else(|| {
-            let available: Vec<String> =
-                sections.iter().map(|s| format!("## {}", s.name)).collect();
-            Error::Lua(format!(
-                "section `{stripped}` not found; available: {}",
-                available.join(", ")
-            ))
-        })
-}
-
-fn resolve_h2_index(heading: &str, sections: &[Section]) -> Result<usize> {
-    let section = resolve_h2_section(heading, sections)?;
-    sections
-        .iter()
-        .position(|s| s.name == section.name)
+        .position(|s| s.level == section.level && s.name == section.name)
         .ok_or_else(|| Error::Lua(format!("section `{heading}` index missing")))
 }
 

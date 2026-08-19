@@ -171,9 +171,8 @@ return 'helped:' .. store.read('seen.txt')\n\
     assert_eq!(store.read("seen.txt").expect("seen"), "check");
 }
 
-/// The subroutine walk rejects `jump()` (unlike the top-level walk, which
-/// follows it). Locks the `JumpPolicy::Reject` divergence folded into the
-/// unified section engine.
+/// A jump carries the prior section's reply across the transfer: the target
+/// sees the model reply the jumper's prose produced.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn jump_preserves_reply_from_prior_section() {
     let gateway = ScriptedGateway::start(vec![resp_text("model-said-this")]).await;
@@ -551,6 +550,30 @@ fn list_from_section_ambiguous_error_is_loud() {
     let visible = vec![list("Dup"), list("Dup")];
     let error = super::super::engine::list_items_from_visible("### Dup", &visible)
         .expect_err("two visible sections with one address must be ambiguous");
+    let rendered = error.to_string();
+    assert!(rendered.contains("ambiguous"), "error was: {rendered}");
+}
+
+/// Two top-level sections sharing one name error loudly as ambiguous rather
+/// than silently resolving to the first (the retired `resolve_h2_section`
+/// first-match behavior). Unreachable through a real prompt (the parser
+/// forbids duplicate sibling names), so the resolver jump and execute share
+/// is exercised directly with a synthetic top-level slice.
+#[test]
+fn duplicate_top_level_section_names_error_loudly() {
+    fn top(name: &str) -> crate::parser::Section {
+        crate::parser::Section {
+            name: name.to_string(),
+            level: 2,
+            blocks: Vec::new(),
+            children: Vec::new(),
+            items: Vec::new(),
+            off_walk: false,
+        }
+    }
+    let sections = vec![top("Dup"), top("Dup")];
+    let error = super::super::engine::resolve_top_level_index("## Dup", &sections)
+        .expect_err("two top-level sections with one name must be ambiguous");
     let rendered = error.to_string();
     assert!(rendered.contains("ambiguous"), "error was: {rendered}");
 }
