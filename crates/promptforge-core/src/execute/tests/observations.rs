@@ -190,6 +190,28 @@ async fn a_failing_run_still_reports_run_finished() {
 }
 
 #[tokio::test]
+async fn an_erroring_section_reports_started_but_not_finished() {
+    // The absence half of the section-boundary contract: a section that
+    // errors mid-walk must emit SECTION_STARTED and never SECTION_FINISHED.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n```lua\nerror('expected failure')\n```\n";
+    let (result, records) = run_recorded(md).await;
+    assert!(result.is_err());
+
+    let observed = events(&records);
+    assert!(
+        observed.contains(&("Only".to_string(), detail::SECTION_STARTED.to_string())),
+        "the erroring section must report started: {observed:?}"
+    );
+    assert!(
+        !observed
+            .iter()
+            .any(|(_, event)| event == &detail::SECTION_FINISHED.to_string()),
+        "the erroring section must never report finished: {observed:?}"
+    );
+}
+
+#[tokio::test]
 async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     let gateway = ScriptedGateway::start(aliased_tool_script("echo")).await;
     let addr = gateway.addr();

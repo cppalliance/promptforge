@@ -601,6 +601,55 @@ async fn each_arm_emits_a_distinct_succeeded_terminal_event() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_shared_replay_sees_the_arm_item() {
+    // The `item` install lands before `replay_shared`, so the shared
+    // library's top-level code may read `item`; moving the install after the
+    // replay must fail this test.
+    use crate::client::GatewayClient;
+    use crate::model::ModelBindings;
+    use crate::observe::NullObserver;
+    use crate::store::StoreRef;
+
+    let worker = lua_worker("return captured_by_shared");
+    let items = vec![json!("alpha")];
+    let store = StoreRef::memory();
+    let bindings = ToolBindings::default();
+    let models = <ModelBindings as Default>::default();
+    let analysis = crate::execute::ToolAnalysis::default();
+    let shared_tools = SharedTools::default();
+    let client: Option<GatewayClient> = None;
+    let observer = NullObserver;
+    let shared = LuaProgram::compile(
+        "captured_by_shared = item",
+        "test shared",
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
+        "fanout-terminal-test",
+        &crate::observe::NullObserver,
+        "Worker",
+    )
+    .expect("test Lua must compile");
+    let ctx = terminal_ctx(
+        &observer,
+        &store,
+        &bindings,
+        &models,
+        &analysis,
+        &shared_tools,
+        &client,
+        &shared,
+    );
+
+    let results = run_fanout_arms(&worker, &items, &ctx)
+        .await
+        .expect("the arm must succeed");
+    assert_eq!(
+        results,
+        vec![LuaFanoutResult::success(json!("alpha"), "alpha")],
+        "the shared chunk captured the item before the worker ran"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_hard_failing_arm_emits_a_failed_terminal_event() {
     // FANOUT-004: a hard arm error emits a distinct `failed` terminal event,
     // never `succeeded`.
