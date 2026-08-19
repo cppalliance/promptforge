@@ -162,6 +162,63 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_arm_debug_events_reach_the_run_sink_through_the_proxy() {
+    // The arm's debug side channel: with a run debug sink installed, an arm's
+    // model-turn events travel the bounded ProxyDebugCapture channel and are
+    // forwarded to the run's sink under the worker's section name.
+    let gateway = ScriptedGateway::start(vec![resp_text("arm reply")]).await;
+    let addr = gateway.addr();
+    let capture = Arc::new(RecordingCapture::default());
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Test prompt\n\n```lua shared\n\
+        models.default('writer', 'A general model for tests')\n```\n\n\
+        ## Parent\n\n\
+        ```lua\n\
+        local r = fanout('### Worker', {'alpha'})\n\
+        return r[1].text\n\
+        ```\n\n\
+        ### Worker\n\n\
+        Reply about {{ item }}.\n";
+    let prompt = bound_with_tools(md, Vec::new());
+    let out = run(
+        &prompt,
+        "",
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: Arc::new(NullObserver),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test").expect("non-empty test key"),
+            )),
+            debug: Some(Arc::clone(&capture) as Arc<dyn DebugCapture>),
+        },
+    )
+    .await
+    .expect("the fanout must succeed");
+    assert_eq!(out, "arm reply");
+
+    let events = capture.events();
+    let worker_events: Vec<_> = events
+        .iter()
+        .filter(|(_, section, _, _)| section == "Worker")
+        .collect();
+    assert!(
+        worker_events
+            .iter()
+            .any(|event| matches!(event.3, crate::debug::DebugEvent::Request { .. })),
+        "the arm's request must forward to the run's sink: {events:#?}"
+    );
+    assert!(
+        worker_events
+            .iter()
+            .any(|event| matches!(event.3, crate::debug::DebugEvent::Response { .. })),
+        "the arm's response must forward to the run's sink: {events:#?}"
+    );
+}
+
 #[tokio::test]
 async fn debug_capture_none_changes_nothing() {
     let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;

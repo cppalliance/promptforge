@@ -77,20 +77,17 @@ pub use gateway::ResolutionContext;
 
 // Crate-internal items reused through the historical `crate::execute::` path.
 // `ToolAnalysis` and the engine/section-VM items (`ControlContext` and its
-// control-global constructor, `SectionVmSetup`/`VmSeed`/`setup_section_vm`,
-// `now_rfc3339_checked`, `sys_json`, the block walk, and the infer hook
-// install) are consumed by `fanout`; `run_sections` and `execute_live_h1`
-// serve only `run` below and stay module-private. Re-exported so the split
-// stays surface-neutral for the public API while keeping one import path for
-// internal collaborators.
+// control-global constructor, `VmSeed`/`setup_section_vm`, and the block
+// walk) are consumed by `fanout`; `run_sections` and `execute_live_h1` serve
+// only `run` below and stay module-private.
+// Re-exported so the split stays surface-neutral for the public API while
+// keeping one import path for internal collaborators.
 pub(crate) use block_walk::{BlockWalkContext, SectionFlow, walk_section_blocks};
 pub(crate) use engine::{ControlContext, make_control_globals};
 pub(crate) use scope::ToolAnalysis;
-pub(crate) use section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
-pub(crate) use support::{now_rfc3339_checked, sys_json};
-pub(crate) use tools::attach_engine_infer_hook;
+pub(crate) use section_vm::{VmSeed, setup_section_vm};
 
-use engine::run_sections;
+use engine::{RunContext, run_sections};
 use h1::execute_live_h1;
 
 // Everything the executor's own tests reach through `use super::super::*`
@@ -121,7 +118,7 @@ pub(crate) use serde_json::json;
 #[cfg(test)]
 pub(crate) use std::collections::BTreeMap;
 #[cfg(test)]
-pub(crate) use support::{advance_turn, bridge_blocking};
+pub(crate) use support::{advance_turn, bridge_blocking, now_rfc3339_checked};
 #[cfg(test)]
 pub(crate) use tool_loop::{SectionProgress, run_tool_loop};
 #[cfg(test)]
@@ -248,23 +245,22 @@ pub async fn run(
     let turns = Arc::new(AtomicU32::new(0));
 
     let run_body = async {
-        let h1 = execute_live_h1(
-            prompt,
+        // The borrowed context both top-level drivers share, built once so
+        // neither restates the tail.
+        let frame = RunContext {
             args,
-            resolution,
-            &registry,
-            &shared_tools,
+            shared_tools: &shared_tools,
             store,
             execution,
             observer,
-            &observer_arc,
-            client.as_ref(),
+            observer_arc: &observer_arc,
+            client: &client,
             debug,
             debug_arc,
             limits,
-            Arc::clone(&turns),
-        )
-        .await?;
+            turns: &turns,
+        };
+        let h1 = execute_live_h1(prompt, resolution, &registry, &frame).await?;
         if let Some(value) = h1.returned {
             return Ok(value);
         }
@@ -278,17 +274,7 @@ pub async fn run(
             &h1.models,
             &analysis,
             Some(&h1.var),
-            args,
-            &shared_tools,
-            store,
-            execution,
-            observer,
-            &observer_arc,
-            client,
-            debug,
-            debug_arc,
-            limits,
-            Arc::clone(&turns),
+            &frame,
         )
         .await
     };

@@ -1,6 +1,18 @@
 use super::super::*;
 use super::run;
 use super::*;
+use crate::test_support::synthetic_section;
+
+/// The frontmatter every flow test shares, fused into the prompt literal at
+/// compile time so a test states only its sections.
+macro_rules! flow_prompt {
+    ($body:literal) => {
+        concat!(
+            "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n",
+            $body
+        )
+    };
+}
 
 /// Alternating lua/prose blocks run in order; non-final prose is single-shot,
 /// final prose loops, and trailing lua sees the last reply.
@@ -8,13 +20,15 @@ use super::*;
 async fn section_with_alternating_blocks_executes_in_order() {
     let gateway = ScriptedGateway::start(vec![resp_text("reply-1"), resp_text("reply-2")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Only\n\n\
 ```lua\nstore.append('order.txt', 'lua1\\n')\n```\n\n\
 First ask.\n\n\
 ```lua\nstore.append('order.txt', 'lua2\\n')\n```\n\n\
 Final ask.\n\n\
-```lua\nstore.append('order.txt', 'lua3\\n')\nreturn reply\n```\n";
+```lua\nstore.append('order.txt', 'lua3\\n')\nreturn reply\n```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&bound_for_model(md), "", &[], &store, gatewayed(addr))
         .await
@@ -36,7 +50,8 @@ async fn execute_runs_named_section_as_subroutine() {
     // The subroutine sits after its run-ending caller: a contained chain
     // falls through like any walk, so a subroutine placed before later
     // sections would pull them into the chain.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 local research = tasks['## Research']\n\
@@ -56,7 +71,8 @@ assert(step.name == 'Research')\n\
 assert(step.has_prose == true)\n\
 ```\n\n\
 Research {{ args }}.\n\n\
-```lua\nstore.write('evidence.md', reply)\n```\n";
+```lua\nstore.write('evidence.md', reply)\n```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&bound_for_model(md), "topic", &[], &store, gatewayed(addr))
         .await
@@ -66,7 +82,8 @@ Research {{ args }}.\n\n\
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn jump_transfers_control_and_preserves_reply() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Check\n\n\
 ```lua\n\
 store.write('seen.txt', 'check')\n\
@@ -82,7 +99,8 @@ store.write('seen.txt', 'should-not-run')\n\
 ```lua\n\
 assert(reply == nil, 'no prior reply because no prose ran before the jump')\n\
 return 'helped:' .. store.read('seen.txt')\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -97,7 +115,8 @@ return 'helped:' .. store.read('seen.txt')\n\
 async fn jump_preserves_reply_from_prior_section() {
     let gateway = ScriptedGateway::start(vec![resp_text("model-said-this")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Source\n\n\
 Ask something.\n\n\
 ```lua\njump('## Target')\n```\n\n\
@@ -105,7 +124,8 @@ Ask something.\n\n\
 ```lua\n\
 assert(reply ~= nil, 'jump must preserve the prior reply')\n\
 return reply\n\
-```\n";
+```\n"
+    );
     let out = run(
         &bound_for_model(md),
         "",
@@ -124,7 +144,8 @@ return reply\n\
 /// run - and the target's reply returns to the caller.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn jump_inside_execute_is_contained_in_the_chain() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 local r = execute('## Sub')\n\
@@ -141,7 +162,8 @@ error('the chain jump must move past me')\n\
 ## Peer\n\n\
 ```lua\n\
 return 'peer-ran'\n\
-```\n";
+```\n"
+    );
     let out = run_offline(md)
         .await
         .expect("a jump inside execute must be followed within the chain");
@@ -156,7 +178,8 @@ return 'peer-ran'\n\
 async fn execute_chain_jumps_to_a_child_and_returns_the_chain_reply() {
     let gateway = ScriptedGateway::start(vec![resp_text("reply-s1"), resp_text("reply-s2")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 store.append('order.txt', 'A1\\n')\n\
@@ -187,7 +210,8 @@ assert(reply == 'reply-s1', 'fall-through inside the chain carries the reply')\n
 Ask S2.\n\n\
 ```lua\n\
 store.append('order.txt', 'S2\\n')\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&bound_for_model(md), "", &[], &store, gatewayed(addr))
         .await
@@ -200,7 +224,8 @@ store.append('order.txt', 'S2\\n')\n\
 /// S2's reply returns to A. The main walk ends at B and never runs S1 or S2.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execute_chain_over_off_walk_siblings_returns_to_the_caller() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 local r = execute('## S1')\n\
@@ -220,7 +245,8 @@ store.append('order.txt', 'S1\\n')\n\
 ```lua\n\
 store.append('order.txt', 'S2\\n')\n\
 return 's2-reply'\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -233,7 +259,8 @@ return 's2-reply'\n\
 /// rules, and the chain's final reply is the call's return value.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn jump_inside_an_execute_chain_moves_within_the_chain() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 local r = execute('## Sub')\n\
@@ -251,7 +278,8 @@ store.append('order.txt', 'Peer\\n')\n\
 ```lua\n\
 store.append('order.txt', 'Tail\\n')\n\
 return 'tail-reply'\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -264,7 +292,8 @@ return 'tail-reply'\n\
 /// chain ends, the outer walk resumes at the section after the caller.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_outer_walk_never_moves_during_a_contained_chain() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 execute('## Sub')\n\
@@ -283,7 +312,8 @@ jump('## Peer')\n\
 ```lua\n\
 store.append('order.txt', 'Peer\\n')\n\
 return 'p'\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -295,7 +325,8 @@ return 'p'\n\
 /// only addressing runs a marked section.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_contained_chain_skips_off_walk_sections_in_fall_through() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 local r = execute('## Sub')\n\
@@ -314,7 +345,8 @@ store.append('order.txt', 'Hidden\\n')\n\
 ```lua\n\
 store.append('order.txt', 'Tail\\n')\n\
 return 'tail-reply'\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -328,7 +360,8 @@ return 'tail-reply'\n\
 /// not run, and the outer walk continues.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 local r = execute('## Sub')\n\
@@ -346,7 +379,8 @@ return 'sub-reply'\n\
 ## After\n\n\
 ```lua\n\
 error('a return must end the chain before fall-through')\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -358,7 +392,8 @@ error('a return must end the chain before fall-through')\n\
 /// its entries do not advance the outer chain's count.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_contained_chain_counts_sys_id_from_one() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 assert(sys.id == 1, 'the outer chain counts its own sections')\n\
@@ -378,7 +413,8 @@ assert(sys.id == 1, 'a contained chain counts sys.id from 1')\n\
 ```lua\n\
 assert(sys.id == 2, 'the chain counts its own fall-through')\n\
 return 'tail-reply'\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -392,11 +428,13 @@ return 'tail-reply'\n\
 /// The caller is not in its own visible set, so the recursion is mutual.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execute_recursion_is_capped() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\nreturn execute('## B')\n```\n\n\
 ## B\n\n\
-```lua\nreturn execute('## A')\n```\n";
+```lua\nreturn execute('## A')\n```\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("unbounded execute recursion must fail");
@@ -411,9 +449,11 @@ async fn execute_recursion_is_capped() {
 /// heading to `execute` resolves as not-found.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn section_cannot_execute_itself() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Self\n\n\
-```lua\nreturn execute('## Self')\n```\n";
+```lua\nreturn execute('## Self')\n```\n"
+    );
     let error = run_offline(md).await.expect_err("self-execute must fail");
     let rendered = error.to_string();
     assert!(
@@ -426,9 +466,11 @@ async fn section_cannot_execute_itself() {
 /// heading to `jump` resolves as not-found.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn section_cannot_jump_to_itself() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Self\n\n\
-```lua\njump('## Self')\n```\n";
+```lua\njump('## Self')\n```\n"
+    );
     let error = run_offline(md).await.expect_err("self-jump must fail");
     let rendered = error.to_string();
     assert!(
@@ -439,7 +481,8 @@ async fn section_cannot_jump_to_itself() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_returns_structured_results() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 local r = fanout('### Worker', list_from_section('### Items'))\n\
@@ -460,7 +503,8 @@ return 'ok'\n\
 Do work.\n\n\
 ### Items\n\n\
 - alpha\n\
-- beta\n";
+- beta\n"
+    );
     let out = run(&fixture(md), "", &[], &StoreRef::memory(), silent())
         .await
         .expect("fanout must return structured results");
@@ -471,7 +515,8 @@ Do work.\n\n\
 /// execution. It stays in the section tree, so `sys.section_count` counts it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn off_walk_section_is_never_visited_by_the_walk() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Hidden\n\n\
 ---\n\n\
 ```lua\nerror('hidden must not run')\n```\n\n\
@@ -479,7 +524,8 @@ async fn off_walk_section_is_never_visited_by_the_walk() {
 ```lua\n\
 assert(sys.section_count == 2)\n\
 return 'main-ran'\n\
-```\n";
+```\n"
+    );
     let (result, records) = run_recorded(md).await;
     assert_eq!(
         result.expect("the walk must skip the off-walk section"),
@@ -496,7 +542,8 @@ return 'main-ran'\n\
 /// runs when addressed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn off_walk_sections_run_only_when_addressed() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 local rb = execute('## B')\n\
@@ -510,7 +557,8 @@ store.write('order.txt', rb .. ',' .. rc)\n\
 ---\n\n\
 ```lua\nreturn 'c-ran'\n```\n\n\
 ## D\n\n\
-```lua\nreturn 'd-ran:' .. store.read('order.txt')\n```\n";
+```lua\nreturn 'd-ran:' .. store.read('order.txt')\n```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -522,14 +570,16 @@ store.write('order.txt', rb .. ',' .. rc)\n\
 /// A jump addresses an off-walk section directly, so it runs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn jump_to_off_walk_section_runs_it() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\njump('## B')\n```\n\n\
 ## B\n\n\
 ---\n\n\
 ```lua\nreturn 'b-ran'\n```\n\n\
 ## C\n\n\
-```lua\nreturn 'c-ran'\n```\n";
+```lua\nreturn 'c-ran'\n```\n"
+    );
     let out = run_offline(md)
         .await
         .expect("a jump to an off-walk section must run it");
@@ -540,7 +590,8 @@ async fn jump_to_off_walk_section_runs_it() {
 /// ordinary walk step: the next off-walk sibling is skipped again.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fall_through_after_a_jumped_off_walk_section_skips_again() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\njump('## B')\n```\n\n\
 ## B\n\n\
@@ -550,7 +601,8 @@ async fn fall_through_after_a_jumped_off_walk_section_skips_again() {
 ---\n\n\
 ```lua\nreturn 'c-ran'\n```\n\n\
 ## D\n\n\
-```lua\nreturn 'd-ran'\n```\n";
+```lua\nreturn 'd-ran'\n```\n"
+    );
     let out = run_offline(md)
         .await
         .expect("fall-through after an addressed off-walk section must resume skipping");
@@ -563,7 +615,8 @@ async fn fall_through_after_a_jumped_off_walk_section_skips_again() {
 /// the jumper.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn jump_to_a_child_starts_the_child_level_walk() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 store.append('order.txt', 'A\\n')\n\
@@ -581,7 +634,8 @@ store.append('order.txt', 'Y\\n')\n\
 ```lua\n\
 store.append('order.txt', 'B\\n')\n\
 return store.read('order.txt')\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -601,7 +655,8 @@ async fn child_walk_reply_thread_follows_the_detour() {
     ])
     .await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 Ask A.\n\n\
 ```lua\n\
@@ -621,7 +676,8 @@ Ask Y.\n\n\
 ```lua\n\
 assert(reply == 'reply-y', 'the sub-walk last reply resumes the parent chain')\n\
 return reply\n\
-```\n";
+```\n"
+    );
     let out = run(
         &bound_for_model(md),
         "",
@@ -639,7 +695,8 @@ return reply\n\
 /// after the jumper.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn child_walk_recurses_to_h4() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 store.append('order.txt', 'A\\n')\n\
@@ -666,7 +723,8 @@ store.append('order.txt', 'Y\\n')\n\
 ```lua\n\
 store.append('order.txt', 'B\\n')\n\
 return store.read('order.txt')\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -678,7 +736,8 @@ return store.read('order.txt')\n\
 /// by the child-level walk's fall-through.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn off_walk_child_is_skipped_by_the_child_walk() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 jump('### X')\n\
@@ -699,7 +758,8 @@ store.append('order.txt', 'Y\\n')\n\
 ## B\n\n\
 ```lua\n\
 return store.read('order.txt')\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -711,7 +771,8 @@ return store.read('order.txt')\n\
 /// fall-through that follows skips nothing addressed).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn jump_to_an_off_walk_child_runs_it() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 jump('### Off')\n\
@@ -732,7 +793,8 @@ store.append('order.txt', 'Y\\n')\n\
 ## B\n\n\
 ```lua\n\
 return store.read('order.txt')\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -745,7 +807,8 @@ return store.read('order.txt')\n\
 /// any walk, and the chain's final reply is the call's return value.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execute_to_a_child_starts_a_contained_chain() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 local r = execute('### Sub')\n\
@@ -759,7 +822,8 @@ store.append('order.txt', 'Sub\\n')\n\
 ```lua\n\
 store.append('order.txt', 'After\\n')\n\
 return 'after-reply'\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -772,7 +836,8 @@ return 'after-reply'\n\
 /// addressed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn walk_never_descends_into_children() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 store.append('order.txt', 'A\\n')\n\
@@ -785,7 +850,8 @@ error('a child must not run by fall-through')\n\
 ```lua\n\
 store.append('order.txt', 'B\\n')\n\
 return store.read('order.txt')\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -797,7 +863,8 @@ return store.read('order.txt')\n\
 /// it can execute a child and jump to a sibling.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn running_child_addresses_its_own_siblings_and_children() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 jump('### X')\n\
@@ -819,7 +886,8 @@ store.append('order.txt', 'Y\\n')\n\
 ## B\n\n\
 ```lua\n\
 return store.read('order.txt')\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -831,7 +899,8 @@ return store.read('order.txt')\n\
 /// not in its visible set, so the jump resolves as not-found.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn running_child_cannot_address_a_top_level_section() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 jump('### X')\n\
@@ -843,7 +912,8 @@ jump('## B')\n\
 ## B\n\n\
 ```lua\n\
 return 'b-ran'\n\
-```\n";
+```\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("a child jumping to a top-level section must fail");
@@ -858,7 +928,8 @@ return 'b-ran'\n\
 /// resolves as not-found.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn jump_to_a_niece_errors() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 jump('### Niece')\n\
@@ -867,7 +938,8 @@ jump('### Niece')\n\
 ### Niece\n\n\
 ```lua\n\
 return 'niece-ran'\n\
-```\n";
+```\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("a jump to a niece must fail");
@@ -882,7 +954,8 @@ return 'niece-ran'\n\
 /// into a child level continues the count rather than restarting it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sys_id_counts_sections_entered_run_wide() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 store.append('ids.txt', tostring(sys.id) .. '\\n')\n\
@@ -900,7 +973,8 @@ store.append('ids.txt', tostring(sys.id) .. '\\n')\n\
 ```lua\n\
 store.append('ids.txt', tostring(sys.id) .. '\\n')\n\
 return store.read('ids.txt')\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -911,7 +985,8 @@ return store.read('ids.txt')\n\
 /// An off-walk child section still runs as a fanout worker.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn off_walk_worker_runs_as_a_fanout_arm() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 local r = fanout('### Worker', list_from_section('### Items'))\n\
@@ -922,7 +997,8 @@ return r[1].text .. ',' .. r[2].text\n\
 ```lua\nreturn item .. '-done'\n```\n\n\
 ### Items\n\n\
 - alpha\n\
-- beta\n";
+- beta\n"
+    );
     let out = run_offline(md)
         .await
         .expect("an off-walk worker must run as a fanout arm");
@@ -934,7 +1010,8 @@ return r[1].text .. ',' .. r[2].text\n\
 /// Section object from the `tasks` table.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_from_section_returns_bullet_items() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 local items = list_from_section('## List')\n\
@@ -948,7 +1025,8 @@ return 'ok'\n\
 ```\n\n\
 ## List\n\n\
 - alpha\n\
-- beta\n";
+- beta\n"
+    );
     let out = run_offline(md)
         .await
         .expect("a sibling list section's bullet items must be returned");
@@ -958,7 +1036,8 @@ return 'ok'\n\
 /// A numbered list section's items come back in order, markers stripped.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_from_section_returns_numbered_items() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 local items = list_from_section('## Nums')\n\
@@ -969,7 +1048,8 @@ return 'ok'\n\
 ## Nums\n\n\
 1. one\n\
 2. two\n\
-3. three\n";
+3. three\n"
+    );
     let out = run_offline(md)
         .await
         .expect("a numbered list section's items must be returned");
@@ -979,7 +1059,8 @@ return 'ok'\n\
 /// The caller's direct children are in the visible set.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_from_section_resolves_a_direct_child() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 local items = list_from_section('### Sub')\n\
@@ -988,7 +1069,8 @@ return 'ok'\n\
 ```\n\n\
 ### Sub\n\n\
 - x\n\
-- y\n";
+- y\n"
+    );
     let out = run_offline(md)
         .await
         .expect("a direct child list section must be visible");
@@ -999,7 +1081,8 @@ return 'ok'\n\
 /// itself are all outside the visible set: each resolves as not-found.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_from_section_hides_nieces_grandchildren_and_the_caller() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 local ok_niece = pcall(list_from_section, '### Niece')\n\
@@ -1017,7 +1100,8 @@ return 'ok'\n\
 ## Other\n\n\
 ```lua\nlocal x = 1\n```\n\n\
 ### Niece\n\n\
-- niece-item\n";
+- niece-item\n"
+    );
     let out = run_offline(md)
         .await
         .expect("nieces, grandchildren, and the caller must all be invisible");
@@ -1029,7 +1113,8 @@ return 'ok'\n\
 /// document's structure.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_from_section_not_found_lists_only_the_visible_sections() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 list_from_section('## Missing')\n\
@@ -1041,7 +1126,8 @@ list_from_section('## Missing')\n\
 ## Sibling\n\n\
 ```lua\nlocal x = 1\n```\n\n\
 ### Niece\n\n\
-- niece-item\n";
+- niece-item\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("an unknown heading must fail");
@@ -1072,27 +1158,13 @@ list_from_section('## Missing')\n\
     );
 }
 
-/// A synthetic section for the resolution-helper tests, which exercise
-/// duplicate-name sets that are unreachable through a real prompt (the parser
-/// forbids duplicate sibling names).
-fn synthetic_section(name: &str, level: u8, items: Vec<String>) -> crate::parser::Section {
-    crate::parser::Section {
-        name: name.to_string(),
-        level,
-        blocks: Vec::new(),
-        children: Vec::new(),
-        items,
-        off_walk: false,
-    }
-}
-
 /// Two visible sections sharing one `(level, name)` address error loudly as
 /// ambiguous rather than silently resolving to the first.
 #[test]
 fn list_from_section_ambiguous_error_is_loud() {
     let visible = vec![
-        synthetic_section("Dup", 3, vec!["x".to_string()]),
-        synthetic_section("Dup", 3, vec!["x".to_string()]),
+        synthetic_section("Dup", 3, Vec::new(), vec!["x".to_string()]),
+        synthetic_section("Dup", 3, Vec::new(), vec!["x".to_string()]),
     ];
     let error = super::super::engine::list_items_from_visible("### Dup", &visible)
         .expect_err("two visible sections with one address must be ambiguous");
@@ -1106,9 +1178,9 @@ fn list_from_section_ambiguous_error_is_loud() {
 #[test]
 fn duplicate_top_level_section_names_error_loudly() {
     let sections = vec![
-        synthetic_section("Main", 2, Vec::new()),
-        synthetic_section("Dup", 2, Vec::new()),
-        synthetic_section("Dup", 2, Vec::new()),
+        synthetic_section("Main", 2, Vec::new(), Vec::new()),
+        synthetic_section("Dup", 2, Vec::new(), Vec::new()),
+        synthetic_section("Dup", 2, Vec::new(), Vec::new()),
     ];
     let error = super::super::engine::resolve_jump_target("## Dup", &sections, &sections[0])
         .expect_err("two visible sections with one name must be ambiguous");
@@ -1120,13 +1192,15 @@ fn duplicate_top_level_section_names_error_loudly() {
 /// error exists to catch.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_from_section_rejects_a_prose_section() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 list_from_section('## Prose')\n\
 ```\n\n\
 ## Prose\n\n\
-Just prose, no list items here.\n";
+Just prose, no list items here.\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("a prose section has no pre-parsed items");
@@ -1140,12 +1214,14 @@ Just prose, no list items here.\n";
 /// The scaffold the fanout-arm capability tests share: a `## Parent` that
 /// fans `### Worker` out over one `alpha` member and returns the first arm's
 /// text. The worker body and its sibling sections follow.
-const ARM_FANOUT_PARENT: &str = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+const ARM_FANOUT_PARENT: &str = flow_prompt!(
+    "\
 ## Parent\n\n\
 ```lua\n\
 local r = fanout('### Worker', {'alpha'})\n\
 return r[1].text\n\
-```\n\n";
+```\n\n"
+);
 
 /// `list_from_section` inside a fanout arm reads a list section's items,
 /// resolving over the worker's visible set (the set the worker was resolved
@@ -1210,7 +1286,8 @@ return 'tail-reply'\n\
 /// collection returns an empty table.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_inside_a_fanout_arm_maps_over_a_collection() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 local r = fanout('### Outer', {'a', 'b'})\n\
@@ -1228,7 +1305,8 @@ return item .. ':' .. inner[1].text .. ',' .. inner[2].text\n\
 ```lua\n\
 assert(sys.taskid ~= nil, 'a nested arm keeps its own taskid')\n\
 return item .. '!'\n\
-```\n";
+```\n"
+    );
     let out = run_offline(md)
         .await
         .expect("fanout inside an arm must map over the collection");
@@ -1404,7 +1482,8 @@ return item .. ':rejected'\n\
 async fn fanout_recursion_across_the_boundary_trips_the_depth_cap() {
     // A runs at depths 0, 2, 4, 6, 8 (its 5th run); the fanout there would
     // spawn arms at depth 9, past MAX_EXECUTE_DEPTH (8).
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 local ok, v = pcall(store.read, 'n.txt')\n\
@@ -1423,7 +1502,8 @@ return execute('## A')\n\
 ---\n\n\
 ```lua\n\
 return item\n\
-```\n";
+```\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("a fanout at the execute cap must fail");
@@ -1443,7 +1523,8 @@ async fn execute_inside_an_arm_spawned_near_the_cap_trips_the_depth_cap() {
     // B runs at depths 1, 3, 5, 7 (its 4th run); the fanout there spawns arms
     // at depth 8, and the arm's own `execute` would need depth 9 - past
     // MAX_EXECUTE_DEPTH (8).
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 return execute('## B')\n\
@@ -1468,7 +1549,8 @@ return execute('## C')\n\
 ---\n\n\
 ```lua\n\
 return 'c-reply'\n\
-```\n";
+```\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("an execute inside an arm spawned at the cap's edge must fail");
@@ -1733,7 +1815,8 @@ return models.get('ghost'):infer('ping')\n\
 /// client and stays fast.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_accepts_a_prompt_built_collection_over_the_old_default_cap() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 local members = {}\n\
@@ -1745,7 +1828,8 @@ return r[1025].text\n\
 ### Worker\n\n\
 ```lua\n\
 return item\n\
-```\n";
+```\n"
+    );
     let out = run_offline(md)
         .await
         .expect("a collection over the old default cap must succeed");
@@ -1757,12 +1841,14 @@ return item\n\
 /// path must fail here.
 #[tokio::test]
 async fn item_global_is_absent_in_a_walked_section() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Only\n\n\
 ```lua\n\
 assert(item == nil, 'a walked section must not see the fanout item global')\n\
 return 'ok'\n\
-```\n";
+```\n"
+    );
     let out = run_offline(md)
         .await
         .expect("a walked section runs with no item global");
@@ -1773,9 +1859,11 @@ return 'ok'\n\
 /// pins `item: None`, so only a fanout arm's prose may reference it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn item_in_walked_prose_is_a_substitution_error() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Only\n\n\
-Ask about {{ item }}.\n";
+Ask about {{ item }}.\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("{{ item }} outside a fanout arm must fail substitution");
@@ -1791,7 +1879,8 @@ Ask about {{ item }}.\n";
 /// and the chain falls through to the target's following child siblings.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execute_to_a_later_child_runs_the_child_slice_from_that_index() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 local r = execute('### Sub2')\n\
@@ -1809,7 +1898,8 @@ store.append('order.txt', 'Sub2\\n')\n\
 ```lua\n\
 store.append('order.txt', 'Sub3\\n')\n\
 return 'sub3-reply'\n\
-```\n";
+```\n"
+    );
     let store = StoreRef::memory();
     let out = run(&fixture(md), "", &[], &store, silent())
         .await
@@ -1825,7 +1915,8 @@ return 'sub3-reply'\n\
 async fn fanout_arm_without_output_inherits_the_incoming_reply() {
     let gateway = ScriptedGateway::start(vec![resp_text("prior-reply")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## First\n\n\
 Ask for something.\n\n\
 ## Parent\n\n\
@@ -1836,7 +1927,8 @@ return r[1].text\n\
 ### Worker\n\n\
 ```lua\n\
 assert(item == 'alpha')\n\
-```\n";
+```\n"
+    );
     let out = run(
         &bound_for_model(md),
         "",
@@ -1853,7 +1945,8 @@ assert(item == 'alpha')\n\
 /// the walk's sections, never an arm.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn arm_var_is_fresh_not_the_h1_handoff() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 # Test prompt\n\n\
 ```lua\n\
 var.from_h1 = 'seeded'\n\
@@ -1869,7 +1962,8 @@ assert(var.from_h1 == nil, 'an arm var must start fresh')\n\
 return item\n\
 ```\n\n\
 ### Items\n\n\
-- alpha\n";
+- alpha\n"
+    );
     let out = run_offline(md)
         .await
         .expect("the arm runs with a fresh var");
@@ -1880,11 +1974,13 @@ return item\n\
 /// there and calling it is an ordinary Lua error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_from_section_is_absent_on_the_h1() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 # Test prompt\n\n\
 ```lua\n\
 list_from_section('## Nope')\n\
-```\n";
+```\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("list_from_section must be absent on the H1");
@@ -1899,7 +1995,8 @@ list_from_section('## Nope')\n\
 /// its items through `list_from_section` and is never visited by the walk.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn off_walk_list_section_feeds_list_from_section_without_walking() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## List\n\n\
 ---\n\n\
 - alpha\n\
@@ -1909,7 +2006,8 @@ async fn off_walk_list_section_feeds_list_from_section_without_walking() {
 local items = list_from_section('## List')\n\
 assert(#items == 2 and items[1] == 'alpha' and items[2] == 'beta')\n\
 return table.concat(items, ',')\n\
-```\n";
+```\n"
+    );
     let (result, records) = run_recorded(md).await;
     assert_eq!(
         result.expect("an off-walk list section must feed list_from_section"),
@@ -1946,23 +2044,48 @@ Loop forever on {{ item }}.\n\n\
 ### Items\n\n\
 - alpha\n";
     let prompt = bound_with_tools(md, Vec::new());
+    let recorder = Arc::new(Recorder::default());
     let out = run(
         &prompt,
         "",
         &[Arc::new(EchoTool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        gatewayed(addr),
+        RunOptions {
+            observer: Arc::clone(&recorder) as Arc<dyn Observer>,
+            ..gatewayed(addr)
+        },
     )
     .await
     .expect("soft-degraded fanout must still return structured results");
     assert_eq!(out, "ok");
+
+    // FANOUT-004: the exhausted arm emits exactly one FANOUT_ARM_EXHAUSTED
+    // terminal event through the observation channel, and never a succeeded.
+    let records = recorder.records();
+    let exhausted = detail::FANOUT_ARM_EXHAUSTED.to_string();
+    assert_eq!(
+        records
+            .iter()
+            .filter(|(_, section, event)| section == "Worker" && *event == exhausted)
+            .count(),
+        1,
+        "exactly one exhausted terminal event per exhausted arm: {records:?}"
+    );
+    let succeeded = detail::FANOUT_ARM_SUCCEEDED.to_string();
+    assert!(
+        !records
+            .iter()
+            .any(|(_, section, event)| section == "Worker" && *event == succeeded),
+        "an exhausted arm never emits succeeded: {records:?}"
+    );
 }
 
 /// Array members arrive as themselves, in collection order: a string stays a
 /// string, a number a number, a boolean a boolean, a nested table a table.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_collection_array_members_arrive_as_themselves_in_order() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 local r = fanout('### Worker', {'b', 2, true, {nested='x'}})\n\
@@ -1977,7 +2100,8 @@ return 'ok'\n\
 ```lua\n\
 if type(item) == 'table' then return 'table:' .. item.nested end\n\
 return type(item) .. ':' .. tostring(item)\n\
-```\n";
+```\n"
+    );
     let out = run_offline(md)
         .await
         .expect("array members must arrive as themselves");
@@ -1988,7 +2112,8 @@ return type(item) .. ':' .. tostring(item)\n\
 /// `.item` on each arm result carries the same pair table back.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_collection_hash_members_arrive_as_pair_tables() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 local r = fanout('### Worker', {alpha=1, beta='two'})\n\
@@ -2003,7 +2128,8 @@ assert(seen['alpha=1'] and seen['beta=two'])\n\
 return 'ok'\n\
 ```\n\n\
 ### Worker\n\n\
-```lua\nreturn item.key .. '=' .. tostring(item.value)\n```\n";
+```lua\nreturn item.key .. '=' .. tostring(item.value)\n```\n"
+    );
     let out = run_offline(md)
         .await
         .expect("hash members must arrive as pair tables");
@@ -2014,7 +2140,8 @@ return 'ok'\n\
 /// members is legitimate.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_collection_empty_returns_an_empty_table() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 local r = fanout('### Worker', {})\n\
@@ -2022,7 +2149,8 @@ assert(#r == 0)\n\
 return 'ok'\n\
 ```\n\n\
 ### Worker\n\n\
-```lua\nreturn item\n```\n";
+```lua\nreturn item\n```\n"
+    );
     let out = run_offline(md)
         .await
         .expect("an empty collection must return an empty table");
@@ -2032,7 +2160,8 @@ return 'ok'\n\
 /// `.item` on each arm result carries the member value back as a Lua value.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_collection_item_round_trips_members() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 local r = fanout('### Worker', {1, 'two', {n=3}})\n\
@@ -2042,7 +2171,8 @@ assert(type(r[3].item) == 'table' and r[3].item.n == 3)\n\
 return 'ok'\n\
 ```\n\n\
 ### Worker\n\n\
-```lua\nreturn 'done'\n```\n";
+```lua\nreturn 'done'\n```\n"
+    );
     let out = run_offline(md)
         .await
         .expect(".item must round-trip each member");
@@ -2053,7 +2183,8 @@ return 'ok'\n\
 /// shared infrastructure the walk never visits.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_worker_resolves_as_a_sibling() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 local r = fanout('## Worker', {'x'})\n\
@@ -2061,7 +2192,8 @@ return r[1].text\n\
 ```\n\n\
 ## Worker\n\n\
 ---\n\n\
-```lua\nreturn item .. '-done'\n```\n";
+```lua\nreturn item .. '-done'\n```\n"
+    );
     let out = run_offline(md)
         .await
         .expect("a sibling worker must resolve");
@@ -2071,7 +2203,8 @@ return r[1].text\n\
 /// One off-walk sibling worker is shared by two sibling callers.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_worker_shared_by_two_sibling_callers() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## A\n\n\
 ```lua\n\
 local r = fanout('## Worker', {'a'})\n\
@@ -2084,7 +2217,8 @@ return store.read('a.txt') .. ',' .. r[1].text\n\
 ```\n\n\
 ## Worker\n\n\
 ---\n\n\
-```lua\nreturn item .. '-done'\n```\n";
+```lua\nreturn item .. '-done'\n```\n"
+    );
     let out = run_offline(md)
         .await
         .expect("one worker must serve two sibling callers");
@@ -2095,7 +2229,8 @@ return store.read('a.txt') .. ',' .. r[1].text\n\
 /// resolves as not-found.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_niece_worker_is_not_visible() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Main\n\n\
 ```lua\n\
 fanout('### Niece', {'x'})\n\
@@ -2103,7 +2238,8 @@ fanout('### Niece', {'x'})\n\
 ## Other\n\n\
 ```lua\nlocal x = 1\n```\n\n\
 ### Niece\n\n\
-```lua\nreturn item\n```\n";
+```lua\nreturn item\n```\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("a niece worker must not be visible");
@@ -2117,7 +2253,8 @@ fanout('### Niece', {'x'})\n\
 /// `list_from_section`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_string_second_parameter_errors_pointing_at_list_from_section() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 fanout('### Worker', '### Items')\n\
@@ -2125,7 +2262,8 @@ fanout('### Worker', '### Items')\n\
 ### Worker\n\n\
 ```lua\nreturn item\n```\n\n\
 ### Items\n\n\
-- alpha\n";
+- alpha\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("the two-string form must be rejected");
@@ -2143,7 +2281,8 @@ fanout('### Worker', '### Items')\n\
 /// A number or boolean second parameter is not a collection.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_number_and_boolean_second_parameters_error() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 local ok_n, err_n = pcall(fanout, '### Worker', 5)\n\
@@ -2153,7 +2292,8 @@ assert(not ok_b and tostring(err_b):find('collection'), tostring(err_b))\n\
 return 'ok'\n\
 ```\n\n\
 ### Worker\n\n\
-```lua\nreturn item\n```\n";
+```lua\nreturn item\n```\n"
+    );
     let out = run_offline(md)
         .await
         .expect("number and boolean second parameters must error");
@@ -2163,13 +2303,15 @@ return 'ok'\n\
 /// A function member cannot cross into an arm; the error names its index.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_function_member_errors_naming_the_index() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 fanout('### Worker', {'a', function() end})\n\
 ```\n\n\
 ### Worker\n\n\
-```lua\nreturn item\n```\n";
+```lua\nreturn item\n```\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("a function member must error");
@@ -2181,7 +2323,8 @@ fanout('### Worker', {'a', function() end})\n\
 /// A non-scalar (table) key cannot be represented; the error says so.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_table_keyed_member_errors() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 local t = {}\n\
@@ -2189,7 +2332,8 @@ t[{}] = 'x'\n\
 fanout('### Worker', t)\n\
 ```\n\n\
 ### Worker\n\n\
-```lua\nreturn item\n```\n";
+```lua\nreturn item\n```\n"
+    );
     let error = run_offline(md).await.expect_err("a table key must error");
     assert!(
         error
@@ -2202,14 +2346,16 @@ fanout('### Worker', t)\n\
 /// A list section is not a worker template; naming one as the worker errors.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_worker_that_is_a_list_section_errors() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Parent\n\n\
 ```lua\n\
 fanout('### Items', {'x'})\n\
 ```\n\n\
 ### Items\n\n\
 - a\n\
-- b\n";
+- b\n"
+    );
     let error = run_offline(md)
         .await
         .expect_err("a list section is not a worker template");
@@ -2225,7 +2371,8 @@ fanout('### Items', {'x'})\n\
 async fn sys_exposes_section_metadata() {
     let gateway = ScriptedGateway::start(vec![resp_text_finish("alpha-answer", "stop")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+    let md = flow_prompt!(
+        "\
 ## Alpha\n\n\
 ```lua\n\
 assert(sys.section_name == 'Alpha')\n\
@@ -2245,7 +2392,8 @@ assert(sys.section_name == 'Beta')\n\
 assert(sys.section_count == 2)\n\
 assert(sys.execution == 'execute-test')\n\
 return 'done'\n\
-```\n";
+```\n"
+    );
     let out = run(
         &bound_for_model(md),
         "",

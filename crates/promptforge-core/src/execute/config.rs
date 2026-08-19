@@ -90,7 +90,7 @@ impl RunLimits {
 
     /// Sets the maximum number of concurrent fanout arms.
     #[must_use]
-    pub fn fanout_concurrency(mut self, value: NonZeroUsize) -> RunLimits {
+    pub fn max_fanout_concurrency(mut self, value: NonZeroUsize) -> RunLimits {
         self.fanout_concurrency = value;
         self
     }
@@ -131,7 +131,7 @@ impl RunLimits {
 
     /// Returns the maximum number of concurrent fanout arms.
     #[must_use]
-    pub fn fanout(&self) -> NonZeroUsize {
+    pub fn fanout_concurrency(&self) -> NonZeroUsize {
         self.fanout_concurrency
     }
 
@@ -269,7 +269,7 @@ mod tests {
     fn run_limits_pins_all_six_defaults_and_the_untested_builders() {
         let defaults = RunLimits::new();
         assert_eq!(defaults.tool_iterations().get(), 24);
-        assert_eq!(defaults.fanout().get(), 8);
+        assert_eq!(defaults.fanout_concurrency().get(), 8);
         assert_eq!(defaults.response_bytes().get(), 16 * 1024 * 1024);
         assert_eq!(defaults.lua_memory().get(), 64 * 1024 * 1024);
         assert_eq!(defaults.lua_logs().get(), 1024);
