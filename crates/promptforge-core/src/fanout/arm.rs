@@ -346,10 +346,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
     // Re-install the explicit cancel handle on THIS arm's task so its Lua
     // instruction hook and tool loop observe cancellation cooperatively; a
     // spawned task never inherits the parent's task-local (PF-CANCEL-002).
-    let outcome: Result<(LuaFanoutResult, Observation)> = match cancel {
-        Some(handle) => cancel::scope(handle, body).await,
-        None => body.await,
-    };
+    let outcome: Result<(LuaFanoutResult, Observation)> = cancel::maybe_scope(cancel, body).await;
 
     // Single epilogue: tear the VM down once, then record exactly one terminal
     // observation matching the arm's real outcome.

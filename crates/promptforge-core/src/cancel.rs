@@ -124,6 +124,19 @@ where
     CURRENT.scope(cancel, fut).await
 }
 
+/// Runs `fut` under [`scope`] when a handle is present, or bare when it is
+/// not - the explicit-cancel install shared by every entry point that takes
+/// an optional [`CancelHandle`].
+pub(crate) async fn maybe_scope<F, T>(cancel: Option<CancelHandle>, fut: F) -> T
+where
+    F: Future<Output = T>,
+{
+    match cancel {
+        Some(handle) => scope(handle, fut).await,
+        None => fut.await,
+    }
+}
+
 /// Returns the [`CancelHandle`] installed on this task, if any.
 ///
 /// A spawned task (a fanout arm) does NOT inherit the task-local, so code about
