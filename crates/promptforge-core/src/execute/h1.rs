@@ -2,21 +2,16 @@
 //! capabilities and may short-circuit the whole run with a scalar return.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
 
-use crate::client::GatewayClient;
-use crate::debug::DebugCapture;
 use crate::lua::{SectionVm, ToolBinding, ToolBindings, ToolCallCounts};
 use crate::model::ModelBindings;
-use crate::observe::Observer;
 use crate::parser::{Block, Prompt};
 use crate::resolve::RuntimeResolution;
-use crate::store::StoreRef;
 use crate::subst;
-use crate::tools::{SharedTools, ToolRegistry};
+use crate::tools::ToolRegistry;
 use crate::{Error, Result};
 
-use super::config::RunLimits;
+use super::engine::RunContext;
 use super::gateway::{GatewaySource, ResolutionContext, env_client_with_limits};
 use super::scope::prepare_scoped_tools;
 use super::support::{now_rfc3339_checked, sys_json};
@@ -32,26 +27,28 @@ pub(crate) struct LiveH1State {
 }
 
 #[expect(
-    clippy::too_many_arguments,
     clippy::too_many_lines,
-    reason = "H1 mirrors the ordered section block walk over explicit run context"
+    reason = "H1 mirrors the ordered section block walk as one linear pass"
 )]
 pub(crate) async fn execute_live_h1(
     prompt: &Prompt,
-    args: &str,
     resolution: ResolutionContext<'_>,
     registry: &ToolRegistry<'_>,
-    shared_tools: &SharedTools,
-    store: &StoreRef,
-    execution: &str,
-    observer: &dyn Observer,
-    observer_arc: &Arc<dyn Observer>,
-    client: Option<&GatewayClient>,
-    debug: Option<&dyn DebugCapture>,
-    debug_arc: Option<&Arc<dyn DebugCapture>>,
-    limits: RunLimits,
-    turns: Arc<AtomicU32>,
+    frame: &RunContext<'_>,
 ) -> Result<LiveH1State> {
+    let &RunContext {
+        args,
+        shared_tools,
+        store,
+        execution,
+        observer,
+        observer_arc,
+        client,
+        debug,
+        debug_arc,
+        limits,
+        turns,
+    } = frame;
     let default_max_tool_iterations = limits.tool_iterations().get() as usize;
     let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models);
     let now = now_rfc3339_checked()?;
@@ -82,7 +79,7 @@ pub(crate) async fn execute_live_h1(
     // swallowing it (F5). `active_client` stays lazy for the direct H1 prose
     // path below, which builds and propagates its own error via `h1_try!`.
     h1_try!(vm.install_host_apis(observer_arc, &prompt.title));
-    let active_client = client.cloned();
+    let mut active_client = client.clone();
     attach_infer_hook(
         &vm,
         GatewaySource::from_optional(active_client.clone(), limits),
@@ -95,11 +92,10 @@ pub(crate) async fn execute_live_h1(
             .frontmatter
             .max_tool_iterations
             .resolve(default_max_tool_iterations),
-        &turns,
+        turns,
         None,
         Some(runtime.producer()),
     );
-    let mut active_client = active_client;
 
     let mut conversation = Vec::new();
     let mut reply: Option<String> = None;
@@ -116,13 +112,10 @@ pub(crate) async fn execute_live_h1(
             }
             Block::Prose { text, loop_capable } => {
                 let (tool_bindings, model_bindings) = h1_try!(runtime.bindings());
-                let Some(alias) = model_bindings.default() else {
-                    vm.teardown(observer, &prompt.title);
-                    return Err(Error::ModelRequired {
-                        section: prompt.title.clone(),
-                    });
-                };
-                let Some(model) = model_bindings.binding(alias) else {
+                let Some(model) = model_bindings
+                    .default()
+                    .and_then(|alias| model_bindings.binding(alias))
+                else {
                     vm.teardown(observer, &prompt.title);
                     return Err(Error::ModelRequired {
                         section: prompt.title.clone(),

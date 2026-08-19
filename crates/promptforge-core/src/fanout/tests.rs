@@ -1,3 +1,4 @@
+use std::error::Error as _;
 use std::num::NonZeroU32;
 
 use serde_json::json;
@@ -31,17 +32,15 @@ fn resolve_sibling_bare_name_errors() {
 }
 
 fn sibling(name: &str, level: u8) -> Section {
-    Section {
-        name: name.to_string(),
+    crate::test_support::synthetic_section(
+        name,
         level,
-        blocks: vec![Block::Prose {
+        vec![Block::Prose {
             text: String::new(),
             loop_capable: true,
         }],
-        children: Vec::new(),
-        items: Vec::new(),
-        off_walk: false,
-    }
+        Vec::new(),
+    )
 }
 
 #[test]
@@ -84,8 +83,6 @@ async fn fanout_arm_join_failure_preserves_the_join_error_source() {
     // A panicked/aborted arm surfaces as `Error::FanoutArmJoin` that keeps
     // the structured `JoinError` as its `#[source]`, rather than being
     // flattened into an `Error::Lua` string that loses the cause.
-    use std::error::Error as _;
-
     let join_error = tokio::spawn(async { panic!("arm blew up") })
         .await
         .expect_err("a panicking task must produce a JoinError");
@@ -107,14 +104,11 @@ async fn a_panicking_arm_maps_to_fanout_arm_join_through_the_select_loop() {
     // (every arm-internal failure is a `Result`), so the sentinel item
     // injects the panic (test-only, in `run_one_arm`). The run must surface
     // `Error::FanoutArmJoin` with the `JoinError` preserved as the source.
-    use std::error::Error as _;
-
     let worker = lua_worker("return item");
     let sentinel = super::arm::PANIC_ARM_SENTINEL;
     let items = vec![json!("ok"), json!(sentinel)];
     let fixture = FanoutFixture::new();
-    let observer = NullObserver;
-    let ctx = fixture.ctx("fanout-join-panic-test", RunLimits::new(), &observer);
+    let ctx = fixture.ctx("fanout-join-panic-test", RunLimits::new(), &NullObserver);
 
     let error = cancel::scope(CancelHandle::new(), run_fanout_arms(&worker, &items, &ctx))
         .await
@@ -139,8 +133,7 @@ async fn pre_cancelled_fanout_returns_interrupted() {
     let worker = lua_worker("return item");
     let items = vec![json!("alpha"), json!("beta")];
     let fixture = FanoutFixture::new();
-    let observer = NullObserver;
-    let ctx = fixture.ctx("fanout-cancel-test", RunLimits::new(), &observer);
+    let ctx = fixture.ctx("fanout-cancel-test", RunLimits::new(), &NullObserver);
 
     let cancel = CancelHandle::new();
     cancel.cancel();
@@ -166,11 +159,10 @@ async fn fatal_arm_aborts_and_drops_blocked_siblings() {
     // queued and must never be spawned once the first arm fails.
     let items = vec![json!("boom"), json!("beta"), json!("gamma")];
     let fixture = FanoutFixture::new();
-    let observer = NullObserver;
     let ctx = fixture.ctx(
         "fanout-fatal-test",
-        RunLimits::new().fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
-        &observer,
+        RunLimits::new().max_fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
+        &NullObserver,
     );
 
     let error = cancel::scope(CancelHandle::new(), run_fanout_arms(&worker, &items, &ctx))
@@ -205,7 +197,6 @@ fn arm_window_never_exceeds_the_concurrency_limit() {
             let mut window = ArmWindow::new(count, concurrency);
             let mut in_flight: Vec<usize> = Vec::new();
             let mut dispatched: Vec<usize> = Vec::new();
-            let mut max_outstanding = 0usize;
 
             while let Some(index) = window.take_next() {
                 in_flight.push(index);
@@ -223,15 +214,13 @@ fn arm_window_never_exceeds_the_concurrency_limit() {
                     "outstanding {} exceeded limit {limit}",
                     in_flight.len()
                 );
-                max_outstanding = max_outstanding.max(in_flight.len());
                 // Complete arms from alternating ends to vary the order.
-                let done = if toggle {
-                    in_flight.remove(0)
+                if toggle {
+                    in_flight.remove(0);
                 } else {
-                    in_flight.pop().expect("non-empty")
-                };
+                    in_flight.pop();
+                }
                 toggle = !toggle;
-                let _ = done;
                 window.complete_one();
                 while let Some(index) = window.take_next() {
                     in_flight.push(index);
@@ -239,7 +228,6 @@ fn arm_window_never_exceeds_the_concurrency_limit() {
                 }
             }
 
-            assert!(max_outstanding <= limit);
             dispatched.sort_unstable();
             assert_eq!(
                 dispatched,
@@ -259,8 +247,7 @@ async fn fanout_accepts_a_list_over_the_old_default_cap() {
     let worker = lua_worker("return item");
     let items: Vec<serde_json::Value> = (0..1025).map(|i| json!(i.to_string())).collect();
     let fixture = FanoutFixture::new();
-    let observer = NullObserver;
-    let ctx = fixture.ctx("fanout-uncapped-test", RunLimits::new(), &observer);
+    let ctx = fixture.ctx("fanout-uncapped-test", RunLimits::new(), &NullObserver);
 
     let results = run_fanout_arms(&worker, &items, &ctx)
         .await
@@ -282,8 +269,7 @@ async fn model_required_when_arm_prose_has_no_binding() {
     }];
     let items = vec![json!("alpha")];
     let fixture = FanoutFixture::new();
-    let observer = NullObserver;
-    let ctx = fixture.ctx("fanout-test", RunLimits::new(), &observer);
+    let ctx = fixture.ctx("fanout-test", RunLimits::new(), &NullObserver);
 
     let error = run_fanout_arms(&worker, &items, &ctx)
         .await
@@ -448,8 +434,7 @@ async fn the_shared_replay_sees_the_arm_item() {
         "Worker",
     )
     .expect("test Lua must compile");
-    let observer = NullObserver;
-    let ctx = fixture.ctx("fanout-terminal-test", RunLimits::new(), &observer);
+    let ctx = fixture.ctx("fanout-terminal-test", RunLimits::new(), &NullObserver);
 
     let results = run_fanout_arms(&worker, &items, &ctx)
         .await
@@ -484,6 +469,92 @@ async fn a_hard_failing_arm_emits_a_failed_terminal_event() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_vm_construction_failure_emits_one_failed_terminal_event() {
+    // The VM-construction-failure branch, covered by test-only fault
+    // injection: the finalizer finishes `FANOUT_ARM_FAILED` and the arm
+    // returns before its body runs, so the fanout fails with the
+    // construction error and no teardown or second terminal event fires.
+    let mut worker = lua_worker("return item");
+    worker.name = super::arm::FAIL_ARM_VM_SENTINEL.to_string();
+    let items = vec![json!("a")];
+    let fixture = FanoutFixture::new();
+    let recorder = EventRecorder::default();
+    let ctx = fixture.ctx("fanout-terminal-test", RunLimits::new(), &recorder);
+
+    let error = run_fanout_arms(&worker, &items, &ctx)
+        .await
+        .expect_err("an injected construction failure must fail the fanout");
+    assert!(
+        error
+            .to_string()
+            .contains("test-injected VM construction failure"),
+        "the construction error propagates: {error}"
+    );
+    assert_eq!(
+        recorder.count(&detail::FANOUT_ARM_FAILED),
+        1,
+        "the arm finishes failed exactly once: {:?}",
+        recorder.snapshot()
+    );
+    assert_eq!(recorder.count(&detail::FANOUT_ARM_SUCCEEDED), 0);
+    assert_eq!(
+        recorder.count(&detail::FANOUT_ARM_CANCELLED),
+        0,
+        "a finished finalizer must not also emit cancelled on drop: {:?}",
+        recorder.snapshot()
+    );
+    assert_eq!(
+        recorder.count(&detail::LUA_TEARDOWN_STARTED),
+        0,
+        "a failed construction has no VM to tear down: {:?}",
+        recorder.snapshot()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_setup_failure_tears_the_vm_down_once_and_emits_one_failed_event() {
+    // The setup-error path through the arm's single epilogue: a shared chunk
+    // whose top-level errors at replay fails the arm body, so the epilogue
+    // tears the VM down exactly once and records one `FANOUT_ARM_FAILED`.
+    let worker = lua_worker("return item");
+    let items = vec![json!("a")];
+    let mut fixture = FanoutFixture::new();
+    fixture.shared = LuaProgram::compile(
+        "error('boom')",
+        "test shared",
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
+        "fanout-terminal-test",
+        &crate::observe::NullObserver,
+        "Worker",
+    )
+    .expect("test Lua must compile");
+    let recorder = EventRecorder::default();
+    let ctx = fixture.ctx("fanout-terminal-test", RunLimits::new(), &recorder);
+
+    let error = run_fanout_arms(&worker, &items, &ctx)
+        .await
+        .expect_err("a shared-replay failure must fail the fanout");
+    assert!(
+        error.to_string().contains("boom"),
+        "the setup error propagates: {error}"
+    );
+    assert_eq!(
+        recorder.count(&detail::FANOUT_ARM_FAILED),
+        1,
+        "the arm finishes failed exactly once: {:?}",
+        recorder.snapshot()
+    );
+    assert_eq!(recorder.count(&detail::FANOUT_ARM_SUCCEEDED), 0);
+    assert_eq!(
+        recorder.count(&detail::LUA_TEARDOWN_STARTED),
+        1,
+        "the epilogue tears the VM down exactly once: {:?}",
+        recorder.snapshot()
+    );
+    assert_eq!(recorder.count(&detail::LUA_TEARDOWN_SUCCEEDED), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn results_follow_collection_order_not_finish_order() {
     // The first arm is gated on a store key only the second arm writes, so it
     // finishes after its sibling; the returned vec must still follow
@@ -498,8 +569,7 @@ async fn results_follow_collection_order_not_finish_order() {
     );
     let items = vec![json!("one"), json!("two")];
     let fixture = FanoutFixture::new();
-    let observer = NullObserver;
-    let ctx = fixture.ctx("fanout-ordering-test", RunLimits::new(), &observer);
+    let ctx = fixture.ctx("fanout-ordering-test", RunLimits::new(), &NullObserver);
 
     let results = run_fanout_arms(&worker, &items, &ctx)
         .await
@@ -519,8 +589,7 @@ async fn an_empty_collection_returns_empty_results() {
     let worker = lua_worker("return item");
     let items: Vec<serde_json::Value> = Vec::new();
     let fixture = FanoutFixture::new();
-    let observer = NullObserver;
-    let ctx = fixture.ctx("fanout-empty-test", RunLimits::new(), &observer);
+    let ctx = fixture.ctx("fanout-empty-test", RunLimits::new(), &NullObserver);
 
     let results = run_fanout_arms(&worker, &items, &ctx)
         .await
@@ -540,12 +609,11 @@ async fn arm_control_globals_resolve_over_the_threaded_home_and_handles() {
     );
     let items = vec![json!("alpha")];
     let fixture = FanoutFixture::new();
-    let observer = NullObserver;
     let mut list = sibling("List", 3);
     list.items = vec!["x".to_string(), "y".to_string()];
     let home = vec![list];
     let handles = vec![LuaSectionHandle::new("Parent", false)];
-    let mut ctx = fixture.ctx("fanout-home-test", RunLimits::new(), &observer);
+    let mut ctx = fixture.ctx("fanout-home-test", RunLimits::new(), &NullObserver);
     ctx.home = &home;
     ctx.task_handles = &handles;
 
