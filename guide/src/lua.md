@@ -99,6 +99,10 @@ Using this research: {{ var.research }}
 Write a summary.
 ````
 
+Both `jump` and `execute` address any section in the caller's visible set: its sibling sections at its own nesting level (for a top-level section, the other H2 sections) plus its direct children, disambiguated by heading level - `## Peer` matches only a sibling, `### Child` only a direct child. The parent, nieces and nephews, grandchildren, and the caller itself are not visible and resolve as not-found, with the error listing only the visible sections.
+
+A jump to a child heading starts a child-level walk within the jumper's children: the walk begins at the target (which runs even when marked off-walk) and falls through to its following siblings under the same rules as the top-level walk. When the level exhausts, the parent walk resumes at the section after the jumper, and the sub-walk's last reply becomes the reply the next section sees. The rule recurses to deeper levels - a child can jump to its own children. A walk never descends on its own, so a section's children run only when addressed.
+
 Reply preservation across `jump()` enables routing patterns where one section's analysis determines the next section's context:
 
 ````markdown
@@ -142,8 +146,8 @@ Escalate this with recommended actions.
 | `models.infer(prompt)` | One tool-free inference round on the section's current model |
 | `handle:infer(prompt)` | Tool-loop inference on a specific model handle |
 | `store.*` | Virtual filesystem operations |
-| `jump("## Section")` | Transfer control |
-| `execute("## Section", input?)` | Run section as subroutine |
+| `jump("## Section")` | Transfer control to a visible section (a sibling or a direct child); a child target starts a child-level walk |
+| `execute("## Section", input?)` | Run a visible section (a sibling or a direct child) as a subroutine |
 | `fanout(worker, list)` | Map a worker over a list section in parallel |
 | `list_from_section("## List")` | Return a list section's pre-parsed items as an array of strings |
 | `log(msg)` | Emit a diagnostic to the observer |
