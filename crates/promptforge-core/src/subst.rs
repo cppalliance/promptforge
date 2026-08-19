@@ -4,7 +4,7 @@
 //! placeholders in the prose before the model sees it. Lua source in the
 //! prologue and epilog is never substituted. Five namespaces are available:
 //! `args` (the single raw input string), `reply` (the previous section's model
-//! reply, nil in section 1), `item` (the current fanout arm's item text, nil
+//! reply, nil in section 1), `item` (the current fanout arm's item value, nil
 //! outside arms), `var` (values the prologue wrote), and `sys`
 //! (runtime-provided metadata). Resolution is a single pass with no recursion:
 //! scalars render as strings, tables/arrays as JSON, and a missing path is a
@@ -115,14 +115,31 @@ impl std::error::Error for SubstitutionError {
 
 type SubstResult<T> = std::result::Result<T, SubstitutionError>;
 
+/// Renders a fanout arm's item for prose substitution and stub text:
+/// strings verbatim, numbers and booleans in their natural string form,
+/// arrays and objects as compact JSON.
+#[must_use]
+pub(crate) fn render_item(item: &Value) -> String {
+    match item {
+        Value::String(s) => s.clone(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        // Serializing a `Value` cannot fail; the default is unreachable.
+        Value::Null | Value::Array(_) | Value::Object(_) => {
+            serde_json::to_string(item).unwrap_or_default()
+        }
+    }
+}
+
 /// Resolve every `{{ path }}` in `prose` against `args`, `reply`, `item`,
 /// `var`, and `sys`.
 ///
 /// `var` and `sys` are JSON objects (`var` read back from the Lua prologue,
 /// `sys` built by the runtime). `reply` is the previous section's model
 /// reply text, or `None` in the first section. `item` is the current fanout
-/// arm's item text, or `None` outside arms. This function receives prose
-/// only and does not transform either compiled Lua phase.
+/// arm's item value, or `None` outside arms; it renders per
+/// [`render_item`]. This function receives prose only and does not transform
+/// either compiled Lua phase.
 ///
 /// # Errors
 /// Returns [`Error::Substitution`](crate::Error::Substitution) for an unclosed
@@ -133,7 +150,7 @@ pub(crate) fn substitute(
     prose: &str,
     args: &str,
     reply: Option<&str>,
-    item: Option<&str>,
+    item: Option<&Value>,
     var: &Value,
     sys: &Value,
 ) -> Result<String> {
@@ -144,7 +161,7 @@ fn substitute_inner(
     prose: &str,
     args: &str,
     reply: Option<&str>,
-    item: Option<&str>,
+    item: Option<&Value>,
     var: &Value,
     sys: &Value,
 ) -> SubstResult<String> {
@@ -192,7 +209,7 @@ fn resolve(
     offset: usize,
     args: &str,
     reply: Option<&str>,
-    item: Option<&str>,
+    item: Option<&Value>,
     var: &Value,
     sys: &Value,
 ) -> SubstResult<String> {
@@ -209,7 +226,7 @@ fn resolve(
         });
     }
     if path == "item" {
-        return item.map(String::from).ok_or_else(|| {
+        return item.map(render_item).ok_or_else(|| {
             SubstitutionError::new(
                 SubstErrorKind::NilItem,
                 offset,
@@ -341,7 +358,7 @@ mod tests {
     fn err_of(prose: &str) -> SubstitutionError {
         let var = json!({ "kind": "library", "row": { "a": 1 }, "arr": [1, 2] });
         let sys = json!({ "id": 1 });
-        substitute_inner(prose, "Acme Corp", Some("r"), Some("i"), &var, &sys)
+        substitute_inner(prose, "Acme Corp", Some("r"), Some(&json!("i")), &var, &sys)
             .expect_err("expected substitution failure")
     }
 
@@ -546,7 +563,15 @@ mod tests {
     fn resolves_item_when_present() {
         let var = json!({});
         let sys = json!({});
-        let out = substitute("topic: {{ item }}", "", None, Some("the angle"), &var, &sys).unwrap();
+        let out = substitute(
+            "topic: {{ item }}",
+            "",
+            None,
+            Some(&json!("the angle")),
+            &var,
+            &sys,
+        )
+        .unwrap();
         assert_eq!(out, "topic: the angle");
     }
 
@@ -566,11 +591,24 @@ mod tests {
     fn item_dot_path_is_error() {
         let var = json!({});
         let sys = json!({});
-        let err = substitute("{{ item.x }}", "", None, Some("text"), &var, &sys)
+        let err = substitute("{{ item.x }}", "", None, Some(&json!("text")), &var, &sys)
             .expect_err("item is a string, not a table");
         assert!(
             err.to_string().contains("not a table"),
             "error must say not a table: {err}"
         );
+    }
+
+    #[test]
+    fn render_item_renders_by_type() {
+        // The item rendering rule: strings verbatim, numbers and booleans in
+        // their natural string form, arrays and objects as compact JSON.
+        assert_eq!(render_item(&json!("abc")), "abc");
+        assert_eq!(render_item(&json!(3)), "3");
+        assert_eq!(render_item(&json!(1.5)), "1.5");
+        assert_eq!(render_item(&json!(true)), "true");
+        assert_eq!(render_item(&json!(["a", 1])), "[\"a\",1]");
+        assert_eq!(render_item(&json!({ "k": 1 })), "{\"k\":1}");
+        assert_eq!(render_item(&Value::Null), "null");
     }
 }
