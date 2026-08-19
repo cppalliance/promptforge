@@ -215,6 +215,28 @@ fn silent() -> RunOptions {
     }
 }
 
+/// Options that report nowhere and point the run's client at the given
+/// scripted gateway.
+fn gatewayed(addr: SocketAddr) -> RunOptions {
+    RunOptions {
+        execution: EXECUTION,
+        observer: Arc::new(NullObserver),
+        client: Some(GatewayClient::new(
+            GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+            SecretString::new("test").expect("non-empty test key"),
+        )),
+        debug: None,
+    }
+}
+
+/// True when the host exports no gateway configuration, so a test asserting
+/// the lazy-client construction error cannot be turned into a real gateway
+/// call by a developer's PROMPTFORGE_GATEWAY_* variables.
+fn gateway_env_is_unset() -> bool {
+    std::env::var_os("PROMPTFORGE_GATEWAY_URL").is_none()
+        && std::env::var_os("PROMPTFORGE_GATEWAY_API_KEY").is_none()
+}
+
 /// Parse `md` and run it offline with empty `args`, no tools, and a fresh
 /// in-memory store created for the run - the ergonomic path for the
 /// Lua-only tests that do not care about the store's contents.

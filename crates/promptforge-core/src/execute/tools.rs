@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
 use crate::cancel;
-use crate::client::{CompletionResult, Message, ToolSchema};
+use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::debug::{DebugCapture, DebugEvent};
 use crate::lua::{
     LiveBindingProducer, LocalTools, ModelBindings, ModelInferHook, ModelRuntime, ModelsInferHook,
@@ -18,6 +18,7 @@ use crate::observe::{Observer, detail};
 use crate::tools::{SharedTools, ToolId, ToolRegistry};
 use crate::{Error, Result};
 
+use super::config::RunLimits;
 use super::gateway::GatewaySource;
 use super::scope::{ToolAnalysis, prepare_scoped_tools, validate_effective_scope_inner};
 use super::support::{advance_turn, bridge_blocking};
@@ -381,6 +382,42 @@ impl InferContext {
             )),
         }
     }
+}
+
+/// Installs the infer hook the two engine drivers (the section walk and the
+/// fanout arm) share: the handed client (or the environment) wrapped in the
+/// lazy [`GatewaySource`], the prompt's tool analysis always present, and no
+/// live H1 bindings. One helper so this slot list lives in exactly one place.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shared install threads the same borrowed run context both drivers carry"
+)]
+pub(crate) fn attach_engine_infer_hook(
+    vm: &SectionVm,
+    client: Option<GatewayClient>,
+    limits: RunLimits,
+    shared_tools: &SharedTools,
+    observer: Arc<dyn Observer>,
+    debug: Option<Arc<dyn DebugCapture>>,
+    execution: &str,
+    section: &str,
+    max_tool_iterations: usize,
+    turns: &Arc<AtomicU32>,
+    analysis: &ToolAnalysis,
+) {
+    attach_infer_hook(
+        vm,
+        GatewaySource::from_optional(client, limits),
+        shared_tools,
+        observer,
+        debug,
+        execution,
+        section,
+        max_tool_iterations,
+        turns,
+        Some(analysis),
+        None,
+    );
 }
 
 #[expect(

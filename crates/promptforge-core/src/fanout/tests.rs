@@ -95,6 +95,13 @@ fn resolve_sibling_requires_whitespace_after_markers() {
 }
 
 #[test]
+fn resolve_sibling_marker_only_heading_errors_as_nameless() {
+    let sections = vec![sibling("Worker", 3)];
+    let err = resolve_sibling("### ", &sections).expect_err("a marker-only heading must error");
+    assert!(err.to_string().contains("has no name"), "error was: {err}");
+}
+
+#[test]
 fn resolve_sibling_requires_exact_level() {
     let sections = vec![sibling("Worker", 3)];
     // Same name, wrong marker level, must not resolve.
@@ -140,29 +147,11 @@ async fn pre_cancelled_fanout_returns_interrupted() {
     use crate::Error;
     use crate::cancel::{self, CancelHandle};
     use crate::client::GatewayClient;
-    use crate::lua::LuaProgram;
     use crate::model::ModelBindings;
     use crate::observe::NullObserver;
-    use crate::parser::Section;
     use crate::store::StoreRef;
 
-    let prologue = LuaProgram::compile(
-        "return item",
-        "test prologue",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        "fanout-cancel-test",
-        &NullObserver,
-        "Worker",
-    )
-    .expect("test Lua must compile");
-    let worker = Section {
-        name: "Worker".to_string(),
-        level: 3,
-        blocks: vec![Block::Lua(prologue)],
-        children: Vec::new(),
-        items: Vec::new(),
-        off_walk: false,
-    };
+    let worker = lua_worker("return item");
     let items = vec![json!("alpha"), json!("beta")];
     let store = StoreRef::memory();
     let bindings = ToolBindings::default();
@@ -172,28 +161,18 @@ async fn pre_cancelled_fanout_returns_interrupted() {
     let client: Option<GatewayClient> = None;
     let observer = NullObserver;
     let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = FanoutContext {
-        args: "",
-        store: &store,
-        execution: "fanout-cancel-test",
-        observer: &observer,
-        client: &client,
-        debug: None,
-        shared: &shared,
-        bindings: &bindings,
-        models: &models,
-        analysis: &analysis,
-        shared_tools: &shared_tools,
-        max_tool_iterations: 24,
-        fanout_concurrency: NonZeroUsize::new(8).expect("8 is non-zero"),
-        max_fanout_items: NonZeroUsize::new(1024).expect("1024 is non-zero"),
-        lua_memory_bytes: 64 * 1024 * 1024,
-        lua_log_events: 1024,
-        last_reply: None,
-        when: "2026-08-08",
-        parent_id: 1,
-        section_count: 1,
-    };
+    let ctx = terminal_ctx(
+        "fanout-cancel-test",
+        RunLimits::new(),
+        &observer,
+        &store,
+        &bindings,
+        &models,
+        &analysis,
+        &shared_tools,
+        &client,
+        &shared,
+    );
 
     let cancel = CancelHandle::new();
     cancel.cancel();
@@ -216,26 +195,11 @@ async fn fatal_arm_aborts_and_drops_blocked_siblings() {
     use crate::client::GatewayClient;
     use crate::model::ModelBindings;
     use crate::observe::NullObserver;
-    use crate::parser::Section;
     use crate::store::StoreRef;
 
-    let prologue = LuaProgram::compile(
+    let worker = lua_worker(
         "store.append('log.txt', item)\nif item == 'boom' then error('fatal arm error') end\nreturn item",
-        "worker prologue",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        "fanout-fatal-test",
-        &NullObserver,
-        "Worker",
-    )
-    .expect("test Lua must compile");
-    let worker = Section {
-        name: "Worker".to_string(),
-        level: 3,
-        blocks: vec![Block::Lua(prologue)],
-        children: Vec::new(),
-        items: Vec::new(),
-        off_walk: false,
-    };
+    );
     // The fatal item is dispatched first; with concurrency 1 the siblings stay
     // queued and must never be spawned once the first arm fails.
     let items = vec![json!("boom"), json!("beta"), json!("gamma")];
@@ -247,28 +211,18 @@ async fn fatal_arm_aborts_and_drops_blocked_siblings() {
     let client: Option<GatewayClient> = None;
     let observer = NullObserver;
     let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = FanoutContext {
-        args: "",
-        store: &store,
-        execution: "fanout-fatal-test",
-        observer: &observer,
-        client: &client,
-        debug: None,
-        shared: &shared,
-        bindings: &bindings,
-        models: &models,
-        analysis: &analysis,
-        shared_tools: &shared_tools,
-        max_tool_iterations: 24,
-        fanout_concurrency: NonZeroUsize::new(1).expect("1 is non-zero"),
-        max_fanout_items: NonZeroUsize::new(1024).expect("1024 is non-zero"),
-        lua_memory_bytes: 64 * 1024 * 1024,
-        lua_log_events: 1024,
-        last_reply: None,
-        when: "2026-08-08",
-        parent_id: 1,
-        section_count: 1,
-    };
+    let ctx = terminal_ctx(
+        "fanout-fatal-test",
+        RunLimits::new().fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
+        &observer,
+        &store,
+        &bindings,
+        &models,
+        &analysis,
+        &shared_tools,
+        &client,
+        &shared,
+    );
 
     let error = cancel::scope(CancelHandle::new(), run_fanout_arms(&worker, &items, &ctx))
         .await
@@ -385,10 +339,7 @@ async fn fanout_rejects_a_list_over_the_item_cap() {
         analysis: &analysis,
         shared_tools: &shared_tools,
         max_tool_iterations: 24,
-        fanout_concurrency: NonZeroUsize::new(8).expect("8 is non-zero"),
-        max_fanout_items: NonZeroUsize::new(3).expect("3 is non-zero"),
-        lua_memory_bytes: 64 * 1024 * 1024,
-        lua_log_events: 1024,
+        limits: RunLimits::new().max_fanout_items(NonZeroUsize::new(3).expect("3 is non-zero")),
         last_reply: None,
         when: "2026-08-08",
         parent_id: 1,
@@ -433,28 +384,18 @@ async fn model_required_when_arm_prose_has_no_binding() {
     let client: Option<GatewayClient> = None;
     let observer = NullObserver;
     let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = FanoutContext {
-        args: "",
-        store: &store,
-        execution: "fanout-test",
-        observer: &observer,
-        client: &client,
-        debug: None,
-        shared: &shared,
-        bindings: &bindings,
-        models: &models,
-        analysis: &analysis,
-        shared_tools: &shared_tools,
-        max_tool_iterations: 24,
-        fanout_concurrency: NonZeroUsize::new(8).expect("8 is non-zero"),
-        max_fanout_items: NonZeroUsize::new(1024).expect("1024 is non-zero"),
-        lua_memory_bytes: 64 * 1024 * 1024,
-        lua_log_events: 1024,
-        last_reply: None,
-        when: "2026-08-08",
-        parent_id: 1,
-        section_count: 1,
-    };
+    let ctx = terminal_ctx(
+        "fanout-test",
+        RunLimits::new(),
+        &observer,
+        &store,
+        &bindings,
+        &models,
+        &analysis,
+        &shared_tools,
+        &client,
+        &shared,
+    );
 
     let error = run_fanout_arms(&worker, &items, &ctx)
         .await
@@ -471,32 +412,30 @@ async fn model_required_when_arm_prose_has_no_binding() {
     );
 }
 
-/// Records every observation's Display string, in order.
+/// Records every observation it is handed, in order, so tests assert against
+/// the `detail::FANOUT_ARM_*` constants rather than Display wording.
 #[derive(Default)]
-struct EventRecorder(std::sync::Mutex<Vec<String>>);
+struct EventRecorder(std::sync::Mutex<Vec<Observation>>);
 
 impl Observer for EventRecorder {
     fn observe(&self, _execution: &str, _section: &str, event: Observation) {
         self.0
             .lock()
             .expect("recorder mutex is not poisoned")
-            .push(event.to_string());
+            .push(event);
     }
 }
 
 impl EventRecorder {
-    fn snapshot(&self) -> Vec<String> {
+    fn snapshot(&self) -> Vec<Observation> {
         self.0
             .lock()
             .expect("recorder mutex is not poisoned")
             .clone()
     }
 
-    fn count(&self, label: &str) -> usize {
-        self.snapshot()
-            .iter()
-            .filter(|e| e.as_str() == label)
-            .count()
+    fn count(&self, event: &Observation) -> usize {
+        self.snapshot().iter().filter(|e| *e == event).count()
     }
 }
 
@@ -523,9 +462,11 @@ fn lua_worker(source: &str) -> Section {
 #[expect(
     clippy::ref_option,
     clippy::too_many_arguments,
-    reason = "FanoutContext.client borrows an Option<GatewayClient>, so the helper must too; the argument list mirrors the context's fields"
+    reason = "FanoutContext.client borrows an Option<GatewayClient>, so the helper must too; the argument list mirrors the context's fields plus the two knobs (execution name, limits) the routed tests vary"
 )]
 fn terminal_ctx<'a>(
+    execution: &'a str,
+    limits: RunLimits,
     observer: &'a dyn Observer,
     store: &'a StoreRef,
     bindings: &'a ToolBindings,
@@ -538,7 +479,7 @@ fn terminal_ctx<'a>(
     FanoutContext {
         args: "",
         store,
-        execution: "fanout-terminal-test",
+        execution,
         observer,
         client,
         debug: None,
@@ -548,10 +489,7 @@ fn terminal_ctx<'a>(
         analysis,
         shared_tools,
         max_tool_iterations: 24,
-        fanout_concurrency: NonZeroUsize::new(4).expect("4 is non-zero"),
-        max_fanout_items: NonZeroUsize::new(1024).expect("1024 is non-zero"),
-        lua_memory_bytes: 64 * 1024 * 1024,
-        lua_log_events: 1024,
+        limits,
         last_reply: None,
         when: "2026-08-08",
         parent_id: 1,
@@ -575,6 +513,8 @@ async fn each_arm_emits_a_distinct_succeeded_terminal_event() {
     let recorder = EventRecorder::default();
     let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = terminal_ctx(
+        "fanout-terminal-test",
+        RunLimits::new(),
         &recorder,
         &store,
         &bindings,
@@ -589,15 +529,15 @@ async fn each_arm_emits_a_distinct_succeeded_terminal_event() {
         .await
         .expect("both arms must succeed");
     assert_eq!(results.len(), 2);
-    assert_eq!(recorder.count("Fanout arm started"), 2);
+    assert_eq!(recorder.count(&detail::FANOUT_ARM_STARTED), 2);
     assert_eq!(
-        recorder.count("Fanout arm succeeded"),
+        recorder.count(&detail::FANOUT_ARM_SUCCEEDED),
         2,
         "each arm emits one distinct succeeded event: {:?}",
         recorder.snapshot()
     );
-    assert_eq!(recorder.count("Fanout arm failed"), 0);
-    assert_eq!(recorder.count("Fanout arm cancelled"), 0);
+    assert_eq!(recorder.count(&detail::FANOUT_ARM_FAILED), 0);
+    assert_eq!(recorder.count(&detail::FANOUT_ARM_CANCELLED), 0);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -629,6 +569,8 @@ async fn the_shared_replay_sees_the_arm_item() {
     )
     .expect("test Lua must compile");
     let ctx = terminal_ctx(
+        "fanout-terminal-test",
+        RunLimits::new(),
         &observer,
         &store,
         &bindings,
@@ -664,6 +606,8 @@ async fn a_hard_failing_arm_emits_a_failed_terminal_event() {
     let recorder = EventRecorder::default();
     let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = terminal_ctx(
+        "fanout-terminal-test",
+        RunLimits::new(),
         &recorder,
         &store,
         &bindings,
@@ -678,12 +622,95 @@ async fn a_hard_failing_arm_emits_a_failed_terminal_event() {
         .await
         .expect_err("a hard arm error must fail the fanout");
     assert_eq!(
-        recorder.count("Fanout arm failed"),
+        recorder.count(&detail::FANOUT_ARM_FAILED),
         1,
         "the failing arm emits one failed event: {:?}",
         recorder.snapshot()
     );
-    assert_eq!(recorder.count("Fanout arm succeeded"), 0);
+    assert_eq!(recorder.count(&detail::FANOUT_ARM_SUCCEEDED), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn results_follow_collection_order_not_finish_order() {
+    use crate::observe::NullObserver;
+
+    // The first arm is gated on a store key only the second arm writes, so it
+    // finishes after its sibling; the returned vec must still follow
+    // collection order, not finish order.
+    let worker = lua_worker(
+        "if item == 'one' then\n\
+            while not pcall(store.read, 'gate.txt') do end\n\
+            return 'one-late'\n\
+        end\n\
+        store.append('gate.txt', 'x')\n\
+        return 'two-early'",
+    );
+    let items = vec![json!("one"), json!("two")];
+    let store = StoreRef::memory();
+    let bindings = ToolBindings::default();
+    let models = <ModelBindings as Default>::default();
+    let analysis = crate::execute::ToolAnalysis::default();
+    let shared_tools = SharedTools::default();
+    let client: Option<GatewayClient> = None;
+    let observer = NullObserver;
+    let shared = LuaProgram::empty().expect("the empty chunk compiles");
+    let ctx = terminal_ctx(
+        "fanout-ordering-test",
+        RunLimits::new(),
+        &observer,
+        &store,
+        &bindings,
+        &models,
+        &analysis,
+        &shared_tools,
+        &client,
+        &shared,
+    );
+
+    let results = run_fanout_arms(&worker, &items, &ctx)
+        .await
+        .expect("both arms must succeed");
+    assert_eq!(
+        results,
+        vec![
+            LuaFanoutResult::success(json!("one"), "one-late"),
+            LuaFanoutResult::success(json!("two"), "two-early"),
+        ],
+        "results must follow collection order, not finish order"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_empty_collection_returns_empty_results() {
+    use crate::observe::NullObserver;
+
+    let worker = lua_worker("return item");
+    let items: Vec<serde_json::Value> = Vec::new();
+    let store = StoreRef::memory();
+    let bindings = ToolBindings::default();
+    let models = <ModelBindings as Default>::default();
+    let analysis = crate::execute::ToolAnalysis::default();
+    let shared_tools = SharedTools::default();
+    let client: Option<GatewayClient> = None;
+    let observer = NullObserver;
+    let shared = LuaProgram::empty().expect("the empty chunk compiles");
+    let ctx = terminal_ctx(
+        "fanout-empty-test",
+        RunLimits::new(),
+        &observer,
+        &store,
+        &bindings,
+        &models,
+        &analysis,
+        &shared_tools,
+        &client,
+        &shared,
+    );
+
+    let results = run_fanout_arms(&worker, &items, &ctx)
+        .await
+        .expect("an empty collection must succeed");
+    assert!(results.is_empty(), "no items, no results: {results:?}");
 }
 
 /// Signals a oneshot the first time it observes a Lua `log` event, so a test
@@ -727,6 +754,8 @@ async fn an_in_flight_fanout_arm_is_cancelled_cooperatively() {
     };
     let shared = LuaProgram::empty().expect("the empty chunk compiles");
     let ctx = terminal_ctx(
+        "fanout-terminal-test",
+        RunLimits::new(),
         &observer,
         &store,
         &bindings,
@@ -766,22 +795,23 @@ fn arm_finalizer_emits_cancelled_on_drop_unless_finished() {
     // FANOUT-004/006: the guard emits exactly one terminal event. Dropped
     // without finishing => cancelled; finished => only that event.
     let (tx, mut rx) = mpsc::channel::<(String, Observation)>(8);
-    let proxy = Arc::new(ProxyObserver { tx });
+    let observer: Arc<dyn Observer> = Arc::new(ProxyObserver { tx });
 
     drop(ArmFinalizer::new(
-        Arc::clone(&proxy),
+        Arc::clone(&observer),
         "exec".to_string(),
         "S".to_string(),
     ));
     let (_, event) = rx.try_recv().expect("a dropped finalizer emits an event");
-    assert_eq!(event.to_string(), "Fanout arm cancelled");
+    assert_eq!(event, detail::FANOUT_ARM_CANCELLED);
     assert!(rx.try_recv().is_err(), "exactly one terminal event on drop");
 
-    let mut finalizer = ArmFinalizer::new(Arc::clone(&proxy), "exec".to_string(), "S".to_string());
+    let mut finalizer =
+        ArmFinalizer::new(Arc::clone(&observer), "exec".to_string(), "S".to_string());
     finalizer.finish(detail::FANOUT_ARM_SUCCEEDED);
     drop(finalizer);
     let (_, event) = rx.try_recv().expect("finish emits its event");
-    assert_eq!(event.to_string(), "Fanout arm succeeded");
+    assert_eq!(event, detail::FANOUT_ARM_SUCCEEDED);
     assert!(
         rx.try_recv().is_err(),
         "a finished finalizer does not also emit cancelled on drop"
