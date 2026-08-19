@@ -66,8 +66,8 @@ Configurable limits cap resource consumption:
 
 ```rust
 RunLimits::new()
-    .max_tool_iterations(NonZeroU32::new(24).unwrap())    // model round-trips per section
-    .fanout_concurrency(NonZeroUsize::new(8).unwrap())    // parallel arms
+    .max_tool_iterations(NonZeroU32::new(24).unwrap())        // model round-trips per section
+    .max_fanout_concurrency(NonZeroUsize::new(8).unwrap())    // parallel arms
     .max_response_bytes(NonZeroU64::new(16 * 1024 * 1024).unwrap())
     .lua_memory_bytes(NonZeroUsize::new(64 * 1024 * 1024).unwrap())
     .lua_log_events(NonZeroU32::new(1024).unwrap())

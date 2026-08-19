@@ -61,15 +61,16 @@ use mlua::Value as LuaValue;
 
 use super::block_walk::{BlockWalkContext, SectionFlow, walk_section_blocks};
 use super::config::RunLimits;
+use super::gateway::GatewaySource;
 use super::scope::ToolAnalysis;
 use super::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use super::support::{
     GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, bridge_blocking, now_rfc3339_checked, sys_json,
 };
-use super::tools::attach_engine_infer_hook;
+use super::tools::attach_infer_hook;
 
 /// How one chain ended.
-pub(crate) enum WalkEnd {
+enum WalkEnd {
     /// The level ran off its last section, carrying the final reply produced
     /// within it (if any).
     Exhausted(Option<String>),
@@ -77,6 +78,27 @@ pub(crate) enum WalkEnd {
     /// chain; the call's return value, for an `execute()` chain or a fanout
     /// arm's jump-started child walk).
     Returned(String),
+}
+
+/// The borrowed run context the live H1 pass and the section walk share.
+///
+/// Bundled once in [`run`](super::run) so both top-level drivers take one
+/// parameter instead of restating the same eleven-value tail. Every field is
+/// a borrow (or a `Copy` limit set) out of `run`'s owned state; the client is
+/// borrowed as an `Option` because H1 only reads it while the section walk
+/// clones it into its owned, lazily-created walk slot.
+pub(super) struct RunContext<'a> {
+    pub(crate) args: &'a str,
+    pub(crate) shared_tools: &'a SharedTools,
+    pub(crate) store: &'a StoreRef,
+    pub(crate) execution: &'a str,
+    pub(crate) observer: &'a dyn Observer,
+    pub(crate) observer_arc: &'a Arc<dyn Observer>,
+    pub(crate) client: &'a Option<GatewayClient>,
+    pub(crate) debug: Option<&'a dyn DebugCapture>,
+    pub(crate) debug_arc: Option<&'a Arc<dyn DebugCapture>>,
+    pub(crate) limits: RunLimits,
+    pub(crate) turns: &'a Arc<AtomicU32>,
 }
 
 /// The borrowed run context every section in one chain shares.
@@ -111,6 +133,51 @@ pub(crate) struct WalkContext<'a> {
     pub(crate) initial_var: Option<&'a serde_json::Value>,
 }
 
+impl<'a> WalkContext<'a> {
+    /// The chain's borrowed walk context built out of the run frame: the ten
+    /// run-scoped fields come from the frame, so the field list lives in one
+    /// place and cannot drift between the frame and the walk; the caller
+    /// supplies only the walk-only extras.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the walk-only extras stay explicit and linear beside the run frame they extend"
+    )]
+    fn from_run(
+        frame: &RunContext<'a>,
+        shared: &'a crate::lua::LuaProgram,
+        bindings: &'a ToolBindings,
+        models: &'a ModelBindings,
+        analysis: &'a ToolAnalysis,
+        max_tool_iterations: usize,
+        when: &'a str,
+        section_count: usize,
+        task_handles: &'a [LuaSectionHandle],
+        initial_var: Option<&'a serde_json::Value>,
+    ) -> Self {
+        Self {
+            args: frame.args,
+            store: frame.store,
+            execution: frame.execution,
+            observer: frame.observer,
+            observer_arc: frame.observer_arc,
+            debug: frame.debug,
+            debug_arc: frame.debug_arc,
+            shared,
+            bindings,
+            models,
+            analysis,
+            shared_tools: frame.shared_tools,
+            max_tool_iterations,
+            limits: frame.limits,
+            when,
+            section_count,
+            task_handles,
+            turns: frame.turns,
+            initial_var,
+        }
+    }
+}
+
 impl<'a> From<&WalkContext<'a>> for BlockWalkContext<'a> {
     /// The walk driver's block-walk inputs: the shared field list lives here
     /// alone, so a future field add cannot drift between construction sites.
@@ -142,29 +209,15 @@ impl<'a> From<&WalkContext<'a>> for BlockWalkContext<'a> {
 ///
 /// # Errors
 /// Returns the same errors as [`run`](super::run), which documents them.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the walk keeps its borrowed run inputs explicit and linear so the adapter can build one WalkContext"
-)]
-pub(crate) async fn run_sections(
+pub(super) async fn run_sections(
     prompt: &Prompt,
     bindings: &ToolBindings,
     models: &ModelBindings,
     analysis: &ToolAnalysis,
     initial_var: Option<&serde_json::Value>,
-    args: &str,
-    shared_tools: &SharedTools,
-    store: &StoreRef,
-    execution: &str,
-    observer: &dyn Observer,
-    observer_arc: &Arc<dyn Observer>,
-    mut client: Option<GatewayClient>,
-    debug: Option<&dyn DebugCapture>,
-    debug_arc: Option<&Arc<dyn DebugCapture>>,
-    limits: RunLimits,
-    turns: Arc<AtomicU32>,
+    frame: &RunContext<'_>,
 ) -> Result<String> {
-    let default_max_tool_iterations = limits.tool_iterations().get() as usize;
+    let default_max_tool_iterations = frame.limits.tool_iterations().get() as usize;
     let when = now_rfc3339_checked()?;
 
     // Resolve the tool-loop cap once: the prompt's declared budget, or the
@@ -185,33 +238,27 @@ pub(crate) async fn run_sections(
         empty_shared = crate::lua::LuaProgram::empty()?;
         &empty_shared
     };
-    let ctx = WalkContext {
-        args,
-        store,
-        execution,
-        observer,
-        observer_arc,
-        debug,
-        debug_arc,
+    let ctx = WalkContext::from_run(
+        frame,
         shared,
         bindings,
         models,
         analysis,
-        shared_tools,
         max_tool_iterations,
-        limits,
-        when: &when,
-        section_count: prompt.sections.len(),
-        task_handles: &task_handles,
-        turns: &turns,
+        &when,
+        prompt.sections.len(),
+        &task_handles,
         initial_var,
-    };
+    );
 
     // The owned control context is built once per run: every field is
     // run-scoped, so all sections share one Arc and only the per-section
     // client snapshot is captured fresh by `make_control_globals`.
     let control = Arc::new(ControlContext::from_walk(&ctx));
 
+    // The walk owns its client slot: seeded from the run's client (if any),
+    // created lazily on first prose, and shared by every section.
+    let mut client = frame.client.clone();
     let mut entered = 0usize;
     match walk_siblings(
         &ctx,
@@ -254,7 +301,7 @@ pub(crate) async fn run_sections(
     clippy::too_many_arguments,
     reason = "the chain keeps its shared contexts, position, entry mode, and depth explicit and linear"
 )]
-pub(crate) async fn walk_siblings(
+async fn walk_siblings(
     ctx: &WalkContext<'_>,
     control: &Arc<ControlContext>,
     siblings: &[Section],
@@ -362,15 +409,7 @@ async fn run_one_section(
     incoming_reply: Option<&str>,
     client: &mut Option<GatewayClient>,
 ) -> Result<SectionFlow> {
-    let now = now_rfc3339_checked()?;
-    let sys = sys_json(
-        ctx.when,
-        &now,
-        section_id,
-        &section.name,
-        ctx.execution,
-        ctx.section_count,
-    );
+    let sys = control.sys_json(section_id, &section.name)?;
 
     ctx.observer
         .observe(ctx.execution, &section.name, detail::SECTION_STARTED);
@@ -405,17 +444,12 @@ async fn run_one_section(
     // bindings - is shared with the fanout arm; only the seed, the `sys`
     // extras, and the callbacks' parameters (home slice, caller, depth) are
     // the walk's own.
-    let setup = SectionVmSetup {
-        args: ctx.args,
-        sys: &sys,
-        store: ctx.store,
-        last_reply: incoming_reply,
-        seed: VmSeed::InitialVar(ctx.initial_var),
-        observer_arc: ctx.observer_arc,
-        section_name: &section.name,
-        task_handles: ctx.task_handles,
-        shared: ctx.shared,
-    };
+    let setup = control.vm_setup(
+        &sys,
+        incoming_reply,
+        VmSeed::InitialVar(ctx.initial_var),
+        &section.name,
+    );
     if let Err(error) = setup_section_vm(
         &mut vm,
         &setup,
@@ -431,19 +465,7 @@ async fn run_one_section(
     // surfaces a concrete construction error on first use instead of the setup
     // swallowing it. The direct prose path below still builds `client` and
     // propagates its own error.
-    attach_engine_infer_hook(
-        &vm,
-        client.clone(),
-        ctx.limits,
-        ctx.shared_tools,
-        Arc::clone(ctx.observer_arc),
-        ctx.debug_arc.cloned(),
-        ctx.execution,
-        &section.name,
-        ctx.max_tool_iterations,
-        ctx.turns,
-        ctx.analysis,
-    );
+    control.attach_infer_hook(&vm, client.clone(), &section.name);
 
     // The walk half - the ordered block loop - reports how the section
     // ended, reading only the narrowed BlockWalkContext inputs. The teardown
@@ -533,7 +555,7 @@ pub(super) fn list_items_from_visible(heading: &str, visible: &[Section]) -> Res
 
 /// Where a jump transfers control, resolved against the jumper's visible set.
 #[derive(Debug)]
-pub(crate) enum JumpTarget {
+pub(super) enum JumpTarget {
     /// A flat index move within the jumper's own slice.
     Sibling(usize),
     /// A descent into the jumper's child slice, starting at this index.
@@ -552,7 +574,7 @@ pub(crate) enum JumpTarget {
 /// # Errors
 /// Returns [`Error::Lua`] when the heading is malformed, matches no visible
 /// section, or matches more than one.
-pub(crate) fn resolve_jump_target(
+pub(super) fn resolve_jump_target(
     heading: &str,
     siblings: &[Section],
     jumper: &Section,
@@ -605,27 +627,74 @@ pub(crate) struct ControlContext {
 }
 
 impl ControlContext {
+    /// The one field list both borrowed-context constructors share: every
+    /// run-scoped field is cloned out of the borrowed view here, so a future
+    /// field add cannot drift between the walk and fanout constructions. The
+    /// three trailing parameters are the per-driver deltas: the turns counter,
+    /// the observer, and the debug sink.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the owned context is built from one linear borrowed field list; bundling it would add a second struct mirroring the same fields"
+    )]
+    fn from_run_fields(
+        store: &StoreRef,
+        args: &str,
+        execution: &str,
+        when: &str,
+        shared: &LuaProgram,
+        bindings: &ToolBindings,
+        models: &ModelBindings,
+        shared_tools: &SharedTools,
+        section_count: usize,
+        task_handles: &[LuaSectionHandle],
+        analysis: &ToolAnalysis,
+        limits: RunLimits,
+        max_tool_iterations: usize,
+        turns: &Arc<AtomicU32>,
+        observer: Arc<dyn Observer>,
+        debug: Option<Arc<dyn DebugCapture>>,
+    ) -> Self {
+        Self {
+            store: store.clone(),
+            args: args.to_string(),
+            execution: execution.to_string(),
+            when: when.to_string(),
+            shared: shared.to_owned(),
+            bindings: bindings.clone(),
+            models: models.clone(),
+            shared_tools: shared_tools.clone(),
+            section_count,
+            task_handles: task_handles.to_vec(),
+            turns: Arc::clone(turns),
+            analysis: analysis.clone(),
+            observer,
+            debug,
+            limits,
+            max_tool_iterations,
+        }
+    }
+
     /// The owned control context for a chain, cloned out of the chain's
     /// borrowed walk context.
     fn from_walk(ctx: &WalkContext<'_>) -> Self {
-        Self {
-            store: ctx.store.clone(),
-            args: ctx.args.to_string(),
-            execution: ctx.execution.to_string(),
-            when: ctx.when.to_string(),
-            shared: ctx.shared.to_owned(),
-            bindings: ctx.bindings.clone(),
-            models: ctx.models.clone(),
-            shared_tools: ctx.shared_tools.clone(),
-            section_count: ctx.section_count,
-            task_handles: ctx.task_handles.to_vec(),
-            turns: Arc::clone(ctx.turns),
-            analysis: ctx.analysis.clone(),
-            observer: Arc::clone(ctx.observer_arc),
-            debug: ctx.debug_arc.cloned(),
-            limits: ctx.limits,
-            max_tool_iterations: ctx.max_tool_iterations,
-        }
+        Self::from_run_fields(
+            ctx.store,
+            ctx.args,
+            ctx.execution,
+            ctx.when,
+            ctx.shared,
+            ctx.bindings,
+            ctx.models,
+            ctx.shared_tools,
+            ctx.section_count,
+            ctx.task_handles,
+            ctx.analysis,
+            ctx.limits,
+            ctx.max_tool_iterations,
+            ctx.turns,
+            Arc::clone(ctx.observer_arc),
+            ctx.debug_arc.cloned(),
+        )
     }
 
     /// The owned control context every arm of one fanout shares, cloned out
@@ -638,24 +707,24 @@ impl ControlContext {
         observer: Arc<dyn Observer>,
         debug: Option<Arc<dyn DebugCapture>>,
     ) -> Self {
-        Self {
-            store: ctx.store.clone(),
-            args: ctx.args.to_owned(),
-            execution: ctx.execution.to_owned(),
-            when: ctx.when.to_owned(),
-            shared: ctx.shared.to_owned(),
-            bindings: ctx.bindings.clone(),
-            models: ctx.models.clone(),
-            shared_tools: ctx.shared_tools.clone(),
-            section_count: ctx.section_count,
-            task_handles: ctx.task_handles.to_vec(),
-            turns: Arc::clone(turns),
-            analysis: ctx.analysis.clone(),
+        Self::from_run_fields(
+            ctx.store,
+            ctx.args,
+            ctx.execution,
+            ctx.when,
+            ctx.shared,
+            ctx.bindings,
+            ctx.models,
+            ctx.shared_tools,
+            ctx.section_count,
+            ctx.task_handles,
+            ctx.analysis,
+            ctx.limits,
+            ctx.max_tool_iterations,
+            turns,
             observer,
             debug,
-            limits: ctx.limits,
-            max_tool_iterations: ctx.max_tool_iterations,
-        }
+        )
     }
 
     /// The borrowed chain-walk inputs derived from this owned context, so
@@ -684,6 +753,115 @@ impl ControlContext {
             turns: &self.turns,
             initial_var: None,
         }
+    }
+
+    /// The borrowed fanout inputs derived from this owned context, beside
+    /// [`walk_context`](Self::walk_context) so both borrowed-context
+    /// derivations keep their field lists in one place. The fanout callback
+    /// supplies only its own deltas: the client snapshot, the reply seed, the
+    /// arms' parent id, the worker's home slice, and the caller's execute
+    /// depth.
+    #[expect(
+        clippy::ref_option,
+        reason = "the FanoutContext it builds borrows the Option<GatewayClient> itself, matching the context's field type"
+    )]
+    fn fanout_context<'a>(
+        &'a self,
+        client: &'a Option<GatewayClient>,
+        last_reply: Option<&'a str>,
+        parent_id: usize,
+        home: &'a [Section],
+        execute_depth: usize,
+    ) -> fanout::FanoutContext<'a> {
+        fanout::FanoutContext {
+            args: &self.args,
+            store: &self.store,
+            execution: &self.execution,
+            observer: self.observer.as_ref(),
+            client,
+            debug: self.debug.as_deref(),
+            shared: &self.shared,
+            bindings: &self.bindings,
+            models: &self.models,
+            analysis: &self.analysis,
+            shared_tools: &self.shared_tools,
+            max_tool_iterations: self.max_tool_iterations,
+            limits: self.limits,
+            last_reply,
+            when: &self.when,
+            parent_id,
+            section_count: self.section_count,
+            home,
+            task_handles: &self.task_handles,
+            execute_depth,
+        }
+    }
+
+    /// The borrowed VM-setup inputs both engine drivers share, sourcing the
+    /// run-wide slots (`args`, `store`, `observer`, `task_handles`, `shared`)
+    /// from this context so the field list lives in one place; the driver
+    /// supplies only its own deltas: the `sys` JSON, the incoming reply, the
+    /// seed, and the section name.
+    pub(crate) fn vm_setup<'a>(
+        &'a self,
+        sys: &'a serde_json::Value,
+        last_reply: Option<&'a str>,
+        seed: VmSeed<'a>,
+        section_name: &'a str,
+    ) -> SectionVmSetup<'a> {
+        SectionVmSetup {
+            args: &self.args,
+            sys,
+            store: &self.store,
+            last_reply,
+            seed,
+            observer_arc: &self.observer,
+            section_name,
+            task_handles: &self.task_handles,
+            shared: &self.shared,
+        }
+    }
+
+    /// The `sys` JSON for one section or arm of this run: a fresh `now`
+    /// timestamp under the run's `when`, with the driver supplying only its
+    /// `id` delta (the walk's chain position, or an arm's parent section id)
+    /// and the section name.
+    pub(crate) fn sys_json(&self, id: usize, section_name: &str) -> Result<serde_json::Value> {
+        let now = now_rfc3339_checked()?;
+        Ok(sys_json(
+            &self.when,
+            &now,
+            id,
+            section_name,
+            &self.execution,
+            self.section_count,
+        ))
+    }
+
+    /// Installs the infer hook both engine drivers share, sourcing every
+    /// run-wide slot from this context; the driver supplies only its client
+    /// snapshot and the section name. The handed client (or the environment)
+    /// is wrapped in the lazy [`GatewaySource`], with the prompt's tool
+    /// analysis always present and no live H1 bindings.
+    pub(crate) fn attach_infer_hook(
+        &self,
+        vm: &SectionVm,
+        client: Option<GatewayClient>,
+        section_name: &str,
+    ) {
+        attach_infer_hook(
+            vm,
+            GatewaySource::from_optional(client, self.limits),
+            &self.shared_tools,
+            Arc::clone(&self.observer),
+            self.debug.clone(),
+            &self.execution,
+            section_name,
+            self.max_tool_iterations,
+            &self.turns,
+            Some(&self.analysis),
+            None,
+        );
     }
 
     /// Drives a contained chain from an execute/jump target: resolves the
@@ -883,28 +1061,7 @@ fn make_fanout_callback(
     // control globals derive their resolution set from it (the home slice
     // plus the worker's children), so the arm never inverts this layout.
     let worker_home = home_without(visible, worker);
-    let ctx = fanout::FanoutContext {
-        args: &control.args,
-        store: &control.store,
-        execution: &control.execution,
-        observer: control.observer.as_ref(),
-        client,
-        debug: control.debug.as_deref(),
-        shared: &control.shared,
-        bindings: &control.bindings,
-        models: &control.models,
-        analysis: &control.analysis,
-        shared_tools: &control.shared_tools,
-        max_tool_iterations: control.max_tool_iterations,
-        limits: control.limits,
-        last_reply,
-        when: &control.when,
-        parent_id,
-        section_count: control.section_count,
-        home: &worker_home,
-        task_handles: &control.task_handles,
-        execute_depth,
-    };
+    let ctx = control.fanout_context(client, last_reply, parent_id, &worker_home, execute_depth);
 
     // The collection was converted to JSON member-by-member at the Lua
     // boundary (the same bridge `var` uses); the cap inside counts members.

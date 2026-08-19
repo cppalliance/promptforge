@@ -9,9 +9,8 @@ use serde_json::Value;
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::execute::{
-    BlockWalkContext, ControlContext, SectionFlow, SectionVmSetup, VmSeed,
-    attach_engine_infer_hook, make_control_globals, now_rfc3339_checked, setup_section_vm,
-    sys_json, walk_section_blocks,
+    BlockWalkContext, ControlContext, SectionFlow, VmSeed, make_control_globals, setup_section_vm,
+    walk_section_blocks,
 };
 use crate::lua::{LuaFanoutResult, SectionVm};
 use crate::observe::{Observation, Observer, detail};
@@ -132,6 +131,14 @@ impl Drop for ArmFinalizer {
 #[cfg(test)]
 pub(crate) const PANIC_ARM_SENTINEL: &str = "__fanout_test_panic_arm__";
 
+/// Test-only fault-injection sentinel: an arm whose worker carries this
+/// exact section name fails VM construction, so the finalizer's
+/// construction-failure branch is covered through the real driver path. No
+/// production input can fail construction on cue - the failure modes (Lua
+/// init, host injection) are not name-keyed.
+#[cfg(test)]
+pub(crate) const FAIL_ARM_VM_SENTINEL: &str = "__fanout_test_fail_arm_vm__";
+
 /// Runs one fanout arm to completion.
 ///
 /// The arm is a thin adapter over the shared engine: the body builds the
@@ -193,13 +200,23 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         worker.name.clone(),
     );
 
-    let mut vm = match SectionVm::new_for_section(
+    let constructed = SectionVm::new_for_section(
         &control.bindings,
         &control.models,
         &control.execution,
         observer,
         &worker.name,
-    ) {
+    );
+    // Test-only fault injection: an arm whose worker is named the sentinel
+    // fails VM construction here, driving the finalizer's
+    // construction-failure branch (finish FAILED, return before the body).
+    #[cfg(test)]
+    let constructed = if worker.name == FAIL_ARM_VM_SENTINEL {
+        Err(Error::Internal("test-injected VM construction failure"))
+    } else {
+        constructed
+    };
+    let mut vm = match constructed {
         Ok(vm) => vm,
         Err(error) => {
             finalizer.finish(detail::FANOUT_ARM_FAILED);
@@ -214,15 +231,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             control.limits.lua_memory().get(),
             control.limits.lua_logs().get(),
         )?;
-        let now = now_rfc3339_checked()?;
-        let mut sys = sys_json(
-            &control.when,
-            &now,
-            inputs.parent_id,
-            &worker.name,
-            &control.execution,
-            control.section_count,
-        );
+        let mut sys = control.sys_json(inputs.parent_id, &worker.name)?;
         // The arm's own sys extra: the 1-based collection position.
         sys["taskid"] = Value::String(taskid);
 
@@ -242,17 +251,12 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
 
         // The arm runs the walk's shared VM setup with its own deltas: the
         // `sys` extras (`taskid`, the parent `id`) and the `item` seed.
-        let setup = SectionVmSetup {
-            args: &control.args,
-            sys: &sys,
-            store: &control.store,
-            last_reply: inputs.last_reply.as_deref(),
-            seed: VmSeed::Item(&item),
-            observer_arc: &control.observer,
-            section_name: &worker.name,
-            task_handles: &control.task_handles,
-            shared: &control.shared,
-        };
+        let setup = control.vm_setup(
+            &sys,
+            inputs.last_reply.as_deref(),
+            VmSeed::Item(&item),
+            &worker.name,
+        );
         setup_section_vm(
             &mut vm,
             &setup,
@@ -264,19 +268,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         // The infer hook carries a lazy client source: a nested `model:infer`
         // surfaces a concrete construction error on first use instead of the
         // setup swallowing it.
-        attach_engine_infer_hook(
-            &vm,
-            inputs.client.clone(),
-            control.limits,
-            &control.shared_tools,
-            Arc::clone(&control.observer),
-            control.debug.clone(),
-            &control.execution,
-            &worker.name,
-            control.max_tool_iterations,
-            &control.turns,
-            &control.analysis,
-        );
+        control.attach_infer_hook(&vm, inputs.client.clone(), &worker.name);
 
         // The shared block walk: every Lua and prose block in order, the
         // conversation and reply rolling forward, the tool scope rebuilt per

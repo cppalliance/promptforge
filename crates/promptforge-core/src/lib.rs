@@ -84,6 +84,8 @@ pub mod parser;
 mod resolve;
 pub mod store;
 pub(crate) mod subst;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod tools;
 pub(crate) mod untrusted;
 

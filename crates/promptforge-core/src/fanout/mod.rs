@@ -315,7 +315,7 @@ pub(crate) async fn run_fanout_arms(
 
     // At most `fanout_concurrency` arms are resident at once: seed the initial
     // window, then schedule the next queued item whenever one completes.
-    let mut window = ArmWindow::new(items.len(), ctx.limits.fanout());
+    let mut window = ArmWindow::new(items.len(), ctx.limits.fanout_concurrency());
     fill_window(&mut window, &mut join_set);
 
     // Drop the unused sender clone so the debug channel can close when arms finish.
