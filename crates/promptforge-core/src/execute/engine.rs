@@ -177,15 +177,27 @@ pub(crate) async fn run_sections(
 
     let mut reply: Option<String> = None;
     let mut index = 0usize;
+    // An off-walk section is skipped in fall-through order (no observation, no
+    // execution) but stays addressable: a jump targeting it still runs it, so
+    // only arrival by fall-through (including the walk's start) applies the
+    // skip.
+    let mut jumped = false;
     while index < prompt.sections.len() {
         let section = &prompt.sections[index];
-        // `id` counts sections entered, so the first is 1, and serves as the
+        if !jumped && section.is_off_walk() {
+            index += 1;
+            continue;
+        }
+        jumped = false;
+        // `id` is the section's 1-based position in the prompt's section
+        // list (off-walk skips do not renumber it), and serves as the
         // section's parent id for nested execute/fanout.
         match run_one_section(&ctx, section, index + 1, 0, reply.as_deref(), &mut client).await? {
             SectionFlow::Jumped { heading, reply: r } => {
                 let target = resolve_h2_index(&heading, &prompt.sections)?;
                 reply = r;
                 index = target;
+                jumped = true;
             }
             SectionFlow::Returned(value) => return Ok(value),
             SectionFlow::FellThrough { reply: r } => {
