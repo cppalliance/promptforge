@@ -219,8 +219,8 @@ pub(crate) struct FanoutContext<'a> {
     pub analysis: &'a crate::execute::ToolAnalysis,
     pub shared_tools: &'a SharedTools,
     pub max_tool_iterations: usize,
-    /// The run's resource limits: the concurrency window and item cap are read
-    /// from it here, each arm reads its Lua ceilings from it, and a lazily
+    /// The run's resource limits: the concurrency window is read from it
+    /// here, each arm reads its Lua ceilings from it, and a lazily
     /// created gateway client inherits its HTTP limits.
     pub limits: RunLimits,
     pub last_reply: Option<&'a str>,
@@ -253,16 +253,6 @@ pub(crate) async fn run_fanout_arms(
     items: &[serde_json::Value],
     ctx: &FanoutContext<'_>,
 ) -> Result<Vec<LuaFanoutResult>> {
-    // Reject an oversized collection before scheduling anything, so a
-    // pathological prompt cannot allocate an unbounded number of arms.
-    let max_items = ctx.limits.fanout_items().get();
-    if items.len() > max_items {
-        return Err(Error::Lua(format!(
-            "fanout collection has {} members, exceeding the maximum of {max_items}",
-            items.len(),
-        )));
-    }
-
     let turns = Arc::new(AtomicU32::new(0));
     // A spawned arm does not inherit the run's task-local CancelHandle, so
     // capture it here (on the parent task) and carry an explicit clone into every
@@ -314,12 +304,19 @@ pub(crate) async fn run_fanout_arms(
         join_set.spawn(run_one_arm(payload));
     };
 
+    // Spawns every arm the window currently allows: seeds the initial window,
+    // then refills it as arms complete.
+    let fill_window =
+        |window: &mut ArmWindow, join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>| {
+            while let Some(index) = window.take_next() {
+                spawn_arm(index, join_set);
+            }
+        };
+
     // At most `fanout_concurrency` arms are resident at once: seed the initial
     // window, then schedule the next queued item whenever one completes.
     let mut window = ArmWindow::new(items.len(), ctx.limits.fanout());
-    while let Some(index) = window.take_next() {
-        spawn_arm(index, &mut join_set);
-    }
+    fill_window(&mut window, &mut join_set);
 
     // Drop the unused sender clone so the debug channel can close when arms finish.
     drop(debug_tx);
@@ -332,7 +329,7 @@ pub(crate) async fn run_fanout_arms(
                 return Err(Error::Interrupted);
             }
             Some((section, event)) = side_channels.observe_rx.recv() => {
-                forward_observation(ctx, &section, event);
+                ctx.observer.observe(ctx.execution, &section, event);
             }
             Some(msg) = side_channels.debug_rx.recv() => {
                 forward_debug(ctx, msg);
@@ -343,15 +340,15 @@ pub(crate) async fn run_fanout_arms(
                     Some(Ok(Ok((index, reply)))) => {
                         replies[index] = Some(reply);
                         window.complete_one();
-                        while let Some(next) = window.take_next() {
-                            spawn_arm(next, &mut join_set);
-                        }
+                        fill_window(&mut window, &mut join_set);
                     }
                     Some(Ok(Err(error))) => {
                         abort_fanout_arms(&mut join_set, ctx, &mut side_channels).await;
                         return Err(error);
                     }
-                    Some(Err(join_error)) if join_error.is_cancelled() => {}
+                    // A cancelled JoinError cannot reach this loop: the only
+                    // abort path (`abort_fanout_arms`) drains the JoinSet
+                    // before its caller returns.
                     Some(Err(join_error)) => {
                         abort_fanout_arms(&mut join_set, ctx, &mut side_channels).await;
                         // Keep the structured JoinError as the error source; it is
@@ -365,18 +362,18 @@ pub(crate) async fn run_fanout_arms(
 
     side_channels.drain(ctx);
 
-    let mut ordered = Vec::with_capacity(replies.len());
-    for (index, reply) in replies.into_iter().enumerate() {
-        match reply {
-            Some(result) => ordered.push(result),
-            None => {
-                return Err(Error::Lua(format!(
-                    "fanout arm {} finished without a reply",
-                    index + 1
-                )));
-            }
-        }
-    }
+    // Every slot is Some here: each arm-failure path returns early, and
+    // `ArmWindow` dispatches each index exactly once, so a drained JoinSet
+    // means every arm replied. The `ok_or_else` keeps that invariant guarded.
+    let ordered = replies
+        .into_iter()
+        .enumerate()
+        .map(|(index, reply)| {
+            reply.ok_or_else(|| {
+                Error::Lua(format!("fanout arm {} finished without a reply", index + 1))
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(ordered)
 }
 
@@ -420,11 +417,6 @@ impl ArmWindow {
     }
 }
 
-/// Forwards one arm observation to the run's observer.
-fn forward_observation(ctx: &FanoutContext<'_>, section: &str, event: Observation) {
-    ctx.observer.observe(ctx.execution, section, event);
-}
-
 /// Forwards one arm debug event to the run's capture sink, when one is set.
 fn forward_debug(ctx: &FanoutContext<'_>, msg: DebugMsg) {
     if let Some(capture) = ctx.debug {
@@ -443,7 +435,7 @@ impl SideChannels {
     /// Forwards every event the arms left buffered, draining both channels.
     fn drain(&mut self, ctx: &FanoutContext<'_>) {
         while let Ok((section, event)) = self.observe_rx.try_recv() {
-            forward_observation(ctx, &section, event);
+            ctx.observer.observe(ctx.execution, &section, event);
         }
         while let Ok(msg) = self.debug_rx.try_recv() {
             forward_debug(ctx, msg);
@@ -451,6 +443,8 @@ impl SideChannels {
     }
 }
 
+/// Aborts every outstanding arm, drains the `JoinSet`, and flushes the side
+/// channels so events the arms already buffered still reach the run's sinks.
 async fn abort_fanout_arms(
     join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>,
     ctx: &FanoutContext<'_>,

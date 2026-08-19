@@ -126,6 +126,12 @@ impl Drop for ArmFinalizer {
     }
 }
 
+/// Test-only fault-injection sentinel: an arm whose item is this exact
+/// string panics on entry, so the `FanoutArmJoin` mapping is covered through
+/// the real `run_fanout_arms` select loop.
+#[cfg(test)]
+pub(crate) const PANIC_ARM_SENTINEL: &str = "__fanout_test_panic_arm__";
+
 /// Runs one fanout arm to completion.
 ///
 /// The arm is a thin adapter over the shared engine: the body builds the
@@ -160,6 +166,15 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         item,
         index,
     } = payload;
+    // Test-only fault injection: an arm handed the sentinel item panics on
+    // entry, so a test can drive a genuine non-cancellation `JoinError`
+    // through the `run_fanout_arms` select loop. No production input can
+    // panic an arm - every arm-internal failure is a `Result`.
+    #[cfg(test)]
+    assert!(
+        item.as_str() != Some(PANIC_ARM_SENTINEL),
+        "test-injected arm panic"
+    );
     let control = &inputs.control;
     let worker = &inputs.worker;
 
