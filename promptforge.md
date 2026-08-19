@@ -121,6 +121,7 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 | `return value` | End run, return value |
 | `jump("## Section")` | Transfer control |
 | `execute("## Section", input?)` | Run section as subroutine |
+| `list_from_section("## List")` | A list section's pre-parsed items as an array |
 | `var.x = ...` | Cross-section state |
 | `log(msg)` | Emit to observer |
 
