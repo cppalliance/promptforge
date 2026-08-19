@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
@@ -21,7 +21,7 @@ use super::proxies::ProxyObserver;
 /// Everything one spawned fanout arm owns for its independent execution.
 pub(crate) struct ArmPayload {
     pub(crate) worker: Section,
-    pub(crate) item_text: String,
+    pub(crate) item: Value,
     pub(crate) index: usize,
     pub(crate) store: StoreRef,
     pub(crate) client: Option<GatewayClient>,
@@ -102,7 +102,7 @@ impl Drop for ArmFinalizer {
 pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
     let ArmPayload {
         worker,
-        item_text,
+        item,
         index,
         store,
         client,
@@ -166,7 +166,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
 
         vm.inject_host(&args, &sys, &store, last_reply.as_deref())?;
         vm.install_host_apis(&(observer_arc.clone() as Arc<dyn Observer>), &worker.name)?;
-        vm.set_global_string("item", &item_text)?;
+        vm.set_global_json("item", &item)?;
 
         // Arms get the same control globals as a walked section, but nested
         // execute/fanout have no walk to re-enter here, so both fail loudly.
@@ -196,7 +196,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             match vm.run_chunk(program, observer, &worker.name)? {
                 LuaBlockResult::Returned(Some(value)) => {
                     return Ok((
-                        LuaFanoutResult::success(&item_text, value),
+                        LuaFanoutResult::success(item.clone(), value),
                         detail::FANOUT_ARM_SUCCEEDED,
                     ));
                 }
@@ -233,7 +233,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             worker.prose(),
             &args,
             last_reply.as_deref(),
-            Some(&item_text),
+            Some(&item),
             &var,
             &sys,
         )?;
@@ -297,10 +297,11 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
                     // One stuck arm must not kill sibling evidence facets.
                     Err(Error::ToolLoopExhausted) => {
                         let stub = format!(
-                            "## {item_text}\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)"
+                            "## {}\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)",
+                            subst::render_item(&item)
                         );
                         return Ok((
-                            LuaFanoutResult::exhausted_stub(&item_text, stub),
+                            LuaFanoutResult::exhausted_stub(item.clone(), stub),
                             detail::FANOUT_ARM_EXHAUSTED,
                         ));
                     }
@@ -324,7 +325,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
 
         let text = epilog_return.or(arm_reply).unwrap_or_default();
         Ok((
-            LuaFanoutResult::success(item_text.clone(), text),
+            LuaFanoutResult::success(item, text),
             detail::FANOUT_ARM_SUCCEEDED,
         ))
     };

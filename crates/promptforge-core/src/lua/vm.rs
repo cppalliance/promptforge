@@ -703,11 +703,25 @@ impl SectionVm {
 
     /// Sets a string global in the VM, overwriting any existing value.
     ///
-    /// Used by fanout to inject `item` after host injection.
+    /// Used by the H1 path to inject `reply` after host injection.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if the global cannot be set.
     pub(crate) fn set_global_string(&self, name: &str, value: &str) -> Result<()> {
+        self.lua.globals().raw_set(name, value).map_err(Error::lua)
+    }
+
+    /// Sets a global in the VM to the Lua form of a JSON value, overwriting
+    /// any existing value.
+    ///
+    /// Used by fanout to inject `item` after host injection; the conversion
+    /// is the same `LuaSerdeExt` bridge that seeds `var`.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the value cannot convert or the global
+    /// cannot be set.
+    pub(crate) fn set_global_json(&self, name: &str, value: &Json) -> Result<()> {
+        let value = self.lua.to_value(value).map_err(Error::lua)?;
         self.lua.globals().raw_set(name, value).map_err(Error::lua)
     }
 

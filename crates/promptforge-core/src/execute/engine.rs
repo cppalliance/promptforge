@@ -824,5 +824,12 @@ fn make_fanout_callback(
         section_count,
     };
 
-    bridge_blocking(fanout::run_fanout_arms(worker, &list.items, &ctx))
+    // Members cross into the arms as JSON values (the same bridge `var`
+    // uses); the list section's pre-parsed items are always strings.
+    let items: Vec<serde_json::Value> = list
+        .items
+        .iter()
+        .map(|item| serde_json::Value::String(item.clone()))
+        .collect();
+    bridge_blocking(fanout::run_fanout_arms(worker, &items, &ctx))
 }

@@ -201,18 +201,20 @@ impl UserData for LuaSectionHandle {
 ///
 /// Authors read `.text`, `.ok`, `.item`, and `.exhausted`. `__tostring` returns
 /// `.text` so `tostring` and a tostring-coercing `table.concat` keep working.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `.item` carries the arm's member value back as a Lua value via the same
+/// serde bridge that seeds `var`.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LuaFanoutResult {
     text: String,
     ok: bool,
-    item: String,
+    item: Json,
     exhausted: bool,
 }
 
 impl LuaFanoutResult {
     /// Builds a successful arm result.
     #[must_use]
-    pub(crate) fn success(item: impl Into<String>, text: impl Into<String>) -> Self {
+    pub(crate) fn success(item: impl Into<Json>, text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             ok: true,
@@ -223,7 +225,7 @@ impl LuaFanoutResult {
 
     /// Builds a soft-degraded arm result after tool-loop exhaustion.
     #[must_use]
-    pub(crate) fn exhausted_stub(item: impl Into<String>, text: impl Into<String>) -> Self {
+    pub(crate) fn exhausted_stub(item: impl Into<Json>, text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             ok: false,
@@ -237,7 +239,7 @@ impl UserData for LuaFanoutResult {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         fields.add_field_method_get("text", |_, this| Ok(this.text.clone()));
         fields.add_field_method_get("ok", |_, this| Ok(this.ok));
-        fields.add_field_method_get("item", |_, this| Ok(this.item.clone()));
+        fields.add_field_method_get("item", |lua, this| lua.to_value(&this.item));
         fields.add_field_method_get("exhausted", |_, this| Ok(this.exhausted));
     }
 
