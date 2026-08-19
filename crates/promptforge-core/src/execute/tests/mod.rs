@@ -268,6 +268,32 @@ async fn run(
     .map_err(Error::from)
 }
 
+/// Runs a fixture offline through the real [`run`](super::run) entry point
+/// with a caller-customized [`RunConfig`], returning the typed [`RunError`]
+/// so a test can assert on its kind (limits, cancellation).
+async fn run_with_config(
+    test: &TestPrompt,
+    configure: impl FnOnce(RunConfig) -> RunConfig,
+) -> std::result::Result<String, RunError> {
+    let picker = ToolPicker::build(
+        Catalog::new(Vec::new()),
+        PickerConfig::default()
+            .with_similarity_floor(0.0)
+            .and_then(|config| config.with_margin(0.0))
+            .expect("test thresholds are in the supported domain"),
+    )
+    .expect("test picker must build");
+    super::run(
+        &test.prompt,
+        "",
+        ResolutionContext::new(&picker, &test.models),
+        &[],
+        &StoreRef::memory(),
+        configure(RunConfig::new(EXECUTION)),
+    )
+    .await
+}
+
 /// An [`Observer`] that keeps every observation it is handed, in order, so a test
 /// can assert on the whole sequence rather than on a count.
 #[derive(Default)]
@@ -882,6 +908,28 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
         matches!(result, Err(crate::Error::Interrupted)),
         "expected Interrupted, got {result:?}"
     );
+}
+
+#[tokio::test]
+async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
+    use crate::cancel::CancelHandle;
+
+    // The explicit-cancel wiring of the public entry point: a handle passed
+    // through `RunConfig::cancel` is installed around the whole run body, so
+    // the section's Lua instruction hook observes it and the run maps the
+    // interruption to `RunErrorKind::Cancelled`.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Loop\n\n```lua\nlocal n = 0\nwhile true do n = n + 1 end\n```\n";
+    let handle = CancelHandle::new();
+    handle.cancel();
+    let error = run_with_config(&fixture(md), |config| config.cancel(handle))
+        .await
+        .expect_err("a pre-cancelled handle must fail the run");
+    assert!(
+        matches!(error.kind(), RunErrorKind::Cancelled),
+        "expected RunErrorKind::Cancelled, got {error:?}"
+    );
+    assert!(error.is_cancelled());
 }
 
 /// Run the loop against `addr` with `tools` in scope, recording observations

@@ -50,9 +50,11 @@
 //! [`ResolutionContext`]), `scope` (tool-scope analysis and validation),
 //! `tools` (the `model:infer` bag and hook), `tool_loop` (the model tool
 //! loop), `h1` (the live H1 pass), `section_vm` (the section VM setup half
-//! shared by the walk and the fanout arm), `engine` (the section walkers),
+//! shared by the walk and the fanout arm), `block_walk` (the ordered block
+//! loop - the engine's walk half), `engine` (the section walkers),
 //! and `support` (the sync/async bridge and shared helpers).
 
+mod block_walk;
 mod config;
 mod engine;
 mod error;
@@ -74,10 +76,11 @@ pub use gateway::ResolutionContext;
 
 // Crate-internal items reused through the historical `crate::execute::` path.
 // Only `run_sections`, `execute_live_h1`, and `ToolAnalysis` serve `run`
-// below; the rest (`section_vm`, `prepare_effective_scope`,
-// `now_rfc3339_checked`, `SectionProgress`, `run_tool_loop`) are consumed by
-// `fanout` alone. Re-exported so the split stays surface-neutral for the
-// public API while keeping one import path for internal collaborators.
+// below; the rest (`SectionVmSetup`/`VmSeed`/`setup_section_vm`,
+// `prepare_effective_scope`, `now_rfc3339_checked`, `SectionProgress`,
+// `run_tool_loop`) are consumed by `fanout` and by the executor's own tests
+// through the test glob. Re-exported so the split stays surface-neutral for
+// the public API while keeping one import path for internal collaborators.
 pub(crate) use engine::run_sections;
 pub(crate) use h1::execute_live_h1;
 pub(crate) use scope::{ToolAnalysis, prepare_effective_scope};
@@ -281,10 +284,7 @@ pub async fn run(
     // Explicit cancellation: when the caller supplies a handle it is installed
     // for the run so cooperative cancel checks observe it; without one the run
     // simply is not cancellable from this path.
-    let result = match cancel {
-        Some(handle) => cancel::scope(handle, run_body).await,
-        None => run_body.await,
-    };
+    let result = cancel::maybe_scope(cancel, run_body).await;
 
     observer.observe(
         execution,

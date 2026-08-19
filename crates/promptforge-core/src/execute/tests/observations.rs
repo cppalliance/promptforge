@@ -212,6 +212,37 @@ async fn an_erroring_section_reports_started_but_not_finished() {
 }
 
 #[tokio::test]
+async fn a_limits_failure_propagates_without_any_teardown_observation() {
+    // The driver owns the limits install: a ceiling below the VM's baseline
+    // allocation fails before the teardown boundary exists, so the error
+    // propagates bare and no LUA_TEARDOWN_* record may fire on this path.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n```lua\nreturn \"ran\"\n```\n";
+    let recorder = Arc::new(Recorder::default());
+    let sink = Arc::clone(&recorder) as Arc<dyn Observer>;
+    let result = run_with_config(&fixture(md), move |config| {
+        config
+            .observer(sink)
+            .limits(RunLimits::new().lua_memory_bytes(std::num::NonZeroUsize::MIN))
+    })
+    .await;
+    let error = result.expect_err("a 1-byte Lua memory ceiling must fail the run");
+    assert!(
+        error.to_string().contains("memory"),
+        "the failure must be the memory ceiling, got: {error}"
+    );
+
+    let observed = events(&recorder.records());
+    assert!(
+        !observed.iter().any(|(_, event)| {
+            event == &detail::LUA_TEARDOWN_STARTED.to_string()
+                || event == &detail::LUA_TEARDOWN_SUCCEEDED.to_string()
+        }),
+        "a limits failure fires no teardown observations: {observed:?}"
+    );
+}
+
+#[tokio::test]
 async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     let gateway = ScriptedGateway::start(aliased_tool_script("echo")).await;
     let addr = gateway.addr();

@@ -32,48 +32,36 @@
 //! `section_vm` module, which the fanout arm drives with the same sequence.
 //! Construction and the Lua limits install stay with the driver: a limits
 //! failure must propagate bare, before any teardown observation exists.
+//! The walk half - the ordered block loop with its conversation state,
+//! per-block scope rebuild, and reply roll-forward - lives in the sibling
+//! `block_walk` module; [`run_one_section`] composes setup, infer hook,
+//! walk, teardown, and observation, owning the teardown boundary so every
+//! path tears the VM down exactly once.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 use serde_json::json;
 
-use crate::client::{GatewayClient, Message};
+use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::fanout;
-use crate::lua::{
-    LuaBlockResult, LuaSectionHandle, SectionVm, ToolBinding, ToolBindings, ToolCallCounts,
-    current_tool_bindings, resolve_section_target,
-};
-use crate::model::{CompletionOptions, ModelBindings};
+use crate::lua::{LuaSectionHandle, SectionVm, ToolBindings, resolve_section_target};
+use crate::model::ModelBindings;
 use crate::observe::{Observer, detail};
 use crate::parser::{Block, Prompt, Section};
 use crate::store::StoreRef;
-use crate::subst;
 use crate::tools::SharedTools;
 use crate::{Error, Result};
 use mlua::Value as LuaValue;
 
+use super::block_walk::{SectionFlow, walk_section_blocks};
 use super::config::RunLimits;
-use super::gateway::{GatewaySource, env_client_with_limits};
-use super::scope::{ToolAnalysis, prepare_effective_scope};
+use super::gateway::GatewaySource;
+use super::scope::ToolAnalysis;
 use super::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use super::support::{GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, bridge_blocking, now_rfc3339_checked};
-use super::tool_loop::{ProseMode, SectionProgress, run_prose_inference};
 use super::tools::attach_infer_hook;
-
-/// How one section's block walk ended.
-enum SectionFlow {
-    /// Ran off the section end, carrying the reply produced within it (if any).
-    FellThrough { reply: Option<String> },
-    /// A scalar early return ended the section (and the chain it fired in).
-    Returned(String),
-    /// A `jump(target)` requested control transfer (any walked level).
-    Jumped {
-        heading: String,
-        reply: Option<String>,
-    },
-}
 
 /// How one chain ended.
 enum WalkEnd {
@@ -89,30 +77,30 @@ enum WalkEnd {
 ///
 /// Bundled so the single-section engine and the chain drivers keep one linear
 /// set of borrows rather than threading two dozen parameters each.
-struct WalkContext<'a> {
-    args: &'a str,
-    store: &'a StoreRef,
-    execution: &'a str,
-    observer: &'a dyn Observer,
-    observer_arc: &'a Arc<dyn Observer>,
-    debug: Option<&'a dyn DebugCapture>,
-    debug_arc: Option<&'a Arc<dyn DebugCapture>>,
+pub(super) struct WalkContext<'a> {
+    pub(super) args: &'a str,
+    pub(super) store: &'a StoreRef,
+    pub(super) execution: &'a str,
+    pub(super) observer: &'a dyn Observer,
+    pub(super) observer_arc: &'a Arc<dyn Observer>,
+    pub(super) debug: Option<&'a dyn DebugCapture>,
+    pub(super) debug_arc: Option<&'a Arc<dyn DebugCapture>>,
     /// The shared library replayed as every section's first chunk; an empty
     /// compiled chunk when the prompt declares no `lua shared` library.
-    shared: &'a crate::lua::LuaProgram,
-    bindings: &'a ToolBindings,
-    models: &'a ModelBindings,
-    analysis: &'a ToolAnalysis,
-    shared_tools: &'a SharedTools,
-    max_tool_iterations: usize,
-    limits: RunLimits,
-    when: &'a str,
-    top_sections: &'a [Section],
-    task_handles: &'a [LuaSectionHandle],
-    turns: &'a Arc<AtomicU32>,
+    pub(super) shared: &'a crate::lua::LuaProgram,
+    pub(super) bindings: &'a ToolBindings,
+    pub(super) models: &'a ModelBindings,
+    pub(super) analysis: &'a ToolAnalysis,
+    pub(super) shared_tools: &'a SharedTools,
+    pub(super) max_tool_iterations: usize,
+    pub(super) limits: RunLimits,
+    pub(super) when: &'a str,
+    pub(super) top_sections: &'a [Section],
+    pub(super) task_handles: &'a [LuaSectionHandle],
+    pub(super) turns: &'a Arc<AtomicU32>,
     /// `var` seeded from an earlier VM (top-level H1 hand-off); `None` for a
     /// contained chain.
-    initial_var: Option<&'a serde_json::Value>,
+    pub(super) initial_var: Option<&'a serde_json::Value>,
 }
 
 /// Walk the prompt's top-level sections, reporting each boundary, and return
@@ -307,8 +295,10 @@ async fn walk_siblings(
 
 /// Execute one section's block lifecycle over the shared [`WalkContext`].
 ///
-/// This is the single engine every chain drives. The VM setup sequence runs
-/// through [`setup_section_vm`], the setup half shared with the fanout arm.
+/// This is the single engine every chain drives: VM construction and limits,
+/// the setup half through [`setup_section_vm`] (shared with the fanout arm),
+/// the infer hook, the block walk through [`walk_section_blocks`], then the
+/// teardown boundary and the section-finished observation.
 /// `siblings` is the caller's
 /// own walk slice, from which the section's visible set (its siblings minus
 /// itself, plus its direct children) is built for the control globals.
@@ -319,7 +309,7 @@ async fn walk_siblings(
 /// [`SectionFlow`] tells the chain how the section ended.
 #[expect(
     clippy::too_many_lines,
-    reason = "one linear section lifecycle: VM setup, ordered block walk, scope close, and teardown, kept together so every chain shares exactly one implementation"
+    reason = "the driver builds the three control-global callbacks inline; each owns clones of the run context so the persistent Lua closures hold no borrows"
 )]
 async fn run_one_section(
     ctx: &WalkContext<'_>,
@@ -388,18 +378,13 @@ async fn run_one_section(
                     "execute recursion exceeded cap of {MAX_EXECUTE_DEPTH}"
                 )));
             }
-            let visible = visible_sections(&exec_siblings, &exec_caller);
-            let worker = fanout::resolve_sibling(&heading, &visible)?;
             // The contained chain runs the target's own sibling slice from
             // the target's index: a child target sits beside the caller's
             // children, a sibling target beside the caller's siblings.
             let (chain_slice, start) =
-                if let Some(index) = section_position(&exec_caller.children, worker) {
-                    (exec_caller.children.as_slice(), index)
-                } else {
-                    let index = section_position(&exec_siblings, worker)
-                        .ok_or_else(|| Error::Lua(format!("section `{heading}` index missing")))?;
-                    (exec_siblings.as_slice(), index)
+                match resolve_jump_target(&heading, &exec_siblings, &exec_caller)? {
+                    JumpTarget::Child(index) => (exec_caller.children.as_slice(), index),
+                    JumpTarget::Sibling(index) => (exec_siblings.as_slice(), index),
                 };
             let call_args = input.as_deref().unwrap_or(&exec_args);
             let task_handles = exec_task_handles.clone();
@@ -449,6 +434,9 @@ async fn run_one_section(
             })
         }
     };
+    // The section's visible set is built once per section and shared: the
+    // fanout callback takes a clone, the list callback takes the original.
+    let visible = visible_sections(siblings, section);
     let fanout_callback = {
         let fanout_store = ctx.store.clone();
         let fanout_args = ctx.args.to_string();
@@ -463,7 +451,7 @@ async fn run_one_section(
         let fanout_analysis = ctx.analysis.clone();
         let fanout_observer = Arc::clone(ctx.observer_arc);
         let fanout_debug = ctx.debug_arc.cloned();
-        let visible = visible_sections(siblings, section);
+        let visible = visible.clone();
         let section_count = ctx.top_sections.len();
         let limits = ctx.limits;
         let max_tool_iterations = ctx.max_tool_iterations;
@@ -492,11 +480,8 @@ async fn run_one_section(
             )
         }
     };
-    let list_callback = {
-        let visible = visible_sections(siblings, section);
-        move |heading: String| -> std::result::Result<Vec<String>, Error> {
-            list_items_from_visible(&heading, &visible)
-        }
+    let list_callback = move |heading: String| -> std::result::Result<Vec<String>, Error> {
+        list_items_from_visible(&heading, &visible)
     };
 
     // The setup half of the section lifecycle - host injection, host APIs,
@@ -543,232 +528,16 @@ async fn run_one_section(
         None,
     );
 
-    // Walk-only state: the registry is read only inside the block walk.
-    let registry = ctx.shared_tools.registry();
-    let mut conversation: Vec<Message> = Vec::new();
-    // Gates the one-time model resolution and counts install at the first
-    // prose block below. Schemas and dispatch rebuild on EVERY prose block so
-    // `tools.add`/`tools.add_local` between blocks reach the next model turn.
-    let mut seen_prose = false;
-    let mut counts: Option<ToolCallCounts> = None;
-    // Set at the first prose block exactly when a model binding resolved, so
-    // its `None` check below is the one model-required gate.
-    let mut completion_options: Option<CompletionOptions> = None;
-    let mut sys = sys;
-    let mut early_return: Option<String> = None;
-    let mut jump_heading: Option<String> = None;
-    // The reply visible to this section's prose. It starts at the incoming
-    // reply and rolls forward as prose produces text, so both the `{{reply}}`
-    // substitution and the Lua `reply` global stay consistent within a section.
-    let mut reply: Option<String> = incoming_reply.map(str::to_owned);
-
-    for block in &section.blocks {
-        match block {
-            Block::Lua(program) => {
-                let returned = vm.run_chunk(program, ctx.observer, &section.name);
-                match returned {
-                    Ok(LuaBlockResult::Returned(Some(value))) => {
-                        early_return = Some(value);
-                        break;
-                    }
-                    Ok(LuaBlockResult::Returned(None)) => {}
-                    Ok(LuaBlockResult::Jump(heading)) => {
-                        jump_heading = Some(heading);
-                        break;
-                    }
-                    Err(error) => {
-                        vm.teardown(ctx.observer, &section.name);
-                        return Err(error);
-                    }
-                }
-            }
-            Block::Prose { text, loop_capable } => {
-                let effective_bindings = match current_tool_bindings(ctx.bindings, &vm.tool_runtime)
-                {
-                    Ok(bindings) => bindings,
-                    Err(error) => {
-                        vm.teardown(ctx.observer, &section.name);
-                        return Err(error);
-                    }
-                };
-                if !seen_prose {
-                    seen_prose = true;
-                    counts = match vm.install_tool_call_counts(&effective_bindings) {
-                        Ok(c) => Some(c),
-                        Err(error) => {
-                            vm.teardown(ctx.observer, &section.name);
-                            return Err(error);
-                        }
-                    };
-                    let resolved_model =
-                        match crate::lua::resolve_model_binding(ctx.models, &vm.model_runtime) {
-                            Ok(model) => model,
-                            Err(error) => {
-                                vm.teardown(ctx.observer, &section.name);
-                                return Err(error);
-                            }
-                        };
-                    if let Some(binding) = resolved_model.as_ref() {
-                        let current = match vm.current_sys(&sys) {
-                            Ok(current) => current,
-                            Err(error) => {
-                                vm.teardown(ctx.observer, &section.name);
-                                return Err(error);
-                            }
-                        };
-                        let enriched = crate::lua::enrich_sys_model(&current, binding);
-                        if let Err(error) = vm.re_seal_sys(&enriched) {
-                            vm.teardown(ctx.observer, &section.name);
-                            return Err(error);
-                        }
-                        sys = enriched;
-                        completion_options = Some(binding.completion_options());
-                    }
-                }
-                let local_schemas = vm.local_tool_schemas();
-                // Seed aliases added since the first prose block (via
-                // `tools.add` or `tools.add_local`) so the tool loop can count
-                // their calls; `ensure` is idempotent on existing aliases.
-                if let Some(counts) = counts.as_ref() {
-                    let new_aliases = effective_bindings
-                        .iter()
-                        .map(ToolBinding::alias)
-                        .chain(local_schemas.iter().map(|schema| schema.name.as_str()));
-                    for alias in new_aliases {
-                        if let Err(error) = counts.ensure(alias) {
-                            vm.teardown(ctx.observer, &section.name);
-                            return Err(error);
-                        }
-                    }
-                }
-                let (schemas, dispatch) = match prepare_effective_scope(
-                    ctx.analysis,
-                    &effective_bindings,
-                    &local_schemas,
-                    &registry,
-                    ctx.execution,
-                    ctx.observer,
-                    &section.name,
-                ) {
-                    Ok(prepared) => prepared,
-                    Err(error) => {
-                        vm.teardown(ctx.observer, &section.name);
-                        return Err(error);
-                    }
-                };
-
-                let var = match vm.var() {
-                    Ok(var) => var,
-                    Err(error) => {
-                        vm.teardown(ctx.observer, &section.name);
-                        return Err(error);
-                    }
-                };
-                let prose =
-                    match subst::substitute(text, ctx.args, reply.as_deref(), None, &var, &sys) {
-                        Ok(prose) => prose,
-                        Err(error) => {
-                            vm.teardown(ctx.observer, &section.name);
-                            return Err(error);
-                        }
-                    };
-                if prose.trim().is_empty() {
-                    continue;
-                }
-                let Some(options) = completion_options.as_ref() else {
-                    vm.teardown(ctx.observer, &section.name);
-                    return Err(Error::ModelRequired {
-                        section: section.name.clone(),
-                    });
-                };
-                if client.is_none() {
-                    match env_client_with_limits(ctx.limits) {
-                        Ok(new_client) => *client = Some(new_client),
-                        Err(error) => {
-                            vm.teardown(ctx.observer, &section.name);
-                            return Err(error);
-                        }
-                    }
-                }
-                let Some(active_client) = client.as_ref() else {
-                    // The block just above guarantees a client exists here; a
-                    // `None` is an internal invariant violation, not a reason to
-                    // silently skip this section's prose.
-                    vm.teardown(ctx.observer, &section.name);
-                    return Err(Error::Internal(
-                        "model-facing prose reached inference with no gateway client",
-                    ));
-                };
-                let global_aliases = Some(&ctx.analysis.alias_to_id);
-                let mode = if *loop_capable {
-                    ProseMode::Loop {
-                        max_tool_iterations: ctx.max_tool_iterations,
-                    }
-                } else {
-                    ProseMode::SingleShot
-                };
-                // Local tools are Lua functions on this section VM; route
-                // their calls back into it rather than the registry.
-                let local_dispatch =
-                    |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, &args);
-                let outcome = match run_prose_inference(
-                    active_client,
-                    &schemas,
-                    &dispatch,
-                    &registry,
-                    &mut conversation,
-                    prose,
-                    mode,
-                    SectionProgress {
-                        execution: ctx.execution,
-                        observer: ctx.observer,
-                        section: &section.name,
-                        turns: ctx.turns.as_ref(),
-                        debug: ctx.debug,
-                        completion_options: options,
-                    },
-                    counts.as_ref(),
-                    global_aliases,
-                    Some(&local_dispatch),
-                )
-                .await
-                {
-                    Ok(outcome) => outcome,
-                    Err(error) => {
-                        vm.teardown(ctx.observer, &section.name);
-                        return Err(error);
-                    }
-                };
-                sys = crate::lua::enrich_sys_reply_finish_reason(
-                    &sys,
-                    outcome.finish_reason.as_deref(),
-                );
-                if let Err(error) = vm.re_seal_sys(&sys) {
-                    vm.teardown(ctx.observer, &section.name);
-                    return Err(error);
-                }
-                if let Some(text) = outcome.text {
-                    if let Err(error) = vm.bind_reply(&text, ctx.observer, &section.name) {
-                        vm.teardown(ctx.observer, &section.name);
-                        return Err(error);
-                    }
-                    reply = Some(text);
-                }
-            }
-        }
-    }
-
+    // The walk half - the ordered block loop - reports how the section
+    // ended. The teardown boundary stays here: every path out of the walk
+    // tears the VM down exactly once, and SECTION_FINISHED fires only when
+    // the walk completed (a jump or return included), never on an error.
+    let result = walk_section_blocks(&mut vm, ctx, section, sys, incoming_reply, client).await;
     vm.teardown(ctx.observer, &section.name);
+    let flow = result?;
     ctx.observer
         .observe(ctx.execution, &section.name, detail::SECTION_FINISHED);
-
-    if let Some(heading) = jump_heading {
-        return Ok(SectionFlow::Jumped { heading, reply });
-    }
-    if let Some(value) = early_return {
-        return Ok(SectionFlow::Returned(value));
-    }
-    Ok(SectionFlow::FellThrough { reply })
+    Ok(flow)
 }
 
 fn section_handles(sections: &[Section]) -> Vec<LuaSectionHandle> {
@@ -819,7 +588,7 @@ fn visible_sections(siblings: &[Section], caller: &Section) -> Vec<Section> {
 /// section, or matches more than one (see [`fanout::resolve_sibling`]), or
 /// when the resolved section has no pre-parsed items - the error that catches
 /// naming a prose section by mistake.
-pub(crate) fn list_items_from_visible(heading: &str, visible: &[Section]) -> Result<Vec<String>> {
+pub(super) fn list_items_from_visible(heading: &str, visible: &[Section]) -> Result<Vec<String>> {
     let section = fanout::resolve_sibling(heading, visible)?;
     if section.items.is_empty() {
         return Err(Error::Lua(format!(
@@ -851,7 +620,7 @@ pub(crate) enum JumpTarget {
 /// # Errors
 /// Returns [`Error::Lua`] when the heading is malformed, matches no visible
 /// section, or matches more than one.
-pub(crate) fn resolve_jump_target(
+pub(super) fn resolve_jump_target(
     heading: &str,
     siblings: &[Section],
     jumper: &Section,
