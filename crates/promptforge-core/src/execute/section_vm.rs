@@ -9,8 +9,8 @@
 //! Only the deltas live at the call site: the driver builds its own `sys`
 //! JSON (the walk's chain-position `id`; the arm's parent `id` plus
 //! `taskid`), picks the [`VmSeed`] (`initial_var` for the walk, the
-//! collection `item` for the arm), and supplies its own three control-global
-//! callbacks.
+//! collection `item` for the arm), and parameterizes the shared
+//! control-global constructor with its own home slice, caller, and depth.
 //!
 //! VM construction and the Lua limits install stay with the driver. A
 //! construction failure's handling differs (the walk propagates, the arm
@@ -64,8 +64,7 @@ pub(crate) struct SectionVmSetup<'a> {
     pub(crate) observer_arc: &'a Arc<dyn Observer>,
     /// The section name used in observations and error messages.
     pub(crate) section_name: &'a str,
-    /// The run's section handles backing the `tasks` table; empty for an
-    /// arm.
+    /// The run's section handles backing the `tasks` table.
     pub(crate) task_handles: &'a [LuaSectionHandle],
     /// The shared library replayed as the section's first chunk.
     pub(crate) shared: &'a LuaProgram,
@@ -76,7 +75,8 @@ pub(crate) struct SectionVmSetup<'a> {
 /// The sequence is fixed and shared: host injection carrying the driver's
 /// [`VmSeed`], [`SectionVm::install_host_apis`], the `item` global when the
 /// seed is [`VmSeed::Item`], [`SectionVm::install_control_globals`] with the
-/// driver's callbacks, [`SectionVm::replay_shared`], and
+/// callbacks the driver built from the shared `make_control_globals`
+/// constructor, [`SectionVm::replay_shared`], and
 /// [`SectionVm::install_captured_bindings`]. The caller applies the Lua
 /// limits itself before calling, so a limits failure propagates without
 /// touching the VM's teardown observation path.

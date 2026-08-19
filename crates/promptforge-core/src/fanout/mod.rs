@@ -13,8 +13,13 @@
 //! block walk (every Lua and prose block in order, the conversation and reply
 //! rolling forward, the tool scope rebuilt per prose block, a gateway client
 //! created from the environment on first use when the arm was handed none).
-//! Nested `execute`/`fanout`/`list_from_section` fail loudly inside an arm,
-//! and `jump` is rejected. The invoker receives an ordered Lua
+//! Arms run with the full control surface: `execute`, `fanout`, and
+//! `list_from_section` resolve against the worker's visible set (the set the
+//! worker was resolved from, minus the worker, plus its children), and `jump`
+//! drives a child walk whose reply becomes the arm's text. Recursion depth
+//! accumulates across the fanout boundary - each arm runs one level deeper
+//! than its caller - so `MAX_EXECUTE_DEPTH` bounds `execute`/`fanout` nesting
+//! uniformly. The invoker receives an ordered Lua
 //! table of structured arm results (`.text`, `.ok`, `.item`, `.exhausted`),
 //! with `.item` carrying the member value back. Fatal arm errors abort
 //! siblings; [`Error::ToolLoopExhausted`] soft-degrades to an incomplete stub.
@@ -32,7 +37,7 @@ use crate::cancel;
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::execute::RunLimits;
-use crate::lua::{LuaFanoutResult, LuaProgram, ToolBindings};
+use crate::lua::{LuaFanoutResult, LuaProgram, LuaSectionHandle, ToolBindings};
 use crate::model::ModelBindings;
 use crate::observe::{Observation, Observer};
 use crate::parser::Section;
@@ -224,6 +229,16 @@ pub(crate) struct FanoutContext<'a> {
     pub parent_id: usize,
     /// Total H2 section count in the top-level prompt.
     pub section_count: usize,
+    /// The worker's home slice - the set it was resolved from, minus the
+    /// worker. Each arm's control globals (`execute`, `fanout`,
+    /// `list_from_section`, and a jump's target) derive their resolution set
+    /// from it as the home slice plus the worker's children.
+    pub home: &'a [Section],
+    /// The run's section handles, installed as every arm's `tasks` table.
+    pub task_handles: &'a [LuaSectionHandle],
+    /// The fanout caller's execute depth. Each arm runs one level deeper, so
+    /// recursion accounting accumulates across the fanout boundary.
+    pub execute_depth: usize,
 }
 
 /// Runs the worker section template once per item, concurrently.
@@ -233,10 +248,6 @@ pub(crate) struct FanoutContext<'a> {
 ///
 /// # Errors
 /// Fatal arm errors abort siblings; tool-loop exhaustion soft-degrades.
-#[expect(
-    clippy::too_many_lines,
-    reason = "the scheduler is one cohesive unit: item-cap check, arm spawner, windowed dispatch, and the select! drain loop"
-)]
 pub(crate) async fn run_fanout_arms(
     worker: &Section,
     items: &[serde_json::Value],
@@ -276,35 +287,29 @@ pub(crate) async fn run_fanout_arms(
         }) as Arc<dyn DebugCapture>
     });
 
-    let mut join_set: JoinSet<Result<(usize, LuaFanoutResult)>> = JoinSet::new();
-    let mut replies: Vec<Option<LuaFanoutResult>> = (0..items.len()).map(|_| None).collect();
+    // The inputs every arm shares, built once and carried by Arc into each
+    // arm's payload across the spawn boundary, so an N-item fanout pays one
+    // inputs construction rather than N deep clones.
+    let inputs = Arc::new(ArmInputs::from_context(
+        ctx,
+        worker,
+        &turns,
+        Arc::clone(&proxy_observer),
+        proxy_debug.clone(),
+        arm_cancel.clone(),
+    ));
 
-    // Spawns arm `index`, cloning only that arm's inputs. Concurrency is bounded
-    // by only ever having `ArmWindow`-approved arms resident in the `JoinSet`.
+    let mut join_set: JoinSet<Result<(usize, LuaFanoutResult)>> = JoinSet::new();
+    let mut replies: Vec<Option<LuaFanoutResult>> = vec![None; items.len()];
+
+    // Spawns arm `index`, pairing the shared inputs with that arm's own item.
+    // Concurrency is bounded by only ever having `ArmWindow`-approved arms
+    // resident in the `JoinSet`.
     let spawn_arm = |index: usize, join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>| {
         let payload = ArmPayload {
-            worker: worker.clone(),
+            inputs: Arc::clone(&inputs),
             item: items[index].clone(),
             index,
-            store: ctx.store.clone(),
-            client: ctx.client.clone(),
-            args: ctx.args.to_owned(),
-            execution: ctx.execution.to_owned(),
-            when: ctx.when.to_owned(),
-            last_reply: ctx.last_reply.map(str::to_owned),
-            shared: ctx.shared.to_owned(),
-            bindings: ctx.bindings.clone(),
-            models: ctx.models.clone(),
-            analysis: ctx.analysis.clone(),
-            shared_tools: ctx.shared_tools.clone(),
-            max_tool_iterations: ctx.max_tool_iterations,
-            limits: ctx.limits,
-            parent_id: ctx.parent_id,
-            section_count: ctx.section_count,
-            turns: Arc::clone(&turns),
-            observer: Arc::clone(&proxy_observer),
-            debug: proxy_debug.clone(),
-            cancel: arm_cancel.clone(),
         };
         join_set.spawn(run_one_arm(payload));
     };
@@ -459,7 +464,7 @@ async fn abort_fanout_arms(
 mod arm;
 mod proxies;
 
-use arm::{ArmPayload, run_one_arm};
+use arm::{ArmInputs, ArmPayload, run_one_arm};
 use proxies::{DebugMsg, ProxyDebugCapture, ProxyObserver, SIDE_CHANNEL_CAPACITY};
 
 #[cfg(test)]

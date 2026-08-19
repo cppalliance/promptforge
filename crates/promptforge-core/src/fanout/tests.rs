@@ -5,69 +5,27 @@ use serde_json::json;
 use super::arm::ArmFinalizer;
 use super::proxies::ProxyObserver;
 use super::*;
-use crate::observe::detail;
+use crate::cancel::CancelHandle;
+use crate::observe::{NullObserver, detail};
 use crate::parser::Block;
 
 #[test]
 fn resolve_sibling_finds_exact_match() {
-    let sections = vec![
-        Section {
-            name: "Worker".to_string(),
-            level: 3,
-            blocks: vec![Block::Prose {
-                text: String::new(),
-                loop_capable: true,
-            }],
-            children: Vec::new(),
-            items: Vec::new(),
-            off_walk: false,
-        },
-        Section {
-            name: "Topics".to_string(),
-            level: 3,
-            blocks: vec![Block::Prose {
-                text: String::new(),
-                loop_capable: true,
-            }],
-            children: Vec::new(),
-            items: vec!["a".to_string()],
-            off_walk: false,
-        },
-    ];
+    let sections = vec![sibling("Worker", 3), sibling("Topics", 3)];
     let found = resolve_sibling("### Worker", &sections).expect("must resolve");
     assert_eq!(found.name, "Worker");
 }
 
 #[test]
 fn resolve_sibling_missing_heading_lists_available() {
-    let sections = vec![Section {
-        name: "Worker".to_string(),
-        level: 3,
-        blocks: vec![Block::Prose {
-            text: String::new(),
-            loop_capable: true,
-        }],
-        children: Vec::new(),
-        items: Vec::new(),
-        off_walk: false,
-    }];
+    let sections = vec![sibling("Worker", 3)];
     let err = resolve_sibling("### Missing", &sections).expect_err("missing heading must error");
     assert!(err.to_string().contains("### Worker"), "error was: {err}");
 }
 
 #[test]
 fn resolve_sibling_bare_name_errors() {
-    let sections = vec![Section {
-        name: "Worker".to_string(),
-        level: 3,
-        blocks: vec![Block::Prose {
-            text: String::new(),
-            loop_capable: true,
-        }],
-        children: Vec::new(),
-        items: Vec::new(),
-        off_walk: false,
-    }];
+    let sections = vec![sibling("Worker", 3)];
     let err = resolve_sibling("Worker", &sections).expect_err("bare name without ### must error");
     assert!(err.to_string().contains("### markers"), "error was: {err}");
 }
@@ -144,35 +102,11 @@ async fn fanout_arm_join_failure_preserves_the_join_error_source() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pre_cancelled_fanout_returns_interrupted() {
-    use crate::Error;
-    use crate::cancel::{self, CancelHandle};
-    use crate::client::GatewayClient;
-    use crate::model::ModelBindings;
-    use crate::observe::NullObserver;
-    use crate::store::StoreRef;
-
     let worker = lua_worker("return item");
     let items = vec![json!("alpha"), json!("beta")];
-    let store = StoreRef::memory();
-    let bindings = ToolBindings::default();
-    let models = <ModelBindings as Default>::default();
-    let analysis = crate::execute::ToolAnalysis::default();
-    let shared_tools = SharedTools::default();
-    let client: Option<GatewayClient> = None;
+    let fixture = FanoutFixture::new();
     let observer = NullObserver;
-    let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = terminal_ctx(
-        "fanout-cancel-test",
-        RunLimits::new(),
-        &observer,
-        &store,
-        &bindings,
-        &models,
-        &analysis,
-        &shared_tools,
-        &client,
-        &shared,
-    );
+    let ctx = fixture.ctx("fanout-cancel-test", RunLimits::new(), &observer);
 
     let cancel = CancelHandle::new();
     cancel.cancel();
@@ -191,37 +125,18 @@ async fn fatal_arm_aborts_and_drops_blocked_siblings() {
     // from the run level (not Interrupted, not a synthetic JoinError), and the
     // queued/blocked siblings are dropped without running - proven by a store
     // side-channel that only the fatal arm ever wrote to.
-    use crate::cancel::{self, CancelHandle};
-    use crate::client::GatewayClient;
-    use crate::model::ModelBindings;
-    use crate::observe::NullObserver;
-    use crate::store::StoreRef;
-
     let worker = lua_worker(
         "store.append('log.txt', item)\nif item == 'boom' then error('fatal arm error') end\nreturn item",
     );
     // The fatal item is dispatched first; with concurrency 1 the siblings stay
     // queued and must never be spawned once the first arm fails.
     let items = vec![json!("boom"), json!("beta"), json!("gamma")];
-    let store = StoreRef::memory();
-    let bindings = ToolBindings::default();
-    let models = <ModelBindings as Default>::default();
-    let analysis = crate::execute::ToolAnalysis::default();
-    let shared_tools = SharedTools::default();
-    let client: Option<GatewayClient> = None;
+    let fixture = FanoutFixture::new();
     let observer = NullObserver;
-    let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = terminal_ctx(
+    let ctx = fixture.ctx(
         "fanout-fatal-test",
         RunLimits::new().fanout_concurrency(NonZeroUsize::new(1).expect("1 is non-zero")),
         &observer,
-        &store,
-        &bindings,
-        &models,
-        &analysis,
-        &shared_tools,
-        &client,
-        &shared,
     );
 
     let error = cancel::scope(CancelHandle::new(), run_fanout_arms(&worker, &items, &ctx))
@@ -234,7 +149,10 @@ async fn fatal_arm_aborts_and_drops_blocked_siblings() {
     );
     // Only the fatal arm ran; the blocked siblings were dropped and never
     // executed their prologue.
-    let log = store.read("log.txt").expect("the fatal arm wrote its item");
+    let log = fixture
+        .store
+        .read("log.txt")
+        .expect("the fatal arm wrote its item");
     assert!(log.contains("boom"), "the fatal arm ran: {log:?}");
     assert!(
         !log.contains("beta") && !log.contains("gamma"),
@@ -300,51 +218,17 @@ fn arm_window_never_exceeds_the_concurrency_limit() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_rejects_a_list_over_the_item_cap() {
-    use crate::client::GatewayClient;
-    use crate::model::ModelBindings;
-    use crate::observe::NullObserver;
-    use crate::parser::Section;
-    use crate::store::StoreRef;
-
-    let worker = Section {
-        name: "Worker".to_string(),
-        level: 3,
-        blocks: vec![Block::Prose {
-            text: "irrelevant".to_string(),
-            loop_capable: true,
-        }],
-        children: Vec::new(),
-        items: Vec::new(),
-        off_walk: false,
-    };
+    // The cap check fires before any arm is scheduled, so the worker body is
+    // irrelevant here.
+    let worker = sibling("Worker", 3);
     let items: Vec<serde_json::Value> = (0..5).map(|i| json!(i.to_string())).collect();
-    let store = StoreRef::memory();
-    let bindings = ToolBindings::default();
-    let models = <ModelBindings as Default>::default();
-    let analysis = crate::execute::ToolAnalysis::default();
-    let shared_tools = SharedTools::default();
-    let client: Option<GatewayClient> = None;
+    let fixture = FanoutFixture::new();
     let observer = NullObserver;
-    let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = FanoutContext {
-        args: "",
-        store: &store,
-        execution: "fanout-cap-test",
-        observer: &observer,
-        client: &client,
-        debug: None,
-        shared: &shared,
-        bindings: &bindings,
-        models: &models,
-        analysis: &analysis,
-        shared_tools: &shared_tools,
-        max_tool_iterations: 24,
-        limits: RunLimits::new().max_fanout_items(NonZeroUsize::new(3).expect("3 is non-zero")),
-        last_reply: None,
-        when: "2026-08-08",
-        parent_id: 1,
-        section_count: 1,
-    };
+    let ctx = fixture.ctx(
+        "fanout-cap-test",
+        RunLimits::new().max_fanout_items(NonZeroUsize::new(3).expect("3 is non-zero")),
+        &observer,
+    );
 
     let error = run_fanout_arms(&worker, &items, &ctx)
         .await
@@ -357,45 +241,15 @@ async fn fanout_rejects_a_list_over_the_item_cap() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn model_required_when_arm_prose_has_no_binding() {
-    use crate::Error;
-    use crate::client::GatewayClient;
-    use crate::model::ModelBindings;
-    use crate::observe::NullObserver;
-    use crate::parser::Section;
-    use crate::store::StoreRef;
-
-    let worker = Section {
-        name: "Worker".to_string(),
-        level: 3,
-        blocks: vec![Block::Prose {
-            text: "Ask the model about {{ item }}.".to_string(),
-            loop_capable: true,
-        }],
-        children: Vec::new(),
-        items: Vec::new(),
-        off_walk: false,
-    };
+    let mut worker = sibling("Worker", 3);
+    worker.blocks = vec![Block::Prose {
+        text: "Ask the model about {{ item }}.".to_string(),
+        loop_capable: true,
+    }];
     let items = vec![json!("alpha")];
-    let store = StoreRef::memory();
-    let bindings = ToolBindings::default();
-    let models = <ModelBindings as Default>::default();
-    let analysis = crate::execute::ToolAnalysis::default();
-    let shared_tools = SharedTools::default();
-    let client: Option<GatewayClient> = None;
+    let fixture = FanoutFixture::new();
     let observer = NullObserver;
-    let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = terminal_ctx(
-        "fanout-test",
-        RunLimits::new(),
-        &observer,
-        &store,
-        &bindings,
-        &models,
-        &analysis,
-        &shared_tools,
-        &client,
-        &shared,
-    );
+    let ctx = fixture.ctx("fanout-test", RunLimits::new(), &observer);
 
     let error = run_fanout_arms(&worker, &items, &ctx)
         .await
@@ -459,6 +313,54 @@ fn lua_worker(source: &str) -> Section {
     }
 }
 
+/// Owns the run-context values every `run_fanout_arms` test threads into
+/// [`terminal_ctx`], so a test states only its execution name, limits, and
+/// observer. Fields stay visible so a test can swap one out (a custom shared
+/// library, a threaded home slice) before building the context.
+struct FanoutFixture {
+    store: StoreRef,
+    bindings: ToolBindings,
+    models: ModelBindings,
+    analysis: crate::execute::ToolAnalysis,
+    shared_tools: SharedTools,
+    client: Option<GatewayClient>,
+    shared: LuaProgram,
+}
+
+impl FanoutFixture {
+    fn new() -> Self {
+        Self {
+            store: StoreRef::memory(),
+            bindings: ToolBindings::default(),
+            models: <ModelBindings as Default>::default(),
+            analysis: crate::execute::ToolAnalysis::default(),
+            shared_tools: SharedTools::default(),
+            client: None,
+            shared: LuaProgram::empty().expect("the empty chunk compiles"),
+        }
+    }
+
+    fn ctx<'a>(
+        &'a self,
+        execution: &'a str,
+        limits: RunLimits,
+        observer: &'a dyn Observer,
+    ) -> FanoutContext<'a> {
+        terminal_ctx(
+            execution,
+            limits,
+            observer,
+            &self.store,
+            &self.bindings,
+            &self.models,
+            &self.analysis,
+            &self.shared_tools,
+            &self.client,
+            &self.shared,
+        )
+    }
+}
+
 #[expect(
     clippy::ref_option,
     clippy::too_many_arguments,
@@ -494,6 +396,9 @@ fn terminal_ctx<'a>(
         when: "2026-08-08",
         parent_id: 1,
         section_count: 1,
+        home: &[],
+        task_handles: &[],
+        execute_depth: 0,
     }
 }
 
@@ -504,26 +409,9 @@ async fn each_arm_emits_a_distinct_succeeded_terminal_event() {
     // `started` and one `succeeded`, and nothing else.
     let worker = lua_worker("return item");
     let items = vec![json!("a"), json!("b")];
-    let store = StoreRef::memory();
-    let bindings = ToolBindings::default();
-    let models = <ModelBindings as Default>::default();
-    let analysis = crate::execute::ToolAnalysis::default();
-    let shared_tools = SharedTools::default();
-    let client: Option<GatewayClient> = None;
+    let fixture = FanoutFixture::new();
     let recorder = EventRecorder::default();
-    let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = terminal_ctx(
-        "fanout-terminal-test",
-        RunLimits::new(),
-        &recorder,
-        &store,
-        &bindings,
-        &models,
-        &analysis,
-        &shared_tools,
-        &client,
-        &shared,
-    );
+    let ctx = fixture.ctx("fanout-terminal-test", RunLimits::new(), &recorder);
 
     let results = run_fanout_arms(&worker, &items, &ctx)
         .await
@@ -545,21 +433,10 @@ async fn the_shared_replay_sees_the_arm_item() {
     // The `item` install lands before `replay_shared`, so the shared
     // library's top-level code may read `item`; moving the install after the
     // replay must fail this test.
-    use crate::client::GatewayClient;
-    use crate::model::ModelBindings;
-    use crate::observe::NullObserver;
-    use crate::store::StoreRef;
-
     let worker = lua_worker("return captured_by_shared");
     let items = vec![json!("alpha")];
-    let store = StoreRef::memory();
-    let bindings = ToolBindings::default();
-    let models = <ModelBindings as Default>::default();
-    let analysis = crate::execute::ToolAnalysis::default();
-    let shared_tools = SharedTools::default();
-    let client: Option<GatewayClient> = None;
-    let observer = NullObserver;
-    let shared = LuaProgram::compile(
+    let mut fixture = FanoutFixture::new();
+    fixture.shared = LuaProgram::compile(
         "captured_by_shared = item",
         "test shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
@@ -568,18 +445,8 @@ async fn the_shared_replay_sees_the_arm_item() {
         "Worker",
     )
     .expect("test Lua must compile");
-    let ctx = terminal_ctx(
-        "fanout-terminal-test",
-        RunLimits::new(),
-        &observer,
-        &store,
-        &bindings,
-        &models,
-        &analysis,
-        &shared_tools,
-        &client,
-        &shared,
-    );
+    let observer = NullObserver;
+    let ctx = fixture.ctx("fanout-terminal-test", RunLimits::new(), &observer);
 
     let results = run_fanout_arms(&worker, &items, &ctx)
         .await
@@ -597,26 +464,9 @@ async fn a_hard_failing_arm_emits_a_failed_terminal_event() {
     // never `succeeded`.
     let worker = lua_worker("error('boom')");
     let items = vec![json!("a")];
-    let store = StoreRef::memory();
-    let bindings = ToolBindings::default();
-    let models = <ModelBindings as Default>::default();
-    let analysis = crate::execute::ToolAnalysis::default();
-    let shared_tools = SharedTools::default();
-    let client: Option<GatewayClient> = None;
+    let fixture = FanoutFixture::new();
     let recorder = EventRecorder::default();
-    let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = terminal_ctx(
-        "fanout-terminal-test",
-        RunLimits::new(),
-        &recorder,
-        &store,
-        &bindings,
-        &models,
-        &analysis,
-        &shared_tools,
-        &client,
-        &shared,
-    );
+    let ctx = fixture.ctx("fanout-terminal-test", RunLimits::new(), &recorder);
 
     run_fanout_arms(&worker, &items, &ctx)
         .await
@@ -632,8 +482,6 @@ async fn a_hard_failing_arm_emits_a_failed_terminal_event() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn results_follow_collection_order_not_finish_order() {
-    use crate::observe::NullObserver;
-
     // The first arm is gated on a store key only the second arm writes, so it
     // finishes after its sibling; the returned vec must still follow
     // collection order, not finish order.
@@ -646,26 +494,9 @@ async fn results_follow_collection_order_not_finish_order() {
         return 'two-early'",
     );
     let items = vec![json!("one"), json!("two")];
-    let store = StoreRef::memory();
-    let bindings = ToolBindings::default();
-    let models = <ModelBindings as Default>::default();
-    let analysis = crate::execute::ToolAnalysis::default();
-    let shared_tools = SharedTools::default();
-    let client: Option<GatewayClient> = None;
+    let fixture = FanoutFixture::new();
     let observer = NullObserver;
-    let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = terminal_ctx(
-        "fanout-ordering-test",
-        RunLimits::new(),
-        &observer,
-        &store,
-        &bindings,
-        &models,
-        &analysis,
-        &shared_tools,
-        &client,
-        &shared,
-    );
+    let ctx = fixture.ctx("fanout-ordering-test", RunLimits::new(), &observer);
 
     let results = run_fanout_arms(&worker, &items, &ctx)
         .await
@@ -682,35 +513,47 @@ async fn results_follow_collection_order_not_finish_order() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_empty_collection_returns_empty_results() {
-    use crate::observe::NullObserver;
-
     let worker = lua_worker("return item");
     let items: Vec<serde_json::Value> = Vec::new();
-    let store = StoreRef::memory();
-    let bindings = ToolBindings::default();
-    let models = <ModelBindings as Default>::default();
-    let analysis = crate::execute::ToolAnalysis::default();
-    let shared_tools = SharedTools::default();
-    let client: Option<GatewayClient> = None;
+    let fixture = FanoutFixture::new();
     let observer = NullObserver;
-    let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = terminal_ctx(
-        "fanout-empty-test",
-        RunLimits::new(),
-        &observer,
-        &store,
-        &bindings,
-        &models,
-        &analysis,
-        &shared_tools,
-        &client,
-        &shared,
-    );
+    let ctx = fixture.ctx("fanout-empty-test", RunLimits::new(), &observer);
 
     let results = run_fanout_arms(&worker, &items, &ctx)
         .await
         .expect("an empty collection must succeed");
     assert!(results.is_empty(), "no items, no results: {results:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn arm_control_globals_resolve_over_the_threaded_home_and_handles() {
+    // The FanoutContext home slice and task handles reach the arm's control
+    // globals: `list_from_section` resolves a home sibling's items, and the
+    // `tasks` table carries the threaded handles.
+    let worker = lua_worker(
+        "local items = list_from_section('### List')\n\
+        assert(tasks['## Parent'].name == 'Parent', 'the arm sees the threaded task handles')\n\
+        return item .. ':' .. table.concat(items, ',')",
+    );
+    let items = vec![json!("alpha")];
+    let fixture = FanoutFixture::new();
+    let observer = NullObserver;
+    let mut list = sibling("List", 3);
+    list.items = vec!["x".to_string(), "y".to_string()];
+    let home = vec![list];
+    let handles = vec![LuaSectionHandle::new("Parent", false)];
+    let mut ctx = fixture.ctx("fanout-home-test", RunLimits::new(), &observer);
+    ctx.home = &home;
+    ctx.task_handles = &handles;
+
+    let results = run_fanout_arms(&worker, &items, &ctx)
+        .await
+        .expect("the arm must succeed");
+    assert_eq!(
+        results,
+        vec![LuaFanoutResult::success(json!("alpha"), "alpha:x,y")],
+        "the arm's control globals resolved over the threaded home slice"
+    );
 }
 
 /// Signals a oneshot the first time it observes a Lua `log` event, so a test
@@ -737,34 +580,15 @@ async fn an_in_flight_fanout_arm_is_cancelled_cooperatively() {
     // per-arm handle the arm could not be aborted (synchronous Lua cannot be
     // preempted) and the join drain would hang - so the timeout below is the
     // regression guard. Readiness is signaled explicitly (no sleeps).
-    use crate::cancel::{self, CancelHandle};
-
     let worker = lua_worker("log('running')\nwhile true do end\nreturn item");
     let items = vec![json!("only")];
-    let store = StoreRef::memory();
-    let bindings = ToolBindings::default();
-    let models = <ModelBindings as Default>::default();
-    let analysis = crate::execute::ToolAnalysis::default();
-    let shared_tools = SharedTools::default();
-    let client: Option<GatewayClient> = None;
+    let fixture = FanoutFixture::new();
 
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     let observer = SignalOnLog {
         tx: std::sync::Mutex::new(Some(ready_tx)),
     };
-    let shared = LuaProgram::empty().expect("the empty chunk compiles");
-    let ctx = terminal_ctx(
-        "fanout-terminal-test",
-        RunLimits::new(),
-        &observer,
-        &store,
-        &bindings,
-        &models,
-        &analysis,
-        &shared_tools,
-        &client,
-        &shared,
-    );
+    let ctx = fixture.ctx("fanout-terminal-test", RunLimits::new(), &observer);
 
     let cancel = CancelHandle::new();
     let canceller = {
