@@ -9,7 +9,7 @@ promptforge: 1
 ## Research
 
 ```lua
-local replies = fanout("### Worker", "### Topics")
+local replies = fanout("### Worker", list_from_section("### Topics"))
 return table.concat(replies, "\n")
 ```
 

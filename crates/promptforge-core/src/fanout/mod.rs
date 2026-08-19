@@ -1,17 +1,24 @@
-//! Explicit fanout: map a worker section over a list of items.
+//! Explicit fanout: map a worker section over a collection of members.
 //!
-//! A parent section's Lua epilog calls `fanout("### Worker", "### List")` to
-//! run the worker template once per item parsed from the list section. Arms
-//! execute concurrently on a [`tokio::task::JoinSet`]; each gets a fresh
-//! [`SectionVm`] with `item` and `sys.taskid` injected. The invoker receives an
-//! ordered Lua table of structured arm results (`.text`, `.ok`, `.item`,
-//! `.exhausted`). Fatal arm errors abort siblings;
-//! [`Error::ToolLoopExhausted`] soft-degrades to an incomplete stub.
+//! A section's Lua calls `fanout(worker, collection)` to run the worker
+//! template once per collection member. The collection is any Lua table: the
+//! array part (`1..=#t`) iterates in order first, then the hash part in
+//! undefined order. An array member arrives as the arm's `item` value as
+//! itself; a hash member arrives as a pair table (`item.key` / `item.value`).
+//! A list section's pre-parsed items feed in through `list_from_section`:
+//! `fanout("### Worker", list_from_section("### List"))`. Arms execute
+//! concurrently on a [`tokio::task::JoinSet`]; each gets a fresh [`SectionVm`]
+//! with `item` and `sys.taskid` injected. The invoker receives an ordered Lua
+//! table of structured arm results (`.text`, `.ok`, `.item`, `.exhausted`),
+//! with `.item` carrying the member value back. Fatal arm errors abort
+//! siblings; [`Error::ToolLoopExhausted`] soft-degrades to an incomplete stub.
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
+use mlua::{Lua, LuaSerdeExt, Value};
+use serde_json::json;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
@@ -26,7 +33,7 @@ use crate::store::StoreRef;
 use crate::tools::SharedTools;
 use crate::{Error, Result};
 
-/// Parses a fanout heading like `"### Name"` into an exact `(level, name)`
+/// Parses a section heading like `"### Name"` into an exact `(level, name)`
 /// address.
 ///
 /// The marker run must be one-or-more `#`, immediately followed by whitespace,
@@ -41,64 +48,150 @@ fn parse_heading_address(heading: &str) -> Result<(usize, String)> {
     let level = stripped.chars().take_while(|&c| c == '#').count();
     if level == 0 {
         return Err(Error::Lua(format!(
-            "fanout heading must include ### markers, got bare name: {stripped}"
+            "section heading must include ### markers, got bare name: {stripped}"
         )));
     }
     // The `#` run is ASCII, so a byte slice at `level` is a valid boundary.
     let rest = &stripped[level..];
     if !rest.starts_with(|c: char| c.is_whitespace()) {
         return Err(Error::Lua(format!(
-            "fanout heading must have whitespace after the {} markers: {stripped}",
+            "section heading must have whitespace after the {} markers: {stripped}",
             "#".repeat(level)
         )));
     }
     let name = rest.trim();
     if name.is_empty() {
         return Err(Error::Lua(format!(
-            "fanout heading has no name: {stripped}"
+            "section heading has no name: {stripped}"
         )));
     }
     Ok((level, name.to_owned()))
 }
 
-/// Resolves a heading string like `"### Name"` against a list of sibling
+/// Resolves a heading string like `"### Name"` against a caller's visible
 /// sections, returning the single matching section.
 ///
-/// The heading is parsed into an exact `(level, name)` address; a sibling
+/// The heading is parsed into an exact `(level, name)` address; a section
 /// matches only when BOTH its level and name are equal. Zero matches and more
 /// than one match are both rejected, so an ambiguous or level-mismatched
 /// heading never resolves to an arbitrary first hit.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] when the heading is malformed (see
-/// [`parse_heading_address`]), when no sibling matches the exact address, or
-/// when more than one sibling matches. The error message lists available
-/// siblings.
-pub(crate) fn resolve_sibling<'a>(heading: &str, siblings: &'a [Section]) -> Result<&'a Section> {
+/// [`parse_heading_address`]), when no visible section matches the exact
+/// address, or when more than one matches. The error message lists the
+/// visible sections and nothing else, so the error channel cannot leak the
+/// rest of the document's structure.
+pub(crate) fn resolve_sibling<'a>(heading: &str, visible: &'a [Section]) -> Result<&'a Section> {
     let (level, name) = parse_heading_address(heading)?;
 
-    let mut matches = siblings
+    let mut matches = visible
         .iter()
         .filter(|section| usize::from(section.level) == level && section.name == name);
     let Some(found) = matches.next() else {
-        let available: Vec<String> = siblings
+        let available: Vec<String> = visible
             .iter()
             .map(|s| format!("{} {}", "#".repeat(s.level.into()), s.name))
             .collect();
         return Err(Error::Lua(format!(
-            "fanout heading `{}` not found; available siblings: {}",
+            "section heading `{}` not found; available sections: {}",
             heading.trim(),
             available.join(", ")
         )));
     };
     if matches.next().is_some() {
         return Err(Error::Lua(format!(
-            "fanout heading `{}` is ambiguous; more than one sibling matches {} {name}",
+            "section heading `{}` is ambiguous; more than one visible section matches {} {name}",
             heading.trim(),
             "#".repeat(level)
         )));
     }
     Ok(found)
+}
+
+/// Converts fanout's collection argument into the JSON members that cross
+/// into the arms, one value at a time.
+///
+/// The array part (`1..=#t`) iterates in order first, then the hash part in
+/// undefined order. Array members convert as themselves; hash members convert
+/// to `{"key": k, "value": v}` pair tables so no information is lost. Each
+/// member converts individually through the same serde bridge that seeds
+/// `var`, because whole-table serde cannot represent mixed tables.
+///
+/// # Errors
+/// Returns [`Error::Lua`] when the value is not a table (the message points
+/// at `list_from_section` for the list-section case), when a member is a
+/// function, userdata, or thread (the error names the member's index), or
+/// when a hash key is not a string, number, or boolean.
+pub(crate) fn collection_to_items(lua: &Lua, collection: &Value) -> Result<Vec<serde_json::Value>> {
+    let Value::Table(table) = collection else {
+        return Err(Error::Lua(
+            "fanout's second parameter is a collection; for a list section use list_from_section(heading)".to_owned(),
+        ));
+    };
+    let mut items = Vec::new();
+    let border = table.raw_len();
+    for index in 1..=border {
+        let member = table.raw_get::<Value>(index).map_err(Error::lua)?;
+        items.push(member_to_json(lua, member, &index.to_string())?);
+    }
+    for pair in table.pairs::<Value, Value>() {
+        let (key, member) = pair.map_err(Error::lua)?;
+        // The array part was already emitted above, in order.
+        if let Value::Integer(index) = &key
+            && usize::try_from(*index).is_ok_and(|index| (1..=border).contains(&index))
+        {
+            continue;
+        }
+        let key_json = match &key {
+            Value::String(s) => {
+                serde_json::Value::String(s.to_str().map_err(Error::lua)?.to_string())
+            }
+            Value::Integer(i) => serde_json::Value::from(*i),
+            Value::Number(n) => serde_json::Number::from_f64(*n)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| {
+                    Error::Lua("fanout collection key is not a finite number".to_owned())
+                })?,
+            Value::Boolean(b) => serde_json::Value::Bool(*b),
+            other => {
+                return Err(Error::Lua(format!(
+                    "fanout collection key must be a string, number, or boolean, got {}",
+                    other.type_name()
+                )));
+            }
+        };
+        let value_json = member_to_json(lua, member, &key_label(&key))?;
+        items.push(json!({ "key": key_json, "value": value_json }));
+    }
+    Ok(items)
+}
+
+/// Converts one collection member to JSON through the serde bridge.
+///
+/// Functions, userdata, and threads cannot serialize, so they are rejected at
+/// the call boundary with an error naming the member's index rather than the
+/// bridge's type error.
+fn member_to_json(lua: &Lua, member: Value, index: &str) -> Result<serde_json::Value> {
+    match &member {
+        Value::Function(_) | Value::UserData(_) | Value::Thread(_) => Err(Error::Lua(format!(
+            "fanout collection member at index {index} is a {}; members must be data",
+            member.type_name()
+        ))),
+        _ => lua.from_value(member).map_err(Error::lua),
+    }
+}
+
+/// Renders a hash key for a member diagnostic: strings verbatim, numbers and
+/// booleans in their natural string form.
+fn key_label(key: &Value) -> String {
+    match key {
+        Value::String(s) => s.to_string_lossy(),
+        Value::Integer(i) => i.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::Boolean(b) => b.to_string(),
+        other => other.type_name().to_owned(),
+    }
 }
 
 /// Everything a fanout needs from the invoker's context.
@@ -135,8 +228,8 @@ pub(crate) struct FanoutContext<'a> {
 
 /// Runs the worker section template once per item, concurrently.
 ///
-/// Returns the ordered structured results from each arm (list order, not
-/// finish order).
+/// Returns the ordered structured results from each arm (collection order,
+/// not finish order).
 ///
 /// # Errors
 /// Fatal arm errors abort siblings; tool-loop exhaustion soft-degrades.
@@ -149,11 +242,11 @@ pub(crate) async fn run_fanout_arms(
     items: &[serde_json::Value],
     ctx: &FanoutContext<'_>,
 ) -> Result<Vec<LuaFanoutResult>> {
-    // Reject an oversized list before scheduling anything, so a pathological
-    // prompt cannot allocate an unbounded number of arms.
+    // Reject an oversized collection before scheduling anything, so a
+    // pathological prompt cannot allocate an unbounded number of arms.
     if items.len() > ctx.max_fanout_items.get() {
         return Err(Error::Lua(format!(
-            "fanout list has {} items, exceeding the maximum of {}",
+            "fanout collection has {} members, exceeding the maximum of {}",
             items.len(),
             ctx.max_fanout_items.get()
         )));

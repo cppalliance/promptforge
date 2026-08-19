@@ -12,7 +12,7 @@ promptforge: 1
 ```
 
 ```lua
-local replies = fanout("### Worker", "### Items")
+local replies = fanout("### Worker", list_from_section("### Items"))
 return table.concat(replies, ",")
 ```
 
