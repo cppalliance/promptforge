@@ -76,19 +76,22 @@ pub use error::{RunError, RunErrorKind};
 pub use gateway::ResolutionContext;
 
 // Crate-internal items reused through the historical `crate::execute::` path.
-// Only `run_sections`, `execute_live_h1`, and `ToolAnalysis` serve `run`
-// below; the rest (`SectionVmSetup`/`VmSeed`/`setup_section_vm`,
+// `ToolAnalysis` and the engine/section-VM items (`ControlContext` and its
+// control-global constructor, `SectionVmSetup`/`VmSeed`/`setup_section_vm`,
 // `now_rfc3339_checked`, `sys_json`, the block walk, and the infer hook
-// install) are consumed by `fanout`. Re-exported so the split stays
-// surface-neutral for the public API while keeping one import path for
+// install) are consumed by `fanout`; `run_sections` and `execute_live_h1`
+// serve only `run` below and stay module-private. Re-exported so the split
+// stays surface-neutral for the public API while keeping one import path for
 // internal collaborators.
 pub(crate) use block_walk::{BlockWalkContext, SectionFlow, walk_section_blocks};
-pub(crate) use engine::run_sections;
-pub(crate) use h1::execute_live_h1;
+pub(crate) use engine::{ControlContext, make_control_globals};
 pub(crate) use scope::ToolAnalysis;
 pub(crate) use section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 pub(crate) use support::{now_rfc3339_checked, sys_json};
 pub(crate) use tools::attach_engine_infer_hook;
+
+use engine::run_sections;
+use h1::execute_live_h1;
 
 // Everything the executor's own tests reach through `use super::super::*`
 // (and that `tests/mod.rs` does not itself import): executor-internal items,

@@ -30,6 +30,10 @@
 //! The VM setup half of the lifecycle - host injection, host APIs, control
 //! globals, the shared replay, captured bindings - lives in the sibling
 //! `section_vm` module, which the fanout arm drives with the same sequence.
+//! The control-global callbacks themselves are built once in
+//! [`make_control_globals`] for both drivers, so an arm's
+//! `execute`/`fanout`/`list_from_section` and its jump behave exactly as a
+//! walked section's, resolved over the worker's visible set.
 //! Construction and the Lua limits install stay with the driver: a limits
 //! failure must propagate bare, before any teardown observation exists.
 //! The walk half - the ordered block loop with its conversation state,
@@ -44,7 +48,9 @@ use std::sync::atomic::AtomicU32;
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::fanout;
-use crate::lua::{LuaSectionHandle, SectionVm, ToolBindings, resolve_section_target};
+use crate::lua::{
+    LuaFanoutResult, LuaProgram, LuaSectionHandle, SectionVm, ToolBindings, resolve_section_target,
+};
 use crate::model::ModelBindings;
 use crate::observe::{Observer, detail};
 use crate::parser::{Block, Prompt, Section};
@@ -63,43 +69,46 @@ use super::support::{
 use super::tools::attach_engine_infer_hook;
 
 /// How one chain ended.
-enum WalkEnd {
+pub(crate) enum WalkEnd {
     /// The level ran off its last section, carrying the final reply produced
     /// within it (if any).
     Exhausted(Option<String>),
     /// A scalar early return ended the chain (the run, for the top-level
-    /// chain; the call's return value, for an `execute()` chain).
+    /// chain; the call's return value, for an `execute()` chain or a fanout
+    /// arm's jump-started child walk).
     Returned(String),
 }
 
 /// The borrowed run context every section in one chain shares.
 ///
 /// Bundled so the single-section engine and the chain drivers keep one linear
-/// set of borrows rather than threading two dozen parameters each.
-pub(super) struct WalkContext<'a> {
-    pub(super) args: &'a str,
-    pub(super) store: &'a StoreRef,
-    pub(super) execution: &'a str,
-    pub(super) observer: &'a dyn Observer,
-    pub(super) observer_arc: &'a Arc<dyn Observer>,
-    pub(super) debug: Option<&'a dyn DebugCapture>,
-    pub(super) debug_arc: Option<&'a Arc<dyn DebugCapture>>,
+/// set of borrows rather than threading two dozen parameters each. The fanout
+/// arm builds the same context for its jump-started child walk.
+pub(crate) struct WalkContext<'a> {
+    pub(crate) args: &'a str,
+    pub(crate) store: &'a StoreRef,
+    pub(crate) execution: &'a str,
+    pub(crate) observer: &'a dyn Observer,
+    pub(crate) observer_arc: &'a Arc<dyn Observer>,
+    pub(crate) debug: Option<&'a dyn DebugCapture>,
+    pub(crate) debug_arc: Option<&'a Arc<dyn DebugCapture>>,
     /// The shared library replayed as every section's first chunk; an empty
     /// compiled chunk when the prompt declares no `lua shared` library.
-    pub(super) shared: &'a crate::lua::LuaProgram,
-    pub(super) bindings: &'a ToolBindings,
-    pub(super) models: &'a ModelBindings,
-    pub(super) analysis: &'a ToolAnalysis,
-    pub(super) shared_tools: &'a SharedTools,
-    pub(super) max_tool_iterations: usize,
-    pub(super) limits: RunLimits,
-    pub(super) when: &'a str,
-    pub(super) top_sections: &'a [Section],
-    pub(super) task_handles: &'a [LuaSectionHandle],
-    pub(super) turns: &'a Arc<AtomicU32>,
+    pub(crate) shared: &'a crate::lua::LuaProgram,
+    pub(crate) bindings: &'a ToolBindings,
+    pub(crate) models: &'a ModelBindings,
+    pub(crate) analysis: &'a ToolAnalysis,
+    pub(crate) shared_tools: &'a SharedTools,
+    pub(crate) max_tool_iterations: usize,
+    pub(crate) limits: RunLimits,
+    pub(crate) when: &'a str,
+    /// The run's top-level section count, reported as `sys.section_count`.
+    pub(crate) section_count: usize,
+    pub(crate) task_handles: &'a [LuaSectionHandle],
+    pub(crate) turns: &'a Arc<AtomicU32>,
     /// `var` seeded from an earlier VM (top-level H1 hand-off); `None` for a
     /// contained chain.
-    pub(super) initial_var: Option<&'a serde_json::Value>,
+    pub(crate) initial_var: Option<&'a serde_json::Value>,
 }
 
 impl<'a> From<&WalkContext<'a>> for BlockWalkContext<'a> {
@@ -192,15 +201,21 @@ pub(crate) async fn run_sections(
         max_tool_iterations,
         limits,
         when: &when,
-        top_sections: &prompt.sections,
+        section_count: prompt.sections.len(),
         task_handles: &task_handles,
         turns: &turns,
         initial_var,
     };
 
+    // The owned control context is built once per run: every field is
+    // run-scoped, so all sections share one Arc and only the per-section
+    // client snapshot is captured fresh by `make_control_globals`.
+    let control = Arc::new(ControlContext::from_walk(&ctx));
+
     let mut entered = 0usize;
     match walk_siblings(
         &ctx,
+        &control,
         &prompt.sections,
         0,
         None,
@@ -221,8 +236,9 @@ pub(crate) async fn run_sections(
 ///
 /// This is the one chain function at every heading level and for every entry
 /// mode: the top-level walk runs the prompt's sections, a jump to a child
-/// heading recurses into the jumper's children, and an `execute()` call runs
-/// a contained chain over the target's slice - all under the same rules
+/// heading recurses into the jumper's children, an `execute()` call runs a
+/// contained chain over the target's slice, and a fanout arm's jump drives a
+/// child walk from the arm's driver boundary - all under the same rules
 /// (fall-through order, off-walk skips, the reply rolling forward across
 /// sections). When a jump-started sub-walk's level exhausts, the parent
 /// chain resumes after the jumper with the sub-walk's last reply. A scalar
@@ -236,10 +252,11 @@ pub(crate) async fn run_sections(
 /// sections this chain has entered and seeds each `sys.id`.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the chain keeps its position, entry mode, and depth explicit and linear beside the shared WalkContext"
+    reason = "the chain keeps its shared contexts, position, entry mode, and depth explicit and linear"
 )]
-async fn walk_siblings(
+pub(crate) async fn walk_siblings(
     ctx: &WalkContext<'_>,
+    control: &Arc<ControlContext>,
     siblings: &[Section],
     start: usize,
     incoming_reply: Option<String>,
@@ -265,6 +282,7 @@ async fn walk_siblings(
         *entered += 1;
         match run_one_section(
             ctx,
+            control,
             section,
             siblings,
             *entered,
@@ -282,6 +300,7 @@ async fn walk_siblings(
                     // resumes after the jumper when that level exhausts.
                     JumpTarget::Child(child_index) => match Box::pin(walk_siblings(
                         ctx,
+                        control,
                         &section.children,
                         child_index,
                         reply,
@@ -317,9 +336,10 @@ async fn walk_siblings(
 /// Execute one section's block lifecycle over the shared [`WalkContext`].
 ///
 /// This is the single engine every chain drives: VM construction and limits,
-/// the setup half through [`setup_section_vm`] (shared with the fanout arm),
-/// the infer hook, the block walk through [`walk_section_blocks`], then the
-/// teardown boundary and the section-finished observation.
+/// the control globals through [`make_control_globals`] (shared with the
+/// fanout arm), the setup half through [`setup_section_vm`], the infer hook,
+/// the block walk through [`walk_section_blocks`], then the teardown
+/// boundary and the section-finished observation.
 /// `siblings` is the caller's
 /// own walk slice, from which the section's visible set (its siblings minus
 /// itself, plus its direct children) is built for the control globals.
@@ -329,11 +349,12 @@ async fn walk_siblings(
 /// forward as later prose in the same section produces text. The returned
 /// [`SectionFlow`] tells the chain how the section ended.
 #[expect(
-    clippy::too_many_lines,
-    reason = "the driver builds the three control-global callbacks inline; each owns clones of the run context so the persistent Lua closures hold no borrows"
+    clippy::too_many_arguments,
+    reason = "the engine keeps the shared contexts, the section's chain position, and its depth explicit and linear"
 )]
 async fn run_one_section(
     ctx: &WalkContext<'_>,
+    control: &Arc<ControlContext>,
     section: &Section,
     siblings: &[Section],
     section_id: usize,
@@ -348,7 +369,7 @@ async fn run_one_section(
         section_id,
         &section.name,
         ctx.execution,
-        ctx.top_sections.len(),
+        ctx.section_count,
     );
 
     ctx.observer
@@ -366,149 +387,24 @@ async fn run_one_section(
     vm.apply_lua_limits(ctx.limits.lua_memory().get(), ctx.limits.lua_logs().get())?;
 
     // Control globals are installed once for the section's whole lifecycle.
-    // Both callbacks own clones of the run context so the persistent Lua
-    // closures hold no borrows; the observer and debug captures go through
-    // their Arc handles for the same reason.
-    let execute_callback = {
-        let exec_store = ctx.store.clone();
-        let exec_args = ctx.args.to_string();
-        let exec_execution = ctx.execution.to_string();
-        let exec_when = ctx.when.to_string();
-        let exec_shared = ctx.shared.to_owned();
-        let exec_bindings = ctx.bindings.clone();
-        let exec_models = ctx.models.clone();
-        let exec_client = client.clone();
-        let exec_tools = ctx.shared_tools.clone();
-        let exec_siblings = siblings.to_vec();
-        let exec_caller = section.clone();
-        let exec_top = ctx.top_sections.to_vec();
-        // The run's handles already describe this same top-level slice;
-        // cloning them beats rebuilding them on every execute() call.
-        let exec_task_handles = ctx.task_handles.to_vec();
-        let exec_turns = Arc::clone(ctx.turns);
-        let exec_analysis = ctx.analysis.clone();
-        let exec_observer = Arc::clone(ctx.observer_arc);
-        let exec_debug = ctx.debug_arc.cloned();
-        let limits = ctx.limits;
-        let max_tool_iterations = ctx.max_tool_iterations;
-        move |target: LuaValue, input: Option<String>| -> std::result::Result<String, Error> {
-            let heading = resolve_section_target(target).map_err(Error::lua)?;
-            let next_depth = execute_depth + 1;
-            if next_depth > MAX_EXECUTE_DEPTH {
-                return Err(Error::Lua(format!(
-                    "execute recursion exceeded cap of {MAX_EXECUTE_DEPTH}"
-                )));
-            }
-            // The contained chain runs the target's own sibling slice from
-            // the target's index: a child target sits beside the caller's
-            // children, a sibling target beside the caller's siblings.
-            let (chain_slice, start) =
-                match resolve_jump_target(&heading, &exec_siblings, &exec_caller)? {
-                    JumpTarget::Child(index) => (exec_caller.children.as_slice(), index),
-                    JumpTarget::Sibling(index) => (exec_siblings.as_slice(), index),
-                };
-            let call_args = input.as_deref().unwrap_or(&exec_args);
-            let task_handles = exec_task_handles.clone();
-            let ctx = WalkContext {
-                args: call_args,
-                store: &exec_store,
-                execution: &exec_execution,
-                observer: exec_observer.as_ref(),
-                observer_arc: &exec_observer,
-                debug: exec_debug.as_deref(),
-                debug_arc: exec_debug.as_ref(),
-                shared: &exec_shared,
-                bindings: &exec_bindings,
-                models: &exec_models,
-                analysis: &exec_analysis,
-                shared_tools: &exec_tools,
-                max_tool_iterations,
-                limits,
-                when: &exec_when,
-                top_sections: &exec_top,
-                task_handles: &task_handles,
-                turns: &exec_turns,
-                initial_var: None,
-            };
-            let mut client = exec_client.clone();
-            // A contained chain counts its own `sys.id` from 1, like a fresh
-            // run; the caller's chain keeps its own count.
-            let mut entered = 0usize;
-            // Return the structured error directly (LUA-012): the typed error and
-            // its source cross the Lua boundary via `mlua::Error::external` rather
-            // than being flattened to a string here.
-            let end = bridge_blocking(walk_siblings(
-                &ctx,
-                chain_slice,
-                start,
-                None,
-                true,
-                next_depth,
-                &mut client,
-                &mut entered,
-            ))?;
-            // A return ends the chain, and its value is the call's return;
-            // an exhausted chain returns its final reply.
-            Ok(match end {
-                WalkEnd::Returned(value) => value,
-                WalkEnd::Exhausted(reply) => reply.unwrap_or_default(),
-            })
-        }
-    };
-    // The section's visible set is built once per section and shared: the
-    // fanout callback takes a clone, the list callback takes the original.
-    let visible = visible_sections(siblings, section);
-    let fanout_callback = {
-        let fanout_store = ctx.store.clone();
-        let fanout_args = ctx.args.to_string();
-        let fanout_execution = ctx.execution.to_string();
-        let fanout_when = ctx.when.to_string();
-        let fanout_last_reply = incoming_reply.map(str::to_owned);
-        let fanout_shared = ctx.shared.to_owned();
-        let fanout_bindings = ctx.bindings.clone();
-        let fanout_models = ctx.models.clone();
-        let fanout_client = client.clone();
-        let fanout_tools = ctx.shared_tools.clone();
-        let fanout_analysis = ctx.analysis.clone();
-        let fanout_observer = Arc::clone(ctx.observer_arc);
-        let fanout_debug = ctx.debug_arc.cloned();
-        let visible = visible.clone();
-        let section_count = ctx.top_sections.len();
-        let limits = ctx.limits;
-        let max_tool_iterations = ctx.max_tool_iterations;
-        move |worker_heading: String, items: Vec<serde_json::Value>| {
-            make_fanout_callback(
-                &worker_heading,
-                &items,
-                &visible,
-                &fanout_args,
-                &fanout_store,
-                &fanout_execution,
-                fanout_observer.as_ref(),
-                fanout_client.as_ref(),
-                fanout_debug.as_deref(),
-                &fanout_shared,
-                &fanout_bindings,
-                &fanout_models,
-                &fanout_analysis,
-                &fanout_tools,
-                max_tool_iterations,
-                limits,
-                fanout_last_reply.as_deref(),
-                &fanout_when,
-                section_id,
-                section_count,
-            )
-        }
-    };
-    let list_callback = move |heading: String| -> std::result::Result<Vec<String>, Error> {
-        list_items_from_visible(&heading, &visible)
-    };
+    // The callbacks share the run-wide Arc of the owned run context plus a
+    // snapshot of the client at this section's start, so the persistent Lua
+    // closures hold no borrows.
+    let (execute_callback, fanout_callback, list_callback) = make_control_globals(
+        control,
+        client,
+        section.clone(),
+        siblings.to_vec(),
+        execute_depth,
+        incoming_reply.map(str::to_owned),
+        section_id,
+    );
 
     // The setup half of the section lifecycle - host injection, host APIs,
     // the control globals, the shared replay, and the captured alias
     // bindings - is shared with the fanout arm; only the seed, the `sys`
-    // extras, and the callbacks are the walk's own.
+    // extras, and the callbacks' parameters (home slice, caller, depth) are
+    // the walk's own.
     let setup = SectionVmSetup {
         args: ctx.args,
         sys: &sys,
@@ -585,21 +481,33 @@ fn section_position(slice: &[Section], target: &Section) -> Option<usize> {
         .position(|s| s.level == target.level && s.name == target.name)
 }
 
-/// The sections a running section may address by heading: the caller's own
-/// sibling slice minus the caller itself, plus the caller's direct children.
+/// The caller's home slice minus the caller itself, the caller found by its
+/// parser-unique `(level, name)` pair and excluded by index.
 ///
-/// The caller is found in `siblings` by its parser-unique `(level, name)`
-/// pair and excluded by index; a caller that is not in the slice excludes
-/// nothing. The parent, aunts/uncles, nieces/nephews, and grandchildren are
-/// never in the set, so a resolution error that lists the set cannot leak the
-/// rest of the document's structure.
-fn visible_sections(siblings: &[Section], caller: &Section) -> Vec<Section> {
-    let caller_index = section_position(siblings, caller);
-    siblings
-        .iter()
+/// A caller that is not in the slice excludes nothing: that is the fanout
+/// arm's case, whose home slice is the worker's resolution set with the
+/// worker already removed (built in [`make_fanout_callback`]), so the arm's
+/// visible set comes out as exactly the home slice plus the worker's
+/// children (pinned by the arm control-global tests in
+/// `execute/tests/exec_flow.rs`).
+fn home_without(home: &[Section], caller: &Section) -> Vec<Section> {
+    let caller_index = section_position(home, caller);
+    home.iter()
         .enumerate()
         .filter(|(index, _)| Some(*index) != caller_index)
         .map(|(_, section)| section.clone())
+        .collect()
+}
+
+/// The sections a running section may address by heading: the caller's own
+/// home slice minus the caller itself, plus the caller's direct children.
+///
+/// The parent, aunts/uncles, nieces/nephews, and grandchildren are never in
+/// the set, so a resolution error that lists the set cannot leak the rest of
+/// the document's structure.
+fn visible_sections(home: &[Section], caller: &Section) -> Vec<Section> {
+    home_without(home, caller)
+        .into_iter()
         .chain(caller.children.iter().cloned())
         .collect()
 }
@@ -644,7 +552,7 @@ pub(crate) enum JumpTarget {
 /// # Errors
 /// Returns [`Error::Lua`] when the heading is malformed, matches no visible
 /// section, or matches more than one.
-pub(super) fn resolve_jump_target(
+pub(crate) fn resolve_jump_target(
     heading: &str,
     siblings: &[Section],
     jumper: &Section,
@@ -664,32 +572,304 @@ pub(super) fn resolve_jump_target(
         ))
 }
 
+/// The owned run context the control-global callbacks capture.
+///
+/// The `execute`/`fanout`/`list_from_section` closures are installed once per
+/// section VM and may outlive the driver that built them, so they capture
+/// owned clones of the run context rather than borrows. Every field is
+/// run-scoped, so one `Arc` is built per chain (or per fanout) and shared by
+/// every section's install; only the client is captured separately, as a
+/// per-install snapshot (see [`make_control_globals`]). Bundling the shared
+/// fields into one `Arc` keeps the three capture lists from restating the
+/// same dozen clones, and gives the fanout arm the same construction the
+/// walk uses.
+pub(crate) struct ControlContext {
+    pub(crate) store: StoreRef,
+    pub(crate) args: String,
+    pub(crate) execution: String,
+    pub(crate) when: String,
+    pub(crate) shared: LuaProgram,
+    pub(crate) bindings: ToolBindings,
+    pub(crate) models: ModelBindings,
+    pub(crate) shared_tools: SharedTools,
+    /// The run's top-level section count, reported as `sys.section_count` in
+    /// contained chains and nested fanout arms.
+    pub(crate) section_count: usize,
+    pub(crate) task_handles: Vec<LuaSectionHandle>,
+    pub(crate) turns: Arc<AtomicU32>,
+    pub(crate) analysis: ToolAnalysis,
+    pub(crate) observer: Arc<dyn Observer>,
+    pub(crate) debug: Option<Arc<dyn DebugCapture>>,
+    pub(crate) limits: RunLimits,
+    pub(crate) max_tool_iterations: usize,
+}
+
+impl ControlContext {
+    /// The owned control context for a chain, cloned out of the chain's
+    /// borrowed walk context.
+    fn from_walk(ctx: &WalkContext<'_>) -> Self {
+        Self {
+            store: ctx.store.clone(),
+            args: ctx.args.to_string(),
+            execution: ctx.execution.to_string(),
+            when: ctx.when.to_string(),
+            shared: ctx.shared.to_owned(),
+            bindings: ctx.bindings.clone(),
+            models: ctx.models.clone(),
+            shared_tools: ctx.shared_tools.clone(),
+            section_count: ctx.section_count,
+            task_handles: ctx.task_handles.to_vec(),
+            turns: Arc::clone(ctx.turns),
+            analysis: ctx.analysis.clone(),
+            observer: Arc::clone(ctx.observer_arc),
+            debug: ctx.debug_arc.cloned(),
+            limits: ctx.limits,
+            max_tool_iterations: ctx.max_tool_iterations,
+        }
+    }
+
+    /// The owned control context every arm of one fanout shares, cloned out
+    /// of the borrowed fanout context: the proxy observer/debug carry the
+    /// arms' report-only traffic over the bounded side channels, and `turns`
+    /// is the counter all arms of the fanout share.
+    pub(crate) fn from_fanout(
+        ctx: &fanout::FanoutContext<'_>,
+        turns: &Arc<AtomicU32>,
+        observer: Arc<dyn Observer>,
+        debug: Option<Arc<dyn DebugCapture>>,
+    ) -> Self {
+        Self {
+            store: ctx.store.clone(),
+            args: ctx.args.to_owned(),
+            execution: ctx.execution.to_owned(),
+            when: ctx.when.to_owned(),
+            shared: ctx.shared.to_owned(),
+            bindings: ctx.bindings.clone(),
+            models: ctx.models.clone(),
+            shared_tools: ctx.shared_tools.clone(),
+            section_count: ctx.section_count,
+            task_handles: ctx.task_handles.to_vec(),
+            turns: Arc::clone(turns),
+            analysis: ctx.analysis.clone(),
+            observer,
+            debug,
+            limits: ctx.limits,
+            max_tool_iterations: ctx.max_tool_iterations,
+        }
+    }
+
+    /// The borrowed chain-walk inputs derived from this owned context, so
+    /// the field list lives in one place for both chain drivers. `args` is
+    /// the only parameter: an `execute` call's explicit input overrides the
+    /// run's args.
+    pub(crate) fn walk_context<'a>(&'a self, args: &'a str) -> WalkContext<'a> {
+        WalkContext {
+            args,
+            store: &self.store,
+            execution: &self.execution,
+            observer: self.observer.as_ref(),
+            observer_arc: &self.observer,
+            debug: self.debug.as_deref(),
+            debug_arc: self.debug.as_ref(),
+            shared: &self.shared,
+            bindings: &self.bindings,
+            models: &self.models,
+            analysis: &self.analysis,
+            shared_tools: &self.shared_tools,
+            max_tool_iterations: self.max_tool_iterations,
+            limits: self.limits,
+            when: &self.when,
+            section_count: self.section_count,
+            task_handles: &self.task_handles,
+            turns: &self.turns,
+            initial_var: None,
+        }
+    }
+
+    /// Drives a contained chain from an execute/jump target: resolves the
+    /// target over the caller's visible set, walks the target's chain slice
+    /// from its index under every normal rule (counting its own `sys.id`
+    /// from 1), and maps the chain's end to its text - a return's value,
+    /// else the final reply. Both chain drivers call this one helper: the
+    /// `execute` callback bridges it synchronously, the fanout arm's jump
+    /// awaits it directly.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the chain drive keeps the caller, home slice, target, args, reply, depth, and client explicit and linear beside the shared control context"
+    )]
+    pub(crate) async fn drive_contained_chain(
+        self: &Arc<Self>,
+        caller: &Section,
+        home: &[Section],
+        heading: &str,
+        args: &str,
+        incoming_reply: Option<String>,
+        execute_depth: usize,
+        client: &mut Option<GatewayClient>,
+    ) -> Result<String> {
+        // The contained chain runs the target's own slice from the target's
+        // index: a child target sits beside the caller's children, a sibling
+        // target beside the caller's home slice.
+        let (chain_slice, start) = match resolve_jump_target(heading, home, caller)? {
+            JumpTarget::Child(index) => (caller.children.as_slice(), index),
+            JumpTarget::Sibling(index) => (home, index),
+        };
+        let ctx = self.walk_context(args);
+        let mut entered = 0usize;
+        let end = walk_siblings(
+            &ctx,
+            self,
+            chain_slice,
+            start,
+            incoming_reply,
+            true,
+            execute_depth,
+            client,
+            &mut entered,
+        )
+        .await?;
+        // A return ends the chain, and its value is the call's return; an
+        // exhausted chain returns its final reply.
+        Ok(match end {
+            WalkEnd::Returned(value) => value,
+            WalkEnd::Exhausted(reply) => reply.unwrap_or_default(),
+        })
+    }
+}
+
+/// The one recursion-cap boundary check, shared by the `execute` and `fanout`
+/// callbacks: `op` at `depth` past [`MAX_EXECUTE_DEPTH`] errors.
+fn check_execute_depth(depth: usize, op: &str) -> Result<()> {
+    if depth > MAX_EXECUTE_DEPTH {
+        return Err(Error::Lua(format!(
+            "{op} recursion exceeded cap of {MAX_EXECUTE_DEPTH}"
+        )));
+    }
+    Ok(())
+}
+
+/// Builds the three control-global callbacks every engine driver installs on
+/// a section VM: `execute`, `fanout`, and `list_from_section`.
+///
+/// `caller` is the section the globals serve (a walked section, or a fanout
+/// arm's worker); `home` is the slice its `execute` chain slices into - the
+/// caller's own walk slice for the section walk, or the worker's home slice
+/// (its resolution set minus the worker) for an arm. The resolution set for
+/// all three globals is derived here as the home slice minus the caller, plus
+/// the caller's direct children (see [`visible_sections`]). `client` is the
+/// driver's client snapshot at install time: each nested chain starts from
+/// it, creating one lazily when absent. `execute_depth` is the caller's
+/// nesting depth: an `execute` chain runs one level deeper, and a `fanout`
+/// passes it through so each arm runs one level deeper, keeping
+/// [`MAX_EXECUTE_DEPTH`] the only recursion constraint across both
+/// boundaries. `last_reply` seeds each arm's reply roll-forward; `parent_id`
+/// becomes the `sys.id` of the arms a `fanout` spawns.
+#[expect(
+    clippy::type_complexity,
+    reason = "the triple of anonymous control-global closures is the product; a named struct cannot hold them without type_alias_impl_trait, and boxing would allocate per VM install"
+)]
+#[expect(
+    clippy::ref_option,
+    reason = "the client snapshot is cloned into the returned 'static closures, so the parameter must borrow the Option itself"
+)]
+pub(crate) fn make_control_globals(
+    control: &Arc<ControlContext>,
+    client: &Option<GatewayClient>,
+    caller: Section,
+    home: Vec<Section>,
+    execute_depth: usize,
+    last_reply: Option<String>,
+    parent_id: usize,
+) -> (
+    impl Fn(LuaValue, Option<String>) -> std::result::Result<String, Error> + Send + use<>,
+    impl Fn(String, Vec<serde_json::Value>) -> std::result::Result<Vec<LuaFanoutResult>, Error>
+    + Send
+    + use<>,
+    impl Fn(String) -> std::result::Result<Vec<String>, Error> + Send + use<>,
+) {
+    let visible = visible_sections(&home, &caller);
+    let execute_callback = {
+        let control = Arc::clone(control);
+        let client = client.clone();
+        move |target: LuaValue, input: Option<String>| -> std::result::Result<String, Error> {
+            let heading = resolve_section_target(target).map_err(Error::lua)?;
+            // Each execute chain runs one level deeper than its caller.
+            let next_depth = execute_depth + 1;
+            check_execute_depth(next_depth, "execute")?;
+            let call_args = input.as_deref().unwrap_or(&control.args);
+            let mut client = client.clone();
+            // A contained chain counts its own `sys.id` from 1, like a fresh
+            // run; the caller's chain keeps its own count. Return the
+            // structured error directly (LUA-012): the typed error and its
+            // source cross the Lua boundary via `mlua::Error::external`
+            // rather than being flattened to a string here.
+            bridge_blocking(control.drive_contained_chain(
+                &caller,
+                &home,
+                &heading,
+                call_args,
+                None,
+                next_depth,
+                &mut client,
+            ))
+        }
+    };
+    // The caller's visible set is built once and shared: the fanout callback
+    // takes a clone, the list callback takes the original.
+    let fanout_callback = {
+        let control = Arc::clone(control);
+        let client = client.clone();
+        let visible = visible.clone();
+        move |worker_heading: String, items: Vec<serde_json::Value>| {
+            make_fanout_callback(
+                &worker_heading,
+                &items,
+                &visible,
+                &control,
+                &client,
+                last_reply.as_deref(),
+                parent_id,
+                execute_depth,
+            )
+        }
+    };
+    let list_callback = move |heading: String| -> std::result::Result<Vec<String>, Error> {
+        list_items_from_visible(&heading, &visible)
+    };
+    (execute_callback, fanout_callback, list_callback)
+}
+
+/// Runs one `fanout(worker, collection)` call: resolves the worker over the
+/// caller's visible set, checks the recursion cap, and schedules the arms.
+///
+/// # Errors
+/// Returns [`Error::Lua`] when the fanout caller sits at
+/// [`MAX_EXECUTE_DEPTH`] (each arm runs one level deeper, so the cap trips at
+/// the boundary), when the heading resolves to nothing or to more than one
+/// section (see [`fanout::resolve_sibling`]), or when the resolved section is
+/// a list section rather than a worker template.
 #[expect(
     clippy::too_many_arguments,
-    reason = "fanout callback threads all borrowed run context through to the arm executor"
+    reason = "the fanout callback threads the resolution set, the owned run context, and the client snapshot through to the arm scheduler as one linear parameter list"
+)]
+#[expect(
+    clippy::ref_option,
+    reason = "the FanoutContext it builds borrows the Option<GatewayClient> itself, matching the context's field type"
 )]
 fn make_fanout_callback(
     worker_heading: &str,
     items: &[serde_json::Value],
-    visible: &[crate::parser::Section],
-    args: &str,
-    store: &StoreRef,
-    execution: &str,
-    observer: &dyn Observer,
-    client: Option<&GatewayClient>,
-    debug: Option<&dyn DebugCapture>,
-    shared: &crate::lua::LuaProgram,
-    bindings: &ToolBindings,
-    models: &ModelBindings,
-    analysis: &ToolAnalysis,
-    shared_tools: &SharedTools,
-    max_tool_iterations: usize,
-    limits: RunLimits,
+    visible: &[Section],
+    control: &ControlContext,
+    client: &Option<GatewayClient>,
     last_reply: Option<&str>,
-    when: &str,
     parent_id: usize,
-    section_count: usize,
-) -> std::result::Result<Vec<crate::lua::LuaFanoutResult>, Error> {
+    execute_depth: usize,
+) -> std::result::Result<Vec<LuaFanoutResult>, Error> {
+    // Each arm runs one execute level deeper than the fanout caller, so
+    // recursion accounting accumulates across the fanout boundary instead of
+    // resetting, and MAX_EXECUTE_DEPTH stays the only recursion constraint.
+    check_execute_depth(execute_depth + 1, "fanout")?;
     let worker = fanout::resolve_sibling(worker_heading, visible)?;
     if worker.prologue().is_none() && worker.epilog().is_none() && !worker.items.is_empty() {
         return Err(Error::Lua(format!(
@@ -698,25 +878,32 @@ fn make_fanout_callback(
         )));
     }
 
-    let fanout_client = client.cloned();
+    // The worker's home slice - the set it was resolved from, minus the
+    // worker - is threaded to the arms as constructed here; each arm's
+    // control globals derive their resolution set from it (the home slice
+    // plus the worker's children), so the arm never inverts this layout.
+    let worker_home = home_without(visible, worker);
     let ctx = fanout::FanoutContext {
-        args,
-        store,
-        execution,
-        observer,
-        client: &fanout_client,
-        debug,
-        shared,
-        bindings,
-        models,
-        analysis,
-        shared_tools,
-        max_tool_iterations,
-        limits,
+        args: &control.args,
+        store: &control.store,
+        execution: &control.execution,
+        observer: control.observer.as_ref(),
+        client,
+        debug: control.debug.as_deref(),
+        shared: &control.shared,
+        bindings: &control.bindings,
+        models: &control.models,
+        analysis: &control.analysis,
+        shared_tools: &control.shared_tools,
+        max_tool_iterations: control.max_tool_iterations,
+        limits: control.limits,
         last_reply,
-        when,
+        when: &control.when,
         parent_id,
-        section_count,
+        section_count: control.section_count,
+        home: &worker_home,
+        task_handles: &control.task_handles,
+        execute_depth,
     };
 
     // The collection was converted to JSON member-by-member at the Lua
