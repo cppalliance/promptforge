@@ -145,6 +145,7 @@ Escalate this with recommended actions.
 | `jump("## Section")` | Transfer control |
 | `execute("## Section", input?)` | Run section as subroutine |
 | `fanout(worker, list)` | Map a worker over a list section in parallel |
+| `list_from_section("## List")` | Return a list section's pre-parsed items as an array of strings |
 | `log(msg)` | Emit a diagnostic to the observer |
 | `untrusted(s)` | Wrap a string in the untrusted guard envelope |
 

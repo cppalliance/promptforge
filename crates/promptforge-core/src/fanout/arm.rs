@@ -169,8 +169,9 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         vm.set_global_json("item", &item)?;
 
         // Arms get the same control globals as a walked section, but nested
-        // execute/fanout have no walk to re-enter here, so both fail loudly.
-        // `jump` records into the arm VM's slot and is rejected below.
+        // execute/fanout/list_from_section have no walk to re-enter here, so
+        // they fail loudly. `jump` records into the arm VM's slot and is
+        // rejected below.
         vm.install_control_globals(
             &[],
             |_, _| {
@@ -181,6 +182,11 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             |_, _| {
                 Err(Error::Lua(
                     "fanout() is not available inside a fanout arm".to_owned(),
+                ))
+            },
+            |_| {
+                Err(Error::Lua(
+                    "list_from_section() is not available inside a fanout arm".to_owned(),
                 ))
             },
         )?;

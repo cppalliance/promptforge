@@ -389,6 +389,264 @@ return r[1].text .. ',' .. r[2].text\n\
     assert_eq!(out, "alpha-done,beta-done");
 }
 
+/// `list_from_section` returns a sibling list section's pre-parsed bullet
+/// items as a Lua array of strings, addressed by heading string or by a
+/// Section object from the `tasks` table.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_from_section_returns_bullet_items() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Main\n\n\
+```lua\n\
+local items = list_from_section('## List')\n\
+assert(type(items) == 'table')\n\
+assert(#items == 2)\n\
+assert(items[1] == 'alpha')\n\
+assert(items[2] == 'beta')\n\
+local by_handle = list_from_section(tasks['## List'])\n\
+assert(#by_handle == 2 and by_handle[1] == 'alpha')\n\
+return 'ok'\n\
+```\n\n\
+## List\n\n\
+- alpha\n\
+- beta\n";
+    let out = run_offline(md)
+        .await
+        .expect("a sibling list section's bullet items must be returned");
+    assert_eq!(out, "ok");
+}
+
+/// A numbered list section's items come back in order, markers stripped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_from_section_returns_numbered_items() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Main\n\n\
+```lua\n\
+local items = list_from_section('## Nums')\n\
+assert(#items == 3)\n\
+assert(items[1] == 'one' and items[2] == 'two' and items[3] == 'three')\n\
+return 'ok'\n\
+```\n\n\
+## Nums\n\n\
+1. one\n\
+2. two\n\
+3. three\n";
+    let out = run_offline(md)
+        .await
+        .expect("a numbered list section's items must be returned");
+    assert_eq!(out, "ok");
+}
+
+/// The caller's direct children are in the visible set.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_from_section_resolves_a_direct_child() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Main\n\n\
+```lua\n\
+local items = list_from_section('### Sub')\n\
+assert(#items == 2 and items[1] == 'x' and items[2] == 'y')\n\
+return 'ok'\n\
+```\n\n\
+### Sub\n\n\
+- x\n\
+- y\n";
+    let out = run_offline(md)
+        .await
+        .expect("a direct child list section must be visible");
+    assert_eq!(out, "ok");
+}
+
+/// A sibling's child (niece), a child's child (grandchild), and the caller
+/// itself are all outside the visible set: each resolves as not-found.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_from_section_hides_nieces_grandchildren_and_the_caller() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Main\n\n\
+```lua\n\
+local ok_niece = pcall(list_from_section, '### Niece')\n\
+assert(not ok_niece, 'a niece is not visible')\n\
+local ok_grand = pcall(list_from_section, '#### Grand')\n\
+assert(not ok_grand, 'a grandchild is not visible')\n\
+local ok_self = pcall(list_from_section, '## Main')\n\
+assert(not ok_self, 'the caller itself is not visible')\n\
+return 'ok'\n\
+```\n\n\
+### Kid\n\n\
+- kid-item\n\n\
+#### Grand\n\n\
+- grand-item\n\n\
+## Other\n\n\
+```lua\nlocal x = 1\n```\n\n\
+### Niece\n\n\
+- niece-item\n";
+    let out = run_offline(md)
+        .await
+        .expect("nieces, grandchildren, and the caller must all be invisible");
+    assert_eq!(out, "ok");
+}
+
+/// The not-found error lists exactly the visible sections - siblings plus
+/// direct children - so the error channel cannot leak the rest of the
+/// document's structure.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_from_section_not_found_lists_only_the_visible_sections() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Main\n\n\
+```lua\n\
+list_from_section('## Missing')\n\
+```\n\n\
+### Kid\n\n\
+- kid-item\n\n\
+#### Grand\n\n\
+- grand-item\n\n\
+## Sibling\n\n\
+```lua\nlocal x = 1\n```\n\n\
+### Niece\n\n\
+- niece-item\n";
+    let error = run_offline(md)
+        .await
+        .expect_err("an unknown heading must fail");
+    let rendered = error.to_string();
+    assert!(rendered.contains("not found"), "error was: {rendered}");
+    assert!(
+        rendered.contains("## Sibling"),
+        "a sibling is visible: {rendered}"
+    );
+    assert!(
+        rendered.contains("### Kid"),
+        "a direct child is visible: {rendered}"
+    );
+    let (_, available) = rendered
+        .split_once("available siblings:")
+        .expect("the not-found error must list the visible sections");
+    assert!(
+        !available.contains("## Main"),
+        "the caller is not listed: {rendered}"
+    );
+    assert!(
+        !available.contains("Niece"),
+        "a niece is not listed: {rendered}"
+    );
+    assert!(
+        !available.contains("Grand"),
+        "a grandchild is not listed: {rendered}"
+    );
+}
+
+/// Two visible sections sharing one `(level, name)` address error loudly as
+/// ambiguous rather than silently resolving to the first. Unreachable through
+/// a real prompt (the parser forbids duplicate sibling names), so the
+/// resolution helper is exercised directly with a synthetic visible set.
+#[test]
+fn list_from_section_ambiguous_error_is_loud() {
+    fn list(name: &str) -> crate::parser::Section {
+        crate::parser::Section {
+            name: name.to_string(),
+            level: 3,
+            blocks: Vec::new(),
+            children: Vec::new(),
+            items: vec!["x".to_string()],
+            off_walk: false,
+        }
+    }
+    let visible = vec![list("Dup"), list("Dup")];
+    let error = super::super::engine::list_items_from_visible("### Dup", &visible)
+        .expect_err("two visible sections with one address must be ambiguous");
+    let rendered = error.to_string();
+    assert!(rendered.contains("ambiguous"), "error was: {rendered}");
+}
+
+/// Naming a prose section (no pre-parsed items) is the mistake the no-items
+/// error exists to catch.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_from_section_rejects_a_prose_section() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Main\n\n\
+```lua\n\
+list_from_section('## Prose')\n\
+```\n\n\
+## Prose\n\n\
+Just prose, no list items here.\n";
+    let error = run_offline(md)
+        .await
+        .expect_err("a prose section has no pre-parsed items");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("section `Prose` has no pre-parsed items"),
+        "error was: {rendered}"
+    );
+}
+
+/// Inside a fanout arm the global is a loud stub, same as execute/fanout.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_from_section_is_not_available_inside_a_fanout_arm() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', '### Items')\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+local items = list_from_section('### Items')\n\
+return item\n\
+```\n\n\
+### Items\n\n\
+- alpha\n";
+    let error = run_offline(md)
+        .await
+        .expect_err("list_from_section inside an arm must fail loudly");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("list_from_section() is not available inside a fanout arm"),
+        "error was: {rendered}"
+    );
+}
+
+/// The H1 VM never gets the control globals, so `list_from_section` is nil
+/// there and calling it is an ordinary Lua error.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_from_section_is_absent_on_the_h1() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+```lua\n\
+list_from_section('## Nope')\n\
+```\n";
+    let error = run_offline(md)
+        .await
+        .expect_err("list_from_section must be absent on the H1");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("list_from_section"),
+        "the nil-call error must name the global: {rendered}"
+    );
+}
+
+/// The flagship composition: a sibling list section marked off-walk returns
+/// its items through `list_from_section` and is never visited by the walk.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn off_walk_list_section_feeds_list_from_section_without_walking() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## List\n\n\
+---\n\n\
+- alpha\n\
+- beta\n\n\
+## Main\n\n\
+```lua\n\
+local items = list_from_section('## List')\n\
+assert(#items == 2 and items[1] == 'alpha' and items[2] == 'beta')\n\
+return table.concat(items, ',')\n\
+```\n";
+    let (result, records) = run_recorded(md).await;
+    assert_eq!(
+        result.expect("an off-walk list section must feed list_from_section"),
+        "alpha,beta"
+    );
+    assert!(
+        records.iter().all(|(_, section, _)| section != "List"),
+        "an off-walk list section must never walk: {records:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_exhausted_arm_exposes_failure_metadata() {
     let gateway =
