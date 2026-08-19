@@ -449,10 +449,10 @@ impl SectionVm {
         )
     }
 
-    /// Installs `tasks`, `execute`, `jump`, and `fanout` as persistent
-    /// globals for the section's whole lifecycle.
+    /// Installs `tasks`, `execute`, `jump`, `fanout`, and `list_from_section`
+    /// as persistent globals for the section's whole lifecycle.
     ///
-    /// Called once by the engine after host injection. Both callbacks own
+    /// Called once by the engine after host injection. The callbacks own
     /// their run context, so the closures stay valid across every chunk this
     /// VM runs without a live [`mlua::Scope`]. The `jump` closure captures a
     /// clone of the VM's jump slot; the slot is reset before each chunk and
@@ -460,15 +460,17 @@ impl SectionVm {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if any global cannot be installed.
-    pub(crate) fn install_control_globals<E, F>(
+    pub(crate) fn install_control_globals<E, F, L>(
         &self,
         tasks: &[LuaSectionHandle],
         execute_callback: E,
         fanout_callback: F,
+        list_callback: L,
     ) -> Result<()>
     where
         E: Fn(Value, Option<String>) -> std::result::Result<String, Error> + Send + 'static,
         F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, Error> + Send + 'static,
+        L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
     {
         install_tasks_table(&self.lua, tasks)?;
         let globals = self.lua.globals();
@@ -503,7 +505,22 @@ impl SectionVm {
                 Ok(table)
             })
             .map_err(Error::lua)?;
-        globals.raw_set("fanout", fanout_fn).map_err(Error::lua)
+        globals.raw_set("fanout", fanout_fn).map_err(Error::lua)?;
+        let list_fn = self
+            .lua
+            .create_function(move |lua, target: Value| {
+                let heading = resolve_section_target(target)?;
+                let items = list_callback(heading).map_err(mlua::Error::external)?;
+                let table = lua.create_table_with_capacity(items.len(), 0)?;
+                for (i, item) in items.into_iter().enumerate() {
+                    table.raw_set(i + 1, item)?;
+                }
+                Ok(table)
+            })
+            .map_err(Error::lua)?;
+        globals
+            .raw_set("list_from_section", list_fn)
+            .map_err(Error::lua)
     }
 
     /// Executes one live H1 Lua block with call-time capability resolution.

@@ -366,9 +366,18 @@ async fn run_one_section(
             )
         }
     };
-    if let Err(error) =
-        vm.install_control_globals(ctx.task_handles, execute_callback, fanout_callback)
-    {
+    let list_callback = {
+        let visible = visible_sections(ctx.top_sections, section);
+        move |heading: String| -> std::result::Result<Vec<String>, Error> {
+            list_items_from_visible(&heading, &visible)
+        }
+    };
+    if let Err(error) = vm.install_control_globals(
+        ctx.task_handles,
+        execute_callback,
+        fanout_callback,
+        list_callback,
+    ) {
         vm.teardown(ctx.observer, &section.name);
         return Err(error);
     }
@@ -657,6 +666,55 @@ fn section_handles(sections: &[Section]) -> Vec<LuaSectionHandle> {
         .collect()
 }
 
+/// The sections a running section may address by heading: the top-level
+/// sections minus the caller itself, plus the caller's direct children.
+///
+/// The caller is found in `top_sections` by its parser-unique `(level, name)`
+/// pair and excluded by index; a caller that is not a top-level section
+/// excludes nothing. The parent, aunts/uncles, nieces/nephews, and
+/// grandchildren are never in the set, so a resolution error that lists the
+/// set cannot leak the rest of the document's structure.
+fn visible_sections(top_sections: &[Section], caller: &Section) -> Vec<Section> {
+    let caller_index = top_sections
+        .iter()
+        .position(|s| s.level == caller.level && s.name == caller.name);
+    top_sections
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| Some(*index) != caller_index)
+        .map(|(_, section)| section.clone())
+        .chain(caller.children.iter().cloned())
+        .collect()
+}
+
+/// Resolves `heading` against a caller's visible set and returns the matched
+/// section's pre-parsed list items.
+///
+/// # Errors
+/// Returns [`Error::Lua`] when the heading is malformed, matches no visible
+/// section, or matches more than one (see [`fanout::resolve_sibling`]), or
+/// when the resolved section has no pre-parsed items - the error that catches
+/// naming a prose section by mistake.
+pub(crate) fn list_items_from_visible(heading: &str, visible: &[Section]) -> Result<Vec<String>> {
+    let section = fanout::resolve_sibling(heading, visible)?;
+    Ok(require_pre_parsed_items(section)?.to_vec())
+}
+
+/// Returns the section's pre-parsed list items, or the error that catches
+/// naming a prose section by mistake.
+///
+/// # Errors
+/// Returns [`Error::Lua`] when the section has no pre-parsed items.
+fn require_pre_parsed_items(section: &Section) -> Result<&[String]> {
+    if section.items.is_empty() {
+        return Err(Error::Lua(format!(
+            "section `{}` has no pre-parsed items",
+            section.name
+        )));
+    }
+    Ok(&section.items)
+}
+
 fn resolve_h2_section<'a>(heading: &str, sections: &'a [Section]) -> Result<&'a Section> {
     let stripped = heading.trim();
     if !stripped.starts_with("##") || stripped.starts_with("###") {
@@ -787,12 +845,7 @@ fn make_fanout_callback(
 ) -> std::result::Result<Vec<crate::lua::LuaFanoutResult>, Error> {
     let worker = fanout::resolve_sibling(worker_heading, children)?;
     let list = fanout::resolve_sibling(list_heading, children)?;
-    if list.items.is_empty() {
-        return Err(Error::Lua(format!(
-            "section `{}` has no pre-parsed items",
-            list.name
-        )));
-    }
+    let list_items = require_pre_parsed_items(list)?;
     if worker.prologue().is_none() && worker.epilog().is_none() && !worker.items.is_empty() {
         return Err(Error::Lua(format!(
             "section `{}` is a list section, not a worker template",
@@ -826,8 +879,7 @@ fn make_fanout_callback(
 
     // Members cross into the arms as JSON values (the same bridge `var`
     // uses); the list section's pre-parsed items are always strings.
-    let items: Vec<serde_json::Value> = list
-        .items
+    let items: Vec<serde_json::Value> = list_items
         .iter()
         .map(|item| serde_json::Value::String(item.clone()))
         .collect();

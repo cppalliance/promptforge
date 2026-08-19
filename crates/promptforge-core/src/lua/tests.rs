@@ -1256,6 +1256,11 @@ fn jump_during_shared_replay_is_a_hard_error() {
         &[],
         |_, _| Err(Error::Lua("execute is not needed here".to_owned())),
         |_, _| Err(Error::Lua("fanout is not needed here".to_owned())),
+        |_| {
+            Err(Error::Lua(
+                "list_from_section is not needed here".to_owned(),
+            ))
+        },
     )
     .expect("control globals must install");
     let error = vm
