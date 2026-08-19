@@ -133,6 +133,8 @@ Escalate this with recommended actions.
 
 `execute()` nests up to 8 levels deep. A chain starts with `reply` set to nil - pass context through the `input` parameter instead. A `jump()` inside a chain moves within the chain, and a `return` inside a chain ends the chain, not the run. Sections can be referenced by heading string or by Section objects from the `tasks` table.
 
+`fanout(worker, collection)` maps the worker over any Lua table, resolved against the same visible set. The collection is always a table, never a section name - a non-table second parameter is an error that points at `list_from_section`. The array part (`1..#t`) iterates in order first, then the hash part in undefined order. An array member arrives as the arm's `item` unchanged - a string stays a string, a number a number, a table a table - while a hash member arrives as a pair table with `item.key` and `item.value`. Keys must be strings, numbers, or booleans; a function or userdata member is an error naming its index. Each arm result's `.item` carries the member value back, so the caller can correlate results with rich items. An empty collection returns an empty table. To fanout over a list section's pre-parsed items, pass `list_from_section("### List")` as the collection.
+
 ## Lua API Summary
 
 | Function | Effect |
@@ -150,7 +152,7 @@ Escalate this with recommended actions.
 | `store.*` | Virtual filesystem operations |
 | `jump("## Section")` | Transfer control to a visible section (a sibling or a direct child); a child target starts a child-level walk |
 | `execute("## Section", input?)` | Start a contained chain at a visible section (a sibling or a direct child); returns the chain's final reply |
-| `fanout(worker, list)` | Map a worker over a list section in parallel |
+| `fanout(worker, collection)` | Map a worker over a collection in parallel; array members arrive as `item`, hash members as pair tables |
 | `list_from_section("## List")` | Return a list section's pre-parsed items as an array of strings |
 | `log(msg)` | Emit a diagnostic to the observer |
 | `untrusted(s)` | Wrap a string in the untrusted guard envelope |

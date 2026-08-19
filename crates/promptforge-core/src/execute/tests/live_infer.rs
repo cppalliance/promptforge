@@ -149,7 +149,7 @@ async fn captured_bindings_reach_section_execute_and_fanout_vms() {
          ```lua\n\
          local direct = binding_names()\n\
          local called = execute('## Called')\n\
-         local arms = fanout('### Worker', '### Items')\n\
+         local arms = fanout('### Worker', list_from_section('### Items'))\n\
          return direct .. '|' .. called .. '|' .. table.concat(arms, ',')\n\
          ```\n\n\
          ### Worker\n\n\

@@ -464,10 +464,10 @@ async fn run_one_section(
         let section_count = ctx.top_sections.len();
         let limits = ctx.limits;
         let max_tool_iterations = ctx.max_tool_iterations;
-        move |worker_heading: String, list_heading: String| {
+        move |worker_heading: String, items: Vec<serde_json::Value>| {
             make_fanout_callback(
                 &worker_heading,
-                &list_heading,
+                &items,
                 &visible,
                 &fanout_args,
                 &fanout_store,
@@ -878,7 +878,7 @@ pub(crate) fn resolve_jump_target(
 )]
 fn make_fanout_callback(
     worker_heading: &str,
-    list_heading: &str,
+    items: &[serde_json::Value],
     visible: &[crate::parser::Section],
     args: &str,
     store: &StoreRef,
@@ -899,8 +899,6 @@ fn make_fanout_callback(
     section_count: usize,
 ) -> std::result::Result<Vec<crate::lua::LuaFanoutResult>, Error> {
     let worker = fanout::resolve_sibling(worker_heading, visible)?;
-    let list = fanout::resolve_sibling(list_heading, visible)?;
-    let list_items = require_pre_parsed_items(list)?;
     if worker.prologue().is_none() && worker.epilog().is_none() && !worker.items.is_empty() {
         return Err(Error::Lua(format!(
             "section `{}` is a list section, not a worker template",
@@ -932,11 +930,7 @@ fn make_fanout_callback(
         section_count,
     };
 
-    // Members cross into the arms as JSON values (the same bridge `var`
-    // uses); the list section's pre-parsed items are always strings.
-    let items: Vec<serde_json::Value> = list_items
-        .iter()
-        .map(|item| serde_json::Value::String(item.clone()))
-        .collect();
-    bridge_blocking(fanout::run_fanout_arms(worker, &items, &ctx))
+    // The collection was converted to JSON member-by-member at the Lua
+    // boundary (the same bridge `var` uses); the cap inside counts members.
+    bridge_blocking(fanout::run_fanout_arms(worker, items, &ctx))
 }

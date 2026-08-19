@@ -523,7 +523,7 @@ async fn empty_prose_epilog_sees_sys_model_when_binding_present() {
 async fn fanout_arm_epilog_sees_sys_model_catalog_id() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
-## Parent\n\n```lua\nlocal r = fanout('### Worker', '### Items')\nreturn table.concat(r, ',')\n```\n\n\
+## Parent\n\n```lua\nlocal r = fanout('### Worker', list_from_section('### Items'))\nreturn table.concat(r, ',')\n```\n\n\
 ### Worker\n\n```lua\n-- prologue\n```\n\nAsk about {{ item }}.\n\n\
 ```lua\nreturn sys.model .. ':' .. tostring(sys.reply_finish_reason) .. ':' .. item\n```\n\n\
 ### Items\n\n- a\n";
@@ -548,6 +548,49 @@ async fn fanout_arm_epilog_sees_sys_model_catalog_id() {
     .await
     .unwrap();
     assert_eq!(out, "claude-sonnet-4-6:stop:a");
+}
+
+/// `{{ item }}` renders a non-string member per its type: here a table
+/// member reaches the model as compact JSON.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_item_substitution_renders_a_table_member_as_compact_json() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+## Parent\n\n```lua\nlocal r = fanout('### Worker', {{7, 'x'}})\nreturn r[1].text\n```\n\n\
+### Worker\n\n```lua\n-- prologue\n```\n\nItem: {{ item }}.\n";
+    let gateway = ScriptedGateway::start(vec![resp_text("hello from the mock")]).await;
+    let addr = gateway.addr();
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        RunOptions {
+            execution: EXECUTION,
+            observer: Arc::new(NullObserver),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test").expect("non-empty test key"),
+            )),
+            debug: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, "hello from the mock");
+
+    let body = gateway
+        .last_request()
+        .expect("complete must reach the gateway");
+    let user_content = body["messages"]
+        .as_array()
+        .and_then(|messages| messages.first())
+        .and_then(|message| message["content"].as_str())
+        .expect("first message must carry substituted prose");
+    assert!(
+        user_content.contains("Item: [7,\"x\"]."),
+        "a table member must render as compact JSON, got: {user_content}"
+    );
 }
 
 // --- Reply forwarding across sections ---

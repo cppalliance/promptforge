@@ -469,7 +469,9 @@ impl SectionVm {
     ) -> Result<()>
     where
         E: Fn(Value, Option<String>) -> std::result::Result<String, Error> + Send + 'static,
-        F: Fn(String, String) -> std::result::Result<Vec<LuaFanoutResult>, Error> + Send + 'static,
+        F: Fn(String, Vec<Json>) -> std::result::Result<Vec<LuaFanoutResult>, Error>
+            + Send
+            + 'static,
         L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
     {
         install_tasks_table(&self.lua, tasks)?;
@@ -496,8 +498,10 @@ impl SectionVm {
         globals.raw_set("jump", jump_fn).map_err(Error::lua)?;
         let fanout_fn = self
             .lua
-            .create_function(move |lua, (worker, list): (String, String)| {
-                let replies = fanout_callback(worker, list).map_err(mlua::Error::external)?;
+            .create_function(move |lua, (worker, collection): (String, Value)| {
+                let items = crate::fanout::collection_to_items(lua, &collection)
+                    .map_err(mlua::Error::external)?;
+                let replies = fanout_callback(worker, items).map_err(mlua::Error::external)?;
                 let table = lua.create_table_with_capacity(replies.len(), 0)?;
                 for (i, reply) in replies.into_iter().enumerate() {
                     table.raw_set(i + 1, reply)?;
