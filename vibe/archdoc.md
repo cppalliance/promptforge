@@ -22,7 +22,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A5. The store confines every path to its configured backend root.
 - A6. The Lua VM boundary exposes only host-installed capabilities.
 - A10. Every model-chosen network destination is revalidated after DNS and on each redirect; private addresses are denied by default.
-- A11. Every repeated model or tool operation has a finite explicit budget and fails visibly when exhausted.
+- A11. Every potentially unbounded model or tool loop has a finite explicit budget and fails visibly when exhausted.
 - A12. Each section receives only capabilities it explicitly names; unknown names fail before the model turn.
 - A15. Every section and fan-out arm gets a fresh model context; only explicit Lua chooses transitions, and state crosses through the store or named payloads.
 - A19. Runtime metadata is sealed: unknown reads and all author writes fail, and every field has an explicit refresh boundary.
@@ -35,19 +35,19 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A42. External file I/O ends at the trusted host; prompts see only validated store paths.
 
-- A43. Hosts expose no live tools by default; each capability requires explicit enablement.
 
 
 
 
-- A50. An empty stop turn is valid only after a successful tool call; other empty replies fail.
-- A51. Config secret sidecars supply defaults through local lookup and never mutate process state.
 
 - A52. Every untrusted string is guard-wrapped explicitly at the model-facing insertion boundary, independent of its origin.
 - A53. Shared Lua replays as each section's first chunk under the section's limits and host environment; replay cannot transfer control.
 
 - A54. A leading thematic break makes a section address-only; a later break starts reader-only content that never parses or executes.
 - A55. Fan-out maps an explicit collection across isolated JSON values and returns each original member with its result.
+
+- A56. Ordinary sections and fan-out arms share one VM and block-walk semantics; arms have no separate capability tier.
+- A57. Fan-out bounds concurrent arms, not finite collection cardinality; total work remains explicit in the input.
 
 ## Principles
 
