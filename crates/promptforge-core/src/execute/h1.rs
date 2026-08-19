@@ -4,8 +4,6 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
-use serde_json::json;
-
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::lua::{SectionVm, ToolBinding, ToolBindings, ToolCallCounts};
@@ -21,7 +19,7 @@ use crate::{Error, Result};
 use super::config::RunLimits;
 use super::gateway::{GatewaySource, ResolutionContext, env_client_with_limits};
 use super::scope::prepare_scoped_tools;
-use super::support::now_rfc3339_checked;
+use super::support::{now_rfc3339_checked, sys_json};
 use super::tool_loop::{ProseMode, SectionProgress, run_prose_inference};
 use super::tools::attach_infer_hook;
 
@@ -57,14 +55,14 @@ pub(crate) async fn execute_live_h1(
     let default_max_tool_iterations = limits.tool_iterations().get() as usize;
     let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models);
     let now = now_rfc3339_checked()?;
-    let sys = json!({
-        "when": now.clone(),
-        "now": now,
-        "id": 0,
-        "section_name": prompt.title,
-        "execution": execution,
-        "section_count": prompt.sections.len(),
-    });
+    let sys = sys_json(
+        &now,
+        &now,
+        0,
+        &prompt.title,
+        execution,
+        prompt.sections.len(),
+    );
     let mut vm = SectionVm::new(execution, observer, &prompt.title)?;
     vm.apply_lua_limits(limits.lua_memory().get(), limits.lua_logs().get())?;
     vm.inject_host(args, &sys, store, None)?;

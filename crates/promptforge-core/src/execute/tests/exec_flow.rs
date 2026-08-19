@@ -6,31 +6,8 @@ use super::*;
 /// final prose loops, and trailing lua sees the last reply.
 #[tokio::test]
 async fn section_with_alternating_blocks_executes_in_order() {
-    async fn completions(
-        State(calls): State<Arc<AtomicU32>>,
-        Json(_body): Json<Value>,
-    ) -> Json<Value> {
-        let n = calls.fetch_add(1, Ordering::Relaxed) + 1;
-        Json(json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": format!("reply-{n}")
-                }
-            }]
-        }))
-    }
-
-    let calls = Arc::new(AtomicU32::new(0));
-    let router = Router::new()
-        .route("/v1/chat/completions", post(completions))
-        .with_state(Arc::clone(&calls));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, router).await.unwrap();
-    });
-
+    let gateway = ScriptedGateway::start(vec![resp_text("reply-1"), resp_text("reply-2")]).await;
+    let addr = gateway.addr();
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n\
 ```lua\nstore.append('order.txt', 'lua1\\n')\n```\n\n\
@@ -39,26 +16,12 @@ First ask.\n\n\
 Final ask.\n\n\
 ```lua\nstore.append('order.txt', 'lua3\\n')\nreturn reply\n```\n";
     let store = StoreRef::memory();
-    let out = run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &store,
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
-    )
-    .await
-    .expect("alternating blocks must execute");
+    let out = run(&bound_for_model(md), "", &[], &store, gatewayed(addr))
+        .await
+        .expect("alternating blocks must execute");
 
     assert_eq!(out, "reply-2");
-    assert_eq!(calls.load(Ordering::Relaxed), 2);
+    assert_eq!(gateway.call_count(), 2);
     assert_eq!(
         store.read("order.txt").expect("order log"),
         "lua1\nlua2\nlua3\n"
@@ -84,23 +47,8 @@ Final ask.\n\n\
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execute_runs_named_section_as_subroutine() {
-    async fn completions(Json(_body): Json<Value>) -> Json<Value> {
-        Json(json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "research-reply"
-                }
-            }]
-        }))
-    }
-
-    let router = Router::new().route("/v1/chat/completions", post(completions));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, router).await.unwrap();
-    });
+    let gateway = ScriptedGateway::start(vec![resp_text("research-reply")]).await;
+    let addr = gateway.addr();
 
     // The subroutine sits after its run-ending caller: a contained chain
     // falls through like any walk, so a subroutine placed before later
@@ -127,23 +75,9 @@ assert(step.has_prose == true)\n\
 Research {{ args }}.\n\n\
 ```lua\nstore.write('evidence.md', reply)\n```\n";
     let store = StoreRef::memory();
-    let out = run(
-        &bound_for_model(md),
-        "topic",
-        &[],
-        &store,
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
-    )
-    .await
-    .expect("execute must run named section as subroutine");
+    let out = run(&bound_for_model(md), "topic", &[], &store, gatewayed(addr))
+        .await
+        .expect("execute must run named section as subroutine");
     assert_eq!(out, "research-reply");
 }
 
@@ -194,15 +128,7 @@ return reply\n\
         "",
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .expect("jump must preserve the reply from the prior section");
@@ -280,23 +206,9 @@ Ask S2.\n\n\
 store.append('order.txt', 'S2\\n')\n\
 ```\n";
     let store = StoreRef::memory();
-    let out = run(
-        &bound_for_model(md),
-        "",
-        &[],
-        &store,
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
-    )
-    .await
-    .expect("the execute chain must jump, fall through, and return its reply");
+    let out = run(&bound_for_model(md), "", &[], &store, gatewayed(addr))
+        .await
+        .expect("the execute chain must jump, fall through, and return its reply");
     assert_eq!(out, "A1\nSub\nS1\nS2\nA2\nB\n");
 }
 
@@ -727,15 +639,7 @@ return reply\n\
         "",
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .expect("the reply thread must follow the detour");
@@ -1351,6 +1255,248 @@ jump('### Items')\n\
     );
 }
 
+/// A multi-prose worker runs the shared block walk: every prose block reaches
+/// the model, the conversation rolls forward across blocks, and `{{ reply }}`
+/// substitutes the previous block's model text. `{{ item }}` resolves against
+/// the arm's collection member.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_arm_runs_every_prose_block_with_the_reply_rolling_forward() {
+    let gateway =
+        ScriptedGateway::start(vec![resp_text("first answer"), resp_text("second answer")]).await;
+    let addr = gateway.addr();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', {'alpha'})\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+First ask about {{ item }}.\n\n\
+```lua\nvar.mid = 1\n```\n\n\
+The first answer was: {{ reply }}.\n";
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        gatewayed(addr),
+    )
+    .await
+    .expect("a multi-prose worker must run every prose block");
+    assert_eq!(out, "second answer", "the arm's text is the final reply");
+
+    let bodies = gateway.requests();
+    assert_eq!(
+        bodies.len(),
+        2,
+        "one model turn per prose block: {bodies:?}"
+    );
+    let first = bodies[0]["messages"].as_array().expect("messages array");
+    let first_content = first.last().expect("a user turn")["content"]
+        .as_str()
+        .expect("content string");
+    assert!(
+        first_content.contains("First ask about alpha."),
+        "the first prose must substitute the arm's item: {first_content}"
+    );
+    // The conversation rolls forward: the second block's request still carries
+    // the first block's user turn, and `{{ reply }}` substituted the first
+    // block's model text (the engine binds text replies to `reply` rather
+    // than appending them as assistant turns).
+    let second = bodies[1]["messages"].as_array().expect("messages array");
+    let user_turns: Vec<&str> = second
+        .iter()
+        .filter(|m| m["role"] == "user")
+        .filter_map(|m| m["content"].as_str())
+        .collect();
+    assert_eq!(
+        user_turns,
+        vec![
+            "First ask about alpha.",
+            "The first answer was: first answer."
+        ],
+        "the second turn must carry the rolled-forward conversation and reply: {bodies:?}"
+    );
+}
+
+/// `tools.add` between a worker's prose blocks rebuilds the effective scope,
+/// so the added tool reaches the next model turn inside the arm.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_arm_tools_add_between_prose_blocks_reaches_the_next_model_turn() {
+    let gateway = ScriptedGateway::start(vec![
+        resp_text("first"),
+        resp_tool_call("c1", "section_tool", "{\"value\":\"x\"}"),
+        resp_text("second"),
+    ])
+    .await;
+    let addr = gateway.addr();
+    let tool = Arc::new(ScopedFixtureTool::new(
+        "concrete",
+        "canonical_wire",
+        "Section concrete.",
+    ));
+    let prompt = bound_with_tools(
+        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Test prompt\n\n```lua shared\n\
+tools.need('section_tool', 'capability')\n\
+models.default('writer', 'A general model for tests')\n```\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', {'alpha'})\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+First ask.\n\n\
+```lua\ntools.add('section_tool')\n```\n\n\
+Second ask.\n",
+        Vec::new(),
+    );
+
+    let out = run(
+        &prompt,
+        "",
+        &[Arc::clone(&tool) as Arc<dyn Tool>],
+        &StoreRef::memory(),
+        gatewayed(addr),
+    )
+    .await
+    .expect("tools.add inside an arm must reach the next model turn");
+
+    assert_eq!(out, "second");
+    assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
+    let bodies = gateway.requests();
+    assert!(
+        bodies[0].get("tools").is_none(),
+        "the first prose block predates tools.add: {bodies:?}"
+    );
+    assert_eq!(
+        bodies[1]["tools"][0]["function"]["name"], "section_tool",
+        "the second prose block must see the added tool: {bodies:?}"
+    );
+}
+
+/// `model:infer` works inside an arm: the arm installs the infer hook, so a
+/// worker's Lua can call the model directly.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_arm_model_infer_works_inside_an_arm() {
+    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
+    let addr = gateway.addr();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', {'alpha'})\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+return models.get('writer'):infer('ping about ' .. item)\n\
+```\n";
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        gatewayed(addr),
+    )
+    .await
+    .expect("model:infer inside an arm must run");
+    assert_eq!(out, "pong");
+
+    let body = gateway
+        .last_request()
+        .expect("infer must reach the gateway");
+    assert_eq!(body["model"], "claude-sonnet-4-6");
+    let messages = body["messages"].as_array().expect("messages array");
+    let content = messages.last().expect("a user turn")["content"]
+        .as_str()
+        .expect("content string");
+    assert!(
+        content.contains("ping about alpha"),
+        "the arm's item must reach the infer prompt: {content}"
+    );
+}
+
+/// An arm handed no client creates one lazily when its prose needs it: the
+/// creation reads the gateway environment, so with the variables unset the run
+/// fails with the missing-variable error instead of silently skipping the
+/// prose.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_arm_without_a_client_creates_one_lazily_when_prose_needs_it() {
+    // The missing-variable error only fires on an unconfigured host; with a
+    // gateway exported, the lazy creation would succeed and make a real call.
+    if !gateway_env_is_unset() {
+        return;
+    }
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', {'alpha'})\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+Ask about {{ item }}.\n";
+    let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
+        .await
+        .expect_err("an arm with no client must attempt lazy creation, not skip its prose");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("missing environment variable: PROMPTFORGE_GATEWAY"),
+        "the arm must surface the lazy client construction error: {rendered}"
+    );
+}
+
+/// `model:infer` inside an arm handed no client surfaces the lazy-creation
+/// error through the infer hook - a different code path than the prose walk's
+/// lazy creation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_arm_model_infer_without_a_client_surfaces_the_lazy_error() {
+    // Same host dependence as the prose variant above: skip on a configured host.
+    if !gateway_env_is_unset() {
+        return;
+    }
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', {'alpha'})\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+return models.get('writer'):infer('ping about ' .. item)\n\
+```\n";
+    let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
+        .await
+        .expect_err("model:infer in an arm with no client must surface the lazy error");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("missing environment variable: PROMPTFORGE_GATEWAY"),
+        "the infer hook must surface the lazy client construction error: {rendered}"
+    );
+}
+
+/// An unknown model alias errors loudly inside an arm, same as on the walk.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_arm_model_infer_with_an_unknown_alias_errors_loudly() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', {'alpha'})\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+return models.get('ghost'):infer('ping')\n\
+```\n";
+    let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
+        .await
+        .expect_err("an unknown model alias inside an arm must fail loudly");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("models.get alias \"ghost\" was not declared"),
+        "the unknown alias must be named: {rendered}"
+    );
+}
+
 /// A walked section never sees the fanout `item` global: the seed split
 /// installs `item` only for an arm, so a regression seeding it on the walk
 /// path must fail here.
@@ -1366,6 +1512,86 @@ return 'ok'\n\
         .await
         .expect("a walked section runs with no item global");
     assert_eq!(out, "ok");
+}
+
+/// `{{ item }}` in walked (non-arm) prose is a substitution error: the walk
+/// pins `item: None`, so only a fanout arm's prose may reference it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn item_in_walked_prose_is_a_substitution_error() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n\
+Ask about {{ item }}.\n";
+    let error = run_offline(md)
+        .await
+        .expect_err("{{ item }} outside a fanout arm must fail substitution");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("{{ item }} is nil"),
+        "the walked section's prose must reject {{ item }}: {rendered}"
+    );
+}
+
+/// `execute()` on a child heading resolves the target's index within the
+/// caller's CHILD slice, not the sibling slice: earlier children do not run,
+/// and the chain falls through to the target's following child siblings.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn execute_to_a_later_child_runs_the_child_slice_from_that_index() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Main\n\n\
+```lua\n\
+local r = execute('### Sub2')\n\
+return 'got:' .. r\n\
+```\n\n\
+### Sub1\n\n\
+```lua\n\
+error('an earlier child must not run')\n\
+```\n\n\
+### Sub2\n\n\
+```lua\n\
+store.append('order.txt', 'Sub2\\n')\n\
+```\n\n\
+### Sub3\n\n\
+```lua\n\
+store.append('order.txt', 'Sub3\\n')\n\
+return 'sub3-reply'\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("execute to a later child must run the child slice from that index");
+    assert_eq!(out, "got:sub3-reply");
+    assert_eq!(store.read("order.txt").expect("order log"), "Sub2\nSub3\n");
+}
+
+/// A worker that neither returns from Lua nor produces prose text falls
+/// through with its arm text seeded from the reply incoming to the parent
+/// (the engine's pass-through semantic), not an empty string.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_arm_without_output_inherits_the_incoming_reply() {
+    let gateway = ScriptedGateway::start(vec![resp_text("prior-reply")]).await;
+    let addr = gateway.addr();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## First\n\n\
+Ask for something.\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', {'alpha'})\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+assert(item == 'alpha')\n\
+```\n";
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        gatewayed(addr),
+    )
+    .await
+    .expect("a no-output arm must inherit the incoming reply");
+    assert_eq!(out, "prior-reply");
 }
 
 /// The arm's `var` starts as a fresh table: the top-level H1 hand-off seeds
@@ -1470,15 +1696,7 @@ Loop forever on {{ item }}.\n\n\
         "",
         &[Arc::new(EchoTool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .expect("soft-degraded fanout must still return structured results");
@@ -1800,15 +2018,7 @@ return 'done'\n\
         "",
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .expect("sys must expose section metadata");
