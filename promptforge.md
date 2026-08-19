@@ -120,8 +120,9 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 | `untrusted(s)` | Wrap a string in the untrusted guard envelope |
 | `return value` | End run, return value |
 | `jump("## Section")` | Transfer control to a visible section (a sibling or a direct child); a child target starts a child-level walk |
-| `execute("## Section", input?)` | Run a visible section (a sibling or a direct child) as a subroutine |
-| `list_from_section("## List")` | A list section's pre-parsed items as an array |
+| `execute("## Section", input?)` | Start a contained chain at a visible section (a sibling or a direct child); returns the chain's final reply |
+| `fanout(worker, collection)` | Map a worker over a collection in parallel; array members arrive as `item`, hash members as pair tables |
+| `list_from_section("## List")` | A list section's pre-parsed items as an array - feed it to `fanout` |
 | `var.x = ...` | Cross-section state |
 | `log(msg)` | Emit to observer |
 
