@@ -77,7 +77,7 @@ Escape literal delimiters with backslash: `\{{` emits `{{`.
 
 ## Control Flow
 
-`jump(target)` transfers control to another section by heading name, clearing conversation context. The current `reply` value is preserved across the jump, so the target section can reference it in prose (`{{ reply }}`) or Lua. Clear it explicitly with `reply = nil` before jumping when the target should not inherit the previous reply. `execute(target, input)` runs a section as a subroutine with a fresh VM and conversation, returning that section's reply:
+`jump(target)` transfers control to another section by heading name, clearing conversation context. The current `reply` value is preserved across the jump, so the target section can reference it in prose (`{{ reply }}`) or Lua. Clear it explicitly with `reply = nil` before jumping when the target should not inherit the previous reply. `execute(target, input)` starts a contained chain at the target with a fresh VM and conversation, returning the chain's final reply:
 
 ````markdown
 ## Router
@@ -102,6 +102,8 @@ Write a summary.
 Both `jump` and `execute` address any section in the caller's visible set: its sibling sections at its own nesting level (for a top-level section, the other H2 sections) plus its direct children, disambiguated by heading level - `## Peer` matches only a sibling, `### Child` only a direct child. The parent, nieces and nephews, grandchildren, and the caller itself are not visible and resolve as not-found, with the error listing only the visible sections.
 
 A jump to a child heading starts a child-level walk within the jumper's children: the walk begins at the target (which runs even when marked off-walk) and falls through to its following siblings under the same rules as the top-level walk. When the level exhausts, the parent walk resumes at the section after the jumper, and the sub-walk's last reply becomes the reply the next section sees. The rule recurses to deeper levels - a child can jump to its own children. A walk never descends on its own, so a section's children run only when addressed.
+
+`execute()` runs a contained chain starting at its target: a walk with every normal rule - fall-through, off-walk skips, jumps, child chains - that never moves the outer walk. When the chain ends (its level exhausts or a `return` fires), the chain's final reply is the call's return value and the caller continues. A `return` ends only the chain it fires in; the top-level walk's return ends the run. Because a chain falls through like any walk, a multi-section subroutine is best expressed as a child walk (the children need no off-walk marker, since no walk descends on its own) or placed after the run-ending section.
 
 Reply preservation across `jump()` enables routing patterns where one section's analysis determines the next section's context:
 
@@ -129,7 +131,7 @@ The analysis found a critical issue:
 Escalate this with recommended actions.
 ````
 
-`execute()` nests up to 8 levels deep. A subroutine starts with `reply` set to nil - pass context through the `input` parameter instead. `jump()` inside an `execute()` subroutine is rejected with a clear error. Sections can be referenced by heading string or by Section objects from the `tasks` table.
+`execute()` nests up to 8 levels deep. A chain starts with `reply` set to nil - pass context through the `input` parameter instead. A `jump()` inside a chain moves within the chain, and a `return` inside a chain ends the chain, not the run. Sections can be referenced by heading string or by Section objects from the `tasks` table.
 
 ## Lua API Summary
 
@@ -147,7 +149,7 @@ Escalate this with recommended actions.
 | `handle:infer(prompt)` | Tool-loop inference on a specific model handle |
 | `store.*` | Virtual filesystem operations |
 | `jump("## Section")` | Transfer control to a visible section (a sibling or a direct child); a child target starts a child-level walk |
-| `execute("## Section", input?)` | Run a visible section (a sibling or a direct child) as a subroutine |
+| `execute("## Section", input?)` | Start a contained chain at a visible section (a sibling or a direct child); returns the chain's final reply |
 | `fanout(worker, list)` | Map a worker over a list section in parallel |
 | `list_from_section("## List")` | Return a list section's pre-parsed items as an array of strings |
 | `log(msg)` | Emit a diagnostic to the observer |
