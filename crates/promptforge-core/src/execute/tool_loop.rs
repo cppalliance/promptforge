@@ -71,6 +71,12 @@ pub(crate) struct ProseInferenceResult {
 /// Starts a fresh conversation with `prose` as the user turn and runs the full
 /// tool loop. Returns the final text and the last round's finish reason.
 ///
+/// This wrapper stays distinct from [`run_prose_inference`] on purpose: its
+/// one production caller, the `model:infer` hook, wants exactly the
+/// fresh-conversation, loop-until-text contract with exhaustion surfaced as
+/// [`Error::ToolLoopExhausted`], while the block walk drives
+/// [`run_prose_inference`] directly with its own rolling conversation.
+///
 /// # Errors
 /// Returns an out-of-scope tool error if the model calls an alias absent from
 /// `dispatch`, [`Error::ToolLoopExhausted`] if the cap is hit without a text

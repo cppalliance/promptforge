@@ -8,7 +8,13 @@
 //! A list section's pre-parsed items feed in through `list_from_section`:
 //! `fanout("### Worker", list_from_section("### List"))`. Arms execute
 //! concurrently on a [`tokio::task::JoinSet`]; each gets a fresh [`SectionVm`]
-//! with `item` and `sys.taskid` injected. The invoker receives an ordered Lua
+//! with `item` and `sys.taskid` injected and runs the same engine the section
+//! walk drives: the shared VM setup, the `model:infer` hook, and the ordered
+//! block walk (every Lua and prose block in order, the conversation and reply
+//! rolling forward, the tool scope rebuilt per prose block, a gateway client
+//! created from the environment on first use when the arm was handed none).
+//! Nested `execute`/`fanout`/`list_from_section` fail loudly inside an arm,
+//! and `jump` is rejected. The invoker receives an ordered Lua
 //! table of structured arm results (`.text`, `.ok`, `.item`, `.exhausted`),
 //! with `.item` carrying the member value back. Fatal arm errors abort
 //! siblings; [`Error::ToolLoopExhausted`] soft-degrades to an incomplete stub.
@@ -25,6 +31,7 @@ use tokio::task::JoinSet;
 use crate::cancel;
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
+use crate::execute::RunLimits;
 use crate::lua::{LuaFanoutResult, LuaProgram, ToolBindings};
 use crate::model::ModelBindings;
 use crate::observe::{Observation, Observer};
@@ -53,16 +60,18 @@ fn parse_heading_address(heading: &str) -> Result<(usize, String)> {
     }
     // The `#` run is ASCII, so a byte slice at `level` is a valid boundary.
     let rest = &stripped[level..];
-    if !rest.starts_with(|c: char| c.is_whitespace()) {
-        return Err(Error::Lua(format!(
-            "section heading must have whitespace after the {} markers: {stripped}",
-            "#".repeat(level)
-        )));
-    }
+    // Checked before the whitespace gate: a marker-only heading (`###`) has
+    // no name to parse whether or not whitespace followed the markers.
     let name = rest.trim();
     if name.is_empty() {
         return Err(Error::Lua(format!(
             "section heading has no name: {stripped}"
+        )));
+    }
+    if !rest.starts_with(|c: char| c.is_whitespace()) {
+        return Err(Error::Lua(format!(
+            "section heading must have whitespace after the {} markers: {stripped}",
+            "#".repeat(level)
         )));
     }
     Ok((level, name.to_owned()))
@@ -143,17 +152,24 @@ pub(crate) fn collection_to_items(lua: &Lua, collection: &Value) -> Result<Vec<s
         {
             continue;
         }
-        let key_json = match &key {
+        // Each scalar key converts to its JSON form and its diagnostic label
+        // in one match; non-scalar keys are rejected here, so no later code
+        // path can meet one.
+        let (key_json, key_label) = match &key {
             Value::String(s) => {
-                serde_json::Value::String(s.to_str().map_err(Error::lua)?.to_string())
+                let s = s.to_str().map_err(Error::lua)?;
+                (serde_json::Value::String(s.to_owned()), s.to_owned())
             }
-            Value::Integer(i) => serde_json::Value::from(*i),
-            Value::Number(n) => serde_json::Number::from_f64(*n)
-                .map(serde_json::Value::Number)
-                .ok_or_else(|| {
-                    Error::Lua("fanout collection key is not a finite number".to_owned())
-                })?,
-            Value::Boolean(b) => serde_json::Value::Bool(*b),
+            Value::Integer(i) => (serde_json::Value::from(*i), i.to_string()),
+            Value::Number(n) => (
+                serde_json::Number::from_f64(*n)
+                    .map(serde_json::Value::Number)
+                    .ok_or_else(|| {
+                        Error::Lua("fanout collection key is not a finite number".to_owned())
+                    })?,
+                n.to_string(),
+            ),
+            Value::Boolean(b) => (serde_json::Value::Bool(*b), b.to_string()),
             other => {
                 return Err(Error::Lua(format!(
                     "fanout collection key must be a string, number, or boolean, got {}",
@@ -161,7 +177,7 @@ pub(crate) fn collection_to_items(lua: &Lua, collection: &Value) -> Result<Vec<s
                 )));
             }
         };
-        let value_json = member_to_json(lua, member, &key_label(&key))?;
+        let value_json = member_to_json(lua, member, &key_label)?;
         items.push(json!({ "key": key_json, "value": value_json }));
     }
     Ok(items)
@@ -182,18 +198,6 @@ fn member_to_json(lua: &Lua, member: Value, index: &str) -> Result<serde_json::V
     }
 }
 
-/// Renders a hash key for a member diagnostic: strings verbatim, numbers and
-/// booleans in their natural string form.
-fn key_label(key: &Value) -> String {
-    match key {
-        Value::String(s) => s.to_string_lossy(),
-        Value::Integer(i) => i.to_string(),
-        Value::Number(n) => n.to_string(),
-        Value::Boolean(b) => b.to_string(),
-        other => other.type_name().to_owned(),
-    }
-}
-
 /// Everything a fanout needs from the invoker's context.
 pub(crate) struct FanoutContext<'a> {
     pub args: &'a str,
@@ -210,14 +214,10 @@ pub(crate) struct FanoutContext<'a> {
     pub analysis: &'a crate::execute::ToolAnalysis,
     pub shared_tools: &'a SharedTools,
     pub max_tool_iterations: usize,
-    /// Maximum number of arms permitted to execute concurrently.
-    pub fanout_concurrency: NonZeroUsize,
-    /// Maximum number of items a single fanout may map over.
-    pub max_fanout_items: NonZeroUsize,
-    /// Per-arm Lua heap ceiling.
-    pub lua_memory_bytes: usize,
-    /// Per-arm Lua `log()` event budget.
-    pub lua_log_events: u32,
+    /// The run's resource limits: the concurrency window and item cap are read
+    /// from it here, each arm reads its Lua ceilings from it, and a lazily
+    /// created gateway client inherits its HTTP limits.
+    pub limits: RunLimits,
     pub last_reply: Option<&'a str>,
     pub when: &'a str,
     /// The 1-based id of the parent section that initiated the fanout.
@@ -244,11 +244,11 @@ pub(crate) async fn run_fanout_arms(
 ) -> Result<Vec<LuaFanoutResult>> {
     // Reject an oversized collection before scheduling anything, so a
     // pathological prompt cannot allocate an unbounded number of arms.
-    if items.len() > ctx.max_fanout_items.get() {
+    let max_items = ctx.limits.fanout_items().get();
+    if items.len() > max_items {
         return Err(Error::Lua(format!(
-            "fanout collection has {} members, exceeding the maximum of {}",
+            "fanout collection has {} members, exceeding the maximum of {max_items}",
             items.len(),
-            ctx.max_fanout_items.get()
         )));
     }
 
@@ -263,9 +263,12 @@ pub(crate) async fn run_fanout_arms(
     // proxies drop events (see `ProxyObserver`/`ProxyDebugCapture`) rather than
     // block an arm, so back-pressure can never alter execution results - only the
     // completeness of best-effort progress reporting.
-    let (observe_tx, mut observe_rx) =
-        mpsc::channel::<(String, Observation)>(SIDE_CHANNEL_CAPACITY);
-    let (debug_tx, mut debug_rx) = mpsc::channel::<DebugMsg>(SIDE_CHANNEL_CAPACITY);
+    let (observe_tx, observe_rx) = mpsc::channel::<(String, Observation)>(SIDE_CHANNEL_CAPACITY);
+    let (debug_tx, debug_rx) = mpsc::channel::<DebugMsg>(SIDE_CHANNEL_CAPACITY);
+    let mut side_channels = SideChannels {
+        observe_rx,
+        debug_rx,
+    };
     let proxy_observer = Arc::new(ProxyObserver { tx: observe_tx });
     let proxy_debug = ctx.debug.map(|_| {
         Arc::new(ProxyDebugCapture {
@@ -295,8 +298,7 @@ pub(crate) async fn run_fanout_arms(
             analysis: ctx.analysis.clone(),
             shared_tools: ctx.shared_tools.clone(),
             max_tool_iterations: ctx.max_tool_iterations,
-            lua_memory_bytes: ctx.lua_memory_bytes,
-            lua_log_events: ctx.lua_log_events,
+            limits: ctx.limits,
             parent_id: ctx.parent_id,
             section_count: ctx.section_count,
             turns: Arc::clone(&turns),
@@ -309,7 +311,7 @@ pub(crate) async fn run_fanout_arms(
 
     // At most `fanout_concurrency` arms are resident at once: seed the initial
     // window, then schedule the next queued item whenever one completes.
-    let mut window = ArmWindow::new(items.len(), ctx.fanout_concurrency);
+    let mut window = ArmWindow::new(items.len(), ctx.limits.fanout());
     while let Some(index) = window.take_next() {
         spawn_arm(index, &mut join_set);
     }
@@ -321,16 +323,14 @@ pub(crate) async fn run_fanout_arms(
         tokio::select! {
             biased;
             () = cancel::wait_cancelled() => {
-                abort_fanout_arms(&mut join_set, ctx, &mut observe_rx, &mut debug_rx).await;
+                abort_fanout_arms(&mut join_set, ctx, &mut side_channels).await;
                 return Err(Error::Interrupted);
             }
-            Some((section, event)) = observe_rx.recv() => {
-                ctx.observer.observe(ctx.execution, &section, event);
+            Some((section, event)) = side_channels.observe_rx.recv() => {
+                forward_observation(ctx, &section, event);
             }
-            Some(msg) = debug_rx.recv() => {
-                if let Some(capture) = ctx.debug {
-                    capture.on_event(ctx.execution, &msg.section, msg.turn_index, msg.event);
-                }
+            Some(msg) = side_channels.debug_rx.recv() => {
+                forward_debug(ctx, msg);
             }
             joined = join_set.join_next() => {
                 match joined {
@@ -343,12 +343,12 @@ pub(crate) async fn run_fanout_arms(
                         }
                     }
                     Some(Ok(Err(error))) => {
-                        abort_fanout_arms(&mut join_set, ctx, &mut observe_rx, &mut debug_rx).await;
+                        abort_fanout_arms(&mut join_set, ctx, &mut side_channels).await;
                         return Err(error);
                     }
                     Some(Err(join_error)) if join_error.is_cancelled() => {}
                     Some(Err(join_error)) => {
-                        abort_fanout_arms(&mut join_set, ctx, &mut observe_rx, &mut debug_rx).await;
+                        abort_fanout_arms(&mut join_set, ctx, &mut side_channels).await;
                         // Keep the structured JoinError as the error source; it is
                         // only stringified at the Lua callback boundary.
                         return Err(Error::FanoutArmJoin(join_error));
@@ -358,7 +358,7 @@ pub(crate) async fn run_fanout_arms(
         }
     }
 
-    drain_side_channels(ctx, &mut observe_rx, &mut debug_rx);
+    side_channels.drain(ctx);
 
     let mut ordered = Vec::with_capacity(replies.len());
     for (index, reply) in replies.into_iter().enumerate() {
@@ -415,30 +415,45 @@ impl ArmWindow {
     }
 }
 
+/// Forwards one arm observation to the run's observer.
+fn forward_observation(ctx: &FanoutContext<'_>, section: &str, event: Observation) {
+    ctx.observer.observe(ctx.execution, section, event);
+}
+
+/// Forwards one arm debug event to the run's capture sink, when one is set.
+fn forward_debug(ctx: &FanoutContext<'_>, msg: DebugMsg) {
+    if let Some(capture) = ctx.debug {
+        capture.on_event(ctx.execution, &msg.section, msg.turn_index, msg.event);
+    }
+}
+
+/// The receive halves of the two arm side channels, bundled so the abort and
+/// drain paths thread one value rather than restating the same pair.
+struct SideChannels {
+    observe_rx: mpsc::Receiver<(String, Observation)>,
+    debug_rx: mpsc::Receiver<DebugMsg>,
+}
+
+impl SideChannels {
+    /// Forwards every event the arms left buffered, draining both channels.
+    fn drain(&mut self, ctx: &FanoutContext<'_>) {
+        while let Ok((section, event)) = self.observe_rx.try_recv() {
+            forward_observation(ctx, &section, event);
+        }
+        while let Ok(msg) = self.debug_rx.try_recv() {
+            forward_debug(ctx, msg);
+        }
+    }
+}
+
 async fn abort_fanout_arms(
     join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>,
     ctx: &FanoutContext<'_>,
-    observe_rx: &mut mpsc::Receiver<(String, Observation)>,
-    debug_rx: &mut mpsc::Receiver<DebugMsg>,
+    side_channels: &mut SideChannels,
 ) {
     join_set.abort_all();
     while join_set.join_next().await.is_some() {}
-    drain_side_channels(ctx, observe_rx, debug_rx);
-}
-
-fn drain_side_channels(
-    ctx: &FanoutContext<'_>,
-    observe_rx: &mut mpsc::Receiver<(String, Observation)>,
-    debug_rx: &mut mpsc::Receiver<DebugMsg>,
-) {
-    while let Ok((section, event)) = observe_rx.try_recv() {
-        ctx.observer.observe(ctx.execution, &section, event);
-    }
-    while let Ok(msg) = debug_rx.try_recv() {
-        if let Some(capture) = ctx.debug {
-            capture.on_event(ctx.execution, &msg.section, msg.turn_index, msg.event);
-        }
-    }
+    side_channels.drain(ctx);
 }
 
 mod arm;

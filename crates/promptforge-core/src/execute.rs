@@ -51,7 +51,8 @@
 //! `tools` (the `model:infer` bag and hook), `tool_loop` (the model tool
 //! loop), `h1` (the live H1 pass), `section_vm` (the section VM setup half
 //! shared by the walk and the fanout arm), `block_walk` (the ordered block
-//! loop - the engine's walk half), `engine` (the section walkers),
+//! loop - the engine's walk half, shared by the walk and the fanout arm),
+//! `engine` (the section walkers),
 //! and `support` (the sync/async bridge and shared helpers).
 
 mod block_walk;
@@ -77,20 +78,22 @@ pub use gateway::ResolutionContext;
 // Crate-internal items reused through the historical `crate::execute::` path.
 // Only `run_sections`, `execute_live_h1`, and `ToolAnalysis` serve `run`
 // below; the rest (`SectionVmSetup`/`VmSeed`/`setup_section_vm`,
-// `prepare_effective_scope`, `now_rfc3339_checked`, `SectionProgress`,
-// `run_tool_loop`) are consumed by `fanout` and by the executor's own tests
-// through the test glob. Re-exported so the split stays surface-neutral for
-// the public API while keeping one import path for internal collaborators.
+// `now_rfc3339_checked`, `sys_json`, the block walk, and the infer hook
+// install) are consumed by `fanout`. Re-exported so the split stays
+// surface-neutral for the public API while keeping one import path for
+// internal collaborators.
+pub(crate) use block_walk::{BlockWalkContext, SectionFlow, walk_section_blocks};
 pub(crate) use engine::run_sections;
 pub(crate) use h1::execute_live_h1;
-pub(crate) use scope::{ToolAnalysis, prepare_effective_scope};
+pub(crate) use scope::ToolAnalysis;
 pub(crate) use section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
-pub(crate) use support::now_rfc3339_checked;
-pub(crate) use tool_loop::{SectionProgress, run_tool_loop};
+pub(crate) use support::{now_rfc3339_checked, sys_json};
+pub(crate) use tools::attach_engine_infer_hook;
 
-// Executor-internal items and crate types the executor's own tests reach
-// through `use super::super::*` (and that `tests/mod.rs` does not itself
-// import). Test-only, so the non-test lib carries no unused re-export while the
+// Everything the executor's own tests reach through `use super::super::*`
+// (and that `tests/mod.rs` does not itself import): executor-internal items,
+// crate types, and the two external conveniences (`json`, `BTreeMap`).
+// Test-only, so the non-test lib carries no unused re-export while the
 // historic executor namespace stays intact for the test glob.
 #[cfg(test)]
 pub(crate) use crate::Result;
@@ -103,15 +106,21 @@ pub(crate) use crate::model::ModelBindings;
 #[cfg(test)]
 pub(crate) use crate::observe::Observer;
 #[cfg(test)]
-pub(crate) use gateway::{GatewaySource, env_client_with_limits};
+pub(crate) use gateway::GatewaySource;
+#[cfg(test)]
+pub(crate) use gateway::env_client_with_limits;
 #[cfg(test)]
 pub(crate) use scope::OwnedNearDuplicate;
+#[cfg(test)]
+pub(crate) use scope::prepare_effective_scope;
 #[cfg(test)]
 pub(crate) use serde_json::json;
 #[cfg(test)]
 pub(crate) use std::collections::BTreeMap;
 #[cfg(test)]
 pub(crate) use support::{advance_turn, bridge_blocking};
+#[cfg(test)]
+pub(crate) use tool_loop::{SectionProgress, run_tool_loop};
 #[cfg(test)]
 pub(crate) use tools::ToolBag;
 

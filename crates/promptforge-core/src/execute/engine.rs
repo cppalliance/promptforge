@@ -41,8 +41,6 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
-use serde_json::json;
-
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::fanout;
@@ -55,13 +53,14 @@ use crate::tools::SharedTools;
 use crate::{Error, Result};
 use mlua::Value as LuaValue;
 
-use super::block_walk::{SectionFlow, walk_section_blocks};
+use super::block_walk::{BlockWalkContext, SectionFlow, walk_section_blocks};
 use super::config::RunLimits;
-use super::gateway::GatewaySource;
 use super::scope::ToolAnalysis;
 use super::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
-use super::support::{GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, bridge_blocking, now_rfc3339_checked};
-use super::tools::attach_infer_hook;
+use super::support::{
+    GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, bridge_blocking, now_rfc3339_checked, sys_json,
+};
+use super::tools::attach_engine_infer_hook;
 
 /// How one chain ended.
 enum WalkEnd {
@@ -101,6 +100,28 @@ pub(super) struct WalkContext<'a> {
     /// `var` seeded from an earlier VM (top-level H1 hand-off); `None` for a
     /// contained chain.
     pub(super) initial_var: Option<&'a serde_json::Value>,
+}
+
+impl<'a> From<&WalkContext<'a>> for BlockWalkContext<'a> {
+    /// The walk driver's block-walk inputs: the shared field list lives here
+    /// alone, so a future field add cannot drift between construction sites.
+    /// `item` is absent on the walk; only the fanout arm sets it.
+    fn from(ctx: &WalkContext<'a>) -> Self {
+        BlockWalkContext {
+            args: ctx.args,
+            execution: ctx.execution,
+            observer: ctx.observer,
+            debug: ctx.debug,
+            bindings: ctx.bindings,
+            models: ctx.models,
+            analysis: ctx.analysis,
+            shared_tools: ctx.shared_tools,
+            max_tool_iterations: ctx.max_tool_iterations,
+            limits: ctx.limits,
+            turns: ctx.turns.as_ref(),
+            item: None,
+        }
+    }
 }
 
 /// Walk the prompt's top-level sections, reporting each boundary, and return
@@ -321,14 +342,14 @@ async fn run_one_section(
     client: &mut Option<GatewayClient>,
 ) -> Result<SectionFlow> {
     let now = now_rfc3339_checked()?;
-    let sys = json!({
-        "when": ctx.when,
-        "now": now,
-        "id": section_id,
-        "section_name": section.name,
-        "execution": ctx.execution,
-        "section_count": ctx.top_sections.len(),
-    });
+    let sys = sys_json(
+        ctx.when,
+        &now,
+        section_id,
+        &section.name,
+        ctx.execution,
+        ctx.top_sections.len(),
+    );
 
     ctx.observer
         .observe(ctx.execution, &section.name, detail::SECTION_STARTED);
@@ -514,9 +535,10 @@ async fn run_one_section(
     // surfaces a concrete construction error on first use instead of the setup
     // swallowing it. The direct prose path below still builds `client` and
     // propagates its own error.
-    attach_infer_hook(
+    attach_engine_infer_hook(
         &vm,
-        GatewaySource::from_optional(client.clone(), ctx.limits),
+        client.clone(),
+        ctx.limits,
         ctx.shared_tools,
         Arc::clone(ctx.observer_arc),
         ctx.debug_arc.cloned(),
@@ -524,15 +546,17 @@ async fn run_one_section(
         &section.name,
         ctx.max_tool_iterations,
         ctx.turns,
-        Some(ctx.analysis),
-        None,
+        ctx.analysis,
     );
 
     // The walk half - the ordered block loop - reports how the section
-    // ended. The teardown boundary stays here: every path out of the walk
-    // tears the VM down exactly once, and SECTION_FINISHED fires only when
-    // the walk completed (a jump or return included), never on an error.
-    let result = walk_section_blocks(&mut vm, ctx, section, sys, incoming_reply, client).await;
+    // ended, reading only the narrowed BlockWalkContext inputs. The teardown
+    // boundary stays here: every path out of the walk tears the VM down
+    // exactly once, and SECTION_FINISHED fires only when the walk completed
+    // (a jump or return included), never on an error.
+    let walk_ctx = BlockWalkContext::from(ctx);
+    let result =
+        walk_section_blocks(&mut vm, &walk_ctx, section, sys, incoming_reply, client).await;
     vm.teardown(ctx.observer, &section.name);
     let flow = result?;
     ctx.observer
@@ -630,9 +654,14 @@ pub(super) fn resolve_jump_target(
     if let Some(index) = section_position(&jumper.children, target) {
         return Ok(JumpTarget::Child(index));
     }
+    // `target` was resolved out of the visible set built from exactly these
+    // two slices, so a miss here is an internal invariant violation, not a
+    // user-facing Lua error.
     section_position(siblings, target)
         .map(JumpTarget::Sibling)
-        .ok_or_else(|| Error::Lua(format!("section `{heading}` index missing")))
+        .ok_or(Error::Internal(
+            "resolved jump target is absent from the jumper's sibling slice",
+        ))
 }
 
 #[expect(
@@ -683,10 +712,7 @@ fn make_fanout_callback(
         analysis,
         shared_tools,
         max_tool_iterations,
-        fanout_concurrency: limits.fanout(),
-        max_fanout_items: limits.fanout_items(),
-        lua_memory_bytes: limits.lua_memory().get(),
-        lua_log_events: limits.lua_logs().get(),
+        limits,
         last_reply,
         when,
         parent_id,

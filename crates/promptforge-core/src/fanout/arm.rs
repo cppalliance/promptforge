@@ -1,18 +1,18 @@
 //! Execution of a single fanout arm: its owned payload, the terminal-observation
-//! guard, and the linear arm body.
+//! guard, and the thin adapter over the shared engine.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::execute::{
-    SectionProgress, SectionVmSetup, ToolAnalysis, VmSeed, now_rfc3339_checked,
-    prepare_effective_scope, run_tool_loop, setup_section_vm,
+    BlockWalkContext, RunLimits, SectionFlow, SectionVmSetup, ToolAnalysis, VmSeed,
+    attach_engine_infer_hook, now_rfc3339_checked, setup_section_vm, sys_json, walk_section_blocks,
 };
-use crate::lua::{LuaBlockResult, LuaFanoutResult, LuaProgram, SectionVm, ToolBindings};
+use crate::lua::{LuaFanoutResult, LuaProgram, SectionVm, ToolBindings};
 use crate::model::ModelBindings;
 use crate::observe::{Observation, Observer, detail};
 use crate::parser::Section;
@@ -39,8 +39,9 @@ pub(crate) struct ArmPayload {
     pub(crate) analysis: ToolAnalysis,
     pub(crate) shared_tools: SharedTools,
     pub(crate) max_tool_iterations: usize,
-    pub(crate) lua_memory_bytes: usize,
-    pub(crate) lua_log_events: u32,
+    /// The run's resource limits: the arm's Lua ceilings come from it, and a
+    /// lazily created gateway client inherits its HTTP timeout and body cap.
+    pub(crate) limits: RunLimits,
     pub(crate) parent_id: usize,
     pub(crate) section_count: usize,
     pub(crate) turns: Arc<AtomicU32>,
@@ -59,14 +60,14 @@ pub(crate) struct ArmPayload {
 /// run is cancelled - `Drop` emits [`detail::FANOUT_ARM_CANCELLED`]. Exactly one
 /// terminal event therefore fires for every arm (FANOUT-004).
 pub(crate) struct ArmFinalizer {
-    observer: Arc<ProxyObserver>,
+    observer: Arc<dyn Observer>,
     execution: String,
     section: String,
     finished: bool,
 }
 
 impl ArmFinalizer {
-    pub(crate) fn new(observer: Arc<ProxyObserver>, execution: String, section: String) -> Self {
+    pub(crate) fn new(observer: Arc<dyn Observer>, execution: String, section: String) -> Self {
         Self {
             observer,
             execution,
@@ -81,7 +82,7 @@ impl ArmFinalizer {
     }
 
     fn emit(&self, event: Observation) {
-        (self.observer.as_ref() as &dyn Observer).observe(&self.execution, &self.section, event);
+        self.observer.observe(&self.execution, &self.section, event);
     }
 }
 
@@ -95,13 +96,25 @@ impl Drop for ArmFinalizer {
 
 /// Runs one fanout arm to completion.
 ///
+/// The arm is a thin adapter over the shared engine: the body builds the
+/// engine's inputs from the payload (the `sys` JSON carrying `taskid` and the
+/// parent section's `id`, the `item` seed, the proxy observer, the shared
+/// turns counter), runs the setup half ([`setup_section_vm`]), installs the
+/// `model:infer` hook with a lazy client source, and drives the shared block
+/// walk ([`walk_section_blocks`]). The control globals stay stubbed - nested
+/// execute/fanout/list_from_section fail loudly - and a [`SectionFlow::Jumped`]
+/// maps to the jump-rejection error. [`SectionFlow::Returned`] and
+/// [`SectionFlow::FellThrough`] map to [`LuaFanoutResult::success`];
+/// [`Error::ToolLoopExhausted`] soft-degrades to the incomplete stub so one
+/// stuck arm cannot kill sibling evidence.
+///
 /// VM teardown and the terminal arm observation happen in ONE epilogue
 /// (FANOUT-006): the fallible body runs against a borrowed VM without any inline
 /// teardown, then the epilogue tears the VM down once and records the single
 /// distinct terminal event via [`ArmFinalizer`].
 #[expect(
     clippy::too_many_lines,
-    reason = "the arm body is one cohesive linear sequence of fallible steps"
+    reason = "the arm adapter is one cohesive linear sequence: payload destructuring, engine input construction, the walk, and the outcome mapping"
 )]
 pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
     let ArmPayload {
@@ -120,8 +133,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         analysis,
         shared_tools,
         max_tool_iterations,
-        lua_memory_bytes,
-        lua_log_events,
+        limits,
         parent_id,
         section_count,
         turns,
@@ -131,14 +143,16 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
     } = payload;
 
     let taskid = (index + 1).to_string();
-    let observer_arc = observer;
-    let observer = observer_arc.as_ref() as &dyn Observer;
+    // Erase the proxy handle once, up front: the finalizer, the persistent
+    // host APIs, and the direct observation calls all share this one handle.
+    let observer_dyn: Arc<dyn Observer> = observer;
+    let observer: &dyn Observer = observer_dyn.as_ref();
     observer.observe(&execution, &worker.name, detail::FANOUT_ARM_STARTED);
 
     // The guard defaults to a CANCELLED terminal event; the epilogue below
     // upgrades it to the arm's real outcome unless the arm is aborted first.
     let mut finalizer = ArmFinalizer::new(
-        Arc::clone(&observer_arc),
+        Arc::clone(&observer_dyn),
         execution.clone(),
         worker.name.clone(),
     );
@@ -152,30 +166,27 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             }
         };
 
-    // The persistent host APIs capture the observer as `Arc<dyn Observer>`;
-    // the cast is bound here so the body can borrow it.
-    let observer_dyn = observer_arc.clone() as Arc<dyn Observer>;
-
     // The body performs no teardown; every fallible step uses `?`. It returns the
     // arm result paired with its distinct terminal event.
     let body = async {
-        vm.apply_lua_limits(lua_memory_bytes, lua_log_events)?;
+        vm.apply_lua_limits(limits.lua_memory().get(), limits.lua_logs().get())?;
         let now = now_rfc3339_checked()?;
-        let sys = json!({
-            "when": when,
-            "now": now,
-            "id": parent_id,
-            "taskid": taskid,
-            "section_name": worker.name,
-            "execution": execution,
-            "section_count": section_count,
-        });
+        let mut sys = sys_json(
+            &when,
+            &now,
+            parent_id,
+            &worker.name,
+            &execution,
+            section_count,
+        );
+        // The arm's own sys extra: the 1-based collection position.
+        sys["taskid"] = Value::String(taskid);
 
         // The arm runs the walk's shared VM setup with its own deltas: the
         // `sys` extras (`taskid`, the parent `id`), the `item` seed, and stub
         // control globals. Nested execute/fanout/list_from_section have no
         // walk to re-enter here, so they fail loudly. `jump` records into the
-        // arm VM's slot and is rejected below.
+        // arm VM's slot and is rejected at the outcome mapping below.
         let setup = SectionVmSetup {
             args: &args,
             sys: &sys,
@@ -207,140 +218,76 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             },
         )?;
 
-        if let Some(program) = worker.prologue() {
-            match vm.run_chunk(program, observer, &worker.name)? {
-                LuaBlockResult::Returned(Some(value)) => {
-                    return Ok((
-                        LuaFanoutResult::success(item.clone(), value),
-                        detail::FANOUT_ARM_SUCCEEDED,
-                    ));
-                }
-                LuaBlockResult::Returned(None) => {}
-                LuaBlockResult::Jump(heading) => {
-                    return Err(Error::Lua(format!(
-                        "jump({heading}) is not allowed inside a fanout arm"
-                    )));
-                }
-            }
-        }
+        // The infer hook carries a lazy client source: a nested `model:infer`
+        // surfaces a concrete construction error on first use instead of the
+        // setup swallowing it.
+        attach_engine_infer_hook(
+            &vm,
+            client.clone(),
+            limits,
+            &shared_tools,
+            Arc::clone(&observer_dyn),
+            debug.clone(),
+            &execution,
+            &worker.name,
+            max_tool_iterations,
+            &turns,
+            &analysis,
+        );
 
-        let scope = crate::lua::current_tool_bindings(&bindings, &vm.tool_runtime)?;
-        let counts = vm.install_tool_call_counts(&scope)?;
-        let local_schemas = vm.local_tool_schemas();
-        for schema in &local_schemas {
-            counts.ensure(&schema.name)?;
-        }
-        let model = crate::lua::resolve_model_binding(&models, &vm.model_runtime)?;
-
-        let sys = if let Some(model_binding) = model.as_ref() {
-            let current = vm.current_sys(&sys)?;
-            let enriched = crate::lua::enrich_sys_model(&current, model_binding);
-            vm.re_seal_sys(&enriched)?;
-            enriched
-        } else {
-            sys
+        // The shared block walk: every Lua and prose block in order, the
+        // conversation and reply rolling forward, the tool scope rebuilt per
+        // prose block, and a gateway client created from the environment when
+        // the arm was handed none. The arm's only walk-input delta is `item`.
+        let walk_ctx = BlockWalkContext {
+            args: &args,
+            execution: &execution,
+            observer,
+            debug: debug.as_deref(),
+            bindings: &bindings,
+            models: &models,
+            analysis: &analysis,
+            shared_tools: &shared_tools,
+            max_tool_iterations,
+            limits,
+            turns: turns.as_ref(),
+            item: Some(&item),
         };
-
-        let var = vm.var()?;
-        let prose = subst::substitute(
-            worker.prose(),
-            &args,
+        let mut client = client;
+        match walk_section_blocks(
+            &mut vm,
+            &walk_ctx,
+            &worker,
+            sys,
             last_reply.as_deref(),
-            Some(&item),
-            &var,
-            &sys,
-        )?;
-
-        let mut arm_reply: Option<String> = None;
-        if !prose.trim().is_empty() {
-            let Some(model_binding) = model else {
-                return Err(Error::ModelRequired {
-                    section: worker.name.clone(),
-                });
-            };
-            let completion_options = model_binding.completion_options();
-            let registry = shared_tools.registry();
-            let (schemas, dispatch) = prepare_effective_scope(
-                &analysis,
-                &scope,
-                &local_schemas,
-                &registry,
-                &execution,
-                observer,
-                &worker.name,
-            )?;
-            if let Some(client) = client.as_ref() {
-                let global_aliases = Some(&analysis.alias_to_id);
-                let debug_ref = debug.as_deref();
-                // Local tools are Lua functions on the arm's VM; route their
-                // calls back into it rather than the registry.
-                let local_dispatch =
-                    |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, &args);
-                match run_tool_loop(
-                    client,
-                    &schemas,
-                    &dispatch,
-                    &registry,
-                    prose,
-                    max_tool_iterations,
-                    SectionProgress {
-                        execution: &execution,
-                        observer,
-                        section: &worker.name,
-                        turns: turns.as_ref(),
-                        debug: debug_ref,
-                        completion_options: &completion_options,
-                    },
-                    Some(&counts),
-                    global_aliases,
-                    Some(&local_dispatch),
-                )
-                .await
-                {
-                    Ok((text, finish_reason)) => {
-                        let current = vm.current_sys(&sys)?;
-                        let enriched = crate::lua::enrich_sys_reply_finish_reason(
-                            &current,
-                            finish_reason.as_deref(),
-                        );
-                        vm.re_seal_sys(&enriched)?;
-                        vm.bind_reply(&text, observer, &worker.name)?;
-                        arm_reply = Some(text);
-                    }
-                    // One stuck arm must not kill sibling evidence facets.
-                    Err(Error::ToolLoopExhausted) => {
-                        let stub = format!(
-                            "## {}\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)",
-                            subst::render_item(&item)
-                        );
-                        return Ok((
-                            LuaFanoutResult::exhausted_stub(item.clone(), stub),
-                            detail::FANOUT_ARM_EXHAUSTED,
-                        ));
-                    }
-                    Err(error) => return Err(error),
-                }
+            &mut client,
+        )
+        .await
+        {
+            Ok(SectionFlow::Returned(value)) => Ok((
+                LuaFanoutResult::success(item, value),
+                detail::FANOUT_ARM_SUCCEEDED,
+            )),
+            Ok(SectionFlow::FellThrough { reply }) => Ok((
+                LuaFanoutResult::success(item, reply.unwrap_or_default()),
+                detail::FANOUT_ARM_SUCCEEDED,
+            )),
+            Ok(SectionFlow::Jumped { heading, .. }) => Err(Error::Lua(format!(
+                "jump({heading}) is not allowed inside a fanout arm"
+            ))),
+            // One stuck arm must not kill sibling evidence facets.
+            Err(Error::ToolLoopExhausted) => {
+                let stub = format!(
+                    "## {}\n\nUNKNOWN\n\n(section incomplete: tool loop exhausted)",
+                    subst::render_item(&item)
+                );
+                Ok((
+                    LuaFanoutResult::exhausted_stub(item, stub),
+                    detail::FANOUT_ARM_EXHAUSTED,
+                ))
             }
+            Err(error) => Err(error),
         }
-
-        let epilog_return = if let Some(program) = worker.epilog() {
-            match vm.run_chunk(program, observer, &worker.name)? {
-                LuaBlockResult::Returned(value) => value,
-                LuaBlockResult::Jump(heading) => {
-                    return Err(Error::Lua(format!(
-                        "jump({heading}) is not allowed inside a fanout arm"
-                    )));
-                }
-            }
-        } else {
-            None
-        };
-
-        let text = epilog_return.or(arm_reply).unwrap_or_default();
-        Ok((
-            LuaFanoutResult::success(item, text),
-            detail::FANOUT_ARM_SUCCEEDED,
-        ))
     };
 
     // Re-install the explicit cancel handle on THIS arm's task so its Lua

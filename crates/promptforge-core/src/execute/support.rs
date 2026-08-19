@@ -55,6 +55,27 @@ pub(crate) fn advance_turn(turns: &AtomicU32) -> u32 {
         .saturating_add(1)
 }
 
+/// The `sys` JSON every engine driver builds for its section or arm: the six
+/// shared fields in one construction. A driver with an extra field (the
+/// fanout arm's `taskid`) inserts it at its own call site.
+pub(crate) fn sys_json(
+    when: &str,
+    now: &str,
+    id: usize,
+    section_name: &str,
+    execution: &str,
+    section_count: usize,
+) -> serde_json::Value {
+    serde_json::json!({
+        "when": when,
+        "now": now,
+        "id": id,
+        "section_name": section_name,
+        "execution": execution,
+        "section_count": section_count,
+    })
+}
+
 /// The current UTC time as an RFC 3339 string.
 ///
 /// # Errors
