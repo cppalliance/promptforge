@@ -6,6 +6,9 @@
 //! optional `lua shared` H1 library, and splits content into [`RawBlock`]s that
 //! the facade compiles into [`Block`]s.
 
+use std::borrow::Cow;
+use std::ops::Range;
+
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 
 use super::Block;
@@ -40,6 +43,10 @@ pub(super) fn split_h1(
     execution: &str,
     observer: &dyn Observer,
 ) -> Result<(Option<LuaProgram>, Vec<Block>, String)> {
+    // The H1 takes only the marker's comment role: everything below the first
+    // `---` rule is reader-only, so a `lua shared` fence there is inert and
+    // the description text comes from above the rule.
+    let content = truncate_at_first_rule(content);
     let leading = trim_leading_blank_lines(content);
     if leading.lines().next() == Some("```lua prompt") {
         return Err(Error::Parse(
@@ -55,11 +62,7 @@ pub(super) fn split_h1(
         })?;
         let (source, rest) = extract_exact_fence(after_open, "prompt `lua shared`")?;
         let fence_end = content.len() - rest.len();
-        for byte in &mut h1_content[opening..fence_end] {
-            if !matches!(*byte, b'\r' | b'\n') {
-                *byte = b' ';
-            }
-        }
+        blank_preserving_newlines(&mut h1_content[opening..fence_end]);
         Some(LuaProgram::compile(
             &source,
             "prompt shared library",
@@ -205,6 +208,66 @@ pub(super) fn exact_shared_openings(content: &str) -> Vec<usize> {
 /// Byte offset where leading blank lines end.
 fn leading_content_start(content: &str) -> usize {
     content.len() - trim_leading_blank_lines(content).len()
+}
+
+/// Blanks a byte slice in place, preserving `\r` and `\n` so source-line
+/// numbers still map back to the original file.
+fn blank_preserving_newlines(bytes: &mut [u8]) {
+    for byte in bytes {
+        if !matches!(*byte, b'\r' | b'\n') {
+            *byte = b' ';
+        }
+    }
+}
+
+/// Byte ranges of every genuine thematic break in `content`.
+///
+/// Pulldown reports a `Rule` only for a real CommonMark thematic break: a
+/// `---` inside a fenced code block is code, and a text line immediately
+/// followed by `---` is a setext heading underline, never a rule.
+fn rule_ranges(content: &str) -> Vec<Range<usize>> {
+    Parser::new_ext(content, Options::empty())
+        .into_offset_iter()
+        .filter_map(|(event, range)| matches!(event, Event::Rule).then_some(range))
+        .collect()
+}
+
+/// Truncates a content region at its first `---` rule, making everything
+/// below the rule reader-only.
+pub(super) fn truncate_at_first_rule(content: &str) -> &str {
+    match rule_ranges(content).first() {
+        Some(range) => &content[..range.start],
+        None => content,
+    }
+}
+
+/// Applies the `---` marker's two roles to one section's content.
+///
+/// A rule that precedes any executable content (only whitespace before it)
+/// marks the section off-walk: the marker is blanked out and the content
+/// below parses normally. Any later rule is then the comment boundary where
+/// the section's executable content ends. With no leading rule, the first
+/// rule is the comment boundary. The marker is blanked rather than removed so
+/// Lua source-line numbers still map back to the original file.
+///
+/// # Errors
+/// Returns [`Error::Parse`] when the masked content fails UTF-8 validation,
+/// which the ASCII-only masking makes unreachable.
+pub(super) fn split_rule_roles(content: &str) -> Result<(bool, Cow<'_, str>)> {
+    let ranges = rule_ranges(content);
+    let Some(first) = ranges.first() else {
+        return Ok((false, Cow::Borrowed(content)));
+    };
+    if !content[..first.start].trim().is_empty() {
+        return Ok((false, Cow::Borrowed(&content[..first.start])));
+    }
+    let mut masked = content.as_bytes().to_vec();
+    blank_preserving_newlines(&mut masked[first.clone()]);
+    let end = ranges.get(1).map_or(content.len(), |range| range.start);
+    masked.truncate(end);
+    let masked = String::from_utf8(masked)
+        .map_err(|_| Error::Parse("internal rule masking failed".to_owned()))?;
+    Ok((true, Cow::Owned(masked)))
 }
 
 /// Splits a section into alternating exact `lua` fences and prose segments.

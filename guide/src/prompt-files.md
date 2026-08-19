@@ -43,6 +43,32 @@ The parser enforces strict structure:
 
 Parse errors report stable kind discriminants and optional byte spans for editor diagnostics. Lua compilation errors include absolute source-line numbers that map back to the original prompt file.
 
+## The `---` Marker
+
+A `---` thematic break inside a section carries one of two roles, decided by position.
+
+As a section's first content (only blank lines before it), the marker takes the section **off the walk**: the top-to-bottom walk skips it entirely, and it runs only when addressed directly by `execute`, `jump`, or `fanout`. Content below the marker executes normally. This is how a shared worker or a list section lives as a top-level section without running in the walk:
+
+````markdown
+## Main
+
+```lua
+local reply = execute("## Helper")
+```
+
+## Helper
+
+---
+
+```lua
+return "helper reply"
+```
+````
+
+Anywhere else, the rule is a **comment boundary**: everything below it until the next heading is reader-only. No Lua below it compiles or runs, no prose below it reaches the model, and no list items parse from it. The two roles compose - a section may carry the off-walk marker at the top and a later rule starting a comment region. On the H1 only the comment role applies.
+
+Authoring note: the marker is recognized only as a genuine Markdown thematic break. After a prose line it needs a blank line before it - a text line immediately followed by `---` is a setext heading underline, not a marker. After a heading or a fence it stands alone.
+
 ## Optional Frontmatter Fields
 
 - `max_tool_iterations` - integer between 1 and 1000 (default: 24)

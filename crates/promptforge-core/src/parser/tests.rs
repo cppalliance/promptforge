@@ -168,7 +168,6 @@ fn parses_single_minimal_section() {
     assert_eq!(p.sections.len(), 1);
     assert_eq!(p.sections[0].name, "Greet");
     assert_eq!(p.sections[0].prose(), "Say hi");
-
 }
 
 #[test]
@@ -964,7 +963,11 @@ fn epilog_source_line_maps_runtime_error_to_absolute_line() {
     // 15: ```
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Check\n\nAsk the model.\n\n```lua\nlocal a = 1\nassert(false)\n```\n";
     let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
-    let epilog = prompt.entry().expect("has sections").epilog().expect("epilog must exist");
+    let epilog = prompt
+        .entry()
+        .expect("has sections")
+        .epilog()
+        .expect("epilog must exist");
 
     assert_eq!(
         epilog.source_line().get(),
@@ -1007,7 +1010,11 @@ fn prologue_source_line_maps_correctly() {
     // 14: Do the work.
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Work\n\n```lua\nassert(false)\n```\n\nDo the work.\n";
     let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
-    let prologue = prompt.entry().expect("has sections").prologue().expect("prologue must exist");
+    let prologue = prompt
+        .entry()
+        .expect("has sections")
+        .prologue()
+        .expect("prologue must exist");
 
     assert_eq!(
         prologue.source_line().get(),
@@ -1046,7 +1053,11 @@ fn multi_line_chunk_maps_inner_line_correctly() {
     // 16: ```
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nProse.\n\n```lua\nlocal x = 1\nlocal y = 2\nassert(false)\n```\n";
     let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
-    let epilog = prompt.entry().expect("has sections").epilog().expect("epilog must exist");
+    let epilog = prompt
+        .entry()
+        .expect("has sections")
+        .epilog()
+        .expect("epilog must exist");
 
     assert_eq!(epilog.source_line().get(), 13);
 
@@ -1126,4 +1137,132 @@ fn frontmatter_without_input_output_still_parses() {
     let prompt = Prompt::parse(source, "test", &NullObserver).unwrap();
     assert!(prompt.frontmatter().input().is_none());
     assert!(prompt.frontmatter().output().is_none());
+}
+
+#[test]
+fn off_walk_marker_marks_section_and_content_below_parses() {
+    // A `---` rule as a section's first content (only whitespace before it)
+    // takes the section off the walk; the content below the marker parses
+    // normally.
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n---\n\n```lua\nvar.x = 1\n```\n\nBelow the marker.\n\n## Plain\n\np\n";
+    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let section = &prompt.sections[0];
+    assert!(section.is_off_walk());
+    assert_eq!(
+        section.prologue().map(LuaProgram::source),
+        Some("var.x = 1")
+    );
+    assert_eq!(section.prose(), "Below the marker.");
+    assert!(!prompt.sections[1].is_off_walk());
+}
+
+#[test]
+fn comment_rule_excludes_everything_below_it() {
+    // A `---` rule after executable content is a comment boundary: no Lua
+    // below it compiles (the malformed fence would fail compilation if it
+    // did) and no prose below it reaches the model. A heading below the rule
+    // still splits sections.
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nLive prose.\n\n```lua\nvar.x = 1\n```\n\n---\n\nDead prose.\n\n```lua\nnot compiled =\n```\n\n## After\n\nafter prose\n";
+    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    assert_eq!(prompt.sections.len(), 2);
+    let section = &prompt.sections[0];
+    assert!(!section.is_off_walk());
+    assert_eq!(section.blocks().len(), 2);
+    assert_eq!(section.prose(), "Live prose.");
+    assert_eq!(section.epilog().map(LuaProgram::source), Some("var.x = 1"));
+    assert_eq!(prompt.sections[1].name, "After");
+    assert_eq!(prompt.sections[1].prose(), "after prose");
+}
+
+#[test]
+fn off_walk_marker_composes_with_a_later_comment_rule() {
+    // The two roles compose: an off-walk marker at the top, then a Lua fence
+    // and prose, then a blank line and a second rule starting a comment
+    // region.
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n---\n\n```lua\nvar.x = 1\n```\n\nLive prose.\n\n---\n\nDead prose.\n";
+    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let section = &prompt.sections[0];
+    assert!(section.is_off_walk());
+    assert_eq!(section.blocks().len(), 2);
+    assert_eq!(
+        section.prologue().map(LuaProgram::source),
+        Some("var.x = 1")
+    );
+    assert_eq!(section.prose(), "Live prose.");
+}
+
+#[test]
+fn off_walk_list_section_parses_items_below_the_marker() {
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Items\n\n---\n\n- alpha\n- beta\n";
+    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let section = &prompt.sections[0];
+    assert!(section.is_off_walk());
+    assert!(section.is_list_only());
+    assert_eq!(section.items(), ["alpha", "beta"]);
+}
+
+#[test]
+fn comment_rule_ends_list_items() {
+    // List items parse only from the executable content above the boundary.
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Items\n\n- alpha\n\n---\n\n- beta\n";
+    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let section = &prompt.sections[0];
+    assert!(!section.is_off_walk());
+    assert_eq!(section.items(), ["alpha"]);
+}
+
+#[test]
+fn h1_rule_is_a_comment_boundary() {
+    // The off-walk role is meaningless on the H1 (no walk visits it), so a
+    // rule there is simply a comment boundary: a `lua shared` fence below it
+    // is inert and the description text comes from above the rule.
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\nDescription above.\n\n---\n\n```lua shared\nlocal hidden = 1\n```\n\nBelow prose.\n\n## S\n\np\n";
+    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    assert!(prompt.replay.is_none());
+    assert_eq!(prompt.description_text, "Description above.");
+    assert_eq!(
+        prompt.h1_blocks,
+        vec![Block::Prose {
+            text: "Description above.".to_owned(),
+            loop_capable: true,
+        }]
+    );
+}
+
+#[test]
+fn rule_inside_a_fenced_code_block_is_not_a_marker() {
+    // Pulldown reports only a genuine thematic break: a `---` inside a
+    // fenced code block is code, not a rule.
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nLive prose.\n\n```text\n---\n```\n\nAlso live.\n";
+    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let section = &prompt.sections[0];
+    assert!(!section.is_off_walk());
+    assert!(section.prose().contains("Also live."));
+    assert!(section.prose().contains("---"));
+
+    // With a leading marker, a fenced `---` still is not the comment
+    // boundary.
+    let src =
+        "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n---\n\n```text\n---\n```\n\nLive.\n";
+    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let section = &prompt.sections[0];
+    assert!(section.is_off_walk());
+    assert!(section.prose().contains("Live."));
+    assert!(section.prose().contains("---"));
+}
+
+#[test]
+fn setext_underline_is_not_a_rule() {
+    // Found debt, pinned as-is: a prose line immediately followed by `---`
+    // with no blank line is a CommonMark setext H2 underline, not a rule, so
+    // the heading scanner reads it as a new section. The blank line before
+    // the marker is required.
+    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nSome prose\n---\n\nMore prose\n";
+    let prompt = Prompt::parse(src, "test", &NullObserver).unwrap();
+    assert_eq!(prompt.sections.len(), 2);
+    assert_eq!(prompt.sections[0].name, "S");
+    assert!(!prompt.sections[0].is_off_walk());
+    assert_eq!(prompt.sections[1].name, "Some prose");
+    assert!(!prompt.sections[1].is_off_walk());
+    assert_eq!(prompt.sections[1].prose(), "More prose");
 }

@@ -278,6 +278,117 @@ Do work.\n\n\
     assert_eq!(out, "ok");
 }
 
+/// An off-walk section is never visited by the walk: no observation, no
+/// execution. It stays in the section tree, so `sys.section_count` counts it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn off_walk_section_is_never_visited_by_the_walk() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Hidden\n\n\
+---\n\n\
+```lua\nerror('hidden must not run')\n```\n\n\
+## Main\n\n\
+```lua\n\
+assert(sys.section_count == 2)\n\
+return 'main-ran'\n\
+```\n";
+    let (result, records) = run_recorded(md).await;
+    assert_eq!(
+        result.expect("the walk must skip the off-walk section"),
+        "main-ran"
+    );
+    assert!(
+        records.iter().all(|(_, section, _)| section != "Hidden"),
+        "an off-walk section must produce no observations: {records:?}"
+    );
+}
+
+/// The canonical shape: A executes B and C (both off-walk), D unmarked - the
+/// walk visits A then D, and the off-walk sections' content below the marker
+/// runs when addressed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn off_walk_sections_run_only_when_addressed() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+local rb = execute('## B')\n\
+local rc = execute('## C')\n\
+store.write('order.txt', rb .. ',' .. rc)\n\
+```\n\n\
+## B\n\n\
+---\n\n\
+```lua\nreturn 'b-ran'\n```\n\n\
+## C\n\n\
+---\n\n\
+```lua\nreturn 'c-ran'\n```\n\n\
+## D\n\n\
+```lua\nreturn 'd-ran:' .. store.read('order.txt')\n```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("off-walk sections must run when addressed");
+    // A walked B or C would end the run early with its own scalar return.
+    assert_eq!(out, "d-ran:b-ran,c-ran");
+}
+
+/// A jump addresses an off-walk section directly, so it runs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn jump_to_off_walk_section_runs_it() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\njump('## B')\n```\n\n\
+## B\n\n\
+---\n\n\
+```lua\nreturn 'b-ran'\n```\n\n\
+## C\n\n\
+```lua\nreturn 'c-ran'\n```\n";
+    let out = run_offline(md)
+        .await
+        .expect("a jump to an off-walk section must run it");
+    assert_eq!(out, "b-ran");
+}
+
+/// A jump runs its off-walk target, but the fall-through that follows is an
+/// ordinary walk step: the next off-walk sibling is skipped again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fall_through_after_a_jumped_off_walk_section_skips_again() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\njump('## B')\n```\n\n\
+## B\n\n\
+---\n\n\
+```lua\nlocal b = 1\n```\n\n\
+## C\n\n\
+---\n\n\
+```lua\nreturn 'c-ran'\n```\n\n\
+## D\n\n\
+```lua\nreturn 'd-ran'\n```\n";
+    let out = run_offline(md)
+        .await
+        .expect("fall-through after an addressed off-walk section must resume skipping");
+    assert_eq!(out, "d-ran");
+}
+
+/// An off-walk child section still runs as a fanout worker.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn off_walk_worker_runs_as_a_fanout_arm() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', '### Items')\n\
+return r[1].text .. ',' .. r[2].text\n\
+```\n\n\
+### Worker\n\n\
+---\n\n\
+```lua\nreturn item .. '-done'\n```\n\n\
+### Items\n\n\
+- alpha\n\
+- beta\n";
+    let out = run_offline(md)
+        .await
+        .expect("an off-walk worker must run as a fanout arm");
+    assert_eq!(out, "alpha-done,beta-done");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_exhausted_arm_exposes_failure_metadata() {
     let gateway =

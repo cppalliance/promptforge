@@ -18,6 +18,7 @@ fn resolve_sibling_finds_exact_match() {
             }],
             children: Vec::new(),
             items: Vec::new(),
+            off_walk: false,
         },
         Section {
             name: "Topics".to_string(),
@@ -28,6 +29,7 @@ fn resolve_sibling_finds_exact_match() {
             }],
             children: Vec::new(),
             items: vec!["a".to_string()],
+            off_walk: false,
         },
     ];
     let found = resolve_sibling("### Worker", &sections).expect("must resolve");
@@ -45,6 +47,7 @@ fn resolve_sibling_missing_heading_lists_available() {
         }],
         children: Vec::new(),
         items: Vec::new(),
+        off_walk: false,
     }];
     let err = resolve_sibling("### Missing", &sections).expect_err("missing heading must error");
     assert!(err.to_string().contains("### Worker"), "error was: {err}");
@@ -61,6 +64,7 @@ fn resolve_sibling_bare_name_errors() {
         }],
         children: Vec::new(),
         items: Vec::new(),
+        off_walk: false,
     }];
     let err = resolve_sibling("Worker", &sections).expect_err("bare name without ### must error");
     assert!(err.to_string().contains("### markers"), "error was: {err}");
@@ -76,6 +80,7 @@ fn sibling(name: &str, level: u8) -> Section {
         }],
         children: Vec::new(),
         items: Vec::new(),
+        off_walk: false,
     }
 }
 
@@ -154,6 +159,7 @@ async fn pre_cancelled_fanout_returns_interrupted() {
         blocks: vec![Block::Lua(prologue)],
         children: Vec::new(),
         items: Vec::new(),
+        off_walk: false,
     };
     let items = vec!["alpha".to_string(), "beta".to_string()];
     let store = StoreRef::memory();
@@ -226,6 +232,7 @@ async fn fatal_arm_aborts_and_drops_blocked_siblings() {
         blocks: vec![Block::Lua(prologue)],
         children: Vec::new(),
         items: Vec::new(),
+        off_walk: false,
     };
     // The fatal item is dispatched first; with concurrency 1 the siblings stay
     // queued and must never be spawned once the first arm fails.
@@ -352,6 +359,7 @@ async fn fanout_rejects_a_list_over_the_item_cap() {
         }],
         children: Vec::new(),
         items: Vec::new(),
+        off_walk: false,
     };
     let items: Vec<String> = (0..5).map(|i| i.to_string()).collect();
     let store = StoreRef::memory();
@@ -412,6 +420,7 @@ async fn model_required_when_arm_prose_has_no_binding() {
         }],
         children: Vec::new(),
         items: Vec::new(),
+        off_walk: false,
     };
     let items = vec!["alpha".to_string()];
     let store = StoreRef::memory();
@@ -505,6 +514,7 @@ fn lua_worker(source: &str) -> Section {
         blocks: vec![Block::Lua(program)],
         children: Vec::new(),
         items: Vec::new(),
+        off_walk: false,
     }
 }
 

@@ -92,6 +92,8 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 - Zero or more **H2** sections - executed top-to-bottom
 - ` ```lua ` fences for executable Lua; ` ```lua shared ` for a shared library (replays as each section VM's first chunk with the full environment; `jump` excluded)
 - Prose outside fences becomes model turns
+- `---` as a section's first content marks it off-walk: skipped by the walk, runs only when addressed (`execute`/`jump`/`fanout`); content below the marker executes normally
+- `---` anywhere else starts a reader-only comment region (no Lua, no model prose, no list items below it); after a prose line it needs a blank line before it
 - Substitution: `{{ args }}`, `{{ var.x }}`, `{{ reply }}`
 - Scalar `return` from Lua ends the run
 
