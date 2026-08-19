@@ -1274,6 +1274,127 @@ return item\n\
     );
 }
 
+/// Inside a fanout arm the global is a loud stub, same as list/fanout.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn execute_is_not_available_inside_a_fanout_arm() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', list_from_section('### Items'))\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+execute('### Items')\n\
+return item\n\
+```\n\n\
+### Items\n\n\
+- alpha\n";
+    let error = run_offline(md)
+        .await
+        .expect_err("execute inside an arm must fail loudly");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("execute() is not available inside a fanout arm"),
+        "error was: {rendered}"
+    );
+}
+
+/// Inside a fanout arm the global is a loud stub, same as list/execute.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_is_not_available_inside_a_fanout_arm() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', list_from_section('### Items'))\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+fanout('### Worker', {})\n\
+return item\n\
+```\n\n\
+### Items\n\n\
+- alpha\n";
+    let error = run_offline(md)
+        .await
+        .expect_err("fanout inside an arm must fail loudly");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("fanout() is not available inside a fanout arm"),
+        "error was: {rendered}"
+    );
+}
+
+/// A jump records into the arm VM's slot and is rejected at the boundary.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn jump_is_rejected_inside_a_fanout_arm() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', list_from_section('### Items'))\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+jump('### Items')\n\
+```\n\n\
+### Items\n\n\
+- alpha\n";
+    let error = run_offline(md)
+        .await
+        .expect_err("jump inside an arm must be rejected");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("jump(### Items) is not allowed inside a fanout arm"),
+        "error was: {rendered}"
+    );
+}
+
+/// A walked section never sees the fanout `item` global: the seed split
+/// installs `item` only for an arm, so a regression seeding it on the walk
+/// path must fail here.
+#[tokio::test]
+async fn item_global_is_absent_in_a_walked_section() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n\
+```lua\n\
+assert(item == nil, 'a walked section must not see the fanout item global')\n\
+return 'ok'\n\
+```\n";
+    let out = run_offline(md)
+        .await
+        .expect("a walked section runs with no item global");
+    assert_eq!(out, "ok");
+}
+
+/// The arm's `var` starts as a fresh table: the top-level H1 hand-off seeds
+/// the walk's sections, never an arm.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn arm_var_is_fresh_not_the_h1_handoff() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+```lua\n\
+var.from_h1 = 'seeded'\n\
+```\n\n\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', list_from_section('### Items'))\n\
+return r[1].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+assert(var.from_h1 == nil, 'an arm var must start fresh')\n\
+return item\n\
+```\n\n\
+### Items\n\n\
+- alpha\n";
+    let out = run_offline(md)
+        .await
+        .expect("the arm runs with a fresh var");
+    assert_eq!(out, "alpha");
+}
+
 /// The H1 VM never gets the control globals, so `list_from_section` is nil
 /// there and calling it is an ordinary Lua error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
