@@ -12,6 +12,8 @@ promptforge: 1
 
 Below the frontmatter, the document has one H1 title and zero or more H2 sections. A prompt with H2 sections walks them top to bottom in fall-through order. A prompt with no H2 sections executes the H1 blocks and returns the model reply. The H1 region always runs first, resolving tools and models before any section begins.
 
+The walk is level-independent and never descends on its own: a section's children (H3 under H2, and so on) do not run in fall-through order. Control reaches a child level only when a section jumps to one of its own children - that starts a child-level walk within the jumper's children, beginning at the addressed child and falling through to its following siblings under the same rules (off-walk skips included). When the child level exhausts, the parent walk resumes at the section after the jumper, carrying the child walk's last reply. The rule recurses to deeper levels.
+
 ## Minimal Prompt File
 
 ````markdown

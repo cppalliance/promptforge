@@ -89,7 +89,7 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 ## Prompt Structure
 
 - Exactly one **H1** - title + H1 Lua (tool/model resolution)
-- Zero or more **H2** sections - executed top-to-bottom
+- Zero or more **H2** sections - executed top-to-bottom; children (H3+) never run by fall-through, only when addressed, and a jump to a child starts a child-level walk that resumes the parent after the jumper
 - ` ```lua ` fences for executable Lua; ` ```lua shared ` for a shared library (replays as each section VM's first chunk with the full environment; `jump` excluded)
 - Prose outside fences becomes model turns
 - `---` as a section's first content marks it off-walk: skipped by the walk, runs only when addressed (`execute`/`jump`/`fanout`); content below the marker executes normally
@@ -119,8 +119,8 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 | `store.exists(path)` | Check existence |
 | `untrusted(s)` | Wrap a string in the untrusted guard envelope |
 | `return value` | End run, return value |
-| `jump("## Section")` | Transfer control |
-| `execute("## Section", input?)` | Run section as subroutine |
+| `jump("## Section")` | Transfer control to a visible section (a sibling or a direct child); a child target starts a child-level walk |
+| `execute("## Section", input?)` | Run a visible section (a sibling or a direct child) as a subroutine |
 | `list_from_section("## List")` | A list section's pre-parsed items as an array |
 | `var.x = ...` | Cross-section state |
 | `log(msg)` | Emit to observer |

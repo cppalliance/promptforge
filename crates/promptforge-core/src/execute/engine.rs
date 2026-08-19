@@ -8,7 +8,10 @@
 //! - [`run_sections`] is the top-level walk. It loops over the prompt's
 //!   sections with [`JumpPolicy::Follow`], carries the model reply across
 //!   section boundaries (preserving it across a jump), and computes the run's
-//!   final result (the last reply, else `"done"`).
+//!   final result (the last reply, else `"done"`). A jump to a child heading
+//!   recurses into a child-level walk over the jumper's children under the
+//!   same rules; when that level exhausts, the parent walk resumes after the
+//!   jumper.
 //! - [`run_execute_section`] is the `execute()` subroutine. It drives the
 //!   engine once for one isolated section with [`JumpPolicy::Reject`] and a
 //!   frozen `execute_depth`, then returns that section's reply.
@@ -62,11 +65,20 @@ enum SectionFlow {
     FellThrough { reply: Option<String> },
     /// A scalar early return ended the section (and, top-level, the run).
     Returned(String),
-    /// A `jump(target)` requested control transfer (top-level only).
+    /// A `jump(target)` requested control transfer (any walked level).
     Jumped {
         heading: String,
         reply: Option<String>,
     },
+}
+
+/// How one walk level ended.
+enum WalkEnd {
+    /// The level ran off its last section, carrying the final reply produced
+    /// within it (if any).
+    Exhausted(Option<String>),
+    /// A scalar early return ended the run.
+    Returned(String),
 }
 
 /// The borrowed run context every section in one walk shares.
@@ -175,50 +187,120 @@ pub(crate) async fn run_sections(
         initial_var,
     };
 
-    let mut reply: Option<String> = None;
-    let mut index = 0usize;
-    // An off-walk section is skipped in fall-through order (no observation, no
-    // execution) but stays addressable: a jump targeting it still runs it, so
-    // only arrival by fall-through (including the walk's start) applies the
+    let mut entered = 0usize;
+    match walk_siblings(
+        &ctx,
+        &prompt.sections,
+        0,
+        None,
+        false,
+        &mut client,
+        &mut entered,
+    )
+    .await?
+    {
+        WalkEnd::Returned(value) => Ok(value),
+        // Ran off the end.
+        WalkEnd::Exhausted(reply) => Ok(reply.unwrap_or_else(|| "done".to_string())),
+    }
+}
+
+/// Walk one sibling slice from `start` and report how the level ended.
+///
+/// This is the one walk at every heading level: the top-level walk runs the
+/// prompt's sections, and a jump to a child heading recurses into the
+/// jumper's children under the same rules (fall-through order, off-walk
+/// skips, the reply rolling forward across sections). When a sub-walk's
+/// level exhausts, the parent walk resumes after the jumper with the
+/// sub-walk's last reply; a scalar return ends the run from any level.
+/// `start_addressed` is true when the walk begins on a jump target, which
+/// runs even when marked off-walk. `entered` counts the sections the walk
+/// has entered run-wide and seeds each `sys.id`.
+async fn walk_siblings(
+    ctx: &WalkContext<'_>,
+    siblings: &[Section],
+    start: usize,
+    incoming_reply: Option<String>,
+    start_addressed: bool,
+    client: &mut Option<GatewayClient>,
+    entered: &mut usize,
+) -> Result<WalkEnd> {
+    let mut reply = incoming_reply;
+    let mut index = start;
+    // Arrival by addressing (a jump target, including a sub-walk's first
+    // section) runs the section even when it is marked off-walk; only
+    // fall-through arrival (including an unmarked walk start) applies the
     // skip.
-    let mut jumped = false;
-    while index < prompt.sections.len() {
-        let section = &prompt.sections[index];
-        if !jumped && section.is_off_walk() {
+    let mut addressed = start_addressed;
+    while index < siblings.len() {
+        let section = &siblings[index];
+        if !addressed && section.is_off_walk() {
             index += 1;
             continue;
         }
-        jumped = false;
-        // `id` is the section's 1-based position in the prompt's section
-        // list (off-walk skips do not renumber it), and serves as the
-        // section's parent id for nested execute/fanout.
-        match run_one_section(&ctx, section, index + 1, 0, reply.as_deref(), &mut client).await? {
+        addressed = false;
+        *entered += 1;
+        match run_one_section(
+            ctx,
+            section,
+            siblings,
+            *entered,
+            0,
+            reply.as_deref(),
+            client,
+        )
+        .await?
+        {
             SectionFlow::Jumped { heading, reply: r } => {
-                let target = resolve_top_level_index(&heading, &prompt.sections)?;
                 reply = r;
-                index = target;
-                jumped = true;
+                match resolve_jump_target(&heading, siblings, section)? {
+                    // A child target descends: the child-level walk runs the
+                    // jumper's children from the target, and this walk resumes
+                    // after the jumper when that level exhausts.
+                    JumpTarget::Child(child_index) => match Box::pin(walk_siblings(
+                        ctx,
+                        &section.children,
+                        child_index,
+                        reply,
+                        true,
+                        client,
+                        entered,
+                    ))
+                    .await?
+                    {
+                        WalkEnd::Exhausted(child_reply) => {
+                            reply = child_reply;
+                            index += 1;
+                        }
+                        WalkEnd::Returned(value) => return Ok(WalkEnd::Returned(value)),
+                    },
+                    JumpTarget::Sibling(target) => {
+                        index = target;
+                        addressed = true;
+                    }
+                }
             }
-            SectionFlow::Returned(value) => return Ok(value),
+            SectionFlow::Returned(value) => return Ok(WalkEnd::Returned(value)),
             SectionFlow::FellThrough { reply: r } => {
                 reply = r;
                 index += 1;
             }
         }
     }
-
-    // Ran off the end.
-    Ok(reply.unwrap_or_else(|| "done".to_string()))
+    Ok(WalkEnd::Exhausted(reply))
 }
 
 /// Execute one section's block lifecycle over the shared [`WalkContext`].
 ///
 /// This is the single engine both the top-level walk and the `execute()`
-/// subroutine drive. `section_id` is the `sys.id` value and the nested-call
-/// parent id (1-based for the top-level walk, `0` for a subroutine).
-/// `incoming_reply` is the model reply visible to this section's first prose;
-/// the engine rolls it forward as later prose in the same section produces
-/// text. The returned [`SectionFlow`] tells the adapter how the section ended.
+/// subroutine drive. `siblings` is the caller's own walk slice, from which
+/// the section's visible set (its siblings minus itself, plus its direct
+/// children) is built for the control globals. `section_id` is the `sys.id`
+/// value and the nested-call parent id (the run-wide count of sections
+/// entered for the walk, `0` for a subroutine). `incoming_reply` is the
+/// model reply visible to this section's first prose; the engine rolls it
+/// forward as later prose in the same section produces text. The returned
+/// [`SectionFlow`] tells the adapter how the section ended.
 #[expect(
     clippy::too_many_lines,
     reason = "one linear section lifecycle: VM setup, ordered block walk, scope close, and teardown, kept together so both walk policies share exactly one implementation"
@@ -226,6 +308,7 @@ pub(crate) async fn run_sections(
 async fn run_one_section(
     ctx: &WalkContext<'_>,
     section: &Section,
+    siblings: &[Section],
     section_id: usize,
     execute_depth: usize,
     incoming_reply: Option<&str>,
@@ -278,7 +361,9 @@ async fn run_one_section(
         let exec_models = ctx.models.clone();
         let exec_client = client.clone();
         let exec_tools = ctx.shared_tools.clone();
-        let exec_sections = ctx.top_sections.to_vec();
+        let exec_siblings = siblings.to_vec();
+        let exec_caller = section.clone();
+        let exec_top = ctx.top_sections.to_vec();
         let exec_turns = Arc::clone(ctx.turns);
         let exec_analysis = ctx.analysis.clone();
         let exec_observer = Arc::clone(ctx.observer_arc);
@@ -293,13 +378,24 @@ async fn run_one_section(
                     "execute recursion exceeded cap of {MAX_EXECUTE_DEPTH}"
                 )));
             }
-            let worker = fanout::resolve_sibling(&heading, &exec_sections)?;
+            let visible = visible_sections(&exec_siblings, &exec_caller);
+            let worker = fanout::resolve_sibling(&heading, &visible)?;
+            // The subroutine builds its own visible set from its sibling
+            // slice: a child target sits beside the caller's children, a
+            // sibling target beside the caller's siblings.
+            let worker_siblings: &[Section] =
+                if section_position(&exec_caller.children, worker).is_some() {
+                    &exec_caller.children
+                } else {
+                    &exec_siblings
+                };
             let call_args = input.as_deref().unwrap_or(&exec_args);
             // Return the structured error directly (LUA-012): the typed error and
             // its source cross the Lua boundary via `mlua::Error::external` rather
             // than being flattened to a string here.
             bridge_blocking(run_execute_section(
                 worker,
+                worker_siblings,
                 call_args,
                 &exec_store,
                 &exec_execution,
@@ -319,7 +415,7 @@ async fn run_one_section(
                 &exec_when,
                 &exec_turns,
                 next_depth,
-                &exec_sections,
+                &exec_top,
             ))
         }
     };
@@ -337,7 +433,7 @@ async fn run_one_section(
         let fanout_analysis = ctx.analysis.clone();
         let fanout_observer = Arc::clone(ctx.observer_arc);
         let fanout_debug = ctx.debug_arc.cloned();
-        let children = section.children.clone();
+        let visible = visible_sections(siblings, section);
         let section_count = ctx.top_sections.len();
         let limits = ctx.limits;
         let max_tool_iterations = ctx.max_tool_iterations;
@@ -345,7 +441,7 @@ async fn run_one_section(
             make_fanout_callback(
                 &worker_heading,
                 &list_heading,
-                &children,
+                &visible,
                 &fanout_args,
                 &fanout_store,
                 &fanout_execution,
@@ -367,7 +463,7 @@ async fn run_one_section(
         }
     };
     let list_callback = {
-        let visible = visible_sections(ctx.top_sections, section);
+        let visible = visible_sections(siblings, section);
         move |heading: String| -> std::result::Result<Vec<String>, Error> {
             list_items_from_visible(&heading, &visible)
         }
@@ -666,19 +762,25 @@ fn section_handles(sections: &[Section]) -> Vec<LuaSectionHandle> {
         .collect()
 }
 
-/// The sections a running section may address by heading: the top-level
-/// sections minus the caller itself, plus the caller's direct children.
-///
-/// The caller is found in `top_sections` by its parser-unique `(level, name)`
-/// pair and excluded by index; a caller that is not a top-level section
-/// excludes nothing. The parent, aunts/uncles, nieces/nephews, and
-/// grandchildren are never in the set, so a resolution error that lists the
-/// set cannot leak the rest of the document's structure.
-fn visible_sections(top_sections: &[Section], caller: &Section) -> Vec<Section> {
-    let caller_index = top_sections
+/// The index of `target` in `slice`, matched on the parser-unique
+/// `(level, name)` pair; `None` when the slice does not contain it.
+fn section_position(slice: &[Section], target: &Section) -> Option<usize> {
+    slice
         .iter()
-        .position(|s| s.level == caller.level && s.name == caller.name);
-    top_sections
+        .position(|s| s.level == target.level && s.name == target.name)
+}
+
+/// The sections a running section may address by heading: the caller's own
+/// sibling slice minus the caller itself, plus the caller's direct children.
+///
+/// The caller is found in `siblings` by its parser-unique `(level, name)`
+/// pair and excluded by index; a caller that is not in the slice excludes
+/// nothing. The parent, aunts/uncles, nieces/nephews, and grandchildren are
+/// never in the set, so a resolution error that lists the set cannot leak the
+/// rest of the document's structure.
+fn visible_sections(siblings: &[Section], caller: &Section) -> Vec<Section> {
+    let caller_index = section_position(siblings, caller);
+    siblings
         .iter()
         .enumerate()
         .filter(|(index, _)| Some(*index) != caller_index)
@@ -715,21 +817,39 @@ fn require_pre_parsed_items(section: &Section) -> Result<&[String]> {
     Ok(&section.items)
 }
 
-/// Resolves `heading` against the top-level section slice and returns the
-/// matched section's index.
+/// Where a jump transfers control, resolved against the jumper's visible set.
+#[derive(Debug)]
+pub(crate) enum JumpTarget {
+    /// A flat index move within the jumper's own slice.
+    Sibling(usize),
+    /// A descent into the jumper's child slice, starting at this index.
+    Child(usize),
+}
+
+/// Resolves `heading` against the jumper's visible set (its sibling slice
+/// minus itself, plus its direct children) and classifies the target: a
+/// direct child of the jumper starts a child-level walk; anything else is a
+/// sibling within the jumper's own slice.
 ///
 /// Resolution is an exact `(level, name)` match (see
-/// [`fanout::resolve_sibling`]): two top-level sections sharing a name error
-/// loudly as ambiguous instead of silently resolving to the first.
+/// [`fanout::resolve_sibling`]): two visible sections sharing an address
+/// error loudly as ambiguous instead of silently resolving to the first.
 ///
 /// # Errors
-/// Returns [`Error::Lua`] when the heading is malformed, matches no top-level
+/// Returns [`Error::Lua`] when the heading is malformed, matches no visible
 /// section, or matches more than one.
-pub(crate) fn resolve_top_level_index(heading: &str, sections: &[Section]) -> Result<usize> {
-    let section = fanout::resolve_sibling(heading, sections)?;
-    sections
-        .iter()
-        .position(|s| s.level == section.level && s.name == section.name)
+pub(crate) fn resolve_jump_target(
+    heading: &str,
+    siblings: &[Section],
+    jumper: &Section,
+) -> Result<JumpTarget> {
+    let visible = visible_sections(siblings, jumper);
+    let target = fanout::resolve_sibling(heading, &visible)?;
+    if let Some(index) = section_position(&jumper.children, target) {
+        return Ok(JumpTarget::Child(index));
+    }
+    section_position(siblings, target)
+        .map(JumpTarget::Sibling)
         .ok_or_else(|| Error::Lua(format!("section `{heading}` index missing")))
 }
 
@@ -738,12 +858,16 @@ pub(crate) fn resolve_top_level_index(heading: &str, sections: &[Section]) -> Re
 /// A thin adapter over [`run_one_section`] with the subroutine policy: `sys.id`
 /// is `0`, no `initial_var` seed, jumps are rejected, and the caller's
 /// `execute_depth` is threaded through so the recursion cap is enforced.
+/// `siblings` is the target's own sibling slice, from which its visible set
+/// is built; `top_sections` stays the document's top-level slice for
+/// `sys.section_count` and the `tasks` table.
 #[expect(
     clippy::too_many_arguments,
     reason = "subroutine shares the full run context with the top-level walker before it is folded into one WalkContext"
 )]
 async fn run_execute_section(
     section: &Section,
+    siblings: &[Section],
     args: &str,
     store: &StoreRef,
     execution: &str,
@@ -789,7 +913,17 @@ async fn run_execute_section(
         initial_var: None,
     };
     let mut client = client.cloned();
-    match run_one_section(&ctx, section, 0, execute_depth, last_reply, &mut client).await? {
+    match run_one_section(
+        &ctx,
+        section,
+        siblings,
+        0,
+        execute_depth,
+        last_reply,
+        &mut client,
+    )
+    .await?
+    {
         SectionFlow::Returned(value) => Ok(value),
         SectionFlow::FellThrough { reply } => Ok(reply.unwrap_or_default()),
         // Unreachable under `JumpPolicy::Reject`: a jump returns an error from
@@ -808,7 +942,7 @@ async fn run_execute_section(
 fn make_fanout_callback(
     worker_heading: &str,
     list_heading: &str,
-    children: &[crate::parser::Section],
+    visible: &[crate::parser::Section],
     args: &str,
     store: &StoreRef,
     execution: &str,
@@ -827,8 +961,8 @@ fn make_fanout_callback(
     parent_id: usize,
     section_count: usize,
 ) -> std::result::Result<Vec<crate::lua::LuaFanoutResult>, Error> {
-    let worker = fanout::resolve_sibling(worker_heading, children)?;
-    let list = fanout::resolve_sibling(list_heading, children)?;
+    let worker = fanout::resolve_sibling(worker_heading, visible)?;
+    let list = fanout::resolve_sibling(list_heading, visible)?;
     let list_items = require_pre_parsed_items(list)?;
     if worker.prologue().is_none() && worker.epilog().is_none() && !worker.items.is_empty() {
         return Err(Error::Lua(format!(
