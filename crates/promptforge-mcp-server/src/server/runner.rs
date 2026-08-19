@@ -373,10 +373,8 @@ fn mock_store(prompt: &Prompt, input_file: &str, input_text: &str) -> Result<Sto
     };
 
     match (declared_input, content) {
-        (Some(decl), Some(content)) => {
-            StoreRef::with_files([(decl.path().to_owned(), content)])
-                .map_err(|e| format!("cannot seed store with declared input: {e}"))
-        }
+        (Some(decl), Some(content)) => StoreRef::with_files([(decl.path().to_owned(), content)])
+            .map_err(|e| format!("cannot seed store with declared input: {e}")),
         (None, Some(_)) => {
             Err("input_file or input_text was provided but the prompt declares no input".to_owned())
         }

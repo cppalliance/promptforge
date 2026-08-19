@@ -90,10 +90,7 @@ pub(crate) struct Entry {
 #[derive(Debug, Clone)]
 enum EntryState {
     /// The file read, parsed, and passed every check.
-    Healthy {
-        source: String,
-        prompt: Box<Prompt>,
-    },
+    Healthy { source: String, prompt: Box<Prompt> },
     /// The file failed a check. The class is what a fault is tagged with; the
     /// detail is the human-readable line.
     Broken { kind: FaultKind, detail: String },

@@ -112,7 +112,9 @@ fn default_multi_arg_rolls_back_when_already_selected() {
 fn model_runtime_select_enforces_at_most_once() {
     let mut runtime = ModelRuntime::new();
     assert!(runtime.used().is_none());
-    runtime.select("writer".to_owned()).expect("first select ok");
+    runtime
+        .select("writer".to_owned())
+        .expect("first select ok");
     assert_eq!(runtime.used(), Some("writer"));
     assert!(
         runtime.select("other".to_owned()).is_err(),
