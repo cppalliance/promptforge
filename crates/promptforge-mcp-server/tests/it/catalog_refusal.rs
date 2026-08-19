@@ -58,13 +58,7 @@ async fn a_catalog_with_two_faults_refuses_to_serve_and_prints_both() {
     // refuses to start, and every fault is printed before the nonzero exit so an
     // operator fixes them in one pass rather than one restart each.
     let dir = tempfile::tempdir().expect("create a temporary directory");
-    let config = fixture(
-        dir.path(),
-        &[
-            ("echo.md", ECHO),
-            ("upper.md", SHOUTY),
-        ],
-    );
+    let config = fixture(dir.path(), &[("echo.md", ECHO), ("upper.md", SHOUTY)]);
 
     // `kill_on_drop` turns the timeout below into a clean kill: on elapse the
     // `wait_with_output` future is dropped, which drops the child and signals

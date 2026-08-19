@@ -112,8 +112,9 @@ mod tests {
 
     #[test]
     fn missing_url_alone_fails_with_a_friendly_message() {
-        let error = require_gateway_env_from(lookup_from(&[("PROMPTFORGE_GATEWAY_API_KEY", "secret")]))
-            .expect_err("URL missing must fail");
+        let error =
+            require_gateway_env_from(lookup_from(&[("PROMPTFORGE_GATEWAY_API_KEY", "secret")]))
+                .expect_err("URL missing must fail");
         assert!(
             format!("{error:#}")
                 .starts_with("missing environment variable PROMPTFORGE_GATEWAY_URL\n"),

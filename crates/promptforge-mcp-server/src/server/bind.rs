@@ -84,7 +84,8 @@ impl PreparedTools {
     /// so prompts without `models.need` keep working.
     pub async fn load(config: &Config) -> Result<Self, PreparedToolsError> {
         let gateway = &config.gateway;
-        let models = match fetch_model_catalog(gateway.url.as_str(), gateway.api_key.expose()).await {
+        let models = match fetch_model_catalog(gateway.url.as_str(), gateway.api_key.expose()).await
+        {
             Ok(catalog) => catalog,
             Err(error) if is_transient(&error) => {
                 // A momentary outage: warn and serve on with an empty catalog,
@@ -326,8 +327,8 @@ mod tests {
             ThinkingMode::Never,
         )])
         .expect("the test catalog has a single unique model");
-        let tools =
-            PreparedTools::new(&config.gateway, &config.tools, models).expect("prepare repository tools");
+        let tools = PreparedTools::new(&config.gateway, &config.tools, models)
+            .expect("prepare repository tools");
         let prompts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../prompts");
         let mut files = Vec::new();
         collect_markdown(&prompts, &mut files);

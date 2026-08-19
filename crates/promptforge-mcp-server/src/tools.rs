@@ -221,15 +221,21 @@ impl BuiltInTool {
                     ),
                     (
                         "input_file",
-                        Some("Filesystem path to read into the prompt's store. Mutually exclusive with input_text."),
+                        Some(
+                            "Filesystem path to read into the prompt's store. Mutually exclusive with input_text.",
+                        ),
                     ),
                     (
                         "input_text",
-                        Some("Text to place directly in the prompt's store. Mutually exclusive with input_file."),
+                        Some(
+                            "Text to place directly in the prompt's store. Mutually exclusive with input_file.",
+                        ),
                     ),
                     (
                         "output_file",
-                        Some("Filesystem path to write the prompt's output file to. Omit to return output inline."),
+                        Some(
+                            "Filesystem path to write the prompt's output file to. Omit to return output inline.",
+                        ),
                     ),
                 ],
                 &["prompt"],

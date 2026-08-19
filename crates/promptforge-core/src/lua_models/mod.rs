@@ -271,14 +271,11 @@ pub(crate) fn install_h2_models(
             let mut state = state
                 .lock()
                 .map_err(|_| mlua::Error::external("model declaration runtime was poisoned"))?;
-            let binding = frozen
-                .binding(&alias)
-                .cloned()
-                .ok_or_else(|| {
-                    mlua::Error::external(format!(
-                        "models.use alias {alias:?} was not declared by models.need"
-                    ))
-                })?;
+            let binding = frozen.binding(&alias).cloned().ok_or_else(|| {
+                mlua::Error::external(format!(
+                    "models.use alias {alias:?} was not declared by models.need"
+                ))
+            })?;
             state.select(alias).map_err(|_| {
                 mlua::Error::external("models.use may be called at most once per section")
             })?;
@@ -291,14 +288,11 @@ pub(crate) fn install_h2_models(
     let get_fn = lua
         .create_function(move |_, alias: String| -> mlua::Result<LuaModelHandle> {
             validate_alias(&alias).map_err(mlua::Error::external)?;
-            let binding = frozen
-                .binding(&alias)
-                .cloned()
-                .ok_or_else(|| {
-                    mlua::Error::external(format!(
-                        "models.get alias {alias:?} was not declared by models.need"
-                    ))
-                })?;
+            let binding = frozen.binding(&alias).cloned().ok_or_else(|| {
+                mlua::Error::external(format!(
+                    "models.get alias {alias:?} was not declared by models.need"
+                ))
+            })?;
             Ok(LuaModelHandle::from_binding(&binding))
         })
         .map_err(Error::lua)?;
