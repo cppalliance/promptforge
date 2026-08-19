@@ -11,6 +11,10 @@ pub(crate) const MAX_EXECUTE_DEPTH: usize = 8;
 /// The prompt language major this executor implements.
 pub(crate) const SUPPORTED_MAJOR: u32 = 1;
 
+/// The run's final result when no section produced a reply: the generic
+/// completion text both fallback sites (an empty walk, an H1-only run) share.
+pub(crate) const GENERIC_COMPLETION: &str = "done";
+
 /// Bridges a section's synchronous Lua host call (`model:infer`, `execute`,
 /// `fanout`) into the async runtime.
 ///

@@ -26,6 +26,12 @@
 //! `execute_depth`, and the cross-section reply carried in. Everything else
 //! (the prose tool loop, scope validation, cancellation, teardown, and every
 //! observation) is shared, so a fix lands in one place for every path.
+//!
+//! The VM setup half of the lifecycle - host injection, host APIs, control
+//! globals, the shared replay, captured bindings - lives in the sibling
+//! `section_vm` module, which the fanout arm drives with the same sequence.
+//! Construction and the Lua limits install stay with the driver: a limits
+//! failure must propagate bare, before any teardown observation exists.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
@@ -39,7 +45,7 @@ use crate::lua::{
     LuaBlockResult, LuaSectionHandle, SectionVm, ToolBinding, ToolBindings, ToolCallCounts,
     current_tool_bindings, resolve_section_target,
 };
-use crate::model::{CompletionOptions, ModelBinding, ModelBindings};
+use crate::model::{CompletionOptions, ModelBindings};
 use crate::observe::{Observer, detail};
 use crate::parser::{Block, Prompt, Section};
 use crate::store::StoreRef;
@@ -51,7 +57,8 @@ use mlua::Value as LuaValue;
 use super::config::RunLimits;
 use super::gateway::{GatewaySource, env_client_with_limits};
 use super::scope::{ToolAnalysis, prepare_effective_scope};
-use super::support::{MAX_EXECUTE_DEPTH, bridge_blocking, now_rfc3339_checked};
+use super::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
+use super::support::{GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, bridge_blocking, now_rfc3339_checked};
 use super::tool_loop::{ProseMode, SectionProgress, run_prose_inference};
 use super::tools::attach_infer_hook;
 
@@ -197,7 +204,7 @@ pub(crate) async fn run_sections(
     {
         WalkEnd::Returned(value) => Ok(value),
         // Ran off the end.
-        WalkEnd::Exhausted(reply) => Ok(reply.unwrap_or_else(|| "done".to_string())),
+        WalkEnd::Exhausted(reply) => Ok(reply.unwrap_or_else(|| GENERIC_COMPLETION.to_string())),
     }
 }
 
@@ -300,7 +307,9 @@ async fn walk_siblings(
 
 /// Execute one section's block lifecycle over the shared [`WalkContext`].
 ///
-/// This is the single engine every chain drives. `siblings` is the caller's
+/// This is the single engine every chain drives. The VM setup sequence runs
+/// through [`setup_section_vm`], the setup half shared with the fanout arm.
+/// `siblings` is the caller's
 /// own walk slice, from which the section's visible set (its siblings minus
 /// itself, plus its direct children) is built for the control globals.
 /// `section_id` is the `sys.id` value and the nested-call parent id (the
@@ -321,7 +330,6 @@ async fn run_one_section(
     incoming_reply: Option<&str>,
     client: &mut Option<GatewayClient>,
 ) -> Result<SectionFlow> {
-    let registry = ctx.shared_tools.registry();
     let now = now_rfc3339_checked()?;
     let sys = json!({
         "when": ctx.when,
@@ -342,17 +350,9 @@ async fn run_one_section(
         ctx.observer,
         &section.name,
     )?;
+    // A limits failure propagates bare: no teardown runs here, so no
+    // LUA_TEARDOWN_* observation fires on this path.
     vm.apply_lua_limits(ctx.limits.lua_memory().get(), ctx.limits.lua_logs().get())?;
-    if let Err(error) =
-        vm.inject_host_with_var(ctx.args, &sys, ctx.store, incoming_reply, ctx.initial_var)
-    {
-        vm.teardown(ctx.observer, &section.name);
-        return Err(error);
-    }
-    if let Err(error) = vm.install_host_apis(ctx.observer_arc, &section.name) {
-        vm.teardown(ctx.observer, &section.name);
-        return Err(error);
-    }
 
     // Control globals are installed once for the section's whole lifecycle.
     // Both callbacks own clones of the run context so the persistent Lua
@@ -371,6 +371,9 @@ async fn run_one_section(
         let exec_siblings = siblings.to_vec();
         let exec_caller = section.clone();
         let exec_top = ctx.top_sections.to_vec();
+        // The run's handles already describe this same top-level slice;
+        // cloning them beats rebuilding them on every execute() call.
+        let exec_task_handles = ctx.task_handles.to_vec();
         let exec_turns = Arc::clone(ctx.turns);
         let exec_analysis = ctx.analysis.clone();
         let exec_observer = Arc::clone(ctx.observer_arc);
@@ -399,7 +402,7 @@ async fn run_one_section(
                     (exec_siblings.as_slice(), index)
                 };
             let call_args = input.as_deref().unwrap_or(&exec_args);
-            let task_handles = section_handles(&exec_top);
+            let task_handles = exec_task_handles.clone();
             let ctx = WalkContext {
                 args: call_args,
                 store: &exec_store,
@@ -495,25 +498,29 @@ async fn run_one_section(
             list_items_from_visible(&heading, &visible)
         }
     };
-    if let Err(error) = vm.install_control_globals(
-        ctx.task_handles,
+
+    // The setup half of the section lifecycle - host injection, host APIs,
+    // the control globals, the shared replay, and the captured alias
+    // bindings - is shared with the fanout arm; only the seed, the `sys`
+    // extras, and the callbacks are the walk's own.
+    let setup = SectionVmSetup {
+        args: ctx.args,
+        sys: &sys,
+        store: ctx.store,
+        last_reply: incoming_reply,
+        seed: VmSeed::InitialVar(ctx.initial_var),
+        observer_arc: ctx.observer_arc,
+        section_name: &section.name,
+        task_handles: ctx.task_handles,
+        shared: ctx.shared,
+    };
+    if let Err(error) = setup_section_vm(
+        &mut vm,
+        &setup,
         execute_callback,
         fanout_callback,
         list_callback,
     ) {
-        vm.teardown(ctx.observer, &section.name);
-        return Err(error);
-    }
-
-    // The shared library replays as the section's first chunk with the full
-    // host environment installed; the captured alias globals install only
-    // after the replay, so a declared alias wins over a same-named shared
-    // global.
-    if let Err(error) = vm.replay_shared(ctx.shared, ctx.observer, &section.name) {
-        vm.teardown(ctx.observer, &section.name);
-        return Err(error);
-    }
-    if let Err(error) = vm.install_captured_bindings() {
         vm.teardown(ctx.observer, &section.name);
         return Err(error);
     }
@@ -536,13 +543,16 @@ async fn run_one_section(
         None,
     );
 
+    // Walk-only state: the registry is read only inside the block walk.
+    let registry = ctx.shared_tools.registry();
     let mut conversation: Vec<Message> = Vec::new();
     // Gates the one-time model resolution and counts install at the first
     // prose block below. Schemas and dispatch rebuild on EVERY prose block so
     // `tools.add`/`tools.add_local` between blocks reach the next model turn.
     let mut seen_prose = false;
     let mut counts: Option<ToolCallCounts> = None;
-    let mut model_binding: Option<ModelBinding> = None;
+    // Set at the first prose block exactly when a model binding resolved, so
+    // its `None` check below is the one model-required gate.
     let mut completion_options: Option<CompletionOptions> = None;
     let mut sys = sys;
     let mut early_return: Option<String> = None;
@@ -614,7 +624,6 @@ async fn run_one_section(
                         sys = enriched;
                         completion_options = Some(binding.completion_options());
                     }
-                    model_binding = resolved_model;
                 }
                 let local_schemas = vm.local_tool_schemas();
                 // Seed aliases added since the first prose block (via
@@ -666,12 +675,12 @@ async fn run_one_section(
                 if prose.trim().is_empty() {
                     continue;
                 }
-                if model_binding.is_none() {
+                let Some(options) = completion_options.as_ref() else {
                     vm.teardown(ctx.observer, &section.name);
                     return Err(Error::ModelRequired {
                         section: section.name.clone(),
                     });
-                }
+                };
                 if client.is_none() {
                     match env_client_with_limits(ctx.limits) {
                         Ok(new_client) => *client = Some(new_client),
@@ -689,12 +698,6 @@ async fn run_one_section(
                     return Err(Error::Internal(
                         "model-facing prose reached inference with no gateway client",
                     ));
-                };
-                let Some(options) = completion_options.as_ref() else {
-                    vm.teardown(ctx.observer, &section.name);
-                    return Err(Error::ModelRequired {
-                        section: section.name.clone(),
-                    });
                 };
                 let global_aliases = Some(&ctx.analysis.alias_to_id);
                 let mode = if *loop_capable {
@@ -818,22 +821,13 @@ fn visible_sections(siblings: &[Section], caller: &Section) -> Vec<Section> {
 /// naming a prose section by mistake.
 pub(crate) fn list_items_from_visible(heading: &str, visible: &[Section]) -> Result<Vec<String>> {
     let section = fanout::resolve_sibling(heading, visible)?;
-    Ok(require_pre_parsed_items(section)?.to_vec())
-}
-
-/// Returns the section's pre-parsed list items, or the error that catches
-/// naming a prose section by mistake.
-///
-/// # Errors
-/// Returns [`Error::Lua`] when the section has no pre-parsed items.
-fn require_pre_parsed_items(section: &Section) -> Result<&[String]> {
     if section.items.is_empty() {
         return Err(Error::Lua(format!(
             "section `{}` has no pre-parsed items",
             section.name
         )));
     }
-    Ok(&section.items)
+    Ok(section.items.clone())
 }
 
 /// Where a jump transfers control, resolved against the jumper's visible set.

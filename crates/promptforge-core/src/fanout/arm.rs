@@ -8,6 +8,10 @@ use serde_json::{Value, json};
 
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
+use crate::execute::{
+    SectionProgress, SectionVmSetup, ToolAnalysis, VmSeed, now_rfc3339_checked,
+    prepare_effective_scope, run_tool_loop, setup_section_vm,
+};
 use crate::lua::{LuaBlockResult, LuaFanoutResult, LuaProgram, SectionVm, ToolBindings};
 use crate::model::ModelBindings;
 use crate::observe::{Observation, Observer, detail};
@@ -32,7 +36,7 @@ pub(crate) struct ArmPayload {
     pub(crate) shared: LuaProgram,
     pub(crate) bindings: ToolBindings,
     pub(crate) models: ModelBindings,
-    pub(crate) analysis: crate::execute::ToolAnalysis,
+    pub(crate) analysis: ToolAnalysis,
     pub(crate) shared_tools: SharedTools,
     pub(crate) max_tool_iterations: usize,
     pub(crate) lua_memory_bytes: usize,
@@ -73,6 +77,10 @@ impl ArmFinalizer {
 
     pub(crate) fn finish(&mut self, event: Observation) {
         self.finished = true;
+        self.emit(event);
+    }
+
+    fn emit(&self, event: Observation) {
         (self.observer.as_ref() as &dyn Observer).observe(&self.execution, &self.section, event);
     }
 }
@@ -80,11 +88,7 @@ impl ArmFinalizer {
 impl Drop for ArmFinalizer {
     fn drop(&mut self) {
         if !self.finished {
-            (self.observer.as_ref() as &dyn Observer).observe(
-                &self.execution,
-                &self.section,
-                detail::FANOUT_ARM_CANCELLED,
-            );
+            self.emit(detail::FANOUT_ARM_CANCELLED);
         }
     }
 }
@@ -148,12 +152,15 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             }
         };
 
+    // The persistent host APIs capture the observer as `Arc<dyn Observer>`;
+    // the cast is bound here so the body can borrow it.
+    let observer_dyn = observer_arc.clone() as Arc<dyn Observer>;
+
     // The body performs no teardown; every fallible step uses `?`. It returns the
     // arm result paired with its distinct terminal event.
     let body = async {
         vm.apply_lua_limits(lua_memory_bytes, lua_log_events)?;
-
-        let now = crate::execute::now_rfc3339_checked()?;
+        let now = now_rfc3339_checked()?;
         let sys = json!({
             "when": when,
             "now": now,
@@ -164,16 +171,25 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             "section_count": section_count,
         });
 
-        vm.inject_host(&args, &sys, &store, last_reply.as_deref())?;
-        vm.install_host_apis(&(observer_arc.clone() as Arc<dyn Observer>), &worker.name)?;
-        vm.set_global_json("item", &item)?;
-
-        // Arms get the same control globals as a walked section, but nested
-        // execute/fanout/list_from_section have no walk to re-enter here, so
-        // they fail loudly. `jump` records into the arm VM's slot and is
-        // rejected below.
-        vm.install_control_globals(
-            &[],
+        // The arm runs the walk's shared VM setup with its own deltas: the
+        // `sys` extras (`taskid`, the parent `id`), the `item` seed, and stub
+        // control globals. Nested execute/fanout/list_from_section have no
+        // walk to re-enter here, so they fail loudly. `jump` records into the
+        // arm VM's slot and is rejected below.
+        let setup = SectionVmSetup {
+            args: &args,
+            sys: &sys,
+            store: &store,
+            last_reply: last_reply.as_deref(),
+            seed: VmSeed::Item(&item),
+            observer_arc: &observer_dyn,
+            section_name: &worker.name,
+            task_handles: &[],
+            shared: &shared,
+        };
+        setup_section_vm(
+            &mut vm,
+            &setup,
             |_, _| {
                 Err(Error::Lua(
                     "execute() is not available inside a fanout arm".to_owned(),
@@ -190,13 +206,6 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
                 ))
             },
         )?;
-
-        // The shared library replays as the arm's first chunk with the full
-        // host environment installed; the captured alias globals install only
-        // after the replay, so a declared alias wins over a same-named shared
-        // global.
-        vm.replay_shared(&shared, observer, &worker.name)?;
-        vm.install_captured_bindings()?;
 
         if let Some(program) = worker.prologue() {
             match vm.run_chunk(program, observer, &worker.name)? {
@@ -216,12 +225,10 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         }
 
         let scope = crate::lua::current_tool_bindings(&bindings, &vm.tool_runtime)?;
-        let counts = Some(vm.install_tool_call_counts(&scope)?);
+        let counts = vm.install_tool_call_counts(&scope)?;
         let local_schemas = vm.local_tool_schemas();
-        if let Some(counts) = counts.as_ref() {
-            for schema in &local_schemas {
-                counts.ensure(&schema.name)?;
-            }
+        for schema in &local_schemas {
+            counts.ensure(&schema.name)?;
         }
         let model = crate::lua::resolve_model_binding(&models, &vm.model_runtime)?;
 
@@ -253,7 +260,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             };
             let completion_options = model_binding.completion_options();
             let registry = shared_tools.registry();
-            let (schemas, dispatch) = crate::execute::prepare_effective_scope(
+            let (schemas, dispatch) = prepare_effective_scope(
                 &analysis,
                 &scope,
                 &local_schemas,
@@ -269,14 +276,14 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
                 // calls back into it rather than the registry.
                 let local_dispatch =
                     |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, &args);
-                match crate::execute::run_tool_loop(
+                match run_tool_loop(
                     client,
                     &schemas,
                     &dispatch,
                     &registry,
                     prose,
                     max_tool_iterations,
-                    crate::execute::SectionProgress {
+                    SectionProgress {
                         execution: &execution,
                         observer,
                         section: &worker.name,
@@ -284,7 +291,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
                         debug: debug_ref,
                         completion_options: &completion_options,
                     },
-                    counts.as_ref(),
+                    Some(&counts),
                     global_aliases,
                     Some(&local_dispatch),
                 )

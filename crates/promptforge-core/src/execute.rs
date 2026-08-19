@@ -49,8 +49,9 @@
 //! (`RunConfig`/`RunLimits`), `gateway` (client acquisition and
 //! [`ResolutionContext`]), `scope` (tool-scope analysis and validation),
 //! `tools` (the `model:infer` bag and hook), `tool_loop` (the model tool
-//! loop), `h1` (the live H1 pass), `engine` (the section walkers), and
-//! `support` (the sync/async bridge and shared helpers).
+//! loop), `h1` (the live H1 pass), `section_vm` (the section VM setup half
+//! shared by the walk and the fanout arm), `engine` (the section walkers),
+//! and `support` (the sync/async bridge and shared helpers).
 
 mod config;
 mod engine;
@@ -58,6 +59,7 @@ mod error;
 mod gateway;
 mod h1;
 mod scope;
+mod section_vm;
 mod support;
 mod tool_loop;
 mod tools;
@@ -70,13 +72,16 @@ pub use config::{RunConfig, RunLimits};
 pub use error::{RunError, RunErrorKind};
 pub use gateway::ResolutionContext;
 
-// Crate-internal items reused by `fanout` (through the historical
-// `crate::execute::` path) and by `run` below. Re-exported so the split stays
-// surface-neutral for the public API while keeping one import path for
-// internal collaborators.
+// Crate-internal items reused through the historical `crate::execute::` path.
+// Only `run_sections`, `execute_live_h1`, and `ToolAnalysis` serve `run`
+// below; the rest (`section_vm`, `prepare_effective_scope`,
+// `now_rfc3339_checked`, `SectionProgress`, `run_tool_loop`) are consumed by
+// `fanout` alone. Re-exported so the split stays surface-neutral for the
+// public API while keeping one import path for internal collaborators.
 pub(crate) use engine::run_sections;
 pub(crate) use h1::execute_live_h1;
 pub(crate) use scope::{ToolAnalysis, prepare_effective_scope};
+pub(crate) use section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 pub(crate) use support::now_rfc3339_checked;
 pub(crate) use tool_loop::{SectionProgress, run_tool_loop};
 
@@ -114,7 +119,7 @@ use crate::observe::detail;
 use crate::parser::Prompt;
 use crate::store::StoreRef;
 use crate::tools::{SharedTools, Tool};
-use support::SUPPORTED_MAJOR;
+use support::{GENERIC_COMPLETION, SUPPORTED_MAJOR};
 
 /// Executes a parsed prompt and returns its final text.
 ///
@@ -249,7 +254,7 @@ pub async fn run(
             return Ok(value);
         }
         if prompt.sections.is_empty() {
-            return Ok(h1.reply.unwrap_or_else(|| "done".to_string()));
+            return Ok(h1.reply.unwrap_or_else(|| GENERIC_COMPLETION.to_string()));
         }
         let analysis = ToolAnalysis::new(&h1.bindings, resolution.picker)?;
         run_sections(
