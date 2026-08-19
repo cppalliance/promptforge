@@ -14,6 +14,8 @@ Below the frontmatter, the document has one H1 title and zero or more H2 section
 
 The walk is level-independent and never descends on its own: a section's children (H3 under H2, and so on) do not run in fall-through order. Control reaches a child level only when a section jumps to one of its own children - that starts a child-level walk within the jumper's children, beginning at the addressed child and falling through to its following siblings under the same rules (off-walk skips included). When the child level exhausts, the parent walk resumes at the section after the jumper, carrying the child walk's last reply. The rule recurses to deeper levels.
 
+`execute(target, input)` starts a contained chain at the target: a walk with every normal rule (fall-through, off-walk skips, jumps, child chains) that never moves the outer walk. When the chain ends - its level exhausts or a `return` fires - the chain's final reply is the call's return value, and the caller continues. A `return` ends only the chain it fires in; the top-level walk's return ends the run.
+
 ## Minimal Prompt File
 
 ````markdown

@@ -102,15 +102,10 @@ async fn execute_runs_named_section_as_subroutine() {
         axum::serve(listener, router).await.unwrap();
     });
 
+    // The subroutine sits after its run-ending caller: a contained chain
+    // falls through like any walk, so a subroutine placed before later
+    // sections would pull them into the chain.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Research\n\n\
-```lua\n\
-local step = tasks['## Research']\n\
-assert(step.name == 'Research')\n\
-assert(step.has_prose == true)\n\
-```\n\n\
-Research {{ args }}.\n\n\
-```lua\nstore.write('evidence.md', reply)\n```\n\n\
 ## Main\n\n\
 ```lua\n\
 local research = tasks['## Research']\n\
@@ -122,7 +117,15 @@ assert(by_name == 'research-reply')\n\
 assert(by_obj == 'research-reply')\n\
 assert(store.read('evidence.md') == 'research-reply')\n\
 return by_name\n\
-```\n";
+```\n\n\
+## Research\n\n\
+```lua\n\
+local step = tasks['## Research']\n\
+assert(step.name == 'Research')\n\
+assert(step.has_prose == true)\n\
+```\n\n\
+Research {{ args }}.\n\n\
+```lua\nstore.write('evidence.md', reply)\n```\n";
     let store = StoreRef::memory();
     let out = run(
         &bound_for_model(md),
@@ -206,27 +209,286 @@ return reply\n\
     assert_eq!(out, "model-said-this");
 }
 
-/// The subroutine walk rejects `jump()` (unlike the top-level walk, which
-/// follows it). Locks the `JumpPolicy::Reject` divergence folded into the
-/// unified section engine.
+/// A jump inside `execute()` is contained by the chain: followed, not
+/// rejected (the retired reject policy's inversion). The chain's index moves
+/// to the target - the sections between the jumper and the target do not
+/// run - and the target's reply returns to the caller.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jump_inside_execute_is_rejected() {
+async fn jump_inside_execute_is_contained_in_the_chain() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Main\n\n\
-```lua\nreturn execute('## Sub')\n```\n\n\
+```lua\n\
+local r = execute('## Sub')\n\
+return 'main:' .. r\n\
+```\n\n\
 ## Sub\n\n\
 ```lua\n\
-local m = tasks['## Main']\n\
-jump(m)\n\
+jump('## Peer')\n\
+```\n\n\
+## Skipped\n\n\
+```lua\n\
+error('the chain jump must move past me')\n\
+```\n\n\
+## Peer\n\n\
+```lua\n\
+return 'peer-ran'\n\
 ```\n";
-    let error = run_offline(md)
+    let out = run_offline(md)
         .await
-        .expect_err("jump inside execute must fail");
-    let rendered = format!("{error:?}");
-    assert!(
-        rendered.contains("not allowed inside execute"),
-        "expected a jump-rejection error, got: {rendered}"
-    );
+        .expect("a jump inside execute must be followed within the chain");
+    assert_eq!(out, "main:peer-ran");
+}
+
+/// The canonical contained chain (decision 14): A executes Sub; Sub jumps to
+/// its child S1, starting a child-level chain that falls through to S2; when
+/// S2 finishes, the chain's final reply returns to A and the outer walk
+/// continues at B, never having moved.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn execute_chain_jumps_to_a_child_and_returns_the_chain_reply() {
+    let gateway = ScriptedGateway::start(vec![resp_text("reply-s1"), resp_text("reply-s2")]).await;
+    let addr = gateway.addr();
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+store.append('order.txt', 'A1\\n')\n\
+local r = execute('## Sub')\n\
+assert(r == 'reply-s2', 'the chain final reply returns to A')\n\
+store.append('order.txt', 'A2\\n')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+store.append('order.txt', 'B\\n')\n\
+return store.read('order.txt')\n\
+```\n\n\
+## Sub\n\n\
+```lua\n\
+store.append('order.txt', 'Sub\\n')\n\
+jump('### S1')\n\
+```\n\n\
+### S1\n\n\
+Ask S1.\n\n\
+```lua\n\
+assert(reply == 'reply-s1', 'the chain rolls the reply forward')\n\
+store.append('order.txt', 'S1\\n')\n\
+```\n\n\
+### S2\n\n\
+```lua\n\
+assert(reply == 'reply-s1', 'fall-through inside the chain carries the reply')\n\
+```\n\n\
+Ask S2.\n\n\
+```lua\n\
+store.append('order.txt', 'S2\\n')\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &store,
+        RunOptions {
+            execution: EXECUTION,
+            observer: Arc::new(NullObserver),
+            client: Some(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+                SecretString::new("test").expect("non-empty test key"),
+            )),
+            debug: None,
+        },
+    )
+    .await
+    .expect("the execute chain must jump, fall through, and return its reply");
+    assert_eq!(out, "A1\nSub\nS1\nS2\nA2\nB\n");
+}
+
+/// The second canonical example (decision 14): A executes the off-walk S1,
+/// which runs because it is addressed; the chain falls through to S2, and
+/// S2's reply returns to A. The main walk ends at B and never runs S1 or S2.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn execute_chain_over_off_walk_siblings_returns_to_the_caller() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+local r = execute('## S1')\n\
+store.append('order.txt', 'A:' .. r .. '\\n')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+store.append('order.txt', 'B\\n')\n\
+return store.read('order.txt')\n\
+```\n\n\
+## S1\n\n\
+---\n\n\
+```lua\n\
+store.append('order.txt', 'S1\\n')\n\
+```\n\n\
+## S2\n\n\
+```lua\n\
+store.append('order.txt', 'S2\\n')\n\
+return 's2-reply'\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("the chain must run the addressed off-walk target and fall through");
+    assert_eq!(out, "S1\nS2\nA:s2-reply\nB\n");
+}
+
+/// A jump inside an `execute()` chain to a sibling moves within the
+/// contained chain: the walk continues from the jump target under the normal
+/// rules, and the chain's final reply is the call's return value.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn jump_inside_an_execute_chain_moves_within_the_chain() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+local r = execute('## Sub')\n\
+return 'A:' .. r\n\
+```\n\n\
+## Sub\n\n\
+```lua\n\
+jump('## Peer')\n\
+```\n\n\
+## Peer\n\n\
+```lua\n\
+store.append('order.txt', 'Peer\\n')\n\
+```\n\n\
+## Tail\n\n\
+```lua\n\
+store.append('order.txt', 'Tail\\n')\n\
+return 'tail-reply'\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("a jump inside the chain must move within the chain");
+    assert_eq!(out, "A:tail-reply");
+    assert_eq!(store.read("order.txt").expect("order log"), "Peer\nTail\n");
+}
+
+/// The outer walk never moves while a contained chain runs: wherever the
+/// chain ends, the outer walk resumes at the section after the caller.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_outer_walk_never_moves_during_a_contained_chain() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+execute('## Sub')\n\
+store.append('order.txt', 'A-done\\n')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+store.append('order.txt', 'B\\n')\n\
+return store.read('order.txt')\n\
+```\n\n\
+## Sub\n\n\
+```lua\n\
+jump('## Peer')\n\
+```\n\n\
+## Peer\n\n\
+```lua\n\
+store.append('order.txt', 'Peer\\n')\n\
+return 'p'\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("the outer walk must resume at the section after the caller");
+    assert_eq!(out, "Peer\nA-done\nB\n");
+}
+
+/// A contained chain skips off-walk sections in fall-through like any walk:
+/// only addressing runs a marked section.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_contained_chain_skips_off_walk_sections_in_fall_through() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+local r = execute('## Sub')\n\
+return r\n\
+```\n\n\
+## Sub\n\n\
+```lua\n\
+store.append('order.txt', 'Sub\\n')\n\
+```\n\n\
+## Hidden\n\n\
+---\n\n\
+```lua\n\
+store.append('order.txt', 'Hidden\\n')\n\
+```\n\n\
+## Tail\n\n\
+```lua\n\
+store.append('order.txt', 'Tail\\n')\n\
+return 'tail-reply'\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("the chain must skip the off-walk section in fall-through");
+    assert_eq!(out, "tail-reply");
+    assert_eq!(store.read("order.txt").expect("order log"), "Sub\nTail\n");
+}
+
+/// A return inside a contained chain ends the chain, not the run: the
+/// returned value is the call's return, the chain's remaining sections do
+/// not run, and the outer walk continues.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_return_inside_a_chain_ends_the_chain_not_the_run() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## A\n\n\
+```lua\n\
+local r = execute('## Sub')\n\
+store.append('order.txt', 'A:' .. r .. '\\n')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+store.append('order.txt', 'B\\n')\n\
+return store.read('order.txt')\n\
+```\n\n\
+## Sub\n\n\
+```lua\n\
+return 'sub-reply'\n\
+```\n\n\
+## After\n\n\
+```lua\n\
+error('a return must end the chain before fall-through')\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("a return must end the chain, not the run");
+    assert_eq!(out, "A:sub-reply\nB\n");
+}
+
+/// A contained chain counts its own `sys.id` from 1, like a fresh run, and
+/// its entries do not advance the outer chain's count.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_contained_chain_counts_sys_id_from_one() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Main\n\n\
+```lua\n\
+assert(sys.id == 1, 'the outer chain counts its own sections')\n\
+local r = execute('## Sub')\n\
+store.append('order.txt', r .. '\\n')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+assert(sys.id == 2, 'the contained chain must not advance the outer count')\n\
+return store.read('order.txt')\n\
+```\n\n\
+## Sub\n\n\
+```lua\n\
+assert(sys.id == 1, 'a contained chain counts sys.id from 1')\n\
+```\n\n\
+## Tail\n\n\
+```lua\n\
+assert(sys.id == 2, 'the chain counts its own fall-through')\n\
+return 'tail-reply'\n\
+```\n";
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
+        .await
+        .expect("a contained chain must count its own sys.id from 1");
+    assert_eq!(out, "tail-reply\n");
 }
 
 /// Nested `execute()` is capped at [`MAX_EXECUTE_DEPTH`]. Locks the
@@ -586,11 +848,11 @@ return store.read('order.txt')\n\
     assert_eq!(out, "Off\nY\n");
 }
 
-/// `execute` to a child runs it as a single-section subroutine: no
-/// fall-through to the target's following siblings (the chain contract is a
-/// later step).
+/// `execute` to a child starts a contained chain at the target: the chain
+/// falls through to the target's following siblings under the same rules as
+/// any walk, and the chain's final reply is the call's return value.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn execute_to_a_child_runs_single_section() {
+async fn execute_to_a_child_starts_a_contained_chain() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Main\n\n\
 ```lua\n\
@@ -599,16 +861,19 @@ return 'got:' .. r\n\
 ```\n\n\
 ### Sub\n\n\
 ```lua\n\
-return 'sub-reply'\n\
+store.append('order.txt', 'Sub\\n')\n\
 ```\n\n\
 ### After\n\n\
 ```lua\n\
-error('execute must not fall through to the next child')\n\
+store.append('order.txt', 'After\\n')\n\
+return 'after-reply'\n\
 ```\n";
-    let out = run_offline(md)
+    let store = StoreRef::memory();
+    let out = run(&fixture(md), "", &[], &store, silent())
         .await
-        .expect("execute to a child must run it as a subroutine");
-    assert_eq!(out, "got:sub-reply");
+        .expect("execute to a child must start a contained chain");
+    assert_eq!(out, "got:after-reply");
+    assert_eq!(store.read("order.txt").expect("order log"), "Sub\nAfter\n");
 }
 
 /// The top-level walk never descends: a section's children do not run unless

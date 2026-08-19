@@ -11,6 +11,11 @@
 //! Running off the last section ends the run: the result is the last model
 //! reply, else a generic completion.
 //!
+//! The walk is level-independent and never descends on its own: a jump to a
+//! child heading starts a child-level walk over the jumper's children under
+//! the same rules, and the parent walk resumes after the jumper when that
+//! level exhausts.
+//!
 //! One run-scoped [`StoreRef`] is created once by the caller and threaded through
 //! every section (both its Lua prologue and, later, the model's file tools), so
 //! bulk state persists across the context-clearing transitions even though a
@@ -28,8 +33,12 @@
 //! which is checked for semantic near-duplicates before concrete tools are
 //! advertised under their local aliases and dispatched by stable identity.
 //!
-//! Lua `execute()` runs a named top-level section as a subroutine (fresh VM,
-//! fresh conversation, recursion capped at 8) and returns that section's reply.
+//! Lua `execute()` starts a contained chain at a visible section (fresh VM,
+//! fresh conversation, recursion capped at 8): the chain runs from the target
+//! with every normal walk rule - fall-through, off-walk skips, jumps, child
+//! chains - and the outer walk never moves while it runs. When the chain
+//! ends (its level exhausts or a return fires), its final reply is the call's
+//! return value; a return ends only the chain it fires in.
 //! Lua `jump(target)` transfers control to a named section and clears
 //! cross-section reply context.
 //!

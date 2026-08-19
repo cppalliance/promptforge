@@ -2,25 +2,30 @@
 //!
 //! One private engine, [`run_one_section`], executes a single section's block
 //! lifecycle: VM construction, host injection, the ordered Lua/prose block
-//! walk, scope close, teardown, and per-section observation. Two thin adapters
-//! drive it:
+//! walk, scope close, teardown, and per-section observation. One recursive
+//! chain function, [`walk_siblings`], drives it at every level:
 //!
-//! - [`run_sections`] is the top-level walk. It loops over the prompt's
-//!   sections with [`JumpPolicy::Follow`], carries the model reply across
-//!   section boundaries (preserving it across a jump), and computes the run's
-//!   final result (the last reply, else `"done"`). A jump to a child heading
-//!   recurses into a child-level walk over the jumper's children under the
-//!   same rules; when that level exhausts, the parent walk resumes after the
-//!   jumper.
-//! - [`run_execute_section`] is the `execute()` subroutine. It drives the
-//!   engine once for one isolated section with [`JumpPolicy::Reject`] and a
-//!   frozen `execute_depth`, then returns that section's reply.
+//! - [`run_sections`] starts the top-level chain over the prompt's sections.
+//!   It carries the model reply across section boundaries (preserving it
+//!   across a jump) and computes the run's final result (the last reply,
+//!   else `"done"`). A jump to a child heading recurses into a child-level
+//!   chain over the jumper's children under the same rules; when that level
+//!   exhausts, the parent chain resumes after the jumper. A scalar return in
+//!   the top-level chain ends the run.
+//! - An `execute()` call runs a contained chain over the target's sibling
+//!   slice from the target's index, with every normal rule (fall-through,
+//!   off-walk skips, jumps, child chains). The outer chain never moves while
+//!   the contained chain runs. When the contained chain ends - its level
+//!   exhausts or a return fires - its final reply is the call's return
+//!   value, and a return ends only the chain it fires in. Each contained
+//!   chain counts its own `sys.id` from 1 and carries the caller's
+//!   `execute_depth` so the recursion cap holds across nesting.
 //!
-//! The engine parameterizes exactly the divergences the two paths require: the
-//! `sys.id` index, the host-injection seed (`initial_var`), the jump policy,
-//! the `execute_depth`, and the cross-section reply carried in. Everything else
+//! The engine parameterizes exactly the divergences the paths require: the
+//! `sys.id` index, the host-injection seed (`initial_var`), the
+//! `execute_depth`, and the cross-section reply carried in. Everything else
 //! (the prose tool loop, scope validation, cancellation, teardown, and every
-//! observation) is shared, so a fix lands in one place for both paths.
+//! observation) is shared, so a fix lands in one place for every path.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
@@ -50,20 +55,11 @@ use super::support::{MAX_EXECUTE_DEPTH, bridge_blocking, now_rfc3339_checked};
 use super::tool_loop::{ProseMode, SectionProgress, run_prose_inference};
 use super::tools::attach_infer_hook;
 
-/// Whether a `jump(target)` may escape the section being walked.
-#[derive(Clone, Copy)]
-enum JumpPolicy {
-    /// Top-level walk: a jump ends the section; the caller resolves the target.
-    Follow,
-    /// `execute()` subroutine: a jump is rejected as an error.
-    Reject,
-}
-
 /// How one section's block walk ended.
 enum SectionFlow {
     /// Ran off the section end, carrying the reply produced within it (if any).
     FellThrough { reply: Option<String> },
-    /// A scalar early return ended the section (and, top-level, the run).
+    /// A scalar early return ended the section (and the chain it fired in).
     Returned(String),
     /// A `jump(target)` requested control transfer (any walked level).
     Jumped {
@@ -72,18 +68,19 @@ enum SectionFlow {
     },
 }
 
-/// How one walk level ended.
+/// How one chain ended.
 enum WalkEnd {
     /// The level ran off its last section, carrying the final reply produced
     /// within it (if any).
     Exhausted(Option<String>),
-    /// A scalar early return ended the run.
+    /// A scalar early return ended the chain (the run, for the top-level
+    /// chain; the call's return value, for an `execute()` chain).
     Returned(String),
 }
 
-/// The borrowed run context every section in one walk shares.
+/// The borrowed run context every section in one chain shares.
 ///
-/// Bundled so the single-section engine and the two adapters keep one linear
+/// Bundled so the single-section engine and the chain drivers keep one linear
 /// set of borrows rather than threading two dozen parameters each.
 struct WalkContext<'a> {
     args: &'a str,
@@ -106,9 +103,8 @@ struct WalkContext<'a> {
     top_sections: &'a [Section],
     task_handles: &'a [LuaSectionHandle],
     turns: &'a Arc<AtomicU32>,
-    jump_policy: JumpPolicy,
     /// `var` seeded from an earlier VM (top-level H1 hand-off); `None` for a
-    /// subroutine.
+    /// contained chain.
     initial_var: Option<&'a serde_json::Value>,
 }
 
@@ -183,7 +179,6 @@ pub(crate) async fn run_sections(
         top_sections: &prompt.sections,
         task_handles: &task_handles,
         turns: &turns,
-        jump_policy: JumpPolicy::Follow,
         initial_var,
     };
 
@@ -194,6 +189,7 @@ pub(crate) async fn run_sections(
         0,
         None,
         false,
+        0,
         &mut client,
         &mut entered,
     )
@@ -205,23 +201,34 @@ pub(crate) async fn run_sections(
     }
 }
 
-/// Walk one sibling slice from `start` and report how the level ended.
+/// Walk one sibling slice from `start` and report how the chain ended.
 ///
-/// This is the one walk at every heading level: the top-level walk runs the
-/// prompt's sections, and a jump to a child heading recurses into the
-/// jumper's children under the same rules (fall-through order, off-walk
-/// skips, the reply rolling forward across sections). When a sub-walk's
-/// level exhausts, the parent walk resumes after the jumper with the
-/// sub-walk's last reply; a scalar return ends the run from any level.
-/// `start_addressed` is true when the walk begins on a jump target, which
-/// runs even when marked off-walk. `entered` counts the sections the walk
-/// has entered run-wide and seeds each `sys.id`.
+/// This is the one chain function at every heading level and for every entry
+/// mode: the top-level walk runs the prompt's sections, a jump to a child
+/// heading recurses into the jumper's children, and an `execute()` call runs
+/// a contained chain over the target's slice - all under the same rules
+/// (fall-through order, off-walk skips, the reply rolling forward across
+/// sections). When a jump-started sub-walk's level exhausts, the parent
+/// chain resumes after the jumper with the sub-walk's last reply. A scalar
+/// return ends the chain it fires in: it propagates out of every sub-walk to
+/// the chain's root, where the top-level chain turns it into the run's
+/// result and an `execute()` chain into the call's return value.
+/// `start_addressed` is true when the chain begins on an addressed target (a
+/// jump or execute target), which runs even when marked off-walk.
+/// `execute_depth` is the chain's nesting depth, threaded into every section
+/// so nested `execute()` calls stay under the cap. `entered` counts the
+/// sections this chain has entered and seeds each `sys.id`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the chain keeps its position, entry mode, and depth explicit and linear beside the shared WalkContext"
+)]
 async fn walk_siblings(
     ctx: &WalkContext<'_>,
     siblings: &[Section],
     start: usize,
     incoming_reply: Option<String>,
     start_addressed: bool,
+    execute_depth: usize,
     client: &mut Option<GatewayClient>,
     entered: &mut usize,
 ) -> Result<WalkEnd> {
@@ -245,7 +252,7 @@ async fn walk_siblings(
             section,
             siblings,
             *entered,
-            0,
+            execute_depth,
             reply.as_deref(),
             client,
         )
@@ -254,15 +261,16 @@ async fn walk_siblings(
             SectionFlow::Jumped { heading, reply: r } => {
                 reply = r;
                 match resolve_jump_target(&heading, siblings, section)? {
-                    // A child target descends: the child-level walk runs the
-                    // jumper's children from the target, and this walk resumes
-                    // after the jumper when that level exhausts.
+                    // A child target descends: the child-level chain runs the
+                    // jumper's children from the target, and this chain
+                    // resumes after the jumper when that level exhausts.
                     JumpTarget::Child(child_index) => match Box::pin(walk_siblings(
                         ctx,
                         &section.children,
                         child_index,
                         reply,
                         true,
+                        execute_depth,
                         client,
                         entered,
                     ))
@@ -292,18 +300,17 @@ async fn walk_siblings(
 
 /// Execute one section's block lifecycle over the shared [`WalkContext`].
 ///
-/// This is the single engine both the top-level walk and the `execute()`
-/// subroutine drive. `siblings` is the caller's own walk slice, from which
-/// the section's visible set (its siblings minus itself, plus its direct
-/// children) is built for the control globals. `section_id` is the `sys.id`
-/// value and the nested-call parent id (the run-wide count of sections
-/// entered for the walk, `0` for a subroutine). `incoming_reply` is the
+/// This is the single engine every chain drives. `siblings` is the caller's
+/// own walk slice, from which the section's visible set (its siblings minus
+/// itself, plus its direct children) is built for the control globals.
+/// `section_id` is the `sys.id` value and the nested-call parent id (the
+/// count of sections entered in this chain). `incoming_reply` is the
 /// model reply visible to this section's first prose; the engine rolls it
 /// forward as later prose in the same section produces text. The returned
-/// [`SectionFlow`] tells the adapter how the section ended.
+/// [`SectionFlow`] tells the chain how the section ended.
 #[expect(
     clippy::too_many_lines,
-    reason = "one linear section lifecycle: VM setup, ordered block walk, scope close, and teardown, kept together so both walk policies share exactly one implementation"
+    reason = "one linear section lifecycle: VM setup, ordered block walk, scope close, and teardown, kept together so every chain shares exactly one implementation"
 )]
 async fn run_one_section(
     ctx: &WalkContext<'_>,
@@ -380,43 +387,63 @@ async fn run_one_section(
             }
             let visible = visible_sections(&exec_siblings, &exec_caller);
             let worker = fanout::resolve_sibling(&heading, &visible)?;
-            // The subroutine builds its own visible set from its sibling
-            // slice: a child target sits beside the caller's children, a
-            // sibling target beside the caller's siblings.
-            let worker_siblings: &[Section] =
-                if section_position(&exec_caller.children, worker).is_some() {
-                    &exec_caller.children
+            // The contained chain runs the target's own sibling slice from
+            // the target's index: a child target sits beside the caller's
+            // children, a sibling target beside the caller's siblings.
+            let (chain_slice, start) =
+                if let Some(index) = section_position(&exec_caller.children, worker) {
+                    (exec_caller.children.as_slice(), index)
                 } else {
-                    &exec_siblings
+                    let index = section_position(&exec_siblings, worker)
+                        .ok_or_else(|| Error::Lua(format!("section `{heading}` index missing")))?;
+                    (exec_siblings.as_slice(), index)
                 };
             let call_args = input.as_deref().unwrap_or(&exec_args);
+            let task_handles = section_handles(&exec_top);
+            let ctx = WalkContext {
+                args: call_args,
+                store: &exec_store,
+                execution: &exec_execution,
+                observer: exec_observer.as_ref(),
+                observer_arc: &exec_observer,
+                debug: exec_debug.as_deref(),
+                debug_arc: exec_debug.as_ref(),
+                shared: &exec_shared,
+                bindings: &exec_bindings,
+                models: &exec_models,
+                analysis: &exec_analysis,
+                shared_tools: &exec_tools,
+                max_tool_iterations,
+                limits,
+                when: &exec_when,
+                top_sections: &exec_top,
+                task_handles: &task_handles,
+                turns: &exec_turns,
+                initial_var: None,
+            };
+            let mut client = exec_client.clone();
+            // A contained chain counts its own `sys.id` from 1, like a fresh
+            // run; the caller's chain keeps its own count.
+            let mut entered = 0usize;
             // Return the structured error directly (LUA-012): the typed error and
             // its source cross the Lua boundary via `mlua::Error::external` rather
             // than being flattened to a string here.
-            bridge_blocking(run_execute_section(
-                worker,
-                worker_siblings,
-                call_args,
-                &exec_store,
-                &exec_execution,
-                exec_observer.as_ref(),
-                &exec_observer,
-                exec_debug.as_deref(),
-                exec_debug.as_ref(),
-                &exec_shared,
-                &exec_bindings,
-                &exec_models,
-                &exec_analysis,
-                &exec_tools,
-                exec_client.as_ref(),
-                max_tool_iterations,
-                limits,
+            let end = bridge_blocking(walk_siblings(
+                &ctx,
+                chain_slice,
+                start,
                 None,
-                &exec_when,
-                &exec_turns,
+                true,
                 next_depth,
-                &exec_top,
-            ))
+                &mut client,
+                &mut entered,
+            ))?;
+            // A return ends the chain, and its value is the call's return;
+            // an exhausted chain returns its final reply.
+            Ok(match end {
+                WalkEnd::Returned(value) => value,
+                WalkEnd::Exhausted(reply) => reply.unwrap_or_default(),
+            })
         }
     };
     let fanout_callback = {
@@ -535,18 +562,10 @@ async fn run_one_section(
                         break;
                     }
                     Ok(LuaBlockResult::Returned(None)) => {}
-                    Ok(LuaBlockResult::Jump(heading)) => match ctx.jump_policy {
-                        JumpPolicy::Follow => {
-                            jump_heading = Some(heading);
-                            break;
-                        }
-                        JumpPolicy::Reject => {
-                            vm.teardown(ctx.observer, &section.name);
-                            return Err(Error::Lua(format!(
-                                "jump({heading}) is not allowed inside execute()"
-                            )));
-                        }
-                    },
+                    Ok(LuaBlockResult::Jump(heading)) => {
+                        jump_heading = Some(heading);
+                        break;
+                    }
                     Err(error) => {
                         vm.teardown(ctx.observer, &section.name);
                         return Err(error);
@@ -851,88 +870,6 @@ pub(crate) fn resolve_jump_target(
     section_position(siblings, target)
         .map(JumpTarget::Sibling)
         .ok_or_else(|| Error::Lua(format!("section `{heading}` index missing")))
-}
-
-/// Runs a named section as an `execute()` subroutine and returns its reply.
-///
-/// A thin adapter over [`run_one_section`] with the subroutine policy: `sys.id`
-/// is `0`, no `initial_var` seed, jumps are rejected, and the caller's
-/// `execute_depth` is threaded through so the recursion cap is enforced.
-/// `siblings` is the target's own sibling slice, from which its visible set
-/// is built; `top_sections` stays the document's top-level slice for
-/// `sys.section_count` and the `tasks` table.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "subroutine shares the full run context with the top-level walker before it is folded into one WalkContext"
-)]
-async fn run_execute_section(
-    section: &Section,
-    siblings: &[Section],
-    args: &str,
-    store: &StoreRef,
-    execution: &str,
-    observer: &dyn Observer,
-    observer_arc: &Arc<dyn Observer>,
-    debug: Option<&dyn DebugCapture>,
-    debug_arc: Option<&Arc<dyn DebugCapture>>,
-    shared: &crate::lua::LuaProgram,
-    bindings: &ToolBindings,
-    models: &ModelBindings,
-    analysis: &ToolAnalysis,
-    shared_tools: &SharedTools,
-    client: Option<&GatewayClient>,
-    max_tool_iterations: usize,
-    limits: RunLimits,
-    last_reply: Option<&str>,
-    when: &str,
-    turns: &Arc<AtomicU32>,
-    execute_depth: usize,
-    top_sections: &[Section],
-) -> Result<String> {
-    let task_handles = section_handles(top_sections);
-    let ctx = WalkContext {
-        args,
-        store,
-        execution,
-        observer,
-        observer_arc,
-        debug,
-        debug_arc,
-        shared,
-        bindings,
-        models,
-        analysis,
-        shared_tools,
-        max_tool_iterations,
-        limits,
-        when,
-        top_sections,
-        task_handles: &task_handles,
-        turns,
-        jump_policy: JumpPolicy::Reject,
-        initial_var: None,
-    };
-    let mut client = client.cloned();
-    match run_one_section(
-        &ctx,
-        section,
-        siblings,
-        0,
-        execute_depth,
-        last_reply,
-        &mut client,
-    )
-    .await?
-    {
-        SectionFlow::Returned(value) => Ok(value),
-        SectionFlow::FellThrough { reply } => Ok(reply.unwrap_or_default()),
-        // Unreachable under `JumpPolicy::Reject`: a jump returns an error from
-        // the engine before it can surface here. Kept typed rather than
-        // panicking so a future policy change fails loudly, not silently.
-        SectionFlow::Jumped { .. } => Err(Error::Internal(
-            "execute() subroutine produced a jump despite the reject policy",
-        )),
-    }
 }
 
 #[expect(
