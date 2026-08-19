@@ -1488,18 +1488,16 @@ async fn fanout_arm_runs_every_prose_block_with_the_reply_rolling_forward() {
     let gateway =
         ScriptedGateway::start(vec![resp_text("first answer"), resp_text("second answer")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Parent\n\n\
-```lua\n\
-local r = fanout('### Worker', {'alpha'})\n\
-return r[1].text\n\
-```\n\n\
-### Worker\n\n\
+    let md = [
+        ARM_FANOUT_PARENT,
+        "### Worker\n\n\
 First ask about {{ item }}.\n\n\
 ```lua\nvar.mid = 1\n```\n\n\
-The first answer was: {{ reply }}.\n";
+The first answer was: {{ reply }}.\n",
+    ]
+    .concat();
     let out = run(
-        &bound_for_model(md),
+        &bound_for_model(&md),
         "",
         &[],
         &StoreRef::memory(),
@@ -1559,22 +1557,24 @@ async fn fanout_arm_tools_add_between_prose_blocks_reaches_the_next_model_turn()
         "canonical_wire",
         "Section concrete.",
     ));
-    let prompt = bound_with_tools(
-        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-# Test prompt\n\n```lua shared\n\
+    // `tools.need`/`models.default` are H1-only declarations, so the
+    // declarations block is spliced into the shared scaffold ahead of
+    // `## Parent`.
+    let mut md = ARM_FANOUT_PARENT.replacen(
+        "## Parent",
+        "# Test prompt\n\n```lua shared\n\
 tools.need('section_tool', 'capability')\n\
 models.default('writer', 'A general model for tests')\n```\n\n\
-## Parent\n\n\
-```lua\n\
-local r = fanout('### Worker', {'alpha'})\n\
-return r[1].text\n\
-```\n\n\
-### Worker\n\n\
+## Parent",
+        1,
+    );
+    md.push_str(
+        "### Worker\n\n\
 First ask.\n\n\
 ```lua\ntools.add('section_tool')\n```\n\n\
 Second ask.\n",
-        Vec::new(),
     );
+    let prompt = bound_with_tools(&md, Vec::new());
 
     let out = run(
         &prompt,
@@ -1605,18 +1605,16 @@ Second ask.\n",
 async fn fanout_arm_model_infer_works_inside_an_arm() {
     let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Parent\n\n\
-```lua\n\
-local r = fanout('### Worker', {'alpha'})\n\
-return r[1].text\n\
-```\n\n\
-### Worker\n\n\
+    let md = [
+        ARM_FANOUT_PARENT,
+        "### Worker\n\n\
 ```lua\n\
 return models.get('writer'):infer('ping about ' .. item)\n\
-```\n";
+```\n",
+    ]
+    .concat();
     let out = run(
-        &bound_for_model(md),
+        &bound_for_model(&md),
         "",
         &[],
         &StoreRef::memory(),
@@ -1651,17 +1649,16 @@ async fn fanout_arm_without_a_client_creates_one_lazily_when_prose_needs_it() {
     if !gateway_env_is_unset() {
         return;
     }
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Parent\n\n\
-```lua\n\
-local r = fanout('### Worker', {'alpha'})\n\
-return r[1].text\n\
-```\n\n\
-### Worker\n\n\
-Ask about {{ item }}.\n";
-    let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
-        .await
-        .expect_err("an arm with no client must attempt lazy creation, not skip its prose");
+    let md = [ARM_FANOUT_PARENT, "### Worker\n\nAsk about {{ item }}.\n"].concat();
+    let error = run(
+        &bound_for_model(&md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        silent(),
+    )
+    .await
+    .expect_err("an arm with no client must attempt lazy creation, not skip its prose");
     let rendered = error.to_string();
     assert!(
         rendered.contains("missing environment variable: PROMPTFORGE_GATEWAY"),
@@ -1678,19 +1675,23 @@ async fn fanout_arm_model_infer_without_a_client_surfaces_the_lazy_error() {
     if !gateway_env_is_unset() {
         return;
     }
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Parent\n\n\
-```lua\n\
-local r = fanout('### Worker', {'alpha'})\n\
-return r[1].text\n\
-```\n\n\
-### Worker\n\n\
+    let md = [
+        ARM_FANOUT_PARENT,
+        "### Worker\n\n\
 ```lua\n\
 return models.get('writer'):infer('ping about ' .. item)\n\
-```\n";
-    let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
-        .await
-        .expect_err("model:infer in an arm with no client must surface the lazy error");
+```\n",
+    ]
+    .concat();
+    let error = run(
+        &bound_for_model(&md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        silent(),
+    )
+    .await
+    .expect_err("model:infer in an arm with no client must surface the lazy error");
     let rendered = error.to_string();
     assert!(
         rendered.contains("missing environment variable: PROMPTFORGE_GATEWAY"),
@@ -1701,24 +1702,54 @@ return models.get('writer'):infer('ping about ' .. item)\n\
 /// An unknown model alias errors loudly inside an arm, same as on the walk.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_arm_model_infer_with_an_unknown_alias_errors_loudly() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Parent\n\n\
-```lua\n\
-local r = fanout('### Worker', {'alpha'})\n\
-return r[1].text\n\
-```\n\n\
-### Worker\n\n\
+    let md = [
+        ARM_FANOUT_PARENT,
+        "### Worker\n\n\
 ```lua\n\
 return models.get('ghost'):infer('ping')\n\
-```\n";
-    let error = run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
-        .await
-        .expect_err("an unknown model alias inside an arm must fail loudly");
+```\n",
+    ]
+    .concat();
+    let error = run(
+        &bound_for_model(&md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        silent(),
+    )
+    .await
+    .expect_err("an unknown model alias inside an arm must fail loudly");
     let rendered = error.to_string();
     assert!(
         rendered.contains("models.get alias \"ghost\" was not declared"),
         "the unknown alias must be named: {rendered}"
     );
+}
+
+/// A collection larger than the old default item cap (1024) runs through the
+/// prompt-level path: the parent's Lua builds the table,
+/// `collection_to_items` converts it, and `fanout` dispatches every member.
+/// The worker is pure Lua with an immediate return, so the run needs no
+/// client and stays fast.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_accepts_a_prompt_built_collection_over_the_old_default_cap() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Parent\n\n\
+```lua\n\
+local members = {}\n\
+for i = 1, 1025 do members[i] = 'm' .. i end\n\
+local r = fanout('### Worker', members)\n\
+assert(#r == 1025, 'every member ran')\n\
+return r[1025].text\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+return item\n\
+```\n";
+    let out = run_offline(md)
+        .await
+        .expect("a collection over the old default cap must succeed");
+    assert_eq!(out, "m1025");
 }
 
 /// A walked section never sees the fanout `item` global: the seed split
@@ -2164,28 +2195,6 @@ fanout('### Worker', t)\n\
         error
             .to_string()
             .contains("key must be a string, number, or boolean"),
-        "error was: {error}"
-    );
-}
-
-/// The item cap bounds the collection length: 1025 members exceed the
-/// default 1024 cap before any arm is scheduled.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_oversized_collection_errors() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Parent\n\n\
-```lua\n\
-local t = {}\n\
-for i = 1, 1025 do t[i] = i end\n\
-fanout('### Worker', t)\n\
-```\n\n\
-### Worker\n\n\
-```lua\nreturn item\n```\n";
-    let error = run_offline(md)
-        .await
-        .expect_err("an oversized collection must error");
-    assert!(
-        error.to_string().contains("exceeding the maximum of 1024"),
         "error was: {error}"
     );
 }

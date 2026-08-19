@@ -101,6 +101,40 @@ async fn fanout_arm_join_failure_preserves_the_join_error_source() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_panicking_arm_maps_to_fanout_arm_join_through_the_select_loop() {
+    // The select loop's non-cancellation `JoinError` arm is reachable only
+    // when a spawned arm panics, and no production input can panic an arm
+    // (every arm-internal failure is a `Result`), so the sentinel item
+    // injects the panic (test-only, in `run_one_arm`). The run must surface
+    // `Error::FanoutArmJoin` with the `JoinError` preserved as the source.
+    use std::error::Error as _;
+
+    let worker = lua_worker("return item");
+    let sentinel = super::arm::PANIC_ARM_SENTINEL;
+    let items = vec![json!("ok"), json!(sentinel)];
+    let fixture = FanoutFixture::new();
+    let observer = NullObserver;
+    let ctx = fixture.ctx("fanout-join-panic-test", RunLimits::new(), &observer);
+
+    let error = cancel::scope(CancelHandle::new(), run_fanout_arms(&worker, &items, &ctx))
+        .await
+        .expect_err("a panicking arm must fail the fanout");
+    assert!(
+        matches!(error, Error::FanoutArmJoin(_)),
+        "expected FanoutArmJoin, got {error}"
+    );
+    let join_error = error
+        .source()
+        .expect("the JoinError is preserved as the error source")
+        .downcast_ref::<tokio::task::JoinError>()
+        .expect("the source is the structured JoinError");
+    assert!(
+        join_error.is_panic(),
+        "the JoinError must carry the arm's panic"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pre_cancelled_fanout_returns_interrupted() {
     let worker = lua_worker("return item");
     let items = vec![json!("alpha"), json!("beta")];
@@ -217,25 +251,25 @@ fn arm_window_never_exceeds_the_concurrency_limit() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_rejects_a_list_over_the_item_cap() {
-    // The cap check fires before any arm is scheduled, so the worker body is
-    // irrelevant here.
-    let worker = sibling("Worker", 3);
-    let items: Vec<serde_json::Value> = (0..5).map(|i| json!(i.to_string())).collect();
+async fn fanout_accepts_a_list_over_the_old_default_cap() {
+    // The item cap is gone; the concurrency window is the only bound. A
+    // 1025-member collection (one over the old 1024 default) runs to
+    // completion. The worker is pure Lua with an immediate return, so the
+    // run needs no client and stays fast.
+    let worker = lua_worker("return item");
+    let items: Vec<serde_json::Value> = (0..1025).map(|i| json!(i.to_string())).collect();
     let fixture = FanoutFixture::new();
     let observer = NullObserver;
-    let ctx = fixture.ctx(
-        "fanout-cap-test",
-        RunLimits::new().max_fanout_items(NonZeroUsize::new(3).expect("3 is non-zero")),
-        &observer,
-    );
+    let ctx = fixture.ctx("fanout-uncapped-test", RunLimits::new(), &observer);
 
-    let error = run_fanout_arms(&worker, &items, &ctx)
+    let results = run_fanout_arms(&worker, &items, &ctx)
         .await
-        .expect_err("a list longer than max_fanout_items must be rejected");
-    assert!(
-        error.to_string().contains("exceeding the maximum of 3"),
-        "error must explain the item cap: {error}"
+        .expect("a collection over the old default cap must succeed");
+    assert_eq!(results.len(), 1025);
+    assert_eq!(
+        results[1024],
+        LuaFanoutResult::success(json!("1024"), "1024"),
+        "the last arm's result follows collection order"
     );
 }
 
@@ -313,8 +347,8 @@ fn lua_worker(source: &str) -> Section {
     }
 }
 
-/// Owns the run-context values every `run_fanout_arms` test threads into
-/// [`terminal_ctx`], so a test states only its execution name, limits, and
+/// Owns the run-context values every `run_fanout_arms` test threads into a
+/// [`FanoutContext`], so a test states only its execution name, limits, and
 /// observer. Fields stay visible so a test can swap one out (a custom shared
 /// library, a threaded home slice) before building the context.
 struct FanoutFixture {
@@ -346,59 +380,28 @@ impl FanoutFixture {
         limits: RunLimits,
         observer: &'a dyn Observer,
     ) -> FanoutContext<'a> {
-        terminal_ctx(
+        FanoutContext {
+            args: "",
+            store: &self.store,
             execution,
-            limits,
             observer,
-            &self.store,
-            &self.bindings,
-            &self.models,
-            &self.analysis,
-            &self.shared_tools,
-            &self.client,
-            &self.shared,
-        )
-    }
-}
-
-#[expect(
-    clippy::ref_option,
-    clippy::too_many_arguments,
-    reason = "FanoutContext.client borrows an Option<GatewayClient>, so the helper must too; the argument list mirrors the context's fields plus the two knobs (execution name, limits) the routed tests vary"
-)]
-fn terminal_ctx<'a>(
-    execution: &'a str,
-    limits: RunLimits,
-    observer: &'a dyn Observer,
-    store: &'a StoreRef,
-    bindings: &'a ToolBindings,
-    models: &'a ModelBindings,
-    analysis: &'a crate::execute::ToolAnalysis,
-    shared_tools: &'a SharedTools,
-    client: &'a Option<GatewayClient>,
-    shared: &'a LuaProgram,
-) -> FanoutContext<'a> {
-    FanoutContext {
-        args: "",
-        store,
-        execution,
-        observer,
-        client,
-        debug: None,
-        shared,
-        bindings,
-        models,
-        analysis,
-        shared_tools,
-        max_tool_iterations: 24,
-        limits,
-        last_reply: None,
-        when: "2026-08-08",
-        parent_id: 1,
-        section_count: 1,
-        home: &[],
-        task_handles: &[],
-        execute_depth: 0,
+            client: &self.client,
+            debug: None,
+            shared: &self.shared,
+            bindings: &self.bindings,
+            models: &self.models,
+            analysis: &self.analysis,
+            shared_tools: &self.shared_tools,
+            max_tool_iterations: 24,
+            limits,
+            last_reply: None,
+            when: "2026-08-08",
+            parent_id: 1,
+            section_count: 1,
+            home: &[],
+            task_handles: &[],
+            execute_depth: 0,
+        }
     }
 }
 
