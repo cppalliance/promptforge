@@ -10,31 +10,28 @@ use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::observe::{NullObserver, Observer};
 
-/// Builds a [`NonZeroU32`] from a compile-time-known non-zero value.
-pub(crate) const fn nz_u32(value: u32) -> NonZeroU32 {
-    match NonZeroU32::new(value) {
-        Some(non_zero) => non_zero,
-        None => unreachable!(),
-    }
+/// Generates one `nz_*` constructor per `NonZero*` type: a `const fn`
+/// building the wrapper from a compile-time-known non-zero value.
+macro_rules! nz {
+    ($name:ident, $nonzero:ident, $primitive:ty) => {
+        /// Builds the non-zero wrapper from a compile-time-known non-zero
+        /// value.
+        pub(crate) const fn $name(value: $primitive) -> $nonzero {
+            match $nonzero::new(value) {
+                Some(non_zero) => non_zero,
+                None => unreachable!(),
+            }
+        }
+    };
 }
 
-/// Builds a [`NonZeroU64`] from a compile-time-known non-zero value.
-pub(crate) const fn nz_u64(value: u64) -> NonZeroU64 {
-    match NonZeroU64::new(value) {
-        Some(non_zero) => non_zero,
-        None => unreachable!(),
-    }
-}
+nz!(nz_u32, NonZeroU32, u32);
+nz!(nz_u64, NonZeroU64, u64);
+nz!(nz_usize, NonZeroUsize, usize);
 
-/// Builds a [`NonZeroUsize`] from a compile-time-known non-zero value.
-pub(crate) const fn nz_usize(value: usize) -> NonZeroUsize {
-    match NonZeroUsize::new(value) {
-        Some(non_zero) => non_zero,
-        None => unreachable!(),
-    }
-}
-
-/// Resource ceilings a run honors at every otherwise-unbounded site.
+/// Resource ceilings a run honors at its bounded sites: per-section tool
+/// iterations, fanout concurrency, model response size, Lua memory, Lua log
+/// volume, and the request timeout.
 ///
 /// The defaults are safe, non-environment values so a clean build needs no
 /// provisioning. Frontmatter `max_tool_iterations`, when present, still
@@ -56,7 +53,6 @@ pub(crate) const fn nz_usize(value: usize) -> NonZeroUsize {
 pub struct RunLimits {
     max_tool_iterations: NonZeroU32,
     fanout_concurrency: NonZeroUsize,
-    max_fanout_items: NonZeroUsize,
     max_response_bytes: NonZeroU64,
     lua_memory_bytes: NonZeroUsize,
     lua_log_events: NonZeroU32,
@@ -78,7 +74,6 @@ impl RunLimits {
         RunLimits {
             max_tool_iterations: nz_u32(24),
             fanout_concurrency: nz_usize(8),
-            max_fanout_items: nz_usize(1024),
             max_response_bytes: nz_u64(16 * 1024 * 1024),
             lua_memory_bytes: nz_usize(64 * 1024 * 1024),
             lua_log_events: nz_u32(1024),
@@ -97,15 +92,6 @@ impl RunLimits {
     #[must_use]
     pub fn fanout_concurrency(mut self, value: NonZeroUsize) -> RunLimits {
         self.fanout_concurrency = value;
-        self
-    }
-
-    /// Sets the maximum number of items a single fanout may map over.
-    ///
-    /// A list longer than this is rejected before any arm is scheduled.
-    #[must_use]
-    pub fn max_fanout_items(mut self, value: NonZeroUsize) -> RunLimits {
-        self.max_fanout_items = value;
         self
     }
 
@@ -136,9 +122,7 @@ impl RunLimits {
         self.request_timeout = value;
         self
     }
-}
 
-impl RunLimits {
     /// Returns the default per-section model round-trip cap.
     #[must_use]
     pub fn tool_iterations(&self) -> NonZeroU32 {
@@ -149,12 +133,6 @@ impl RunLimits {
     #[must_use]
     pub fn fanout(&self) -> NonZeroUsize {
         self.fanout_concurrency
-    }
-
-    /// Returns the maximum number of items a single fanout may map over.
-    #[must_use]
-    pub fn fanout_items(&self) -> NonZeroUsize {
-        self.max_fanout_items
     }
 
     /// Returns the maximum accepted model response body size, in bytes.
@@ -268,12 +246,6 @@ impl RunConfig {
     pub fn execution(&self) -> &str {
         &self.execution
     }
-
-    /// Returns the resource limits.
-    #[must_use]
-    pub fn limits_ref(&self) -> &RunLimits {
-        &self.limits
-    }
 }
 
 impl fmt::Debug for RunConfig {
@@ -286,5 +258,29 @@ impl fmt::Debug for RunConfig {
             .field("cancel", &self.cancel.is_some())
             .field("limits", &self.limits)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_limits_pins_all_six_defaults_and_the_untested_builders() {
+        let defaults = RunLimits::new();
+        assert_eq!(defaults.tool_iterations().get(), 24);
+        assert_eq!(defaults.fanout().get(), 8);
+        assert_eq!(defaults.response_bytes().get(), 16 * 1024 * 1024);
+        assert_eq!(defaults.lua_memory().get(), 64 * 1024 * 1024);
+        assert_eq!(defaults.lua_logs().get(), 1024);
+        assert_eq!(defaults.timeout(), Duration::from_secs(120));
+
+        let built = RunLimits::new()
+            .max_response_bytes(nz_u64(4 * 1024))
+            .lua_log_events(nz_u32(7))
+            .request_timeout(Duration::from_secs(5));
+        assert_eq!(built.response_bytes().get(), 4 * 1024);
+        assert_eq!(built.lua_logs().get(), 7);
+        assert_eq!(built.timeout(), Duration::from_secs(5));
     }
 }
