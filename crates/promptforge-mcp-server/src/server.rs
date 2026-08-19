@@ -244,8 +244,15 @@ impl PromptForgeServer {
                 }
                 match resolve::resolve(generation.catalog(), &requested) {
                     Ok(entry) => {
-                        self.run(entry, &args, &input_file, &input_text, &output_file, reporting)
-                            .await
+                        self.run(
+                            entry,
+                            &args,
+                            &input_file,
+                            &input_text,
+                            &output_file,
+                            reporting,
+                        )
+                        .await
                     }
                     // A miss is caller-correctable: hand back every enabled
                     // name, nearest first, so the model's next call can name one

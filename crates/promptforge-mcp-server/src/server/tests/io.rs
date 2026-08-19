@@ -57,11 +57,7 @@ async fn input_provided_without_a_declaration_fails_the_run() {
 #[tokio::test]
 async fn input_declared_but_not_provided_fails_the_run() {
     let dir = tempfile::tempdir().expect("create a temporary prompts directory");
-    write(
-        dir.path(),
-        "reader.md",
-        &input_prompt("reader", "paper.md"),
-    );
+    write(dir.path(), "reader.md", &input_prompt("reader", "paper.md"));
     let config = Config::from_toml_str(&format!(
         "[server]\napi_key = \"t\"\n\n\
          [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
@@ -93,11 +89,7 @@ async fn input_declared_but_not_provided_fails_the_run() {
 #[tokio::test]
 async fn input_text_seeds_the_store_for_the_prompt() {
     let dir = tempfile::tempdir().expect("create a temporary prompts directory");
-    write(
-        dir.path(),
-        "reader.md",
-        &input_prompt("reader", "paper.md"),
-    );
+    write(dir.path(), "reader.md", &input_prompt("reader", "paper.md"));
     let config = Config::from_toml_str(&format!(
         "[server]\napi_key = \"t\"\n\n\
          [gateway]\nurl = \"http://127.0.0.1:8081/v1\"\napi_key = \"gw\"\n\n\
