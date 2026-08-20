@@ -33,6 +33,17 @@ pub(crate) struct ToolAnalysis {
     pub(crate) near_duplicates: Vec<OwnedNearDuplicate>,
 }
 
+/// Returns the alias frozen for a selected tool identity.
+fn frozen_alias(analysis: &ToolAnalysis, id: &ToolId) -> Result<String> {
+    analysis
+        .id_to_alias
+        .get(id)
+        .cloned()
+        .ok_or_else(|| Error::ToolScopeAnalysis {
+            detail: "selected identity has no frozen alias".to_owned(),
+        })
+}
+
 impl ToolAnalysis {
     pub(crate) fn new(bindings: &ToolBindings, picker: &ToolPicker) -> Result<Self> {
         let alias_to_id = bindings
@@ -112,20 +123,8 @@ pub(crate) fn validate_effective_scope_inner(
         if !effective.contains(&pair.first_id) || !effective.contains(&pair.second_id) {
             continue;
         }
-        let first_alias = analysis
-            .id_to_alias
-            .get(&pair.first_id)
-            .cloned()
-            .ok_or_else(|| Error::ToolScopeAnalysis {
-                detail: "selected identity has no frozen alias".to_owned(),
-            })?;
-        let second_alias = analysis
-            .id_to_alias
-            .get(&pair.second_id)
-            .cloned()
-            .ok_or_else(|| Error::ToolScopeAnalysis {
-                detail: "selected identity has no frozen alias".to_owned(),
-            })?;
+        let first_alias = frozen_alias(analysis, &pair.first_id)?;
+        let second_alias = frozen_alias(analysis, &pair.second_id)?;
         return Err(Error::NearDuplicateTools {
             diagnostic: Box::new(NearDuplicateDiagnostic {
                 first_alias,

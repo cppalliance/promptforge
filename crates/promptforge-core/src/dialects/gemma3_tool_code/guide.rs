@@ -6,6 +6,43 @@
 
 use serde_json::Value;
 
+/// Collects a function's parameters and required set, then renders its signature.
+fn render_signature(function: &Value, name: &str) -> String {
+    let params = function
+        .get("parameters")
+        .and_then(|value| value.get("properties"))
+        .and_then(Value::as_object);
+    let required = function
+        .get("parameters")
+        .and_then(|value| value.get("required"))
+        .and_then(Value::as_array)
+        .map(|required| {
+            required
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut arg_bits = Vec::new();
+    if let Some(params) = params {
+        // List every property, not just the required ones: a schema with any
+        // required parameter must still advertise its optional parameters,
+        // marked with a trailing `?`, so they never vanish from the guide.
+        for key in params.keys() {
+            if required.contains(&key.as_str()) {
+                arg_bits.push(format!("{key}=..."));
+            } else {
+                arg_bits.push(format!("{key}=...?"));
+            }
+        }
+    }
+    if arg_bits.is_empty() {
+        format!("{name}()")
+    } else {
+        format!("{name}({})", arg_bits.join(", "))
+    }
+}
+
 /// Render a system guide from OpenAI-shaped `tools`, or `None` when the list is
 /// empty or lists no usable tool.
 pub(crate) fn render_tool_guide(list: &[Value]) -> Option<String> {
@@ -32,39 +69,7 @@ pub(crate) fn render_tool_guide(list: &[Value]) -> Option<String> {
             .get("description")
             .and_then(Value::as_str)
             .unwrap_or("");
-        let params = function
-            .get("parameters")
-            .and_then(|value| value.get("properties"))
-            .and_then(Value::as_object);
-        let required = function
-            .get("parameters")
-            .and_then(|value| value.get("required"))
-            .and_then(Value::as_array)
-            .map(|required| {
-                required
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let mut arg_bits = Vec::new();
-        if let Some(params) = params {
-            // List every property, not just the required ones: a schema with any
-            // required parameter must still advertise its optional parameters,
-            // marked with a trailing `?`, so they never vanish from the guide.
-            for key in params.keys() {
-                if required.contains(&key.as_str()) {
-                    arg_bits.push(format!("{key}=..."));
-                } else {
-                    arg_bits.push(format!("{key}=...?"));
-                }
-            }
-        }
-        let sig = if arg_bits.is_empty() {
-            format!("{name}()")
-        } else {
-            format!("{name}({})", arg_bits.join(", "))
-        };
+        let sig = render_signature(function, name);
         if description.is_empty() {
             lines.push(format!("- {sig}"));
         } else {

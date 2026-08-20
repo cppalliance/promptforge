@@ -38,6 +38,47 @@ enum GatewayTransport {
     Disabled,
 }
 
+/// Builds the completion request body before dialect-specific reshaping.
+fn build_request_body(
+    messages: &[Message],
+    tools: Option<&[ToolSchema]>,
+    options: &CompletionOptions,
+) -> Value {
+    let mut body = serde_json::json!({
+        "model": options.model,
+        "messages": messages,
+    });
+    if let Some(tools) = tools.filter(|tools| !tools.is_empty()) {
+        let wrapped: Vec<Value> = tools
+            .iter()
+            .map(|tool| {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    },
+                })
+            })
+            .collect();
+        body["tools"] = Value::Array(wrapped);
+        body["tool_choice"] = Value::String("auto".into());
+    }
+    if let Some(temperature) = options.temperature {
+        body["temperature"] = serde_json::json!(temperature.get());
+    }
+    if let Some(max_tokens) = options.max_tokens {
+        body["max_tokens"] = serde_json::json!(max_tokens.get());
+    }
+    if let Some(thinking) = options.thinking {
+        body["chat_template_kwargs"] = serde_json::json!({
+            "enable_thinking": thinking,
+        });
+    }
+    body
+}
+
 impl fmt::Debug for GatewayClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // The bearer key is a credential and must never appear in Debug output,
@@ -202,38 +243,7 @@ impl GatewayClient {
         let GatewayTransport::Http(http) = &self.transport else {
             return Err(CompletionError::from(Error::GatewayDisabled));
         };
-        let mut request_body = serde_json::json!({
-            "model": options.model,
-            "messages": messages,
-        });
-        if let Some(tools) = tools.filter(|tools| !tools.is_empty()) {
-            let wrapped: Vec<Value> = tools
-                .iter()
-                .map(|tool| {
-                    serde_json::json!({
-                        "type": "function",
-                        "function": {
-                            "name": tool.name,
-                            "description": tool.description,
-                            "parameters": tool.parameters,
-                        },
-                    })
-                })
-                .collect();
-            request_body["tools"] = Value::Array(wrapped);
-            request_body["tool_choice"] = Value::String("auto".into());
-        }
-        if let Some(temperature) = options.temperature {
-            request_body["temperature"] = serde_json::json!(temperature.get());
-        }
-        if let Some(max_tokens) = options.max_tokens {
-            request_body["max_tokens"] = serde_json::json!(max_tokens.get());
-        }
-        if let Some(thinking) = options.thinking {
-            request_body["chat_template_kwargs"] = serde_json::json!({
-                "enable_thinking": thinking,
-            });
-        }
+        let mut request_body = build_request_body(messages, tools, options);
 
         let dialect = self
             .dialect_registry

@@ -121,20 +121,26 @@ impl std::error::Error for SubstitutionError {
 
 type SubstResult<T> = std::result::Result<T, SubstitutionError>;
 
+/// Renders the JSON scalar forms shared by item and placeholder rendering.
+fn render_scalar(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
 /// Renders a fanout arm's item for prose substitution and stub text:
 /// strings verbatim, numbers and booleans in their natural string form,
 /// arrays and objects as compact JSON.
 #[must_use]
 pub(crate) fn render_item(item: &Value) -> String {
-    match item {
-        Value::String(s) => s.clone(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
-        // Serializing a `Value` cannot fail; the default is unreachable.
-        Value::Null | Value::Array(_) | Value::Object(_) => {
-            serde_json::to_string(item).unwrap_or_default()
-        }
+    if let Some(rendered) = render_scalar(item) {
+        return rendered;
     }
+    // Serializing a `Value` cannot fail; the default is unreachable.
+    serde_json::to_string(item).unwrap_or_default()
 }
 
 /// Resolve every `{{ path }}` in `prose` against `args`, `reply`, `item`,
@@ -371,23 +377,24 @@ fn path_preview(path: &str) -> String {
 
 /// Render a resolved JSON value as its substituted string.
 fn render(value: &Value, path: &str, offset: usize) -> SubstResult<String> {
-    match value {
-        Value::Null => Err(SubstitutionError::new(
+    if let Some(rendered) = render_scalar(value) {
+        return Ok(rendered);
+    }
+    if value.is_null() {
+        Err(SubstitutionError::new(
             SubstErrorKind::NullValue,
             offset,
             format!("missing {{{{ {} }}}}", path_preview(path)),
-        )),
-        Value::String(s) => Ok(s.clone()),
-        Value::Bool(b) => Ok(b.to_string()),
-        Value::Number(n) => Ok(n.to_string()),
-        Value::Array(_) | Value::Object(_) => serde_json::to_string(value).map_err(|error| {
+        ))
+    } else {
+        serde_json::to_string(value).map_err(|error| {
             SubstitutionError::with_source(
                 SubstErrorKind::Serialize,
                 offset,
                 format!("could not serialize {{{{ {} }}}}", path_preview(path)),
                 Box::new(error),
             )
-        }),
+        })
     }
 }
 
