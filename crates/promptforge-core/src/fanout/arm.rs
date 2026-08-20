@@ -10,7 +10,7 @@ use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::execute::{
     BlockWalkContext, ControlContext, SectionFlow, VmSeed, make_control_globals, setup_section_vm,
-    walk_section_blocks,
+    run_one_section_impl,
 };
 use crate::lua::{LuaFanoutResult, SectionVm};
 use crate::observe::{Observation, Observer, detail};
@@ -147,7 +147,7 @@ pub(crate) const FAIL_ARM_VM_SENTINEL: &str = "__fanout_test_fail_arm_vm__";
 /// turns counter), installs the engine's real control globals resolved over
 /// the worker's visible set ([`make_control_globals`]), runs the setup half
 /// ([`setup_section_vm`]), installs the `model:infer` hook with a lazy client
-/// source, and drives the shared block walk ([`walk_section_blocks`]).
+/// source, and drives the shared block walk ([`run_one_section_impl`]).
 ///
 /// A [`SectionFlow::Jumped`] transfers control rather than erroring: the
 /// arm's remaining blocks are skipped and a child walk runs from the target
@@ -280,7 +280,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             ..BlockWalkContext::from(&walk_ctx)
         };
         let mut client = inputs.client.clone();
-        match walk_section_blocks(
+        match run_one_section_impl(
             &mut vm,
             &block_ctx,
             worker,
