@@ -367,7 +367,7 @@ pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading>> {
     Ok(headings)
 }
 
-/// Build a section tree from a flat, document-ordered list of headings.
+/// Builds a section tree from a flat, document-ordered list of headings.
 ///
 /// Recursion consumes headings whose level is deeper than `parent_level`; a
 /// heading at or above `parent_level` belongs to an ancestor and stops the
@@ -376,8 +376,10 @@ pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading>> {
 /// rejected: every heading must be exactly one level deeper than its parent.
 ///
 /// # Errors
-/// Returns a structure-classified parse error when a heading is more than one
-/// level deeper than its parent.
+/// Returns [`Error::ParseStructured`] for an orphan heading, an empty heading,
+/// duplicate sibling names, or malformed section content. Propagates
+/// [`Error::LuaCompile`] or [`Error::Lua`] from Lua compilation and
+/// [`Error::Internal`] from invalid or overflowing source-line calculations.
 pub(crate) fn build_sections(
     headings: &[Heading],
     pos: &mut usize,

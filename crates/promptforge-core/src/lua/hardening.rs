@@ -101,6 +101,12 @@ pub(crate) fn value_to_string(value: &Value) -> Result<String> {
     }
 }
 
+/// Converts only the first returned Lua value into an optional scalar string.
+///
+/// Later values are ignored. A missing or nil first value returns `None`.
+///
+/// # Errors
+/// Returns [`Error::Lua`] when the first value is not a supported scalar.
 pub(crate) fn scalar_return(returned: MultiValue) -> Result<Option<String>> {
     match returned.into_iter().next() {
         None | Some(Value::Nil) => Ok(None),

@@ -115,7 +115,7 @@ pub(crate) fn glob_match(pattern: &[u8], text: &[u8]) -> bool {
 
 /// Matches `text` against already-compiled glob `tokens` (see [`compile_glob`]).
 ///
-/// Split from [`glob_match`] so one compiled pattern can be reused across many
+/// Split from `glob_match` so one compiled pattern can be reused across many
 /// paths without re-tokenizing per path (STORE-020). Same bounded iterative
 /// dynamic program: `O(tokens * text_len)` time, `O(text_len)` space.
 pub(crate) fn matches_tokens(tokens: &[GlobToken], text: &[u8]) -> bool {

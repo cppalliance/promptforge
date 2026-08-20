@@ -194,15 +194,13 @@ impl LuaProgram {
             .map_err(Error::lua)
     }
 
-    /// Maps a Lua runtime error to an [`Error::Lua`] with the chunk-relative
-    /// line rewritten to an absolute prompt-source line.
+    /// Maps a Lua runtime failure to its ordered core outcome.
     ///
-    /// Lua errors look like `[string "chunk name"]:N: message`. This method
-    /// rewrites only this program's chunk-relative `:N:` to the absolute
-    /// prompt line `source_line + N - 1`, and prefixes a clear
-    /// `{location}:{absolute}:` tag so hosts can show `file:line` without
-    /// parsing Lua's `[string ...]` form. Nested errors from other chunks
-    /// (for example a fanout arm) are left unchanged.
+    /// Cancellation is checked first and returns [`Error::Interrupted`].
+    /// Otherwise a recognized host quota returns [`Error::LuaQuota`]. All
+    /// remaining failures return [`Error::LuaRuntime`] with this program's
+    /// chunk-relative line rewritten to an absolute prompt-source line. Nested
+    /// errors from other chunks (for example a fanout arm) are left unchanged.
     pub(crate) fn map_runtime_error(&self, error: &mlua::Error) -> Error {
         // A block aborted by the cancellation hook surfaces as an interruption,
         // not a Lua authoring error.

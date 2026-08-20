@@ -123,5 +123,3 @@ async fn store_persists_across_sections() {
         "the run's store must retain the written file"
     );
 }
-
-// --- Tool-call loop test (exercises the model round trip via a mock) ---

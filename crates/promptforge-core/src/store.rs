@@ -67,8 +67,8 @@ impl WriteScope {
 /// operations are synchronous in any case.
 ///
 /// Beside the backend lock the handle keeps a write registry mapping each
-/// path to the [`WriteScope`] that last wrote it: a fanout arm's scoped
-/// write ([`StoreRef::write_scoped`]) to a path already written by a
+/// path to the `WriteScope` that last wrote it: a fanout arm's scoped
+/// write (`StoreRef::write_scoped`) to a path already written by a
 /// different arm of the same fanout fails with [`StoreError::WriteRace`].
 /// Plain [`StoreRef::write`] (walk sections), `append`, and reads never
 /// touch the registry.
@@ -363,7 +363,8 @@ impl StoreRef {
     /// [`Store::str_replace`].
     ///
     /// # Errors
-    /// Returns [`StoreError::NotFound`], [`StoreError::AnchorNotFound`], or
+    /// Returns [`StoreError::InvalidAnchor`] when `old` is empty. Otherwise,
+    /// returns [`StoreError::NotFound`], [`StoreError::AnchorNotFound`], or
     /// [`StoreError::AnchorAmbiguous`] per [`Store::str_replace`].
     ///
     /// # Examples

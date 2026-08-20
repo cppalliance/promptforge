@@ -4,6 +4,11 @@ use super::{
 };
 use crate::client::ToolSchema;
 
+/// Installs the read-only `tools.calls` counter table for declared aliases.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the Lua table or callbacks cannot be created or
+/// installed.
 pub(crate) fn install_lua_tool_calls(
     lua: &Lua,
     counts: &ToolCallCounts,
@@ -159,6 +164,11 @@ fn add_local_params_schema(params: &mlua::Table) -> mlua::Result<Json> {
     }))
 }
 
+/// Installs the H2 tool declaration and local-tool APIs into one section VM.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if a Lua table or callback cannot be created or
+/// installed.
 pub(crate) fn install_h2_tools(
     lua: &Lua,
     globals: &mlua::Table,

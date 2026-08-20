@@ -111,6 +111,7 @@ impl LuaToolHandle {
         }
     }
 
+    /// Builds a handle from a live tool and its prompt-local binding metadata.
     pub(crate) fn from_live_binding(
         alias: impl Into<String>,
         description: impl Into<String>,
@@ -254,6 +255,7 @@ impl ToolBindings {
         &self.always
     }
 
+    /// Returns the binding for `alias`, if it was declared.
     pub(crate) fn binding(&self, alias: &str) -> Option<&ToolBinding> {
         self.bindings.iter().find(|binding| binding.alias == alias)
     }

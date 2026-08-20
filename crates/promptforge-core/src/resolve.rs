@@ -116,10 +116,10 @@ enum CachedDecision {
     Absent,
     Duplicate(Vec<ToolId>),
     Ambiguous(Vec<ToolId>),
-    /// The picker's query failed. The typed [`QueryError`] is retained as a
-    /// shareable source (F4) so the failure chain survives the cache; it is
-    /// wrapped once here and cloned (an `Arc` bump) into a fresh `Error` on
-    /// every cache hit.
+    /// The picker's query failed. The typed
+    /// [`promptforge_tool_picker::QueryError`] is retained as a shareable source
+    /// (F4) so the failure chain survives the cache; it is wrapped once here and
+    /// cloned (an `Arc` bump) into a fresh `Error` on every cache hit.
     QueryFailed(SharedSource),
     /// The picker returned an outcome this resolver does not model (a defensive
     /// catch-all; no dependency error to preserve).
