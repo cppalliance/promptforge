@@ -2,11 +2,13 @@
 
 A prompt is built from alternating Lua and prose blocks. Each section can contain any number of Lua blocks interleaved with prose segments. The last prose block in a section runs a full tool-call loop; earlier prose blocks run single-shot (one model round, then control continues to the next Lua block).
 
+Preamble, prologue, and epilog are positions, not phases: the preamble is the H1 region, the prologue is a section's Lua before its first prose, and the epilog is Lua after the last prose. The behavior is emergent - an epilog runs simply because it is the next block.
+
 A tool-call loop may end silently: when the model finishes with `finish_reason: "stop"` and an empty reply after completing at least one tool call, the loop accepts that as a clean exit and the section's `reply` is `""`. This supports "record everything via tools, output nothing" prompts. Any other empty reply - no prior tool calls, or a missing or non-`"stop"` finish reason - fails the run with an empty-model-reply error.
 
-## The H1 Phase
+## The H1 Preamble
 
-Lua blocks in the H1 region execute once in source order before any H2 section. The H1 phase declares tools and models, sets variables, and can short-circuit the entire run:
+Lua blocks in the H1 region execute once in source order before any H2 section. The preamble declares tools and models, sets variables, and can short-circuit the entire run:
 
 ````markdown
 # My Prompt
@@ -52,13 +54,14 @@ Each section VM provides these globals:
 | `tools` | Tool scope and call counts |
 | `log` | Diagnostic checkpoint function |
 | `reply` | Previous section's model answer |
-| `tasks` | Section handles for control flow |
 
-The `sys` table includes `when`, `now`, `id`, `section_name`, `execution`, `section_count`, `model` (after first model interaction), and `reply_finish_reason` (after inference). It is sealed - writes raise errors and the metatable cannot be replaced.
+The `sys` table includes `when`, `now`, `id`, `section_name`, `execution`, `section_count`, `model` (after first model interaction), and `reply_finish_reason` (after inference). It is sealed - writes raise errors and the metatable cannot be replaced. `sys.id` is the run-global execution-unit counter: H1 keeps id 0, and every section entry and every fanout arm takes the next value, so entering the same section twice yields two ids. A fanout arm also carries `sys.index`, its 1-based position within the current fanout (a nested fanout restarts at 1); `sys.index` is absent outside fanout, and reading it there raises.
+
+`var` is the walk-local clipboard. Writes to it persist across sections on the same walk, H1 included, so H1 `var` writes are visible to every H2 section on the walk. `execute` and `fanout` start contained walks that clone the caller's `var` in and discard it out - child writes never reach the caller. `var` holds JSON data only: assigning a function, userdata, or a table containing one fails at the assigning line. Bare globals (`x = 42` without `local`) are section-local scratch instead, and prose reads them as `{{ x }}`.
 
 ## Template Substitution
 
-Prose blocks support `{{ path }}` template substitutions with five namespaces:
+Prose blocks support `{{ path }}` template substitutions. The sources are `args`, `reply`, `var`, `sys`, `item` (fanout arms only), and bare globals: an unknown first segment resolves as a section-local Lua global, with dotted paths indexing into its JSON form. Scalars render naturally, tables as JSON; a missing global, or one holding a function or userdata, is an error:
 
 ````markdown
 ## Research
@@ -131,24 +134,24 @@ The analysis found a critical issue:
 Escalate this with recommended actions.
 ````
 
-`execute()` nests up to 8 levels deep, and the count accumulates across `fanout` boundaries - each arm runs one level deeper than the section or arm that spawned it. A chain starts with `reply` set to nil - pass context through the `input` parameter instead. A `jump()` inside a chain moves within the chain, and a `return` inside a chain ends the chain, not the run. Sections can be referenced by heading string or by Section objects from the `tasks` table.
+`execute()` nests up to 8 levels deep, and the count accumulates across `fanout` boundaries - each arm runs one level deeper than the section or arm that spawned it. A chain starts with `reply` set to nil - pass context through the `input` parameter instead. A `jump()` inside a chain moves within the chain, and a `return` inside a chain ends the chain, not the run. Sections are referenced by heading string.
 
-`fanout(worker, collection)` maps the worker over any Lua table, resolved against the same visible set. The collection is always a table, never a section name - a non-table second parameter is an error that points at `list_from_section`. The array part (`1..#t`) iterates in order first, then the hash part in undefined order. An array member arrives as the arm's `item` unchanged - a string stays a string, a number a number, a table a table - while a hash member arrives as a pair table with `item.key` and `item.value`. Keys must be strings, numbers, or booleans; a function or userdata member is an error naming its index. Each arm result's `.item` carries the member value back, so the caller can correlate results with rich items. An empty collection returns an empty table. To fanout over a list section's pre-parsed items, pass `list_from_section("### List")` as the collection.
+`fanout(worker, collection)` maps the worker over any Lua table, resolved against the same visible set. The collection is always a table, never a section name - a non-table second parameter is an error that points at `list_from_section`. The array part (`1..#t`) iterates in order first, then the hash part in undefined order. An array member arrives as the arm's `item` unchanged - a string stays a string, a number a number, a table a table - while a hash member arrives as a pair table with `item.key` and `item.value`. Keys must be strings, numbers, or booleans; a function or userdata member is an error naming its index. Each arm result's `.item` carries the member value back, so the caller can correlate results with rich items. An empty collection is an error - no work is likely a bug. To fanout over a list section's pre-parsed items, pass `list_from_section("### List")` as the collection.
 
 ## Lua API Summary
 
 | Function | Effect |
 |----------|--------|
-| `tools.need(alias, desc)` | Resolve a tool by capability description |
-| `tools.always(alias...)` | Make resolved tools available in every section |
-| `tools.add(alias...)` | Make resolved tools available in this section |
+| `tools.need(alias, desc, override?)` | Resolve a tool by capability description; `override` sets the model-facing description |
+| `tools.always(alias, override?)` | Make a resolved tool available in every section |
+| `tools.add(alias, override?)` | Make a resolved tool available in this section; `tools.add({"a", "b"})` for bulk |
 | `tools.add_local(alias, desc, params, handler)` | Declare a Lua-backed tool (H2 only) |
 | `models.need(alias, desc, opts?)` | Resolve a model by capability description |
 | `models.default(alias, desc, opts?)` | Declare and set the prompt-wide baseline model (H1) |
 | `models.use(alias)` | Select a declared model for this section; returns its handle |
 | `models.get(alias)` | Return a declared model's handle without changing the section model |
 | `models.infer(prompt)` | One tool-free inference round on the section's current model |
-| `handle:infer(prompt)` | Tool-loop inference on a specific model handle |
+| `handle:infer(prompt)` | One tool-free inference round on the handle's model |
 | `store.*` | Virtual filesystem operations |
 | `jump("## Section")` | Transfer control to a visible section (a sibling or a direct child); a child target starts a child-level walk |
 | `execute("## Section", input?)` | Start a contained chain at a visible section (a sibling or a direct child); returns the chain's final reply |
@@ -156,6 +159,8 @@ Escalate this with recommended actions.
 | `list_from_section("## List")` | Return a list section's pre-parsed items as an array of strings |
 | `log(msg)` | Emit a diagnostic to the observer |
 | `untrusted(s)` | Wrap a string in the untrusted guard envelope |
+
+Both infer forms share one shape: a single tool-free round on a fresh conversation that never sets `reply` and never touches `sys`. `models.infer(prompt)` uses the section's current model; `models.get(alias):infer(prompt)` uses any declared model. A Lua block that needs tools uses `execute` on a section.
 
 ## Local Tools
 
@@ -174,7 +179,7 @@ end)
 
 The params table maps each parameter name to either a bare type string or a `{type, description}` array. Supported types are `"string"`, `"integer"`, `"number"`, and `"boolean"`. All declared parameters are required. The engine converts the table into the JSON Schema the model sees.
 
-The handler receives the arguments as a Lua table with the named fields and returns a string; Lua errors surface as tool-call failures. The handler shares the section's VM, so it can use `store`, `var`, and section globals, and it may call `execute()`, `fanout`, and `model:infer`. It cannot call `jump()` - `jump` is disabled for the duration of the call. Local tool output is trusted (no nonce envelope), since the prompt author wrote the handler. A local tool becomes visible to the model starting from the next prose block or `model:infer` call.
+The handler receives the arguments as a Lua table with the named fields and returns a string; Lua errors surface as tool-call failures. The handler shares the section's VM, so it can use `store`, `var`, and section globals, and it may call `execute()`, `fanout`, and `model:infer`. It cannot call `jump()` - `jump` is disabled for the duration of the call. Local tool output is trusted (no nonce envelope), since the prompt author wrote the handler. A local tool becomes visible to the model starting from the next prose block.
 
 ## Sandbox Constraints
 

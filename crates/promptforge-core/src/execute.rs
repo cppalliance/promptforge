@@ -39,8 +39,8 @@
 //! chains - and the outer walk never moves while it runs. When the chain
 //! ends (its level exhausts or a return fires), its final reply is the call's
 //! return value; a return ends only the chain it fires in.
-//! Lua `jump(target)` transfers control to a named section and clears
-//! cross-section reply context.
+//! Lua `jump(target)` transfers control to a named section: the conversation
+//! is cleared and the current reply carries across the jump.
 //!
 //! # Module layout
 //!

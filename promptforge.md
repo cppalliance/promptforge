@@ -94,21 +94,23 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 - Prose outside fences becomes model turns
 - `---` as a section's first content marks it off-walk: skipped by the walk, runs only when addressed (`execute`/`jump`/`fanout`); content below the marker executes normally
 - `---` anywhere else starts a reader-only comment region (no Lua, no model prose, no list items below it); after a prose line it needs a blank line before it
-- Substitution: `{{ args }}`, `{{ var.x }}`, `{{ reply }}`
+- Substitution: `{{ args }}`, `{{ var.x }}`, `{{ reply }}`, `{{ x }}` (a section-local bare global)
 - Scalar `return` from Lua ends the run
 
 ## Lua API
 
 | Function | Effect |
 |---|---|
-| `tools.need(alias, desc)` | Resolve a tool by description |
-| `tools.add(alias...)` | Make resolved tools available to the model |
+| `tools.need(alias, desc, override?)` | Resolve a tool by description; `override` sets the model-facing description |
+| `tools.always(alias, override?)` | Make a resolved tool available in every section |
+| `tools.add(alias, override?)` | Make a resolved tool available in this section; `tools.add({"a", "b"})` for bulk |
 | `tools.add_local(alias, desc, params, handler)` | Declare a Lua-backed tool (H2 only) |
 | `models.default(alias, desc)` | Declare and set the prompt-wide baseline model |
 | `models.need(alias, desc, opts)` | Bind with options (thinking, context, temperature) |
 | `models.use(alias)` | Select a declared model for this section; returns its handle |
 | `models.get(alias)` | Return a declared model's handle without changing the section model |
 | `models.infer(prompt)` | One tool-free inference round on the section's current model |
+| `handle:infer(prompt)` | One tool-free inference round on the handle's model |
 | `store.read(path[, start[, end]])` | Read file verbatim, optionally lines `start` to `end` (1-based, inclusive) |
 | `store.read_numbered(path[, start[, end]])` | Read with absolute line numbers, optionally lines `start` to `end` (1-based, inclusive) |
 | `store.write(path, content)` | Create or overwrite file |
@@ -123,7 +125,7 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 | `execute("## Section", input?)` | Start a contained chain at a visible section (a sibling or a direct child); returns the chain's final reply |
 | `fanout(worker, collection)` | Map a worker over a collection in parallel; array members arrive as `item`, hash members as pair tables |
 | `list_from_section("## List")` | A list section's pre-parsed items as an array - feed it to `fanout` |
-| `var.x = ...` | Cross-section state |
+| `var.x = ...` | Walk-local state (JSON only); persists across sections on one walk, cloned into `execute`/`fanout` |
 | `log(msg)` | Emit to observer |
 
 Full reference: `guide/src/prompt-files.md` (structure), `guide/src/lua.md` (API)
@@ -149,7 +151,7 @@ models.default("researcher", "A model suited for careful analysis")
 ## Research
 
 ```lua
-tools.add("search", "fetch")
+tools.add({"search", "fetch"})
 ```
 
 Research this person using live web tools. Return a factual summary.

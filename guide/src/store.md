@@ -19,6 +19,8 @@ local exists = store.exists("notes/summary.md")
 store.delete("notes/summary.md")
 ```
 
+`store.delete` on a missing path is silent - delete is idempotent. Within a single `fanout`, two arms calling `store.write` on the same path is a hard error (a write-write race); `store.append` from concurrent arms stays legal.
+
 ## Bounded Reads
 
 `store.read` takes optional 1-based inclusive line bounds: `store.read("log.txt", 20, 40)` returns lines 20 through 40 joined by newlines, with no trailing newline. `store.read("log.txt", 20)` reads from line 20 to the end of the file. An `end` past the last line clamps to it, and a `start` past the last line returns an empty string. A `start` below 1 or an `end` before `start` raises an error.
