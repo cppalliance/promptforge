@@ -1358,8 +1358,7 @@ return 'tail-reply'\n\
 
 /// `fanout` inside a fanout arm maps over a collection: the nested worker
 /// resolves over the outer worker's visible set, and the nested structured
-/// results come back to the outer arm. A nested fanout over an empty
-/// collection returns an empty table.
+/// results come back to the outer arm.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fanout_inside_a_fanout_arm_maps_over_a_collection() {
     let md = flow_prompt!(
@@ -1373,8 +1372,6 @@ return table.concat({r[1].text, r[2].text}, ';')\n\
 ```lua\n\
 local inner = fanout('### Inner', {item .. '1', item .. '2'})\n\
 assert(inner[1].ok and inner[2].ok)\n\
-local empty = fanout('### Inner', {})\n\
-assert(#empty == 0, 'a nested fanout over an empty collection returns an empty table')\n\
 return item .. ':' .. inner[1].text .. ',' .. inner[2].text\n\
 ```\n\n\
 ### Inner\n\n\
@@ -2018,6 +2015,31 @@ assert(item == 'alpha')\n\
     assert_eq!(out, "prior-reply");
 }
 
+/// The other half of the fall-through rule (note 67): with no reply incoming
+/// to the parent, a worker that produces no output yields an honest empty
+/// text - "done" would be a lie - and the arm still reports ok.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_arm_without_output_and_no_incoming_reply_yields_empty_text() {
+    let md = flow_prompt!(
+        "\
+## Parent\n\n\
+```lua\n\
+local r = fanout('### Worker', {'alpha'})\n\
+assert(r[1].ok, 'the arm succeeded')\n\
+assert(r[1].text == '', 'a no-reply arm yields empty text')\n\
+return 'ok'\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+assert(item == 'alpha')\n\
+```\n"
+    );
+    let out = run_offline(md)
+        .await
+        .expect("a no-reply arm must succeed with empty text");
+    assert_eq!(out, "ok");
+}
+
 /// Each fanout arm seeds `var` from a fresh clone of the caller's `var` (the
 /// walk's H1-seeded value), so an arm reads the caller's entries but sibling
 /// and caller writes never cross arm boundaries.
@@ -2359,25 +2381,28 @@ return 'ok'\n\
     assert_eq!(out, "ok");
 }
 
-/// An empty collection maps to an empty result table: mapping over zero
-/// members is legitimate.
+/// An empty collection is an error: no work is likely a bug (a list section
+/// that parsed empty, a wrong variable), so the fanout is rejected before
+/// any scheduling rather than returning zero results.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fanout_collection_empty_returns_an_empty_table() {
+async fn fanout_collection_empty_errors() {
     let md = flow_prompt!(
         "\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', {})\n\
-assert(#r == 0)\n\
-return 'ok'\n\
+fanout('### Worker', {})\n\
 ```\n\n\
 ### Worker\n\n\
 ```lua\nreturn item\n```\n"
     );
-    let out = run_offline(md)
+    let error = run_offline(md)
         .await
-        .expect("an empty collection must return an empty table");
-    assert_eq!(out, "ok");
+        .expect_err("an empty collection must error");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("empty collection"),
+        "error was: {rendered}"
+    );
 }
 
 /// `.item` on each arm result carries the member value back as a Lua value.

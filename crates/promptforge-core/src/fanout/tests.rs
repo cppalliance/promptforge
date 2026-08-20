@@ -589,16 +589,25 @@ async fn results_follow_collection_order_not_finish_order() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_empty_collection_returns_empty_results() {
+async fn an_empty_collection_is_rejected_before_any_scheduling() {
+    // Note 65: no work is likely a bug, so the fanout errors instead of
+    // returning zero results.
     let worker = lua_worker("return item");
     let items: Vec<serde_json::Value> = Vec::new();
     let fixture = FanoutFixture::new();
     let ctx = fixture.ctx("fanout-empty-test", RunLimits::new(), &NullObserver);
 
-    let results = run_fanout_arms(&worker, &items, &ctx)
+    let error = run_fanout_arms(&worker, &items, &ctx)
         .await
-        .expect("an empty collection must succeed");
-    assert!(results.is_empty(), "no items, no results: {results:?}");
+        .expect_err("an empty collection must error");
+    assert!(
+        matches!(error, Error::Lua(_)),
+        "expected Error::Lua, got {error}"
+    );
+    assert!(
+        error.to_string().contains("empty collection"),
+        "error was: {error}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

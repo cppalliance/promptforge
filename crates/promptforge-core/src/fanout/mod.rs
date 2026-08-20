@@ -22,8 +22,10 @@
 //! than its caller - so `MAX_EXECUTE_DEPTH` bounds `execute`/`fanout` nesting
 //! uniformly. The invoker receives an ordered Lua
 //! table of structured arm results (`.text`, `.ok`, `.item`, `.exhausted`),
-//! with `.item` carrying the member value back. Fatal arm errors abort
-//! siblings; [`Error::ToolLoopExhausted`] soft-degrades to an incomplete stub.
+//! with `.item` carrying the member value back. An empty collection is an
+//! [`Error::Lua`] before any scheduling: no work is likely a bug. Fatal arm
+//! errors abort siblings; [`Error::ToolLoopExhausted`] soft-degrades to an
+//! incomplete stub.
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -250,12 +252,21 @@ pub(crate) struct FanoutContext<'a> {
 /// not finish order).
 ///
 /// # Errors
-/// Fatal arm errors abort siblings; tool-loop exhaustion soft-degrades.
+/// Returns [`Error::Lua`] when `items` is empty: no work is likely a bug, so
+/// the fanout is rejected before any scheduling. Fatal arm errors abort
+/// siblings; tool-loop exhaustion soft-degrades.
 pub(crate) async fn run_fanout_arms(
     worker: &Section,
     items: &[serde_json::Value],
     ctx: &FanoutContext<'_>,
 ) -> Result<Vec<LuaFanoutResult>> {
+    // An empty collection runs zero arms; that is an authoring bug (a list
+    // section that parsed empty, a wrong variable), not a valid run.
+    if items.is_empty() {
+        return Err(Error::Lua(
+            "fanout over an empty collection: no work is likely a bug".to_owned(),
+        ));
+    }
     let turns = Arc::new(AtomicU32::new(0));
     // A spawned arm does not inherit the run's task-local CancelHandle, so
     // capture it here (on the parent task) and carry an explicit clone into every
