@@ -117,7 +117,7 @@ flowchart LR
 
 - [PromptForge User Guide](https://cppalliance.github.io/promptforge/) - full documentation
 - [User Guide](promptforge-user-guide.md) - progressive tutorial for writing prompts
-- [design-core.md](crates/promptforge-core/design-core.md) - core design notes
+- [design-core.md](design/design-core.md) - core design notes
 
 ![Filing cabinets](images/banner-06.png)
 

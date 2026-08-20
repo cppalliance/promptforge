@@ -43,7 +43,7 @@ The MCP server config lives at `local/mcp-service.toml` (gitignored). It serves 
 - `[catalog]` required: `include` globs relative to `[paths].prompts`. Without it the server finds zero prompts.
 - `[tools]` defaults to nothing enabled (true sandbox). Enable per prompt needs.
 - `[prompts.NAME]` optional: per-prompt overrides (`enabled = false`).
-- Full schema: `crates/promptforge-mcp-server/design-mcp-server.md`
+- Full schema: `design/design-mcp-server.md`
 
 ## `local/gateway.toml` (gateway config)
 
@@ -71,7 +71,7 @@ endpoints = ["anthropic"]
 - `[[local_model]]` for GGUF: `source`, `sha256`, `context`, `gpu_layers`, `flash_attention`.
 - `[tools.web_search]`: `provider = "brave"`, `api_key = "${BRAVE_API_KEY}"`.
 - `${VAR}` references resolve from a name-matched env file (`local/gateway.env` for `local/gateway.toml`), then from the process environment. The gateway supports `include` for config inheritance - when configs use it, the full include chain is walked and all found env files are loaded, root values taking precedence.
-- Full schema: `crates/promptforge-gateway/design-gateway.md`
+- Full schema: `design/design-gateway.md`
 
 ## YAML Frontmatter
 
