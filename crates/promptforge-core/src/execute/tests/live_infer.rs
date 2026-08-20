@@ -374,3 +374,57 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
 
     assert_eq!(out, "false:final answer:3");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn h1_and_h2_prose_both_run_through_the_shared_block_loop() {
+    // One block loop serves both drivers: the live H1 prose and the H2
+    // section prose each reach the gateway exactly once, in source order.
+    let gateway = ScriptedGateway::start(vec![resp_text("h1 reply"), resp_text("h2 reply")]).await;
+    let source = "---\nname: shared-loop\ndescription: d\npromptforge: 1\n---\n\n\
+        # Shared Loop\n\n\
+        ```lua\n\
+        models.default('writer', 'A general model for tests')\n\
+        ```\n\n\
+        h1 prose turn\n\n\
+        ## Section Two\n\n\
+        h2 prose turn\n\n\
+        ```lua\n\
+        return reply\n\
+        ```\n";
+    let prompt = parse(source);
+    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
+        .expect("empty tool picker must build");
+    let models = test_model_catalog();
+    let out = super::super::run(
+        &prompt,
+        "",
+        ResolutionContext::new(&picker, &models),
+        &[],
+        &StoreRef::memory(),
+        to_config(gatewayed(gateway.addr())),
+    )
+    .await
+    .expect("H1 prose and H2 prose both run through the shared block loop");
+
+    assert_eq!(out, "h2 reply");
+    assert_eq!(
+        gateway.call_count(),
+        2,
+        "the H1 prose and the H2 prose each drive exactly one completion"
+    );
+    let requests = gateway.requests();
+    let first_prose = requests[0]["messages"][0]["content"]
+        .as_str()
+        .expect("the first request carries a user message");
+    let second_prose = requests[1]["messages"][0]["content"]
+        .as_str()
+        .expect("the second request carries a user message");
+    assert!(
+        first_prose.contains("h1 prose turn"),
+        "the first completion is the H1 prose: {first_prose}"
+    );
+    assert!(
+        second_prose.contains("h2 prose turn"),
+        "the second completion is the H2 prose: {second_prose}"
+    );
+}

@@ -9,8 +9,8 @@ use serde_json::Value;
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::execute::{
-    BlockWalkContext, ControlContext, SectionFlow, VmSeed, make_control_globals, setup_section_vm,
-    run_one_section_impl,
+    BlockRunMode, BlockWalkContext, ControlContext, SectionFlow, VmSeed, make_control_globals,
+    run_one_section_impl, setup_section_vm,
 };
 use crate::lua::{LuaFanoutResult, SectionVm};
 use crate::observe::{Observation, Observer, detail};
@@ -283,7 +283,9 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         match run_one_section_impl(
             &mut vm,
             &block_ctx,
-            worker,
+            &worker.name,
+            &worker.blocks,
+            BlockRunMode::Section,
             sys,
             inputs.last_reply.as_deref(),
             &mut client,
