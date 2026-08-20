@@ -239,6 +239,60 @@ Use the tool.\n\n\
 }
 
 #[tokio::test]
+async fn local_tool_alias_cannot_shadow_a_declared_tool() {
+    let tool = Arc::new(ScopedFixtureTool::new(
+        "concrete",
+        "canonical_wire",
+        "Concrete description.",
+    ));
+    let prompt = bound_with_tools(
+        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Test prompt\n\n```lua\n\
+tools.need('grab', 'capability')\n\
+models.default('writer', 'A general model for tests')\n```\n\n\
+## Only\n\n\
+```lua\n\
+tools.add_local('grab', 'Local grab', {}, function() return 'local' end)\n\
+```\n",
+        Vec::new(),
+    );
+
+    let error = run(
+        &prompt,
+        "",
+        &[tool as Arc<dyn Tool>],
+        &StoreRef::memory(),
+        silent(),
+    )
+    .await
+    .expect_err("a local alias must not shadow a declared tool");
+    assert!(
+        error
+            .to_string()
+            .contains("duplicates a declared tool alias"),
+        "the error must identify the declared-alias collision: {error}"
+    );
+}
+
+#[tokio::test]
+async fn local_tool_alias_cannot_be_registered_twice() {
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+# Test prompt\n\n\
+## Only\n\n\
+```lua\n\
+tools.add_local('grab', 'First grab', {}, function() return 'first' end)\n\
+tools.add_local('grab', 'Second grab', {}, function() return 'second' end)\n\
+```\n";
+    let error = run_offline(md)
+        .await
+        .expect_err("a local alias must not be registered twice");
+    assert!(
+        error.to_string().contains("is already registered"),
+        "the error must identify the duplicate local alias: {error}"
+    );
+}
+
+#[tokio::test]
 async fn tools_add_between_prose_blocks_takes_effect_on_the_second_block() {
     let gateway = ScriptedGateway::start(vec![
         resp_text("first"),
