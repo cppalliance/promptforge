@@ -309,31 +309,10 @@ pub(crate) async fn run_fanout_arms(
     let mut join_set: JoinSet<Result<(usize, LuaFanoutResult)>> = JoinSet::new();
     let mut replies: Vec<Option<LuaFanoutResult>> = vec![None; items.len()];
 
-    // Spawns arm `index`, pairing the shared inputs with that arm's own item.
-    // Concurrency is bounded by only ever having `ArmWindow`-approved arms
-    // resident in the `JoinSet`.
-    let spawn_arm = |index: usize, join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>| {
-        let payload = ArmPayload {
-            inputs: Arc::clone(&inputs),
-            item: items[index].clone(),
-            index,
-        };
-        join_set.spawn(run_one_arm(payload));
-    };
-
-    // Spawns every arm the window currently allows: seeds the initial window,
-    // then refills it as arms complete.
-    let fill_window =
-        |window: &mut ArmWindow, join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>| {
-            while let Some(index) = window.take_next() {
-                spawn_arm(index, join_set);
-            }
-        };
-
     // At most `fanout_concurrency` arms are resident at once: seed the initial
     // window, then schedule the next queued item whenever one completes.
     let mut window = ArmWindow::new(items.len(), ctx.limits.fanout_concurrency());
-    fill_window(&mut window, &mut join_set);
+    fill_window(&inputs, items, &mut window, &mut join_set);
 
     // Drop the unused sender clone so the debug channel can close when arms finish.
     drop(debug_tx);
@@ -352,26 +331,17 @@ pub(crate) async fn run_fanout_arms(
                 forward_debug(ctx, msg);
             }
             joined = join_set.join_next() => {
-                match joined {
-                    None => break,
-                    Some(Ok(Ok((index, reply)))) => {
-                        replies[index] = Some(reply);
-                        window.complete_one();
-                        fill_window(&mut window, &mut join_set);
-                    }
-                    Some(Ok(Err(error))) => {
-                        abort_fanout_arms(&mut join_set, ctx, &mut side_channels).await;
-                        return Err(error);
-                    }
-                    // A cancelled JoinError cannot reach this loop: the only
-                    // abort path (`abort_fanout_arms`) drains the JoinSet
-                    // before its caller returns.
-                    Some(Err(join_error)) => {
-                        abort_fanout_arms(&mut join_set, ctx, &mut side_channels).await;
-                        // Keep the structured JoinError as the error source; it is
-                        // only stringified at the Lua callback boundary.
-                        return Err(Error::FanoutArmJoin(join_error));
-                    }
+                if !handle_joined_arm(
+                    joined,
+                    &inputs,
+                    items,
+                    &mut window,
+                    &mut join_set,
+                    &mut replies,
+                    ctx,
+                    &mut side_channels,
+                ).await? {
+                    break;
                 }
             }
         }
@@ -392,6 +362,61 @@ pub(crate) async fn run_fanout_arms(
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(ordered)
+}
+
+/// Spawns every arm currently admitted by the concurrency window.
+fn fill_window(
+    inputs: &Arc<ArmInputs>,
+    items: &[serde_json::Value],
+    window: &mut ArmWindow,
+    join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>,
+) {
+    while let Some(index) = window.take_next() {
+        let payload = ArmPayload {
+            inputs: Arc::clone(inputs),
+            item: items[index].clone(),
+            index,
+        };
+        join_set.spawn(run_one_arm(payload));
+    }
+}
+
+/// Applies one join result, aborting and draining siblings on failure.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "join handling updates the scheduler state and preserves the shared abort path explicitly"
+)]
+async fn handle_joined_arm(
+    joined: Option<std::result::Result<Result<(usize, LuaFanoutResult)>, tokio::task::JoinError>>,
+    inputs: &Arc<ArmInputs>,
+    items: &[serde_json::Value],
+    window: &mut ArmWindow,
+    join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>,
+    replies: &mut [Option<LuaFanoutResult>],
+    ctx: &FanoutContext<'_>,
+    side_channels: &mut SideChannels,
+) -> Result<bool> {
+    match joined {
+        None => Ok(false),
+        Some(Ok(Ok((index, reply)))) => {
+            replies[index] = Some(reply);
+            window.complete_one();
+            fill_window(inputs, items, window, join_set);
+            Ok(true)
+        }
+        Some(Ok(Err(error))) => {
+            abort_fanout_arms(join_set, ctx, side_channels).await;
+            Err(error)
+        }
+        // A cancelled JoinError cannot reach this loop: the only abort path
+        // drains the JoinSet before its caller returns.
+        Some(Err(join_error)) => {
+            abort_fanout_arms(join_set, ctx, side_channels).await;
+            // Keep the structured JoinError as the error source; it is only
+            // stringified at the Lua callback boundary.
+            Err(Error::FanoutArmJoin(join_error))
+        }
+    }
 }
 
 /// Windowed fan-out scheduler state: never lets more than `concurrency` arms be
