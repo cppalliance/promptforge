@@ -1254,8 +1254,8 @@ fn jump_during_shared_replay_is_a_hard_error() {
         .expect("host APIs must install");
     vm.install_control_globals(
         &[],
-        |_, _| Err(Error::Lua("execute is not needed here".to_owned())),
-        |_, _| Err(Error::Lua("fanout is not needed here".to_owned())),
+        |_, _, _| Err(Error::Lua("execute is not needed here".to_owned())),
+        |_, _, _| Err(Error::Lua("fanout is not needed here".to_owned())),
         |_| {
             Err(Error::Lua(
                 "list_from_section is not needed here".to_owned(),
@@ -1880,6 +1880,70 @@ fn var_is_read_back() {
     assert_eq!(
         out.var.get("greeting").and_then(|v| v.as_str()),
         Some("hi bob")
+    );
+}
+
+#[test]
+fn var_guard_allows_json_data_and_reads_back() {
+    let out = run(
+        "var.n = 1\nvar.s = 'x'\nvar.t = { a = {1, 2} }\nvar.b = true",
+        "",
+    )
+    .expect("JSON data writes must pass the guard");
+    assert_eq!(
+        out.var,
+        json!({ "n": 1, "s": "x", "t": { "a": [1, 2] }, "b": true })
+    );
+}
+
+#[test]
+fn var_rejects_a_function_at_the_assigning_line() {
+    let error = run("var.f = function() end", "")
+        .expect_err("a function assigned into var must fail at the assigning line");
+    assert!(
+        error
+            .to_string()
+            .contains("var.f must be JSON data, got function"),
+        "error was {error}"
+    );
+}
+
+#[test]
+fn var_rejects_a_nested_function_at_the_assigning_line() {
+    let error = run("var.t = { f = function() end }", "")
+        .expect_err("a nested function must fail the deep check at the assigning line");
+    assert!(
+        error.to_string().contains("function"),
+        "the bridge error must name the offending type: {error}"
+    );
+}
+
+#[test]
+fn var_guard_error_is_catchable_at_the_assigning_line() {
+    // A pcall around the write catches the guard's error, proving the failure
+    // is raised by that statement rather than later at serialization. The
+    // caught value is mlua's error userdata, so stringify before matching.
+    let out = run(
+        "local ok, err = pcall(function() var.f = function() end end)\n\
+         assert(not ok, 'the write must fail')\n\
+         assert(tostring(err):match('must be JSON data'), tostring(err))\n\
+         var.kept = 'yes'\n\
+         return var.kept",
+        "",
+    )
+    .expect("the caught guard error must not fail the chunk");
+    assert_eq!(out.returned.as_deref(), Some("yes"));
+    assert_eq!(out.var.get("kept").and_then(|v| v.as_str()), Some("yes"));
+}
+
+#[test]
+fn reassigning_the_var_global_fails_read_back() {
+    // `var = 5` drops the guarded proxy from reach; read-back must reject it
+    // rather than silently roll the pre-reassignment data forward.
+    let error = run("var = 5", "").expect_err("reassigning the var global must fail at read-back");
+    assert!(
+        error.to_string().contains("`var` global was reassigned"),
+        "the error must name the reassignment: {error}"
     );
 }
 

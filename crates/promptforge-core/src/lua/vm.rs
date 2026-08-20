@@ -4,9 +4,10 @@ use super::{
     LuaSectionHandle, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook,
     ModelRuntime, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result,
     RuntimeResolution, StdLib, StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime,
-    Value, default_log_byte_budget, detail, harden, install_h2_models, install_h2_tools,
-    install_instruction_budget, install_log, install_lua_tool_calls, install_store_table,
-    install_tasks_table, install_untrusted, resolve_section_target, scalar_return, seal_sys,
+    Value, default_log_byte_budget, detail, guarded_var, harden, install_h2_models,
+    install_h2_tools, install_instruction_budget, install_log, install_lua_tool_calls,
+    install_store_table, install_tasks_table, install_untrusted, resolve_section_target,
+    scalar_return, seal_sys, var_to_json,
 };
 use crate::client::ToolSchema;
 
@@ -361,6 +362,10 @@ impl SectionVm {
 
     /// Installs host values while seeding `var` from an earlier VM.
     ///
+    /// The `var` global is a guarded proxy (see [`guarded_var`]): writes are
+    /// validated for JSON-representability at the assigning line, and the
+    /// hidden data table behind it is what [`var`](Self::var) reads back.
+    ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values cannot be bridged or were already
     /// injected.
@@ -389,10 +394,7 @@ impl SectionVm {
                 .map_err(|_| Error::Lua("sys live slot was poisoned".to_owned()))?;
             *live = Some(sys.clone());
         }
-        let var = match initial_var {
-            Some(value) => self.lua.to_value(value).map_err(Error::lua)?,
-            None => Value::Table(self.lua.create_table().map_err(Error::lua)?),
-        };
+        let var = guarded_var(&self.lua, initial_var)?;
         globals.raw_set("var", var).map_err(Error::lua)?;
         install_h2_tools(
             &self.lua,
@@ -456,7 +458,11 @@ impl SectionVm {
     /// their run context, so the closures stay valid across every chunk this
     /// VM runs without a live [`mlua::Scope`]. The `jump` closure captures a
     /// clone of the VM's jump slot; the slot is reset before each chunk and
-    /// read after it by the control-run path.
+    /// read after it by the control-run path. The `execute` and `fanout`
+    /// closures snapshot this VM's `var` at call time (reading the hidden
+    /// data table through the in-scope `&Lua`) and hand the JSON to their
+    /// callback, so a contained chain or arm seeds from a clone and its
+    /// writes never reach this VM.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if any global cannot be installed.
@@ -468,8 +474,8 @@ impl SectionVm {
         list_callback: L,
     ) -> Result<()>
     where
-        E: Fn(Value, Option<String>) -> std::result::Result<String, Error> + Send + 'static,
-        F: Fn(String, Vec<Json>) -> std::result::Result<Vec<LuaFanoutResult>, Error>
+        E: Fn(Value, Option<String>, Json) -> std::result::Result<String, Error> + Send + 'static,
+        F: Fn(String, Vec<Json>, Json) -> std::result::Result<Vec<LuaFanoutResult>, Error>
             + Send
             + 'static,
         L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
@@ -478,8 +484,9 @@ impl SectionVm {
         let globals = self.lua.globals();
         let execute_fn = self
             .lua
-            .create_function(move |_, (target, input): (Value, Option<String>)| {
-                execute_callback(target, input).map_err(mlua::Error::external)
+            .create_function(move |lua, (target, input): (Value, Option<String>)| {
+                let var = var_to_json(lua).map_err(mlua::Error::external)?;
+                execute_callback(target, input, var).map_err(mlua::Error::external)
             })
             .map_err(Error::lua)?;
         globals.raw_set("execute", execute_fn).map_err(Error::lua)?;
@@ -501,7 +508,8 @@ impl SectionVm {
             .create_function(move |lua, (worker, collection): (String, Value)| {
                 let items = crate::fanout::collection_to_items(lua, &collection)
                     .map_err(mlua::Error::external)?;
-                let replies = fanout_callback(worker, items).map_err(mlua::Error::external)?;
+                let var = var_to_json(lua).map_err(mlua::Error::external)?;
+                let replies = fanout_callback(worker, items, var).map_err(mlua::Error::external)?;
                 let table = lua.create_table_with_capacity(replies.len(), 0)?;
                 for (i, reply) in replies.into_iter().enumerate() {
                     table.raw_set(i + 1, reply)?;
@@ -694,7 +702,8 @@ impl SectionVm {
         result
     }
 
-    /// Returns the current `var` table as JSON.
+    /// Returns the current `var` table as JSON, read from the hidden data
+    /// table behind the guarded proxy (not the proxy, which stays empty).
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values have not been injected or `var`
@@ -718,8 +727,26 @@ impl SectionVm {
                 "section VM host values have not been injected".to_owned(),
             ));
         }
-        let value: Value = self.lua.globals().get("var").map_err(Error::lua)?;
-        self.lua.from_value(value).map_err(Error::lua)
+        var_to_json(&self.lua)
+    }
+
+    /// Reads a bare global for prose substitution: `None` when the global is
+    /// unset, its JSON form when set.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] when the global is a function, userdata, or
+    /// thread (bare globals in prose must be data), or when its value cannot
+    /// be represented as JSON.
+    pub(crate) fn global_json(&self, name: &str) -> Result<Option<Json>> {
+        let value: Value = self.lua.globals().get(name).map_err(Error::lua)?;
+        match value {
+            Value::Nil => Ok(None),
+            Value::Function(_) | Value::UserData(_) | Value::Thread(_) => Err(Error::Lua(format!(
+                "global `{name}` is a {}; bare globals in prose must be JSON data",
+                value.type_name()
+            ))),
+            other => Ok(Some(self.lua.from_value(other).map_err(Error::lua)?)),
+        }
     }
 
     /// Sets a string global in the VM, overwriting any existing value.
