@@ -3,9 +3,8 @@ use super::*;
 /// A backend whose `glob` ignores the pattern and always returns every path.
 ///
 /// If `StoreRef::glob` delegated matching to the backend it would return all
-/// paths unfiltered; the filtered results below prove `StoreRef` snapshots the
-/// keys and runs the matcher itself, outside the backend lock
-/// (AUDIT-MUTEX-EXPENSIVE).
+/// paths unfiltered; the filtered results below prove `StoreRef` applies the
+/// caller's pattern to the backend snapshot itself.
 struct GlobSpyStore {
     paths: Vec<String>,
 }
@@ -35,7 +34,7 @@ impl Store for GlobSpyStore {
 }
 
 #[test]
-fn glob_snapshots_and_matches_outside_the_lock() {
+fn glob_filters_backend_snapshot_with_caller_pattern() {
     let spy = GlobSpyStore {
         paths: vec![
             "src/a.rs".to_owned(),
@@ -44,8 +43,7 @@ fn glob_snapshots_and_matches_outside_the_lock() {
         ],
     };
     let store = StoreRef::new(Box::new(spy));
-    // The caller's real pattern is applied by `StoreRef` on the owned snapshot;
-    // the backend is only ever asked to enumerate via `**`.
+    // The caller's real pattern is applied by `StoreRef` to the backend result.
     let matched = store.glob("src/*.rs").expect("glob");
     assert_eq!(matched, vec!["src/a.rs".to_owned()]);
     let matched = store.glob("src/**/*.rs").expect("glob");
@@ -561,12 +559,27 @@ fn platform_unsafe_paths_are_rejected_before_dispatch() {
             other => panic!("expected InvalidPath for {path:?}, got {other:?}"),
         }
     }
-    // A path at the byte limit is fine; one byte over is rejected.
-    let long = format!("{}.txt", "a".repeat(path::MAX_STORE_PATH_BYTES));
+    // A path at the exact byte limit is accepted; one byte over is rejected.
+    let maximum = "a".repeat(path::MAX_STORE_PATH_BYTES);
+    store
+        .write(&maximum, "at-limit")
+        .expect("a 1024-byte path must be accepted");
     assert_eq!(
-        store.read(&long).expect_err("too long").kind(),
-        StoreErrorKind::InvalidPath
+        store.read(&maximum).expect("read at-limit path"),
+        "at-limit"
     );
+    let too_long = "a".repeat(path::MAX_STORE_PATH_BYTES + 1);
+    let error = store
+        .read(&too_long)
+        .expect_err("a 1025-byte path must be rejected");
+    assert_eq!(error.kind(), StoreErrorKind::InvalidPath);
+    assert!(matches!(
+        error,
+        StoreError::InvalidPath {
+            reason: PathReason::TooLong,
+            ..
+        }
+    ));
     // Names that merely contain a device substring are allowed.
     store
         .write("console.txt", "ok")
@@ -631,6 +644,10 @@ fn backend_ctor_classifies_and_hides_source() {
     assert_eq!(err.kind(), StoreErrorKind::Backend);
     assert!(err.path().is_none());
     assert!(std::error::Error::source(&err).is_some());
+    assert!(
+        !err.to_string().contains("disk gone"),
+        "Display must not expose the backend source: {err}"
+    );
 }
 
 #[test]

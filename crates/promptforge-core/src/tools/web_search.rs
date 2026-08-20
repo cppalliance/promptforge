@@ -687,6 +687,10 @@ mod tests {
                 body.get("safesearch").and_then(Value::as_str),
                 Some("strict")
             );
+            assert_eq!(
+                body.get("include_domains"),
+                Some(&serde_json::json!(["example.com"]))
+            );
             Json(serde_json::json!({ "results": [{ "url": "https://e.com" }] }))
         }
         let mock =

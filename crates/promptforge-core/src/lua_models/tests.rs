@@ -130,9 +130,11 @@ fn infer_options_absent_or_nil_are_accepted() {
 
 #[test]
 fn infer_options_reject_a_table_or_any_non_nil_value() {
+    let lua = Lua::new();
+    let table = Value::Table(lua.create_table().expect("create Lua table"));
     let boolean = Value::Boolean(true);
     let integer = Value::Integer(1);
-    for value in [&boolean, &integer] {
+    for value in [&table, &boolean, &integer] {
         let error = reject_infer_options(Some(value))
             .expect_err("a non-nil infer options argument must be rejected");
         assert!(
@@ -299,6 +301,14 @@ fn parse_single_alias_and_validate_alias_branches() {
     );
 
     assert!(validate_alias("Writer_1-x").is_ok());
+    assert!(
+        validate_alias(&format!("A{}", "2".repeat(63))).is_ok(),
+        "a 64-character alias must be accepted"
+    );
+    assert!(
+        validate_alias(&format!("A{}", "2".repeat(64))).is_err(),
+        "a 65-character alias must be rejected"
+    );
     assert!(validate_alias("").is_err(), "empty alias rejected");
     assert!(validate_alias("1abc").is_err(), "leading digit rejected");
     assert!(validate_alias("a b").is_err(), "space rejected");

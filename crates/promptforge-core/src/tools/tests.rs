@@ -109,6 +109,10 @@ fn tool_error_classifies_and_hides_source() {
 
     let sourced = ToolError::with_source("wrap", std::io::Error::other("cause"));
     assert!(std::error::Error::source(&sourced).is_some());
+    assert!(
+        !sourced.to_string().contains("cause"),
+        "Display must not expose the tool error source: {sourced}"
+    );
 }
 
 #[test]

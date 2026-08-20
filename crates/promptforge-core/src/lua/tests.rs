@@ -351,17 +351,50 @@ fn logs_are_correlated_and_ordered_across_chunks() {
     .expect("second chunk log must succeed");
     vm.teardown(recorder.as_ref(), "Gather");
 
-    let details = recorder
-        .records()
-        .into_iter()
-        .map(|(_, _, detail)| detail.to_string())
-        .collect::<Vec<_>>();
-    assert!(details.contains(&"Lua: prologue checkpoint".to_owned()));
-    assert!(details.contains(&"Lua: epilog checkpoint".to_owned()));
-    assert!(
-        !details
-            .iter()
-            .any(|detail| detail.contains("binding") || detail.contains("replay"))
+    assert_eq!(
+        recorder.records(),
+        [
+            (
+                EXECUTION.to_owned(),
+                "Gather".to_owned(),
+                detail::LUA_CHUNK_STARTED,
+            ),
+            (
+                EXECUTION.to_owned(),
+                "Gather".to_owned(),
+                Observation::Lua("prologue checkpoint".to_owned()),
+            ),
+            (
+                EXECUTION.to_owned(),
+                "Gather".to_owned(),
+                detail::LUA_CHUNK_SUCCEEDED,
+            ),
+            (
+                EXECUTION.to_owned(),
+                "Gather".to_owned(),
+                detail::LUA_CHUNK_STARTED,
+            ),
+            (
+                EXECUTION.to_owned(),
+                "Gather".to_owned(),
+                Observation::Lua("epilog checkpoint".to_owned()),
+            ),
+            (
+                EXECUTION.to_owned(),
+                "Gather".to_owned(),
+                detail::LUA_CHUNK_SUCCEEDED,
+            ),
+            (
+                EXECUTION.to_owned(),
+                "Gather".to_owned(),
+                detail::LUA_TEARDOWN_STARTED,
+            ),
+            (
+                EXECUTION.to_owned(),
+                "Gather".to_owned(),
+                detail::LUA_TEARDOWN_SUCCEEDED,
+            ),
+        ]
     );
 }
 
@@ -802,9 +835,15 @@ fn duplicate_alias_error_cannot_be_suppressed_with_lua_pcall() {
 #[test]
 fn binding_rejects_unknown_and_duplicate_always_aliases() {
     let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
-    for source in [
-        "tools.always('missing')",
-        "tools.need('search', 'one'); tools.always('search'); tools.always('search')",
+    for (source, expected) in [
+        (
+            "tools.always('missing')",
+            "tools.always alias \"missing\" was not declared by tools.need",
+        ),
+        (
+            "tools.need('search', 'one'); tools.always('search'); tools.always('search')",
+            "tools.always alias \"search\" was recorded more than once",
+        ),
     ] {
         let error = execute_live_tool_needs(
             &program(source),
@@ -815,16 +854,19 @@ fn binding_rejects_unknown_and_duplicate_always_aliases() {
         )
         .expect_err("invalid always declarations must fail");
         assert!(
-            error.to_string().contains("not declared")
-                || error.to_string().contains("more than once")
+            error.to_string().contains(expected),
+            "error must identify the rejected always declaration: {error}"
         );
     }
 }
 
 #[test]
 fn captured_bindings_do_not_execute_h1_source() {
-    let bindings =
-        fixture_bindings("tools.need('search', 'search the web'); tools.always('search')");
+    let bindings = fixture_bindings(
+        "h1_was_executed = true; \
+         tools.need('search', 'search the web'); \
+         tools.always('search')",
+    );
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("captured bindings must install without executing H1");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
