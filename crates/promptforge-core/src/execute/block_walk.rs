@@ -76,7 +76,9 @@ pub(crate) enum BlockRunMode<'a> {
 /// and rolls forward as prose produces text; `sys` arrives as the driver's
 /// JSON and is enriched in place with the model binding and each outcome's
 /// finish reason. Prose substitution resolves `{{ item }}` against
-/// `ctx.item`, which is `Some` only when the driver is a fanout arm.
+/// `ctx.item`, which is `Some` only when the driver is a fanout arm, and an
+/// unknown first path segment against the VM's bare globals via
+/// [`SectionVm::global_json`].
 ///
 /// The caller owns the teardown boundary: an error propagates without
 /// tearing the VM down, so the driver's single teardown covers every path.
@@ -188,6 +190,7 @@ pub(crate) async fn run_one_section_impl(
                             ctx.item,
                             &var,
                             &sys,
+                            &|name| vm.global_json(name),
                         )?;
                         if prose.trim().is_empty() {
                             continue;
@@ -284,6 +287,7 @@ pub(crate) async fn run_one_section_impl(
                             ctx.item,
                             &var,
                             &sys,
+                            &|name| vm.global_json(name),
                         )?;
                         if prose.trim().is_empty() {
                             continue;

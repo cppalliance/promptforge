@@ -2,15 +2,19 @@
 //!
 //! After a section's Lua prologue runs, the harness resolves `{{ path }}`
 //! placeholders in the prose before the model sees it. Lua source in the
-//! prologue and epilog is never substituted. Five namespaces are available:
+//! prologue and epilog is never substituted. Five sources are available:
 //! `args` (the single raw input string), `reply` (the previous section's model
 //! reply, nil in section 1), `item` (the current fanout arm's item value, nil
 //! outside arms), `var` (values the prologue wrote), and `sys`
-//! (runtime-provided metadata). Resolution is a single pass with no recursion:
+//! (runtime-provided metadata). An unknown first segment resolves as a bare
+//! global: a section-local Lua global (`x = 42` without `local`) read through
+//! a host-supplied lookup, with dotted paths indexing into its JSON form.
+//! Resolution is a single pass with no recursion:
 //! scalars render as strings, tables/arrays as JSON, and a missing path is a
 //! hard error. `{{ reply }}` when nil is a hard error. `{{ item }}` outside a
-//! fanout arm is a hard error. Substitution does no arithmetic - compute in
-//! Lua and reference the result.
+//! fanout arm is a hard error. A missing bare global, or one holding a
+//! function or userdata, is a hard error. Substitution does no arithmetic -
+//! compute in Lua and reference the result.
 //!
 //! # Escape grammar
 //!
@@ -39,7 +43,8 @@ pub(crate) enum SubstErrorKind {
     BadPath,
     /// A path segment was empty or whitespace-padded (`var.`, `var..x`).
     EmptySegment,
-    /// The leading namespace is not one of the five known roots.
+    /// The leading namespace is not one of the known roots and names no bare
+    /// global.
     UnknownNamespace,
     /// A scalar namespace (`args`/`reply`/`item`) was indexed like a table.
     NotATable,
@@ -51,7 +56,8 @@ pub(crate) enum SubstErrorKind {
     NilReply,
     /// `{{ item }}` was used outside a fanout arm.
     NilItem,
-    /// A table/array value failed to serialize to JSON.
+    /// A table/array value failed to serialize to JSON, or a bare global was
+    /// not JSON data.
     Serialize,
 }
 
@@ -132,20 +138,22 @@ pub(crate) fn render_item(item: &Value) -> String {
 }
 
 /// Resolve every `{{ path }}` in `prose` against `args`, `reply`, `item`,
-/// `var`, and `sys`.
+/// `var`, `sys`, and the section's bare globals.
 ///
 /// `var` and `sys` are JSON objects (`var` read back from the Lua prologue,
 /// `sys` built by the runtime). `reply` is the previous section's model
 /// reply text, or `None` in the first section. `item` is the current fanout
 /// arm's item value, or `None` outside arms; it renders per
-/// [`render_item`]. This function receives prose only and does not transform
-/// either compiled Lua phase.
+/// [`render_item`]. `globals` resolves a bare global by name: `Ok(None)`
+/// when unset, `Ok(Some(_))` with its JSON form when set. This function
+/// receives prose only and does not transform either compiled Lua phase.
 ///
 /// # Errors
 /// Returns [`Error::Substitution`](crate::Error::Substitution) for an unclosed
-/// `{{`, an unknown namespace, an empty or whitespace path segment, a missing
-/// key, a null value, `{{ reply }}` when `reply` is `None`, or `{{ item }}`
-/// when `item` is `None`.
+/// `{{`, an unknown namespace or missing bare global, an empty or whitespace
+/// path segment, a missing key, a null value, a non-JSON bare global,
+/// `{{ reply }}` when `reply` is `None`, or `{{ item }}` when `item` is
+/// `None`.
 pub(crate) fn substitute(
     prose: &str,
     args: &str,
@@ -153,8 +161,11 @@ pub(crate) fn substitute(
     item: Option<&Value>,
     var: &Value,
     sys: &Value,
+    globals: &dyn Fn(&str) -> Result<Option<Value>>,
 ) -> Result<String> {
-    Ok(substitute_inner(prose, args, reply, item, var, sys)?)
+    Ok(substitute_inner(
+        prose, args, reply, item, var, sys, globals,
+    )?)
 }
 
 fn substitute_inner(
@@ -164,6 +175,7 @@ fn substitute_inner(
     item: Option<&Value>,
     var: &Value,
     sys: &Value,
+    globals: &dyn Fn(&str) -> Result<Option<Value>>,
 ) -> SubstResult<String> {
     let mut out = String::with_capacity(prose.len());
     let bytes = prose.as_bytes();
@@ -190,7 +202,7 @@ fn substitute_inner(
                 )
             })?;
             let path = after[..end].trim();
-            out.push_str(&resolve(path, start, args, reply, item, var, sys)?);
+            out.push_str(&resolve(path, start, args, reply, item, var, sys, globals)?);
             i += 2 + end + 2;
             continue;
         }
@@ -204,6 +216,10 @@ fn substitute_inner(
 }
 
 /// Resolve a single `{{ }}` path to its rendered string.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the resolver keeps the path, its offset, and the five substitution sources explicit and linear"
+)]
 fn resolve(
     path: &str,
     offset: usize,
@@ -212,6 +228,7 @@ fn resolve(
     item: Option<&Value>,
     var: &Value,
     sys: &Value,
+    globals: &dyn Fn(&str) -> Result<Option<Value>>,
 ) -> SubstResult<String> {
     if path == "args" {
         return Ok(args.to_string());
@@ -235,14 +252,6 @@ fn resolve(
         });
     }
 
-    let Some((namespace, keys)) = path.split_once('.') else {
-        return Err(SubstitutionError::new(
-            SubstErrorKind::BadPath,
-            offset,
-            format!("bad path: {{{{ {} }}}}", path_preview(path)),
-        ));
-    };
-
     // Validate the complete segment grammar before any lookup: every segment
     // (namespace included) must be nonempty and free of leading or trailing
     // whitespace, so `var.`, `var..x`, and `var. .x` are rejected up front even
@@ -260,6 +269,14 @@ fn resolve(
         }
     }
 
+    let (namespace, keys) = match path.split_once('.') {
+        Some((namespace, keys)) => (namespace, Some(keys)),
+        None => (path, None),
+    };
+
+    // An unknown first segment resolves as a bare global: the host lookup
+    // reads the section-local Lua global and converts it to JSON.
+    let global_value;
     let root = match namespace {
         "var" => var,
         "sys" => sys,
@@ -271,27 +288,57 @@ fn resolve(
             ));
         }
         other => {
-            return Err(SubstitutionError::new(
-                SubstErrorKind::UnknownNamespace,
-                offset,
-                format!(
-                    "unknown namespace '{}' in {{{{ {} }}}}",
-                    path_preview(other),
-                    path_preview(path)
-                ),
-            ));
+            global_value = globals(other)
+                .map_err(|error| {
+                    SubstitutionError::with_source(
+                        SubstErrorKind::Serialize,
+                        offset,
+                        format!(
+                            "global '{}' in {{{{ {} }}}} is not JSON data",
+                            path_preview(other),
+                            path_preview(path)
+                        ),
+                        Box::new(error),
+                    )
+                })?
+                .ok_or_else(|| {
+                    SubstitutionError::new(
+                        SubstErrorKind::UnknownNamespace,
+                        offset,
+                        format!(
+                            "unknown namespace or global '{}' in {{{{ {} }}}}",
+                            path_preview(other),
+                            path_preview(path)
+                        ),
+                    )
+                })?;
+            &global_value
         }
     };
 
     let mut current = root;
-    for key in keys.split('.') {
-        current = current.get(key).ok_or_else(|| {
-            SubstitutionError::new(
-                SubstErrorKind::MissingKey,
+    match keys {
+        Some(keys) => {
+            for key in keys.split('.') {
+                current = current.get(key).ok_or_else(|| {
+                    SubstitutionError::new(
+                        SubstErrorKind::MissingKey,
+                        offset,
+                        format!("missing {{{{ {} }}}}", path_preview(path)),
+                    )
+                })?;
+            }
+        }
+        // A bare `var`/`sys` with no key stays an error; a bare global with
+        // no keys renders its whole JSON value.
+        None if matches!(namespace, "var" | "sys") => {
+            return Err(SubstitutionError::new(
+                SubstErrorKind::BadPath,
                 offset,
-                format!("missing {{{{ {} }}}}", path_preview(path)),
-            )
-        })?;
+                format!("bad path: {{{{ {} }}}}", path_preview(path)),
+            ));
+        }
+        None => {}
     }
     render(current, path, offset)
 }
@@ -349,17 +396,35 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// The lookup for prose with no section VM behind it: every bare-global
+    /// name comes back unset.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "the signature must match the globals-lookup callback type"
+    )]
+    fn no_globals(_: &str) -> Result<Option<Value>> {
+        Ok(None)
+    }
+
     fn run(prose: &str) -> Result<String> {
         let var = json!({ "kind": "library", "count": 3, "row": { "a": 1 } });
         let sys = json!({ "when": "2026-07-29T00:00:00Z", "id": 1 });
-        substitute(prose, "Acme Corp", None, None, &var, &sys)
+        substitute(prose, "Acme Corp", None, None, &var, &sys, &no_globals)
     }
 
     fn err_of(prose: &str) -> SubstitutionError {
         let var = json!({ "kind": "library", "row": { "a": 1 }, "arr": [1, 2] });
         let sys = json!({ "id": 1 });
-        substitute_inner(prose, "Acme Corp", Some("r"), Some(&json!("i")), &var, &sys)
-            .expect_err("expected substitution failure")
+        substitute_inner(
+            prose,
+            "Acme Corp",
+            Some("r"),
+            Some(&json!("i")),
+            &var,
+            &sys,
+            &no_globals,
+        )
+        .expect_err("expected substitution failure")
     }
 
     #[test]
@@ -454,7 +519,16 @@ mod tests {
         let sys = json!({});
         // `var.payload` renders text that looks like a placeholder; it must be
         // emitted verbatim, never resolved against args.
-        let out = substitute("value: {{ var.payload }}", "SECRET", None, None, &var, &sys).unwrap();
+        let out = substitute(
+            "value: {{ var.payload }}",
+            "SECRET",
+            None,
+            None,
+            &var,
+            &sys,
+            &no_globals,
+        )
+        .unwrap();
         assert_eq!(out, "value: {{ args }}");
     }
 
@@ -489,16 +563,91 @@ mod tests {
         assert!(e.to_string().contains("ghost.x"));
     }
 
+    // --- bare globals (section-local Lua globals in prose) -------------------
+
+    #[test]
+    fn bare_global_resolves_a_scalar() {
+        let var = json!({});
+        let sys = json!({});
+        let globals = |name: &str| Ok((name == "answer").then(|| json!(42)));
+        let out = substitute(
+            "the answer is {{ answer }}",
+            "",
+            None,
+            None,
+            &var,
+            &sys,
+            &globals,
+        )
+        .unwrap();
+        assert_eq!(out, "the answer is 42");
+    }
+
+    #[test]
+    fn bare_global_dotted_path_indexes_the_json() {
+        let var = json!({});
+        let sys = json!({});
+        let globals = |name: &str| Ok((name == "row").then(|| json!({ "a": { "b": 2 } })));
+        let out = substitute("cell {{ row.a.b }}", "", None, None, &var, &sys, &globals).unwrap();
+        assert_eq!(out, "cell 2");
+    }
+
+    #[test]
+    fn bare_global_table_renders_as_json() {
+        let var = json!({});
+        let sys = json!({});
+        let globals = |name: &str| Ok((name == "row").then(|| json!({ "a": 1 })));
+        let out = substitute("{{ row }}", "", None, None, &var, &sys, &globals).unwrap();
+        assert_eq!(out, "{\"a\":1}");
+    }
+
+    #[test]
+    fn missing_bare_global_is_unknown_namespace() {
+        let e = err_of("{{ ghost }}");
+        assert_eq!(e.kind, SubstErrorKind::UnknownNamespace);
+        assert!(e.to_string().contains("global 'ghost'"));
+    }
+
+    #[test]
+    fn non_json_bare_global_is_an_error() {
+        let var = json!({});
+        let sys = json!({});
+        let globals = |name: &str| {
+            assert_eq!(name, "f");
+            Err(crate::Error::Lua("global `f` is a function".to_owned()))
+        };
+        let e = substitute_inner("{{ f }}", "", None, None, &var, &sys, &globals).unwrap_err();
+        assert_eq!(e.kind, SubstErrorKind::Serialize);
+        assert!(e.to_string().contains("not JSON data"));
+        assert!(
+            std::error::Error::source(&e).is_some(),
+            "the lookup failure must be preserved as the source"
+        );
+    }
+
+    #[test]
+    fn bare_namespaces_still_require_a_key() {
+        // `{{ var }}` and `{{ sys }}` stay BadPath; only bare globals render
+        // whole values.
+        for prose in ["{{ var }}", "{{ sys }}"] {
+            let e = err_of(prose);
+            assert_eq!(e.kind, SubstErrorKind::BadPath, "path {prose:?}");
+        }
+    }
+
     #[test]
     fn null_value_and_reply_item_kinds() {
         let var = json!({ "n": Value::Null });
         let sys = json!({});
-        let e = substitute_inner("{{ var.n }}", "", None, None, &var, &sys).unwrap_err();
+        let e =
+            substitute_inner("{{ var.n }}", "", None, None, &var, &sys, &no_globals).unwrap_err();
         assert_eq!(e.kind, SubstErrorKind::NullValue);
 
-        let e = substitute_inner("{{ reply }}", "", None, None, &var, &sys).unwrap_err();
+        let e =
+            substitute_inner("{{ reply }}", "", None, None, &var, &sys, &no_globals).unwrap_err();
         assert_eq!(e.kind, SubstErrorKind::NilReply);
-        let e = substitute_inner("{{ item }}", "", None, None, &var, &sys).unwrap_err();
+        let e =
+            substitute_inner("{{ item }}", "", None, None, &var, &sys, &no_globals).unwrap_err();
         assert_eq!(e.kind, SubstErrorKind::NilItem);
     }
 
@@ -515,7 +664,7 @@ mod tests {
     fn array_renders_as_json() {
         let var = json!({ "arr": [1, 2, 3] });
         let sys = json!({});
-        let out = substitute("{{ var.arr }}", "", None, None, &var, &sys).unwrap();
+        let out = substitute("{{ var.arr }}", "", None, None, &var, &sys, &no_globals).unwrap();
         assert_eq!(out, "[1,2,3]");
     }
 
@@ -530,6 +679,7 @@ mod tests {
             None,
             &var,
             &sys,
+            &no_globals,
         )
         .unwrap();
         assert_eq!(out, "prev: model output");
@@ -539,8 +689,8 @@ mod tests {
     fn reply_nil_is_error() {
         let var = json!({});
         let sys = json!({});
-        let err =
-            substitute("{{ reply }}", "", None, None, &var, &sys).expect_err("nil reply must fail");
+        let err = substitute("{{ reply }}", "", None, None, &var, &sys, &no_globals)
+            .expect_err("nil reply must fail");
         assert!(
             err.to_string().contains("nil"),
             "error must mention nil: {err}"
@@ -551,8 +701,16 @@ mod tests {
     fn reply_dot_path_is_error() {
         let var = json!({});
         let sys = json!({});
-        let err = substitute("{{ reply.x }}", "", Some("text"), None, &var, &sys)
-            .expect_err("reply is a string, not a table");
+        let err = substitute(
+            "{{ reply.x }}",
+            "",
+            Some("text"),
+            None,
+            &var,
+            &sys,
+            &no_globals,
+        )
+        .expect_err("reply is a string, not a table");
         assert!(
             err.to_string().contains("not a table"),
             "error must say not a table: {err}"
@@ -570,6 +728,7 @@ mod tests {
             Some(&json!("the angle")),
             &var,
             &sys,
+            &no_globals,
         )
         .unwrap();
         assert_eq!(out, "topic: the angle");
@@ -579,8 +738,8 @@ mod tests {
     fn item_nil_is_error() {
         let var = json!({});
         let sys = json!({});
-        let err =
-            substitute("{{ item }}", "", None, None, &var, &sys).expect_err("nil item must fail");
+        let err = substitute("{{ item }}", "", None, None, &var, &sys, &no_globals)
+            .expect_err("nil item must fail");
         assert!(
             err.to_string().contains("nil"),
             "error must mention nil: {err}"
@@ -591,8 +750,16 @@ mod tests {
     fn item_dot_path_is_error() {
         let var = json!({});
         let sys = json!({});
-        let err = substitute("{{ item.x }}", "", None, Some(&json!("text")), &var, &sys)
-            .expect_err("item is a string, not a table");
+        let err = substitute(
+            "{{ item.x }}",
+            "",
+            None,
+            Some(&json!("text")),
+            &var,
+            &sys,
+            &no_globals,
+        )
+        .expect_err("item is a string, not a table");
         assert!(
             err.to_string().contains("not a table"),
             "error must say not a table: {err}"

@@ -1,5 +1,17 @@
 use super::{Error, Json, Lua, LuaSerdeExt, ModelBinding, Result, Value};
 
+/// The registry key holding the `var` proxy's hidden data table.
+///
+/// The registry is unreachable from sandboxed author code (no `debug`
+/// library), so only host code holding a `&Lua` can read or replace the data
+/// table behind the guarded global.
+const VAR_DATA_REGISTRY: &str = "promptforge.var_data";
+
+/// The registry key holding the `var` proxy table itself, so read-back can
+/// detect an author reassigning the global (`var = 5`), which would
+/// otherwise silently strand the hidden data table.
+const VAR_PROXY_REGISTRY: &str = "promptforge.var_proxy";
+
 /// Returns a copy of `sys` with the bound catalog model id under `"model"`.
 pub(crate) fn enrich_sys_model(sys: &Json, binding: &ModelBinding) -> Json {
     match sys {
@@ -87,4 +99,100 @@ pub(crate) fn seal_sys(lua: &Lua, sys: &Json) -> Result<mlua::Table> {
 
     proxy.set_metatable(Some(metatable));
     Ok(proxy)
+}
+
+/// Builds the guarded `var` global: an empty proxy table over a hidden data
+/// table.
+///
+/// The proxy is empty; reads go through `__index` against the data table, so
+/// present values surface directly and absent keys read as Lua nil.
+/// `__newindex` validates the assigned value for JSON-representability
+/// through the serde bridge - a function, userdata, or thread is rejected at
+/// the assigning line, and nested tables are deep-checked by the bridge -
+/// then writes through to the data table. `__metatable` is set so author
+/// code cannot replace the guard. The data table is stashed in the Lua
+/// registry (unreachable from sandboxed author code) and is the read-back
+/// source for [`var_to_json`]; the proxy never holds entries itself. The
+/// proxy is stashed alongside it so [`var_to_json`] can reject an author
+/// reassigning the `var` global instead of silently reading stale data.
+pub(crate) fn guarded_var(lua: &Lua, initial: Option<&Json>) -> Result<mlua::Table> {
+    let data = match initial {
+        Some(value) => match lua.to_value(value).map_err(Error::lua)? {
+            Value::Table(table) => table,
+            other => {
+                return Err(Error::Lua(format!(
+                    "var must seed from a JSON object, got {}",
+                    other.type_name()
+                )));
+            }
+        },
+        None => lua.create_table().map_err(Error::lua)?,
+    };
+
+    let proxy = lua.create_table().map_err(Error::lua)?;
+    let metatable = lua.create_table().map_err(Error::lua)?;
+    metatable.set("__index", data.clone()).map_err(Error::lua)?;
+
+    let write_data = data.clone();
+    let newindex = lua
+        .create_function(
+            move |lua, (_proxy, key, value): (Value, Value, Value)| -> mlua::Result<()> {
+                if let Value::Function(_) | Value::UserData(_) | Value::Thread(_) = value {
+                    let field = match &key {
+                        Value::String(name) => name.to_string_lossy(),
+                        other => format!("{other:?}"),
+                    };
+                    return Err(mlua::Error::runtime(format!(
+                        "var.{field} must be JSON data, got {}",
+                        value.type_name()
+                    )));
+                }
+                // Deep check: the serde bridge walks nested tables, so a
+                // function, userdata, or thread anywhere in the value fails
+                // here, at the assigning line, rather than at read-back.
+                lua.from_value::<Json>(value.clone())?;
+                write_data.raw_set(key, value)
+            },
+        )
+        .map_err(Error::lua)?;
+    metatable.set("__newindex", newindex).map_err(Error::lua)?;
+    metatable
+        .set("__metatable", "var is guarded")
+        .map_err(Error::lua)?;
+
+    proxy.set_metatable(Some(metatable));
+    // The named registry entries keep the data table alive and reachable for
+    // host read-back, and the proxy reachable for the reassignment check in
+    // `var_to_json`.
+    lua.set_named_registry_value(VAR_DATA_REGISTRY, data)
+        .map_err(Error::lua)?;
+    lua.set_named_registry_value(VAR_PROXY_REGISTRY, proxy.clone())
+        .map_err(Error::lua)?;
+    Ok(proxy)
+}
+
+/// Reads the hidden `var` data table back as JSON.
+///
+/// # Errors
+/// Returns [`Error::Lua`] if the data table is absent (host values were
+/// never injected), if the author reassigned the `var` global (the proxy is
+/// no longer reachable, so the hidden table no longer reflects it), or if
+/// the data cannot be represented as JSON.
+pub(crate) fn var_to_json(lua: &Lua) -> Result<Json> {
+    let proxy: mlua::Table = lua
+        .named_registry_value(VAR_PROXY_REGISTRY)
+        .map_err(Error::lua)?;
+    let current: Value = lua.globals().get("var").map_err(Error::lua)?;
+    match current {
+        Value::Table(ref table) if table.equals(&proxy).map_err(Error::lua)? => {}
+        _ => {
+            return Err(Error::Lua(
+                "the `var` global was reassigned; write `var.<field>` instead".to_owned(),
+            ));
+        }
+    }
+    let data: mlua::Table = lua
+        .named_registry_value(VAR_DATA_REGISTRY)
+        .map_err(Error::lua)?;
+    lua.from_value(Value::Table(data)).map_err(Error::lua)
 }

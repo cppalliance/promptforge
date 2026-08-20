@@ -8,9 +8,10 @@
 //! alias bindings (so a declared alias wins over a same-named shared global).
 //! Only the deltas live at the call site: the driver builds its own `sys`
 //! JSON (the walk's chain-position `id`; the arm's parent `id` plus
-//! `taskid`), picks the [`VmSeed`] (`initial_var` for the walk, the
-//! collection `item` for the arm), and parameterizes the shared
-//! control-global constructor with its own home slice, caller, and depth.
+//! `taskid`), picks the [`VmSeed`] (the walk's rolled-forward `var`; an arm
+//! adds its collection `item` to the caller's cloned `var`), and
+//! parameterizes the shared control-global constructor with its own home
+//! slice, caller, and depth.
 //!
 //! VM construction and the Lua limits install stay with the driver. A
 //! construction failure's handling differs (the walk propagates, the arm
@@ -32,15 +33,19 @@ use crate::store::StoreRef;
 use crate::{Error, Result};
 
 /// What a section VM is seeded with beyond the shared host contract.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum VmSeed<'a> {
-    /// A walked section: `var` carried in from an earlier VM (the top-level
-    /// H1 hand-off); `None` for a contained chain.
-    InitialVar(Option<&'a serde_json::Value>),
-    /// A fanout arm: the collection member, installed as the `item` global
-    /// after the host APIs so [`SectionVm::replay_shared`] - whose top-level
-    /// code may read `item` - sees it.
-    Item(&'a serde_json::Value),
+///
+/// Both fields install through the same serde bridge: `var` seeds the hidden
+/// data table behind the guarded `var` proxy, and `item` installs as the
+/// `item` global after the host APIs so [`SectionVm::replay_shared`] - whose
+/// top-level code may read `item` - sees it.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct VmSeed<'a> {
+    /// The walk's current `var`: rolled forward across sections on one walk,
+    /// cloned into an `execute` chain or a fanout arm; `None` seeds an empty
+    /// table.
+    pub(crate) var: Option<&'a serde_json::Value>,
+    /// The fanout arm's collection member; `None` outside an arm.
+    pub(crate) item: Option<&'a serde_json::Value>,
 }
 
 /// The borrowed inputs one section VM setup shares.
@@ -56,8 +61,8 @@ pub(crate) struct SectionVmSetup<'a> {
     pub(crate) store: &'a StoreRef,
     /// The model reply visible to this section's first prose.
     pub(crate) last_reply: Option<&'a str>,
-    /// The driver-specific seed: `initial_var` for the walk, `item` for an
-    /// arm.
+    /// The driver-specific seed: the walk's `var`, plus the collection
+    /// `item` for an arm.
     pub(crate) seed: VmSeed<'a>,
     /// The observer `Arc`: the persistent host APIs (`log`, `store`) capture
     /// it, and the shared-library replay reports through it.
@@ -74,7 +79,7 @@ pub(crate) struct SectionVmSetup<'a> {
 ///
 /// The sequence is fixed and shared: host injection carrying the driver's
 /// [`VmSeed`], [`SectionVm::install_host_apis`], the `item` global when the
-/// seed is [`VmSeed::Item`], [`SectionVm::install_control_globals`] with the
+/// seed carries one, [`SectionVm::install_control_globals`] with the
 /// callbacks the driver built from the shared `make_control_globals`
 /// constructor, [`SectionVm::replay_shared`], and
 /// [`SectionVm::install_captured_bindings`]. The caller applies the Lua
@@ -97,25 +102,27 @@ pub(crate) fn setup_section_vm<E, F, L>(
     list_callback: L,
 ) -> Result<()>
 where
-    E: Fn(LuaValue, Option<String>) -> std::result::Result<String, Error> + Send + 'static,
-    F: Fn(String, Vec<serde_json::Value>) -> std::result::Result<Vec<LuaFanoutResult>, Error>
+    E: Fn(LuaValue, Option<String>, serde_json::Value) -> std::result::Result<String, Error>
+        + Send
+        + 'static,
+    F: Fn(
+            String,
+            Vec<serde_json::Value>,
+            serde_json::Value,
+        ) -> std::result::Result<Vec<LuaFanoutResult>, Error>
         + Send
         + 'static,
     L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
 {
-    let (initial_var, item) = match setup.seed {
-        VmSeed::InitialVar(initial_var) => (initial_var, None),
-        VmSeed::Item(item) => (None, Some(item)),
-    };
     vm.inject_host_with_var(
         setup.args,
         setup.sys,
         setup.store,
         setup.last_reply,
-        initial_var,
+        setup.seed.var,
     )?;
     vm.install_host_apis(setup.observer_arc, setup.section_name)?;
-    if let Some(item) = item {
+    if let Some(item) = setup.seed.item {
         vm.set_global_json("item", item)?;
     }
     vm.install_control_globals(
