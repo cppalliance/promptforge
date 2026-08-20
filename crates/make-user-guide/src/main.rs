@@ -84,10 +84,11 @@ fn demote_headings(src: &str) -> String {
                 }
             }
             Some((ch, len)) => {
-                if let Some((close_ch, close_len)) = fence_marker(trimmed) {
-                    if close_ch == ch && close_len >= len {
-                        fence = None;
-                    }
+                if let Some((close_ch, close_len)) = fence_marker(trimmed)
+                    && close_ch == ch
+                    && close_len >= len
+                {
+                    fence = None;
                 }
             }
         }
@@ -113,12 +114,11 @@ fn workspace_root() -> PathBuf {
     let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     loop {
         let candidate = dir.join("Cargo.toml");
-        if candidate.exists() {
-            if let Ok(contents) = fs::read_to_string(&candidate) {
-                if contents.contains("[workspace]") {
-                    return dir;
-                }
-            }
+        if candidate.exists()
+            && let Ok(contents) = fs::read_to_string(&candidate)
+            && contents.contains("[workspace]")
+        {
+            return dir;
         }
         if !dir.pop() {
             eprintln!("error: could not find workspace root");
