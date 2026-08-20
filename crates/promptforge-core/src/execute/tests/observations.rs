@@ -2,6 +2,9 @@ use super::super::*;
 use super::run;
 use super::*;
 
+const FAILING_PROMPT: &str = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+## Only\n\n```lua\nerror('expected failure')\n```\n";
+
 #[tokio::test]
 async fn a_two_section_run_reports_the_exact_observation_sequence() {
     let (result, records) = run_recorded(TWO_SECTIONS).await;
@@ -100,10 +103,7 @@ async fn recording_and_null_observers_produce_the_same_result_and_store_state() 
         "observer choice must not change stored contents"
     );
 
-    let failing = fixture(
-        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-         ## Only\n\n```lua\nerror('expected failure')\n```\n",
-    );
+    let failing = fixture(FAILING_PROMPT);
     let sink = Arc::new(Recorder::default());
     let observed_error = run(
         &failing,
@@ -147,9 +147,7 @@ async fn a_run_refused_by_the_version_gate_reports_nothing() {
 async fn a_failing_run_still_reports_run_finished() {
     // The prologue fails, so the walk tears down its VM and the final
     // observation must report the run failure.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n```lua\nerror('expected failure')\n```\n";
-    let (result, records) = run_recorded(md).await;
+    let (result, records) = run_recorded(FAILING_PROMPT).await;
     assert!(matches!(
         result,
         Err(Error::Lua(_) | Error::LuaRuntime { .. })
@@ -193,9 +191,7 @@ async fn a_failing_run_still_reports_run_finished() {
 async fn an_erroring_section_reports_started_but_not_finished() {
     // The absence half of the section-boundary contract: a section that
     // errors mid-walk must emit SECTION_STARTED and never SECTION_FINISHED.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n```lua\nerror('expected failure')\n```\n";
-    let (result, records) = run_recorded(md).await;
+    let (result, records) = run_recorded(FAILING_PROMPT).await;
     assert!(result.is_err());
 
     let observed = events(&records);
@@ -295,10 +291,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
+            client: Some(gateway_client(addr)),
             debug: None,
         },
     )
@@ -343,10 +336,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
 async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     let gateway = ScriptedGateway::start(echo_then_text_script()).await;
     let addr = gateway.addr();
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
+    let client = gateway_client(addr);
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];

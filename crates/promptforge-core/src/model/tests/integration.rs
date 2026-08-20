@@ -2,26 +2,32 @@
 
 use super::*;
 
-#[test]
-fn models_need_resolves_and_use_selects_section_binding() {
+/// Compiles and resolves one live H1 declaration fixture.
+fn resolve_shared(source: &str) -> Result<(ToolBindings, ModelBindings)> {
     let shared = crate::lua::LuaProgram::compile(
-            r#"models.need("analyst", "careful analysis", { thinking = false, temperature = 0, context = 40000 })"#,
-            "shared",
-            NonZeroU32::new(1).expect("compile source line is non-zero"),
-            EXECUTION,
-            &NullObserver,
-            "Prompt",
-        )
-        .unwrap();
+        source,
+        "shared",
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
+        EXECUTION,
+        &NullObserver,
+        "Prompt",
+    )?;
     let tool_resolver =
         |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (tools, models) = resolve_live_declarations_for_test(
+    resolve_live_declarations_for_test(
         &shared,
         &tool_resolver,
         &fixture_resolver,
         EXECUTION,
         &NullObserver,
         "Prompt",
+    )
+}
+
+#[test]
+fn models_need_resolves_and_use_selects_section_binding() {
+    let (tools, models) = resolve_shared(
+        r#"models.need("analyst", "careful analysis", { thinking = false, temperature = 0, context = 40000 })"#,
     )
     .unwrap();
     assert_eq!(models.bindings()[0].id().name(), "analyst");
@@ -50,26 +56,7 @@ fn models_need_resolves_and_use_selects_section_binding() {
 
 #[test]
 fn no_models_use_or_always_leaves_section_unbound() {
-    let shared = crate::lua::LuaProgram::compile(
-        r#"models.need("analyst", "careful analysis")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (tools, models) = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
+    let (tools, models) = resolve_shared(r#"models.need("analyst", "careful analysis")"#).unwrap();
     let mut vm =
         section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
             .unwrap();
@@ -83,51 +70,15 @@ fn no_models_use_or_always_leaves_section_unbound() {
 
 #[test]
 fn constraint_filter_makes_need_absent() {
-    let shared = crate::lua::LuaProgram::compile(
-        r#"models.need("analyst", "careful analysis", { context = 200000 })"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let error = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap_err();
+    let error =
+        resolve_shared(r#"models.need("analyst", "careful analysis", { context = 200000 })"#)
+            .unwrap_err();
     assert!(matches!(error, Error::ModelAbsent { .. }));
 }
 
 #[test]
 fn undeclared_models_use_fails_loudly() {
-    let shared = crate::lua::LuaProgram::compile(
-        r#"models.need("analyst", "careful analysis")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (tools, models) = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
+    let (tools, models) = resolve_shared(r#"models.need("analyst", "careful analysis")"#).unwrap();
     let mut vm =
         section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
             .unwrap();

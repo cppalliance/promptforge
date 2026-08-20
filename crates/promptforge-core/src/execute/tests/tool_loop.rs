@@ -1,6 +1,32 @@
 use super::super::*;
 use super::*;
 
+/// Runs the standard echo fixture with the requested loop cap.
+async fn run_echo_loop(addr: SocketAddr, max_iterations: usize) -> Result<String> {
+    let client = gateway_client(addr);
+    let echo = EchoTool;
+    let tools: &[&dyn Tool] = &[&echo];
+    let schemas = schemas_for(tools);
+    let dispatch = dispatch_for(tools);
+    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+    let turns = AtomicU32::new(0);
+    let options = test_completion_options();
+    run_tool_loop(
+        &client,
+        &schemas,
+        &dispatch,
+        &registry,
+        "loop forever".to_string(),
+        max_iterations,
+        silent_progress(&turns, &options),
+        None,
+        None,
+        None,
+    )
+    .await
+    .map(|(text, _)| text)
+}
+
 #[tokio::test]
 async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     // A small explicit cap: the loop must make exactly that many round
@@ -8,34 +34,9 @@ async fn tool_loop_gives_up_after_exactly_the_configured_cap() {
     let cap = 3;
     let gateway =
         ScriptedGateway::start(vec![resp_tool_call("call_x", "echo", "{\"value\":\"x\"}")]).await;
-    let addr = gateway.addr();
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
-
-    let echo = EchoTool;
-    let tools: &[&dyn Tool] = &[&echo];
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
-
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let err = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        &registry,
-        "loop forever".to_string(),
-        cap,
-        silent_progress(&turns, &options),
-        None,
-        None,
-        None,
-    )
-    .await
-    .expect_err("a never-converging model should exhaust the loop");
+    let err = run_echo_loop(gateway.addr(), cap)
+        .await
+        .expect_err("a never-converging model should exhaust the loop");
     assert!(matches!(err, Error::ToolLoopExhausted));
     assert_eq!(
         gateway.call_count(),
@@ -50,34 +51,9 @@ async fn tool_loop_uses_the_default_cap_when_unspecified() {
     // prompt declares no budget) makes exactly that many round trips.
     let gateway =
         ScriptedGateway::start(vec![resp_tool_call("call_x", "echo", "{\"value\":\"x\"}")]).await;
-    let addr = gateway.addr();
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
-
-    let echo = EchoTool;
-    let tools: &[&dyn Tool] = &[&echo];
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
-
-    let turns = AtomicU32::new(0);
-    let options = test_completion_options();
-    let err = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        &registry,
-        "loop forever".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&turns, &options),
-        None,
-        None,
-        None,
-    )
-    .await
-    .expect_err("a never-converging model should exhaust the loop");
+    let err = run_echo_loop(gateway.addr(), DEFAULT_MAX_TOOL_ITERATIONS)
+        .await
+        .expect_err("a never-converging model should exhaust the loop");
     assert!(matches!(err, Error::ToolLoopExhausted));
     assert_eq!(gateway.call_count(), DEFAULT_MAX_TOOL_ITERATIONS);
     assert_eq!(DEFAULT_MAX_TOOL_ITERATIONS, 24);
@@ -113,10 +89,7 @@ async fn tool_loop_errors_on_unknown_tool() {
     let gateway =
         ScriptedGateway::start(vec![resp_tool_call("call_x", "echo", "{\"value\":\"x\"}")]).await;
     let addr = gateway.addr();
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
+    let client = gateway_client(addr);
 
     // Advertise schemas so the request carries tools, but pass no dispatch
     // targets, so the returned call resolves to no tool.
@@ -162,10 +135,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     let gateway =
         ScriptedGateway::start(vec![resp_tool_call("call_x", "echo", "{\"value\":\"x\"}")]).await;
     let addr = gateway.addr();
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
+    let client = gateway_client(addr);
 
     let failing = FailingTool;
     let tools: &[&dyn Tool] = &[&failing];

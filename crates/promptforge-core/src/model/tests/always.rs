@@ -2,21 +2,19 @@
 
 use super::*;
 
-#[test]
-fn models_always_records_binding() {
+/// Compiles and resolves one live H1 declaration fixture.
+fn resolve_shared(source: &str) -> Result<(ToolBindings, ModelBindings)> {
     let shared = crate::lua::LuaProgram::compile(
-        r#"models.need("writer", "A tiny model", { thinking = false, temperature = 0 })
-               models.default("writer")"#,
+        source,
         "shared",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
         &NullObserver,
         "Prompt",
-    )
-    .unwrap();
+    )?;
     let tool_resolver =
         |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (_tools, models) = resolve_live_declarations_for_test(
+    resolve_live_declarations_for_test(
         &shared,
         &tool_resolver,
         &fixture_resolver,
@@ -24,13 +22,21 @@ fn models_always_records_binding() {
         &NullObserver,
         "Prompt",
     )
+}
+
+#[test]
+fn models_always_records_binding() {
+    let (_tools, models) = resolve_shared(
+        r#"models.need("writer", "A tiny model", { thinking = false, temperature = 0 })
+               models.default("writer")"#,
+    )
     .unwrap();
     assert_eq!(models.default(), Some("writer"));
 }
 
 #[test]
 fn models_always_returns_inspectable_object() {
-    let shared = crate::lua::LuaProgram::compile(
+    let (tools, models) = resolve_shared(
         r#"local needed = models.need("writer", "A tiny model", {
                    thinking = false, temperature = 0, max_tokens = 256
                })
@@ -51,24 +57,8 @@ fn models_always_returns_inspectable_object() {
                assert(model.temperature == 0)
                assert(model.max_tokens == 256)
                assert(model.dialect == "openai")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
     )
     .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (tools, models) = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .expect("models.need/always must return an inspectable Model object");
     assert_eq!(models.default(), Some("writer"));
     assert_eq!(models.bindings()[0].context().get(), 8_192);
 
@@ -79,52 +69,17 @@ fn models_always_returns_inspectable_object() {
 
 #[test]
 fn models_always_without_prior_need_fails() {
-    let shared = crate::lua::LuaProgram::compile(
-        r#"models.default("writer")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let error = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap_err();
+    let error = resolve_shared(r#"models.default("writer")"#).unwrap_err();
     let msg = error.to_string();
     assert!(msg.contains("not declared"), "unexpected error: {msg}");
 }
 
 #[test]
 fn models_always_duplicate_fails() {
-    let shared = crate::lua::LuaProgram::compile(
+    let error = resolve_shared(
         r#"models.need("writer", "A tiny model")
                models.default("writer")
                models.default("writer")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let error = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
     )
     .unwrap_err();
     let msg = error.to_string();
@@ -133,25 +88,9 @@ fn models_always_duplicate_fails() {
 
 #[test]
 fn models_always_installs_exactly() {
-    let shared = crate::lua::LuaProgram::compile(
+    let (tools, models) = resolve_shared(
         r#"models.need("writer", "A tiny model")
                models.default("writer")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (tools, models) = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
     )
     .unwrap();
     let mut vm =
@@ -167,25 +106,9 @@ fn models_always_installs_exactly() {
 
 #[test]
 fn models_always_provides_completion_options_without_use() {
-    let shared = crate::lua::LuaProgram::compile(
+    let (tools, models) = resolve_shared(
         r#"models.need("writer", "A tiny model", { thinking = false, temperature = 0 })
                models.default("writer")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (tools, models) = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
     )
     .unwrap();
     let mut vm =
@@ -209,26 +132,7 @@ fn models_always_provides_completion_options_without_use() {
 
 #[test]
 fn models_always_from_h2_prologue_fails() {
-    let shared = crate::lua::LuaProgram::compile(
-        r#"models.need("writer", "A tiny model")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (tools, models) = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
+    let (tools, models) = resolve_shared(r#"models.need("writer", "A tiny model")"#).unwrap();
     let mut vm =
         section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
             .unwrap();
@@ -255,24 +159,8 @@ fn models_always_from_h2_prologue_fails() {
 
 #[test]
 fn models_always_multi_arg_records_need_and_always() {
-    let shared = crate::lua::LuaProgram::compile(
+    let (_tools, models) = resolve_shared(
         r#"models.default("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (_tools, models) = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
     )
     .unwrap();
     assert_eq!(models.default(), Some("writer"));
@@ -281,50 +169,15 @@ fn models_always_multi_arg_records_need_and_always() {
 
 #[test]
 fn models_always_multi_arg_two_args() {
-    let shared = crate::lua::LuaProgram::compile(
-        r#"models.default("writer", "A tiny model")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (_tools, models) = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
+    let (_tools, models) = resolve_shared(r#"models.default("writer", "A tiny model")"#).unwrap();
     assert_eq!(models.default(), Some("writer"));
     assert!(models.binding("writer").is_some());
 }
 
 #[test]
 fn models_always_multi_arg_provides_completion_options() {
-    let shared = crate::lua::LuaProgram::compile(
+    let (tools, models) = resolve_shared(
         r#"models.default("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (tools, models) = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
     )
     .unwrap();
     let mut vm =
@@ -348,26 +201,9 @@ fn models_always_multi_arg_provides_completion_options() {
 
 #[test]
 fn models_always_multi_arg_installs_exactly() {
-    let shared = crate::lua::LuaProgram::compile(
-        r#"models.default("writer", "A tiny model", { thinking = false })"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (tools, models) = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
+    let (tools, models) =
+        resolve_shared(r#"models.default("writer", "A tiny model", { thinking = false })"#)
+            .unwrap();
     let mut vm =
         section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
             .unwrap();
@@ -381,47 +217,17 @@ fn models_always_multi_arg_installs_exactly() {
 
 #[test]
 fn models_always_multi_arg_and_single_arg_cannot_both_be_called() {
-    let shared = crate::lua::LuaProgram::compile(
+    let (_tools, models) = resolve_shared(
         r#"models.need("analyst", "careful analysis")
                models.default("writer", "A tiny model")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let (_tools, models) = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
     )
     .unwrap();
     assert_eq!(models.default(), Some("writer"));
 
     // Now verify that a second always (single-arg) after multi-arg always fails.
-    let shared2 = crate::lua::LuaProgram::compile(
+    let error = resolve_shared(
         r#"models.default("writer", "A tiny model")
                models.default("writer")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let error = resolve_live_declarations_for_test(
-        &shared2,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
     )
     .unwrap_err();
     let msg = error.to_string();
@@ -430,25 +236,9 @@ fn models_always_multi_arg_and_single_arg_cannot_both_be_called() {
 
 #[test]
 fn models_always_multi_arg_duplicate_alias_fails() {
-    let shared = crate::lua::LuaProgram::compile(
+    let error = resolve_shared(
         r#"models.need("writer", "A tiny model")
                models.default("writer", "A tiny model")"#,
-        "shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
-    )
-    .unwrap();
-    let tool_resolver =
-        |_: &str| -> crate::Result<crate::tools::ToolId> { unreachable!("no tools") };
-    let error = resolve_live_declarations_for_test(
-        &shared,
-        &tool_resolver,
-        &fixture_resolver,
-        EXECUTION,
-        &NullObserver,
-        "Prompt",
     )
     .unwrap_err();
     let msg = error.to_string();
