@@ -10,6 +10,15 @@ pub(crate) struct BindingState {
     callback_error: Option<Error>,
 }
 
+impl BindingState {
+    /// Records the first concrete callback error, preserving its typed cause.
+    fn record_error(&mut self, error: Error) {
+        if self.callback_error.is_none() {
+            self.callback_error = Some(error);
+        }
+    }
+}
+
 /// Run-scoped accumulator populated by live H1 capability calls.
 ///
 /// The producer is installed into one H1 VM. Every executed `tools.need`,
@@ -122,9 +131,7 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                         let error = Error::DuplicateAlias {
                             alias: alias.clone(),
                         };
-                        if bindings.callback_error.is_none() {
-                            bindings.callback_error = Some(error);
-                        }
+                        bindings.record_error(error);
                         return Err(mlua::Error::external("duplicate tool alias"));
                     }
                 }
@@ -134,9 +141,7 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                         let mut bindings = needs.lock().map_err(|_| {
                             mlua::Error::external("tool binding recorder was poisoned")
                         })?;
-                        if bindings.callback_error.is_none() {
-                            bindings.callback_error = Some(error);
-                        }
+                        bindings.record_error(error);
                         return Err(mlua::Error::external("tool capability resolution failed"));
                     }
                 };
@@ -148,9 +153,7 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                     let mut bindings = needs
                         .lock()
                         .map_err(|_| mlua::Error::external("tool binding recorder was poisoned"))?;
-                    if bindings.callback_error.is_none() {
-                        bindings.callback_error = Some(error);
-                    }
+                    bindings.record_error(error);
                     return Err(mlua::Error::external("picked tool is not live"));
                 };
                 let handle = LuaToolHandle::from_live_binding(&alias, &description, tool);
@@ -168,9 +171,7 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                         first_alias: first,
                         second_alias: alias,
                     };
-                    if bindings.callback_error.is_none() {
-                        bindings.callback_error = Some(error);
-                    }
+                    bindings.record_error(error);
                     return Err(mlua::Error::external(
                         "tool identity was selected more than once",
                     ));
