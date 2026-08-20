@@ -51,8 +51,8 @@
 //! `tools` (the `model:infer` bag and hook), `tool_loop` (the model tool
 //! loop), `h1` (the live H1 pass), `section_vm` (the section VM setup half
 //! shared by the walk and the fanout arm), `block_walk` (the ordered block
-//! loop - the engine's walk half, shared by the walk and the fanout arm),
-//! `engine` (the section walkers),
+//! loop - the engine's walk half, shared by the live H1 pass, the walk, and
+//! the fanout arm), `engine` (the section walkers),
 //! and `support` (the sync/async bridge and shared helpers).
 
 mod block_walk;
@@ -82,7 +82,7 @@ pub use gateway::ResolutionContext;
 // only `run` below and stay module-private.
 // Re-exported so the split stays surface-neutral for the public API while
 // keeping one import path for internal collaborators.
-pub(crate) use block_walk::{BlockWalkContext, SectionFlow, run_one_section_impl};
+pub(crate) use block_walk::{BlockRunMode, BlockWalkContext, SectionFlow, run_one_section_impl};
 pub(crate) use engine::{ControlContext, make_control_globals};
 pub(crate) use scope::ToolAnalysis;
 pub(crate) use section_vm::{VmSeed, setup_section_vm};

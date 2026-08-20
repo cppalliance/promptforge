@@ -3,19 +3,18 @@
 
 use std::sync::Arc;
 
-use crate::lua::{SectionVm, ToolBinding, ToolBindings, ToolCallCounts};
+use crate::lua::{SectionVm, ToolBindings};
 use crate::model::ModelBindings;
-use crate::parser::{Block, Prompt};
+use crate::parser::Prompt;
 use crate::resolve::RuntimeResolution;
-use crate::subst;
 use crate::tools::ToolRegistry;
 use crate::{Error, Result};
 
+use super::block_walk::{BlockRunMode, BlockWalkContext, SectionFlow, run_one_section_impl};
 use super::engine::RunContext;
-use super::gateway::{GatewaySource, ResolutionContext, env_client_with_limits};
-use super::scope::prepare_scoped_tools;
+use super::gateway::{GatewaySource, ResolutionContext};
+use super::scope::ToolAnalysis;
 use super::support::{now_rfc3339_checked, sys_json};
-use super::tool_loop::{ProseMode, SectionProgress, run_prose_inference};
 use super::tools::attach_infer_hook;
 
 pub(crate) struct LiveH1State {
@@ -28,7 +27,7 @@ pub(crate) struct LiveH1State {
 
 #[expect(
     clippy::too_many_lines,
-    reason = "H1 mirrors the ordered section block walk as one linear pass"
+    reason = "the H1 shell is one linear pass: VM construction and limits, host setup, the infer hook, the shared block loop, and the state extraction"
 )]
 pub(crate) async fn execute_live_h1(
     prompt: &Prompt,
@@ -50,6 +49,10 @@ pub(crate) async fn execute_live_h1(
         turns,
     } = frame;
     let default_max_tool_iterations = limits.tool_iterations().get() as usize;
+    let max_tool_iterations = prompt
+        .frontmatter
+        .max_tool_iterations
+        .resolve(default_max_tool_iterations);
     let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models);
     let now = now_rfc3339_checked()?;
     let sys = sys_json(
@@ -77,7 +80,8 @@ pub(crate) async fn execute_live_h1(
     // The infer hook carries a lazy client source so a nested `model:infer`
     // surfaces a concrete construction error on first use instead of the setup
     // swallowing it (F5). `active_client` stays lazy for the direct H1 prose
-    // path below, which builds and propagates its own error via `h1_try!`.
+    // path, which the shared block loop builds and propagates its own error
+    // for via `h1_try!`.
     h1_try!(vm.install_host_apis(observer_arc, &prompt.title));
     let mut active_client = client.clone();
     attach_infer_hook(
@@ -88,121 +92,58 @@ pub(crate) async fn execute_live_h1(
         debug_arc.cloned(),
         execution,
         &prompt.title,
-        prompt
-            .frontmatter
-            .max_tool_iterations
-            .resolve(default_max_tool_iterations),
+        max_tool_iterations,
         turns,
         None,
         Some(runtime.producer()),
     );
 
-    let mut conversation = Vec::new();
-    let mut reply: Option<String> = None;
-    let mut returned = None;
-    for block in &prompt.h1_blocks {
-        match block {
-            Block::Lua(program) => {
-                if let Some(value) =
-                    h1_try!(vm.run_live_h1_block(program, &runtime, observer, &prompt.title))
-                {
-                    returned = Some(value);
-                    break;
-                }
-            }
-            Block::Prose { text, loop_capable } => {
-                let (tool_bindings, model_bindings) = h1_try!(runtime.bindings());
-                let Some(model) = model_bindings
-                    .default()
-                    .and_then(|alias| model_bindings.binding(alias))
-                else {
-                    vm.teardown(observer, &prompt.title);
-                    return Err(Error::ModelRequired {
-                        section: prompt.title.clone(),
-                    });
-                };
-                let mut scope: Vec<ToolBinding> = Vec::new();
-                for alias in tool_bindings.always() {
-                    if let Some(binding) = tool_bindings
-                        .bindings()
-                        .iter()
-                        .find(|binding| binding.alias() == alias)
-                    {
-                        scope.push(binding.clone());
-                    }
-                }
-                // H1 registers no local tools; the list is always empty here.
-                let (schemas, dispatch) = h1_try!(prepare_scoped_tools(
-                    &scope,
-                    &vm.local_tool_schemas(),
-                    registry
-                ));
-                let var = h1_try!(vm.var());
-                let prose = h1_try!(subst::substitute(
-                    text,
-                    args,
-                    reply.as_deref(),
-                    None,
-                    &var,
-                    &sys
-                ));
-                if prose.trim().is_empty() {
-                    continue;
-                }
-                if active_client.is_none() {
-                    active_client = Some(h1_try!(env_client_with_limits(limits)));
-                }
-                let Some(active_client) = active_client.as_ref() else {
-                    vm.teardown(observer, &prompt.title);
-                    return Err(Error::Lua(
-                        "gateway client was not initialized for H1 prose".to_owned(),
-                    ));
-                };
-                let counts =
-                    ToolCallCounts::new(scope.iter().map(|binding| binding.alias().to_owned()));
-                let mode = if *loop_capable {
-                    ProseMode::Loop {
-                        max_tool_iterations: prompt
-                            .frontmatter
-                            .max_tool_iterations
-                            .resolve(default_max_tool_iterations),
-                    }
-                } else {
-                    ProseMode::SingleShot
-                };
-                let completion_options = model.completion_options();
-                let outcome = h1_try!(
-                    run_prose_inference(
-                        active_client,
-                        &schemas,
-                        &dispatch,
-                        registry,
-                        &mut conversation,
-                        prose,
-                        mode,
-                        SectionProgress {
-                            execution,
-                            observer,
-                            section: &prompt.title,
-                            turns: turns.as_ref(),
-                            debug,
-                            completion_options: &completion_options,
-                        },
-                        Some(&counts),
-                        None,
-                        // H1 registers no local tools, so there is no local
-                        // dispatcher to thread through.
-                        None,
-                    )
-                    .await
-                );
-                if let Some(text) = outcome.text {
-                    h1_try!(vm.set_global_string("reply", &text));
-                    reply = Some(text);
-                }
-            }
+    // The ordered block loop is the shared one (`block_walk`) running in live
+    // H1 mode; this shell keeps only VM construction, limits, host setup, the
+    // infer hook, the state extraction, and the teardown boundary. The
+    // section-only context fields (frozen bindings, models, analysis) are
+    // never read in live mode, so the shell fills them with empty
+    // placeholders.
+    let bindings_placeholder = ToolBindings::default();
+    let models_placeholder = ModelBindings::from_parts(Vec::new(), None);
+    let analysis_placeholder = ToolAnalysis::default();
+    let block_ctx = BlockWalkContext {
+        args,
+        execution,
+        observer,
+        debug,
+        bindings: &bindings_placeholder,
+        models: &models_placeholder,
+        analysis: &analysis_placeholder,
+        shared_tools,
+        max_tool_iterations,
+        limits,
+        turns: turns.as_ref(),
+        item: None,
+    };
+    let flow = h1_try!(
+        run_one_section_impl(
+            &mut vm,
+            &block_ctx,
+            &prompt.title,
+            &prompt.h1_blocks,
+            BlockRunMode::LiveH1(&runtime),
+            sys,
+            None,
+            &mut active_client,
+        )
+        .await
+    );
+    let (returned, reply) = match flow {
+        SectionFlow::Returned(value) => (Some(value), None),
+        SectionFlow::FellThrough { reply } => (None, reply),
+        // `run_live_h1_block` turns a recorded jump into an error, so live
+        // mode never yields a jump flow.
+        SectionFlow::Jumped { .. } => {
+            vm.teardown(observer, &prompt.title);
+            return Err(Error::Internal("live H1 block walk reported a jump"));
         }
-    }
+    };
     let var = h1_try!(vm.var());
     let (bindings, models) = h1_try!(runtime.bindings());
     vm.teardown(observer, &prompt.title);

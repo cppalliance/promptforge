@@ -59,7 +59,7 @@ use crate::tools::SharedTools;
 use crate::{Error, Result};
 use mlua::Value as LuaValue;
 
-use super::block_walk::{BlockWalkContext, SectionFlow, run_one_section_impl};
+use super::block_walk::{BlockRunMode, BlockWalkContext, SectionFlow, run_one_section_impl};
 use super::config::RunLimits;
 use super::gateway::GatewaySource;
 use super::scope::ToolAnalysis;
@@ -473,8 +473,17 @@ async fn run_one_section(
     // exactly once, and SECTION_FINISHED fires only when the walk completed
     // (a jump or return included), never on an error.
     let walk_ctx = BlockWalkContext::from(ctx);
-    let result =
-        run_one_section_impl(&mut vm, &walk_ctx, section, sys, incoming_reply, client).await;
+    let result = run_one_section_impl(
+        &mut vm,
+        &walk_ctx,
+        &section.name,
+        &section.blocks,
+        BlockRunMode::Section,
+        sys,
+        incoming_reply,
+        client,
+    )
+    .await;
     vm.teardown(ctx.observer, &section.name);
     let flow = result?;
     ctx.observer
