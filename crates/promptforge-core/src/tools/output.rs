@@ -138,14 +138,18 @@ impl ToolError {
         }
     }
 
-    /// Builds a model-safe error that keeps `src` as a hidden `#[source]` cause.
+    /// Builds a model-safe backend error with `src` as a hidden `#[source]`.
+    ///
+    /// The initial kind is [`ToolErrorKind::Backend`]; use
+    /// [`ToolError::with_kind`] when the source represents another class.
     ///
     /// # Examples
     /// ```
-    /// use promptforge_core::tools::ToolError;
+    /// use promptforge_core::tools::{ToolError, ToolErrorKind};
     ///
     /// let io = std::io::Error::other("boom");
     /// let err = ToolError::with_source("backend failed", io);
+    /// assert_eq!(err.kind(), ToolErrorKind::Backend);
     /// assert!(std::error::Error::source(&err).is_some());
     /// ```
     #[must_use]

@@ -30,8 +30,8 @@ pub enum DialectErrorKind {
 /// [`ToolDialectRegistry::resolve`](crate::dialects::ToolDialectRegistry::resolve).
 ///
 /// Carries a stable [`kind`](DialectError::kind) classifier. `#[non_exhaustive]`
-/// and not constructible outside the crate; obtain one only from a failed
-/// resolve and inspect it through [`kind`](DialectError::kind) and
+/// with a private representation; callers obtain one from a failed resolve and
+/// inspect it through [`kind`](DialectError::kind) and
 /// [`Display`](std::fmt::Display).
 ///
 /// ```
