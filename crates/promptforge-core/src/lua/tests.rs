@@ -1356,6 +1356,42 @@ fn jump_during_shared_replay_is_a_hard_error() {
 }
 
 #[test]
+fn execute_with_a_non_string_target_errors() {
+    // The control callback resolves its target through the same
+    // `resolve_section_target` boundary as the engine: a number is not a
+    // heading, and the error says so.
+    let mut vm = SectionVm::new(EXECUTION, &NullObserver, "Test").expect("VM must build");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host values must inject");
+    let observer = null_observer();
+    vm.install_host_apis(&observer, "Test")
+        .expect("host APIs must install");
+    vm.install_control_globals(
+        |target, _, _| resolve_section_target(target).map_err(Error::lua),
+        |_, _, _| Err(Error::Lua("fanout is not needed here".to_owned())),
+        |_| {
+            Err(Error::Lua(
+                "list_from_section is not needed here".to_owned(),
+            ))
+        },
+    )
+    .expect("control globals must install");
+    let out = run_scalar(
+        &vm,
+        &program(
+            "local ok, err = pcall(execute, 42)\n\
+             assert(not ok and tostring(err):find('section target must be a string'), tostring(err))\n\
+             return 'ok'",
+        ),
+        &NullObserver,
+        "Test",
+    )
+    .expect("a non-string execute target must error");
+    assert_eq!(out.as_deref(), Some("ok"));
+    vm.teardown(&NullObserver, "Test");
+}
+
+#[test]
 fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
     // The `tools`/`models` tables install with host injection, before the
     // replay, so shared top-level code may scope tools at load. The bare

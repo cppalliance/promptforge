@@ -409,3 +409,35 @@ async fn h1_and_h2_prose_both_run_through_the_shared_block_loop() {
         "the second completion is the H2 prose: {second_prose}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one() {
+    // The H1 driver holds id 0 off the run-global counter, so the first
+    // walked section takes id 1.
+    let source = "---\nname: live-h1-sys-id\ndescription: d\npromptforge: 1\n---\n\n\
+        # Live H1 Sys Id\n\n\
+        ```lua\n\
+        assert(sys.id == 0, 'the live H1 chunk keeps sys.id 0')\n\
+        ```\n\n\
+        ## Result\n\n\
+        ```lua\n\
+        assert(sys.id == 1, 'the first walked section takes sys.id 1')\n\
+        return 'ok'\n\
+        ```\n";
+    let prompt = parse(source);
+    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
+        .expect("empty tool picker must build");
+    let models = test_model_catalog();
+    let out = super::super::run(
+        &prompt,
+        "",
+        ResolutionContext::new(&picker, &models),
+        &[],
+        &StoreRef::memory(),
+        to_config(silent()),
+    )
+    .await
+    .expect("the H1 chunk keeps id 0 and the first walked section takes id 1");
+
+    assert_eq!(out, "ok");
+}
