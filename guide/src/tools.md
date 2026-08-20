@@ -102,7 +102,7 @@ Handler rules:
 
 - Receives the arguments as a Lua table with the named fields; returns a string
 - Runs in the section's VM with access to `store`, `var`, and section globals (accumulator patterns work)
-- May call `execute()`, `fanout`, and `model:infer`
+- May call `execute()`, `fanout`, and the `infer` forms (`models.infer(prompt)`, `handle:infer(prompt)`)
 - Cannot call `jump()` - it is disabled for the duration of the call
 - Lua errors propagate as tool-call failures
 - Output is trusted: no nonce envelope, since the prompt author wrote the handler

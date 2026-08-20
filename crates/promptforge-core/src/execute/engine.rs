@@ -394,10 +394,10 @@ async fn run_one_section(
         return Err(error);
     }
 
-    // The infer hook carries a lazy client source (F5): a nested `model:infer`
-    // surfaces a concrete construction error on first use instead of the setup
-    // swallowing it. The direct prose path below still builds `client` and
-    // propagates its own error.
+    // The infer hook carries a lazy client source (F5): a nested
+    // `models.infer` or `handle:infer` surfaces a concrete construction error
+    // on first use instead of the setup swallowing it. The direct prose path
+    // below still builds `client` and propagates its own error.
     control.attach_infer_hook(&vm, client.clone(), &section.name);
 
     // The walk half - the ordered block loop - reports how the section

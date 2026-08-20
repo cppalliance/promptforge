@@ -179,7 +179,7 @@ end)
 
 The params table maps each parameter name to either a bare type string or a `{type, description}` array. Supported types are `"string"`, `"integer"`, `"number"`, and `"boolean"`. All declared parameters are required. The engine converts the table into the JSON Schema the model sees.
 
-The handler receives the arguments as a Lua table with the named fields and returns a string; Lua errors surface as tool-call failures. The handler shares the section's VM, so it can use `store`, `var`, and section globals, and it may call `execute()`, `fanout`, and `model:infer`. It cannot call `jump()` - `jump` is disabled for the duration of the call. Local tool output is trusted (no nonce envelope), since the prompt author wrote the handler. A local tool becomes visible to the model starting from the next prose block.
+The handler receives the arguments as a Lua table with the named fields and returns a string; Lua errors surface as tool-call failures. The handler shares the section's VM, so it can use `store`, `var`, and section globals, and it may call `execute()`, `fanout`, and the `infer` forms (`models.infer(prompt)`, `handle:infer(prompt)`). It cannot call `jump()` - `jump` is disabled for the duration of the call. Local tool output is trusted (no nonce envelope), since the prompt author wrote the handler. A local tool becomes visible to the model starting from the next prose block.
 
 ## Sandbox Constraints
 

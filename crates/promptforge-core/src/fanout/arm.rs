@@ -156,7 +156,8 @@ pub(crate) const FAIL_ARM_VM_SENTINEL: &str = "__fanout_test_fail_arm_vm__";
 /// proxy observer, the shared turns counter), installs the engine's real
 /// control globals resolved over the worker's visible set
 /// ([`make_control_globals`]), runs the setup half
-/// ([`setup_section_vm`]), installs the `model:infer` hook with a lazy client
+/// ([`setup_section_vm`]), installs the infer hook (`models.infer` /
+/// `handle:infer`) with a lazy client
 /// source, and drives the shared block walk ([`run_one_section_impl`]).
 ///
 /// A [`SectionFlow::Jumped`] transfers control rather than erroring: the
@@ -283,9 +284,9 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             list_callback,
         )?;
 
-        // The infer hook carries a lazy client source: a nested `model:infer`
-        // surfaces a concrete construction error on first use instead of the
-        // setup swallowing it.
+        // The infer hook carries a lazy client source: a nested
+        // `models.infer` or `handle:infer` surfaces a concrete construction
+        // error on first use instead of the setup swallowing it.
         control.attach_infer_hook(&vm, inputs.client.clone(), &worker.name);
 
         // The shared block walk: every Lua and prose block in order, the
