@@ -110,8 +110,12 @@ pub trait Store: Send {
 
     /// Removes the file at `path`.
     ///
+    /// Delete is idempotent: removing a file that does not exist succeeds, so
+    /// a caller never has to check [`Store::exists`] before deleting.
+    ///
     /// # Errors
-    /// Returns [`StoreError::NotFound`] if no file exists at `path`.
+    /// This operation does not fail for the in-memory backend; the return type
+    /// stays fallible for filesystem-backed backends.
     ///
     /// # Examples
     /// ```
@@ -121,6 +125,7 @@ pub trait Store: Send {
     /// fs.write("temp.txt", "scratch")?;
     /// fs.delete("temp.txt")?;
     /// assert!(fs.read("temp.txt").is_err());
+    /// fs.delete("temp.txt")?; // already gone; still Ok
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     fn delete(&mut self, path: &str) -> Result<(), StoreError>;
@@ -290,13 +295,9 @@ impl Store for MemStore {
     }
 
     fn delete(&mut self, path: &str) -> Result<(), StoreError> {
-        if self.files.remove(path).is_some() {
-            Ok(())
-        } else {
-            Err(StoreError::NotFound {
-                path: path.to_string(),
-            })
-        }
+        // Idempotent: an absent path is already in the post-delete state.
+        self.files.remove(path);
+        Ok(())
     }
 
     fn glob(&self, pattern: &str) -> Result<Vec<String>, StoreError> {

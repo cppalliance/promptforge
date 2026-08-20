@@ -178,9 +178,8 @@ impl Store for FileStore {
         let fs_path = self.resolve(path)?;
         match fs::remove_file(&fs_path) {
             Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(StoreError::NotFound {
-                path: path.to_owned(),
-            }),
+            // Idempotent delete: an absent file is already in the end state.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(StoreError::backend(e)),
         }
     }
@@ -279,10 +278,9 @@ mod tests {
     }
 
     #[test]
-    fn delete_missing_returns_not_found() {
+    fn delete_missing_is_silent() {
         let (_dir, mut store) = temp_store();
-        let err = store.delete("ghost.txt").expect_err("should error");
-        assert!(err.is_not_found());
+        store.delete("ghost.txt").expect("delete is idempotent");
     }
 
     #[test]

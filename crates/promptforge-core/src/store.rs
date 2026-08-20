@@ -392,8 +392,11 @@ impl StoreRef {
 
     /// Removes the file at `path`. See [`Store::delete`].
     ///
+    /// Delete is idempotent: a missing file is not an error.
+    ///
     /// # Errors
-    /// Returns [`StoreError::NotFound`] if no file exists at `path`.
+    /// Returns [`StoreError::InvalidPath`] if `path` fails validation, or any
+    /// [`StoreError`] the backend reports.
     ///
     /// # Examples
     /// ```
@@ -402,6 +405,7 @@ impl StoreRef {
     /// let store = StoreRef::memory();
     /// store.write("a.txt", "hi")?;
     /// store.delete("a.txt")?;
+    /// store.delete("a.txt")?; // already gone; still Ok
     /// # Ok::<(), promptforge_core::store::StoreError>(())
     /// ```
     pub fn delete(&self, path: &str) -> Result<(), StoreError> {
