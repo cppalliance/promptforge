@@ -22,8 +22,8 @@
 //!   `execute_depth` so the recursion cap holds across nesting.
 //!
 //! The engine parameterizes exactly the divergences the paths require: the
-//! `sys.id` index, the host-injection seed (`initial_var`), the
-//! `execute_depth`, and the cross-section reply carried in. Everything else
+//! `sys.id` index, the walk's `var` seed, the `execute_depth`, and the
+//! cross-section reply carried in. Everything else
 //! (the prose tool loop, scope validation, cancellation, teardown, and every
 //! observation) is shared, so a fix lands in one place for every path.
 //!
@@ -89,14 +89,15 @@ enum WalkEnd {
 /// and debug sink are carried only as their `Arc` forms; a use site that
 /// wants `&dyn Observer` / `&dyn DebugCapture` derefs in place.
 ///
-/// Two fields are driver-specific one-offs and stay `Option`: `item` is set
-/// only by a fanout arm, and `initial_var` only by the top-level walk. The
-/// walk-only fields (`shared` through `task_handles`) carry empty defaults
-/// while the live H1 pass runs - live mode never reads them - and the
-/// section walk rebuilds the frame with the live values H1 produced. The
-/// client is not in the frame: each driver owns its client slot (seeded from
-/// the run's client, created lazily on first prose), so it is threaded as a
-/// separate parameter.
+/// `item` is the one driver-specific one-off and stays `Option`: set only by
+/// a fanout arm. The walk-owned `var` is not in the frame: it rolls forward
+/// through `walk_siblings` as walk-local mutable state. The walk-only fields
+/// (`shared` through `task_handles`) carry empty defaults while the live H1
+/// pass runs - live mode never reads them - and the section walk rebuilds
+/// the frame with the live values H1 produced. The client is not in the
+/// frame: each driver owns its client slot (seeded from the run's client,
+/// created lazily on first prose), so it is threaded as a separate
+/// parameter.
 #[derive(Clone, Copy)]
 pub(crate) struct RunFrame<'a> {
     /// The run's argument string for `{{ args }}` substitution.
@@ -130,9 +131,6 @@ pub(crate) struct RunFrame<'a> {
     /// The run's top-level section count, reported as `sys.section_count`.
     pub(crate) section_count: usize,
     pub(crate) task_handles: &'a [LuaSectionHandle],
-    /// `var` seeded from an earlier VM (top-level H1 hand-off); `None` for a
-    /// contained chain.
-    pub(crate) initial_var: Option<&'a serde_json::Value>,
     /// The fanout arm's collection member for `{{ item }}` substitution;
     /// `None` outside a fanout arm.
     pub(crate) item: Option<&'a serde_json::Value>,
@@ -166,7 +164,6 @@ pub(super) async fn run_sections(
         analysis,
         when: &when,
         task_handles: &task_handles,
-        initial_var,
         ..*frame
     };
 
@@ -179,6 +176,11 @@ pub(super) async fn run_sections(
     // created lazily on first prose, and shared by every section.
     let mut client = client.cloned();
     let mut entered = 0usize;
+    // The walk owns its `var`: seeded from H1's hand-off, rolled forward
+    // across sections, and shared with jump-started child walks.
+    let mut var = initial_var
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
     match walk_siblings(
         &ctx,
         &control,
@@ -189,6 +191,7 @@ pub(super) async fn run_sections(
         0,
         &mut client,
         &mut entered,
+        &mut var,
     )
     .await?
     {
@@ -215,10 +218,12 @@ pub(super) async fn run_sections(
 /// jump or execute target), which runs even when marked off-walk.
 /// `execute_depth` is the chain's nesting depth, threaded into every section
 /// so nested `execute()` calls stay under the cap. `entered` counts the
-/// sections this chain has entered and seeds each `sys.id`.
+/// sections this chain has entered and seeds each `sys.id`. `var` is the
+/// walk's clipboard: each section's VM seeds from it, the section's final
+/// `var` replaces it, and a jump-started child walk shares the same value.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the chain keeps its shared contexts, position, entry mode, and depth explicit and linear"
+    reason = "the chain keeps its shared contexts, position, entry mode, depth, and walk-owned var explicit and linear"
 )]
 async fn walk_siblings(
     ctx: &RunFrame<'_>,
@@ -230,6 +235,7 @@ async fn walk_siblings(
     execute_depth: usize,
     client: &mut Option<GatewayClient>,
     entered: &mut usize,
+    var: &mut serde_json::Value,
 ) -> Result<WalkEnd> {
     let mut reply = incoming_reply;
     let mut index = start;
@@ -246,7 +252,7 @@ async fn walk_siblings(
         }
         addressed = false;
         *entered += 1;
-        match run_one_section(
+        let (flow, final_var) = run_one_section(
             ctx,
             control,
             section,
@@ -255,9 +261,11 @@ async fn walk_siblings(
             execute_depth,
             reply.as_deref(),
             client,
+            var,
         )
-        .await?
-        {
+        .await?;
+        *var = final_var;
+        match flow {
             SectionFlow::Jumped { heading, reply: r } => {
                 reply = r;
                 match resolve_jump_target(&heading, siblings, section)? {
@@ -274,6 +282,7 @@ async fn walk_siblings(
                         execute_depth,
                         client,
                         entered,
+                        var,
                     ))
                     .await?
                     {
@@ -312,11 +321,13 @@ async fn walk_siblings(
 /// `section_id` is the `sys.id` value and the nested-call parent id (the
 /// count of sections entered in this chain). `incoming_reply` is the
 /// model reply visible to this section's first prose; the engine rolls it
-/// forward as later prose in the same section produces text. The returned
-/// [`SectionFlow`] tells the chain how the section ended.
+/// forward as later prose in the same section produces text. `var` is the
+/// walk's current clipboard, seeded into the section's VM; the section's
+/// final `var` is read back before teardown and returned alongside the
+/// [`SectionFlow`] so the walk rolls it forward.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the engine keeps the shared contexts, the section's chain position, and its depth explicit and linear"
+    reason = "the engine keeps the shared contexts, the section's chain position, its depth, and the walk's var explicit and linear"
 )]
 async fn run_one_section(
     ctx: &RunFrame<'_>,
@@ -327,7 +338,8 @@ async fn run_one_section(
     execute_depth: usize,
     incoming_reply: Option<&str>,
     client: &mut Option<GatewayClient>,
-) -> Result<SectionFlow> {
+    var: &serde_json::Value,
+) -> Result<(SectionFlow, serde_json::Value)> {
     let sys = control.sys_json(section_id, &section.name)?;
 
     ctx.observer
@@ -366,7 +378,10 @@ async fn run_one_section(
     let setup = control.vm_setup(
         &sys,
         incoming_reply,
-        VmSeed::InitialVar(ctx.initial_var),
+        VmSeed {
+            var: Some(var),
+            item: None,
+        },
         &section.name,
     );
     if let Err(error) = setup_section_vm(
@@ -401,11 +416,22 @@ async fn run_one_section(
         client,
     )
     .await;
+    let flow = match result {
+        Ok(flow) => flow,
+        Err(error) => {
+            vm.teardown(ctx.observer.as_ref(), &section.name);
+            return Err(error);
+        }
+    };
+    // Read the section's final var back before teardown so the walk rolls it
+    // forward; the write guard keeps this conversion from failing in
+    // practice.
+    let final_var = vm.var();
     vm.teardown(ctx.observer.as_ref(), &section.name);
-    let flow = result?;
+    let final_var = final_var?;
     ctx.observer
         .observe(ctx.execution, &section.name, detail::SECTION_FINISHED);
-    Ok(flow)
+    Ok((flow, final_var))
 }
 
 fn section_handles(sections: &[Section]) -> Vec<LuaSectionHandle> {
@@ -656,8 +682,8 @@ impl ControlContext {
     /// The borrowed run frame derived from this owned context, so the field
     /// list lives in one place for both chain drivers. `args` is the only
     /// parameter: an `execute` call's explicit input overrides the run's
-    /// args. `initial_var` and `item` stay `None`; the fanout arm overlays
-    /// its own `item` on the returned frame.
+    /// args. `item` stays `None`; the fanout arm overlays its own `item` on
+    /// the returned frame.
     pub(crate) fn walk_context<'a>(&'a self, args: &'a str) -> RunFrame<'a> {
         RunFrame {
             args,
@@ -676,7 +702,6 @@ impl ControlContext {
             when: &self.when,
             section_count: self.section_count,
             task_handles: &self.task_handles,
-            initial_var: None,
             item: None,
         }
     }
@@ -685,8 +710,8 @@ impl ControlContext {
     /// [`walk_context`](Self::walk_context) so both borrowed-context
     /// derivations keep their field lists in one place. The fanout callback
     /// supplies only its own deltas: the client snapshot, the reply seed, the
-    /// arms' parent id, the worker's home slice, and the caller's execute
-    /// depth.
+    /// arms' parent id, the worker's home slice, the caller's execute depth,
+    /// and the caller's `var` snapshot each arm clones in.
     #[expect(
         clippy::ref_option,
         reason = "the FanoutContext it builds borrows the Option<GatewayClient> itself, matching the context's field type"
@@ -698,6 +723,7 @@ impl ControlContext {
         parent_id: usize,
         home: &'a [Section],
         execute_depth: usize,
+        var: &'a serde_json::Value,
     ) -> fanout::FanoutContext<'a> {
         fanout::FanoutContext {
             args: &self.args,
@@ -720,6 +746,7 @@ impl ControlContext {
             home,
             task_handles: &self.task_handles,
             execute_depth,
+            var,
         }
     }
 
@@ -794,12 +821,14 @@ impl ControlContext {
     /// target over the caller's visible set, walks the target's chain slice
     /// from its index under every normal rule (counting its own `sys.id`
     /// from 1), and maps the chain's end to its text - a return's value,
-    /// else the final reply. Both chain drivers call this one helper: the
-    /// `execute` callback bridges it synchronously, the fanout arm's jump
-    /// awaits it directly.
+    /// else the final reply. The chain seeds its `var` from `var` (a clone
+    /// of the caller's, taken at the call site) and discards it when the
+    /// chain ends, so the caller never sees the chain's writes. Both chain
+    /// drivers call this one helper: the `execute` callback bridges it
+    /// synchronously, the fanout arm's jump awaits it directly.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the chain drive keeps the caller, home slice, target, args, reply, depth, and client explicit and linear beside the shared control context"
+        reason = "the chain drive keeps the caller, home slice, target, args, reply, depth, client, and var clone explicit and linear beside the shared control context"
     )]
     pub(crate) async fn drive_contained_chain(
         self: &Arc<Self>,
@@ -810,6 +839,7 @@ impl ControlContext {
         incoming_reply: Option<String>,
         execute_depth: usize,
         client: &mut Option<GatewayClient>,
+        var: serde_json::Value,
     ) -> Result<String> {
         // The contained chain runs the target's own slice from the target's
         // index: a child target sits beside the caller's children, a sibling
@@ -820,6 +850,7 @@ impl ControlContext {
         };
         let ctx = self.walk_context(args);
         let mut entered = 0usize;
+        let mut var = var;
         let end = walk_siblings(
             &ctx,
             self,
@@ -830,6 +861,7 @@ impl ControlContext {
             execute_depth,
             client,
             &mut entered,
+            &mut var,
         )
         .await?;
         // A return ends the chain, and its value is the call's return; an
@@ -867,7 +899,11 @@ fn check_execute_depth(depth: usize, op: &str) -> Result<()> {
 /// passes it through so each arm runs one level deeper, keeping
 /// [`MAX_EXECUTE_DEPTH`] the only recursion constraint across both
 /// boundaries. `last_reply` seeds each arm's reply roll-forward; `parent_id`
-/// becomes the `sys.id` of the arms a `fanout` spawns.
+/// becomes the `sys.id` of the arms a `fanout` spawns. The `execute` and
+/// `fanout` closures receive the caller VM's `var` as a JSON snapshot taken
+/// at the call site (see [`SectionVm::install_control_globals`]): an
+/// `execute` chain seeds from that clone and discards it, and each fanout
+/// arm seeds from its own copy.
 #[expect(
     clippy::type_complexity,
     reason = "the triple of anonymous control-global closures is the product; a named struct cannot hold them without type_alias_impl_trait, and boxing would allocate per VM install"
@@ -885,8 +921,14 @@ pub(crate) fn make_control_globals(
     last_reply: Option<String>,
     parent_id: usize,
 ) -> (
-    impl Fn(LuaValue, Option<String>) -> std::result::Result<String, Error> + Send + use<>,
-    impl Fn(String, Vec<serde_json::Value>) -> std::result::Result<Vec<LuaFanoutResult>, Error>
+    impl Fn(LuaValue, Option<String>, serde_json::Value) -> std::result::Result<String, Error>
+    + Send
+    + use<>,
+    impl Fn(
+        String,
+        Vec<serde_json::Value>,
+        serde_json::Value,
+    ) -> std::result::Result<Vec<LuaFanoutResult>, Error>
     + Send
     + use<>,
     impl Fn(String) -> std::result::Result<Vec<String>, Error> + Send + use<>,
@@ -895,7 +937,10 @@ pub(crate) fn make_control_globals(
     let execute_callback = {
         let control = Arc::clone(control);
         let client = client.clone();
-        move |target: LuaValue, input: Option<String>| -> std::result::Result<String, Error> {
+        move |target: LuaValue,
+              input: Option<String>,
+              var: serde_json::Value|
+              -> std::result::Result<String, Error> {
             let heading = resolve_section_target(target).map_err(Error::lua)?;
             // Each execute chain runs one level deeper than its caller.
             let next_depth = execute_depth + 1;
@@ -915,6 +960,7 @@ pub(crate) fn make_control_globals(
                 None,
                 next_depth,
                 &mut client,
+                var,
             ))
         }
     };
@@ -924,10 +970,11 @@ pub(crate) fn make_control_globals(
         let control = Arc::clone(control);
         let client = client.clone();
         let visible = visible.clone();
-        move |worker_heading: String, items: Vec<serde_json::Value>| {
+        move |worker_heading: String, items: Vec<serde_json::Value>, var: serde_json::Value| {
             make_fanout_callback(
                 &worker_heading,
                 &items,
+                &var,
                 &visible,
                 &control,
                 &client,
@@ -963,6 +1010,7 @@ pub(crate) fn make_control_globals(
 fn make_fanout_callback(
     worker_heading: &str,
     items: &[serde_json::Value],
+    caller_var: &serde_json::Value,
     visible: &[Section],
     control: &ControlContext,
     client: &Option<GatewayClient>,
@@ -987,7 +1035,14 @@ fn make_fanout_callback(
     // control globals derive their resolution set from it (the home slice
     // plus the worker's children), so the arm never inverts this layout.
     let worker_home = home_without(visible, worker);
-    let ctx = control.fanout_context(client, last_reply, parent_id, &worker_home, execute_depth);
+    let ctx = control.fanout_context(
+        client,
+        last_reply,
+        parent_id,
+        &worker_home,
+        execute_depth,
+        caller_var,
+    );
 
     // The collection was converted to JSON member-by-member at the Lua
     // boundary (the same bridge `var` uses); the cap inside counts members.

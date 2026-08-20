@@ -1941,10 +1941,11 @@ assert(item == 'alpha')\n\
     assert_eq!(out, "prior-reply");
 }
 
-/// The arm's `var` starts as a fresh table: the top-level H1 hand-off seeds
-/// the walk's sections, never an arm.
+/// Each fanout arm seeds `var` from a fresh clone of the caller's `var` (the
+/// walk's H1-seeded value), so an arm reads the caller's entries but sibling
+/// and caller writes never cross arm boundaries.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn arm_var_is_fresh_not_the_h1_handoff() {
+async fn fanout_arms_get_fresh_var_clones() {
     let md = flow_prompt!(
         "\
 # Test prompt\n\n\
@@ -1953,21 +1954,166 @@ var.from_h1 = 'seeded'\n\
 ```\n\n\
 ## Parent\n\n\
 ```lua\n\
-local r = fanout('### Worker', list_from_section('### Items'))\n\
-return r[1].text\n\
+local r = fanout('### Worker', {'a', 'b'})\n\
+assert(var.a == nil and var.b == nil, 'arm writes must not reach the caller')\n\
+return r[1].text .. r[2].text\n\
 ```\n\n\
 ### Worker\n\n\
 ```lua\n\
-assert(var.from_h1 == nil, 'an arm var must start fresh')\n\
+assert(var.from_h1 == 'seeded', 'an arm var clones the caller var in')\n\
+local sibling = item == 'a' and 'b' or 'a'\n\
+assert(var[sibling] == nil, 'each arm gets a fresh clone')\n\
+var[item] = true\n\
 return item\n\
-```\n\n\
-### Items\n\n\
-- alpha\n"
+```\n"
     );
     let out = run_offline(md)
         .await
-        .expect("the arm runs with a fresh var");
-    assert_eq!(out, "alpha");
+        .expect("each arm must get a fresh var clone");
+    assert_eq!(out, "ab");
+}
+
+/// `var` is the walk's clipboard: H1's writes seed the top-level walk, and
+/// one section's writes reach the next across both fall-through and a jump.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn var_persists_across_sections_fallthrough_and_jump() {
+    let md = flow_prompt!(
+        "\
+# Test prompt\n\n\
+```lua\n\
+var.from_h1 = 'seed'\n\
+```\n\n\
+## A\n\n\
+```lua\n\
+assert(var.from_h1 == 'seed', 'H1 var writes must reach the first H2 section')\n\
+var.from_a = 'a'\n\
+jump('## C')\n\
+```\n\n\
+## B\n\n\
+```lua\n\
+error('the jump must skip B')\n\
+```\n\n\
+## C\n\n\
+```lua\n\
+assert(var.from_h1 == 'seed', 'the jump shares the walk var')\n\
+assert(var.from_a == 'a', 'the jump carries the jumper writes')\n\
+var.from_c = 'c'\n\
+```\n\n\
+## D\n\n\
+```lua\n\
+assert(var.from_c == 'c', 'fall-through after the jumped target keeps var')\n\
+return var.from_h1 .. var.from_a .. var.from_c\n\
+```\n"
+    );
+    let out = run_offline(md)
+        .await
+        .expect("var must persist across the walk");
+    assert_eq!(out, "seedac");
+}
+
+/// `execute` clones the caller's `var` in: the contained chain reads the
+/// clone, and its writes are discarded when the chain ends.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn execute_clones_var_in_and_discards_child_writes() {
+    let md = flow_prompt!(
+        "\
+## Main\n\n\
+```lua\n\
+var.shared = 'caller'\n\
+local r = execute('## Sub')\n\
+assert(r == 'sub saw caller', 'the child reads the cloned var')\n\
+assert(var.child_write == nil, 'child writes must not reach the caller')\n\
+return 'ok'\n\
+```\n\n\
+## Sub\n\n\
+```lua\n\
+var.child_write = 'sub'\n\
+return 'sub saw ' .. var.shared\n\
+```\n"
+    );
+    let out = run_offline(md)
+        .await
+        .expect("execute must clone var in and discard child writes");
+    assert_eq!(out, "ok");
+}
+
+/// The `var` write guard turns a non-JSON assignment into a run failure at
+/// the assigning line (the lua module tests pin the guard's messages).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn var_write_of_a_function_fails_the_run() {
+    let md = flow_prompt!(
+        "\
+## Only\n\n\
+```lua\n\
+var.f = function() end\n\
+```\n"
+    );
+    let error = run_offline(md)
+        .await
+        .expect_err("a function assigned into var must fail the run");
+    let rendered = format!("{error:?}");
+    assert!(
+        rendered.contains("var.f must be JSON data, got function"),
+        "the guard error must name the field and the type: {rendered}"
+    );
+}
+
+/// A bare global (`x = 42` without `local`) resolves in prose, with dotted
+/// paths indexing into a table global and a whole table rendering as JSON.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bare_global_resolves_in_prose() {
+    let gateway = ScriptedGateway::start(vec![resp_text("done")]).await;
+    let addr = gateway.addr();
+    let md = flow_prompt!(
+        "\
+## Only\n\n\
+```lua\n\
+answer = 42\n\
+data = { score = 9 }\n\
+```\n\n\
+The answer is {{ answer }}; score {{ data.score }}; raw {{ data }}.\n"
+    );
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        gatewayed(addr),
+    )
+    .await
+    .expect("a bare global must resolve in prose");
+    assert_eq!(out, "done");
+    let bodies = gateway.requests();
+    let content = bodies[0]["messages"]
+        .as_array()
+        .expect("messages array")
+        .last()
+        .expect("a user turn")["content"]
+        .as_str()
+        .expect("content string");
+    assert!(
+        content.contains("The answer is 42; score 9; raw {\"score\":9}."),
+        "prose must substitute the bare globals: {content}"
+    );
+}
+
+/// A `{{ }}` path whose first segment names no known namespace and no bare
+/// global is a hard substitution error.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn missing_bare_global_in_prose_errors() {
+    let md = flow_prompt!(
+        "\
+## Only\n\n\
+{{ ghost }} here.\n"
+    );
+    let error = run_offline(md)
+        .await
+        .expect_err("a missing bare global must fail substitution");
+    let rendered = format!("{error:?}");
+    assert!(
+        rendered.contains("unknown namespace or global 'ghost'"),
+        "the error must name the missing global: {rendered}"
+    );
 }
 
 /// The H1 VM never gets the control globals, so `list_from_section` is nil

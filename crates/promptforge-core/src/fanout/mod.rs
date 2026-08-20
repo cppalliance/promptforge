@@ -8,7 +8,8 @@
 //! A list section's pre-parsed items feed in through `list_from_section`:
 //! `fanout("### Worker", list_from_section("### List"))`. Arms execute
 //! concurrently on a [`tokio::task::JoinSet`]; each gets a fresh [`SectionVm`]
-//! with `item` and `sys.taskid` injected and runs the same engine the section
+//! with `item` and `sys.taskid` injected and `var` cloned in from the caller
+//! (arm writes never reach the caller), and runs the same engine the section
 //! walk drives: the shared VM setup, the `model:infer` hook, and the ordered
 //! block walk (every Lua and prose block in order, the conversation and reply
 //! rolling forward, the tool scope rebuilt per prose block, a gateway client
@@ -239,6 +240,9 @@ pub(crate) struct FanoutContext<'a> {
     /// The fanout caller's execute depth. Each arm runs one level deeper, so
     /// recursion accounting accumulates across the fanout boundary.
     pub execute_depth: usize,
+    /// The fanout caller's `var`, snapshotted at the call site: each arm
+    /// seeds from its own clone, and arm writes never reach the caller.
+    pub var: &'a serde_json::Value,
 }
 
 /// Runs the worker section template once per item, concurrently.

@@ -345,6 +345,7 @@ struct FanoutFixture {
     shared_tools: SharedTools,
     client: Option<GatewayClient>,
     shared: LuaProgram,
+    var: serde_json::Value,
 }
 
 impl FanoutFixture {
@@ -357,6 +358,7 @@ impl FanoutFixture {
             shared_tools: SharedTools::default(),
             client: None,
             shared: LuaProgram::empty().expect("the empty chunk compiles"),
+            var: json!({}),
         }
     }
 
@@ -387,6 +389,7 @@ impl FanoutFixture {
             home: &[],
             task_handles: &[],
             execute_depth: 0,
+            var: &self.var,
         }
     }
 }
