@@ -82,7 +82,7 @@ pub use gateway::ResolutionContext;
 // only `run` below and stay module-private.
 // Re-exported so the split stays surface-neutral for the public API while
 // keeping one import path for internal collaborators.
-pub(crate) use block_walk::{BlockWalkContext, SectionFlow, walk_section_blocks};
+pub(crate) use block_walk::{BlockWalkContext, SectionFlow, run_one_section_impl};
 pub(crate) use engine::{ControlContext, make_control_globals};
 pub(crate) use scope::ToolAnalysis;
 pub(crate) use section_vm::{VmSeed, setup_section_vm};
