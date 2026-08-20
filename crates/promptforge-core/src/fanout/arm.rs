@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::execute::{
-    BlockRunMode, ControlContext, RunFrame, SectionFlow, VmSeed, make_control_globals,
+    BlockRunMode, ControlContext, RunFrame, SectionFlow, VmSeed, make_control_globals, next_id,
     run_one_section_impl, setup_section_vm,
 };
 use crate::lua::{LuaFanoutResult, SectionVm};
@@ -46,7 +46,6 @@ pub(crate) struct ArmInputs {
     /// The arm's execute depth: the fanout caller's depth plus one, so
     /// recursion accounting accumulates across the fanout boundary.
     pub(crate) execute_depth: usize,
-    pub(crate) parent_id: usize,
     /// Explicit cancellation handle carried across the spawn boundary, since a
     /// spawned arm does not inherit the parent task-local (PF-CANCEL-002).
     pub(crate) cancel: Option<cancel::CancelHandle>,
@@ -73,7 +72,6 @@ impl ArmInputs {
             last_reply: ctx.last_reply.map(str::to_owned),
             var: ctx.var.clone(),
             execute_depth: ctx.execute_depth + 1,
-            parent_id: ctx.parent_id,
             cancel,
         }
     }
@@ -146,8 +144,9 @@ pub(crate) const FAIL_ARM_VM_SENTINEL: &str = "__fanout_test_fail_arm_vm__";
 /// Runs one fanout arm to completion.
 ///
 /// The arm is a thin adapter over the shared engine: the body builds the
-/// engine's inputs from the payload (the `sys` JSON carrying `taskid` and the
-/// parent section's `id`, the caller's cloned `var`, the `item` seed, the
+/// engine's inputs from the payload (the `sys` JSON carrying the arm's
+/// run-global `id` and its per-fanout `index`, the caller's cloned `var`,
+/// the `item` seed, the
 /// proxy observer, the shared turns counter), installs the engine's real
 /// control globals resolved over the worker's visible set
 /// ([`make_control_globals`]), runs the setup half
@@ -158,7 +157,8 @@ pub(crate) const FAIL_ARM_VM_SENTINEL: &str = "__fanout_test_fail_arm_vm__";
 /// arm's remaining blocks are skipped and a child walk runs from the target
 /// under the engine's chain-slice rule (a child target walks the worker's
 /// children; any other visible target walks the worker's home slice),
-/// counting its own `sys.id` from 1 like a contained `execute` chain. The
+/// each entry taking the next run-global `sys.id` like a contained
+/// `execute` chain. The
 /// arm's result text is the child walk's returned value or final reply.
 /// [`SectionFlow::Returned`] and [`SectionFlow::FellThrough`] map to
 /// [`LuaFanoutResult::success`]; [`Error::ToolLoopExhausted`] soft-degrades to
@@ -190,7 +190,6 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
     let control = &inputs.control;
     let worker = &inputs.worker;
 
-    let taskid = (index + 1).to_string();
     // The proxy handle inside the shared control context is the one observer
     // handle the finalizer, the persistent host APIs, and the direct
     // observation calls all share.
@@ -236,9 +235,12 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             control.limits.lua_memory().get(),
             control.limits.lua_logs().get(),
         )?;
-        let mut sys = control.sys_json(inputs.parent_id, &worker.name)?;
-        // The arm's own sys extra: the 1-based collection position.
-        sys["taskid"] = Value::String(taskid);
+        let mut sys = control.sys_json(next_id(&control.ids), &worker.name)?;
+        // The arm's own sys extra: its 1-based position within this fanout.
+        // Absent outside a fanout, so a walked section reading `sys.index`
+        // raises the sealed-sys unknown-field error; a nested fanout's arms
+        // restart at 1.
+        sys["index"] = Value::from(index + 1);
 
         // The arm installs the engine's real control globals: `execute`,
         // `fanout`, and `list_from_section` resolve over the worker's visible
@@ -251,11 +253,10 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             inputs.home.clone(),
             inputs.execute_depth,
             inputs.last_reply.clone(),
-            inputs.parent_id,
         );
 
         // The arm runs the walk's shared VM setup with its own deltas: the
-        // `sys` extras (`taskid`, the parent `id`), the caller's cloned
+        // `sys` extra (`index`), the caller's cloned
         // `var`, and the `item` seed.
         let setup = control.vm_setup(
             &sys,
@@ -307,7 +308,8 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
                     // A jump transfers control; it does not return. The arm's
                     // own remaining blocks are skipped, and a child walk runs
                     // from the target under the engine's chain-slice rule,
-                    // counting its own `sys.id` from 1 like a contained
+                    // each entry taking the next run-global `sys.id` like a
+                    // contained
                     // execute chain. The child walk shares the arm's var,
                     // read back at the jump. The arm's result text is the
                     // child walk's returned value or final reply.

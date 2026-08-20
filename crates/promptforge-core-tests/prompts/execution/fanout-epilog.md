@@ -19,7 +19,7 @@ return table.concat(replies, ",")
 ### Worker
 
 ```lua
-return item .. "-" .. sys.taskid
+return item .. "-" .. sys.index
 ```
 
 ### Items

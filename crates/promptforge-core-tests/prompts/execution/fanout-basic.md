@@ -16,7 +16,7 @@ return table.concat(replies, "\n")
 ### Worker
 
 ```lua
-return item .. "-" .. sys.taskid
+return item .. "-" .. sys.index
 ```
 
 Do work.
