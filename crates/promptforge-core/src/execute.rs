@@ -76,18 +76,19 @@ pub use error::{RunError, RunErrorKind};
 pub use gateway::ResolutionContext;
 
 // Crate-internal items reused through the historical `crate::execute::` path.
-// `ToolAnalysis` and the engine/section-VM items (`ControlContext` and its
-// control-global constructor, `VmSeed`/`setup_section_vm`, and the block
-// walk) are consumed by `fanout`; `run_sections` and `execute_live_h1` serve
-// only `run` below and stay module-private.
+// `ToolAnalysis` and the engine/section-VM items (the `RunFrame` borrowed
+// context, `ControlContext` and its control-global constructor,
+// `VmSeed`/`setup_section_vm`, and the block walk) are consumed by `fanout`;
+// `run_sections` and `execute_live_h1` serve only `run` below and stay
+// module-private.
 // Re-exported so the split stays surface-neutral for the public API while
 // keeping one import path for internal collaborators.
-pub(crate) use block_walk::{BlockRunMode, BlockWalkContext, SectionFlow, run_one_section_impl};
-pub(crate) use engine::{ControlContext, make_control_globals};
+pub(crate) use block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
+pub(crate) use engine::{ControlContext, RunFrame, make_control_globals};
 pub(crate) use scope::ToolAnalysis;
 pub(crate) use section_vm::{VmSeed, setup_section_vm};
 
-use engine::{RunContext, run_sections};
+use engine::run_sections;
 use h1::execute_live_h1;
 
 // Everything the executor's own tests reach through `use super::super::*`
@@ -101,8 +102,6 @@ pub(crate) use crate::Result;
 pub(crate) use crate::client::ToolSchema;
 #[cfg(test)]
 pub(crate) use crate::lua::{SectionVm, ToolCallCounts};
-#[cfg(test)]
-pub(crate) use crate::model::ModelBindings;
 #[cfg(test)]
 pub(crate) use crate::observe::Observer;
 #[cfg(test)]
@@ -132,6 +131,9 @@ use crate::parser::Prompt;
 use crate::store::StoreRef;
 use crate::tools::{SharedTools, Tool};
 use support::{GENERIC_COMPLETION, SUPPORTED_MAJOR};
+
+// Used by `run` below and re-exported for the executor test glob.
+pub(crate) use crate::model::ModelBindings;
 
 /// Executes a parsed prompt and returns its final text.
 ///
@@ -232,10 +234,8 @@ pub async fn run(
     let observer_arc = observer;
     let observer = observer_arc.as_ref();
     // Keep the owned debug Arc so it can reach the nested `model:infer` hook
-    // (F4), alongside the borrowed `&dyn DebugCapture` used for direct capture.
-    let owned_debug = debug;
-    let debug: Option<&dyn DebugCapture> = owned_debug.as_deref();
-    let debug_arc: Option<&Arc<dyn DebugCapture>> = owned_debug.as_ref();
+    // (F4); the frame carries the Arc and use sites deref for direct capture.
+    let debug_arc: Option<&Arc<dyn DebugCapture>> = debug.as_ref();
     let client =
         client.map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
     let shared_tools =
@@ -245,22 +245,50 @@ pub async fn run(
     let turns = Arc::new(AtomicU32::new(0));
 
     let run_body = async {
-        // The borrowed context both top-level drivers share, built once so
-        // neither restates the tail.
-        let frame = RunContext {
+        // The one borrowed frame every driver shares, built once so no driver
+        // restates the tail. The walk-only fields carry empty defaults for
+        // the live H1 pass, which never reads them; the section walk rebuilds
+        // the frame with the live values H1 produced. `shared`,
+        // `section_count`, and `max_tool_iterations` are prompt-derived, so
+        // they carry their real values from the start.
+        //
+        // Section startup replays the shared library unconditionally; a
+        // prompt without one replays an empty compiled chunk instead, so the
+        // startup sequence carries no `Option` branch.
+        let empty_shared;
+        let shared = if let Some(program) = prompt.replay.as_ref() {
+            program
+        } else {
+            empty_shared = crate::lua::LuaProgram::empty()?;
+            &empty_shared
+        };
+        let empty_bindings = crate::lua::ToolBindings::default();
+        let empty_models = ModelBindings::from_parts(Vec::new(), None);
+        let empty_analysis = ToolAnalysis::default();
+        let frame = RunFrame {
             args,
-            shared_tools: &shared_tools,
             store,
             execution,
-            observer,
-            observer_arc: &observer_arc,
-            client: &client,
-            debug,
-            debug_arc,
+            observer: &observer_arc,
+            debug: debug_arc,
+            shared_tools: &shared_tools,
             limits,
             turns: &turns,
+            shared,
+            bindings: &empty_bindings,
+            models: &empty_models,
+            analysis: &empty_analysis,
+            max_tool_iterations: prompt
+                .frontmatter
+                .max_tool_iterations
+                .resolve(limits.tool_iterations().get() as usize),
+            when: "",
+            section_count: prompt.sections.len(),
+            task_handles: &[],
+            initial_var: None,
+            item: None,
         };
-        let h1 = execute_live_h1(prompt, resolution, &registry, &frame).await?;
+        let h1 = execute_live_h1(prompt, resolution, &registry, client.as_ref(), &frame).await?;
         if let Some(value) = h1.returned {
             return Ok(value);
         }
@@ -274,6 +302,7 @@ pub async fn run(
             &h1.models,
             &analysis,
             Some(&h1.var),
+            client.as_ref(),
             &frame,
         )
         .await

@@ -59,7 +59,7 @@ use crate::tools::SharedTools;
 use crate::{Error, Result};
 use mlua::Value as LuaValue;
 
-use super::block_walk::{BlockRunMode, BlockWalkContext, SectionFlow, run_one_section_impl};
+use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
 use super::config::RunLimits;
 use super::gateway::GatewaySource;
 use super::scope::ToolAnalysis;
@@ -80,124 +80,62 @@ enum WalkEnd {
     Returned(String),
 }
 
-/// The borrowed run context the live H1 pass and the section walk share.
+/// The one borrowed frame every engine driver shares.
 ///
-/// Bundled once in [`run`](super::run) so both top-level drivers take one
-/// parameter instead of restating the same eleven-value tail. Every field is
-/// a borrow (or a `Copy` limit set) out of `run`'s owned state; the client is
-/// borrowed as an `Option` because H1 only reads it while the section walk
-/// clones it into its owned, lazily-created walk slot.
-pub(super) struct RunContext<'a> {
+/// Bundled once in [`run`](super::run) so the live H1 pass, the section
+/// walk, and the fanout arm (via [`ControlContext::walk_context`]) each take
+/// one parameter instead of restating the same field tail. Every field is a
+/// borrow (or a `Copy` limit set) out of the run's owned state. The observer
+/// and debug sink are carried only as their `Arc` forms; a use site that
+/// wants `&dyn Observer` / `&dyn DebugCapture` derefs in place.
+///
+/// Two fields are driver-specific one-offs and stay `Option`: `item` is set
+/// only by a fanout arm, and `initial_var` only by the top-level walk. The
+/// walk-only fields (`shared` through `task_handles`) carry empty defaults
+/// while the live H1 pass runs - live mode never reads them - and the
+/// section walk rebuilds the frame with the live values H1 produced. The
+/// client is not in the frame: each driver owns its client slot (seeded from
+/// the run's client, created lazily on first prose), so it is threaded as a
+/// separate parameter.
+#[derive(Clone, Copy)]
+pub(crate) struct RunFrame<'a> {
+    /// The run's argument string for `{{ args }}` substitution.
     pub(crate) args: &'a str,
+    pub(crate) store: &'a StoreRef,
+    /// The execution identifier every observation carries.
+    pub(crate) execution: &'a str,
+    /// The run's observer handle.
+    pub(crate) observer: &'a Arc<dyn Observer>,
+    /// Opt-in raw request/response capture for each model turn.
+    pub(crate) debug: Option<&'a Arc<dyn DebugCapture>>,
+    /// The run's shared tool registry handle.
     pub(crate) shared_tools: &'a SharedTools,
-    pub(crate) store: &'a StoreRef,
-    pub(crate) execution: &'a str,
-    pub(crate) observer: &'a dyn Observer,
-    pub(crate) observer_arc: &'a Arc<dyn Observer>,
-    pub(crate) client: &'a Option<GatewayClient>,
-    pub(crate) debug: Option<&'a dyn DebugCapture>,
-    pub(crate) debug_arc: Option<&'a Arc<dyn DebugCapture>>,
+    /// The run's resource limits, used to build a lazy gateway client.
     pub(crate) limits: RunLimits,
+    /// The model-turn counter this walk advances (the run's, or one shared by
+    /// all arms of a fanout).
     pub(crate) turns: &'a Arc<AtomicU32>,
-}
-
-/// The borrowed run context every section in one chain shares.
-///
-/// Bundled so the single-section engine and the chain drivers keep one linear
-/// set of borrows rather than threading two dozen parameters each. The fanout
-/// arm builds the same context for its jump-started child walk.
-pub(crate) struct WalkContext<'a> {
-    pub(crate) args: &'a str,
-    pub(crate) store: &'a StoreRef,
-    pub(crate) execution: &'a str,
-    pub(crate) observer: &'a dyn Observer,
-    pub(crate) observer_arc: &'a Arc<dyn Observer>,
-    pub(crate) debug: Option<&'a dyn DebugCapture>,
-    pub(crate) debug_arc: Option<&'a Arc<dyn DebugCapture>>,
     /// The shared library replayed as every section's first chunk; an empty
     /// compiled chunk when the prompt declares no `lua shared` library.
-    pub(crate) shared: &'a crate::lua::LuaProgram,
+    pub(crate) shared: &'a LuaProgram,
+    /// The frozen prompt-level tool bindings.
     pub(crate) bindings: &'a ToolBindings,
+    /// The frozen prompt-level model bindings.
     pub(crate) models: &'a ModelBindings,
+    /// The prompt's tool-scope analysis (semantic duplicate check, aliases).
     pub(crate) analysis: &'a ToolAnalysis,
-    pub(crate) shared_tools: &'a SharedTools,
+    /// The resolved per-section tool-loop cap.
     pub(crate) max_tool_iterations: usize,
-    pub(crate) limits: RunLimits,
     pub(crate) when: &'a str,
     /// The run's top-level section count, reported as `sys.section_count`.
     pub(crate) section_count: usize,
     pub(crate) task_handles: &'a [LuaSectionHandle],
-    pub(crate) turns: &'a Arc<AtomicU32>,
     /// `var` seeded from an earlier VM (top-level H1 hand-off); `None` for a
     /// contained chain.
     pub(crate) initial_var: Option<&'a serde_json::Value>,
-}
-
-impl<'a> WalkContext<'a> {
-    /// The chain's borrowed walk context built out of the run frame: the ten
-    /// run-scoped fields come from the frame, so the field list lives in one
-    /// place and cannot drift between the frame and the walk; the caller
-    /// supplies only the walk-only extras.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the walk-only extras stay explicit and linear beside the run frame they extend"
-    )]
-    fn from_run(
-        frame: &RunContext<'a>,
-        shared: &'a crate::lua::LuaProgram,
-        bindings: &'a ToolBindings,
-        models: &'a ModelBindings,
-        analysis: &'a ToolAnalysis,
-        max_tool_iterations: usize,
-        when: &'a str,
-        section_count: usize,
-        task_handles: &'a [LuaSectionHandle],
-        initial_var: Option<&'a serde_json::Value>,
-    ) -> Self {
-        Self {
-            args: frame.args,
-            store: frame.store,
-            execution: frame.execution,
-            observer: frame.observer,
-            observer_arc: frame.observer_arc,
-            debug: frame.debug,
-            debug_arc: frame.debug_arc,
-            shared,
-            bindings,
-            models,
-            analysis,
-            shared_tools: frame.shared_tools,
-            max_tool_iterations,
-            limits: frame.limits,
-            when,
-            section_count,
-            task_handles,
-            turns: frame.turns,
-            initial_var,
-        }
-    }
-}
-
-impl<'a> From<&WalkContext<'a>> for BlockWalkContext<'a> {
-    /// The walk driver's block-walk inputs: the shared field list lives here
-    /// alone, so a future field add cannot drift between construction sites.
-    /// `item` is absent on the walk; only the fanout arm sets it.
-    fn from(ctx: &WalkContext<'a>) -> Self {
-        BlockWalkContext {
-            args: ctx.args,
-            execution: ctx.execution,
-            observer: ctx.observer,
-            debug: ctx.debug,
-            bindings: ctx.bindings,
-            models: ctx.models,
-            analysis: ctx.analysis,
-            shared_tools: ctx.shared_tools,
-            max_tool_iterations: ctx.max_tool_iterations,
-            limits: ctx.limits,
-            turns: ctx.turns.as_ref(),
-            item: None,
-        }
-    }
+    /// The fanout arm's collection member for `{{ item }}` substitution;
+    /// `None` outside a fanout arm.
+    pub(crate) item: Option<&'a serde_json::Value>,
 }
 
 /// Walk the prompt's top-level sections, reporting each boundary, and return
@@ -215,41 +153,22 @@ pub(super) async fn run_sections(
     models: &ModelBindings,
     analysis: &ToolAnalysis,
     initial_var: Option<&serde_json::Value>,
-    frame: &RunContext<'_>,
+    client: Option<&GatewayClient>,
+    frame: &RunFrame<'_>,
 ) -> Result<String> {
-    let default_max_tool_iterations = frame.limits.tool_iterations().get() as usize;
     let when = now_rfc3339_checked()?;
-
-    // Resolve the tool-loop cap once: the prompt's declared budget, or the
-    // runtime default when it declares none.
-    let max_tool_iterations = prompt
-        .frontmatter
-        .max_tool_iterations
-        .resolve(default_max_tool_iterations);
-
     let task_handles = section_handles(&prompt.sections);
-    // Section startup replays the shared library unconditionally; a prompt
-    // without one replays an empty compiled chunk instead, so the startup
-    // sequence carries no `Option` branch.
-    let empty_shared;
-    let shared = if let Some(program) = prompt.replay.as_ref() {
-        program
-    } else {
-        empty_shared = crate::lua::LuaProgram::empty()?;
-        &empty_shared
-    };
-    let ctx = WalkContext::from_run(
-        frame,
-        shared,
+    // The walk's frame: the run-scoped fields carry over from the run frame;
+    // the walk-only fields take their live values now that H1 produced them.
+    let ctx = RunFrame {
         bindings,
         models,
         analysis,
-        max_tool_iterations,
-        &when,
-        prompt.sections.len(),
-        &task_handles,
+        when: &when,
+        task_handles: &task_handles,
         initial_var,
-    );
+        ..*frame
+    };
 
     // The owned control context is built once per run: every field is
     // run-scoped, so all sections share one Arc and only the per-section
@@ -258,7 +177,7 @@ pub(super) async fn run_sections(
 
     // The walk owns its client slot: seeded from the run's client (if any),
     // created lazily on first prose, and shared by every section.
-    let mut client = frame.client.clone();
+    let mut client = client.cloned();
     let mut entered = 0usize;
     match walk_siblings(
         &ctx,
@@ -302,7 +221,7 @@ pub(super) async fn run_sections(
     reason = "the chain keeps its shared contexts, position, entry mode, and depth explicit and linear"
 )]
 async fn walk_siblings(
-    ctx: &WalkContext<'_>,
+    ctx: &RunFrame<'_>,
     control: &Arc<ControlContext>,
     siblings: &[Section],
     start: usize,
@@ -380,7 +299,7 @@ async fn walk_siblings(
     Ok(WalkEnd::Exhausted(reply))
 }
 
-/// Execute one section's block lifecycle over the shared [`WalkContext`].
+/// Execute one section's block lifecycle over the shared [`RunFrame`].
 ///
 /// This is the single engine every chain drives: VM construction and limits,
 /// the control globals through [`make_control_globals`] (shared with the
@@ -400,7 +319,7 @@ async fn walk_siblings(
     reason = "the engine keeps the shared contexts, the section's chain position, and its depth explicit and linear"
 )]
 async fn run_one_section(
-    ctx: &WalkContext<'_>,
+    ctx: &RunFrame<'_>,
     control: &Arc<ControlContext>,
     section: &Section,
     siblings: &[Section],
@@ -418,7 +337,7 @@ async fn run_one_section(
         ctx.bindings,
         ctx.models,
         ctx.execution,
-        ctx.observer,
+        ctx.observer.as_ref(),
         &section.name,
     )?;
     // A limits failure propagates bare: no teardown runs here, so no
@@ -457,7 +376,7 @@ async fn run_one_section(
         fanout_callback,
         list_callback,
     ) {
-        vm.teardown(ctx.observer, &section.name);
+        vm.teardown(ctx.observer.as_ref(), &section.name);
         return Err(error);
     }
 
@@ -468,14 +387,12 @@ async fn run_one_section(
     control.attach_infer_hook(&vm, client.clone(), &section.name);
 
     // The walk half - the ordered block loop - reports how the section
-    // ended, reading only the narrowed BlockWalkContext inputs. The teardown
-    // boundary stays here: every path out of the walk tears the VM down
-    // exactly once, and SECTION_FINISHED fires only when the walk completed
-    // (a jump or return included), never on an error.
-    let walk_ctx = BlockWalkContext::from(ctx);
+    // ended. The teardown boundary stays here: every path out of the walk
+    // tears the VM down exactly once, and SECTION_FINISHED fires only when
+    // the walk completed (a jump or return included), never on an error.
     let result = run_one_section_impl(
         &mut vm,
-        &walk_ctx,
+        ctx,
         &section.name,
         &section.blocks,
         BlockRunMode::Section,
@@ -484,7 +401,7 @@ async fn run_one_section(
         client,
     )
     .await;
-    vm.teardown(ctx.observer, &section.name);
+    vm.teardown(ctx.observer.as_ref(), &section.name);
     let flow = result?;
     ctx.observer
         .observe(ctx.execution, &section.name, detail::SECTION_FINISHED);
@@ -684,8 +601,8 @@ impl ControlContext {
     }
 
     /// The owned control context for a chain, cloned out of the chain's
-    /// borrowed walk context.
-    fn from_walk(ctx: &WalkContext<'_>) -> Self {
+    /// borrowed run frame.
+    fn from_walk(ctx: &RunFrame<'_>) -> Self {
         Self::from_run_fields(
             ctx.store,
             ctx.args,
@@ -701,8 +618,8 @@ impl ControlContext {
             ctx.limits,
             ctx.max_tool_iterations,
             ctx.turns,
-            Arc::clone(ctx.observer_arc),
-            ctx.debug_arc.cloned(),
+            Arc::clone(ctx.observer),
+            ctx.debug.cloned(),
         )
     }
 
@@ -736,31 +653,31 @@ impl ControlContext {
         )
     }
 
-    /// The borrowed chain-walk inputs derived from this owned context, so
-    /// the field list lives in one place for both chain drivers. `args` is
-    /// the only parameter: an `execute` call's explicit input overrides the
-    /// run's args.
-    pub(crate) fn walk_context<'a>(&'a self, args: &'a str) -> WalkContext<'a> {
-        WalkContext {
+    /// The borrowed run frame derived from this owned context, so the field
+    /// list lives in one place for both chain drivers. `args` is the only
+    /// parameter: an `execute` call's explicit input overrides the run's
+    /// args. `initial_var` and `item` stay `None`; the fanout arm overlays
+    /// its own `item` on the returned frame.
+    pub(crate) fn walk_context<'a>(&'a self, args: &'a str) -> RunFrame<'a> {
+        RunFrame {
             args,
             store: &self.store,
             execution: &self.execution,
-            observer: self.observer.as_ref(),
-            observer_arc: &self.observer,
-            debug: self.debug.as_deref(),
-            debug_arc: self.debug.as_ref(),
+            observer: &self.observer,
+            debug: self.debug.as_ref(),
+            shared_tools: &self.shared_tools,
+            limits: self.limits,
+            turns: &self.turns,
             shared: &self.shared,
             bindings: &self.bindings,
             models: &self.models,
             analysis: &self.analysis,
-            shared_tools: &self.shared_tools,
             max_tool_iterations: self.max_tool_iterations,
-            limits: self.limits,
             when: &self.when,
             section_count: self.section_count,
             task_handles: &self.task_handles,
-            turns: &self.turns,
             initial_var: None,
+            item: None,
         }
     }
 

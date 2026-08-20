@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::execute::{
-    BlockRunMode, BlockWalkContext, ControlContext, SectionFlow, VmSeed, make_control_globals,
+    BlockRunMode, ControlContext, RunFrame, SectionFlow, VmSeed, make_control_globals,
     run_one_section_impl, setup_section_vm,
 };
 use crate::lua::{LuaFanoutResult, SectionVm};
@@ -273,16 +273,15 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         // The shared block walk: every Lua and prose block in order, the
         // conversation and reply rolling forward, the tool scope rebuilt per
         // prose block, and a gateway client created from the environment when
-        // the arm was handed none. The arm's only walk-input delta is `item`.
-        let walk_ctx = control.walk_context(&control.args);
-        let block_ctx = BlockWalkContext {
+        // the arm was handed none. The arm's only frame delta is `item`.
+        let frame = RunFrame {
             item: Some(&item),
-            ..BlockWalkContext::from(&walk_ctx)
+            ..control.walk_context(&control.args)
         };
         let mut client = inputs.client.clone();
         match run_one_section_impl(
             &mut vm,
-            &block_ctx,
+            &frame,
             &worker.name,
             &worker.blocks,
             BlockRunMode::Section,
