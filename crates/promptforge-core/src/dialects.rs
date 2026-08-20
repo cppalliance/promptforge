@@ -308,10 +308,16 @@ mod tests {
     #[test]
     fn tools_mode_serde_round_trip() {
         let native = ToolsMode::Native;
-        assert_eq!(serde_json::to_string(&native).unwrap(), "\"native\"");
+        let json = serde_json::to_string(&native).unwrap();
+        assert_eq!(json, "\"native\"");
+        let parsed: ToolsMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, native);
 
         let emulated = ToolsMode::Emulated;
-        assert_eq!(serde_json::to_string(&emulated).unwrap(), "\"emulated\"");
+        let json = serde_json::to_string(&emulated).unwrap();
+        assert_eq!(json, "\"emulated\"");
+        let parsed: ToolsMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, emulated);
     }
 
     #[test]

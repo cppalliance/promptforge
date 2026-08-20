@@ -142,6 +142,13 @@ fn undeclared_models_use_fails_loudly() {
         "Section",
     )
     .unwrap();
-    assert!(vm.run_chunk(&prologue, &NullObserver, "Section").is_err());
+    let error = vm
+        .run_chunk(&prologue, &NullObserver, "Section")
+        .expect_err("an undeclared model alias must fail");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("models.use alias \"missing\" was not declared by models.need"),
+        "the error must name the undeclared alias and declaration requirement: {rendered}"
+    );
     vm.teardown(&NullObserver, "Section");
 }

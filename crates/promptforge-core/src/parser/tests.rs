@@ -515,10 +515,7 @@ fn invalid_middle_lua_fence_fails_parse() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nBefore.\n\n```lua\nnot valid lua =\n```\n\nAfter.\n";
     let err = Prompt::parse(src, "test", &NullObserver)
         .expect_err("invalid middle Lua must fail compilation");
-    assert!(
-        err.to_string().contains("lua") || err.to_string().contains("Lua"),
-        "error was: {err}"
-    );
+    assert_eq!(err.kind(), ParseErrorKind::Lua);
 }
 
 #[test]
