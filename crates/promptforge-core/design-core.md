@@ -65,7 +65,7 @@ A prompt declares tools, models, context, thinking, and temperature. The host su
 
 16. **`execute(target, input?)` runs a section as a subroutine.** Fresh VM, fresh conversation, a fresh copy of the captured H1 `var`, same store/observer/execution id/gateway/registry. The subroutine starts with `reply` = nil; pass context through the `input` parameter. Recursion capped at 8. Returns the section's reply string. Target is `"## Name"` or a Section object.
 
-17. **`jump(target)` transfers control.** The current section stops (no further blocks). Conversation and cross-section `reply` clear. The named top-level H2 runs next. No return to the caller. Unknown target is a hard error.
+17. **`jump(target)` transfers control.** The current section stops (no further blocks). The conversation clears; the `reply` value carries across unless the author clears it with `reply = nil` first. The target - a visible sibling or direct child - runs next. No return to the caller. Unknown target is a hard error.
 
 18. **Prompts resolve semantic needs live under local aliases.** H1 `tools.need(alias, description)` and `models.need(alias, description, opts?)` use case-sensitive aliases matching `[A-Za-z][A-Za-z0-9_-]{0,63}`. Each call immediately asks the prepared picker and returns a frozen Tool or Model object. Optional model `opts`: `context`, `thinking`, `temperature`, `max_tokens`. A need exposes nothing and selects no model. H2 `tools.add` makes tools available to the model; H1 `tools.always` is for every model-facing section. H2 `models.use` selects at most one captured model and returns its handle; H1 `models.default` is the prompt-wide baseline. Non-empty model-facing prose without either fails with `Error::ModelRequired`.
 
@@ -103,8 +103,8 @@ Before the section walk, execute every live H1 block once. Resolver calls talk t
 
 For each top-level section:
 
-1. Create `SectionVm` and load `Prompt.replay` before host injection. At library load time `args`, `sys`, `var`, `store`, `reply`, `log`, tools, models, and control-flow APIs are unavailable, so top-level host calls fail. Pure Lua definitions may refer to those globals for later call-time resolution.
-2. Install captured Tool and Model handles directly from Rust, then inject `args`, sealed `sys` (including `section_name`, `execution`, `section_count`), H1-seeded `var`, `store`, `tasks`, `execute`, `jump`, `fanout`, `log`, and previous `reply`. Host and control globals are installed once per section and stay live for every chunk.
+1. Create `SectionVm`, inject `args`, sealed `sys` (including `section_name`, `execution`, `section_count`), H1-seeded `var`, `store`, and previous `reply`, then install the host APIs (`log`, `store`) and control globals (`execute`, `jump`, `fanout`, `list_from_section`). Load `Prompt.replay` as the section's first chunk with the full environment already installed, so top-level shared code may read `args` or write `store` files at load; a `jump` during the load is a hard error and a scalar return is discarded.
+2. Install captured Tool and Model handles directly from Rust after the replay, so a declared alias wins over a same-named shared global. Host and control globals are installed once per section and stay live for every chunk.
 3. Walk `blocks` in order.
 4. Lua blocks run on the live VM. Scalar return ends the run or the `execute` subroutine. `jump` stops the section and transfers.
 5. At the first prose, resolve the model, seed `tools.calls`, and enrich `sys.model` (one-shot). On every prose block, rebuild effective tool schemas and dispatch from the live bindings so `tools.add` and `tools.add_local` between blocks take effect.
