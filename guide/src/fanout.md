@@ -23,11 +23,11 @@ Fetch and summarize: {{ item }}
 
 The worker is referenced by markdown heading address (level + name) and resolves against the caller's visible sections - its siblings plus its direct children. The second parameter is always a collection, never a section name: any Lua table works, and `list_from_section("### List")` feeds a list section's pre-parsed bullet or numbered items straight in.
 
-The array part (`1..#t`) iterates in order first, then the hash part in undefined order. An array member arrives as the arm's `item` unchanged - a string stays a string, a number a number, a table a table. A hash member arrives as a pair table: `item.key` and `item.value`. Keys must be strings, numbers, or booleans; a function or userdata member is an error naming its index. An empty collection returns an empty result table.
+The array part (`1..#t`) iterates in order first, then the hash part in undefined order. An array member arrives as the arm's `item` unchanged - a string stays a string, a number a number, a table a table. A hash member arrives as a pair table: `item.key` and `item.value`. Keys must be strings, numbers, or booleans; a function or userdata member is an error naming its index. An empty collection is an error - no work is likely a bug.
 
 ## Arm Execution
 
-Each arm receives the current member as the `item` variable and a `sys.taskid` identifying its 1-based position in the collection. The arm can:
+Each arm receives the current member as the `item` variable, a `sys.index` giving its 1-based position within the current fanout (a nested fanout restarts at 1, and `sys.index` is absent outside fanout), and a unique run-global `sys.id`. Each arm also starts with a fresh clone of the caller's `var` - arm writes to `var` never reach the caller. The arm can:
 
 - Run a Lua prologue that short-circuits (enabling pure-Lua map operations)
 - Substitute `{{ item }}` in prose (strings verbatim, numbers and booleans in their natural string form, tables as compact JSON)
@@ -35,7 +35,9 @@ Each arm receives the current member as the `item` variable and a `sys.taskid` i
 - Execute an epilog for post-processing
 - Call `execute`, `fanout`, and `list_from_section`, resolved against the worker's visible sections (the set the worker was resolved from, minus the worker, plus its children), and transfer control with `jump` - the arm's remaining blocks are skipped and the arm's text becomes the jumped-to walk's reply. Recursion depth accumulates across the fanout boundary: each arm runs one `execute` level deeper than its caller, so the 8-level cap bounds mixed `execute`/`fanout` nesting uniformly
 
-Results are returned in collection order (array part first, then the hash part), not finish order. Each result has `.text`, `.ok`, `.item`, and `.exhausted` fields; `.item` carries the member value back - a pair table for hash members - so the caller can correlate results with rich items. The result array supports `table.concat` since objects coerce via `__tostring`.
+Results are returned in collection order (array part first, then the hash part), not finish order. Each result has `.text`, `.ok`, `.item`, and `.exhausted` fields; `.item` carries the member value back - a pair table for hash members - so the caller can correlate results with rich items. An arm that falls through without producing a reply yields `.text == ""` with `.ok == true`. The result array supports `table.concat` since objects coerce via `__tostring`.
+
+All arms share the run's store. Two arms of one fanout calling `store.write` on the same path is a hard error (a write-write race) that aborts the sibling arms; `store.append` from concurrent arms stays legal, with unspecified order.
 
 ## Resilience
 
