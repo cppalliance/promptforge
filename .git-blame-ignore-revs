@@ -1,2 +1,4 @@
 # Formatting-only commits to exclude from git blame
 63c72063efb0dea184f757cd3a0bdf351cc6448f
+# Pure identifier rename: walk_section_blocks -> run_one_section_impl
+2c55b1993af1da077840da23d13aea3a4f45d48a
