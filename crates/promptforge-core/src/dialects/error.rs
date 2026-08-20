@@ -64,9 +64,57 @@ impl DialectError {
     #[must_use]
     pub fn kind(&self) -> DialectErrorKind {
         match &self.inner {
+            Error::DialectNone => DialectErrorKind::NoMatch,
             Error::DialectTie { .. } => DialectErrorKind::Tie,
-            Error::UnknownDialect(_) => DialectErrorKind::Unknown,
-            _ => DialectErrorKind::NoMatch,
+            Error::UnknownDialect(_)
+            | Error::ParseFrontmatter { .. }
+            | Error::ParseStructured { .. }
+            | Error::MissingEnv(_)
+            | Error::InvalidEnv(_)
+            | Error::InvalidConfig(_)
+            | Error::Config { .. }
+            | Error::GatewayDisabled
+            | Error::Http(_)
+            | Error::Backend { .. }
+            | Error::MalformedResponse(_)
+            | Error::MalformedResponseSource { .. }
+            | Error::BackendBodyRead { .. }
+            | Error::EmptyModelReply { .. }
+            | Error::Interrupted
+            | Error::Lua(_)
+            | Error::LuaRuntime { .. }
+            | Error::LuaCompile { .. }
+            | Error::Bind { .. }
+            | Error::BindSchema { .. }
+            | Error::BindQuery { .. }
+            | Error::Absent { .. }
+            | Error::Duplicate { .. }
+            | Error::Ambiguous { .. }
+            | Error::DuplicateAlias { .. }
+            | Error::DuplicateLiveToolId { .. }
+            | Error::ToolIdSelectedTwice { .. }
+            | Error::PickedToolNotLive { .. }
+            | Error::ToolScopeAnalysis { .. }
+            | Error::ToolScopeAnalysisSource { .. }
+            | Error::NearDuplicateTools { .. }
+            | Error::ModelBind { .. }
+            | Error::ModelBindQuery { .. }
+            | Error::ModelAbsent { .. }
+            | Error::ModelDuplicate { .. }
+            | Error::ModelAmbiguous { .. }
+            | Error::DuplicateModelAlias { .. }
+            | Error::Substitution(_)
+            | Error::ToolLoopExhausted
+            | Error::OutOfScopeToolCall { .. }
+            | Error::UnknownScopedTool(_)
+            | Error::ModelRequired { .. }
+            | Error::UnsupportedVersion(_)
+            | Error::Tool { .. }
+            | Error::FanoutArmJoin(_)
+            | Error::Internal(_)
+            | Error::InvalidToolWireName { .. }
+            | Error::LuaQuota { .. }
+            | Error::TimestampFormat(_) => DialectErrorKind::Unknown,
         }
     }
 }
@@ -92,5 +140,16 @@ impl From<Error> for DialectError {
 impl From<DialectError> for Error {
     fn from(error: DialectError) -> Self {
         error.inner
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unrelated_errors_classify_as_unknown() {
+        let error = DialectError::from(Error::InvalidConfig("bad endpoint".to_owned()));
+        assert_eq!(error.kind(), DialectErrorKind::Unknown);
     }
 }
