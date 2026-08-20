@@ -3,27 +3,8 @@ use super::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn live_h1_infer_runs_once() {
-    async fn completions(
-        State(calls): State<Arc<AtomicUsize>>,
-        Json(_body): Json<Value>,
-    ) -> Json<Value> {
-        calls.fetch_add(1, Ordering::SeqCst);
-        Json(json!({
-            "choices": [{
-                "message": { "role": "assistant", "content": "h1 answer" }
-            }]
-        }))
-    }
-
-    let calls = Arc::new(AtomicUsize::new(0));
-    let router = Router::new()
-        .route("/v1/chat/completions", post(completions))
-        .with_state(Arc::clone(&calls));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, router).await.unwrap();
-    });
+    let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
+    let addr = gateway.addr();
 
     let source = "---\nname: live-h1\ndescription: d\npromptforge: 1\n---\n\n\
         # Live H1\n\n\
@@ -43,21 +24,13 @@ async fn live_h1_infer_runs_once() {
         ResolutionContext::new(&picker, &models),
         &[],
         &StoreRef::memory(),
-        to_config(RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        }),
+        to_config(gatewayed(addr)),
     )
     .await
     .expect("live H1 path must run");
 
     assert_eq!(out, "h1 answer");
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(gateway.call_count(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

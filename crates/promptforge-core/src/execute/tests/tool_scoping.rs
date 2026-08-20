@@ -139,25 +139,8 @@ models.default('writer', 'A general model for tests')\n```\n\n\
 
 #[tokio::test]
 async fn near_duplicate_tools_are_valid_when_isolated_in_separate_sections() {
-    async fn completions(
-        State(requests): State<Arc<AtomicUsize>>,
-        Json(_body): Json<Value>,
-    ) -> Json<Value> {
-        requests.fetch_add(1, Ordering::SeqCst);
-        Json(json!({
-            "choices": [{"message": {"role": "assistant", "content": "text"}}]
-        }))
-    }
-
-    let requests = Arc::new(AtomicUsize::new(0));
-    let router = Router::new()
-        .route("/v1/chat/completions", post(completions))
-        .with_state(Arc::clone(&requests));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, router).await.unwrap();
-    });
+    let gateway = ScriptedGateway::start(vec![resp_text("text")]).await;
+    let addr = gateway.addr();
 
     let first = ScopedFixtureTool::new("first", "first_wire", "First concrete.");
     let second = ScopedFixtureTool::new("second", "second_wire", "Second concrete.");
@@ -182,21 +165,13 @@ models.default('writer', 'A general model for tests')\n```\n\n\
             Arc::new(second) as Arc<dyn Tool>,
         ],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .unwrap();
 
     assert_eq!(out, "text");
-    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert_eq!(gateway.call_count(), 2);
 }
 
 #[test]
