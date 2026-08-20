@@ -147,7 +147,7 @@ pub(crate) use crate::model::ModelBindings;
 /// - [`RunErrorKind::Parse`] - a prompt/frontmatter or compiled Lua region was
 ///   invalid.
 /// - [`RunErrorKind::Version`] - the prompt declared an unsupported
-///   `promptforge:` major, or omitted it.
+///   `promptforge:` major.
 /// - [`RunErrorKind::Binding`] - a `tools.need`/`models.need` capability could
 ///   not be bound, was absent, or clashed.
 /// - [`RunErrorKind::Completion`] - a model completion failed at the transport,
