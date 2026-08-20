@@ -38,6 +38,14 @@ impl Recorder {
     }
 }
 
+/// Returns the message carried by either Lua-category error representation.
+fn lua_error_message(error: &Error) -> &str {
+    match error {
+        Error::Lua(message) | Error::LuaRuntime { message, .. } => message,
+        other => panic!("expected a Lua-category error, got {other:?}"),
+    }
+}
+
 #[derive(Debug)]
 struct FailingStore;
 
@@ -2330,11 +2338,7 @@ fn store_delete_then_read_raises() {
         "",
     )
     .expect_err("reading a deleted file must raise");
-    let msg = match &err {
-        Error::Lua(msg) => msg.clone(),
-        Error::LuaRuntime { message, .. } => message.clone(),
-        other => panic!("expected a Lua-category error, got {other:?}"),
-    };
+    let msg = lua_error_message(&err);
     assert!(
         msg.contains("file not found"),
         "the Lua error must carry the store message, got: {msg}"
@@ -2416,11 +2420,7 @@ fn store_read_start_below_one_raises() {
         "store.write('a.txt', 'one')\nreturn store.read('a.txt', -1)",
     ] {
         let err = run(source, "").expect_err("a start below 1 must raise");
-        let msg = match &err {
-            Error::Lua(msg) => msg.clone(),
-            Error::LuaRuntime { message, .. } => message.clone(),
-            other => panic!("expected a Lua-category error, got {other:?}"),
-        };
+        let msg = lua_error_message(&err);
         assert!(
             msg.contains("invalid line range"),
             "the Lua error must carry the range message, got: {msg}"
@@ -2435,11 +2435,7 @@ fn store_read_end_before_start_raises() {
         "",
     )
     .expect_err("an end before start must raise");
-    let msg = match &err {
-        Error::Lua(msg) => msg.clone(),
-        Error::LuaRuntime { message, .. } => message.clone(),
-        other => panic!("expected a Lua-category error, got {other:?}"),
-    };
+    let msg = lua_error_message(&err);
     assert!(
         msg.contains("invalid line range"),
         "the Lua error must carry the range message, got: {msg}"
@@ -2453,11 +2449,7 @@ fn store_read_end_without_start_raises() {
         "",
     )
     .expect_err("an end without a start must raise");
-    let msg = match &err {
-        Error::Lua(msg) => msg.clone(),
-        Error::LuaRuntime { message, .. } => message.clone(),
-        other => panic!("expected a Lua-category error, got {other:?}"),
-    };
+    let msg = lua_error_message(&err);
     assert!(
         msg.contains("invalid line range"),
         "the Lua error must carry the range message, got: {msg}"
@@ -2528,11 +2520,7 @@ fn store_read_numbered_start_below_one_raises() {
         "store.write('a.txt', 'one')\nreturn store.read_numbered('a.txt', -1)",
     ] {
         let err = run(source, "").expect_err("a start below 1 must raise");
-        let msg = match &err {
-            Error::Lua(msg) => msg.clone(),
-            Error::LuaRuntime { message, .. } => message.clone(),
-            other => panic!("expected a Lua-category error, got {other:?}"),
-        };
+        let msg = lua_error_message(&err);
         assert!(
             msg.contains("invalid line range"),
             "the Lua error must carry the range message, got: {msg}"
@@ -2547,11 +2535,7 @@ fn store_read_numbered_end_before_start_raises() {
         "",
     )
     .expect_err("an end before start must raise");
-    let msg = match &err {
-        Error::Lua(msg) => msg.clone(),
-        Error::LuaRuntime { message, .. } => message.clone(),
-        other => panic!("expected a Lua-category error, got {other:?}"),
-    };
+    let msg = lua_error_message(&err);
     assert!(
         msg.contains("invalid line range"),
         "the Lua error must carry the range message, got: {msg}"
@@ -2565,11 +2549,7 @@ fn store_read_numbered_end_without_start_raises() {
         "",
     )
     .expect_err("an end without a start must raise");
-    let msg = match &err {
-        Error::Lua(msg) => msg.clone(),
-        Error::LuaRuntime { message, .. } => message.clone(),
-        other => panic!("expected a Lua-category error, got {other:?}"),
-    };
+    let msg = lua_error_message(&err);
     assert!(
         msg.contains("invalid line range"),
         "the Lua error must carry the range message, got: {msg}"
@@ -2674,11 +2654,7 @@ fn store_error_surfaces_as_lua_error() {
         "",
     )
     .expect_err("an ambiguous anchor must raise");
-    let msg = match &err {
-        Error::Lua(msg) => msg.clone(),
-        Error::LuaRuntime { message, .. } => message.clone(),
-        other => panic!("expected a Lua-category error, got {other:?}"),
-    };
+    let msg = lua_error_message(&err);
     assert!(
         msg.contains("expected exactly one"),
         "the Lua error must carry the ambiguity message, got: {msg}"

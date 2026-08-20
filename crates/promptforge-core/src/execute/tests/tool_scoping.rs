@@ -17,15 +17,7 @@ async fn declared_tools_are_not_injected_without_always_or_add() {
         "",
         &[Arc::new(tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .unwrap();
@@ -63,15 +55,7 @@ models.default('writer', 'A general model for tests')\n```\n\n\
         "",
         &[Arc::clone(&tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .unwrap();
@@ -116,15 +100,7 @@ models.default('writer', 'A general model for tests')\n```\n\n\
         "",
         &[Arc::clone(&tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .unwrap();

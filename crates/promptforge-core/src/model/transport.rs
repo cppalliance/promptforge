@@ -233,6 +233,15 @@ mod tests {
     use super::*;
     use crate::model::CompletionErrorKind;
 
+    async fn spawn_models(app: axum::Router) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        addr
+    }
+
     #[test]
     fn models_list_entry_parses_dialect_fields() {
         let json = serde_json::json!({
@@ -284,11 +293,7 @@ mod tests {
             }))
         }
         let app = Router::new().route("/models", get(models));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
+        let addr = spawn_models(app).await;
 
         let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
             .await
@@ -312,11 +317,7 @@ mod tests {
             )
         }
         let app = Router::new().route("/models", get(models));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
+        let addr = spawn_models(app).await;
 
         let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
             .await
@@ -343,11 +344,7 @@ mod tests {
             (axum::http::StatusCode::OK, "e".repeat(oversized))
         }
         let app = Router::new().route("/models", get(models));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
+        let addr = spawn_models(app).await;
 
         let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
             .await
@@ -371,11 +368,7 @@ mod tests {
             (axum::http::StatusCode::OK, "{ this is not json".to_owned())
         }
         let app = Router::new().route("/models", get(models));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
+        let addr = spawn_models(app).await;
 
         let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
             .await

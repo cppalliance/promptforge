@@ -325,6 +325,22 @@ mod tests {
         OpenAiChatNormalizer.normalize(body)
     }
 
+    /// Wraps one assistant message in the gateway's one-choice envelope.
+    fn one_choice(message: impl Into<Value>) -> Value {
+        let message = message.into();
+        serde_json::json!({ "choices": [{ "message": message }] })
+    }
+
+    /// Wraps one raw tool call in a null-content assistant message.
+    fn one_tool_call(call: impl Into<Value>) -> Value {
+        let call = call.into();
+        one_choice(serde_json::json!({
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [call]
+        }))
+    }
+
     #[test]
     fn answer_and_reasoning_keeps_side_channel() {
         let body = serde_json::json!({
@@ -386,19 +402,11 @@ mod tests {
 
     #[test]
     fn tools_with_null_content_succeed() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call_2",
-                        "type": "function",
-                        "function": { "name": "web_fetch", "arguments": "{\"url\":\"https://example.com\"}" }
-                    }]
-                }
-            }]
-        });
+        let body = one_tool_call(serde_json::json!({
+            "id": "call_2",
+            "type": "function",
+            "function": { "name": "web_fetch", "arguments": "{\"url\":\"https://example.com\"}" }
+        }));
 
         let turn = normalize(&body).unwrap();
         match turn.outcome {
@@ -414,19 +422,11 @@ mod tests {
 
     #[test]
     fn malformed_tool_arguments_are_rejected_not_coerced() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call_bad",
-                        "type": "function",
-                        "function": { "name": "web_fetch", "arguments": "not json" }
-                    }]
-                }
-            }]
-        });
+        let body = one_tool_call(serde_json::json!({
+            "id": "call_bad",
+            "type": "function",
+            "function": { "name": "web_fetch", "arguments": "not json" }
+        }));
 
         assert!(
             matches!(normalize(&body), Err(Error::MalformedResponse(_))),
@@ -436,38 +436,22 @@ mod tests {
 
     #[test]
     fn non_string_tool_arguments_are_rejected() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call_obj",
-                        "type": "function",
-                        "function": { "name": "web_fetch", "arguments": { "url": "x" } }
-                    }]
-                }
-            }]
-        });
+        let body = one_tool_call(serde_json::json!({
+            "id": "call_obj",
+            "type": "function",
+            "function": { "name": "web_fetch", "arguments": { "url": "x" } }
+        }));
 
         assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
     }
 
     #[test]
     fn absent_tool_arguments_are_rejected() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call_none",
-                        "type": "function",
-                        "function": { "name": "ping" }
-                    }]
-                }
-            }]
-        });
+        let body = one_tool_call(serde_json::json!({
+            "id": "call_none",
+            "type": "function",
+            "function": { "name": "ping" }
+        }));
 
         assert!(
             matches!(normalize(&body), Err(Error::MalformedResponse(_))),
@@ -477,19 +461,11 @@ mod tests {
 
     #[test]
     fn non_object_decoded_arguments_are_rejected() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call_arr",
-                        "type": "function",
-                        "function": { "name": "ping", "arguments": "[1,2,3]" }
-                    }]
-                }
-            }]
-        });
+        let body = one_tool_call(serde_json::json!({
+            "id": "call_arr",
+            "type": "function",
+            "function": { "name": "ping", "arguments": "[1,2,3]" }
+        }));
 
         assert!(
             matches!(normalize(&body), Err(Error::MalformedResponse(_))),
@@ -499,19 +475,11 @@ mod tests {
 
     #[test]
     fn blank_tool_call_id_is_rejected() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "   ",
-                        "type": "function",
-                        "function": { "name": "ping", "arguments": "{}" }
-                    }]
-                }
-            }]
-        });
+        let body = one_tool_call(serde_json::json!({
+            "id": "   ",
+            "type": "function",
+            "function": { "name": "ping", "arguments": "{}" }
+        }));
         assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
     }
 
@@ -534,19 +502,11 @@ mod tests {
 
     #[test]
     fn wrong_type_type_field_is_rejected() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call_x",
-                        "type": "not_function",
-                        "function": { "name": "ping", "arguments": "{}" }
-                    }]
-                }
-            }]
-        });
+        let body = one_tool_call(serde_json::json!({
+            "id": "call_x",
+            "type": "not_function",
+            "function": { "name": "ping", "arguments": "{}" }
+        }));
         assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
     }
 
@@ -562,11 +522,7 @@ mod tests {
             if let Some(value) = type_field {
                 call["type"] = value;
             }
-            let body = serde_json::json!({
-                "choices": [{
-                    "message": { "role": "assistant", "content": null, "tool_calls": [call] }
-                }]
-            });
+            let body = one_tool_call(call);
             assert!(matches!(normalize(&body), Err(Error::MalformedResponse(_))));
         }
     }
@@ -615,9 +571,7 @@ mod tests {
 
     #[test]
     fn whitespace_only_content_is_empty_reply() {
-        let body = serde_json::json!({
-            "choices": [{ "message": { "content": "   \n\t " } }]
-        });
+        let body = one_choice(serde_json::json!({ "content": "   \n\t " }));
         assert!(matches!(
             normalize(&body),
             Err(Error::EmptyModelReply { .. })
@@ -655,11 +609,10 @@ mod tests {
 
     #[test]
     fn empty_string_content_without_tools_is_error() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": { "role": "assistant", "content": "" }
-            }]
-        });
+        let body = one_choice(serde_json::json!({
+            "role": "assistant",
+            "content": ""
+        }));
 
         match normalize(&body) {
             Err(Error::EmptyModelReply {
@@ -675,11 +628,10 @@ mod tests {
 
     #[test]
     fn null_content_without_tools_is_error() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": { "role": "assistant", "content": null }
-            }]
-        });
+        let body = one_choice(serde_json::json!({
+            "role": "assistant",
+            "content": null
+        }));
 
         match normalize(&body) {
             Err(Error::EmptyModelReply { detail, .. }) => assert_eq!(detail, EMPTY_REPLY),
@@ -716,15 +668,11 @@ mod tests {
 
     #[test]
     fn synonym_reasoning_field_is_side_channel() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "answer",
-                    "reasoning": "via synonym"
-                }
-            }]
-        });
+        let body = one_choice(serde_json::json!({
+            "role": "assistant",
+            "content": "answer",
+            "reasoning": "via synonym"
+        }));
 
         let turn = normalize(&body).unwrap();
         assert_eq!(turn.reasoning_content.as_deref(), Some("via synonym"));
@@ -736,16 +684,12 @@ mod tests {
 
     #[test]
     fn empty_reasoning_synonym_falls_through() {
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "answer",
-                    "reasoning_content": "",
-                    "thinking": "from thinking"
-                }
-            }]
-        });
+        let body = one_choice(serde_json::json!({
+            "role": "assistant",
+            "content": "answer",
+            "reasoning_content": "",
+            "thinking": "from thinking"
+        }));
 
         let turn = normalize(&body).unwrap();
         assert_eq!(turn.reasoning_content.as_deref(), Some("from thinking"));
@@ -753,9 +697,7 @@ mod tests {
 
     #[test]
     fn missing_content_and_tools_is_empty_model_reply() {
-        let body = serde_json::json!({
-            "choices": [{ "message": { "role": "assistant" } }]
-        });
+        let body = one_choice(serde_json::json!({ "role": "assistant" }));
 
         assert!(matches!(
             normalize(&body),
@@ -774,10 +716,7 @@ mod tests {
         let content = "```tool_code\nsearch(query=\"C++ Alliance founder\")\n```";
         let body = serde_json::json!({
             "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": content
-                },
+                "message": { "role": "assistant", "content": content },
                 "finish_reason": "stop"
             }]
         });
@@ -794,14 +733,10 @@ mod tests {
     #[test]
     fn fenced_json_tool_calls_stays_text_in_openai_normalizer() {
         let content = "```json\n{\"tool_calls\":[{\"id\":\"1\",\"type\":\"function\",\"function\":{\"name\":\"fetch\",\"arguments\":\"{\\\"url\\\":\\\"https://example.com\\\"}\"}}]}\n```";
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": content
-                }
-            }]
-        });
+        let body = one_choice(serde_json::json!({
+            "role": "assistant",
+            "content": content
+        }));
 
         let turn = normalize(&body).unwrap();
         match turn.outcome {

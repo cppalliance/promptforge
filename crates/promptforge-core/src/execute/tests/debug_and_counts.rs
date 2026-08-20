@@ -14,15 +14,7 @@ async fn debug_capture_receives_request_and_response_when_set() {
         "",
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: Some(Arc::clone(&capture) as Arc<dyn DebugCapture>),
-        },
+        gatewayed_with_debug(addr, Arc::clone(&capture) as Arc<dyn DebugCapture>),
     )
     .await
     .unwrap();
@@ -126,15 +118,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
         "",
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: Some(Arc::clone(&capture) as Arc<dyn DebugCapture>),
-        },
+        gatewayed_with_debug(addr, Arc::clone(&capture) as Arc<dyn DebugCapture>),
     )
     .await
     .expect("handle:infer must return text");
@@ -183,15 +167,7 @@ async fn fanout_arm_debug_events_reach_the_run_sink_through_the_proxy() {
         "",
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: Some(Arc::clone(&capture) as Arc<dyn DebugCapture>),
-        },
+        gatewayed_with_debug(addr, Arc::clone(&capture) as Arc<dyn DebugCapture>),
     )
     .await
     .expect("the fanout must succeed");
@@ -227,15 +203,7 @@ async fn debug_capture_none_changes_nothing() {
         "",
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .unwrap();
@@ -268,15 +236,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
         "",
         &[Arc::clone(&tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .unwrap();
@@ -294,10 +254,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
     let gateway =
         ScriptedGateway::start(vec![resp_tool_call("call_x", "echo", "{\"value\":\"x\"}")]).await;
     let addr = gateway.addr();
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
+    let client = gateway_client(addr);
 
     let failing = FailingTool;
     let tools: &[&dyn Tool] = &[&failing];
@@ -366,15 +323,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
         "",
         &[Arc::new(tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .expect_err("epilog assert on zero count must fail the run");
@@ -402,15 +351,7 @@ async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
         "",
         &[Arc::new(tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .expect_err("accessing a typo alias in tools.calls must hard error");
@@ -447,15 +388,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
             Arc::new(global) as Arc<dyn Tool>,
         ],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .expect_err("model calling a global-but-unscoped tool must fail");
@@ -502,15 +435,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
         "",
         &[Arc::new(tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .expect_err("model calling a pure unknown tool must fail");
@@ -559,23 +484,9 @@ async fn handle_infer_returns_text_without_touching_reply_or_sys() {
         return text\n\
         ```\n";
     let prompt = bound_with_tools(md, Vec::new());
-    let out = run(
-        &prompt,
-        "",
-        &[],
-        &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
-    )
-    .await
-    .expect("handle:infer must return text");
+    let out = run(&prompt, "", &[], &StoreRef::memory(), gatewayed(addr))
+        .await
+        .expect("handle:infer must return text");
     assert_eq!(out, "pong");
     let body = gateway
         .last_request()

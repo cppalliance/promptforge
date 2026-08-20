@@ -215,17 +215,30 @@ fn silent() -> RunOptions {
     }
 }
 
+/// Builds a client pointed at the given scripted gateway.
+fn gateway_client(addr: SocketAddr) -> GatewayClient {
+    GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("test").expect("non-empty test key"),
+    )
+}
+
 /// Options that report nowhere and point the run's client at the given
 /// scripted gateway.
 fn gatewayed(addr: SocketAddr) -> RunOptions {
     RunOptions {
         execution: EXECUTION,
         observer: Arc::new(NullObserver),
-        client: Some(GatewayClient::new(
-            GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-            SecretString::new("test").expect("non-empty test key"),
-        )),
+        client: Some(gateway_client(addr)),
         debug: None,
+    }
+}
+
+/// Options that point at a scripted gateway and record debug events.
+fn gatewayed_with_debug(addr: SocketAddr, capture: Arc<dyn DebugCapture>) -> RunOptions {
+    RunOptions {
+        debug: Some(capture),
+        ..gatewayed(addr)
     }
 }
 
@@ -1015,10 +1028,7 @@ async fn tool_loop_dispatches_then_returns_text() {
     // is needed (the crate forbids `unsafe`, which `env::set_var` requires).
     let gateway = ScriptedGateway::start(echo_then_text_script()).await;
     let addr = gateway.addr();
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
+    let client = gateway_client(addr);
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -1062,7 +1072,7 @@ impl Tool for SlowTool {
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this to &str"
+        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn wire_name(&self) -> &str {
         // Matches the function name the mock gateway asks for.
@@ -1071,7 +1081,7 @@ impl Tool for SlowTool {
 
     #[expect(
         clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this to &str"
+        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
     )]
     fn description(&self) -> &str {
         "a deliberately slow tool"
@@ -1094,10 +1104,7 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
 
     let gateway = ScriptedGateway::start(echo_then_text_script()).await;
     let addr = gateway.addr();
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
+    let client = gateway_client(addr);
     let slow = SlowTool;
     let tools: &[&dyn Tool] = &[&slow];
     let schemas = schemas_for(tools);
@@ -1170,10 +1177,7 @@ async fn run_tool_loop_recorded(
     addr: SocketAddr,
     tools: &[&dyn Tool],
 ) -> (Result<String>, Vec<(String, String)>, u32) {
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
+    let client = gateway_client(addr);
     let recorder = Arc::new(Recorder::default());
     let schemas = schemas_for(tools);
     let dispatch = dispatch_for(tools);
@@ -1359,10 +1363,7 @@ fn last_tool_turn_content(bodies: &[Value]) -> String {
 async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     let gateway = ScriptedGateway::start(echo_then_text_script()).await;
     let addr = gateway.addr();
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
+    let client = gateway_client(addr);
 
     let echo = UntrustedEchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -1431,10 +1432,7 @@ async fn untrusted_nonce_is_fresh_per_round() {
     ])
     .await;
     let addr = gateway.addr();
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
+    let client = gateway_client(addr);
 
     let echo = UntrustedEchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -1475,10 +1473,7 @@ async fn untrusted_nonce_is_fresh_per_round() {
 async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     let gateway = ScriptedGateway::start(echo_then_text_script()).await;
     let addr = gateway.addr();
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
+    let client = gateway_client(addr);
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];
@@ -1523,10 +1518,7 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
     ])
     .await;
     let addr = gateway.addr();
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("test").expect("non-empty test key"),
-    );
+    let client = gateway_client(addr);
 
     let echo = EchoTool;
     let tools: &[&dyn Tool] = &[&echo];

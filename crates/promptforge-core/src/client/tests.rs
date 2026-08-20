@@ -6,6 +6,18 @@ use crate::Error;
 use crate::model::{CompletionErrorKind, CompletionOptions};
 use serde_json::Value;
 
+async fn client_for(app: axum::Router) -> GatewayClient {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    GatewayClient::new(
+        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
+        SecretString::new("tok").expect("non-empty test key"),
+    )
+}
+
 fn lookup_from<'a>(
     pairs: &'a [(&'a str, &'a str)],
 ) -> impl Fn(&str) -> std::result::Result<Option<String>, Error> + 'a {
@@ -170,7 +182,6 @@ fn escape_controls_neutralizes_control_bytes_and_bounds_length() {
 async fn backend_error_display_is_body_free_and_body_is_opt_in_and_escaped() {
     use axum::Router;
     use axum::routing::post;
-    use tokio::net::TcpListener;
 
     // A non-success body carrying control characters and a would-be secret.
     async fn handler() -> (axum::http::StatusCode, String) {
@@ -180,16 +191,7 @@ async fn backend_error_display_is_body_free_and_body_is_opt_in_and_escaped() {
         )
     }
     let app = Router::new().route("/v1/chat/completions", post(handler));
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid endpoint"),
-        SecretString::new("tok").expect("non-empty test key"),
-    );
+    let client = client_for(app).await;
     let options = CompletionOptions::new("m", crate::dialects::ToolDialectId::OpenAi);
     let err = client
         .complete(&[Message::user("hi")], None, &options)
@@ -271,7 +273,6 @@ async fn complete_sends_completion_options_model_on_the_wire() {
     use axum::extract::Json;
     use axum::routing::post;
     use serde_json::{Value, json};
-    use tokio::net::TcpListener;
 
     let captured: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
     let slot = Arc::clone(&captured);
@@ -290,16 +291,7 @@ async fn complete_sends_completion_options_model_on_the_wire() {
             }
         }),
     );
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("tok").expect("non-empty test key"),
-    );
+    let client = client_for(app).await;
     let options = CompletionOptions {
         model: "analyst".into(),
         temperature: Some(crate::model::Temperature::new(0.0).expect("0.0 is valid")),
@@ -324,7 +316,6 @@ async fn complete_hard_fails_on_empty_model_reply() {
     use axum::extract::Json;
     use axum::routing::post;
     use serde_json::{Value, json};
-    use tokio::net::TcpListener;
 
     let app = Router::new().route(
         "/v1/chat/completions",
@@ -341,16 +332,7 @@ async fn complete_hard_fails_on_empty_model_reply() {
             }))
         }),
     );
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-
-    let client = GatewayClient::new(
-        GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-        SecretString::new("tok").expect("non-empty test key"),
-    );
+    let client = client_for(app).await;
     let options = CompletionOptions {
         model: "m".into(),
         temperature: None,

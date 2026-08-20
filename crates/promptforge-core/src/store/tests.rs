@@ -68,12 +68,7 @@ fn write_then_read_numbered_numbers_lines() {
 #[test]
 fn read_numbered_pads_numbers_to_width() {
     let store = StoreRef::memory();
-    let mut body = String::new();
-    for n in 1..=10 {
-        use std::fmt::Write as _;
-        let _ = writeln!(body, "line{n}");
-    }
-    store.write("a.txt", &body).expect("write");
+    numbered_fixture(&store, "a.txt", 10);
     let numbered = store
         .read_range_numbered("a.txt", 1, None)
         .expect("numbered");
@@ -199,30 +194,59 @@ fn read_range_empty_file_is_empty_string() {
 fn read_range_start_below_one_errors() {
     let store = StoreRef::memory();
     store.write("a.txt", "one\ntwo\n").expect("write");
-    let err = store.read_range("a.txt", 0, None).expect_err("start of 0");
-    assert_eq!(err.kind(), StoreErrorKind::InvalidRange);
-    assert!(matches!(err, StoreError::InvalidRange { .. }));
-    assert_eq!(err.path(), Some("a.txt"));
+    for style in [RangeStyle::Plain, RangeStyle::Numbered] {
+        let err = style
+            .read(&store, "a.txt", 0, None)
+            .expect_err("start of 0");
+        assert_eq!(err.kind(), StoreErrorKind::InvalidRange, "{style:?}");
+        assert!(matches!(err, StoreError::InvalidRange { .. }));
+        assert_eq!(err.path(), Some("a.txt"));
+    }
 }
 
 #[test]
 fn read_range_end_before_start_errors() {
     let store = StoreRef::memory();
     store.write("a.txt", "one\ntwo\nthree\n").expect("write");
-    let err = store
-        .read_range("a.txt", 3, Some(2))
-        .expect_err("end before start");
-    assert_eq!(err.kind(), StoreErrorKind::InvalidRange);
-    assert!(matches!(err, StoreError::InvalidRange { .. }));
+    for style in [RangeStyle::Plain, RangeStyle::Numbered] {
+        let err = style
+            .read(&store, "a.txt", 3, Some(2))
+            .expect_err("end before start");
+        assert_eq!(err.kind(), StoreErrorKind::InvalidRange, "{style:?}");
+        assert!(matches!(err, StoreError::InvalidRange { .. }));
+    }
 }
 
 #[test]
 fn read_range_missing_file_errors() {
     let store = StoreRef::memory();
-    let err = store
-        .read_range("absent.txt", 1, None)
-        .expect_err("should fail");
-    assert!(matches!(err, StoreError::NotFound { .. }));
+    for style in [RangeStyle::Plain, RangeStyle::Numbered] {
+        let err = style
+            .read(&store, "absent.txt", 1, None)
+            .expect_err("should fail");
+        assert!(matches!(err, StoreError::NotFound { .. }), "{style:?}");
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RangeStyle {
+    Plain,
+    Numbered,
+}
+
+impl RangeStyle {
+    fn read(
+        self,
+        store: &StoreRef,
+        path: &str,
+        start: usize,
+        end: Option<usize>,
+    ) -> Result<String, StoreError> {
+        match self {
+            Self::Plain => store.read_range(path, start, end),
+            Self::Numbered => store.read_range_numbered(path, start, end),
+        }
+    }
 }
 
 /// Writes `line1` through `line<line_count>` into `path`.
@@ -314,38 +338,6 @@ fn read_range_numbered_beyond_eof_is_empty() {
             .expect("numbered"),
         ""
     );
-}
-
-#[test]
-fn read_range_numbered_start_below_one_errors() {
-    let store = StoreRef::memory();
-    store.write("a.txt", "one\ntwo\n").expect("write");
-    let err = store
-        .read_range_numbered("a.txt", 0, None)
-        .expect_err("start of 0");
-    assert_eq!(err.kind(), StoreErrorKind::InvalidRange);
-    assert!(matches!(err, StoreError::InvalidRange { .. }));
-    assert_eq!(err.path(), Some("a.txt"));
-}
-
-#[test]
-fn read_range_numbered_end_before_start_errors() {
-    let store = StoreRef::memory();
-    store.write("a.txt", "one\ntwo\nthree\n").expect("write");
-    let err = store
-        .read_range_numbered("a.txt", 3, Some(2))
-        .expect_err("end before start");
-    assert_eq!(err.kind(), StoreErrorKind::InvalidRange);
-    assert!(matches!(err, StoreError::InvalidRange { .. }));
-}
-
-#[test]
-fn read_range_numbered_missing_file_errors() {
-    let store = StoreRef::memory();
-    let err = store
-        .read_range_numbered("absent.txt", 1, None)
-        .expect_err("should fail");
-    assert!(matches!(err, StoreError::NotFound { .. }));
 }
 
 #[test]
@@ -448,24 +440,31 @@ fn glob_star_stops_at_slash() {
     assert_eq!(store.glob("a/*.txt").expect("glob"), vec!["a/b.txt"]);
 }
 
-#[test]
-fn invalid_paths_are_rejected_before_dispatch() {
-    let store = StoreRef::memory();
-    for (path, reason) in [
-        ("", PathReason::Empty),
-        ("/abs.txt", PathReason::Absolute),
-        ("../escape.txt", PathReason::Traversal),
-        ("a/./b.txt", PathReason::Traversal),
-        ("a//b.txt", PathReason::EmptySegment),
-        ("a\u{0}b.txt", PathReason::Control),
-    ] {
+fn assert_invalid_paths(store: &StoreRef, cases: &[(&str, PathReason)]) {
+    for (path, reason) in cases {
         let err = store.read(path).expect_err("path must be rejected");
         assert_eq!(err.kind(), StoreErrorKind::InvalidPath, "{path}");
         match err {
-            StoreError::InvalidPath { reason: got, .. } => assert_eq!(got, reason, "{path}"),
+            StoreError::InvalidPath { reason: got, .. } => assert_eq!(&got, reason, "{path}"),
             other => panic!("expected InvalidPath for {path:?}, got {other:?}"),
         }
     }
+}
+
+#[test]
+fn invalid_paths_are_rejected_before_dispatch() {
+    let store = StoreRef::memory();
+    assert_invalid_paths(
+        &store,
+        &[
+            ("", PathReason::Empty),
+            ("/abs.txt", PathReason::Absolute),
+            ("../escape.txt", PathReason::Traversal),
+            ("a/./b.txt", PathReason::Traversal),
+            ("a//b.txt", PathReason::EmptySegment),
+            ("a\u{0}b.txt", PathReason::Control),
+        ],
+    );
 }
 
 #[test]
@@ -543,22 +542,18 @@ fn str_replace_reports_empty_ascii_and_multibyte_contents() {
 #[test]
 fn platform_unsafe_paths_are_rejected_before_dispatch() {
     let store = StoreRef::memory();
-    for (path, reason) in [
-        ("a\\b.txt", PathReason::Backslash),
-        ("CON", PathReason::ReservedName),
-        ("dir/nul.txt", PathReason::ReservedName),
-        ("com1", PathReason::ReservedName),
-        ("LPT9.log", PathReason::ReservedName),
-        ("trailing.", PathReason::UnsafeSuffix),
-        ("trailing ", PathReason::UnsafeSuffix),
-    ] {
-        let err = store.read(path).expect_err("path must be rejected");
-        assert_eq!(err.kind(), StoreErrorKind::InvalidPath, "{path}");
-        match err {
-            StoreError::InvalidPath { reason: got, .. } => assert_eq!(got, reason, "{path}"),
-            other => panic!("expected InvalidPath for {path:?}, got {other:?}"),
-        }
-    }
+    assert_invalid_paths(
+        &store,
+        &[
+            ("a\\b.txt", PathReason::Backslash),
+            ("CON", PathReason::ReservedName),
+            ("dir/nul.txt", PathReason::ReservedName),
+            ("com1", PathReason::ReservedName),
+            ("LPT9.log", PathReason::ReservedName),
+            ("trailing.", PathReason::UnsafeSuffix),
+            ("trailing ", PathReason::UnsafeSuffix),
+        ],
+    );
     // A path at the exact byte limit is accepted; one byte over is rejected.
     let maximum = "a".repeat(path::MAX_STORE_PATH_BYTES);
     store

@@ -387,6 +387,15 @@ impl EventRecorder {
     fn count(&self, event: &Observation) -> usize {
         self.snapshot().iter().filter(|e| *e == event).count()
     }
+
+    fn assert_terminal_count(&self, event: &Observation, expected: usize) {
+        assert_eq!(
+            self.count(event),
+            expected,
+            "unexpected terminal-event count: {:?}",
+            self.snapshot()
+        );
+    }
 }
 
 fn lua_worker(source: &str) -> Section {
@@ -407,6 +416,18 @@ fn lua_worker(source: &str) -> Section {
         items: Vec::new(),
         off_walk: false,
     }
+}
+
+fn shared_chunk(source: &str) -> LuaProgram {
+    LuaProgram::compile(
+        source,
+        "test shared",
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
+        "fanout-terminal-test",
+        &crate::observe::NullObserver,
+        "Worker",
+    )
+    .expect("test Lua must compile")
 }
 
 /// Owns the run-context values every `run_fanout_arms` test threads into a
@@ -487,14 +508,9 @@ async fn each_arm_emits_a_distinct_succeeded_terminal_event() {
         .expect("both arms must succeed");
     assert_eq!(results.len(), 2);
     assert_eq!(recorder.count(&detail::FANOUT_ARM_STARTED), 2);
-    assert_eq!(
-        recorder.count(&detail::FANOUT_ARM_SUCCEEDED),
-        2,
-        "each arm emits one distinct succeeded event: {:?}",
-        recorder.snapshot()
-    );
-    assert_eq!(recorder.count(&detail::FANOUT_ARM_FAILED), 0);
-    assert_eq!(recorder.count(&detail::FANOUT_ARM_CANCELLED), 0);
+    recorder.assert_terminal_count(&detail::FANOUT_ARM_SUCCEEDED, 2);
+    recorder.assert_terminal_count(&detail::FANOUT_ARM_FAILED, 0);
+    recorder.assert_terminal_count(&detail::FANOUT_ARM_CANCELLED, 0);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -505,15 +521,7 @@ async fn the_shared_replay_sees_the_arm_item() {
     let worker = lua_worker("return captured_by_shared");
     let items = vec![json!("alpha")];
     let mut fixture = FanoutFixture::new();
-    fixture.shared = LuaProgram::compile(
-        "captured_by_shared = item",
-        "test shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        "fanout-terminal-test",
-        &crate::observe::NullObserver,
-        "Worker",
-    )
-    .expect("test Lua must compile");
+    fixture.shared = shared_chunk("captured_by_shared = item");
     let ctx = fixture.ctx("fanout-terminal-test", RunLimits::new(), &NullObserver);
 
     let results = run_fanout_arms(&worker, &items, &ctx)
@@ -539,13 +547,8 @@ async fn a_hard_failing_arm_emits_a_failed_terminal_event() {
     run_fanout_arms(&worker, &items, &ctx)
         .await
         .expect_err("a hard arm error must fail the fanout");
-    assert_eq!(
-        recorder.count(&detail::FANOUT_ARM_FAILED),
-        1,
-        "the failing arm emits one failed event: {:?}",
-        recorder.snapshot()
-    );
-    assert_eq!(recorder.count(&detail::FANOUT_ARM_SUCCEEDED), 0);
+    recorder.assert_terminal_count(&detail::FANOUT_ARM_FAILED, 1);
+    recorder.assert_terminal_count(&detail::FANOUT_ARM_SUCCEEDED, 0);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -570,19 +573,9 @@ async fn a_vm_construction_failure_emits_one_failed_terminal_event() {
             .contains("test-injected VM construction failure"),
         "the construction error propagates: {error}"
     );
-    assert_eq!(
-        recorder.count(&detail::FANOUT_ARM_FAILED),
-        1,
-        "the arm finishes failed exactly once: {:?}",
-        recorder.snapshot()
-    );
-    assert_eq!(recorder.count(&detail::FANOUT_ARM_SUCCEEDED), 0);
-    assert_eq!(
-        recorder.count(&detail::FANOUT_ARM_CANCELLED),
-        0,
-        "a finished finalizer must not also emit cancelled on drop: {:?}",
-        recorder.snapshot()
-    );
+    recorder.assert_terminal_count(&detail::FANOUT_ARM_FAILED, 1);
+    recorder.assert_terminal_count(&detail::FANOUT_ARM_SUCCEEDED, 0);
+    recorder.assert_terminal_count(&detail::FANOUT_ARM_CANCELLED, 0);
     assert_eq!(
         recorder.count(&detail::LUA_TEARDOWN_STARTED),
         0,
@@ -599,15 +592,7 @@ async fn a_setup_failure_tears_the_vm_down_once_and_emits_one_failed_event() {
     let worker = lua_worker("return item");
     let items = vec![json!("a")];
     let mut fixture = FanoutFixture::new();
-    fixture.shared = LuaProgram::compile(
-        "error('boom')",
-        "test shared",
-        NonZeroU32::new(1).expect("compile source line is non-zero"),
-        "fanout-terminal-test",
-        &crate::observe::NullObserver,
-        "Worker",
-    )
-    .expect("test Lua must compile");
+    fixture.shared = shared_chunk("error('boom')");
     let recorder = EventRecorder::default();
     let ctx = fixture.ctx("fanout-terminal-test", RunLimits::new(), &recorder);
 
@@ -618,13 +603,8 @@ async fn a_setup_failure_tears_the_vm_down_once_and_emits_one_failed_event() {
         error.to_string().contains("boom"),
         "the setup error propagates: {error}"
     );
-    assert_eq!(
-        recorder.count(&detail::FANOUT_ARM_FAILED),
-        1,
-        "the arm finishes failed exactly once: {:?}",
-        recorder.snapshot()
-    );
-    assert_eq!(recorder.count(&detail::FANOUT_ARM_SUCCEEDED), 0);
+    recorder.assert_terminal_count(&detail::FANOUT_ARM_FAILED, 1);
+    recorder.assert_terminal_count(&detail::FANOUT_ARM_SUCCEEDED, 0);
     assert_eq!(
         recorder.count(&detail::LUA_TEARDOWN_STARTED),
         1,

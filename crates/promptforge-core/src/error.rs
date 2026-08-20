@@ -622,6 +622,17 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 mod tests {
     use super::*;
 
+    fn assert_source_survives_run_error(error: Error) {
+        assert!(
+            std::error::Error::source(&error).is_some(),
+            "the internal error must preserve its source"
+        );
+        assert!(
+            std::error::Error::source(&crate::RunError::from(error)).is_some(),
+            "the public RunError wrapper must keep the source reachable"
+        );
+    }
+
     #[test]
     fn source_bearing_binding_errors_preserve_their_cause() {
         // F5: the binding and tool-scope failures keep the originating typed
@@ -634,27 +645,16 @@ mod tests {
             alias: "echo".to_owned(),
             source: Box::new(schema_error),
         };
-        assert!(
-            std::error::Error::source(&bind).is_some(),
-            "BindSchema must preserve the schema validation cause"
-        );
         assert_eq!(
             bind.to_string(),
             "model-facing schema build failure for tool alias \"echo\""
         );
-        assert!(
-            std::error::Error::source(&crate::RunError::from(bind)).is_some(),
-            "the public RunError wrapper must keep the binding cause reachable"
-        );
+        assert_source_survives_run_error(bind);
 
         let analysis = Error::ToolScopeAnalysisSource {
             source: Box::new(std::io::Error::other("picker selection failed")),
         };
-        assert!(
-            std::error::Error::source(&analysis).is_some(),
-            "ToolScopeAnalysisSource must preserve the picker selection cause"
-        );
-        assert!(std::error::Error::source(&crate::RunError::from(analysis)).is_some());
+        assert_source_survives_run_error(analysis);
     }
 
     #[test]
@@ -672,11 +672,7 @@ mod tests {
                 incomplete_input: false,
             }),
         };
-        assert!(
-            std::error::Error::source(&compile).is_some(),
-            "LuaCompile must preserve the mlua compile cause"
-        );
-        assert!(std::error::Error::source(&crate::RunError::from(compile)).is_some());
+        assert_source_survives_run_error(compile);
     }
 
     #[test]
@@ -694,7 +690,7 @@ mod tests {
             source.to_string().contains("bad name!"),
             "the rejected wire name must survive on the source: {source}"
         );
-        assert!(std::error::Error::source(&crate::RunError::from(error)).is_some());
+        assert_source_survives_run_error(error);
     }
 
     #[test]
@@ -756,7 +752,6 @@ mod tests {
             capability: "a fast model".to_owned(),
             source: SharedSource::new(std::io::Error::other("picker rebuild failed")),
         };
-        assert!(std::error::Error::source(&bind).is_some());
-        assert!(std::error::Error::source(&crate::RunError::from(bind)).is_some());
+        assert_source_survives_run_error(bind);
     }
 }

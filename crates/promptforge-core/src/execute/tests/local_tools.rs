@@ -29,25 +29,20 @@ fn resp_two_tool_calls(name: &str, first: (&str, &str), second: (&str, &str)) ->
     }))
 }
 
+/// Builds the standard one-section prompt around a local-tool declaration.
+fn add_local_md(declaration: &str, after_fence: &str) -> String {
+    format!(
+        "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+         ## Only\n\n\
+         ```lua\n{declaration}\n```\n\n\
+         {after_fence}\n"
+    )
+}
+
 /// Run `md` against a scripted gateway with no external tools, returning the
 /// run result. The fixture gets the standard `models.default` H1 binding.
 async fn run_local(test: &TestPrompt, addr: SocketAddr, store: &StoreRef) -> Result<String> {
-    run(
-        test,
-        "",
-        &[],
-        store,
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
-    )
-    .await
+    run(test, "", &[], store, gatewayed(addr)).await
 }
 
 #[tokio::test]
@@ -58,13 +53,11 @@ async fn local_tool_handler_result_returns_to_the_model() {
     ])
     .await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n\
-```lua\n\
-tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  return 'got ' .. args.value\nend)\n\
-```\n\n\
-Use the tool.\n";
-    let out = run_local(&bound_for_model(md), addr, &StoreRef::memory())
+    let md = add_local_md(
+        "tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  return 'got ' .. args.value\nend)",
+        "Use the tool.",
+    );
+    let out = run_local(&bound_for_model(&md), addr, &StoreRef::memory())
         .await
         .unwrap();
     assert_eq!(out, "final answer");
@@ -93,14 +86,14 @@ async fn local_tool_handler_store_writes_persist() {
     ])
     .await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n\
-```lua\n\
-tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  store.write('tool-out.txt', args.value)\n  return 'stored'\nend)\n\
-```\n\n\
-Use the tool.\n";
+    let md = add_local_md(
+        "tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  store.write('tool-out.txt', args.value)\n  return 'stored'\nend)",
+        "Use the tool.",
+    );
     let store = StoreRef::memory();
-    let out = run_local(&bound_for_model(md), addr, &store).await.unwrap();
+    let out = run_local(&bound_for_model(&md), addr, &store)
+        .await
+        .unwrap();
     assert_eq!(out, "final answer");
     assert_eq!(store.read("tool-out.txt").unwrap(), "hi");
 }
@@ -117,14 +110,14 @@ async fn local_tool_multiple_calls_in_one_response_all_run() {
     ])
     .await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n\
-```lua\n\
-tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  store.append('calls.txt', args.value .. ';')\n  return 'ok ' .. args.value\nend)\n\
-```\n\n\
-Use the tool.\n";
+    let md = add_local_md(
+        "tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  store.append('calls.txt', args.value .. ';')\n  return 'ok ' .. args.value\nend)",
+        "Use the tool.",
+    );
     let store = StoreRef::memory();
-    let out = run_local(&bound_for_model(md), addr, &store).await.unwrap();
+    let out = run_local(&bound_for_model(&md), addr, &store)
+        .await
+        .unwrap();
     assert_eq!(out, "final answer");
     assert_eq!(store.read("calls.txt").unwrap(), "a;b;");
 
@@ -149,25 +142,20 @@ async fn local_tool_handler_error_surfaces_as_a_tool_failure() {
     ])
     .await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n\
-```lua\n\
-tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(_args)\n  error('handler exploded')\nend)\n\
-```\n\n\
-Use the tool.\n";
+    let md = add_local_md(
+        "tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(_args)\n  error('handler exploded')\nend)",
+        "Use the tool.",
+    );
     let recorder = Arc::new(Recorder::default());
     let error = run(
-        &bound_for_model(md),
+        &bound_for_model(&md),
         "",
         &[],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
+            client: Some(gateway_client(addr)),
             debug: None,
         },
     )
@@ -199,15 +187,11 @@ async fn local_tool_handler_shares_section_globals_with_later_chunks() {
     let addr = gateway.addr();
     // The accumulator pattern: the handler appends to a section-global table
     // and a later chunk reads it, proving handler and chunks share one VM.
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n\
-```lua\n\
-collected = {}\n\
-tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  table.insert(collected, args.value)\n  return 'noted ' .. args.value\nend)\n\
-```\n\n\
-Use the tool.\n\n\
-```lua\nreturn 'sum:' .. table.concat(collected, ',')\n```\n";
-    let out = run_local(&bound_for_model(md), addr, &StoreRef::memory())
+    let md = add_local_md(
+        "collected = {}\ntools['add_local']('grab', 'Grab a value', { value = 'string' }, function(args)\n  table.insert(collected, args.value)\n  return 'noted ' .. args.value\nend)",
+        "Use the tool.\n\n```lua\nreturn 'sum:' .. table.concat(collected, ',')\n```",
+    );
+    let out = run_local(&bound_for_model(&md), addr, &StoreRef::memory())
         .await
         .unwrap();
     assert_eq!(out, "sum:a,b");
@@ -221,15 +205,11 @@ async fn local_tool_handler_cannot_jump() {
     ])
     .await;
     let addr = gateway.addr();
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n\
-```lua\n\
-tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(_args)\n  jump('## Nowhere')\n  return 'x'\nend)\n\
-```\n\n\
-Use the tool.\n\n\
-## Nowhere\n\n\
-```lua\nreturn 'jumped'\n```\n";
-    let error = run_local(&bound_for_model(md), addr, &StoreRef::memory())
+    let md = add_local_md(
+        "tools['add_local']('grab', 'Grab a value', { value = 'string' }, function(_args)\n  jump('## Nowhere')\n  return 'x'\nend)",
+        "Use the tool.\n\n## Nowhere\n\n```lua\nreturn 'jumped'\n```",
+    );
+    let error = run_local(&bound_for_model(&md), addr, &StoreRef::memory())
         .await
         .expect_err("jump is nil inside a local tool handler");
     assert!(
@@ -323,15 +303,7 @@ Second ask.\n",
         "",
         &[Arc::clone(&tool) as Arc<dyn Tool>],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .unwrap();
