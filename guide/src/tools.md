@@ -25,13 +25,15 @@ tools.add({"a", "b", tool_c}) -- arrays of strings or handles
 
 ## Tool Properties
 
-After `tools.need`, the returned handle exposes: `name`, `description`, `parameters` (JSON schema), `wire_name`, and `untrusted` flag. The model-facing description can be overridden:
+After `tools.need`, the returned handle exposes: `name`, `description`, `parameters` (JSON schema), `wire_name`, and `untrusted` flag. Tool objects are frozen - assigning a field errors. The model-facing description is overridden positionally at declaration or scoping time:
 
 ```lua
-local search = tools.need("search", "web search capability")
-search.description = "Search the web for current information"
-tools.add(search)
+tools.need("search", "web search capability", "Search the web for current information")
+tools.always("search", "Search the web for current information")
+tools.add("search", "Search the web for current information")
 ```
+
+Precedence is `add` over `need`/`always` over the catalog description.
 
 ## Tool Dispatch Loop
 
@@ -105,7 +107,7 @@ Handler rules:
 - Lua errors propagate as tool-call failures
 - Output is trusted: no nonce envelope, since the prompt author wrote the handler
 
-A local tool becomes visible to the model starting from the next prose block or `model:infer` call. Local tools are H2-only; declaring one in H1 is not supported.
+A local tool becomes visible to the model starting from the next prose block. Local tools are H2-only; declaring one in H1 is not supported.
 
 ## Implementing Custom Tools
 

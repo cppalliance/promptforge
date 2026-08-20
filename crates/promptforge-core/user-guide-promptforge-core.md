@@ -111,9 +111,11 @@ RunLimits::new()
 
 A prompt is built from alternating Lua and prose blocks. Each section can contain any number of Lua blocks interleaved with prose segments. The last prose block in a section runs a full tool-call loop; earlier prose blocks run single-shot (one model round, then control continues to the next Lua block).
 
-### The H1 Phase
+Preamble, prologue, and epilog are positions, not phases: the preamble is the H1 region, the prologue is a section's Lua before its first prose, and the epilog is Lua after the last prose.
 
-Lua blocks in the H1 region execute once in source order before any H2 section. The H1 phase declares tools and models, sets variables, and can short-circuit the entire run:
+### The H1 Preamble
+
+Lua blocks in the H1 region execute once in source order before any H2 section. The preamble declares tools and models, sets variables, and can short-circuit the entire run:
 
 ````markdown
 # My Prompt
@@ -134,7 +136,7 @@ Returning a scalar value (string, integer, number, or boolean) from H1 skips all
 
 ### Shared Libraries
 
-A `lua shared` fence in the H1 defines a reusable library compiled once and loaded into every section VM:
+A `lua shared` fence in the H1 defines a reusable library compiled once and replayed into every section VM as its first chunk:
 
 ````markdown
 ```lua shared
@@ -144,7 +146,7 @@ end
 ```
 ````
 
-Shared functions resolve host globals (`store`, `log`, `args`) at call time, not load time - so a shared function can reference `store` even though it doesn't exist when the library loads.
+The replay runs with the full section environment installed (`args`, `sys`, `var`, `reply`, `store`, `log`, the `tools`/`models` tables, and the control globals), so top-level shared code may use them at load. Two exclusions apply: the captured tool/model alias globals install only after the replay (a declared alias wins over a same-named shared global), and `jump` during the load is a hard error. A scalar top-level return is discarded - the replay loads a library, it does not produce the section's result.
 
 ### Section Environment
 
@@ -159,13 +161,14 @@ Each section VM provides these globals:
 | `tools` | Tool scope and call counts |
 | `log` | Diagnostic checkpoint function |
 | `reply` | Previous section's model answer |
-| `tasks` | Section handles for control flow |
 
-The `sys` table includes `when`, `now`, `id`, `section_name`, `execution`, `section_count`, `model` (after first model interaction), and `reply_finish_reason` (after inference). It is sealed - writes raise errors and the metatable cannot be replaced.
+The `sys` table includes `when`, `now`, `id`, `section_name`, `execution`, `section_count`, `model` (after first model interaction), and `reply_finish_reason` (after inference). It is sealed - writes raise errors and the metatable cannot be replaced. `sys.id` is the run-global execution-unit counter: H1 keeps id 0, and every section entry and every fanout arm takes the next value. A fanout arm also carries `sys.index`, its 1-based position within the current fanout; `sys.index` is absent outside fanout.
+
+`var` is the walk-local clipboard: writes persist across sections on the same walk (H1 included), and `execute`/`fanout` clone it in and discard it out - child writes never reach the caller. `var` holds JSON data only; a non-JSON value fails at the assigning line. Bare globals (`x = 42` without `local`) are section-local scratch, visible to prose as `{{ x }}`.
 
 ### Template Substitution
 
-Prose blocks support `{{ path }}` template substitutions with five namespaces:
+Prose blocks support `{{ path }}` template substitutions. The sources are `args`, `reply`, `var`, `sys`, `item` (fanout arms only), and bare globals - a section-local Lua global resolves as `{{ x }}`, with dotted paths indexing into its JSON form:
 
 ````markdown
 ## Research
@@ -206,7 +209,7 @@ Using this research: {{ var.research }}
 Write a summary.
 ````
 
-`execute()` nests up to 8 levels deep. A subroutine starts with `reply` set to nil - pass context through the `input` parameter instead. `jump()` inside an `execute()` subroutine is rejected with a clear error. Sections can be referenced by heading string or by Section objects from the `tasks` table.
+`execute()` nests up to 8 levels deep, and the count accumulates across `fanout` boundaries. A chain starts with `reply` set to nil - pass context through the `input` parameter instead - and with a clone of the caller's `var`. A `jump()` inside a chain moves within the chain, and a `return` inside a chain ends the chain, not the run. Sections are referenced by heading string.
 
 ### Sandbox Constraints
 
@@ -256,23 +259,18 @@ Duplicate model aliases or duplicate `models.default` calls are rejected atomica
 
 ### Model Inference from Lua
 
-`handle:infer(prompt)` runs a nested model inference with tool dispatch from inside any Lua block, using that handle's specific model:
+`infer` has one shape: a single tool-free inference round on a fresh conversation. It never sets `reply` and never touches `sys`. Two forms exist:
 
 ```lua
-local analysis = model:infer("Classify this text: " .. args)
-var.classification = analysis
-```
+-- The section's current model (the models.use selection, else the models.default baseline)
+local tag = models.infer("One-word sentiment of: " .. args)
 
-After inference, `reply` holds the model's response and `sys.reply_finish_reason` holds the finish metadata.
-
-`models.infer(prompt)` is the lighter path: one direct, tool-free inference round on a fresh conversation using the section's current model (the `models.use` selection, else the `models.default` baseline). It does not touch `reply` or `sys.reply_finish_reason`.
-
-`models.get(alias)` returns the handle for a declared model without changing the section's model selection. Combined with `handle:infer`, it is the way to consult a different model inside a section:
-
-```lua
+-- Any declared model, via its handle
 local critic = models.get("critic")
 local review = critic:infer("Critique this draft: " .. reply)
 ```
+
+`models.get(alias)` returns the handle for a declared model without changing the section's model selection, so `handle:infer` is the way to consult a different model inside a section. A Lua block that needs tools uses `execute` on a section instead.
 
 ### Inspecting Model Properties
 
@@ -313,13 +311,15 @@ tools.add({"a", "b", tool_c}) -- arrays of strings or handles
 
 ### Tool Properties
 
-After `tools.need`, the returned handle exposes: `name`, `description`, `parameters` (JSON schema), `wire_name`, and `untrusted` flag. The model-facing description can be overridden:
+After `tools.need`, the returned handle exposes: `name`, `description`, `parameters` (JSON schema), `wire_name`, and `untrusted` flag. Tool objects are frozen - assigning a field errors. The model-facing description is overridden positionally at declaration or scoping time:
 
 ```lua
-local search = tools.need("search", "web search capability")
-search.description = "Search the web for current information"
-tools.add(search)
+tools.need("search", "web search capability", "Search the web for current information")
+tools.always("search", "Search the web for current information")
+tools.add("search", "Search the web for current information")
 ```
+
+Precedence is `add` over `need`/`always` over the catalog description.
 
 ### Tool Dispatch Loop
 
@@ -361,7 +361,7 @@ tools.add_local("grab", "Grab a value from the store", {
 end)
 ```
 
-The params table maps each parameter name to a bare type string or a `{type, description}` array. Supported types are `"string"`, `"integer"`, `"number"`, and `"boolean"`; all declared parameters are required. The handler receives the arguments as a Lua table and returns a string. It shares the section's VM (store, `var`, globals), may call `execute()`, `fanout`, and `model:infer`, and cannot call `jump()`. Local tool output is trusted - no nonce envelope. A local tool becomes visible to the model starting from the next prose block or `model:infer` call.
+The params table maps each parameter name to a bare type string or a `{type, description}` array. Supported types are `"string"`, `"integer"`, `"number"`, and `"boolean"`; all declared parameters are required. The handler receives the arguments as a Lua table and returns a string. It shares the section's VM (store, `var`, globals), may call `execute()`, `fanout`, and `model:infer`, and cannot call `jump()`. Local tool output is trusted - no nonce envelope. A local tool becomes visible to the model starting from the next prose block.
 
 ### Implementing Custom Tools
 
@@ -383,13 +383,13 @@ The web search tool sends queries through a gateway proxy so the search provider
 
 ## Fanout
 
-`fanout(worker, list)` maps a worker section over a list section's items in parallel. Each item is processed by its own isolated execution arm with a fresh Lua VM.
+`fanout(worker, collection)` maps a worker section over a collection in parallel. Each member is processed by its own isolated execution arm with a fresh Lua VM.
 
 ````markdown
 ## Process
 
 ```lua
-local results = fanout("### Worker", "### URLs")
+local results = fanout("### Worker", list_from_section("### URLs"))
 var.output = table.concat(results, "\n\n")
 ```
 
@@ -404,18 +404,18 @@ Fetch and summarize: {{ item }}
 - https://example.com/page3
 ````
 
-Worker and list sections are referenced by markdown heading address (level + name). A list-only section - one with only bullet items and no Lua blocks - serves as the fanout source.
+The worker is referenced by markdown heading address (level + name). The second parameter is always a collection, never a section name: any Lua table works, and `list_from_section("### List")` feeds a list section's pre-parsed items straight in. An empty collection is an error - no work is likely a bug.
 
 ### Arm Execution
 
-Each arm receives the current item text as the `item` variable and a `sys.taskid` identifying its position. The arm can:
+Each arm receives the current member as the `item` variable, a `sys.index` giving its 1-based position within the current fanout, and a unique run-global `sys.id`. Each arm starts with a fresh clone of the caller's `var` - arm writes to `var` never reach the caller. The arm can:
 
 - Run Lua blocks that short-circuit before any prose (enabling pure-Lua map operations)
 - Substitute `{{ item }}` in prose
 - Run the full model tool loop
 - Run Lua blocks after the prose for post-processing
 
-Results are returned in list order (not finish order). Each result has `.text`, `.ok`, `.item`, and `.exhausted` fields. The result array supports `table.concat` since objects coerce via `__tostring`.
+Results are returned in collection order (not finish order). Each result has `.text`, `.ok`, `.item`, and `.exhausted` fields; an arm that produces no reply yields `.text == ""` with `.ok == true`. The result array supports `table.concat` since objects coerce via `__tostring`. All arms share the run's store: two arms of one fanout writing the same path is a hard error (a write-write race), while `store.append` from concurrent arms stays legal.
 
 ### Resilience
 
@@ -443,6 +443,8 @@ local exists = store.exists("notes/summary.md")
 
 store.delete("notes/summary.md")
 ```
+
+`store.delete` on a missing path is silent - delete is idempotent. Within a single `fanout`, two arms calling `store.write` on the same path is a hard error (a write-write race); `store.append` from concurrent arms stays legal.
 
 ### Safe Injection
 

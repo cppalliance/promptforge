@@ -38,27 +38,18 @@ Duplicate model aliases or duplicate `models.default` calls are rejected atomica
 
 ## Model Inference from Lua
 
-`handle:infer(prompt)` runs a nested model inference with tool dispatch from inside any Lua block, using that handle's specific model:
+`infer` has one shape: a single tool-free inference round on a fresh conversation. It never sets `reply` and never touches `sys`. Two forms exist:
 
 ```lua
-local analysis = model:infer("Classify this text: " .. args)
-var.classification = analysis
-```
-
-After inference, `reply` holds the model's response and `sys.reply_finish_reason` holds the finish metadata.
-
-`models.infer(prompt)` is the lighter path: one direct, tool-free inference round on a fresh conversation using the section's current model (the `models.use` selection, else the `models.default` baseline). It does not touch `reply` or `sys.reply_finish_reason`:
-
-```lua
+-- The section's current model (the models.use selection, else the models.default baseline)
 local tag = models.infer("One-word sentiment of: " .. args)
-```
 
-`models.get(alias)` returns the handle for a declared model without changing the section's model selection. Combined with `handle:infer`, it is the way to consult a different model inside a section:
-
-```lua
+-- Any declared model, via its handle
 local critic = models.get("critic")
 local review = critic:infer("Critique this draft: " .. reply)
 ```
+
+`models.get(alias)` returns the handle for a declared model without changing the section's model selection, so `handle:infer` is the way to consult a different model inside a section. A Lua block that needs tools uses `execute` on a section instead.
 
 ## Inspecting Model Properties
 
