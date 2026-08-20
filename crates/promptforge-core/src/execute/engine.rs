@@ -59,7 +59,7 @@ use crate::tools::SharedTools;
 use crate::{Error, Result};
 use mlua::Value as LuaValue;
 
-use super::block_walk::{BlockWalkContext, SectionFlow, walk_section_blocks};
+use super::block_walk::{BlockWalkContext, SectionFlow, run_one_section_impl};
 use super::config::RunLimits;
 use super::gateway::GatewaySource;
 use super::scope::ToolAnalysis;
@@ -385,7 +385,7 @@ async fn walk_siblings(
 /// This is the single engine every chain drives: VM construction and limits,
 /// the control globals through [`make_control_globals`] (shared with the
 /// fanout arm), the setup half through [`setup_section_vm`], the infer hook,
-/// the block walk through [`walk_section_blocks`], then the teardown
+/// the block walk through [`run_one_section_impl`], then the teardown
 /// boundary and the section-finished observation.
 /// `siblings` is the caller's
 /// own walk slice, from which the section's visible set (its siblings minus
@@ -474,7 +474,7 @@ async fn run_one_section(
     // (a jump or return included), never on an error.
     let walk_ctx = BlockWalkContext::from(ctx);
     let result =
-        walk_section_blocks(&mut vm, &walk_ctx, section, sys, incoming_reply, client).await;
+        run_one_section_impl(&mut vm, &walk_ctx, section, sys, incoming_reply, client).await;
     vm.teardown(ctx.observer, &section.name);
     let flow = result?;
     ctx.observer

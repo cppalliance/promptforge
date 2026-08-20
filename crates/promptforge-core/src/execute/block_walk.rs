@@ -1,6 +1,6 @@
 //! The engine's walk half: one section's ordered block loop.
 //!
-//! [`walk_section_blocks`] runs the block lifecycle every driver of the
+//! [`run_one_section_impl`] runs the block lifecycle every driver of the
 //! shared engine shares - Lua chunks in place, prose through the tool loop -
 //! and returns a [`SectionFlow`] telling the driver how the section ended.
 //! The driver owns everything around the loop: VM construction and limits,
@@ -108,7 +108,7 @@ pub(crate) enum SectionFlow {
     clippy::too_many_lines,
     reason = "one linear block loop: per-block scope rebuild, prose substitution, the tool loop, and the reply roll-forward stay together so every driver shares exactly one implementation"
 )]
-pub(crate) async fn walk_section_blocks(
+pub(crate) async fn run_one_section_impl(
     vm: &mut SectionVm,
     ctx: &BlockWalkContext<'_>,
     section: &Section,
