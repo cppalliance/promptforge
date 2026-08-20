@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use crate::client::GatewayClient;
 use crate::lua::{SectionVm, ToolBindings};
 use crate::model::ModelBindings;
 use crate::parser::Prompt;
@@ -10,10 +11,9 @@ use crate::resolve::RuntimeResolution;
 use crate::tools::ToolRegistry;
 use crate::{Error, Result};
 
-use super::block_walk::{BlockRunMode, BlockWalkContext, SectionFlow, run_one_section_impl};
-use super::engine::RunContext;
+use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
+use super::engine::RunFrame;
 use super::gateway::{GatewaySource, ResolutionContext};
-use super::scope::ToolAnalysis;
 use super::support::{now_rfc3339_checked, sys_json};
 use super::tools::attach_infer_hook;
 
@@ -25,34 +25,25 @@ pub(crate) struct LiveH1State {
     pub(crate) reply: Option<String>,
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "the H1 shell is one linear pass: VM construction and limits, host setup, the infer hook, the shared block loop, and the state extraction"
-)]
 pub(crate) async fn execute_live_h1(
     prompt: &Prompt,
     resolution: ResolutionContext<'_>,
     registry: &ToolRegistry<'_>,
-    frame: &RunContext<'_>,
+    client: Option<&GatewayClient>,
+    frame: &RunFrame<'_>,
 ) -> Result<LiveH1State> {
-    let &RunContext {
+    let &RunFrame {
         args,
-        shared_tools,
         store,
         execution,
         observer,
-        observer_arc,
-        client,
         debug,
-        debug_arc,
+        shared_tools,
         limits,
         turns,
+        max_tool_iterations,
+        ..
     } = frame;
-    let default_max_tool_iterations = limits.tool_iterations().get() as usize;
-    let max_tool_iterations = prompt
-        .frontmatter
-        .max_tool_iterations
-        .resolve(default_max_tool_iterations);
     let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models);
     let now = now_rfc3339_checked()?;
     let sys = sys_json(
@@ -63,7 +54,7 @@ pub(crate) async fn execute_live_h1(
         execution,
         prompt.sections.len(),
     );
-    let mut vm = SectionVm::new(execution, observer, &prompt.title)?;
+    let mut vm = SectionVm::new(execution, observer.as_ref(), &prompt.title)?;
     vm.apply_lua_limits(limits.lua_memory().get(), limits.lua_logs().get())?;
     vm.inject_host(args, &sys, store, None)?;
     macro_rules! h1_try {
@@ -71,7 +62,7 @@ pub(crate) async fn execute_live_h1(
             match $expression {
                 Ok(value) => value,
                 Err(error) => {
-                    vm.teardown(observer, &prompt.title);
+                    vm.teardown(observer.as_ref(), &prompt.title);
                     return Err(error);
                 }
             }
@@ -82,14 +73,14 @@ pub(crate) async fn execute_live_h1(
     // swallowing it (F5). `active_client` stays lazy for the direct H1 prose
     // path, which the shared block loop builds and propagates its own error
     // for via `h1_try!`.
-    h1_try!(vm.install_host_apis(observer_arc, &prompt.title));
-    let mut active_client = client.clone();
+    h1_try!(vm.install_host_apis(observer, &prompt.title));
+    let mut active_client = client.cloned();
     attach_infer_hook(
         &vm,
         GatewaySource::from_optional(active_client.clone(), limits),
         shared_tools,
-        Arc::clone(observer_arc),
-        debug_arc.cloned(),
+        Arc::clone(observer),
+        debug.cloned(),
         execution,
         &prompt.title,
         max_tool_iterations,
@@ -99,32 +90,14 @@ pub(crate) async fn execute_live_h1(
     );
 
     // The ordered block loop is the shared one (`block_walk`) running in live
-    // H1 mode; this shell keeps only VM construction, limits, host setup, the
-    // infer hook, the state extraction, and the teardown boundary. The
-    // section-only context fields (frozen bindings, models, analysis) are
-    // never read in live mode, so the shell fills them with empty
-    // placeholders.
-    let bindings_placeholder = ToolBindings::default();
-    let models_placeholder = ModelBindings::from_parts(Vec::new(), None);
-    let analysis_placeholder = ToolAnalysis::default();
-    let block_ctx = BlockWalkContext {
-        args,
-        execution,
-        observer,
-        debug,
-        bindings: &bindings_placeholder,
-        models: &models_placeholder,
-        analysis: &analysis_placeholder,
-        shared_tools,
-        max_tool_iterations,
-        limits,
-        turns: turns.as_ref(),
-        item: None,
-    };
+    // H1 mode on the run frame directly: the frame's walk-only fields carry
+    // empty defaults here and live mode never reads them. This shell keeps
+    // only VM construction, limits, host setup, the infer hook, the state
+    // extraction, and the teardown boundary.
     let flow = h1_try!(
         run_one_section_impl(
             &mut vm,
-            &block_ctx,
+            frame,
             &prompt.title,
             &prompt.h1_blocks,
             BlockRunMode::LiveH1(&runtime),
@@ -140,13 +113,13 @@ pub(crate) async fn execute_live_h1(
         // `run_live_h1_block` turns a recorded jump into an error, so live
         // mode never yields a jump flow.
         SectionFlow::Jumped { .. } => {
-            vm.teardown(observer, &prompt.title);
+            vm.teardown(observer.as_ref(), &prompt.title);
             return Err(Error::Internal("live H1 block walk reported a jump"));
         }
     };
     let var = h1_try!(vm.var());
     let (bindings, models) = h1_try!(runtime.bindings());
-    vm.teardown(observer, &prompt.title);
+    vm.teardown(observer.as_ref(), &prompt.title);
     Ok(LiveH1State {
         bindings,
         models,
