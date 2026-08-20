@@ -123,7 +123,7 @@ impl GatewayEndpoint {
     /// # Ok::<(), promptforge_core::model::CompletionError>(())
     /// ```
     pub fn new(url: &str) -> std::result::Result<GatewayEndpoint, CompletionError> {
-        let reject = |detail: String| CompletionError::from(Error::MissingEnv(detail));
+        let reject = |detail: String| CompletionError::from(Error::InvalidConfig(detail));
         let trimmed = url.trim();
         // Preserve the concrete `url::ParseError` as a private source rather than
         // flattening it into the message (AUDIT-DISCARDED-SOURCE).
