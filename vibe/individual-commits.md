@@ -52,3 +52,5 @@
 
 ## 2026-08-19 Delete the list-h3-with-lua invalid-prompt fixture
 
+## 2026-08-19 Move design documents into one design/ directory
+
