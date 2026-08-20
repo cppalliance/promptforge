@@ -291,6 +291,11 @@ pub(super) fn split_section_blocks(content: &str, section: &str) -> Result<Vec<R
     let mut pos = 0usize;
 
     for (index, &opening) in openings.iter().enumerate() {
+        if opening < pos {
+            return Err(Error::Parse(format!(
+                "section `{section}` `lua` fence is not closed exactly"
+            )));
+        }
         let Some(after_open) = strip_exact_lua_opening(&content[opening..]) else {
             return Err(Error::Parse(
                 "internal section fence classification mismatch".to_owned(),

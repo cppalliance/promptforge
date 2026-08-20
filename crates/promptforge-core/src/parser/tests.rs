@@ -546,6 +546,18 @@ fn section_fence_markers_must_be_exact() {
 }
 
 #[test]
+fn non_exact_section_closing_before_another_lua_fence_is_a_parse_error() {
+    for near_miss_close in ["``` ", "  ```", "````"] {
+        let src = format!(
+            "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n```lua\nvar.a = 1\n{near_miss_close}\n\n```lua\nvar.b = 2\n```\n"
+        );
+        let error = Prompt::parse(&src, "test", &NullObserver)
+            .expect_err("a near-miss closing fence must not panic or close the block");
+        assert!(error.to_string().contains("not closed exactly"));
+    }
+}
+
+#[test]
 fn section_markers_inside_longer_fences_remain_prose() {
     let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\n````markdown\n```lua\nreturn 1\n```\n````\n";
     let prompt =
