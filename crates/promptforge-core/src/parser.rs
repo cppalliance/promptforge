@@ -64,25 +64,12 @@ pub struct ParseError {
 /// Classify a substrate error into a stable [`ParseErrorKind`] and optional
 /// source span.
 ///
-/// A structured parse fault carries both directly; older string parse errors
-/// are classified by message once, here, rather than on every `kind()` call.
+/// A structured parse fault carries both directly.
 fn classify_parse_error(inner: &Error) -> (ParseErrorKind, Option<(usize, usize)>) {
     match inner {
         Error::ParseStructured { kind, span, .. } => (*kind, *span),
         Error::ParseFrontmatter { .. } => (ParseErrorKind::Frontmatter, None),
         Error::LuaCompile { .. } => (ParseErrorKind::Lua, None),
-        Error::Parse(message) => {
-            let kind = if message.contains("frontmatter") {
-                ParseErrorKind::Frontmatter
-            } else if message.contains("fence") {
-                ParseErrorKind::Fence
-            } else if message.contains("list section") || message.contains("bullet item") {
-                ParseErrorKind::List
-            } else {
-                ParseErrorKind::Structure
-            };
-            (kind, None)
-        }
         _ => (ParseErrorKind::Structure, None),
     }
 }
@@ -391,28 +378,36 @@ impl Prompt {
             .filter_map(|(index, heading)| (heading.level == 1).then_some(index))
             .collect();
         let [h1_index] = h1_positions.as_slice() else {
-            return Err(Error::Parse(if h1_positions.is_empty() {
-                "prompt requires an H1 title".into()
-            } else {
-                "prompt must contain exactly one H1 title".into()
-            }));
+            return Err(Error::parse(
+                ParseErrorKind::Structure,
+                if h1_positions.is_empty() {
+                    "prompt requires an H1 title"
+                } else {
+                    "prompt must contain exactly one H1 title"
+                },
+            ));
         };
         let h1 = &headings[*h1_index];
         if h1.title.trim().is_empty() {
-            return Err(Error::Parse("prompt H1 title must not be empty".into()));
+            return Err(Error::parse(
+                ParseErrorKind::Structure,
+                "prompt H1 title must not be empty",
+            ));
         }
         let title = h1.title.clone();
         let h1_content_abs_line = line_add(frontmatter_lines, h1.content_start_line)?;
         let shared_fences = exact_shared_openings(&body);
         let h1_shared_fences = exact_shared_openings(&h1.content);
         if shared_fences.len() > 1 {
-            return Err(Error::Parse(
-                "prompt allows at most one `lua shared` fence".into(),
+            return Err(Error::parse(
+                ParseErrorKind::Fence,
+                "prompt allows at most one `lua shared` fence",
             ));
         }
         if shared_fences.len() != h1_shared_fences.len() {
-            return Err(Error::Parse(
-                "`lua shared` fence is allowed only in H1".into(),
+            return Err(Error::parse(
+                ParseErrorKind::Fence,
+                "`lua shared` fence is allowed only in H1",
             ));
         }
         let (replay, h1_blocks, description_text) = split_h1(

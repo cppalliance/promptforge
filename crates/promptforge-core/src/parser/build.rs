@@ -228,8 +228,9 @@ pub(crate) fn split_frontmatter(input: &str) -> Result<(String, String, u32)> {
     match lines.next() {
         Some(l) if l.trim() == "---" => {}
         _ => {
-            return Err(Error::Parse(
-                "file must begin with a --- frontmatter delimiter".into(),
+            return Err(Error::parse(
+                ParseErrorKind::Frontmatter,
+                "file must begin with a --- frontmatter delimiter",
             ));
         }
     }
@@ -246,7 +247,10 @@ pub(crate) fn split_frontmatter(input: &str) -> Result<(String, String, u32)> {
         yaml.push('\n');
     }
     if !closed {
-        return Err(Error::Parse("frontmatter was not closed with ---".into()));
+        return Err(Error::parse(
+            ParseErrorKind::Frontmatter,
+            "frontmatter was not closed with ---",
+        ));
     }
     let body = lines.collect::<Vec<_>>().join("\n");
     Ok((yaml, body, line_count))
@@ -372,8 +376,8 @@ pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading>> {
 /// rejected: every heading must be exactly one level deeper than its parent.
 ///
 /// # Errors
-/// Returns [`Error::Parse`] when a heading is more than one level deeper than
-/// its parent.
+/// Returns a structure-classified parse error when a heading is more than one
+/// level deeper than its parent.
 pub(crate) fn build_sections(
     headings: &[Heading],
     pos: &mut usize,
@@ -396,20 +400,24 @@ pub(crate) fn build_sections(
         // a heading has no well-defined parent, so reject it rather than
         // silently reparenting it to a shallower ancestor.
         if level > parent_level + 1 {
-            return Err(Error::Parse(format!(
-                "section `{}` is an orphan H{level} heading with no parent H{}",
-                headings[*pos].title.trim(),
-                parent_level + 1
-            )));
+            return Err(Error::parse(
+                ParseErrorKind::Structure,
+                format!(
+                    "section `{}` is an orphan H{level} heading with no parent H{}",
+                    headings[*pos].title.trim(),
+                    parent_level + 1
+                ),
+            ));
         }
         let h = &headings[*pos];
         let name = h.title.clone();
         // A section's name is its runtime address (jumps, lookups, fanout), so an
         // empty/whitespace heading is unaddressable and must be rejected at parse.
         if name.trim().is_empty() {
-            return Err(Error::Parse(format!(
-                "an H{level} section heading must not be empty"
-            )));
+            return Err(Error::parse(
+                ParseErrorKind::Structure,
+                format!("an H{level} section heading must not be empty"),
+            ));
         }
         let content_abs_line = line_add(frontmatter_lines, h.content_start_line)?;
         let heading_abs_line = line_add(frontmatter_lines, h.source_line)?;

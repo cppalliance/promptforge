@@ -87,10 +87,13 @@ async fn missing_version_is_not_a_promptforge_prompt() {
         .await
         .expect_err("a prompt with no promptforge version must be declined");
     match err {
-        Error::Parse(msg) => assert!(
-            msg.contains("not a promptforge prompt"),
-            "the Parse message must name the missing version, got: {msg}"
-        ),
+        Error::ParseStructured { kind, message, .. } => {
+            assert_eq!(kind, ParseErrorKind::Structure);
+            assert!(
+                message.contains("not a promptforge prompt"),
+                "the Parse message must name the missing version, got: {message}"
+            );
+        }
         other => panic!("expected Parse, got {other:?}"),
     }
 }
