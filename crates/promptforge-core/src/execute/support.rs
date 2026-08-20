@@ -15,8 +15,8 @@ pub(crate) const SUPPORTED_MAJOR: u32 = 1;
 /// completion text both fallback sites (an empty walk, an H1-only run) share.
 pub(crate) const GENERIC_COMPLETION: &str = "done";
 
-/// Bridges a section's synchronous Lua host call (`model:infer`, `execute`,
-/// `fanout`) into the async runtime.
+/// Bridges a section's synchronous Lua host call (`models.infer`,
+/// `handle:infer`, `execute`, `fanout`) into the async runtime.
 ///
 /// The Lua VM runs synchronously on the worker thread, so a nested async host
 /// call must block that worker via [`tokio::task::block_in_place`] +
@@ -33,7 +33,7 @@ where
     let handle = tokio::runtime::Handle::current();
     if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread {
         return Err(Error::Internal(
-            "a Lua host call (model:infer/execute/fanout) requires a multi-threaded Tokio runtime",
+            "a Lua host call (models.infer/handle:infer/execute/fanout) requires a multi-threaded Tokio runtime",
         ));
     }
     tokio::task::block_in_place(|| handle.block_on(future))

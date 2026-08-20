@@ -145,6 +145,106 @@ return reply\n\
     assert_eq!(out, "model-said-this");
 }
 
+/// Note 17's escape: `reply = nil` before a jump clears the reply the jump
+/// target sees - the walk reads the Lua `reply` global back at section end.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reply_nil_before_jump_clears_reply_for_target() {
+    let gateway = ScriptedGateway::start(vec![resp_text("model-said-this")]).await;
+    let addr = gateway.addr();
+    let md = flow_prompt!(
+        "\
+## Source\n\n\
+Ask something.\n\n\
+```lua\n\
+reply = nil\n\
+jump('## Target')\n\
+```\n\n\
+## Target\n\n\
+```lua\n\
+assert(reply == nil, 'reply = nil before the jump must clear what the target sees')\n\
+return 'cleared'\n\
+```\n"
+    );
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        gatewayed(addr),
+    )
+    .await
+    .expect("reply = nil before a jump must clear the reply the target sees");
+    assert_eq!(out, "cleared");
+}
+
+/// The same escape at fall-through: `reply = nil` as a section's last word
+/// clears the reply the next section on the walk sees.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reply_nil_before_fall_through_clears_reply_for_next_section() {
+    let gateway = ScriptedGateway::start(vec![resp_text("model-said-this")]).await;
+    let addr = gateway.addr();
+    let md = flow_prompt!(
+        "\
+## Source\n\n\
+Ask something.\n\n\
+```lua\nreply = nil\n```\n\n\
+## Next\n\n\
+```lua\n\
+assert(reply == nil, 'reply = nil at fall-through must clear what the next section sees')\n\
+return 'cleared'\n\
+```\n"
+    );
+    let out = run(
+        &bound_for_model(md),
+        "",
+        &[],
+        &StoreRef::memory(),
+        gatewayed(addr),
+    )
+    .await
+    .expect("reply = nil at fall-through must clear the reply the next section sees");
+    assert_eq!(out, "cleared");
+}
+
+/// The global IS the reply: an author's `reply = "custom"` assignment in Lua
+/// carries to the next section exactly like a prose-produced reply.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reply_assignment_in_lua_carries_to_next_section() {
+    let md = flow_prompt!(
+        "\
+## Source\n\n\
+```lua\nreply = 'custom'\n```\n\n\
+## Next\n\n\
+```lua\n\
+assert(reply == 'custom', 'a Lua reply assignment must carry to the next section')\n\
+return reply\n\
+```\n"
+    );
+    let out = run_offline(md)
+        .await
+        .expect("a Lua reply assignment must carry to the next section");
+    assert_eq!(out, "custom");
+}
+
+/// The read-back validates the global: a non-string, non-nil `reply`
+/// assignment is a Lua error at section end.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reply_assigned_a_non_string_errors() {
+    let md = flow_prompt!(
+        "\
+## Source\n\n\
+```lua\nreply = 42\n```\n"
+    );
+    let error = run_offline(md)
+        .await
+        .expect_err("a non-string reply assignment must error");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("`reply` must be a string or nil"),
+        "the error must name the reply contract: {rendered}"
+    );
+}
+
 /// A jump inside `execute()` is contained by the chain: followed, not
 /// rejected (the retired reject policy's inversion). The chain's index moves
 /// to the target - the sections between the jumper and the target do not

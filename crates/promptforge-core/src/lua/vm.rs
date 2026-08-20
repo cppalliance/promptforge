@@ -706,6 +706,28 @@ impl SectionVm {
         result
     }
 
+    /// Reads the Lua `reply` global back into Rust: `None` when nil, the
+    /// string when set.
+    ///
+    /// The global is seeded at [`inject_host`](Self::inject_host) and rebound
+    /// after prose by [`bind_reply`](Self::bind_reply), so after a Lua chunk
+    /// it carries any author write: `reply = nil` clears the reply a jump
+    /// target or the next section sees, and a string assignment replaces it.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] when `reply` is neither nil nor a string.
+    pub(crate) fn reply(&self) -> Result<Option<String>> {
+        let value: Value = self.lua.globals().get("reply").map_err(Error::lua)?;
+        match value {
+            Value::Nil => Ok(None),
+            Value::String(text) => Ok(Some(text.to_str().map_err(Error::lua)?.to_owned())),
+            other => Err(Error::Lua(format!(
+                "`reply` must be a string or nil, got {}",
+                other.type_name()
+            ))),
+        }
+    }
+
     /// Returns the current `var` table as JSON, read from the hidden data
     /// table behind the guarded proxy (not the proxy, which stays empty).
     ///

@@ -27,7 +27,7 @@ The array part (`1..#t`) iterates in order first, then the hash part in undefine
 
 ## Arm Execution
 
-Each arm receives the current member as the `item` variable, a `sys.index` giving its 1-based position within the current fanout (a nested fanout restarts at 1, and `sys.index` is absent outside fanout), and a unique run-global `sys.id`. Each arm also starts with a fresh clone of the caller's `var` - arm writes to `var` never reach the caller. The arm can:
+Each arm receives the current member as the `item` variable, a `sys.index` giving its 1-based position within the current fanout (a nested fanout restarts at 1, and `sys.index` is absent outside fanout), and a unique run-global `sys.id`. Each arm also starts with a fresh clone of the caller's `var` - arm writes to `var` never reach the caller. An arm's `reply` starts at the fanout caller's incoming reply as captured when the fanout call was set up (the caller's section-start reply), not the caller's latest reply at the call site: a caller whose own prose produced a reply before calling `fanout` hands every arm that earlier reply. The arm can:
 
 - Run a Lua prologue that short-circuits (enabling pure-Lua map operations)
 - Substitute `{{ item }}` in prose (strings verbatim, numbers and booleans in their natural string form, tables as compact JSON)
