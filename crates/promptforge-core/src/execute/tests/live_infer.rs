@@ -183,96 +183,81 @@ async fn captured_bindings_reach_section_execute_and_fanout_vms() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn live_h1_infer_sees_tools_resolved_in_the_same_block() {
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
-    let addr = gateway.addr();
-    let echo = Arc::new(EchoTool);
-    let descriptor = ToolDescriptor::new(
-        PickerToolId::new("tests", "echo"),
-        echo.description(),
-        echo.parameters_schema(),
-    );
-    let capability =
-        serde_json::to_string(&capability_for(&descriptor)).expect("serialize tool capability");
-    let source = format!(
-        "---\nname: live-h1-tools\ndescription: d\npromptforge: 1\n---\n\n\
-         # Live H1 Tools\n\n\
-         ```lua\n\
-         local echo = tools.need('echo', {capability})\n\
-         tools.always(echo.name)\n\
-         local writer = models.default('writer', 'A general model for tests')\n\
-         var.answer = writer:infer('use echo')\n\
-         ```\n\n\
-         ## Result\n\n\
-         ```lua\nreturn var.answer\n```\n"
-    );
-    let prompt = parse(&source);
-    let picker = ToolPicker::build(Catalog::new(vec![descriptor]), PickerConfig::default())
-        .expect("tool picker must build");
+async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() {
+    // The live H1 `models.infer` resolves the current model from the
+    // producer's bindings-so-far and runs the one infer shape: a single
+    // tool-free round on a fresh conversation that leaves `sys` untouched.
+    let gateway = ScriptedGateway::start(vec![resp_text("h1 answer")]).await;
+    let source = "---\nname: live-h1-models-infer\ndescription: d\npromptforge: 1\n---\n\n\
+        # Live H1 Models Infer\n\n\
+        ```lua\n\
+        models.default('writer', 'A general model for tests')\n\
+        var.answer = models.infer('answer once')\n\
+        var.sys_untouched = not pcall(function() return sys.reply_finish_reason end)\n\
+        ```\n\n\
+        ## Result\n\n\
+        ```lua\nreturn var.answer .. ':' .. tostring(var.sys_untouched)\n```\n";
+    let prompt = parse(source);
+    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
+        .expect("empty tool picker must build");
     let models = test_model_catalog();
-    let tools: [Arc<dyn Tool>; 1] = [echo];
-
     let out = super::super::run(
         &prompt,
         "",
         ResolutionContext::new(&picker, &models),
-        &tools,
+        &[],
         &StoreRef::memory(),
-        to_config(RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        }),
+        to_config(gatewayed(gateway.addr())),
     )
     .await
-    .expect("live H1 infer must use its resolved always tool");
+    .expect("live H1 models.infer must run");
 
-    assert_eq!(out, "final answer");
+    assert_eq!(out, "h1 answer:true");
+    assert_eq!(gateway.call_count(), 1);
+    let body = gateway
+        .last_request()
+        .expect("infer must reach the gateway");
+    assert_eq!(
+        body["model"], "claude-sonnet-4-6",
+        "models.infer must use the section's current model"
+    );
+    assert!(
+        body.get("tools").is_none(),
+        "models.infer advertises no tools: {body}"
+    );
+    assert_eq!(
+        body["messages"].as_array().expect("messages array").len(),
+        1,
+        "models.infer runs on a fresh context: {body}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn nested_lua_infer_emits_model_and_tool_observations() {
-    // observe.rs F1: a nested Lua `model:infer` that drives a tool round trip
-    // must surface BOTH model-turn and tool-call observations to the run's
-    // observer, proving owned-observer propagation reaches the inner tool loop.
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
+async fn nested_lua_infer_emits_a_model_turn_observation() {
+    // observe.rs F1: a nested Lua infer must surface its model-turn
+    // observation to the run's observer, proving owned-observer propagation
+    // reaches the nested inference path.
+    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
-    let echo = Arc::new(EchoTool);
-    let descriptor = ToolDescriptor::new(
-        PickerToolId::new("tests", "echo"),
-        echo.description(),
-        echo.parameters_schema(),
-    );
-    let capability =
-        serde_json::to_string(&capability_for(&descriptor)).expect("serialize tool capability");
-    let source = format!(
-        "---\nname: nested-infer-observations\ndescription: d\npromptforge: 1\n---\n\n\
-         # Nested Infer Observations\n\n\
-         ```lua\n\
-         local echo = tools.need('echo', {capability})\n\
-         tools.always(echo.name)\n\
-         local writer = models.default('writer', 'A general model for tests')\n\
-         var.answer = writer:infer('use echo')\n\
-         ```\n\n\
-         ## Result\n\n\
-         ```lua\nreturn var.answer\n```\n"
-    );
-    let prompt = parse(&source);
-    let picker = ToolPicker::build(Catalog::new(vec![descriptor]), PickerConfig::default())
-        .expect("tool picker must build");
+    let source = "---\nname: nested-infer-observations\ndescription: d\npromptforge: 1\n---\n\n\
+        # Nested Infer Observations\n\n\
+        ```lua\n\
+        local writer = models.default('writer', 'A general model for tests')\n\
+        var.answer = writer:infer('ping')\n\
+        ```\n\n\
+        ## Result\n\n\
+        ```lua\nreturn var.answer\n```\n";
+    let prompt = parse(source);
+    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
+        .expect("empty tool picker must build");
     let models = test_model_catalog();
-    let tools: [Arc<dyn Tool>; 1] = [echo];
     let recorder = Arc::new(Recorder::default());
 
     let out = super::super::run(
         &prompt,
         "",
         ResolutionContext::new(&picker, &models),
-        &tools,
+        &[],
         &StoreRef::memory(),
         to_config(RunOptions {
             execution: EXECUTION,
@@ -285,9 +270,9 @@ async fn nested_lua_infer_emits_model_and_tool_observations() {
         }),
     )
     .await
-    .expect("nested infer must run its tool loop");
+    .expect("nested infer must run");
 
-    assert_eq!(out, "final answer");
+    assert_eq!(out, "pong");
     let details: Vec<String> = recorder
         .records()
         .into_iter()
@@ -297,17 +282,13 @@ async fn nested_lua_infer_emits_model_and_tool_observations() {
         .iter()
         .filter(|d| d.as_str() == "Model turn completed")
         .count();
-    let tool_calls = details
-        .iter()
-        .filter(|d| d.as_str() == "Tool call succeeded")
-        .count();
-    assert!(
-        model_turns >= 2,
-        "nested infer drives two model round trips; saw {model_turns}: {details:?}"
-    );
     assert_eq!(
-        tool_calls, 1,
-        "the single echo dispatch must emit exactly one tool-call observation: {details:?}"
+        model_turns, 1,
+        "the nested infer drives exactly one model round trip: {details:?}"
+    );
+    assert!(
+        details.iter().all(|d| d.as_str() != "Tool call succeeded"),
+        "infer advertises no tools, so no tool call can be observed: {details:?}"
     );
 }
 

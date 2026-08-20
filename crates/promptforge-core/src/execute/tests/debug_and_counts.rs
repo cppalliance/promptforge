@@ -106,17 +106,14 @@ fn gateway_source_resolves_ready_and_preserves_the_env_error() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn nested_model_infer_capture_reaches_the_debug_sink() {
-    // F4: a nested `model:infer` called from Lua must route its request/response
+    // F4: a nested infer called from Lua must route its request/response
     // capture to the run's owned debug sink instead of dropping it (was
     // hard-coded to `None`).
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
+    let gateway = ScriptedGateway::start(vec![resp_text("final answer")]).await;
     let addr = gateway.addr();
-    let echo = Arc::new(EchoTool);
     let capture = Arc::new(RecordingCapture::default());
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        tools.need('echo', 'echo tool')\n\
-        tools.always('echo')\n\
         writer = models.default('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
@@ -127,7 +124,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
     let out = run(
         &prompt,
         "",
-        &[Arc::clone(&echo) as Arc<dyn Tool>],
+        &[],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -140,7 +137,7 @@ async fn nested_model_infer_capture_reaches_the_debug_sink() {
         },
     )
     .await
-    .expect("model:infer must return text");
+    .expect("handle:infer must return text");
     assert_eq!(out, "final answer");
 
     let events = capture.events();
@@ -543,29 +540,29 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn model_infer_single_shot_returns_text() {
-    let gateway = ScriptedGateway::start(echo_then_text_script()).await;
+async fn handle_infer_returns_text_without_touching_reply_or_sys() {
+    // The one infer shape: `handle:infer` returns the round's text and never
+    // sets `reply` or `sys.reply_finish_reason`.
+    let gateway = ScriptedGateway::start(vec![resp_text("pong")]).await;
     let addr = gateway.addr();
-    let echo = Arc::new(EchoTool);
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        tools.need('echo', 'echo tool')\n\
-        tools.always('echo')\n\
         writer = models.default('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n\
         ```lua\n\
         local text = writer:infer('say hello')\n\
         assert(type(text) == 'string', 'infer must return text')\n\
-        assert(text == 'final answer')\n\
-        assert(reply == text, 'infer must set reply')\n\
-        assert(tools.calls['echo'] == 1, 'infer tool loop must increment tools.calls')\n\
+        assert(text == 'pong')\n\
+        assert(reply == nil, 'infer must not set reply')\n\
+        assert(not pcall(function() return sys.reply_finish_reason end),\n\
+            'infer must not touch sys')\n\
         return text\n\
         ```\n";
     let prompt = bound_with_tools(md, Vec::new());
     let out = run(
         &prompt,
         "",
-        &[Arc::clone(&echo) as Arc<dyn Tool>],
+        &[],
         &StoreRef::memory(),
         RunOptions {
             execution: EXECUTION,
@@ -578,6 +575,13 @@ async fn model_infer_single_shot_returns_text() {
         },
     )
     .await
-    .expect("model:infer single-shot must return text");
-    assert_eq!(out, "final answer");
+    .expect("handle:infer must return text");
+    assert_eq!(out, "pong");
+    let body = gateway
+        .last_request()
+        .expect("infer must reach the gateway");
+    assert!(
+        body.get("tools").is_none(),
+        "handle:infer advertises no tools: {body}"
+    );
 }

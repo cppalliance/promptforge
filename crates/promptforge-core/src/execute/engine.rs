@@ -776,8 +776,7 @@ impl ControlContext {
     /// Installs the infer hook both engine drivers share, sourcing every
     /// run-wide slot from this context; the driver supplies only its client
     /// snapshot and the section name. The handed client (or the environment)
-    /// is wrapped in the lazy [`GatewaySource`], with the prompt's tool
-    /// analysis always present and no live H1 bindings.
+    /// is wrapped in the lazy [`GatewaySource`], with no live H1 bindings.
     pub(crate) fn attach_infer_hook(
         &self,
         vm: &SectionVm,
@@ -787,14 +786,11 @@ impl ControlContext {
         attach_infer_hook(
             vm,
             GatewaySource::from_optional(client, self.limits),
-            &self.shared_tools,
             Arc::clone(&self.observer),
             self.debug.clone(),
             &self.execution,
             section_name,
-            self.max_tool_iterations,
             &self.turns,
-            Some(&self.analysis),
             None,
         );
     }

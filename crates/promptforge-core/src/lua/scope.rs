@@ -72,17 +72,4 @@ pub(crate) struct ToolRuntime {
     pub(crate) added: Vec<String>,
     /// Per-alias author overrides for model-facing schema descriptions.
     pub(crate) description_overrides: BTreeMap<String, String>,
-    /// Monotonic counter bumped when the effective H2 tool set changes.
-    ///
-    /// [`crate::execute::ToolBag`] caches schemas/dispatch against this value
-    /// so `model:infer` rebuilds only after a real mutation.
-    pub(crate) generation: u64,
-}
-
-impl ToolRuntime {
-    /// Returns the current tool-set generation.
-    #[must_use]
-    pub(crate) fn generation(&self) -> u64 {
-        self.generation
-    }
 }
