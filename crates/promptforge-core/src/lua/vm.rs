@@ -48,12 +48,10 @@ pub(crate) struct SectionVm {
     bound_models: ModelBindings,
     pub(crate) tool_runtime: Arc<Mutex<ToolRuntime>>,
     pub(crate) model_runtime: Arc<Mutex<ModelRuntime>>,
-    /// Shared with [`crate::execute::InferContext`] so `model:infer` and the
-    /// prose tool loop increment the same `tools.calls` counters.
-    counts_slot: Arc<Mutex<Option<ToolCallCounts>>>,
     /// Set by Lua `jump` before it aborts the current chunk.
     jump_slot: Arc<Mutex<Option<String>>>,
-    /// Live sealed `sys` JSON shared with `model:infer` for finish-reason updates.
+    /// Live sealed `sys` JSON, mirrored for [`current_sys`](Self::current_sys)
+    /// snapshots.
     sys_live: Arc<Mutex<Option<Json>>>,
     store: Option<StoreRef>,
     host_injected: bool,
@@ -205,10 +203,8 @@ impl SectionVm {
             tool_runtime: Arc::new(Mutex::new(ToolRuntime {
                 added: Vec::new(),
                 description_overrides: BTreeMap::new(),
-                generation: 0,
             })),
             model_runtime: Arc::new(Mutex::new(ModelRuntime::new())),
-            counts_slot: Arc::new(Mutex::new(None)),
             jump_slot: Arc::new(Mutex::new(None)),
             sys_live: Arc::new(Mutex::new(None)),
             store: None,
@@ -590,7 +586,9 @@ impl SectionVm {
         Ok(())
     }
 
-    /// Shared live `sys` JSON for `model:infer` finish-reason updates.
+    /// Shared live `sys` JSON for finish-reason updates.
+    #[must_use]
+    #[allow(dead_code)] // exercised by the lua module's poisoned-slot test
     pub(crate) fn sys_live_handle(&self) -> Arc<Mutex<Option<Json>>> {
         Arc::clone(&self.sys_live)
     }
@@ -770,15 +768,14 @@ impl SectionVm {
         self.lua.globals().raw_set(name, value).map_err(Error::lua)
     }
 
-    /// Installs `tools.calls` as a read-only Lua table backed by the shared
+    /// Installs `tools.calls` as a read-only Lua table backed by a fresh
     /// [`ToolCallCounts`]. Each in-scope alias reads its live count; indexing
     /// an unknown key is a hard error that names the bad key and lists the
     /// in-scope set. When the key was declared by `tools.need` but not added
     /// to this section's scope, the diagnostic says so.
     ///
     /// Returns the `ToolCallCounts` handle so the executor's tool loop can
-    /// increment it. Reuses counts already seeded by `model:infer` so counters
-    /// persist across infer and the prose path.
+    /// increment it.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when installing the `tools.calls` index fails.
@@ -786,22 +783,7 @@ impl SectionVm {
         &self,
         bindings: &[ToolBinding],
     ) -> Result<ToolCallCounts> {
-        let counts = {
-            let mut slot = self
-                .counts_slot
-                .lock()
-                .map_err(|_| Error::Lua("tool call counts mutex was poisoned".to_owned()))?;
-            if let Some(existing) = slot.as_ref() {
-                for binding in bindings {
-                    existing.ensure(binding.alias())?;
-                }
-                existing.clone()
-            } else {
-                let created = ToolCallCounts::new(bindings.iter().map(|b| b.alias().to_owned()));
-                *slot = Some(created.clone());
-                created
-            }
-        };
+        let counts = ToolCallCounts::new(bindings.iter().map(|b| b.alias().to_owned()));
         let declared: Vec<String> = self
             .bound_tools
             .bindings()
@@ -814,6 +796,7 @@ impl SectionVm {
 
     /// Returns frozen tool bindings and the live H2 addition runtime.
     #[must_use]
+    #[allow(dead_code)] // exercised by the lua and executor scope tests
     pub(crate) fn tool_bag_handles(&self) -> (ToolBindings, Arc<Mutex<ToolRuntime>>) {
         (self.bound_tools.clone(), Arc::clone(&self.tool_runtime))
     }
@@ -823,12 +806,6 @@ impl SectionVm {
     #[allow(dead_code)]
     pub(crate) fn model_bag_handles(&self) -> (ModelBindings, Arc<Mutex<ModelRuntime>>) {
         (self.bound_models.clone(), Arc::clone(&self.model_runtime))
-    }
-
-    /// Returns the shared tool-call counts slot for `model:infer`.
-    #[must_use]
-    pub(crate) fn counts_slot(&self) -> Arc<Mutex<Option<ToolCallCounts>>> {
-        Arc::clone(&self.counts_slot)
     }
 
     /// Calls the local tool registered under `alias` with JSON `args`.
@@ -851,12 +828,6 @@ impl SectionVm {
     #[must_use]
     pub(crate) fn local_tool_schemas(&self) -> Vec<ToolSchema> {
         self.local_tools.schemas()
-    }
-
-    /// Returns the shared local-tools registry for the `model:infer` tool bag.
-    #[must_use]
-    pub(crate) fn local_tools_handle(&self) -> LocalTools {
-        self.local_tools.clone()
     }
 
     /// Returns whether `alias` names a registered local tool.

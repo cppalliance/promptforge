@@ -65,62 +65,6 @@ pub(crate) struct ProseInferenceResult {
     pub finish_reason: Option<String>,
 }
 
-/// Drive one section's model call to a final text reply, dispatching any tool
-/// calls the model requests along the way.
-///
-/// Starts a fresh conversation with `prose` as the user turn and runs the full
-/// tool loop. Returns the final text and the last round's finish reason.
-///
-/// This wrapper stays distinct from [`run_prose_inference`] on purpose: its
-/// one production caller, the `model:infer` hook, wants exactly the
-/// fresh-conversation, loop-until-text contract with exhaustion surfaced as
-/// [`Error::ToolLoopExhausted`], while the block walk drives
-/// [`run_prose_inference`] directly with its own rolling conversation.
-///
-/// # Errors
-/// Returns an out-of-scope tool error if the model calls an alias absent from
-/// `dispatch`, [`Error::ToolLoopExhausted`] if the cap is hit without a text
-/// reply, or any transport/backend error from a model call or a tool's own
-/// failure.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "counts and global_aliases extend the loop's borrowed context for per-VM call tracking"
-)]
-pub(crate) async fn run_tool_loop(
-    client: &GatewayClient,
-    schemas: &[ToolSchema],
-    dispatch: &BTreeMap<String, ToolId>,
-    registry: &ToolRegistry<'_>,
-    prose: String,
-    max_tool_iterations: usize,
-    progress: SectionProgress<'_>,
-    counts: Option<&ToolCallCounts>,
-    global_aliases: Option<&BTreeMap<String, ToolId>>,
-    local_dispatch: Option<&LocalDispatch<'_>>,
-) -> Result<(String, Option<String>)> {
-    let mut conversation = Vec::new();
-    let outcome = run_prose_inference(
-        client,
-        schemas,
-        dispatch,
-        registry,
-        &mut conversation,
-        prose,
-        ProseMode::Loop {
-            max_tool_iterations,
-        },
-        progress,
-        counts,
-        global_aliases,
-        local_dispatch,
-    )
-    .await?;
-    match outcome.text {
-        Some(text) => Ok((text, outcome.finish_reason)),
-        None => Err(Error::ToolLoopExhausted),
-    }
-}
-
 /// Append `prose` to `conversation` and run model inference under `mode`.
 ///
 /// Returns text when the model produces it. For [`ProseMode::SingleShot`],
@@ -130,8 +74,10 @@ pub(crate) async fn run_tool_loop(
 /// Conversation history accumulates for later prose blocks.
 ///
 /// # Errors
-/// Same failure modes as [`run_tool_loop`], except single-shot does not report
-/// [`Error::ToolLoopExhausted`] when the sole round ends without text.
+/// Returns an out-of-scope tool error if the model calls an alias absent from
+/// `dispatch`, [`Error::ToolLoopExhausted`] in loop mode if the cap is hit
+/// without a text reply (single-shot never reports it), or any
+/// transport/backend error from a model call or a tool's own failure.
 #[expect(
     clippy::too_many_arguments,
     clippy::too_many_lines,

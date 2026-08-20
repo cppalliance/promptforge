@@ -10,7 +10,12 @@ use mlua::{Lua, UserData, UserDataFields, UserDataMethods, Value};
 use crate::dialects::ToolDialectId;
 use crate::model::ModelBinding;
 
-/// Host hook that runs `model:infer` from Lua via the executor's shared context.
+/// Host hook that runs `handle:infer` from Lua via the executor's shared
+/// context.
+///
+/// The one infer shape: a single direct, tool-free gateway round on a fresh
+/// conversation with the handle's frozen binding. It never sets `reply` and
+/// never touches `sys`.
 ///
 /// Installed as Lua app data for the duration of a section phase that may call
 /// infer. Absent app data means infer is unavailable in that context.
@@ -23,9 +28,10 @@ pub(crate) type ModelInferHook =
 /// Takes only the prompt: the hook resolves the section's current model
 /// binding itself, because the executor side knows the section name needed
 /// for a typed [`crate::Error::ModelRequired`] and, on the live H1 path, the
-/// bindings are still being recorded into the run's producer. Installed as
-/// Lua app data alongside [`ModelInferHook`]; absent app data means
-/// `models.infer` is unavailable in that context.
+/// bindings are still being recorded into the run's producer. The resolved
+/// binding runs the same single tool-free round as [`ModelInferHook`].
+/// Installed as Lua app data alongside [`ModelInferHook`]; absent app data
+/// means `models.infer` is unavailable in that context.
 pub(crate) type ModelsInferHook = Arc<dyn Fn(&Lua, &str) -> mlua::Result<String> + Send + Sync>;
 
 /// Inspectable Lua userdata returned by `models.need` / `models.default`.

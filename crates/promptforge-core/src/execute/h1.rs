@@ -38,10 +38,8 @@ pub(crate) async fn execute_live_h1(
         execution,
         observer,
         debug,
-        shared_tools,
         limits,
         turns,
-        max_tool_iterations,
         ..
     } = frame;
     let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models);
@@ -78,14 +76,11 @@ pub(crate) async fn execute_live_h1(
     attach_infer_hook(
         &vm,
         GatewaySource::from_optional(active_client.clone(), limits),
-        shared_tools,
         Arc::clone(observer),
         debug.cloned(),
         execution,
         &prompt.title,
-        max_tool_iterations,
         turns,
-        None,
         Some(runtime.producer()),
     );
 

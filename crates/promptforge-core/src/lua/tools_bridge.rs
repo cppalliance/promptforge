@@ -196,19 +196,11 @@ pub(crate) fn install_h2_tools(
                     )));
                 }
             }
-            let mut changed = false;
             for entry in entries {
                 if let Some(description) = entry.description_override {
-                    let override_changed = match state.description_overrides.get(&entry.alias) {
-                        Some(existing) => existing != &description,
-                        None => true,
-                    };
-                    if override_changed {
-                        state
-                            .description_overrides
-                            .insert(entry.alias.clone(), description);
-                        changed = true;
-                    }
+                    state
+                        .description_overrides
+                        .insert(entry.alias.clone(), description);
                 }
                 if frozen
                     .always
@@ -219,11 +211,7 @@ pub(crate) fn install_h2_tools(
                 }
                 if !state.added.iter().any(|existing| existing == &entry.alias) {
                     state.added.push(entry.alias);
-                    changed = true;
                 }
-            }
-            if changed {
-                state.generation = state.generation.saturating_add(1);
             }
             Ok(())
         })
@@ -231,7 +219,6 @@ pub(crate) fn install_h2_tools(
     tools.set("add", add).map_err(Error::lua)?;
 
     let local = local_tools.clone();
-    let state = Arc::clone(runtime);
     let add_local_fn = lua
         .create_function(
             move |lua,
@@ -249,10 +236,6 @@ pub(crate) fn install_h2_tools(
                 local
                     .register(alias, schema, key)
                     .map_err(mlua::Error::external)?;
-                let mut state = state
-                    .lock()
-                    .map_err(|_| mlua::Error::external("tool declaration runtime was poisoned"))?;
-                state.generation = state.generation.saturating_add(1);
                 Ok(())
             },
         )
