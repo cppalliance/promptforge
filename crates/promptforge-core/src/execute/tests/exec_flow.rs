@@ -502,6 +502,31 @@ return tostring(sys.index)\n\
     );
 }
 
+/// `sys.taskid` is retired: a fanout arm reading it raises the sealed-sys
+/// unknown-field error, same as a walked section reading `sys.index`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sys_taskid_inside_a_fanout_errors() {
+    let md = flow_prompt!(
+        "\
+## Parent\n\n\
+```lua\n\
+fanout('### Worker', {'a'})\n\
+```\n\n\
+### Worker\n\n\
+```lua\n\
+return tostring(sys.taskid)\n\
+```\n"
+    );
+    let error = run_offline(md)
+        .await
+        .expect_err("sys.taskid inside a fanout must fail");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("unknown sys field 'taskid'"),
+        "sys.taskid is retired: {rendered}"
+    );
+}
+
 /// Nested `execute()` is capped at [`MAX_EXECUTE_DEPTH`]. Locks the
 /// `execute_depth` divergence threaded through the unified engine (the
 /// top-level walk always enters at depth 0; the subroutine carries its depth).
