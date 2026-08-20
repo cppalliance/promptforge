@@ -17,13 +17,16 @@
 //!   off-walk skips, jumps, child chains). The outer chain never moves while
 //!   the contained chain runs. When the contained chain ends - its level
 //!   exhausts or a return fires - its final reply is the call's return
-//!   value, and a return ends only the chain it fires in. Each contained
-//!   chain counts its own `sys.id` from 1 and carries the caller's
-//!   `execute_depth` so the recursion cap holds across nesting.
+//!   value, and a return ends only the chain it fires in. Every section
+//!   entry and every fanout arm takes the next id from the run-global
+//!   counter (H1 keeps id 0), so entering the same section twice yields two
+//!   ids; the chain carries the caller's `execute_depth` so the recursion
+//!   cap holds across nesting.
 //!
 //! The engine parameterizes exactly the divergences the paths require: the
-//! `sys.id` index, the walk's `var` seed, the `execute_depth`, and the
-//! cross-section reply carried in. Everything else
+//! walk's `var` seed, the `execute_depth`, and the cross-section reply
+//! carried in. The run-global `sys.id` counter rides the frame, shared by
+//! every chain and fanout. Everything else
 //! (the prose tool loop, scope validation, cancellation, teardown, and every
 //! observation) is shared, so a fix lands in one place for every path.
 //!
@@ -43,7 +46,7 @@
 //! path tears the VM down exactly once.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, AtomicU64};
 
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
@@ -65,7 +68,7 @@ use super::gateway::GatewaySource;
 use super::scope::ToolAnalysis;
 use super::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
 use super::support::{
-    GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, bridge_blocking, now_rfc3339_checked, sys_json,
+    GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, bridge_blocking, next_id, now_rfc3339_checked, sys_json,
 };
 use super::tools::attach_infer_hook;
 
@@ -116,6 +119,10 @@ pub(crate) struct RunFrame<'a> {
     /// The model-turn counter this walk advances (the run's, or one shared by
     /// all arms of a fanout).
     pub(crate) turns: &'a Arc<AtomicU32>,
+    /// The run-global execution-id counter: every section entry and every
+    /// fanout arm takes the next value (H1 keeps id 0). A fanout shares it
+    /// without resetting, unlike `turns`.
+    pub(crate) ids: &'a Arc<AtomicU64>,
     /// The shared library replayed as every section's first chunk; an empty
     /// compiled chunk when the prompt declares no `lua shared` library.
     pub(crate) shared: &'a LuaProgram,
@@ -175,7 +182,6 @@ pub(super) async fn run_sections(
     // The walk owns its client slot: seeded from the run's client (if any),
     // created lazily on first prose, and shared by every section.
     let mut client = client.cloned();
-    let mut entered = 0usize;
     // The walk owns its `var`: seeded from H1's hand-off, rolled forward
     // across sections, and shared with jump-started child walks.
     let mut var = initial_var
@@ -190,7 +196,6 @@ pub(super) async fn run_sections(
         false,
         0,
         &mut client,
-        &mut entered,
         &mut var,
     )
     .await?
@@ -217,8 +222,8 @@ pub(super) async fn run_sections(
 /// `start_addressed` is true when the chain begins on an addressed target (a
 /// jump or execute target), which runs even when marked off-walk.
 /// `execute_depth` is the chain's nesting depth, threaded into every section
-/// so nested `execute()` calls stay under the cap. `entered` counts the
-/// sections this chain has entered and seeds each `sys.id`. `var` is the
+/// so nested `execute()` calls stay under the cap. Each section entry takes
+/// the next id from the frame's run-global counter. `var` is the
 /// walk's clipboard: each section's VM seeds from it, the section's final
 /// `var` replaces it, and a jump-started child walk shares the same value.
 #[expect(
@@ -234,7 +239,6 @@ async fn walk_siblings(
     start_addressed: bool,
     execute_depth: usize,
     client: &mut Option<GatewayClient>,
-    entered: &mut usize,
     var: &mut serde_json::Value,
 ) -> Result<WalkEnd> {
     let mut reply = incoming_reply;
@@ -251,13 +255,12 @@ async fn walk_siblings(
             continue;
         }
         addressed = false;
-        *entered += 1;
         let (flow, final_var) = run_one_section(
             ctx,
             control,
             section,
             siblings,
-            *entered,
+            next_id(ctx.ids),
             execute_depth,
             reply.as_deref(),
             client,
@@ -281,7 +284,6 @@ async fn walk_siblings(
                         true,
                         execute_depth,
                         client,
-                        entered,
                         var,
                     ))
                     .await?
@@ -318,8 +320,8 @@ async fn walk_siblings(
 /// `siblings` is the caller's
 /// own walk slice, from which the section's visible set (its siblings minus
 /// itself, plus its direct children) is built for the control globals.
-/// `section_id` is the `sys.id` value and the nested-call parent id (the
-/// count of sections entered in this chain). `incoming_reply` is the
+/// `section_id` is the section's `sys.id`: the next value from the
+/// run-global counter. `incoming_reply` is the
 /// model reply visible to this section's first prose; the engine rolls it
 /// forward as later prose in the same section produces text. `var` is the
 /// walk's current clipboard, seeded into the section's VM; the section's
@@ -334,7 +336,7 @@ async fn run_one_section(
     control: &Arc<ControlContext>,
     section: &Section,
     siblings: &[Section],
-    section_id: usize,
+    section_id: u64,
     execute_depth: usize,
     incoming_reply: Option<&str>,
     client: &mut Option<GatewayClient>,
@@ -367,7 +369,6 @@ async fn run_one_section(
         siblings.to_vec(),
         execute_depth,
         incoming_reply.map(str::to_owned),
-        section_id,
     );
 
     // The setup half of the section lifecycle - host injection, host APIs,
@@ -571,6 +572,9 @@ pub(crate) struct ControlContext {
     pub(crate) section_count: usize,
     pub(crate) task_handles: Vec<LuaSectionHandle>,
     pub(crate) turns: Arc<AtomicU32>,
+    /// The run-global execution-id counter, shared with every contained
+    /// chain and fanout this context spawns.
+    pub(crate) ids: Arc<AtomicU64>,
     pub(crate) analysis: ToolAnalysis,
     pub(crate) observer: Arc<dyn Observer>,
     pub(crate) debug: Option<Arc<dyn DebugCapture>>,
@@ -582,8 +586,8 @@ impl ControlContext {
     /// The one field list both borrowed-context constructors share: every
     /// run-scoped field is cloned out of the borrowed view here, so a future
     /// field add cannot drift between the walk and fanout constructions. The
-    /// three trailing parameters are the per-driver deltas: the turns counter,
-    /// the observer, and the debug sink.
+    /// four trailing parameters are the per-driver deltas: the turns counter,
+    /// the id counter, the observer, and the debug sink.
     #[expect(
         clippy::too_many_arguments,
         reason = "the owned context is built from one linear borrowed field list; bundling it would add a second struct mirroring the same fields"
@@ -603,6 +607,7 @@ impl ControlContext {
         limits: RunLimits,
         max_tool_iterations: usize,
         turns: &Arc<AtomicU32>,
+        ids: &Arc<AtomicU64>,
         observer: Arc<dyn Observer>,
         debug: Option<Arc<dyn DebugCapture>>,
     ) -> Self {
@@ -618,6 +623,7 @@ impl ControlContext {
             section_count,
             task_handles: task_handles.to_vec(),
             turns: Arc::clone(turns),
+            ids: Arc::clone(ids),
             analysis: analysis.clone(),
             observer,
             debug,
@@ -644,6 +650,7 @@ impl ControlContext {
             ctx.limits,
             ctx.max_tool_iterations,
             ctx.turns,
+            ctx.ids,
             Arc::clone(ctx.observer),
             ctx.debug.cloned(),
         )
@@ -651,8 +658,9 @@ impl ControlContext {
 
     /// The owned control context every arm of one fanout shares, cloned out
     /// of the borrowed fanout context: the proxy observer/debug carry the
-    /// arms' report-only traffic over the bounded side channels, and `turns`
-    /// is the counter all arms of the fanout share.
+    /// arms' report-only traffic over the bounded side channels, `turns`
+    /// is the counter all arms of the fanout share, and `ids` is the
+    /// run-global counter the fanout does not reset.
     pub(crate) fn from_fanout(
         ctx: &fanout::FanoutContext<'_>,
         turns: &Arc<AtomicU32>,
@@ -674,6 +682,7 @@ impl ControlContext {
             ctx.limits,
             ctx.max_tool_iterations,
             turns,
+            ctx.ids,
             observer,
             debug,
         )
@@ -694,6 +703,7 @@ impl ControlContext {
             shared_tools: &self.shared_tools,
             limits: self.limits,
             turns: &self.turns,
+            ids: &self.ids,
             shared: &self.shared,
             bindings: &self.bindings,
             models: &self.models,
@@ -709,8 +719,8 @@ impl ControlContext {
     /// The borrowed fanout inputs derived from this owned context, beside
     /// [`walk_context`](Self::walk_context) so both borrowed-context
     /// derivations keep their field lists in one place. The fanout callback
-    /// supplies only its own deltas: the client snapshot, the reply seed, the
-    /// arms' parent id, the worker's home slice, the caller's execute depth,
+    /// supplies only its own deltas: the client snapshot, the reply seed,
+    /// the worker's home slice, the caller's execute depth,
     /// and the caller's `var` snapshot each arm clones in.
     #[expect(
         clippy::ref_option,
@@ -720,7 +730,6 @@ impl ControlContext {
         &'a self,
         client: &'a Option<GatewayClient>,
         last_reply: Option<&'a str>,
-        parent_id: usize,
         home: &'a [Section],
         execute_depth: usize,
         var: &'a serde_json::Value,
@@ -741,7 +750,7 @@ impl ControlContext {
             limits: self.limits,
             last_reply,
             when: &self.when,
-            parent_id,
+            ids: &self.ids,
             section_count: self.section_count,
             home,
             task_handles: &self.task_handles,
@@ -776,10 +785,9 @@ impl ControlContext {
     }
 
     /// The `sys` JSON for one section or arm of this run: a fresh `now`
-    /// timestamp under the run's `when`, with the driver supplying only its
-    /// `id` delta (the walk's chain position, or an arm's parent section id)
-    /// and the section name.
-    pub(crate) fn sys_json(&self, id: usize, section_name: &str) -> Result<serde_json::Value> {
+    /// timestamp under the run's `when`, with the driver supplying only the
+    /// next value from the run-global id counter and the section name.
+    pub(crate) fn sys_json(&self, id: u64, section_name: &str) -> Result<serde_json::Value> {
         let now = now_rfc3339_checked()?;
         Ok(sys_json(
             &self.when,
@@ -819,8 +827,9 @@ impl ControlContext {
 
     /// Drives a contained chain from an execute/jump target: resolves the
     /// target over the caller's visible set, walks the target's chain slice
-    /// from its index under every normal rule (counting its own `sys.id`
-    /// from 1), and maps the chain's end to its text - a return's value,
+    /// from its index under every normal rule (each entry taking the next
+    /// run-global `sys.id`), and maps the chain's end to its text - a
+    /// return's value,
     /// else the final reply. The chain seeds its `var` from `var` (a clone
     /// of the caller's, taken at the call site) and discards it when the
     /// chain ends, so the caller never sees the chain's writes. Both chain
@@ -849,7 +858,6 @@ impl ControlContext {
             JumpTarget::Sibling(index) => (home, index),
         };
         let ctx = self.walk_context(args);
-        let mut entered = 0usize;
         let mut var = var;
         let end = walk_siblings(
             &ctx,
@@ -860,7 +868,6 @@ impl ControlContext {
             true,
             execute_depth,
             client,
-            &mut entered,
             &mut var,
         )
         .await?;
@@ -898,8 +905,8 @@ fn check_execute_depth(depth: usize, op: &str) -> Result<()> {
 /// nesting depth: an `execute` chain runs one level deeper, and a `fanout`
 /// passes it through so each arm runs one level deeper, keeping
 /// [`MAX_EXECUTE_DEPTH`] the only recursion constraint across both
-/// boundaries. `last_reply` seeds each arm's reply roll-forward; `parent_id`
-/// becomes the `sys.id` of the arms a `fanout` spawns. The `execute` and
+/// boundaries. `last_reply` seeds each arm's reply roll-forward. The
+/// `execute` and
 /// `fanout` closures receive the caller VM's `var` as a JSON snapshot taken
 /// at the call site (see [`SectionVm::install_control_globals`]): an
 /// `execute` chain seeds from that clone and discards it, and each fanout
@@ -919,7 +926,6 @@ pub(crate) fn make_control_globals(
     home: Vec<Section>,
     execute_depth: usize,
     last_reply: Option<String>,
-    parent_id: usize,
 ) -> (
     impl Fn(LuaValue, Option<String>, serde_json::Value) -> std::result::Result<String, Error>
     + Send
@@ -947,10 +953,8 @@ pub(crate) fn make_control_globals(
             check_execute_depth(next_depth, "execute")?;
             let call_args = input.as_deref().unwrap_or(&control.args);
             let mut client = client.clone();
-            // A contained chain counts its own `sys.id` from 1, like a fresh
-            // run; the caller's chain keeps its own count. Return the
-            // structured error directly (LUA-012): the typed error and its
-            // source cross the Lua boundary via `mlua::Error::external`
+            // Return the structured error directly (LUA-012): the typed error
+            // and its source cross the Lua boundary via `mlua::Error::external`
             // rather than being flattened to a string here.
             bridge_blocking(control.drive_contained_chain(
                 &caller,
@@ -979,7 +983,6 @@ pub(crate) fn make_control_globals(
                 &control,
                 &client,
                 last_reply.as_deref(),
-                parent_id,
                 execute_depth,
             )
         }
@@ -1015,7 +1018,6 @@ fn make_fanout_callback(
     control: &ControlContext,
     client: &Option<GatewayClient>,
     last_reply: Option<&str>,
-    parent_id: usize,
     execute_depth: usize,
 ) -> std::result::Result<Vec<LuaFanoutResult>, Error> {
     // Each arm runs one execute level deeper than the fanout caller, so
@@ -1035,14 +1037,7 @@ fn make_fanout_callback(
     // control globals derive their resolution set from it (the home slice
     // plus the worker's children), so the arm never inverts this layout.
     let worker_home = home_without(visible, worker);
-    let ctx = control.fanout_context(
-        client,
-        last_reply,
-        parent_id,
-        &worker_home,
-        execute_depth,
-        caller_var,
-    );
+    let ctx = control.fanout_context(client, last_reply, &worker_home, execute_depth, caller_var);
 
     // The collection was converted to JSON member-by-member at the Lua
     // boundary (the same bridge `var` uses); the cap inside counts members.

@@ -8,7 +8,7 @@
 //! A list section's pre-parsed items feed in through `list_from_section`:
 //! `fanout("### Worker", list_from_section("### List"))`. Arms execute
 //! concurrently on a [`tokio::task::JoinSet`]; each gets a fresh [`SectionVm`]
-//! with `item` and `sys.taskid` injected and `var` cloned in from the caller
+//! with `item` and `sys.index` injected and `var` cloned in from the caller
 //! (arm writes never reach the caller), and runs the same engine the section
 //! walk drives: the shared VM setup, the `model:infer` hook, and the ordered
 //! block walk (every Lua and prose block in order, the conversation and reply
@@ -27,7 +27,7 @@
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, AtomicU64};
 
 use mlua::{Lua, LuaSerdeExt, Value};
 use serde_json::json;
@@ -226,8 +226,9 @@ pub(crate) struct FanoutContext<'a> {
     pub limits: RunLimits,
     pub last_reply: Option<&'a str>,
     pub when: &'a str,
-    /// The 1-based id of the parent section that initiated the fanout.
-    pub parent_id: usize,
+    /// The run-global execution-id counter every arm takes its `sys.id`
+    /// from; a fanout shares it without resetting (unlike `turns`).
+    pub ids: &'a Arc<AtomicU64>,
     /// Total H2 section count in the top-level prompt.
     pub section_count: usize,
     /// The worker's home slice - the set it was resolved from, minus the
