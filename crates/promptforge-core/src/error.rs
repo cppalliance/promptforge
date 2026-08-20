@@ -85,6 +85,10 @@ pub(crate) enum Error {
     #[error("environment variable is set but not valid Unicode: {0}")]
     InvalidEnv(String),
 
+    /// A client or endpoint configuration value failed semantic validation.
+    #[error("{0}")]
+    InvalidConfig(String),
+
     /// A client or endpoint configuration input was invalid, retaining the
     /// concrete cause (a secret or URL validation failure) as a private
     /// `#[source]` (client F13 / AUDIT-DISCARDED-SOURCE) instead of flattening

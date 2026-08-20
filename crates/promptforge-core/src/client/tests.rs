@@ -3,7 +3,7 @@ use super::*;
 use std::num::NonZeroU64;
 
 use crate::Error;
-use crate::model::CompletionOptions;
+use crate::model::{CompletionErrorKind, CompletionOptions};
 use serde_json::Value;
 
 fn lookup_from<'a>(
@@ -219,20 +219,27 @@ async fn backend_error_display_is_body_free_and_body_is_opt_in_and_escaped() {
 
 #[test]
 fn gateway_endpoint_rejects_non_http_schemes_and_missing_host() {
-    assert!(GatewayEndpoint::new("ftp://example.com/v1").is_err());
-    assert!(GatewayEndpoint::new("not-a-url").is_err());
-    assert!(GatewayEndpoint::new("http://").is_err());
-    assert!(GatewayEndpoint::new("").is_err());
+    for url in ["ftp://example.com/v1", "not-a-url", "http://", ""] {
+        let error = GatewayEndpoint::new(url).expect_err("invalid endpoint must be rejected");
+        assert_eq!(error.kind(), CompletionErrorKind::Config);
+        assert!(!error.to_string().contains("missing environment variable"));
+    }
 }
 
 #[test]
 fn gateway_endpoint_rejects_credentials_query_and_fragment() {
     // F12: the strict URL parse rejects embedded credentials and the
     // query/fragment ambiguity a hand-rolled prefix scan let through.
-    assert!(GatewayEndpoint::new("http://user:pass@host/v1").is_err());
-    assert!(GatewayEndpoint::new("http://user@host/v1").is_err());
-    assert!(GatewayEndpoint::new("http://host/v1?token=leak").is_err());
-    assert!(GatewayEndpoint::new("http://host/v1#frag").is_err());
+    for url in [
+        "http://user:pass@host/v1",
+        "http://user@host/v1",
+        "http://host/v1?token=leak",
+        "http://host/v1#frag",
+    ] {
+        let error = GatewayEndpoint::new(url).expect_err("invalid endpoint must be rejected");
+        assert_eq!(error.kind(), CompletionErrorKind::Config);
+        assert!(!error.to_string().contains("missing environment variable"));
+    }
     // A clean http(s) API root is still accepted and normalized.
     assert_eq!(
         GatewayEndpoint::new("http://host:8080/v1/")

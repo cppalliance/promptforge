@@ -63,6 +63,7 @@ impl RunError {
             Error::UnsupportedVersion(_) => RunErrorKind::Version,
             Error::MissingEnv(_)
             | Error::InvalidEnv(_)
+            | Error::InvalidConfig(_)
             | Error::Config { .. }
             | Error::GatewayDisabled
             | Error::Http(_)
