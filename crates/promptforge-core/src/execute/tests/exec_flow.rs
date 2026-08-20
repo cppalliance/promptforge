@@ -54,22 +54,12 @@ async fn execute_runs_named_section_as_subroutine() {
         "\
 ## Main\n\n\
 ```lua\n\
-local research = tasks['## Research']\n\
-assert(research.name == 'Research')\n\
-assert(research.has_prose == true)\n\
 local by_name = execute('## Research')\n\
-local by_obj = execute(research)\n\
 assert(by_name == 'research-reply')\n\
-assert(by_obj == 'research-reply')\n\
 assert(store.read('evidence.md') == 'research-reply')\n\
 return by_name\n\
 ```\n\n\
 ## Research\n\n\
-```lua\n\
-local step = tasks['## Research']\n\
-assert(step.name == 'Research')\n\
-assert(step.has_prose == true)\n\
-```\n\n\
 Research {{ args }}.\n\n\
 ```lua\nstore.write('evidence.md', reply)\n```\n"
     );
@@ -80,6 +70,26 @@ Research {{ args }}.\n\n\
     assert_eq!(out, "research-reply");
 }
 
+/// The `tasks` table is gone (note 42): the global is absent, so indexing it
+/// is an ordinary Lua error, and control flow takes heading strings only.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tasks_global_is_absent() {
+    let md = flow_prompt!(
+        "\
+## Main\n\n\
+```lua\n\
+assert(tasks == nil, 'the tasks global is not installed')\n\
+local ok = pcall(function() return tasks['## Main'] end)\n\
+assert(not ok, 'indexing the absent tasks global errors')\n\
+return 'ok'\n\
+```\n"
+    );
+    let out = run_offline(md)
+        .await
+        .expect("the absent tasks global reads as nil and errors on indexing");
+    assert_eq!(out, "ok");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn jump_transfers_control_and_preserves_reply() {
     let md = flow_prompt!(
@@ -87,10 +97,7 @@ async fn jump_transfers_control_and_preserves_reply() {
 ## Check\n\n\
 ```lua\n\
 store.write('seen.txt', 'check')\n\
-local help = tasks['## Help']\n\
-assert(help.name == 'Help')\n\
-assert(help.has_prose == false)\n\
-jump(help)\n\
+jump('## Help')\n\
 store.write('seen.txt', 'should-not-run')\n\
 ```\n\n\
 ## Accept\n\n\
@@ -1079,8 +1086,7 @@ return r[1].text .. ',' .. r[2].text\n\
 }
 
 /// `list_from_section` returns a sibling list section's pre-parsed bullet
-/// items as a Lua array of strings, addressed by heading string or by a
-/// Section object from the `tasks` table.
+/// items as a Lua array of strings, addressed by heading string.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_from_section_returns_bullet_items() {
     let md = flow_prompt!(
@@ -1092,8 +1098,6 @@ assert(type(items) == 'table')\n\
 assert(#items == 2)\n\
 assert(items[1] == 'alpha')\n\
 assert(items[2] == 'beta')\n\
-local by_handle = list_from_section(tasks['## List'])\n\
-assert(#by_handle == 2 and by_handle[1] == 'alpha')\n\
 return 'ok'\n\
 ```\n\n\
 ## List\n\n\
@@ -1323,15 +1327,13 @@ return item .. ':' .. table.concat(items, ',')\n\
 /// visible set: the chain continues the run-global `sys.id` sequence, runs
 /// as plain
 /// sections (no `item` seed), and its final reply is the call's return value.
-/// The arm and the contained chain also see the run's `tasks` table and
-/// `sys.section_count`.
+/// The arm and the contained chain also see the run's `sys.section_count`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execute_inside_a_fanout_arm_runs_a_contained_chain() {
     let md = [
         ARM_FANOUT_PARENT,
         "### Worker\n\n\
 ```lua\n\
-assert(tasks['## Parent'].name == 'Parent', 'the arm sees the run tasks table')\n\
 assert(sys.section_count == 1, 'the arm sees the run top-level section count')\n\
 local got = execute('### Sub')\n\
 return 'worker:' .. got .. ':' .. item\n\

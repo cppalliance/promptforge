@@ -1334,7 +1334,6 @@ fn jump_during_shared_replay_is_a_hard_error() {
     vm.install_host_apis(&observer, "Test")
         .expect("host APIs must install");
     vm.install_control_globals(
-        &[],
         |_, _, _| Err(Error::Lua("execute is not needed here".to_owned())),
         |_, _, _| Err(Error::Lua("fanout is not needed here".to_owned())),
         |_| {

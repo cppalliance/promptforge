@@ -38,7 +38,7 @@ use crate::cancel;
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::execute::RunLimits;
-use crate::lua::{LuaFanoutResult, LuaProgram, LuaSectionHandle, ToolBindings};
+use crate::lua::{LuaFanoutResult, LuaProgram, ToolBindings};
 use crate::model::ModelBindings;
 use crate::observe::{Observation, Observer};
 use crate::parser::Section;
@@ -236,8 +236,6 @@ pub(crate) struct FanoutContext<'a> {
     /// `list_from_section`, and a jump's target) derive their resolution set
     /// from it as the home slice plus the worker's children.
     pub home: &'a [Section],
-    /// The run's section handles, installed as every arm's `tasks` table.
-    pub task_handles: &'a [LuaSectionHandle],
     /// The fanout caller's execute depth. Each arm runs one level deeper, so
     /// recursion accounting accumulates across the fanout boundary.
     pub execute_depth: usize,

@@ -1,7 +1,6 @@
 use super::{
-    Arc, Error, Function, Json, LocalTools, Lua, LuaSectionHandle, LuaToolHandle, MultiValue,
-    Mutex, Result, ToolBindings, ToolCallCounts, ToolRuntime, Value, Variadic, json,
-    validate_alias,
+    Arc, Error, Function, Json, LocalTools, Lua, LuaToolHandle, MultiValue, Mutex, Result,
+    ToolBindings, ToolCallCounts, ToolRuntime, Value, Variadic, json, validate_alias,
 };
 use crate::client::ToolSchema;
 
@@ -261,22 +260,4 @@ pub(crate) fn install_h2_tools(
     tools.set("add_local", add_local_fn).map_err(Error::lua)?;
 
     globals.raw_set("tools", tools).map_err(Error::lua)
-}
-
-/// Installs the phase-local author diagnostic callback.
-///
-/// The callback borrows its observer through [`Scope`], so neither the callback
-/// nor any Lua reference copied from it can retain that observer after the
-/// current H1 or H2 phase returns.
-pub(crate) fn install_tasks_table(lua: &Lua, tasks: &[LuaSectionHandle]) -> Result<()> {
-    let table = lua
-        .create_table_with_capacity(0, tasks.len())
-        .map_err(Error::lua)?;
-    for handle in tasks {
-        let userdata = lua.create_userdata(handle.clone()).map_err(Error::lua)?;
-        table
-            .raw_set(handle.heading(), userdata)
-            .map_err(Error::lua)?;
-    }
-    lua.globals().raw_set("tasks", table).map_err(Error::lua)
 }

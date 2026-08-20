@@ -290,7 +290,6 @@ pub async fn run(
                 .resolve(limits.tool_iterations().get() as usize),
             when: "",
             section_count: prompt.sections.len(),
-            task_handles: &[],
             item: None,
         };
         let h1 = execute_live_h1(prompt, resolution, &registry, client.as_ref(), &frame).await?;

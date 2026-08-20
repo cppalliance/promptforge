@@ -389,7 +389,6 @@ impl FanoutFixture {
             ids: &self.ids,
             section_count: 1,
             home: &[],
-            task_handles: &[],
             execute_depth: 0,
             var: &self.var,
         }
@@ -603,13 +602,11 @@ async fn an_empty_collection_returns_empty_results() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn arm_control_globals_resolve_over_the_threaded_home_and_handles() {
-    // The FanoutContext home slice and task handles reach the arm's control
-    // globals: `list_from_section` resolves a home sibling's items, and the
-    // `tasks` table carries the threaded handles.
+async fn arm_control_globals_resolve_over_the_threaded_home() {
+    // The FanoutContext home slice reaches the arm's control globals:
+    // `list_from_section` resolves a home sibling's items.
     let worker = lua_worker(
         "local items = list_from_section('### List')\n\
-        assert(tasks['## Parent'].name == 'Parent', 'the arm sees the threaded task handles')\n\
         return item .. ':' .. table.concat(items, ',')",
     );
     let items = vec![json!("alpha")];
@@ -617,10 +614,8 @@ async fn arm_control_globals_resolve_over_the_threaded_home_and_handles() {
     let mut list = sibling("List", 3);
     list.items = vec!["x".to_string(), "y".to_string()];
     let home = vec![list];
-    let handles = vec![LuaSectionHandle::new("Parent", false)];
     let mut ctx = fixture.ctx("fanout-home-test", RunLimits::new(), &NullObserver);
     ctx.home = &home;
-    ctx.task_handles = &handles;
 
     let results = run_fanout_arms(&worker, &items, &ctx)
         .await

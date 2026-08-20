@@ -51,12 +51,10 @@ use std::sync::atomic::{AtomicU32, AtomicU64};
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::fanout;
-use crate::lua::{
-    LuaFanoutResult, LuaProgram, LuaSectionHandle, SectionVm, ToolBindings, resolve_section_target,
-};
+use crate::lua::{LuaFanoutResult, LuaProgram, SectionVm, ToolBindings, resolve_section_target};
 use crate::model::ModelBindings;
 use crate::observe::{Observer, detail};
-use crate::parser::{Block, Prompt, Section};
+use crate::parser::{Prompt, Section};
 use crate::store::StoreRef;
 use crate::tools::SharedTools;
 use crate::{Error, Result};
@@ -95,7 +93,7 @@ enum WalkEnd {
 /// `item` is the one driver-specific one-off and stays `Option`: set only by
 /// a fanout arm. The walk-owned `var` is not in the frame: it rolls forward
 /// through `walk_siblings` as walk-local mutable state. The walk-only fields
-/// (`shared` through `task_handles`) carry empty defaults while the live H1
+/// (`shared` through `section_count`) carry empty defaults while the live H1
 /// pass runs - live mode never reads them - and the section walk rebuilds
 /// the frame with the live values H1 produced. The client is not in the
 /// frame: each driver owns its client slot (seeded from the run's client,
@@ -137,7 +135,6 @@ pub(crate) struct RunFrame<'a> {
     pub(crate) when: &'a str,
     /// The run's top-level section count, reported as `sys.section_count`.
     pub(crate) section_count: usize,
-    pub(crate) task_handles: &'a [LuaSectionHandle],
     /// The fanout arm's collection member for `{{ item }}` substitution;
     /// `None` outside a fanout arm.
     pub(crate) item: Option<&'a serde_json::Value>,
@@ -162,7 +159,6 @@ pub(super) async fn run_sections(
     frame: &RunFrame<'_>,
 ) -> Result<String> {
     let when = now_rfc3339_checked()?;
-    let task_handles = section_handles(&prompt.sections);
     // The walk's frame: the run-scoped fields carry over from the run frame;
     // the walk-only fields take their live values now that H1 produced them.
     let ctx = RunFrame {
@@ -170,7 +166,6 @@ pub(super) async fn run_sections(
         models,
         analysis,
         when: &when,
-        task_handles: &task_handles,
         ..*frame
     };
 
@@ -435,19 +430,6 @@ async fn run_one_section(
     Ok((flow, final_var))
 }
 
-fn section_handles(sections: &[Section]) -> Vec<LuaSectionHandle> {
-    sections
-        .iter()
-        .map(|section| {
-            let has_prose = section
-                .blocks
-                .iter()
-                .any(|block| matches!(block, Block::Prose { .. }));
-            LuaSectionHandle::new(&section.name, has_prose)
-        })
-        .collect()
-}
-
 /// The index of `target` in `slice`, matched on the parser-unique
 /// `(level, name)` pair; `None` when the slice does not contain it.
 fn section_position(slice: &[Section], target: &Section) -> Option<usize> {
@@ -570,7 +552,6 @@ pub(crate) struct ControlContext {
     /// The run's top-level section count, reported as `sys.section_count` in
     /// contained chains and nested fanout arms.
     pub(crate) section_count: usize,
-    pub(crate) task_handles: Vec<LuaSectionHandle>,
     pub(crate) turns: Arc<AtomicU32>,
     /// The run-global execution-id counter, shared with every contained
     /// chain and fanout this context spawns.
@@ -602,7 +583,6 @@ impl ControlContext {
         models: &ModelBindings,
         shared_tools: &SharedTools,
         section_count: usize,
-        task_handles: &[LuaSectionHandle],
         analysis: &ToolAnalysis,
         limits: RunLimits,
         max_tool_iterations: usize,
@@ -621,7 +601,6 @@ impl ControlContext {
             models: models.clone(),
             shared_tools: shared_tools.clone(),
             section_count,
-            task_handles: task_handles.to_vec(),
             turns: Arc::clone(turns),
             ids: Arc::clone(ids),
             analysis: analysis.clone(),
@@ -645,7 +624,6 @@ impl ControlContext {
             ctx.models,
             ctx.shared_tools,
             ctx.section_count,
-            ctx.task_handles,
             ctx.analysis,
             ctx.limits,
             ctx.max_tool_iterations,
@@ -677,7 +655,6 @@ impl ControlContext {
             ctx.models,
             ctx.shared_tools,
             ctx.section_count,
-            ctx.task_handles,
             ctx.analysis,
             ctx.limits,
             ctx.max_tool_iterations,
@@ -711,7 +688,6 @@ impl ControlContext {
             max_tool_iterations: self.max_tool_iterations,
             when: &self.when,
             section_count: self.section_count,
-            task_handles: &self.task_handles,
             item: None,
         }
     }
@@ -753,14 +729,13 @@ impl ControlContext {
             ids: &self.ids,
             section_count: self.section_count,
             home,
-            task_handles: &self.task_handles,
             execute_depth,
             var,
         }
     }
 
     /// The borrowed VM-setup inputs both engine drivers share, sourcing the
-    /// run-wide slots (`args`, `store`, `observer`, `task_handles`, `shared`)
+    /// run-wide slots (`args`, `store`, `observer`, `shared`)
     /// from this context so the field list lives in one place; the driver
     /// supplies only its own deltas: the `sys` JSON, the incoming reply, the
     /// seed, and the section name.
@@ -779,7 +754,6 @@ impl ControlContext {
             seed,
             observer_arc: &self.observer,
             section_name,
-            task_handles: &self.task_handles,
             shared: &self.shared,
         }
     }
