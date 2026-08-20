@@ -367,6 +367,55 @@ pub(crate) fn collect_headings(body: &str) -> Result<Vec<Heading>> {
     Ok(headings)
 }
 
+/// Builds one heading's executable blocks while preserving source positions.
+fn build_heading_blocks(
+    heading: &Heading,
+    name: &str,
+    frontmatter_lines: u32,
+    execution: &str,
+    observer: &dyn Observer,
+) -> Result<(Vec<Block>, bool)> {
+    let content_abs_line = line_add(frontmatter_lines, heading.content_start_line)?;
+    // The `---` marker seam: a leading rule takes the section off the
+    // walk, and the first non-leading rule ends its executable content.
+    // Blocks and list items parse only from what survives.
+    let (off_walk, content) = split_rule_roles(&heading.content)?;
+    let raw_blocks = split_section_blocks(content.as_ref(), name)?;
+    let has_prose = raw_blocks
+        .iter()
+        .any(|block| matches!(block, RawBlock::Prose(_)));
+    let last_prose = raw_blocks
+        .iter()
+        .rposition(|block| matches!(block, RawBlock::Prose(_)));
+    let total = raw_blocks.len();
+    let mut blocks = Vec::with_capacity(total);
+    for (index, raw) in raw_blocks.into_iter().enumerate() {
+        match raw {
+            RawBlock::Prose(text) => {
+                let loop_capable = Some(index) == last_prose;
+                blocks.push(Block::Prose { text, loop_capable });
+            }
+            RawBlock::Lua {
+                source,
+                line_offset,
+            } => {
+                let abs_line = line_add(content_abs_line, line_offset)?;
+                let location = lua_block_location(name, index, total, has_prose);
+                let program = LuaProgram::compile(
+                    &source,
+                    &location,
+                    nz_source_line(abs_line)?,
+                    execution,
+                    observer,
+                    name,
+                )?;
+                blocks.push(Block::Lua(program));
+            }
+        }
+    }
+    Ok((blocks, off_walk))
+}
+
 /// Builds a section tree from a flat, document-ordered list of headings.
 ///
 /// Recursion consumes headings whose level is deeper than `parent_level`; a
@@ -421,46 +470,10 @@ pub(crate) fn build_sections(
                 format!("an H{level} section heading must not be empty"),
             ));
         }
-        let content_abs_line = line_add(frontmatter_lines, h.content_start_line)?;
         let heading_abs_line = line_add(frontmatter_lines, h.source_line)?;
         let heading_span = h.span.clone();
-        // The `---` marker seam: a leading rule takes the section off the
-        // walk, and the first non-leading rule ends its executable content.
-        // Blocks and list items parse only from what survives.
-        let (off_walk, content) = split_rule_roles(&h.content)?;
-        let raw_blocks = split_section_blocks(content.as_ref(), &name)?;
-        let has_prose = raw_blocks
-            .iter()
-            .any(|block| matches!(block, RawBlock::Prose(_)));
-        let last_prose = raw_blocks
-            .iter()
-            .rposition(|block| matches!(block, RawBlock::Prose(_)));
-        let total = raw_blocks.len();
-        let mut blocks = Vec::with_capacity(total);
-        for (index, raw) in raw_blocks.into_iter().enumerate() {
-            match raw {
-                RawBlock::Prose(text) => {
-                    let loop_capable = Some(index) == last_prose;
-                    blocks.push(Block::Prose { text, loop_capable });
-                }
-                RawBlock::Lua {
-                    source,
-                    line_offset,
-                } => {
-                    let abs_line = line_add(content_abs_line, line_offset)?;
-                    let location = lua_block_location(&name, index, total, has_prose);
-                    let program = LuaProgram::compile(
-                        &source,
-                        &location,
-                        nz_source_line(abs_line)?,
-                        execution,
-                        observer,
-                        &name,
-                    )?;
-                    blocks.push(Block::Lua(program));
-                }
-            }
-        }
+        let (blocks, off_walk) =
+            build_heading_blocks(h, &name, frontmatter_lines, execution, observer)?;
         *pos += 1;
         let children =
             build_sections(headings, pos, level, frontmatter_lines, execution, observer)?;

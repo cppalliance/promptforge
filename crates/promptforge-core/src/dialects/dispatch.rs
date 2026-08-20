@@ -8,6 +8,29 @@ use crate::client::{Message, ToolCall};
 use crate::normalize::NormalizedTurn;
 use crate::{Error, Result};
 
+/// Returns the request's `messages` array, optionally creating an empty one.
+fn messages_array_mut(
+    object: &mut serde_json::Map<String, Value>,
+    create: bool,
+) -> Result<Option<&mut Vec<Value>>> {
+    let messages = if create {
+        Some(
+            object
+                .entry("messages")
+                .or_insert_with(|| Value::Array(Vec::new())),
+        )
+    } else {
+        object.get_mut("messages")
+    };
+    messages
+        .map(|messages| {
+            messages.as_array_mut().ok_or_else(|| {
+                Error::MalformedResponse("request `messages` was present but not an array".into())
+            })
+        })
+        .transpose()
+}
+
 /// A dialect's confidence that it matches some [`DialectEvidence`].
 ///
 /// Higher values win. The scale is arbitrary but values should stay in `0..=100`.
@@ -47,13 +70,7 @@ impl<'a> DialectRequest<'a> {
     /// `messages` is present but not an array.
     pub(crate) fn validate_shape(&mut self) -> Result<()> {
         let obj = self.object_mut()?;
-        if let Some(messages) = obj.get("messages")
-            && !messages.is_array()
-        {
-            return Err(Error::MalformedResponse(
-                "request `messages` was present but not an array".into(),
-            ));
-        }
+        messages_array_mut(obj, false)?;
         Ok(())
     }
 
@@ -78,14 +95,9 @@ impl<'a> DialectRequest<'a> {
     /// or `messages` is present but not an array.
     pub(crate) fn prepend_message(&mut self, message: Value) -> Result<()> {
         let obj = self.object_mut()?;
-        let messages = obj
-            .entry("messages")
-            .or_insert_with(|| Value::Array(Vec::new()));
-        let Some(list) = messages.as_array_mut() else {
-            return Err(Error::MalformedResponse(
-                "request `messages` was present but not an array".into(),
-            ));
-        };
+        let list = messages_array_mut(obj, true)?.ok_or(Error::Internal(
+            "dialect request: creating messages did not produce an array",
+        ))?;
         list.insert(0, message);
         Ok(())
     }

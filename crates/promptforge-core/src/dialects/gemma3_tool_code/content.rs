@@ -37,6 +37,25 @@ enum Peel<'a> {
     NotAFence,
 }
 
+/// Applies one peel result, returning whether a fence was consumed.
+fn consume_peel<'a>(
+    peel: Peel<'a>,
+    saw_fence: &mut bool,
+    calls: &mut Vec<ToolCall>,
+    rest: &mut &'a str,
+) -> Result<bool, Error> {
+    match peel {
+        Peel::Calls(parsed, remain) => {
+            *saw_fence = true;
+            calls.extend(parsed);
+            *rest = remain;
+            Ok(true)
+        }
+        Peel::Malformed(error) => Err(error),
+        Peel::NotAFence => Ok(false),
+    }
+}
+
 /// Classify model content as prose, tool calls, or malformed protocol.
 ///
 /// The content is protocol only when it begins with a recognized tool fence;
@@ -55,25 +74,25 @@ pub(crate) fn parse_content_tool_dialect(content: &str) -> ContentParse {
         if rest.is_empty() {
             break;
         }
-        match peel_tool_code_fence(rest, &mut next_id) {
-            Peel::Calls(parsed, remain) => {
-                saw_fence = true;
-                calls.extend(parsed);
-                rest = remain;
-                continue;
-            }
-            Peel::Malformed(error) => return ContentParse::Malformed(error),
-            Peel::NotAFence => {}
+        match consume_peel(
+            peel_tool_code_fence(rest, &mut next_id),
+            &mut saw_fence,
+            &mut calls,
+            &mut rest,
+        ) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(error) => return ContentParse::Malformed(error),
         }
-        match peel_json_tool_calls_fence(rest) {
-            Peel::Calls(parsed, remain) => {
-                saw_fence = true;
-                calls.extend(parsed);
-                rest = remain;
-                continue;
-            }
-            Peel::Malformed(error) => return ContentParse::Malformed(error),
-            Peel::NotAFence => {}
+        match consume_peel(
+            peel_json_tool_calls_fence(rest),
+            &mut saw_fence,
+            &mut calls,
+            &mut rest,
+        ) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(error) => return ContentParse::Malformed(error),
         }
         // No tool fence here. If we already consumed one, this is trailing junk
         // in an otherwise-protocol turn; otherwise it is ordinary prose.

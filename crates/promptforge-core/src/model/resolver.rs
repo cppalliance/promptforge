@@ -1,12 +1,20 @@
 //! The semantic `models.need` resolution adapter over the tool picker.
 
-use promptforge_tool_picker::ToolPicker;
+use promptforge_tool_picker::{CandidateGroup, ToolPicker};
 
 use super::{
     ModelCatalog, ModelInvocation, ModelNeedOpts, ModelResolver, ResolvedModel,
     model_from_picker_id, picker_catalog_from,
 };
 use crate::{Error, Result};
+
+/// Converts a picker candidate group to core model identities in picker order.
+fn model_ids(group: &CandidateGroup<'_>) -> Vec<super::ModelId> {
+    group
+        .iter()
+        .map(|tool| model_from_picker_id(tool.id()))
+        .collect()
+}
 
 /// Resolver that filters the catalog, then semantically resolves via a picker.
 #[derive(Debug)]
@@ -70,17 +78,11 @@ impl ModelResolver for PickerModelResolver<'_> {
             }),
             Ok(promptforge_tool_picker::Outcome::Duplicate(group)) => Err(Error::ModelDuplicate {
                 capability: description.to_owned(),
-                candidates: group
-                    .iter()
-                    .map(|tool| model_from_picker_id(tool.id()))
-                    .collect(),
+                candidates: model_ids(&group),
             }),
             Ok(promptforge_tool_picker::Outcome::Ambiguous(group)) => Err(Error::ModelAmbiguous {
                 capability: description.to_owned(),
-                candidates: group
-                    .iter()
-                    .map(|tool| model_from_picker_id(tool.id()))
-                    .collect(),
+                candidates: model_ids(&group),
             }),
             Ok(_) => Err(Error::ModelBind {
                 capability: description.to_owned(),

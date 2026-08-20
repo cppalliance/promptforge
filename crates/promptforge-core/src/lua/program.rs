@@ -1,5 +1,28 @@
 use super::{Error, Function, Lua, LuaOptions, NonZeroU32, Observer, Result, StdLib, detail};
 
+/// Identifies whether temporary compiler setup or chunk compilation failed.
+enum CompilerError {
+    Vm(mlua::Error),
+    Chunk(mlua::Error),
+}
+
+/// Compiles a named chunk in the fixed temporary VM and keeps debug info.
+fn compile_chunk(source: &str, location: &str) -> std::result::Result<Vec<u8>, CompilerError> {
+    let lua = Lua::new_with(
+        StdLib::STRING | StdLib::TABLE | StdLib::MATH,
+        LuaOptions::default(),
+    )
+    .map_err(CompilerError::Vm)?;
+    let function = lua
+        .load(source)
+        .set_name(location)
+        .into_function()
+        .map_err(CompilerError::Chunk)?;
+    // Keep debug info so runtime errors report the chunk name and line
+    // (`dump(true)` strips them and leaves `?:` in the traceback).
+    Ok(function.dump(false))
+}
+
 /// Compiled Lua 5.4 source that can be loaded into multiple process-local VMs.
 ///
 /// A program retains its original source for diagnostics and stores bytecode
@@ -103,20 +126,13 @@ impl LuaProgram {
     ) -> Result<Self> {
         observer.observe(execution, section, detail::LUA_COMPILATION_STARTED);
 
-        let lua = match Lua::new_with(
-            StdLib::STRING | StdLib::TABLE | StdLib::MATH,
-            LuaOptions::default(),
-        ) {
-            Ok(lua) => lua,
-            Err(error) => {
+        let bytecode = match compile_chunk(source, location) {
+            Ok(bytecode) => bytecode,
+            Err(CompilerError::Vm(error)) => {
                 observer.observe(execution, section, detail::LUA_COMPILATION_FAILED);
                 return Err(Error::lua(error));
             }
-        };
-
-        let function = match lua.load(source).set_name(location).into_function() {
-            Ok(function) => function,
-            Err(error) => {
+            Err(CompilerError::Chunk(error)) => {
                 observer.observe(execution, section, detail::LUA_COMPILATION_FAILED);
                 return Err(Error::LuaCompile {
                     location: location.to_owned(),
@@ -127,9 +143,6 @@ impl LuaProgram {
                 });
             }
         };
-        // Keep debug info so runtime errors report the chunk name and line
-        // (`dump(true)` strips them and leaves `?:` in the traceback).
-        let bytecode = function.dump(false);
 
         observer.observe(execution, section, detail::LUA_COMPILATION_SUCCEEDED);
         Ok(Self {
@@ -150,19 +163,12 @@ impl LuaProgram {
     /// # Errors
     /// Returns [`Error::Lua`] if the temporary compiler VM cannot be created.
     pub(crate) fn empty() -> Result<Self> {
-        let lua = Lua::new_with(
-            StdLib::STRING | StdLib::TABLE | StdLib::MATH,
-            LuaOptions::default(),
-        )
-        .map_err(Error::lua)?;
-        let function = lua
-            .load("")
-            .set_name("shared library")
-            .into_function()
-            .map_err(Error::lua)?;
+        let bytecode = compile_chunk("", "shared library").map_err(|error| match error {
+            CompilerError::Vm(error) | CompilerError::Chunk(error) => Error::lua(error),
+        })?;
         Ok(Self {
             source: String::new(),
-            bytecode: function.dump(false),
+            bytecode,
             location: "shared library".to_owned(),
             source_line: NonZeroU32::MIN,
         })

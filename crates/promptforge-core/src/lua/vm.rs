@@ -10,6 +10,15 @@ use super::{
 };
 use crate::client::ToolSchema;
 
+/// Packs owned values into a 1-based Lua sequence table.
+fn pack_sequence<T: mlua::IntoLua>(lua: &Lua, values: Vec<T>) -> mlua::Result<mlua::Table> {
+    let table = lua.create_table_with_capacity(values.len(), 0)?;
+    for (index, value) in values.into_iter().enumerate() {
+        table.raw_set(index + 1, value)?;
+    }
+    Ok(table)
+}
+
 /// One hardened, isolated Lua VM for a section's complete lifecycle.
 ///
 /// The VM owns one Lua environment from construction until drop. Construction
@@ -512,11 +521,7 @@ impl SectionVm {
                     .map_err(mlua::Error::external)?;
                 let var = var_to_json(lua).map_err(mlua::Error::external)?;
                 let replies = fanout_callback(worker, items, var).map_err(mlua::Error::external)?;
-                let table = lua.create_table_with_capacity(replies.len(), 0)?;
-                for (i, reply) in replies.into_iter().enumerate() {
-                    table.raw_set(i + 1, reply)?;
-                }
-                Ok(table)
+                pack_sequence(lua, replies)
             })
             .map_err(Error::lua)?;
         globals.raw_set("fanout", fanout_fn).map_err(Error::lua)?;
@@ -525,11 +530,7 @@ impl SectionVm {
             .create_function(move |lua, target: Value| {
                 let heading = resolve_section_target(target)?;
                 let items = list_callback(heading).map_err(mlua::Error::external)?;
-                let table = lua.create_table_with_capacity(items.len(), 0)?;
-                for (i, item) in items.into_iter().enumerate() {
-                    table.raw_set(i + 1, item)?;
-                }
-                Ok(table)
+                pack_sequence(lua, items)
             })
             .map_err(Error::lua)?;
         globals

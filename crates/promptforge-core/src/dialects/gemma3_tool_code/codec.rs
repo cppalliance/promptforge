@@ -114,13 +114,17 @@ fn parse_tool_code_args(tool_name: &str, src: &str) -> Option<Value> {
     Some(Value::Object(map))
 }
 
-/// Byte offset of the first top-level `=` in `part`, outside quotes and nested
-/// delimiters, or `None` when the part carries no top-level assignment.
-fn top_level_assignment(part: &str) -> Option<usize> {
+/// Scans quote and delimiter state, invoking `visit_top_level` only outside
+/// quotes and nested delimiters.
+fn scan_top_level<T>(
+    src: &str,
+    validate_structure: bool,
+    mut visit_top_level: impl FnMut(usize, char) -> Option<T>,
+) -> std::result::Result<Option<T>, ()> {
     let mut expected_closers: Vec<char> = Vec::new();
     let mut in_quote: Option<char> = None;
     let mut escaped = false;
-    for (idx, ch) in part.char_indices() {
+    for (idx, ch) in src.char_indices() {
         if let Some(q) = in_quote {
             if escaped {
                 escaped = false;
@@ -137,13 +141,31 @@ fn top_level_assignment(part: &str) -> Option<usize> {
             '[' => expected_closers.push(']'),
             '{' => expected_closers.push('}'),
             ')' | ']' | '}' => {
-                expected_closers.pop();
+                let expected = expected_closers.pop();
+                if validate_structure && expected != Some(ch) {
+                    return Err(());
+                }
             }
-            '=' if expected_closers.is_empty() => return Some(idx),
+            _ if expected_closers.is_empty() => {
+                if let Some(result) = visit_top_level(idx, ch) {
+                    return Ok(Some(result));
+                }
+            }
             _ => {}
         }
     }
-    None
+    if validate_structure && (!expected_closers.is_empty() || in_quote.is_some() || escaped) {
+        return Err(());
+    }
+    Ok(None)
+}
+
+/// Byte offset of the first top-level `=` in `part`, outside quotes and nested
+/// delimiters, or `None` when the part carries no top-level assignment.
+fn top_level_assignment(part: &str) -> Option<usize> {
+    scan_top_level(part, false, |idx, ch| (ch == '=').then_some(idx))
+        .ok()
+        .flatten()
 }
 
 /// Decode one argument token as a complete JSON value.
@@ -186,42 +208,14 @@ fn positional_arg_keys(tool_name: &str, count: usize) -> Option<&'static [&'stat
 fn split_top_level_commas(src: &str) -> Option<Vec<&str>> {
     let mut parts = Vec::new();
     let mut start = 0;
-    let mut expected_closers: Vec<char> = Vec::new();
-    let mut in_quote: Option<char> = None;
-    let mut escaped = false;
-    for (idx, ch) in src.char_indices() {
-        if let Some(q) = in_quote {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == q {
-                in_quote = None;
-            }
-            continue;
+    scan_top_level(src, true, |idx, ch| {
+        if ch == ',' {
+            parts.push(&src[start..idx]);
+            start = idx + ch.len_utf8();
         }
-        match ch {
-            '"' | '\'' => in_quote = Some(ch),
-            '(' => expected_closers.push(')'),
-            '[' => expected_closers.push(']'),
-            '{' => expected_closers.push('}'),
-            ')' | ']' | '}' => {
-                // A closer must match the most recent unmatched opener; a bare
-                // or mismatched closer corrupts the argument structure.
-                if expected_closers.pop() != Some(ch) {
-                    return None;
-                }
-            }
-            ',' if expected_closers.is_empty() => {
-                parts.push(&src[start..idx]);
-                start = idx + ch.len_utf8();
-            }
-            _ => {}
-        }
-    }
-    if !expected_closers.is_empty() || in_quote.is_some() || escaped {
-        return None;
-    }
+        None::<()>
+    })
+    .ok()?;
     parts.push(&src[start..]);
     Some(parts)
 }

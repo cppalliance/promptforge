@@ -304,13 +304,7 @@ impl StoreRef {
         start: usize,
         end: Option<usize>,
     ) -> Result<String, StoreError> {
-        let path = StorePath::parse(path)?;
-        let contents = self.lock()?.read(path.as_str())?;
-        let lines: Vec<&str> = contents.lines().collect();
-        let Some((start, end)) = resolve_line_range(path.as_str(), lines.len(), start, end)? else {
-            return Ok(String::new());
-        };
-        Ok(lines[start - 1..end].join("\n"))
+        self.with_read_range(path, start, end, |lines, _| lines.join("\n"))
     }
 
     /// Reads lines `start..=end` of the file at `path` as numbered lines,
@@ -350,13 +344,24 @@ impl StoreRef {
         start: usize,
         end: Option<usize>,
     ) -> Result<String, StoreError> {
+        self.with_read_range(path, start, end, number_lines_from)
+    }
+
+    /// Reads and resolves one line range while its owned contents remain live.
+    fn with_read_range(
+        &self,
+        path: &str,
+        start: usize,
+        end: Option<usize>,
+        render: impl FnOnce(&[&str], usize) -> String,
+    ) -> Result<String, StoreError> {
         let path = StorePath::parse(path)?;
         let contents = self.lock()?.read(path.as_str())?;
         let lines: Vec<&str> = contents.lines().collect();
         let Some((start, end)) = resolve_line_range(path.as_str(), lines.len(), start, end)? else {
             return Ok(String::new());
         };
-        Ok(number_lines_from(&lines[start - 1..end], start))
+        Ok(render(&lines[start - 1..end], start))
     }
 
     /// Replaces the unique occurrence of `old` with `new`. See

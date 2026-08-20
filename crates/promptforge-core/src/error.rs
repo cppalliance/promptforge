@@ -7,6 +7,9 @@
 //! classify this substrate and preserve its source. See the module wrappers for
 //! the `From` bridges that let internal `?` keep flowing through the substrate.
 
+/// A type-erased owned error cause used by the internal substrate.
+pub(crate) type BoxedSource = Box<dyn std::error::Error + Send + Sync>;
+
 /// A cloneable, shareable error cause.
 ///
 /// Some caches re-produce a typed [`Error`] on every lookup (for example the
@@ -59,7 +62,7 @@ pub(crate) enum Error {
         message: String,
         /// The originating YAML parse failure, kept as the cause.
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: BoxedSource,
     },
 
     /// A structurally-classified parse failure carrying a stable kind and an
@@ -101,7 +104,7 @@ pub(crate) enum Error {
         /// The originating validation failure (secret or URL parse), kept as
         /// the cause.
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: BoxedSource,
     },
 
     /// Gateway access was explicitly disabled by the host.
@@ -110,7 +113,7 @@ pub(crate) enum Error {
 
     /// The HTTP request to the model backend failed at the transport layer.
     #[error("http transport failure")]
-    Http(#[source] Box<dyn std::error::Error + Send + Sync>),
+    Http(#[source] BoxedSource),
 
     /// The backend returned a non-success status.
     ///
@@ -143,7 +146,7 @@ pub(crate) enum Error {
         message: String,
         /// The originating decode failure, kept as the cause.
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: BoxedSource,
     },
 
     /// Reading a non-success backend response body failed at the transport
@@ -160,7 +163,7 @@ pub(crate) enum Error {
         status: u16,
         /// The originating transport read failure, kept as the cause.
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: BoxedSource,
     },
 
     /// The model returned neither non-empty tool calls nor non-empty text.
@@ -210,7 +213,7 @@ pub(crate) enum Error {
         message: String,
         /// The originating Lua error, kept as the cause.
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: BoxedSource,
     },
 
     /// Lua source was not syntactically valid at its prompt location.
@@ -232,7 +235,7 @@ pub(crate) enum Error {
         message: String,
         /// The originating `mlua` compile error, kept as the cause.
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: BoxedSource,
     },
 
     /// The concrete picker failed while resolving a capability declaration.
@@ -255,7 +258,7 @@ pub(crate) enum Error {
         alias: String,
         /// The originating schema validation failure, kept as the cause.
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: BoxedSource,
     },
 
     /// The picker's query failed while resolving a capability, retaining the
@@ -358,7 +361,7 @@ pub(crate) enum Error {
     ToolScopeAnalysisSource {
         /// The picker's typed selection failure, kept as the cause.
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: BoxedSource,
     },
 
     /// Two tools in one model-visible scope are semantic near-duplicates.
@@ -507,7 +510,7 @@ pub(crate) enum Error {
         message: String,
         /// The originating tool error, kept as the cause.
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: BoxedSource,
     },
 
     /// A spawned fanout arm task failed to join (it panicked or was aborted
@@ -536,7 +539,7 @@ pub(crate) enum Error {
     InvalidToolWireName {
         /// The originating registry validation failure, kept as the cause.
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: BoxedSource,
     },
 
     /// A Lua host resource quota (log events, log bytes, or instructions) was

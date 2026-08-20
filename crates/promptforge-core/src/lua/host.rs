@@ -144,50 +144,55 @@ pub(crate) fn observe_store_result(
 /// inclusive line range. A negative bound converts to 0, which
 /// [`StoreRef::read_range`] rejects with the same error a zero bound earns,
 /// and an `end` without a `start` is refused rather than silently ignored.
+fn read_store_bounded(
+    handle: &StoreRef,
+    path: &str,
+    start: Option<i64>,
+    end: Option<i64>,
+    numbered: bool,
+) -> std::result::Result<String, crate::store::StoreError> {
+    match start {
+        None if end.is_none() => {
+            if numbered {
+                handle.read_range_numbered(path, 1, None)
+            } else {
+                handle.read(path)
+            }
+        }
+        None => Err(crate::store::StoreError::InvalidRange {
+            path: path.to_owned(),
+            reason: "start is required when end is given",
+        }),
+        Some(start) => {
+            let start = usize::try_from(start).unwrap_or(0);
+            let end = end.map(|line| usize::try_from(line).unwrap_or(0));
+            if numbered {
+                handle.read_range_numbered(path, start, end)
+            } else {
+                handle.read_range(path, start, end)
+            }
+        }
+    }
+}
+
+/// Shared body of the persistent per-section `store.read` host callback.
 fn read_store(
     handle: &StoreRef,
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
 ) -> std::result::Result<String, crate::store::StoreError> {
-    match start {
-        None if end.is_none() => handle.read(path),
-        None => Err(crate::store::StoreError::InvalidRange {
-            path: path.to_owned(),
-            reason: "start is required when end is given",
-        }),
-        Some(start) => handle.read_range(
-            path,
-            usize::try_from(start).unwrap_or(0),
-            end.map(|line| usize::try_from(line).unwrap_or(0)),
-        ),
-    }
+    read_store_bounded(handle, path, start, end, false)
 }
 
-/// Shared body of the persistent per-section `store.read_numbered` host
-/// callback.
-///
-/// Bounds follow `read_store`: no `start` numbers the whole file from 1, a
-/// present `start` slices a 1-based inclusive line range numbered absolutely
-/// from `start`, and an `end` without a `start` is refused.
+/// Shared body of the persistent per-section `store.read_numbered` callback.
 fn read_store_numbered(
     handle: &StoreRef,
     path: &str,
     start: Option<i64>,
     end: Option<i64>,
 ) -> std::result::Result<String, crate::store::StoreError> {
-    match start {
-        None if end.is_none() => handle.read_range_numbered(path, 1, None),
-        None => Err(crate::store::StoreError::InvalidRange {
-            path: path.to_owned(),
-            reason: "start is required when end is given",
-        }),
-        Some(start) => handle.read_range_numbered(
-            path,
-            usize::try_from(start).unwrap_or(0),
-            end.map(|line| usize::try_from(line).unwrap_or(0)),
-        ),
-    }
+    read_store_bounded(handle, path, start, end, true)
 }
 
 /// Expose an always-on `store` table whose methods (`write`, `append`,
@@ -240,108 +245,88 @@ pub(crate) fn install_store_table(
         section: section.to_owned(),
     });
 
-    let handle = store.clone();
-    let report = Arc::clone(&reporter);
-    let write = lua
-        .create_function(move |_, (path, contents): (String, String)| {
-            let result = match write_scope {
+    macro_rules! install_reported_store_fn {
+        (
+            $name:literal,
+            $handle:ident,
+            $arguments:pat_param,
+            $argument_type:ty,
+            $success:expr,
+            $failure:expr,
+            $operation:block
+        ) => {{
+            let $handle = store.clone();
+            let report = Arc::clone(&reporter);
+            let function = lua
+                .create_function(move |_, $arguments: $argument_type| {
+                    let result = $operation;
+                    report.report(result.is_ok(), $success, $failure);
+                    result.map_err(mlua::Error::external)
+                })
+                .map_err(Error::lua)?;
+            table.set($name, function).map_err(Error::lua)?;
+        }};
+    }
+
+    install_reported_store_fn!(
+        "write",
+        handle,
+        (path, contents),
+        (String, String),
+        detail::STORE_WRITE_SUCCEEDED,
+        detail::STORE_WRITE_FAILED,
+        {
+            match write_scope {
                 Some(scope) => handle.write_scoped(&path, &contents, scope),
                 None => handle.write(&path, &contents),
-            };
-            report.report(
-                result.is_ok(),
-                detail::STORE_WRITE_SUCCEEDED,
-                detail::STORE_WRITE_FAILED,
-            );
-            result.map_err(mlua::Error::external)?;
-            Ok(())
-        })
-        .map_err(Error::lua)?;
-    table.set("write", write).map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let report = Arc::clone(&reporter);
-    let append = lua
-        .create_function(move |_, (path, contents): (String, String)| {
-            let result = handle.append(&path, &contents);
-            report.report(
-                result.is_ok(),
-                detail::STORE_APPEND_SUCCEEDED,
-                detail::STORE_APPEND_FAILED,
-            );
-            result.map_err(mlua::Error::external)?;
-            Ok(())
-        })
-        .map_err(Error::lua)?;
-    table.set("append", append).map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let report = Arc::clone(&reporter);
-    let read = lua
-        .create_function(
-            move |_, (path, start, end): (String, Option<i64>, Option<i64>)| {
-                let result = read_store(&handle, &path, start, end);
-                report.report(
-                    result.is_ok(),
-                    detail::STORE_READ_SUCCEEDED,
-                    detail::STORE_READ_FAILED,
-                );
-                result.map_err(mlua::Error::external)
-            },
-        )
-        .map_err(Error::lua)?;
-    table.set("read", read).map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let report = Arc::clone(&reporter);
-    let read_numbered = lua
-        .create_function(
-            move |_, (path, start, end): (String, Option<i64>, Option<i64>)| {
-                let result = read_store_numbered(&handle, &path, start, end);
-                report.report(
-                    result.is_ok(),
-                    detail::STORE_READ_NUMBERED_SUCCEEDED,
-                    detail::STORE_READ_NUMBERED_FAILED,
-                );
-                result.map_err(mlua::Error::external)
-            },
-        )
-        .map_err(Error::lua)?;
-    table
-        .set("read_numbered", read_numbered)
-        .map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let report = Arc::clone(&reporter);
-    let str_replace = lua
-        .create_function(move |_, (path, old, new): (String, String, String)| {
-            let result = handle.str_replace(&path, &old, &new);
-            report.report(
-                result.is_ok(),
-                detail::STORE_REPLACE_SUCCEEDED,
-                detail::STORE_REPLACE_FAILED,
-            );
-            result.map_err(mlua::Error::external)?;
-            Ok(())
-        })
-        .map_err(Error::lua)?;
-    table.set("str_replace", str_replace).map_err(Error::lua)?;
-
-    let handle = store.clone();
-    let report = Arc::clone(&reporter);
-    let delete = lua
-        .create_function(move |_, path: String| {
-            let result = handle.delete(&path);
-            report.report(
-                result.is_ok(),
-                detail::STORE_DELETE_SUCCEEDED,
-                detail::STORE_DELETE_FAILED,
-            );
-            result.map_err(mlua::Error::external)?;
-            Ok(())
-        })
-        .map_err(Error::lua)?;
-    table.set("delete", delete).map_err(Error::lua)?;
+            }
+        }
+    );
+    install_reported_store_fn!(
+        "append",
+        handle,
+        (path, contents),
+        (String, String),
+        detail::STORE_APPEND_SUCCEEDED,
+        detail::STORE_APPEND_FAILED,
+        { handle.append(&path, &contents) }
+    );
+    install_reported_store_fn!(
+        "read",
+        handle,
+        (path, start, end),
+        (String, Option<i64>, Option<i64>),
+        detail::STORE_READ_SUCCEEDED,
+        detail::STORE_READ_FAILED,
+        { read_store(&handle, &path, start, end) }
+    );
+    install_reported_store_fn!(
+        "read_numbered",
+        handle,
+        (path, start, end),
+        (String, Option<i64>, Option<i64>),
+        detail::STORE_READ_NUMBERED_SUCCEEDED,
+        detail::STORE_READ_NUMBERED_FAILED,
+        { read_store_numbered(&handle, &path, start, end) }
+    );
+    install_reported_store_fn!(
+        "str_replace",
+        handle,
+        (path, old, new),
+        (String, String, String),
+        detail::STORE_REPLACE_SUCCEEDED,
+        detail::STORE_REPLACE_FAILED,
+        { handle.str_replace(&path, &old, &new) }
+    );
+    install_reported_store_fn!(
+        "delete",
+        handle,
+        path,
+        String,
+        detail::STORE_DELETE_SUCCEEDED,
+        detail::STORE_DELETE_FAILED,
+        { handle.delete(&path) }
+    );
 
     let handle = store.clone();
     let report = Arc::clone(&reporter);

@@ -12,37 +12,30 @@ const VAR_DATA_REGISTRY: &str = "promptforge.var_data";
 /// otherwise silently strand the hidden data table.
 const VAR_PROXY_REGISTRY: &str = "promptforge.var_proxy";
 
-/// Returns a copy of `sys` with the bound catalog model id under `"model"`.
-pub(crate) fn enrich_sys_model(sys: &Json, binding: &ModelBinding) -> Json {
+/// Returns a copy of `sys` with one object field replaced.
+fn enrich_sys_field(sys: &Json, key: &str, value: Json) -> Json {
     match sys {
         Json::Object(map) => {
             let mut out = map.clone();
-            out.insert(
-                "model".to_owned(),
-                Json::String(binding.id().name().to_owned()),
-            );
+            out.insert(key.to_owned(), value);
             Json::Object(out)
         }
         other => other.clone(),
     }
 }
 
+/// Returns a copy of `sys` with the bound catalog model id under `"model"`.
+pub(crate) fn enrich_sys_model(sys: &Json, binding: &ModelBinding) -> Json {
+    enrich_sys_field(sys, "model", Json::String(binding.id().name().to_owned()))
+}
+
 /// Returns a copy of `sys` with `reply_finish_reason` set from the last inference.
 pub(crate) fn enrich_sys_reply_finish_reason(sys: &Json, reason: Option<&str>) -> Json {
-    match sys {
-        Json::Object(map) => {
-            let mut out = map.clone();
-            out.insert(
-                "reply_finish_reason".to_owned(),
-                match reason {
-                    Some(value) => Json::String(value.to_owned()),
-                    None => Json::Null,
-                },
-            );
-            Json::Object(out)
-        }
-        other => other.clone(),
-    }
+    let value = match reason {
+        Some(value) => Json::String(value.to_owned()),
+        None => Json::Null,
+    };
+    enrich_sys_field(sys, "reply_finish_reason", value)
 }
 
 /// Builds a sealed Lua `sys` table from runtime metadata.
