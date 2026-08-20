@@ -531,6 +531,8 @@ mod tests {
             .near_duplicates(&ids)
             .expect("analysis succeeds");
         assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].0, ids[0]);
+        assert_eq!(pairs[0].1, ids[1]);
         assert!((pairs[0].2 - 0.97).abs() < f32::EPSILON);
     }
 

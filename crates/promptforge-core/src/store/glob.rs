@@ -184,10 +184,10 @@ mod tests {
     use super::{compile_glob, glob_match, matches_tokens};
 
     #[test]
-    fn compiled_tokens_match_identically_to_one_shot_across_many_paths() {
+    fn compiled_and_one_shot_match_expected_results_across_many_paths() {
         // STORE-020: a pattern compiled once and reused across many keys must
-        // agree with the one-shot matcher for every key, so moving the
-        // tokenization out of the per-key loop is behavior-preserving.
+        // produce the pinned result for every key. The one-shot matcher is
+        // checked against the same independent expectations.
         let paths = [
             "a.txt",
             "src/a.rs",
@@ -196,20 +196,25 @@ mod tests {
             "src/deep/deeper/d.rs",
             "notes/today.md",
         ];
-        for pattern in [
-            "*.txt",
-            "src/*.rs",
-            "src/**/*.rs",
-            "**/*.md",
-            "src/**",
-            "no*match",
+        for (pattern, expected) in [
+            ("*.txt", [true, false, false, false, false, false]),
+            ("src/*.rs", [false, true, true, false, false, false]),
+            ("src/**/*.rs", [false, true, true, true, true, false]),
+            ("**/*.md", [false, false, false, false, false, true]),
+            ("src/**", [false, true, true, true, true, false]),
+            ("no*match", [false, false, false, false, false, false]),
         ] {
             let tokens = compile_glob(pattern.as_bytes());
-            for path in paths {
+            for (path, expected) in paths.iter().zip(expected) {
                 assert_eq!(
                     matches_tokens(&tokens, path.as_bytes()),
+                    expected,
+                    "compiled pattern {pattern:?} produced the wrong result for {path:?}",
+                );
+                assert_eq!(
                     glob_match(pattern.as_bytes(), path.as_bytes()),
-                    "pattern {pattern:?} vs {path:?} diverged between compiled and one-shot",
+                    expected,
+                    "one-shot pattern {pattern:?} produced the wrong result for {path:?}",
                 );
             }
         }

@@ -91,7 +91,7 @@ return 'ok'\n\
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn jump_transfers_control_and_preserves_reply() {
+async fn jump_target_sees_no_prior_reply_and_transfer_skips_remaining_blocks() {
     let md = flow_prompt!(
         "\
 ## Check\n\n\
