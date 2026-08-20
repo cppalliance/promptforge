@@ -155,44 +155,6 @@ impl UserData for LuaToolHandle {
     }
 }
 
-/// Inspectable Section object from the Lua `tasks` table.
-///
-/// Authors read `.name` and `.has_prose`, and pass the object to `execute` or
-/// `jump` in place of a heading string.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LuaSectionHandle {
-    name: String,
-    heading: String,
-    has_prose: bool,
-}
-
-impl LuaSectionHandle {
-    /// Builds a handle for a top-level H2 section.
-    #[must_use]
-    pub(crate) fn new(name: impl Into<String>, has_prose: bool) -> Self {
-        let name = name.into();
-        let heading = format!("## {name}");
-        Self {
-            name,
-            heading,
-            has_prose,
-        }
-    }
-
-    /// Returns the canonical `"## Name"` heading used by `execute` / `jump`.
-    #[must_use]
-    pub(crate) fn heading(&self) -> &str {
-        &self.heading
-    }
-}
-
-impl UserData for LuaSectionHandle {
-    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("name", |_, this| Ok(this.name.clone()));
-        fields.add_field_method_get("has_prose", |_, this| Ok(this.has_prose));
-    }
-}
-
 /// One fanout arm result exposed to Lua as a structured object.
 ///
 /// Authors read `.text`, `.ok`, `.item`, and `.exhausted`. `__tostring` returns
@@ -253,19 +215,15 @@ pub(crate) enum LuaBlockResult {
     Jump(String),
 }
 
-/// Resolves an `execute` / `jump` target from a heading string or Section object.
+/// Resolves an `execute` / `jump` target from a heading string.
 ///
 /// # Errors
-/// Returns a Lua error when the value is neither a string nor a Section handle.
+/// Returns a Lua error when the value is not a string.
 pub(crate) fn resolve_section_target(value: Value) -> mlua::Result<String> {
     match value {
         Value::String(s) => Ok(s.to_str()?.to_owned()),
-        Value::UserData(ud) => {
-            let handle = ud.borrow::<LuaSectionHandle>()?;
-            Ok(handle.heading().to_owned())
-        }
         other => Err(mlua::Error::external(format!(
-            "section target must be a string or Section object, got {}",
+            "section target must be a string, got {}",
             other.type_name()
         ))),
     }

@@ -1,13 +1,12 @@
 use super::{
     Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
     Function, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram,
-    LuaSectionHandle, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook,
-    ModelRuntime, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result,
-    RuntimeResolution, StdLib, StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime,
-    Value, default_log_byte_budget, detail, guarded_var, harden, install_h2_models,
-    install_h2_tools, install_instruction_budget, install_log, install_lua_tool_calls,
-    install_store_table, install_tasks_table, install_untrusted, resolve_section_target,
-    scalar_return, seal_sys, var_to_json,
+    LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook, ModelRuntime,
+    ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution, StdLib,
+    StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, Value,
+    default_log_byte_budget, detail, guarded_var, harden, install_h2_models, install_h2_tools,
+    install_instruction_budget, install_log, install_lua_tool_calls, install_store_table,
+    install_untrusted, resolve_section_target, scalar_return, seal_sys, var_to_json,
 };
 use crate::client::ToolSchema;
 
@@ -451,8 +450,8 @@ impl SectionVm {
         )
     }
 
-    /// Installs `tasks`, `execute`, `jump`, `fanout`, and `list_from_section`
-    /// as persistent globals for the section's whole lifecycle.
+    /// Installs `execute`, `jump`, `fanout`, and `list_from_section` as
+    /// persistent globals for the section's whole lifecycle.
     ///
     /// Called once by the engine after host injection. The callbacks own
     /// their run context, so the closures stay valid across every chunk this
@@ -468,7 +467,6 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if any global cannot be installed.
     pub(crate) fn install_control_globals<E, F, L>(
         &self,
-        tasks: &[LuaSectionHandle],
         execute_callback: E,
         fanout_callback: F,
         list_callback: L,
@@ -480,7 +478,6 @@ impl SectionVm {
             + 'static,
         L: Fn(String) -> std::result::Result<Vec<String>, Error> + Send + 'static,
     {
-        install_tasks_table(&self.lua, tasks)?;
         let globals = self.lua.globals();
         let execute_fn = self
             .lua
@@ -622,7 +619,7 @@ impl SectionVm {
     /// `log` reports go to the observer captured by
     /// [`install_host_apis`](Self::install_host_apis); a nil or absent
     /// top-level return produces [`LuaBlockResult::Returned`]`(None)`. When
-    /// the chunk may call `tasks`, `execute`, `jump`, or `fanout`, those must
+    /// the chunk may call `execute`, `jump`, or `fanout`, those must
     /// already be installed by
     /// [`install_control_globals`](Self::install_control_globals).
     ///
