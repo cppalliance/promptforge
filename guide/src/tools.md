@@ -75,6 +75,8 @@ tools.add_local("grab", "Grab a value from the store", {
 end)
 ```
 
+The alias must be unique within the section. It cannot reuse an alias declared by `tools.need` or `tools.always`, and a second `tools.add_local` call with the same alias is an error.
+
 The four positional arguments:
 
 - `alias` - tool name, same rules as `tools.need` (`[A-Za-z][A-Za-z0-9_-]{0,63}`)
