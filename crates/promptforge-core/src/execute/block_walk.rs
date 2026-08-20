@@ -7,66 +7,23 @@
 //! the setup half (`section_vm`), the infer hook, and the teardown boundary,
 //! so a walk error propagates bare and the driver tears the VM down exactly
 //! once on every path. Each driver (the live H1 pass, the section walk's
-//! `run_one_section`, the fanout arm) supplies the loop's narrowed inputs as
-//! one [`BlockWalkContext`] plus a [`BlockRunMode`]: H1-vs-section is a
-//! caller-set mode, not a second loop.
-
-use std::sync::atomic::AtomicU32;
+//! `run_one_section`, the fanout arm) hands the loop the same borrowed
+//! [`RunFrame`] plus a [`BlockRunMode`]: H1-vs-section is a caller-set mode,
+//! not a second loop. Live mode reads only the frame's run-scoped fields;
+//! the walk-only fields it never touches carry empty defaults.
 
 use crate::client::{GatewayClient, Message};
-use crate::debug::DebugCapture;
-use crate::lua::{
-    LuaBlockResult, SectionVm, ToolBinding, ToolBindings, ToolCallCounts, current_tool_bindings,
-};
-use crate::model::{CompletionOptions, ModelBindings};
-use crate::observe::Observer;
+use crate::lua::{LuaBlockResult, SectionVm, ToolBinding, ToolCallCounts, current_tool_bindings};
+use crate::model::CompletionOptions;
 use crate::parser::Block;
 use crate::resolve::RuntimeResolution;
 use crate::subst;
-use crate::tools::SharedTools;
 use crate::{Error, Result};
 
-use super::config::RunLimits;
+use super::engine::RunFrame;
 use super::gateway::env_client_with_limits;
-use super::scope::{ToolAnalysis, prepare_effective_scope, prepare_scoped_tools};
+use super::scope::{prepare_effective_scope, prepare_scoped_tools};
 use super::tool_loop::{ProseMode, SectionProgress, run_prose_inference};
-
-/// The inputs the block walk reads, and nothing else.
-///
-/// Narrowed from the engine's `WalkContext` (which also carries chain-driver
-/// state the loop never touches) so the fanout arm adapter supplies exactly
-/// the same slots: the only driver-specific value is `item`, the fanout
-/// collection member that `{{ item }}` prose substitution resolves against.
-/// `limits` and `max_tool_iterations` arrive as by-value copies; every other
-/// field is borrowed.
-pub(crate) struct BlockWalkContext<'a> {
-    /// The run's argument string for `{{ args }}` substitution.
-    pub(crate) args: &'a str,
-    /// The execution identifier every observation carries.
-    pub(crate) execution: &'a str,
-    /// Where the tool loop reports its turns and tool calls.
-    pub(crate) observer: &'a dyn Observer,
-    /// Opt-in raw request/response capture for each model turn.
-    pub(crate) debug: Option<&'a dyn DebugCapture>,
-    /// The frozen prompt-level tool bindings.
-    pub(crate) bindings: &'a ToolBindings,
-    /// The frozen prompt-level model bindings.
-    pub(crate) models: &'a ModelBindings,
-    /// The prompt's tool-scope analysis (semantic duplicate check, aliases).
-    pub(crate) analysis: &'a ToolAnalysis,
-    /// The run's shared tool registry handle.
-    pub(crate) shared_tools: &'a SharedTools,
-    /// The resolved per-section tool-loop cap.
-    pub(crate) max_tool_iterations: usize,
-    /// The run's resource limits, used to build a lazy gateway client.
-    pub(crate) limits: RunLimits,
-    /// The model-turn counter this walk advances (the run's, or one shared by
-    /// all arms of a fanout).
-    pub(crate) turns: &'a AtomicU32,
-    /// The fanout arm's collection member for `{{ item }}` substitution;
-    /// `None` on the section walk.
-    pub(crate) item: Option<&'a serde_json::Value>,
-}
 
 /// How one section's block walk ended.
 pub(crate) enum SectionFlow {
@@ -132,7 +89,7 @@ pub(crate) enum BlockRunMode<'a> {
 /// [`Error::Internal`] when prose reaches inference with no gateway client.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the loop keeps the VM, the narrowed inputs, the block sequence, the mode, the sys JSON, the reply, and the client slot explicit and linear"
+    reason = "the loop keeps the VM, the shared frame, the block sequence, the mode, the sys JSON, the reply, and the client slot explicit and linear"
 )]
 #[expect(
     clippy::too_many_lines,
@@ -140,7 +97,7 @@ pub(crate) enum BlockRunMode<'a> {
 )]
 pub(crate) async fn run_one_section_impl(
     vm: &mut SectionVm,
-    ctx: &BlockWalkContext<'_>,
+    ctx: &RunFrame<'_>,
     name: &str,
     blocks: &[Block],
     mode: BlockRunMode<'_>,
@@ -173,20 +130,22 @@ pub(crate) async fn run_one_section_impl(
                 // the pass.
                 BlockRunMode::LiveH1(runtime) => {
                     if let Some(value) =
-                        vm.run_live_h1_block(program, runtime, ctx.observer, name)?
+                        vm.run_live_h1_block(program, runtime, ctx.observer.as_ref(), name)?
                     {
                         return Ok(SectionFlow::Returned(value));
                     }
                 }
-                BlockRunMode::Section => match vm.run_chunk(program, ctx.observer, name)? {
-                    LuaBlockResult::Returned(Some(value)) => {
-                        return Ok(SectionFlow::Returned(value));
+                BlockRunMode::Section => {
+                    match vm.run_chunk(program, ctx.observer.as_ref(), name)? {
+                        LuaBlockResult::Returned(Some(value)) => {
+                            return Ok(SectionFlow::Returned(value));
+                        }
+                        LuaBlockResult::Returned(None) => {}
+                        LuaBlockResult::Jump(heading) => {
+                            return Ok(SectionFlow::Jumped { heading, reply });
+                        }
                     }
-                    LuaBlockResult::Returned(None) => {}
-                    LuaBlockResult::Jump(heading) => {
-                        return Ok(SectionFlow::Jumped { heading, reply });
-                    }
-                },
+                }
             },
             Block::Prose { text, loop_capable } => {
                 let prose_mode = if *loop_capable {
@@ -260,10 +219,10 @@ pub(crate) async fn run_one_section_impl(
                             prose_mode,
                             SectionProgress {
                                 execution: ctx.execution,
-                                observer: ctx.observer,
+                                observer: ctx.observer.as_ref(),
                                 section: name,
-                                turns: ctx.turns,
-                                debug: ctx.debug,
+                                turns: ctx.turns.as_ref(),
+                                debug: ctx.debug.map(AsRef::as_ref),
                                 completion_options: &completion_options,
                             },
                             Some(&block_counts),
@@ -313,7 +272,7 @@ pub(crate) async fn run_one_section_impl(
                             &local_schemas,
                             &registry,
                             ctx.execution,
-                            ctx.observer,
+                            ctx.observer.as_ref(),
                             name,
                         )?;
 
@@ -360,10 +319,10 @@ pub(crate) async fn run_one_section_impl(
                             prose_mode,
                             SectionProgress {
                                 execution: ctx.execution,
-                                observer: ctx.observer,
+                                observer: ctx.observer.as_ref(),
                                 section: name,
-                                turns: ctx.turns,
-                                debug: ctx.debug,
+                                turns: ctx.turns.as_ref(),
+                                debug: ctx.debug.map(AsRef::as_ref),
                                 completion_options: options,
                             },
                             counts.as_ref(),
@@ -377,7 +336,7 @@ pub(crate) async fn run_one_section_impl(
                         );
                         vm.re_seal_sys(&sys)?;
                         if let Some(text) = outcome.text {
-                            vm.bind_reply(&text, ctx.observer, name)?;
+                            vm.bind_reply(&text, ctx.observer.as_ref(), name)?;
                             reply = Some(text);
                         }
                     }
