@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use mlua::Value as LuaValue;
 
-use crate::lua::{LuaFanoutResult, LuaProgram, LuaSectionHandle, SectionVm};
+use crate::lua::{LuaFanoutResult, LuaProgram, SectionVm};
 use crate::observe::Observer;
 use crate::store::StoreRef;
 use crate::{Error, Result};
@@ -70,8 +70,6 @@ pub(crate) struct SectionVmSetup<'a> {
     pub(crate) observer_arc: &'a Arc<dyn Observer>,
     /// The section name used in observations and error messages.
     pub(crate) section_name: &'a str,
-    /// The run's section handles backing the `tasks` table.
-    pub(crate) task_handles: &'a [LuaSectionHandle],
     /// The shared library replayed as the section's first chunk.
     pub(crate) shared: &'a LuaProgram,
 }
@@ -126,12 +124,7 @@ where
     if let Some(item) = setup.seed.item {
         vm.set_global_json("item", item)?;
     }
-    vm.install_control_globals(
-        setup.task_handles,
-        execute_callback,
-        fanout_callback,
-        list_callback,
-    )?;
+    vm.install_control_globals(execute_callback, fanout_callback, list_callback)?;
     vm.replay_shared(
         setup.shared,
         setup.observer_arc.as_ref(),
