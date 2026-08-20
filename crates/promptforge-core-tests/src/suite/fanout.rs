@@ -18,9 +18,9 @@ const FANOUT_STORE_WRITES: &str = include_str!("../../prompts/execution/fanout-s
 const FANOUT_ARM_FAILURE: &str = include_str!("../../prompts/execution/fanout-arm-failure.md");
 
 /// The worker-template section name both fanout arms execute under. The
-/// observation stream keys arm events by this section, not by `sys.taskid`
-/// (which the runtime injects only into arm Lua), so the exact per-arm task-id
-/// pairing is proven by the arms' task-id-bearing result rather than the event
+/// observation stream keys arm events by this section, not by `sys.index`
+/// (which the runtime injects only into arm Lua), so the exact per-arm index
+/// pairing is proven by the arms' index-bearing result rather than the event
 /// stream.
 const WORKER_SECTION: &str = "Worker";
 
@@ -72,7 +72,7 @@ async fn fanout_basic_two_items_prologue_return() {
         .result
         .expect("the fanout basic fixture must execute offline");
 
-    // The task-id-bearing output pins each arm's `item .. '-' .. sys.taskid`.
+    // The index-bearing output pins each arm's `item .. '-' .. sys.index`.
     assert_eq!(result, "alpha-1\nbeta-2");
     assert_two_arms_all_succeeded(&run.recorder.records());
 }

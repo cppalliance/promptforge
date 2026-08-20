@@ -68,7 +68,7 @@ mod tool_loop;
 mod tools;
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, AtomicU64};
 
 // Public API surface.
 pub use config::{RunConfig, RunLimits};
@@ -78,7 +78,8 @@ pub use gateway::ResolutionContext;
 // Crate-internal items reused through the historical `crate::execute::` path.
 // `ToolAnalysis` and the engine/section-VM items (the `RunFrame` borrowed
 // context, `ControlContext` and its control-global constructor,
-// `VmSeed`/`setup_section_vm`, and the block walk) are consumed by `fanout`;
+// `VmSeed`/`setup_section_vm`, the block walk, and the `next_id` counter
+// helper) are consumed by `fanout`;
 // `run_sections` and `execute_live_h1` serve only `run` below and stay
 // module-private.
 // Re-exported so the split stays surface-neutral for the public API while
@@ -87,6 +88,7 @@ pub(crate) use block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
 pub(crate) use engine::{ControlContext, RunFrame, make_control_globals};
 pub(crate) use scope::ToolAnalysis;
 pub(crate) use section_vm::{VmSeed, setup_section_vm};
+pub(crate) use support::next_id;
 
 use engine::run_sections;
 use h1::execute_live_h1;
@@ -243,6 +245,9 @@ pub async fn run(
     let registry = shared_tools.registry();
     observer.observe(execution, &prompt.title, detail::RUN_STARTED);
     let turns = Arc::new(AtomicU32::new(0));
+    // The run-global execution-id counter: H1 keeps id 0, and every section
+    // entry and fanout arm takes the next value, across every chain.
+    let ids = Arc::new(AtomicU64::new(0));
 
     let run_body = async {
         // The one borrowed frame every driver shares, built once so no driver
@@ -274,6 +279,7 @@ pub async fn run(
             shared_tools: &shared_tools,
             limits,
             turns: &turns,
+            ids: &ids,
             shared,
             bindings: &empty_bindings,
             models: &empty_models,

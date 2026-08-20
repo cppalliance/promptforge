@@ -7,8 +7,9 @@
 //! shared library as the section's first chunk, then install the captured
 //! alias bindings (so a declared alias wins over a same-named shared global).
 //! Only the deltas live at the call site: the driver builds its own `sys`
-//! JSON (the walk's chain-position `id`; the arm's parent `id` plus
-//! `taskid`), picks the [`VmSeed`] (the walk's rolled-forward `var`; an arm
+//! JSON (both drivers take the next run-global `id`; the arm adds its
+//! per-fanout `index`), picks the [`VmSeed`] (the walk's rolled-forward
+//! `var`; an arm
 //! adds its collection `item` to the caller's cloned `var`), and
 //! parameterizes the shared control-global constructor with its own home
 //! slice, caller, and depth.

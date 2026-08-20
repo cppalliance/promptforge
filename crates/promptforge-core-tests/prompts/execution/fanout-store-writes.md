@@ -1,6 +1,6 @@
 ---
 name: fanout_store_writes
-description: Arms write to store with taskid
+description: Arms write to store with sys.index
 promptforge: 1
 ---
 
@@ -19,10 +19,10 @@ return tostring(#files) .. ":" .. table.concat(replies, ",")
 ```lua
 -- Rendezvous: both arms must be live before either writes its reply path.
 -- Sequential fanout never reaches two ready files and hangs until the test times out.
-store.write("ready-" .. sys.taskid .. ".md", "1")
+store.write("ready-" .. sys.index .. ".md", "1")
 while #store.glob("ready-*.md") < 2 do
 end
-store.write("arm-" .. sys.taskid .. ".md", item)
+store.write("arm-" .. sys.index .. ".md", item)
 return item
 ```
 

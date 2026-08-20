@@ -346,6 +346,7 @@ struct FanoutFixture {
     client: Option<GatewayClient>,
     shared: LuaProgram,
     var: serde_json::Value,
+    ids: Arc<AtomicU64>,
 }
 
 impl FanoutFixture {
@@ -359,6 +360,7 @@ impl FanoutFixture {
             client: None,
             shared: LuaProgram::empty().expect("the empty chunk compiles"),
             var: json!({}),
+            ids: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -384,7 +386,7 @@ impl FanoutFixture {
             limits,
             last_reply: None,
             when: "2026-08-08",
-            parent_id: 1,
+            ids: &self.ids,
             section_count: 1,
             home: &[],
             task_handles: &[],
