@@ -612,6 +612,39 @@ mod tests {
     }
 
     #[test]
+    fn guide_sorts_parameter_names_and_preserves_required_markers() {
+        let dialect = Gemma3ToolCodeDialect;
+        let mut body = serde_json::json!({
+            "messages": [],
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "search",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "zebra": { "type": "string" },
+                            "alpha": { "type": "string" },
+                            "middle": { "type": "string" }
+                        },
+                        "required": ["middle", "zebra"]
+                    }
+                }
+            }]
+        });
+        dialect
+            .prepare_request(&mut DialectRequest::new(&mut body))
+            .expect("the request shape is valid");
+        let guide = body["messages"][0]["content"]
+            .as_str()
+            .expect("the system guide is text");
+        assert!(
+            guide.contains("search(alpha=...?, middle=..., zebra=...)"),
+            "parameter names must be sorted with required markers preserved: {guide}"
+        );
+    }
+
+    #[test]
     fn echo_tool_results_produces_user_turn() {
         let dialect = Gemma3ToolCodeDialect;
         let calls = vec![ToolCall {

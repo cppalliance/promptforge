@@ -54,7 +54,6 @@ pub(crate) async fn execute_live_h1(
     );
     let mut vm = SectionVm::new(execution, observer.as_ref(), &prompt.title)?;
     vm.apply_lua_limits(limits.lua_memory().get(), limits.lua_logs().get())?;
-    vm.inject_host(args, &sys, store, None)?;
     macro_rules! h1_try {
         ($expression:expr) => {
             match $expression {
@@ -66,6 +65,7 @@ pub(crate) async fn execute_live_h1(
             }
         };
     }
+    h1_try!(vm.inject_host(args, &sys, store, None));
     // The infer hook carries a lazy client source so a nested `model:infer`
     // surfaces a concrete construction error on first use instead of the setup
     // swallowing it (F5). `active_client` stays lazy for the direct H1 prose

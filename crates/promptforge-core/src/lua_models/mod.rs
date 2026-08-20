@@ -174,7 +174,7 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
     let needs = Arc::clone(state);
     let need = scope
         .create_function(move |_, args: MultiValue| -> mlua::Result<LuaModelHandle> {
-            let (alias, description, opts) = parse_need_args(args)?;
+            let (alias, description, opts) = parse_need_args(args, "models.need")?;
             validate_alias(&alias).map_err(mlua::Error::external)?;
             let mut guard = needs
                 .lock()
@@ -189,7 +189,7 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
     let default = scope
         .create_function(move |_, args: MultiValue| -> mlua::Result<LuaModelHandle> {
             if args.len() >= 2 {
-                let (alias, description, opts) = parse_need_args(args)?;
+                let (alias, description, opts) = parse_need_args(args, "models.default")?;
                 validate_alias(&alias).map_err(mlua::Error::external)?;
                 let mut guard = default_state
                     .lock()
