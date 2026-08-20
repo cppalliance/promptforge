@@ -24,13 +24,12 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A10. Every model-chosen network destination is revalidated after DNS and on each redirect; private addresses are denied by default.
 - A11. Every potentially unbounded model or tool loop has a finite explicit budget and fails visibly when exhausted.
 - A12. Each section receives only capabilities it explicitly names; unknown names fail before the model turn.
-- A15. Every section and fan-out arm gets a fresh model context; only explicit Lua chooses transitions, and state crosses through the store or named payloads.
+- A15. Every section and fan-out arm gets a fresh model context; durable cross-run state crosses through the store or named payloads.
 - A19. Runtime metadata is sealed: unknown reads and all author writes fail, and every field has an explicit refresh boundary.
 - A25. Every model-facing section uses a prompt-declared model binding; hosts never choose a model implicitly.
 - A26. Artifact credentials are read from process secrets at request time and are never persisted or logged.
 - A27. Model tool-wire dialects are resolved from runtime evidence and applied at one normalization boundary; prompts remain dialect-agnostic.
 - A30. Fan-out arms run concurrently, return in input order, and abort siblings on the first error.
-- A35. The H1 program executes exactly once with live host resolution; no separate declaration or bind replay phase exists.
 
 
 - A42. External file I/O ends at the trusted host; prompts see only validated store paths.
@@ -41,13 +40,15 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 
 - A52. Every untrusted string is guard-wrapped explicitly at the model-facing insertion boundary, independent of its origin.
-- A53. Shared Lua replays as each section's first chunk under the section's limits and host environment; replay cannot transfer control.
 
 - A54. A leading thematic break makes a section address-only; a later break starts reader-only content that never parses or executes.
 - A55. Fan-out maps an explicit collection across isolated JSON values and returns each original member with its result.
 
 - A56. Ordinary sections and fan-out arms share one VM and block-walk semantics; arms have no separate capability tier.
 - A57. Fan-out bounds concurrent arms, not finite collection cardinality; total work remains explicit in the input.
+
+- A58. Variable state rolls through one walk and its jumps; execute chains and fan-out arms receive isolated snapshots whose writes do not escape.
+- A59. Distinct concurrent fan-out arms writing the same store path fail visibly; concurrent append remains legal.
 
 ## Principles
 

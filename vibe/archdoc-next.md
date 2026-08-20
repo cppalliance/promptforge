@@ -63,3 +63,4 @@
 - [2026-08-18-3-untrusted-global-vm-reorder] inclusive store ranges: Keep public line bounds 1-based, inclusive, and clamping so citation call sites copy source coordinates directly.
 - [2026-08-18-4-fanout-collection-items] level-local control graph: Every section address sees only siblings and direct children; explicit transfer enters a level-local walk and execute contains its chain.
 - [2026-08-19-1-collapse-fanout-arm-engine] adapter delta boundary: Arm-only identity, cancellation, observation, exhaustion, and outcome mapping stay in a thin driver instead of policy switches in the engine.
+- [2026-08-19-2-promptforge-refactor] pure direct infer: Every infer call is one fresh tool-free turn and never mutates reply or sys; tool use requires an executed section.
