@@ -46,20 +46,12 @@ impl std::error::Error for SharedSource {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub(crate) enum Error {
-    /// The prompt file could not be parsed (bad frontmatter, no sections, etc.).
-    ///
-    /// The message is the specific failure as a noun phrase; the public wrapper
-    /// already conveys that this is a parse failure, so no redundant `parse
-    /// error:` type label is prepended here (F8).
-    #[error("{0}")]
-    Parse(String),
-
     /// The prompt frontmatter was not valid YAML, preserving the parser cause.
     ///
-    /// Unlike [`Error::Parse`], this retains the originating YAML decode failure
-    /// (a [`serde_yaml_ng::Error`]) as the `#[source]` cause (F3) so
-    /// [`crate::ParseError::source`] can expose the frontmatter syntax location
-    /// instead of flattening it into the message.
+    /// This retains the originating YAML decode failure (a
+    /// [`serde_yaml_ng::Error`]) as the `#[source]` cause (F3) so
+    /// [`crate::ParseError::source`] can expose the frontmatter syntax
+    /// location instead of flattening it into the message.
     #[error("invalid frontmatter: {message}")]
     #[non_exhaustive]
     ParseFrontmatter {
@@ -577,6 +569,15 @@ pub(crate) mod lua_quota {
 }
 
 impl Error {
+    /// Builds a parse failure with a stable classification and no source span.
+    pub(crate) fn parse(kind: crate::parser::ParseErrorKind, message: impl Into<String>) -> Error {
+        Error::ParseStructured {
+            kind,
+            span: None,
+            message: message.into(),
+        }
+    }
+
     /// Wrap a transport-layer error, hiding its concrete type from the API.
     pub(crate) fn http(source: reqwest::Error) -> Error {
         Error::Http(Box::new(source))

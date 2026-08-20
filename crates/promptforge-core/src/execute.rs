@@ -127,7 +127,7 @@ use crate::Error;
 use crate::cancel;
 use crate::debug::DebugCapture;
 use crate::observe::detail;
-use crate::parser::Prompt;
+use crate::parser::{ParseErrorKind, Prompt};
 use crate::store::StoreRef;
 use crate::tools::{SharedTools, Tool};
 use support::{GENERIC_COMPLETION, SUPPORTED_MAJOR};
@@ -216,8 +216,9 @@ pub async fn run(
         Some(SUPPORTED_MAJOR) => {}
         Some(other) => return Err(RunError::from(Error::UnsupportedVersion(other))),
         None => {
-            return Err(RunError::from(Error::Parse(
-                "not a promptforge prompt: no promptforge version".into(),
+            return Err(RunError::from(Error::parse(
+                ParseErrorKind::Structure,
+                "not a promptforge prompt: no promptforge version",
             )));
         }
     }

@@ -11,8 +11,8 @@ use std::ops::Range;
 
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 
-use super::Block;
 use super::build::{line_add, newlines_before, nz_source_line};
+use super::{Block, ParseErrorKind};
 use crate::lua::LuaProgram;
 use crate::observe::Observer;
 use crate::{Error, Result};
@@ -34,8 +34,8 @@ pub(super) enum RawBlock {
 /// `content` begins.
 ///
 /// # Errors
-/// Returns [`Error::Parse`] for the removed `lua prompt` fence form or an
-/// unclosed fence, and a Lua compilation error for invalid Lua.
+/// Returns a fence-classified parse error for the removed `lua prompt` form or
+/// an unclosed fence, and a Lua compilation error for invalid Lua.
 pub(super) fn split_h1(
     content: &str,
     title: &str,
@@ -49,8 +49,9 @@ pub(super) fn split_h1(
     let content = truncate_at_first_rule(content);
     let leading = trim_leading_blank_lines(content);
     if leading.lines().next() == Some("```lua prompt") {
-        return Err(Error::Parse(
-            "the `lua prompt` fence form was removed; use `lua` for a live H1 block or `lua shared` for the shared library".into(),
+        return Err(Error::parse(
+            ParseErrorKind::Fence,
+            "the `lua prompt` fence form was removed; use `lua` for a live H1 block or `lua shared` for the shared library",
         ));
     }
 
@@ -58,7 +59,10 @@ pub(super) fn split_h1(
     let mut h1_content = content.as_bytes().to_vec();
     let replay = if let Some(opening) = shared_opening {
         let after_open = strip_exact_shared_opening(&content[opening..]).ok_or_else(|| {
-            Error::Parse("internal shared fence classification mismatch".to_owned())
+            Error::parse(
+                ParseErrorKind::Structure,
+                "internal shared fence classification mismatch",
+            )
         })?;
         let (source, rest) = extract_exact_fence(after_open, "prompt `lua shared`")?;
         let fence_end = content.len() - rest.len();
@@ -78,8 +82,12 @@ pub(super) fn split_h1(
         None
     };
 
-    let h1_content = String::from_utf8(h1_content)
-        .map_err(|_| Error::Parse("internal H1 source masking failed".to_owned()))?;
+    let h1_content = String::from_utf8(h1_content).map_err(|_| {
+        Error::parse(
+            ParseErrorKind::Structure,
+            "internal H1 source masking failed",
+        )
+    })?;
     let raw_blocks = split_section_blocks(&h1_content, title)?;
     let last_prose = raw_blocks
         .iter()
@@ -154,7 +162,10 @@ fn extract_exact_fence<'a>(content: &'a str, label: &str) -> Result<(String, &'a
         }
         offset += line.len();
     }
-    Err(Error::Parse(format!("{label} fence is not closed")))
+    Err(Error::parse(
+        ParseErrorKind::Fence,
+        format!("{label} fence is not closed"),
+    ))
 }
 
 /// Removes one exact unindented `lua` opening line from `content`.
@@ -251,8 +262,8 @@ pub(super) fn truncate_at_first_rule(content: &str) -> &str {
 /// Lua source-line numbers still map back to the original file.
 ///
 /// # Errors
-/// Returns [`Error::Parse`] when the masked content fails UTF-8 validation,
-/// which the ASCII-only masking makes unreachable.
+/// Returns a structure-classified parse error when the masked content fails
+/// UTF-8 validation, which the ASCII-only masking makes unreachable.
 pub(super) fn split_rule_roles(content: &str) -> Result<(bool, Cow<'_, str>)> {
     let ranges = rule_ranges(content);
     let Some(first) = ranges.first() else {
@@ -266,7 +277,7 @@ pub(super) fn split_rule_roles(content: &str) -> Result<(bool, Cow<'_, str>)> {
     let end = ranges.get(1).map_or(content.len(), |range| range.start);
     masked.truncate(end);
     let masked = String::from_utf8(masked)
-        .map_err(|_| Error::Parse("internal rule masking failed".to_owned()))?;
+        .map_err(|_| Error::parse(ParseErrorKind::Structure, "internal rule masking failed"))?;
     Ok((true, Cow::Owned(masked)))
 }
 
@@ -279,7 +290,8 @@ pub(super) fn split_rule_roles(content: &str) -> Result<(bool, Cow<'_, str>)> {
 /// inside prose.
 ///
 /// # Errors
-/// Returns [`Error::Parse`] when an exact `lua` fence is not closed.
+/// Returns a fence-classified parse error when an exact `lua` fence is not
+/// closed.
 pub(super) fn split_section_blocks(content: &str, section: &str) -> Result<Vec<RawBlock>> {
     let openings = exact_lua_openings(content);
     if openings.is_empty() {
@@ -292,13 +304,15 @@ pub(super) fn split_section_blocks(content: &str, section: &str) -> Result<Vec<R
 
     for (index, &opening) in openings.iter().enumerate() {
         if opening < pos {
-            return Err(Error::Parse(format!(
-                "section `{section}` `lua` fence is not closed exactly"
-            )));
+            return Err(Error::parse(
+                ParseErrorKind::Fence,
+                format!("section `{section}` `lua` fence is not closed exactly"),
+            ));
         }
         let Some(after_open) = strip_exact_lua_opening(&content[opening..]) else {
-            return Err(Error::Parse(
-                "internal section fence classification mismatch".to_owned(),
+            return Err(Error::parse(
+                ParseErrorKind::Structure,
+                "internal section fence classification mismatch",
             ));
         };
         // Preserve classic location wording for unclosed leading/trailing fences.

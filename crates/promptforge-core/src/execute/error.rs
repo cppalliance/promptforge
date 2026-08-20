@@ -55,9 +55,7 @@ impl RunError {
     #[must_use]
     pub fn kind(&self) -> RunErrorKind {
         match &self.inner {
-            Error::Parse(_) | Error::ParseStructured { .. } | Error::ParseFrontmatter { .. } => {
-                RunErrorKind::Parse
-            }
+            Error::ParseStructured { .. } | Error::ParseFrontmatter { .. } => RunErrorKind::Parse,
             Error::LuaQuota { .. } => RunErrorKind::Quota,
             Error::LuaCompile { .. } | Error::Lua(_) | Error::LuaRuntime { .. } => {
                 RunErrorKind::Lua
