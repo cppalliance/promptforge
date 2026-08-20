@@ -64,7 +64,7 @@ const DEFAULT_LUA_LOG_EVENTS: u32 = 1024;
 /// Bounds total log volume (bytes) even when each event is under the per-event
 /// character ceiling. Derived as `events * LUA_LOG_CHARACTER_LIMIT` so it scales
 /// with the configured event budget.
-fn default_log_byte_budget(log_events: u32) -> usize {
+fn log_byte_budget(log_events: u32) -> usize {
     (log_events as usize).saturating_mul(LUA_LOG_CHARACTER_LIMIT)
 }
 

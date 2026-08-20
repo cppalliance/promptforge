@@ -245,7 +245,7 @@ pub(crate) fn install_h2_tools(
                         "tools.add_local alias {alias:?} duplicates a declared tool alias"
                     )));
                 }
-                if local.contains(&alias) {
+                if local.contains(&alias).map_err(mlua::Error::external)? {
                     return Err(mlua::Error::external(format!(
                         "tools.add_local alias {alias:?} is already registered"
                     )));

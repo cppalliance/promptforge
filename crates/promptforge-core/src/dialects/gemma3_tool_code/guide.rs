@@ -28,7 +28,9 @@ fn render_signature(function: &Value, name: &str) -> String {
         // List every property, not just the required ones: a schema with any
         // required parameter must still advertise its optional parameters,
         // marked with a trailing `?`, so they never vanish from the guide.
-        for key in params.keys() {
+        let mut keys = params.keys().collect::<Vec<_>>();
+        keys.sort_unstable();
+        for key in keys {
             if required.contains(&key.as_str()) {
                 arg_bits.push(format!("{key}=..."));
             } else {

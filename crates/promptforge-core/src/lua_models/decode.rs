@@ -23,48 +23,53 @@ pub(crate) fn parse_single_alias(args: &MultiValue, label: &str) -> mlua::Result
     }
 }
 
-pub(crate) fn parse_need_args(args: MultiValue) -> mlua::Result<(String, String, ModelNeedOpts)> {
+pub(crate) fn parse_need_args(
+    args: MultiValue,
+    label: &str,
+) -> mlua::Result<(String, String, ModelNeedOpts)> {
     let mut values = args.into_iter();
     let alias = match values.next() {
         Some(Value::String(value)) => value
             .to_str()
-            .map_err(|_| mlua::Error::external("models.need alias must be a UTF-8 string"))?
+            .map_err(|_| mlua::Error::external(format!("{label} alias must be a UTF-8 string")))?
             .to_owned(),
         _ => {
-            return Err(mlua::Error::external(
-                "models.need expects alias, description, and optional opts table",
-            ));
+            return Err(mlua::Error::external(format!(
+                "{label} expects alias, description, and optional opts table"
+            )));
         }
     };
     let description = match values.next() {
         Some(Value::String(value)) => value
             .to_str()
-            .map_err(|_| mlua::Error::external("models.need description must be a UTF-8 string"))?
+            .map_err(|_| {
+                mlua::Error::external(format!("{label} description must be a UTF-8 string"))
+            })?
             .to_owned(),
         _ => {
-            return Err(mlua::Error::external(
-                "models.need expects alias, description, and optional opts table",
-            ));
+            return Err(mlua::Error::external(format!(
+                "{label} expects alias, description, and optional opts table"
+            )));
         }
     };
     let opts = match values.next() {
         None | Some(Value::Nil) => ModelNeedOpts::default(),
-        Some(Value::Table(table)) => parse_opts_table(&table)?,
+        Some(Value::Table(table)) => parse_opts_table(&table, label)?,
         Some(_) => {
-            return Err(mlua::Error::external(
-                "models.need opts must be a table when provided",
-            ));
+            return Err(mlua::Error::external(format!(
+                "{label} opts must be a table when provided"
+            )));
         }
     };
     if values.next().is_some() {
-        return Err(mlua::Error::external(
-            "models.need expects at most three arguments",
-        ));
+        return Err(mlua::Error::external(format!(
+            "{label} expects at most three arguments"
+        )));
     }
     Ok((alias, description, opts))
 }
 
-pub(crate) fn parse_opts_table(table: &Table) -> mlua::Result<ModelNeedOpts> {
+pub(crate) fn parse_opts_table(table: &Table, label: &str) -> mlua::Result<ModelNeedOpts> {
     let mut opts = ModelNeedOpts::default();
     for pair in table.pairs::<Value, Value>() {
         // Propagate the original `mlua::Error` unchanged (PF-LM-012): it already
@@ -73,30 +78,32 @@ pub(crate) fn parse_opts_table(table: &Table) -> mlua::Result<ModelNeedOpts> {
         let key = match key {
             Value::String(key) => key
                 .to_str()
-                .map_err(|_| mlua::Error::external("models.need opts key must be a UTF-8 string"))?
+                .map_err(|_| {
+                    mlua::Error::external(format!("{label} opts key must be a UTF-8 string"))
+                })?
                 .to_owned(),
             _ => {
-                return Err(mlua::Error::external(
-                    "models.need opts keys must be strings",
-                ));
+                return Err(mlua::Error::external(format!(
+                    "{label} opts keys must be strings"
+                )));
             }
         };
         match key.as_str() {
             "thinking" => {
-                opts.thinking = Some(value_as_bool(&value, "thinking")?);
+                opts.thinking = Some(value_as_bool(&value, "thinking", label)?);
             }
             "context" => {
-                opts.context = Some(value_as_nonzero_u32(&value, "context")?);
+                opts.context = Some(value_as_nonzero_u32(&value, "context", label)?);
             }
             "temperature" => {
-                opts.temperature = Some(value_as_temperature(&value)?);
+                opts.temperature = Some(value_as_temperature(&value, label)?);
             }
             "max_tokens" => {
-                opts.max_tokens = Some(value_as_nonzero_u32(&value, "max_tokens")?);
+                opts.max_tokens = Some(value_as_nonzero_u32(&value, "max_tokens", label)?);
             }
             other => {
                 return Err(mlua::Error::external(format!(
-                    "unknown models.need opts key {other:?}"
+                    "unknown {label} opts key {other:?}"
                 )));
             }
         }
@@ -112,27 +119,27 @@ pub(crate) fn parse_opts_table(table: &Table) -> mlua::Result<ModelNeedOpts> {
 /// (PF-LM-004/PF-LM-005). A non-finite (`NaN`, infinity) or out-of-domain value
 /// is rejected here rather than forwarded to the gateway, and the validated
 /// value travels onward as a `Temperature`, not a raw `f64`.
-pub(crate) fn value_as_temperature(value: &Value) -> mlua::Result<Temperature> {
-    let temperature = decode_lua_number(value, "temperature")?;
+pub(crate) fn value_as_temperature(value: &Value, label: &str) -> mlua::Result<Temperature> {
+    let temperature = decode_lua_number(value, "temperature", label)?;
     Temperature::new(temperature).map_err(|error| {
-        mlua::Error::external(format!("models.need opts.temperature is invalid: {error}"))
+        mlua::Error::external(format!("{label} opts.temperature is invalid: {error}"))
     })
 }
 
-pub(crate) fn value_as_bool(value: &Value, field: &str) -> mlua::Result<bool> {
+pub(crate) fn value_as_bool(value: &Value, field: &str, label: &str) -> mlua::Result<bool> {
     match value {
         Value::Boolean(flag) => Ok(*flag),
         _ => Err(mlua::Error::external(format!(
-            "models.need opts.{field} must be a boolean"
+            "{label} opts.{field} must be a boolean"
         ))),
     }
 }
 
-pub(crate) fn value_as_u32(value: &Value, field: &str) -> mlua::Result<u32> {
+pub(crate) fn value_as_u32(value: &Value, field: &str, label: &str) -> mlua::Result<u32> {
     match value {
         Value::Integer(number) => u32::try_from(*number).map_err(|_| {
             mlua::Error::external(format!(
-                "models.need opts.{field} must be a non-negative integer"
+                "{label} opts.{field} must be a non-negative integer"
             ))
         }),
         Value::Number(number) if number.fract() == 0.0 => {
@@ -146,12 +153,12 @@ pub(crate) fn value_as_u32(value: &Value, field: &str) -> mlua::Result<u32> {
                 Ok(truncated as u32)
             } else {
                 Err(mlua::Error::external(format!(
-                    "models.need opts.{field} must be a non-negative integer"
+                    "{label} opts.{field} must be a non-negative integer"
                 )))
             }
         }
         _ => Err(mlua::Error::external(format!(
-            "models.need opts.{field} must be a non-negative integer"
+            "{label} opts.{field} must be a non-negative integer"
         ))),
     }
 }
@@ -162,12 +169,14 @@ pub(crate) fn value_as_u32(value: &Value, field: &str) -> mlua::Result<u32> {
 /// context minimum is a nonsensical constraint and a zero generation cap would
 /// forbid all output. Both are rejected here, at the Lua parse boundary, rather
 /// than travelling as an ambiguous `0` toward the wire.
-pub(crate) fn value_as_nonzero_u32(value: &Value, field: &str) -> mlua::Result<NonZeroU32> {
-    let raw = value_as_u32(value, field)?;
+pub(crate) fn value_as_nonzero_u32(
+    value: &Value,
+    field: &str,
+    label: &str,
+) -> mlua::Result<NonZeroU32> {
+    let raw = value_as_u32(value, field, label)?;
     NonZeroU32::new(raw).ok_or_else(|| {
-        mlua::Error::external(format!(
-            "models.need opts.{field} must be greater than zero"
-        ))
+        mlua::Error::external(format!("{label} opts.{field} must be greater than zero"))
     })
 }
 
@@ -176,7 +185,7 @@ pub(crate) fn value_as_nonzero_u32(value: &Value, field: &str) -> mlua::Result<N
 /// Both Lua numeric forms are accepted and converted uniformly; the caller's
 /// domain check (for example [`value_as_temperature`]) is the single place that
 /// bounds the result, so there is no separate, arbitrary integer-range gate.
-pub(crate) fn decode_lua_number(value: &Value, field: &str) -> mlua::Result<f64> {
+pub(crate) fn decode_lua_number(value: &Value, field: &str, label: &str) -> mlua::Result<f64> {
     match value {
         Value::Number(number) => Ok(*number),
         Value::Integer(number) => {
@@ -190,7 +199,7 @@ pub(crate) fn decode_lua_number(value: &Value, field: &str) -> mlua::Result<f64>
             Ok(*number as f64)
         }
         _ => Err(mlua::Error::external(format!(
-            "models.need opts.{field} must be a number"
+            "{label} opts.{field} must be a number"
         ))),
     }
 }

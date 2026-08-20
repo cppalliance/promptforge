@@ -174,6 +174,19 @@ pub(crate) async fn run_one_section_impl(
                 };
                 match mode {
                     BlockRunMode::LiveH1(runtime) => {
+                        let var = vm.var()?;
+                        let prose = subst::substitute(
+                            text,
+                            ctx.args,
+                            reply.as_deref(),
+                            ctx.item,
+                            &var,
+                            &sys,
+                            &|name| vm.global_json(name),
+                        )?;
+                        if prose.trim().is_empty() {
+                            continue;
+                        }
                         let (tool_bindings, model_bindings) = runtime.bindings()?;
                         let Some(model) = model_bindings
                             .default()
@@ -195,21 +208,9 @@ pub(crate) async fn run_one_section_impl(
                         }
                         // Live H1 registers no local tools; the list is always
                         // empty here.
+                        let local_schemas = vm.local_tool_schemas()?;
                         let (schemas, dispatch) =
-                            prepare_scoped_tools(&scope, &vm.local_tool_schemas(), &registry)?;
-                        let var = vm.var()?;
-                        let prose = subst::substitute(
-                            text,
-                            ctx.args,
-                            reply.as_deref(),
-                            ctx.item,
-                            &var,
-                            &sys,
-                            &|name| vm.global_json(name),
-                        )?;
-                        if prose.trim().is_empty() {
-                            continue;
-                        }
+                            prepare_scoped_tools(&scope, &local_schemas, &registry)?;
                         if client.is_none() {
                             *client = Some(env_client_with_limits(ctx.limits)?);
                         }
@@ -270,7 +271,7 @@ pub(crate) async fn run_one_section_impl(
                                 completion_options = Some(binding.completion_options());
                             }
                         }
-                        let local_schemas = vm.local_tool_schemas();
+                        let local_schemas = vm.local_tool_schemas()?;
                         // Seed aliases added since the first prose block (via
                         // `tools.add` or `tools.add_local`) so the tool loop can
                         // count their calls; `ensure` is idempotent on existing

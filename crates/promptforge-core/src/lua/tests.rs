@@ -1708,6 +1708,32 @@ fn current_sys_returns_fallback_when_unset_and_errors_on_poison() {
 }
 
 #[test]
+fn local_tools_schema_and_membership_reads_fail_closed_on_poison() {
+    let local = LocalTools::default();
+    let handle = local.entries_handle();
+    let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _guard = handle.lock().expect("first lock is not poisoned");
+        panic!("poison the local tools registry");
+    }));
+    assert!(poisoned.is_err(), "the panic must poison the registry");
+
+    let schemas = local
+        .schemas()
+        .expect_err("schema reads must fail on a poisoned registry");
+    let contains = local
+        .contains("anything")
+        .expect_err("membership reads must fail on a poisoned registry");
+    for error in [schemas, contains] {
+        assert!(
+            error
+                .to_string()
+                .contains("local tools registry was poisoned"),
+            "the concrete poison error must surface: {error}"
+        );
+    }
+}
+
+#[test]
 fn map_chunk_line_to_absolute_rewrites_line_numbers() {
     let location = "section `Web Search` epilog";
     let msg = r#"[string "section `Web Search` epilog"]:2: assertion failed!"#;
@@ -2050,6 +2076,22 @@ fn var_guard_error_is_catchable_at_the_assigning_line() {
     .expect("the caught guard error must not fail the chunk");
     assert_eq!(out.returned.as_deref(), Some("yes"));
     assert_eq!(out.var.get("kept").and_then(|v| v.as_str()), Some("yes"));
+}
+
+#[test]
+fn var_guard_rejects_incremental_nested_function_writes_at_the_assigning_line() {
+    let out = run(
+        "var.t = {}\n\
+         local ok, err = pcall(function() var.t.f = function() end end)\n\
+         assert(not ok, 'the nested write must fail')\n\
+         assert(tostring(err):match('var.t.f must be JSON data'), tostring(err))\n\
+         var.t.kept = 'yes'\n\
+         return var.t.kept",
+        "",
+    )
+    .expect("the nested guard error must remain catchable");
+    assert_eq!(out.returned.as_deref(), Some("yes"));
+    assert_eq!(out.var, json!({ "t": { "kept": "yes" } }));
 }
 
 #[test]
