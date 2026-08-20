@@ -3,10 +3,10 @@ use super::{
     Function, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram,
     LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook, ModelRuntime,
     ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution, StdLib,
-    StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, Value, WriteScope,
-    default_log_byte_budget, detail, guarded_var, harden, install_h2_models, install_h2_tools,
-    install_instruction_budget, install_log, install_lua_tool_calls, install_store_table,
-    install_untrusted, resolve_section_target, scalar_return, seal_sys, var_to_json,
+    StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, Value, WriteScope, detail,
+    guarded_var, harden, install_h2_models, install_h2_tools, install_instruction_budget,
+    install_log, install_lua_tool_calls, install_store_table, install_untrusted, log_byte_budget,
+    resolve_section_target, scalar_return, seal_sys, var_to_json,
 };
 use crate::client::ToolSchema;
 
@@ -107,24 +107,37 @@ impl LocalTools {
     }
 
     /// Returns the schemas of every registered local tool.
-    #[must_use]
-    pub(crate) fn schemas(&self) -> Vec<ToolSchema> {
-        self.entries
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the entries lock was poisoned.
+    pub(crate) fn schemas(&self) -> Result<Vec<ToolSchema>> {
+        Ok(self
+            .entries
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?
             .iter()
             .map(|(_, schema, _)| schema.clone())
-            .collect()
+            .collect())
     }
 
     /// Returns whether `alias` names a registered local tool.
-    #[must_use]
-    pub(crate) fn contains(&self, alias: &str) -> bool {
-        self.entries
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the entries lock was poisoned.
+    pub(crate) fn contains(&self, alias: &str) -> Result<bool> {
+        Ok(self
+            .entries
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .map_err(|_| Error::Lua("local tools registry was poisoned".to_owned()))?
             .iter()
-            .any(|(name, _, _)| name == alias)
+            .any(|(name, _, _)| name == alias))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn entries_handle(
+        &self,
+    ) -> Arc<Mutex<Vec<(String, ToolSchema, mlua::RegistryKey)>>> {
+        Arc::clone(&self.entries)
     }
 
     /// Calls the handler registered under `alias` with JSON `args`.
@@ -223,9 +236,7 @@ impl SectionVm {
             write_scope: None,
             host_injected: false,
             log_budget: Arc::new(AtomicU32::new(DEFAULT_LUA_LOG_EVENTS)),
-            log_byte_budget: Arc::new(AtomicUsize::new(default_log_byte_budget(
-                DEFAULT_LUA_LOG_EVENTS,
-            ))),
+            log_byte_budget: Arc::new(AtomicUsize::new(log_byte_budget(DEFAULT_LUA_LOG_EVENTS))),
             local_tools: LocalTools::default(),
         };
         if let Err(error) = harden(&vm.lua) {
@@ -561,14 +572,21 @@ impl SectionVm {
             self.run_chunk(program, observer, section)
                 .map_err(mlua::Error::external)
         });
+        let callback_error = resolution.take_callback_error()?;
         match result {
-            Ok(LuaBlockResult::Returned(value)) => Ok(value),
+            Ok(LuaBlockResult::Returned(value)) => match callback_error {
+                Some(error) => Err(error),
+                None => Ok(value),
+            },
             // Control globals are never installed on the H1 VM, so `jump` is
             // nil there; this arm is defensive against a recorded jump.
-            Ok(LuaBlockResult::Jump(heading)) => Err(Error::Lua(format!(
-                "jump({heading}) is not available in live H1 Lua"
-            ))),
-            Err(error) => match resolution.take_callback_error()? {
+            Ok(LuaBlockResult::Jump(heading)) => match callback_error {
+                Some(error) => Err(error),
+                None => Err(Error::Lua(format!(
+                    "jump({heading}) is not available in live H1 Lua"
+                ))),
+            },
+            Err(error) => match callback_error {
                 Some(error) => Err(error),
                 None => Err(Error::lua(error)),
             },
@@ -857,15 +875,18 @@ impl SectionVm {
     }
 
     /// Returns the schemas of every registered local tool.
-    #[must_use]
-    pub(crate) fn local_tool_schemas(&self) -> Vec<ToolSchema> {
+    /// # Errors
+    /// Returns [`Error::Lua`] if the local-tools registry was poisoned.
+    pub(crate) fn local_tool_schemas(&self) -> Result<Vec<ToolSchema>> {
         self.local_tools.schemas()
     }
 
     /// Returns whether `alias` names a registered local tool.
-    #[must_use]
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the local-tools registry was poisoned.
     #[allow(dead_code)] // wired up by the local-tools dispatch step
-    pub(crate) fn has_local_tool(&self, alias: &str) -> bool {
+    pub(crate) fn has_local_tool(&self, alias: &str) -> Result<bool> {
         self.local_tools.contains(alias)
     }
 
@@ -885,7 +906,7 @@ impl SectionVm {
             .map_err(Error::lua)?;
         self.log_budget.store(log_events, Ordering::Relaxed);
         self.log_byte_budget
-            .store(default_log_byte_budget(log_events), Ordering::Relaxed);
+            .store(log_byte_budget(log_events), Ordering::Relaxed);
         Ok(())
     }
 
@@ -947,7 +968,7 @@ impl SectionVm {
         let mut slot = self
             .jump_slot
             .lock()
-            .map_err(|_| Error::Lua("jump slot was poisoned".to_owned()))?;
+            .map_err(|_| Error::Lua("jump slot poisoned".to_owned()))?;
         Ok(slot.take())
     }
 
@@ -956,7 +977,7 @@ impl SectionVm {
             let mut slot = self
                 .jump_slot
                 .lock()
-                .map_err(|_| Error::Lua("jump slot was poisoned".to_owned()))?;
+                .map_err(|_| Error::Lua("jump slot poisoned".to_owned()))?;
             *slot = None;
         }
         let result = program.load(&self.lua)?.call(());

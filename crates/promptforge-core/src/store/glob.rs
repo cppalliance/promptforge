@@ -66,6 +66,10 @@ pub(crate) fn validate_glob_grammar(pattern: &str) -> Result<(), &'static str> {
 /// and reuse the tokens via [`matches_tokens`], so the per-path tokenization
 /// cost is not repeated for every key while a store lock is held.
 pub(crate) fn compile_glob(pattern: &[u8]) -> Vec<GlobToken> {
+    debug_assert!(
+        std::str::from_utf8(pattern).is_ok_and(|text| validate_glob_grammar(text).is_ok()),
+        "compile_glob requires validated grammar"
+    );
     tokenize_glob(pattern)
 }
 
@@ -209,5 +213,12 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "compile_glob requires validated grammar")]
+    fn compile_glob_rejects_unvalidated_direct_input_in_debug_builds() {
+        let _ = compile_glob(b"bad/***/pattern");
     }
 }

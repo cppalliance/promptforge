@@ -23,7 +23,7 @@ fn test_binding(alias: &str, dialect: ToolDialectId) -> ModelBinding {
 #[test]
 fn temperature_accepts_finite_in_domain_and_rejects_the_rest() {
     for good in [0.0, 0.7, 1.0, 2.0] {
-        let got = value_as_temperature(&Value::Number(good))
+        let got = value_as_temperature(&Value::Number(good), "models.need")
             .expect("in-domain temperature")
             .get();
         assert!(
@@ -33,7 +33,7 @@ fn temperature_accepts_finite_in_domain_and_rejects_the_rest() {
     }
     for bad in [-0.1, 2.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert!(
-            value_as_temperature(&Value::Number(bad)).is_err(),
+            value_as_temperature(&Value::Number(bad), "models.need").is_err(),
             "temperature {bad} must be rejected"
         );
     }
@@ -43,15 +43,15 @@ fn temperature_accepts_finite_in_domain_and_rejects_the_rest() {
 fn integer_and_number_temperatures_share_one_decode_and_domain_check() {
     // The Lua integer form is decoded through the same path as the number
     // form (no separate i32 gate) and validated by the same domain check.
-    let from_integer = value_as_temperature(&Value::Integer(1))
+    let from_integer = value_as_temperature(&Value::Integer(1), "models.need")
         .expect("integer 1 is in-domain")
         .get();
-    let from_number = value_as_temperature(&Value::Number(1.0))
+    let from_number = value_as_temperature(&Value::Number(1.0), "models.need")
         .expect("number 1.0 is in-domain")
         .get();
     assert!((from_integer - from_number).abs() <= f64::EPSILON);
     assert!(
-        value_as_temperature(&Value::Integer(5)).is_err(),
+        value_as_temperature(&Value::Integer(5), "models.need").is_err(),
         "an out-of-domain integer temperature must be rejected by the one domain check"
     );
 }
@@ -155,13 +155,16 @@ fn parse_need_args_covers_each_branch() {
     let lua = Lua::new();
     // Missing description.
     let one: MultiValue = [lua_string(&lua, "writer")].into_iter().collect();
-    assert!(parse_need_args(one).is_err(), "one argument is rejected");
+    assert!(
+        parse_need_args(one, "models.need").is_err(),
+        "one argument is rejected"
+    );
     // Non-string alias.
     let bad_alias: MultiValue = [Value::Integer(1), lua_string(&lua, "desc")]
         .into_iter()
         .collect();
     assert!(
-        parse_need_args(bad_alias).is_err(),
+        parse_need_args(bad_alias, "models.need").is_err(),
         "non-string alias fails"
     );
     // opts not a table.
@@ -172,7 +175,10 @@ fn parse_need_args_covers_each_branch() {
     ]
     .into_iter()
     .collect();
-    assert!(parse_need_args(bad_opts).is_err(), "non-table opts fails");
+    assert!(
+        parse_need_args(bad_opts, "models.need").is_err(),
+        "non-table opts fails"
+    );
     // Too many arguments.
     let too_many: MultiValue = [
         lua_string(&lua, "writer"),
@@ -182,12 +188,15 @@ fn parse_need_args_covers_each_branch() {
     ]
     .into_iter()
     .collect();
-    assert!(parse_need_args(too_many).is_err(), "four arguments fail");
+    assert!(
+        parse_need_args(too_many, "models.need").is_err(),
+        "four arguments fail"
+    );
     // Valid two-argument form.
     let ok: MultiValue = [lua_string(&lua, "writer"), lua_string(&lua, "desc")]
         .into_iter()
         .collect();
-    let (alias, description, opts) = parse_need_args(ok).expect("valid need args");
+    let (alias, description, opts) = parse_need_args(ok, "models.need").expect("valid need args");
     assert_eq!(alias, "writer");
     assert_eq!(description, "desc");
     assert_eq!(opts.temperature, None);
@@ -201,7 +210,7 @@ fn parse_opts_table_covers_each_key_and_rejects_unknown() {
     table.set("context", 8192).expect("set context");
     table.set("temperature", 0.5).expect("set temperature");
     table.set("max_tokens", 256).expect("set max_tokens");
-    let opts = parse_opts_table(&table).expect("all known keys parse");
+    let opts = parse_opts_table(&table, "models.need").expect("all known keys parse");
     assert_eq!(opts.thinking, Some(true));
     assert_eq!(opts.context.map(std::num::NonZeroU32::get), Some(8192));
     assert_eq!(
@@ -214,59 +223,65 @@ fn parse_opts_table_covers_each_key_and_rejects_unknown() {
     let zero_context = lua.create_table().expect("table");
     zero_context.set("context", 0).expect("set context");
     assert!(
-        parse_opts_table(&zero_context).is_err(),
+        parse_opts_table(&zero_context, "models.need").is_err(),
         "a zero context minimum must be rejected"
     );
     let zero_max = lua.create_table().expect("table");
     zero_max.set("max_tokens", 0).expect("set max_tokens");
     assert!(
-        parse_opts_table(&zero_max).is_err(),
+        parse_opts_table(&zero_max, "models.need").is_err(),
         "a zero max_tokens cap must be rejected"
     );
 
     let unknown = lua.create_table().expect("table");
     unknown.set("bogus", 1).expect("set bogus");
     assert!(
-        parse_opts_table(&unknown).is_err(),
+        parse_opts_table(&unknown, "models.need").is_err(),
         "an unknown opts key must be rejected"
     );
 
     let non_string_key = lua.create_table().expect("table");
     non_string_key.set(1, "x").expect("set numeric key");
     assert!(
-        parse_opts_table(&non_string_key).is_err(),
+        parse_opts_table(&non_string_key, "models.need").is_err(),
         "a non-string opts key must be rejected"
     );
 }
 
 #[test]
 fn scalar_decoders_cover_valid_and_invalid_inputs() {
-    assert!(value_as_bool(&Value::Boolean(false), "thinking").is_ok());
-    assert!(value_as_bool(&Value::Integer(1), "thinking").is_err());
+    assert!(value_as_bool(&Value::Boolean(false), "thinking", "models.need").is_ok());
+    assert!(value_as_bool(&Value::Integer(1), "thinking", "models.need").is_err());
 
-    assert_eq!(value_as_u32(&Value::Integer(7), "context").expect("ok"), 7);
     assert_eq!(
-        value_as_u32(&Value::Number(9.0), "context").expect("whole number ok"),
+        value_as_u32(&Value::Integer(7), "context", "models.need").expect("ok"),
+        7
+    );
+    assert_eq!(
+        value_as_u32(&Value::Number(9.0), "context", "models.need").expect("whole number ok"),
         9
     );
-    assert!(value_as_u32(&Value::Integer(-1), "context").is_err());
-    assert!(value_as_u32(&Value::Number(1.5), "context").is_err());
-    assert!(value_as_u32(&Value::Boolean(true), "context").is_err());
+    assert!(value_as_u32(&Value::Integer(-1), "context", "models.need").is_err());
+    assert!(value_as_u32(&Value::Number(1.5), "context", "models.need").is_err());
+    assert!(value_as_u32(&Value::Boolean(true), "context", "models.need").is_err());
 
     // MODEL-003: the non-zero decoder accepts positive counts and rejects zero.
     assert_eq!(
-        value_as_nonzero_u32(&Value::Integer(7), "context")
+        value_as_nonzero_u32(&Value::Integer(7), "context", "models.need")
             .expect("positive count")
             .get(),
         7
     );
     assert!(
-        value_as_nonzero_u32(&Value::Integer(0), "context").is_err(),
+        value_as_nonzero_u32(&Value::Integer(0), "context", "models.need").is_err(),
         "a zero count must be rejected"
     );
 
-    assert!((decode_lua_number(&Value::Integer(2), "t").expect("int") - 2.0).abs() < f64::EPSILON);
-    assert!(decode_lua_number(&Value::Boolean(true), "t").is_err());
+    assert!(
+        (decode_lua_number(&Value::Integer(2), "t", "models.need").expect("int") - 2.0).abs()
+            < f64::EPSILON
+    );
+    assert!(decode_lua_number(&Value::Boolean(true), "t", "models.need").is_err());
 }
 
 #[test]
@@ -287,6 +302,44 @@ fn parse_single_alias_and_validate_alias_branches() {
     assert!(validate_alias("").is_err(), "empty alias rejected");
     assert!(validate_alias("1abc").is_err(), "leading digit rejected");
     assert!(validate_alias("a b").is_err(), "space rejected");
+}
+
+#[test]
+fn live_model_apis_label_nested_decoder_errors_by_entry_point() {
+    let run = |source: &str| {
+        let lua = Lua::new();
+        let state = std::sync::Arc::new(std::sync::Mutex::new(ModelBindingState::default()));
+        let resolver = |_: &str, _: &ModelNeedOpts| {
+            Ok(crate::model::ResolvedModel {
+                id: ModelId::from_validated("gateway", "m1"),
+                invocation: ModelInvocation::from(&ModelNeedOpts::default()),
+                tool_dialect: ToolDialectId::OpenAi,
+                context: std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
+            })
+        };
+        lua.scope(|scope| {
+            super::install_live_models(&lua, scope, &resolver, &state)
+                .map_err(mlua::Error::external)?;
+            lua.load(source).exec()
+        })
+        .expect_err("the invalid nested scalar must be rejected")
+        .to_string()
+    };
+
+    let need = run("models.need('writer', 'desc', { thinking = 1 })");
+    assert!(
+        need.contains("models.need opts.thinking must be a boolean"),
+        "models.need wording must remain exact: {need}"
+    );
+    let default = run("models.default('writer', 'desc', { thinking = 1 })");
+    assert!(
+        default.contains("models.default opts.thinking must be a boolean"),
+        "models.default must identify its own entry point: {default}"
+    );
+    assert!(
+        !default.contains("models.need"),
+        "models.default errors must not be mislabelled: {default}"
+    );
 }
 
 #[test]

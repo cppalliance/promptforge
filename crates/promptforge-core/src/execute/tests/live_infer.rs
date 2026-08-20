@@ -34,6 +34,54 @@ async fn live_h1_infer_runs_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn live_h1_substitutes_and_skips_empty_prose_before_requiring_a_model() {
+    let empty = "---\nname: empty-h1\ndescription: d\npromptforge: 1\n---\n\n\
+        # Empty H1\n\n\
+        ```lua\nvar.omit = ''\n```\n\n\
+        {{ var.omit }}\n\n\
+        ## Result\n\n\
+        ```lua\nreturn 'ok'\n```\n";
+    let out = super::run(&fixture(empty), "", &[], &StoreRef::memory(), silent())
+        .await
+        .expect("H1 prose that substitutes to empty must not require a model");
+    assert_eq!(out, "ok");
+
+    let nonempty = empty.replace("var.omit = ''", "var.omit = 'ask'");
+    let error = super::run(&fixture(&nonempty), "", &[], &StoreRef::memory(), silent())
+        .await
+        .expect_err("non-empty substituted H1 prose must still require a model");
+    assert!(
+        matches!(error, Error::ModelRequired { .. }),
+        "expected ModelRequired, got {error}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn caught_h1_callback_error_stops_before_a_later_block() {
+    let source = "---\nname: callback-drain\ndescription: d\npromptforge: 1\n---\n\n\
+        # Callback Drain\n\n\
+        ```lua\n\
+        local ok = pcall(models.need, 'missing', 'unavailable model')\n\
+        assert(not ok)\n\
+        ```\n\n\
+        ```lua\nstore.write('later.txt', 'ran')\n```\n\n\
+        ## Result\n\n\
+        ```lua\nreturn 'unexpected'\n```\n";
+    let store = StoreRef::memory();
+    let error = super::run(&fixture(source), "", &[], &store, silent())
+        .await
+        .expect_err("a caught resolver callback error must fail its own block");
+    assert!(
+        matches!(error, Error::ModelAbsent { .. }),
+        "the current block's typed callback error must surface: {error}"
+    );
+    assert!(
+        store.read("later.txt").is_err(),
+        "the later H1 block must not run after the callback error"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn shared_function_resolves_host_globals_when_called() {
     let source = "---\nname: shared-host\ndescription: d\npromptforge: 1\n---\n\n\
         # Shared Host\n\n\
@@ -262,6 +310,101 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
     assert!(
         details.iter().all(|d| d.as_str() != "Tool call succeeded"),
         "infer advertises no tools, so no tool call can be observed: {details:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
+    let gateway = ScriptedGateway::start(vec![resp_delayed_text(
+        "too late",
+        std::time::Duration::from_secs(30),
+    )])
+    .await;
+    let source = "---\nname: cancelled-infer\ndescription: d\npromptforge: 1\n---\n\n\
+        # Cancelled Infer\n\n\
+        ```lua\n\
+        local writer = models.default('writer', 'A general model for tests')\n\
+        return writer:infer('must cancel')\n\
+        ```\n";
+    let prompt = parse(source);
+    let picker = ToolPicker::build(Catalog::default(), PickerConfig::default())
+        .expect("empty tool picker must build");
+    let models = test_model_catalog();
+    let recorder = Arc::new(Recorder::default());
+    let cancel = crate::cancel::CancelHandle::new();
+    let canceller = cancel.clone();
+    let gateway_calls = Arc::clone(&gateway.calls);
+    tokio::spawn(async move {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while gateway_calls.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        canceller.cancel();
+    });
+    let error = super::super::run(
+        &prompt,
+        "",
+        ResolutionContext::new(&picker, &models),
+        &[],
+        &StoreRef::memory(),
+        RunConfig::new(EXECUTION)
+            .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
+            .client(GatewayClient::new(
+                GatewayEndpoint::new(&format!("http://{}/v1", gateway.addr()))
+                    .expect("valid test endpoint"),
+                SecretString::new("test").expect("non-empty test key"),
+            ))
+            .cancel(cancel),
+    )
+    .await
+    .expect_err("cancelling an in-flight infer must interrupt the run");
+    assert!(
+        error.to_string().contains("interrupted"),
+        "expected interruption, got {error}"
+    );
+    assert_eq!(
+        gateway.call_count(),
+        1,
+        "the cancellation must occur after infer reached the gateway"
+    );
+    assert!(
+        recorder
+            .events()
+            .iter()
+            .all(|(_, event)| event != &detail::MODEL_TURN_FAILED.to_string()),
+        "cancellation must not report a model failure: {:?}",
+        recorder.events()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn handle_infer_tool_call_violation_uses_entry_point_neutral_wording() {
+    let gateway = ScriptedGateway::start(vec![resp_tool_call("call_1", "ghost", "{}")]).await;
+    let source = "---\nname: infer-tool-call\ndescription: d\npromptforge: 1\n---\n\n\
+        # Infer Tool Call\n\n\
+        ```lua\n\
+        local writer = models.default('writer', 'A general model for tests')\n\
+        return writer:infer('answer without tools')\n\
+        ```\n";
+    let error = super::run(
+        &bound_for_model(source),
+        "",
+        &[],
+        &StoreRef::memory(),
+        gatewayed(gateway.addr()),
+    )
+    .await
+    .expect_err("a tool-call result from direct infer must be rejected");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("model inference received tool calls but no tools were advertised"),
+        "the violation must use neutral wording: {rendered}"
+    );
+    assert!(
+        !rendered.contains("models.infer received"),
+        "handle:infer must not be misreported as models.infer: {rendered}"
     );
 }
 

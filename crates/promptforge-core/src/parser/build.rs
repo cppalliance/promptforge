@@ -290,10 +290,13 @@ pub fn promptforge_version(source: &str) -> Option<u32> {
 /// Counts the number of `\n` characters in `text[..byte_offset]`.
 ///
 /// # Errors
-/// Returns [`Error::Internal`] when the newline count exceeds `u32`, rather than
-/// saturating to `u32::MAX` and hiding an implausibly large source position.
+/// Returns [`Error::Internal`] when `byte_offset` is out of bounds or not a
+/// UTF-8 boundary, or when the newline count exceeds `u32`.
 pub(crate) fn newlines_before(text: &str, byte_offset: usize) -> Result<u32> {
-    u32::try_from(text[..byte_offset].matches('\n').count())
+    let prefix = text.get(..byte_offset).ok_or(Error::Internal(
+        "parser: source byte offset invariant broken",
+    ))?;
+    u32::try_from(prefix.matches('\n').count())
         .map_err(|_| Error::Internal("parser: newline count exceeded u32 range"))
 }
 
@@ -522,4 +525,22 @@ pub(crate) fn build_sections(
         });
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod position_tests {
+    use super::newlines_before;
+    use crate::Error;
+
+    #[test]
+    fn newlines_before_reports_broken_byte_offset_invariants() {
+        for offset in [1, 4] {
+            let error = newlines_before("é\n", offset)
+                .expect_err("a non-boundary or out-of-range offset must return an error");
+            assert!(matches!(
+                error,
+                Error::Internal("parser: source byte offset invariant broken")
+            ));
+        }
+    }
 }

@@ -590,6 +590,7 @@ struct ScriptedGateway {
 enum GatewayReply {
     Json(Value),
     Status(u16, String),
+    DelayedJson(std::time::Duration, Value),
 }
 
 #[derive(Clone)]
@@ -621,6 +622,10 @@ impl ScriptedGateway {
                     body.clone(),
                 )
                     .into_response(),
+                GatewayReply::DelayedJson(delay, value) => {
+                    tokio::time::sleep(*delay).await;
+                    Json(value.clone()).into_response()
+                }
             }
         }
 
@@ -726,6 +731,18 @@ fn resp_text(content: &str) -> GatewayReply {
             "message": { "role": "assistant", "content": content }
         }]
     }))
+}
+
+/// A delayed final assistant text reply for in-flight cancellation tests.
+fn resp_delayed_text(content: &str, delay: std::time::Duration) -> GatewayReply {
+    GatewayReply::DelayedJson(
+        delay,
+        json!({
+            "choices": [{
+                "message": { "role": "assistant", "content": content }
+            }]
+        }),
+    )
 }
 
 /// A final assistant text reply carrying an explicit `finish_reason`.

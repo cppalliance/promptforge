@@ -212,10 +212,10 @@ async fn an_erroring_section_reports_started_but_not_finished() {
 }
 
 #[tokio::test]
-async fn a_limits_failure_propagates_without_any_teardown_observation() {
-    // The driver owns the limits install: a ceiling below the VM's baseline
-    // allocation fails before the teardown boundary exists, so the error
-    // propagates bare and no LUA_TEARDOWN_* record may fire on this path.
+async fn a_one_byte_limit_fails_host_injection_with_teardown_observations() {
+    // mlua accepts the one-byte ceiling itself, then the first host allocation
+    // fails. Host injection is inside the H1 teardown boundary, unlike the
+    // preceding bare apply_lua_limits call.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\nreturn \"ran\"\n```\n";
     let recorder = Arc::new(Recorder::default());
@@ -234,11 +234,14 @@ async fn a_limits_failure_propagates_without_any_teardown_observation() {
 
     let observed = events(&recorder.records());
     assert!(
-        !observed.iter().any(|(_, event)| {
-            event == &detail::LUA_TEARDOWN_STARTED.to_string()
-                || event == &detail::LUA_TEARDOWN_SUCCEEDED.to_string()
-        }),
-        "a limits failure fires no teardown observations: {observed:?}"
+        observed.contains(&(
+            "Test prompt".to_owned(),
+            detail::LUA_TEARDOWN_STARTED.to_string()
+        )) && observed.contains(&(
+            "Test prompt".to_owned(),
+            detail::LUA_TEARDOWN_SUCCEEDED.to_string()
+        )),
+        "host injection failure must fire both teardown observations: {observed:?}"
     );
 }
 

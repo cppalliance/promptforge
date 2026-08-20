@@ -84,13 +84,16 @@ impl InferContext {
                     result.map_err(Error::from)
                 }
             }
-        })
-        .map_err(mlua::Error::external);
-        if completion.is_err() {
-            self.observer
-                .observe(&self.execution, &self.section, detail::MODEL_TURN_FAILED);
-        }
-        let completion = completion?;
+        });
+        let completion = match completion {
+            Ok(completion) => completion,
+            Err(Error::Interrupted) => return Err(mlua::Error::external(Error::Interrupted)),
+            Err(error) => {
+                self.observer
+                    .observe(&self.execution, &self.section, detail::MODEL_TURN_FAILED);
+                return Err(mlua::Error::external(error));
+            }
+        };
 
         let turn = advance_turn(&self.turns);
         if let Some(capture) = self.debug.as_deref() {
@@ -130,7 +133,7 @@ impl InferContext {
             // No tools were advertised, so a tool-call turn is a backend
             // protocol violation rather than something to dispatch.
             CompletionResult::ToolCalls(_) => Err(mlua::Error::external(
-                "models.infer received tool calls but no tools were advertised",
+                "model inference received tool calls but no tools were advertised",
             )),
         }
     }
