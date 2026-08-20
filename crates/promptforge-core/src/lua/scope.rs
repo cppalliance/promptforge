@@ -67,8 +67,10 @@ impl ToolCallCounts {
     }
 }
 
+/// Tracks tools added to one section VM and their description overrides.
 #[derive(Debug)]
 pub(crate) struct ToolRuntime {
+    /// Prompt-local aliases currently in the section's tool scope.
     pub(crate) added: Vec<String>,
     /// Per-alias author overrides for model-facing schema descriptions.
     pub(crate) description_overrides: BTreeMap<String, String>,

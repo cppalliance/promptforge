@@ -76,8 +76,10 @@ pub(crate) struct ProseInferenceResult {
 /// # Errors
 /// Returns an out-of-scope tool error if the model calls an alias absent from
 /// `dispatch`, [`Error::ToolLoopExhausted`] in loop mode if the cap is hit
-/// without a text reply (single-shot never reports it), or any
-/// transport/backend error from a model call or a tool's own failure.
+/// without a text reply (single-shot never reports it), [`Error::Interrupted`]
+/// when the run is cancelled, or any transport/backend error from a model call
+/// or a tool's own failure. Returns [`Error::Internal`] if a local tool call
+/// reaches dispatch without the required local dispatcher.
 #[expect(
     clippy::too_many_arguments,
     clippy::too_many_lines,

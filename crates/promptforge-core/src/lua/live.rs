@@ -3,6 +3,7 @@ use super::{
     Mutex, Result, ToolBinding, ToolBindings, ToolRegistry, ToolResolver, install_live_models,
 };
 
+/// Stores tool bindings and the first callback failure recorded by live H1.
 #[derive(Debug, Default)]
 pub(crate) struct BindingState {
     bindings: Vec<ToolBinding>,
@@ -231,6 +232,12 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
     lua.globals().raw_set("tools", tools).map_err(Error::lua)
 }
 
+/// Validates a prompt-local tool alias against the supported wire grammar.
+///
+/// # Errors
+/// Returns [`Error::Lua`] when `alias` is empty, exceeds 64 bytes, starts with
+/// a non-letter, or contains a character other than a letter, digit, `_`, or
+/// `-` after its first byte.
 pub(crate) fn validate_alias(alias: &str) -> Result<()> {
     let bytes = alias.as_bytes();
     let valid = (1..=64).contains(&bytes.len())

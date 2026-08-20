@@ -154,7 +154,10 @@ impl CompletionError {
         }
     }
 
-    /// Returns the backend HTTP status, when the failure was a backend status.
+    /// Returns the backend HTTP status carried by a status or body-read failure.
+    ///
+    /// `BackendBodyRead` failures are classified as
+    /// [`CompletionErrorKind::Transport`] but still retain the response status.
     #[must_use]
     pub fn status(&self) -> Option<u16> {
         match &self.inner {

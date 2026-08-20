@@ -33,7 +33,9 @@ impl SharedTools {
     /// trust the invariant without rescanning.
     ///
     /// # Errors
-    /// Returns [`ToolRegistryError`] if two tools share a [`ToolId`].
+    /// Returns [`ToolRegistryError::DuplicateId`] if two tools share a
+    /// [`ToolId`], or [`ToolRegistryError::InvalidWireName`] if a tool's wire
+    /// name is not transport-legal.
     pub(crate) fn new(tools: &[Arc<dyn Tool>]) -> Result<Self, ToolRegistryError> {
         ToolRegistry::new(tools.iter().map(AsRef::as_ref))?;
         Ok(Self {

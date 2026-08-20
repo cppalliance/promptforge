@@ -1060,7 +1060,7 @@ fn prologue_source_line_maps_correctly() {
 
 #[test]
 fn multi_line_chunk_maps_inner_line_correctly() {
-    // Epilog with assert on line 2 of the fence.
+    // Epilog with assert on line 3 of the fence.
     //  1-4: frontmatter
     //  5: empty
     //  6: # T

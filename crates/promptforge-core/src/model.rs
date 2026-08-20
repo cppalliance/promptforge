@@ -85,9 +85,8 @@ impl ModelCatalog {
 
     /// Builds a catalog from descriptors already known to be collision-free.
     ///
-    /// Used by internal callers (like the catalog `filter`) whose inputs are a
-    /// subset of an already-validated catalog, where duplicate checking is
-    /// redundant.
+    /// Used by internal callers whose inputs are already validated, where
+    /// duplicate checking is redundant.
     pub(crate) fn from_validated(models: Vec<ModelDescriptor>) -> ModelCatalog {
         Self { models }
     }
@@ -124,9 +123,9 @@ impl ModelCatalog {
 
     /// Returns the descriptors satisfying `opts` as borrowed references.
     ///
-    /// Unlike [`Self::filter`] this clones nothing (MODEL-017): the semantic
-    /// resolver builds its picker directly from these borrowed matches and
-    /// selects the resolved descriptor back out of the same borrowed slice.
+    /// This clones nothing (MODEL-017): the semantic resolver builds its picker
+    /// directly from these borrowed matches and selects the resolved descriptor
+    /// back out of the same borrowed slice.
     #[must_use]
     pub(crate) fn filtered(&self, opts: &ModelNeedOpts) -> Vec<&ModelDescriptor> {
         self.models
