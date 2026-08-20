@@ -15,6 +15,7 @@ use crate::execute::{
 use crate::lua::{LuaFanoutResult, SectionVm};
 use crate::observe::{Observation, Observer, detail};
 use crate::parser::Section;
+use crate::store::WriteScope;
 use crate::{Error, Result, cancel, subst};
 
 use super::FanoutContext;
@@ -43,6 +44,10 @@ pub(crate) struct ArmInputs {
     /// The fanout caller's `var` snapshot; each arm seeds its VM from a
     /// clone of it, and the arm's writes never reach the caller.
     pub(crate) var: Value,
+    /// This fanout's store-write token: one per `run_fanout_arms` call, so
+    /// the store's write registry can tell two arms of THIS fanout (a
+    /// write-write race) from a later fanout's write (legal).
+    pub(crate) write_token: u64,
     /// The arm's execute depth: the fanout caller's depth plus one, so
     /// recursion accounting accumulates across the fanout boundary.
     pub(crate) execute_depth: usize,
@@ -71,6 +76,7 @@ impl ArmInputs {
             client: ctx.client.clone(),
             last_reply: ctx.last_reply.map(str::to_owned),
             var: ctx.var.clone(),
+            write_token: ctx.store.next_write_token(),
             execute_depth: ctx.execute_depth + 1,
             cancel,
         }
@@ -257,7 +263,8 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
 
         // The arm runs the walk's shared VM setup with its own deltas: the
         // `sys` extra (`index`), the caller's cloned
-        // `var`, and the `item` seed.
+        // `var`, the `item` seed, and its store-write scope (this fanout's
+        // token plus the arm's 1-based index, matching `sys.index`).
         let setup = control.vm_setup(
             &sys,
             inputs.last_reply.as_deref(),
@@ -265,6 +272,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
                 var: Some(&inputs.var),
                 item: Some(&item),
             },
+            Some(WriteScope::new(inputs.write_token, index + 1)),
             &worker.name,
         );
         setup_section_vm(

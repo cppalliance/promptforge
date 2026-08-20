@@ -3,7 +3,7 @@ use super::{
     Function, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram,
     LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook, ModelRuntime,
     ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution, StdLib,
-    StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, Value,
+    StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, Value, WriteScope,
     default_log_byte_budget, detail, guarded_var, harden, install_h2_models, install_h2_tools,
     install_instruction_budget, install_log, install_lua_tool_calls, install_store_table,
     install_untrusted, resolve_section_target, scalar_return, seal_sys, var_to_json,
@@ -54,6 +54,9 @@ pub(crate) struct SectionVm {
     /// snapshots.
     sys_live: Arc<Mutex<Option<Json>>>,
     store: Option<StoreRef>,
+    /// The fanout arm's write scope for `store.write`; `None` outside an arm
+    /// leaves walk-section writes untracked.
+    write_scope: Option<WriteScope>,
     host_injected: bool,
     /// Remaining `log()` events this VM may emit before the budget is exhausted.
     log_budget: Arc<AtomicU32>,
@@ -208,6 +211,7 @@ impl SectionVm {
             jump_slot: Arc::new(Mutex::new(None)),
             sys_live: Arc::new(Mutex::new(None)),
             store: None,
+            write_scope: None,
             host_injected: false,
             log_budget: Arc::new(AtomicU32::new(DEFAULT_LUA_LOG_EVENTS)),
             log_byte_budget: Arc::new(AtomicUsize::new(default_log_byte_budget(
@@ -352,7 +356,7 @@ impl SectionVm {
         store: &StoreRef,
         last_reply: Option<&str>,
     ) -> Result<()> {
-        self.inject_host_with_var(args, sys, store, last_reply, None)
+        self.inject_host_with_var(args, sys, store, last_reply, None, None)
     }
 
     /// Installs host values while seeding `var` from an earlier VM.
@@ -360,6 +364,8 @@ impl SectionVm {
     /// The `var` global is a guarded proxy (see [`guarded_var`]): writes are
     /// validated for JSON-representability at the assigning line, and the
     /// hidden data table behind it is what [`var`](Self::var) reads back.
+    /// `write_scope` is the fanout arm's store-write identity; it is `None`
+    /// for every other driver, leaving `store.write` untracked.
     ///
     /// # Errors
     /// Returns [`Error::Lua`] if host values cannot be bridged or were already
@@ -371,6 +377,7 @@ impl SectionVm {
         store: &StoreRef,
         last_reply: Option<&str>,
         initial_var: Option<&Json>,
+        write_scope: Option<WriteScope>,
     ) -> Result<()> {
         if self.host_injected {
             return Err(Error::Lua(
@@ -405,6 +412,7 @@ impl SectionVm {
         };
         globals.raw_set("reply", reply_value).map_err(Error::lua)?;
         self.store = Some(store.clone());
+        self.write_scope = write_scope;
         self.host_injected = true;
         Ok(())
     }
@@ -443,6 +451,7 @@ impl SectionVm {
             &self.execution,
             observer,
             section,
+            self.write_scope,
         )
     }
 
