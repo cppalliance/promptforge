@@ -25,7 +25,10 @@
 //! with `.item` carrying the member value back. An empty collection is an
 //! [`Error::Lua`] before any scheduling: no work is likely a bug. Fatal arm
 //! errors abort siblings; [`Error::ToolLoopExhausted`] soft-degrades to an
-//! incomplete stub.
+//! incomplete stub. All arms share the run's store: two arms of one fanout
+//! writing the same path is a hard write-write race error (which aborts
+//! siblings like any fatal arm error), while `append` stays legal with
+//! unspecified order.
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;

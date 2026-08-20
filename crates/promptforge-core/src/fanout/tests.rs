@@ -186,6 +186,82 @@ async fn fatal_arm_aborts_and_drops_blocked_siblings() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_arms_writing_one_path_fail_with_a_write_race() {
+    // Note 74: two arms of one fanout calling `store.write` on the same path
+    // is a hard write-write race. The store error surfaces as a Lua error,
+    // which is fatal to the arm and aborts the fanout (note 63).
+    let worker = lua_worker("store.write('shared.txt', item)\nreturn item");
+    let items = vec![json!("alpha"), json!("beta")];
+    let fixture = FanoutFixture::new();
+    let ctx = fixture.ctx("fanout-write-race-test", RunLimits::new(), &NullObserver);
+
+    let error = run_fanout_arms(&worker, &items, &ctx)
+        .await
+        .expect_err("two arms writing one path must fail the fanout");
+    let text = error.to_string();
+    assert!(text.contains("write-write race"), "error was: {text}");
+    assert!(text.contains("shared.txt"), "error was: {text}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_arms_appending_one_path_succeed() {
+    // Note 74: `append` is untracked, so concurrent appends to one path are
+    // legal; only the relative order is unspecified.
+    let worker = lua_worker("store.append('log.txt', item .. ';')\nreturn item");
+    let items = vec![json!("alpha"), json!("beta")];
+    let fixture = FanoutFixture::new();
+    let ctx = fixture.ctx("fanout-append-test", RunLimits::new(), &NullObserver);
+
+    let results = run_fanout_arms(&worker, &items, &ctx)
+        .await
+        .expect("concurrent appends to one path must succeed");
+    assert_eq!(results.len(), 2);
+    let log = fixture.store.read("log.txt").expect("both arms appended");
+    assert!(log.contains("alpha;"), "log was: {log:?}");
+    assert!(log.contains("beta;"), "log was: {log:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_arm_rewriting_its_own_path_succeeds() {
+    // The registry records (fanout token, arm index); the same arm writing
+    // the same path again is a rewrite, not a race.
+    let worker = lua_worker(
+        "store.write('own.txt', 'first')\nstore.write('own.txt', 'second')\nreturn item",
+    );
+    let items = vec![json!("only")];
+    let fixture = FanoutFixture::new();
+    let ctx = fixture.ctx("fanout-rewrite-test", RunLimits::new(), &NullObserver);
+
+    run_fanout_arms(&worker, &items, &ctx)
+        .await
+        .expect("an arm rewriting its own path must succeed");
+    assert_eq!(
+        fixture.store.read("own.txt").expect("the arm wrote"),
+        "second"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sequential_fanouts_may_write_one_path() {
+    // A later fanout carries a fresh write token, so its write overwrites the
+    // earlier fanout's registry record instead of racing against it.
+    let worker = lua_worker("store.write('seq.txt', item)\nreturn item");
+    let fixture = FanoutFixture::new();
+    let first = fixture.ctx("fanout-sequential-1", RunLimits::new(), &NullObserver);
+    run_fanout_arms(&worker, &[json!("one")], &first)
+        .await
+        .expect("the first fanout must succeed");
+    let second = fixture.ctx("fanout-sequential-2", RunLimits::new(), &NullObserver);
+    run_fanout_arms(&worker, &[json!("two")], &second)
+        .await
+        .expect("a sequential fanout may write the same path");
+    assert_eq!(
+        fixture.store.read("seq.txt").expect("both fanouts wrote"),
+        "two"
+    );
+}
+
 #[test]
 fn arm_window_never_exceeds_the_concurrency_limit() {
     // Drive the pure scheduler through every completion order for a few

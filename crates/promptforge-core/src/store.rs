@@ -16,8 +16,10 @@
 //! This module wires no execution; it defines the store and its in-memory
 //! backend only.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write as _;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 mod error;
@@ -33,6 +35,26 @@ use glob::{MAX_GLOB_PATTERN_BYTES, compile_glob, matches_tokens, validate_glob_g
 pub use mem::{MemStore, Store};
 use path::StorePath;
 
+/// The provenance of one fanout arm's scoped write: which fanout, and which
+/// arm within it.
+///
+/// Vended per fanout by [`StoreRef::next_write_token`] and paired with the
+/// arm's 1-based index, so the write registry can tell "another arm of the
+/// same fanout" (a write-write race) from "the same arm again" or "a later
+/// fanout" (both legal).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WriteScope {
+    token: u64,
+    arm: usize,
+}
+
+impl WriteScope {
+    /// Pairs one fanout's token with the arm's 1-based index within it.
+    pub(crate) fn new(token: u64, arm: usize) -> WriteScope {
+        WriteScope { token, arm }
+    }
+}
+
 /// A cheaply cloneable, thread-safe handle to a run's virtual files.
 ///
 /// The handle wraps `Arc<Mutex<Box<dyn Store + Send>>>`: the `Mutex` supplies
@@ -43,6 +65,13 @@ use path::StorePath;
 /// methods mirror [`Store`], each taking the lock, delegating, and
 /// releasing it before returning; no lock is ever held across an await, and the
 /// operations are synchronous in any case.
+///
+/// Beside the backend lock the handle keeps a write registry mapping each
+/// path to the [`WriteScope`] that last wrote it: a fanout arm's scoped
+/// write ([`StoreRef::write_scoped`]) to a path already written by a
+/// different arm of the same fanout fails with [`StoreError::WriteRace`].
+/// Plain [`StoreRef::write`] (walk sections), `append`, and reads never
+/// touch the registry.
 ///
 /// # Examples
 /// ```
@@ -58,6 +87,8 @@ use path::StorePath;
 #[non_exhaustive]
 pub struct StoreRef {
     inner: Arc<Mutex<Box<dyn Store + Send>>>,
+    writers: Arc<Mutex<HashMap<String, WriteScope>>>,
+    write_tokens: Arc<AtomicU64>,
 }
 
 impl fmt::Debug for StoreRef {
@@ -80,6 +111,8 @@ impl StoreRef {
     pub fn new(backend: Box<dyn Store + Send>) -> StoreRef {
         StoreRef {
             inner: Arc::new(Mutex::new(backend)),
+            writers: Arc::new(Mutex::new(HashMap::new())),
+            write_tokens: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -151,6 +184,54 @@ impl StoreRef {
     /// ```
     pub fn write(&self, path: &str, contents: &str) -> Result<(), StoreError> {
         let path = StorePath::parse(path)?;
+        self.lock()?.write(path.as_str(), contents)
+    }
+
+    /// Vends a fresh token identifying one fanout's write scope.
+    ///
+    /// Each fanout takes one token and every arm pairs it with its own index
+    /// via [`WriteScope::new`]; tokens are unique per [`StoreRef`], so two
+    /// fanouts (sequential or nested) never share a scope.
+    pub(crate) fn next_write_token(&self) -> u64 {
+        self.write_tokens.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Creates or overwrites the file at `path` on behalf of one fanout arm,
+    /// recording the arm's [`WriteScope`] as the path's writer.
+    ///
+    /// The registry is checked and updated atomically before the backend is
+    /// touched: a path already written by a different arm of the SAME fanout
+    /// is a write-write race and fails without reaching the backend; the same
+    /// arm rewriting its own path succeeds, and a write carrying a different
+    /// fanout's token overwrites the record, so sequential fanouts stay
+    /// legal.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WriteRace`] on a same-fanout write-write race,
+    /// [`StoreError::InvalidPath`] if `path` fails validation, or any
+    /// [`StoreError`] the backend reports.
+    pub(crate) fn write_scoped(
+        &self,
+        path: &str,
+        contents: &str,
+        scope: WriteScope,
+    ) -> Result<(), StoreError> {
+        let path = StorePath::parse(path)?;
+        {
+            let mut writers = self
+                .writers
+                .lock()
+                .map_err(|_| StoreError::backend(StorePoisoned))?;
+            if let Some(&prior) = writers.get(path.as_str())
+                && prior.token == scope.token
+                && prior.arm != scope.arm
+            {
+                return Err(StoreError::WriteRace {
+                    path: path.as_str().to_owned(),
+                });
+            }
+            writers.insert(path.as_str().to_owned(), scope);
+        }
         self.lock()?.write(path.as_str(), contents)
     }
 
