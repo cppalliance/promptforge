@@ -418,10 +418,10 @@ fn delete_then_read_errors() {
 }
 
 #[test]
-fn delete_missing_errors() {
+fn delete_missing_is_silent() {
+    // Note 55: delete is idempotent, so deleting an absent path succeeds.
     let store = StoreRef::memory();
-    let err = store.delete("absent.txt").expect_err("should fail");
-    assert!(matches!(err, StoreError::NotFound { .. }));
+    store.delete("absent.txt").expect("delete is idempotent");
 }
 
 #[test]
