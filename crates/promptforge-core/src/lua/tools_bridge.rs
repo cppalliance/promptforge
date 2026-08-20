@@ -218,6 +218,7 @@ pub(crate) fn install_h2_tools(
         .map_err(Error::lua)?;
     tools.set("add", add).map_err(Error::lua)?;
 
+    let declared = bindings.clone();
     let local = local_tools.clone();
     let add_local_fn = lua
         .create_function(
@@ -229,6 +230,16 @@ pub(crate) fn install_h2_tools(
                 Function,
             )| {
                 validate_alias(&alias).map_err(mlua::Error::external)?;
+                if declared.binding(&alias).is_some() {
+                    return Err(mlua::Error::external(format!(
+                        "tools.add_local alias {alias:?} duplicates a declared tool alias"
+                    )));
+                }
+                if local.contains(&alias) {
+                    return Err(mlua::Error::external(format!(
+                        "tools.add_local alias {alias:?} is already registered"
+                    )));
+                }
                 let parameters = add_local_params_schema(&params)?;
                 let schema = ToolSchema::new(alias.clone(), description, parameters)
                     .map_err(mlua::Error::external)?;
