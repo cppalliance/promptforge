@@ -78,7 +78,50 @@ impl CompletionError {
             }
             Error::EmptyModelReply { .. } => CompletionErrorKind::EmptyReply,
             Error::GatewayDisabled => CompletionErrorKind::Disabled,
-            _ => CompletionErrorKind::Config,
+            Error::ParseFrontmatter { .. }
+            | Error::ParseStructured { .. }
+            | Error::MissingEnv(_)
+            | Error::InvalidEnv(_)
+            | Error::InvalidConfig(_)
+            | Error::Config { .. }
+            | Error::Interrupted
+            | Error::Lua(_)
+            | Error::LuaRuntime { .. }
+            | Error::LuaCompile { .. }
+            | Error::Bind { .. }
+            | Error::BindSchema { .. }
+            | Error::BindQuery { .. }
+            | Error::Absent { .. }
+            | Error::Duplicate { .. }
+            | Error::Ambiguous { .. }
+            | Error::DuplicateAlias { .. }
+            | Error::DuplicateLiveToolId { .. }
+            | Error::ToolIdSelectedTwice { .. }
+            | Error::PickedToolNotLive { .. }
+            | Error::ToolScopeAnalysis { .. }
+            | Error::ToolScopeAnalysisSource { .. }
+            | Error::NearDuplicateTools { .. }
+            | Error::ModelBind { .. }
+            | Error::ModelBindQuery { .. }
+            | Error::ModelAbsent { .. }
+            | Error::ModelDuplicate { .. }
+            | Error::ModelAmbiguous { .. }
+            | Error::DuplicateModelAlias { .. }
+            | Error::Substitution(_)
+            | Error::ToolLoopExhausted
+            | Error::OutOfScopeToolCall { .. }
+            | Error::UnknownScopedTool(_)
+            | Error::ModelRequired { .. }
+            | Error::UnsupportedVersion(_)
+            | Error::DialectNone
+            | Error::DialectTie { .. }
+            | Error::UnknownDialect(_)
+            | Error::Tool { .. }
+            | Error::FanoutArmJoin(_)
+            | Error::Internal(_)
+            | Error::InvalidToolWireName { .. }
+            | Error::LuaQuota { .. }
+            | Error::TimestampFormat(_) => CompletionErrorKind::Config,
         }
     }
 
@@ -166,5 +209,24 @@ impl From<Error> for CompletionError {
 impl From<CompletionError> for Error {
     fn from(error: CompletionError) -> Self {
         error.inner
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_config_variant_classifies_as_config() {
+        for error in [
+            Error::MissingEnv("URL".to_owned()),
+            Error::InvalidEnv("URL".to_owned()),
+            Error::InvalidConfig("bad endpoint".to_owned()),
+        ] {
+            assert_eq!(
+                CompletionError::from(error).kind(),
+                CompletionErrorKind::Config
+            );
+        }
     }
 }
