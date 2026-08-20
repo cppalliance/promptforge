@@ -50,6 +50,12 @@ impl FileStore {
                 path: path.to_owned(),
             });
         }
+        if path.contains('\\') {
+            return Err(StoreError::backend(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "backslash rejected by confinement check",
+            )));
+        }
         let mut resolved = self.root.clone();
         for component in path.split('/') {
             if component.is_empty() || component == "." || component == ".." {
@@ -321,6 +327,15 @@ mod tests {
         let (_dir, store) = temp_store();
         let err = store.read("a/./b.txt").expect_err("should reject");
         assert!(matches!(err, StoreError::Backend { .. }));
+    }
+
+    #[test]
+    fn confinement_rejects_backslash_segments() {
+        let (_dir, store) = temp_store();
+        for path in ["..\\escape.txt", "a\\b.txt"] {
+            let error = store.read(path).expect_err("backslash path should reject");
+            assert!(matches!(error, StoreError::Backend { .. }));
+        }
     }
 
     #[test]
