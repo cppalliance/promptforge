@@ -202,6 +202,10 @@ impl PromptForgeServer {
     ///
     /// # Errors
     /// The same as [`dispatch_with_progress`](Self::dispatch_with_progress).
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one exhaustive dispatch over BuiltInTool: name resolution plus a single match whose arms parse arguments and delegate, kept together so a new variant fails to compile until it gains an arm here"
+    )]
     async fn answer(
         &self,
         request: CallToolRequestParams,
