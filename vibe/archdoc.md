@@ -41,7 +41,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A52. Every untrusted string is guard-wrapped explicitly at the model-facing insertion boundary, independent of its origin.
 
-- A54. A leading thematic break makes a section address-only; a later break starts reader-only content that never parses or executes.
 - A55. Fan-out maps an explicit collection across isolated JSON values and returns each original member with its result.
 
 - A56. Ordinary sections and fan-out arms share one VM and block-walk semantics; arms have no separate capability tier.
@@ -49,6 +48,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A58. Variable state rolls through one walk and its jumps; execute chains and fan-out arms receive isolated snapshots whose writes do not escape.
 - A59. Distinct concurrent fan-out arms writing the same store path fail visibly; concurrent append remains legal.
+
+- A60. Parse, model, and dialect failures are classified from explicit typed variants, never from user-controlled message text or wildcard fallbacks.
 
 ## Principles
 
