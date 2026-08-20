@@ -50,6 +50,17 @@ fn all_marker_list_with_empty_item_is_rejected() {
 }
 
 #[test]
+fn list_error_kind_does_not_depend_on_the_section_name() {
+    for section in ["frontmatter", "fence"] {
+        let src =
+            format!("---\nname: p\ndescription: d\n---\n\n# T\n\n## {section}\n\n- alpha\n1.\n");
+        let error =
+            Prompt::parse(&src, "test", &NullObserver).expect_err("an empty list item must fail");
+        assert_eq!(error.kind(), ParseErrorKind::List);
+    }
+}
+
+#[test]
 fn parsed_prompt_value_types_are_equatable() {
     // PF-PARSER-011: parsing the same source twice yields equal values, and
     // a differing source yields unequal values, across the finalized parser

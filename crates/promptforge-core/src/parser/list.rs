@@ -5,6 +5,7 @@
 //! ([`is_all_list_markers`]) and extraction ([`parse_bullet_items`]) so the two
 //! can never disagree about what counts as a marker.
 
+use super::ParseErrorKind;
 use crate::{Error, Result};
 
 /// Parses bullet items from prose in a list-only section.
@@ -15,8 +16,8 @@ use crate::{Error, Result};
 /// items list is empty.
 ///
 /// # Errors
-/// Returns [`Error::Parse`] when a line is a non-list line, an empty marker, or
-/// when no items were found.
+/// Returns a list-classified parse error when a line is a non-list line, an
+/// empty marker, or when no items were found.
 pub(super) fn parse_bullet_items(prose: &str, section: &str) -> Result<Vec<String>> {
     let mut items = Vec::new();
     for line in prose.lines() {
@@ -27,21 +28,26 @@ pub(super) fn parse_bullet_items(prose: &str, section: &str) -> Result<Vec<Strin
         match classify_list_line(trimmed) {
             ListLine::Item(content) => items.push(content.to_string()),
             ListLine::EmptyMarker => {
-                return Err(Error::Parse(format!(
-                    "empty bullet item in list section `{section}`"
-                )));
+                return Err(Error::parse(
+                    ParseErrorKind::List,
+                    format!("empty bullet item in list section `{section}`"),
+                ));
             }
             ListLine::NotAMarker => {
-                return Err(Error::Parse(format!(
-                    "section `{section}` is a list section but contains non-list content: {trimmed}"
-                )));
+                return Err(Error::parse(
+                    ParseErrorKind::List,
+                    format!(
+                        "section `{section}` is a list section but contains non-list content: {trimmed}"
+                    ),
+                ));
             }
         }
     }
     if items.is_empty() {
-        return Err(Error::Parse(format!(
-            "section `{section}` is a list section but has no items"
-        )));
+        return Err(Error::parse(
+            ParseErrorKind::List,
+            format!("section `{section}` is a list section but has no items"),
+        ));
     }
     Ok(items)
 }
