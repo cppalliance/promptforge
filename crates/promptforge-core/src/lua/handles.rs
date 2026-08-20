@@ -78,14 +78,14 @@ impl ToolBinding {
 /// Inspectable Tool object returned by Lua `tools.need`.
 ///
 /// Authors read `.name`, `.description`, `.parameters`, `.wire_name`, and
-/// `.untrusted`. `.description` is mutable: assigning it before `tools.add`
-/// overrides the model-facing schema text. Existing callers that ignore the
-/// return value keep working.
+/// `.untrusted`. The object is frozen: model-facing description overrides are
+/// positional arguments to `tools.need` / `tools.always` / `tools.add`, never
+/// assignments on this handle. Existing callers that ignore the return value
+/// keep working.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LuaToolHandle {
     name: String,
     description: String,
-    description_overridden: bool,
     parameters: Json,
     wire_name: String,
     untrusted: bool,
@@ -105,7 +105,6 @@ impl LuaToolHandle {
         Self {
             name: alias.into(),
             description: description.into(),
-            description_overridden: false,
             parameters: json!({}),
             wire_name: id.name().to_owned(),
             untrusted: false,
@@ -120,7 +119,6 @@ impl LuaToolHandle {
         Self {
             name: alias.into(),
             description: description.into(),
-            description_overridden: false,
             parameters: tool.parameters_schema(),
             wire_name: tool.wire_name().to_owned(),
             // Trust is now carried per-call in `ToolOutput`, not a static
@@ -134,28 +132,26 @@ impl LuaToolHandle {
     pub(crate) fn name(&self) -> &str {
         &self.name
     }
-
-    /// Returns the model-facing description override when the author assigned
-    /// `.description` on this handle.
-    #[must_use]
-    pub(crate) fn model_description_override(&self) -> Option<&str> {
-        self.description_overridden
-            .then_some(self.description.as_str())
-    }
 }
 
 impl UserData for LuaToolHandle {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         fields.add_field_method_get("name", |_, this| Ok(this.name.clone()));
         fields.add_field_method_get("description", |_, this| Ok(this.description.clone()));
-        fields.add_field_method_set("description", |_, this, value: String| {
-            this.description = value;
-            this.description_overridden = true;
-            Ok(())
-        });
         fields.add_field_method_get("parameters", |lua, this| lua.to_value(&this.parameters));
         fields.add_field_method_get("wire_name", |_, this| Ok(this.wire_name.clone()));
         fields.add_field_method_get("untrusted", |_, this| Ok(this.untrusted));
+    }
+
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method(
+            MetaMethod::NewIndex,
+            |_, _, (key, _): (String, Value)| -> mlua::Result<()> {
+                Err(mlua::Error::external(format!(
+                    "Tool objects are frozen: cannot assign field {key:?}"
+                )))
+            },
+        );
     }
 }
 

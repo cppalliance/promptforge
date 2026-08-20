@@ -106,7 +106,9 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
     let needs = Arc::clone(state);
     let need = scope
         .create_function(
-            move |_, (alias, description): (String, String)| -> mlua::Result<LuaToolHandle> {
+            move |_,
+                  (alias, description, model_description): (String, String, Option<String>)|
+                  -> mlua::Result<LuaToolHandle> {
                 validate_alias(&alias).map_err(mlua::Error::external)?;
                 {
                     let mut bindings = needs
@@ -177,7 +179,7 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                     alias: alias.clone(),
                     description: description.clone(),
                     id,
-                    model_description: None,
+                    model_description,
                 });
                 Ok(handle)
             },
@@ -187,28 +189,33 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
 
     let prompt_wide = Arc::clone(state);
     let always = scope
-        .create_function(move |_, alias: String| -> mlua::Result<()> {
-            validate_alias(&alias).map_err(mlua::Error::external)?;
-            let mut bindings = prompt_wide
-                .lock()
-                .map_err(|_| mlua::Error::external("tool binding recorder was poisoned"))?;
-            if !bindings
-                .bindings
-                .iter()
-                .any(|binding| binding.alias == alias)
-            {
-                return Err(mlua::Error::external(format!(
-                    "tools.always alias {alias:?} was not declared by tools.need"
-                )));
-            }
-            if bindings.always.iter().any(|existing| existing == &alias) {
-                return Err(mlua::Error::external(format!(
-                    "tools.always alias {alias:?} was recorded more than once"
-                )));
-            }
-            bindings.always.push(alias);
-            Ok(())
-        })
+        .create_function(
+            move |_, (alias, model_description): (String, Option<String>)| -> mlua::Result<()> {
+                validate_alias(&alias).map_err(mlua::Error::external)?;
+                let mut bindings = prompt_wide
+                    .lock()
+                    .map_err(|_| mlua::Error::external("tool binding recorder was poisoned"))?;
+                if bindings.always.iter().any(|existing| existing == &alias) {
+                    return Err(mlua::Error::external(format!(
+                        "tools.always alias {alias:?} was recorded more than once"
+                    )));
+                }
+                let Some(binding) = bindings
+                    .bindings
+                    .iter_mut()
+                    .find(|binding| binding.alias == alias)
+                else {
+                    return Err(mlua::Error::external(format!(
+                        "tools.always alias {alias:?} was not declared by tools.need"
+                    )));
+                };
+                if let Some(model_description) = model_description {
+                    binding.model_description = Some(model_description);
+                }
+                bindings.always.push(alias);
+                Ok(())
+            },
+        )
         .map_err(Error::lua)?;
     tools.set("always", always).map_err(Error::lua)?;
 

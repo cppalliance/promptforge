@@ -156,7 +156,7 @@ fn tool_description_override_appears_in_model_schema() {
     let echo = EchoTool;
     let registry = ToolRegistry::new([&echo as &dyn Tool]).expect("unique test registry");
 
-    // tools.add(Tool) without mutating .description keeps the registry text.
+    // tools.add(alias) with no override keeps the registry (catalog) text.
     let mut default_vm = SectionVm::new_for_section(
         &bindings,
         &<ModelBindings as Default>::default(),
@@ -196,7 +196,7 @@ fn tool_description_override_appears_in_model_schema() {
     assert_eq!(
         default_prepared.schemas[0].description,
         echo.description(),
-        "unmutated Tool object must still advertise the registry description"
+        "no override anywhere must advertise the registry description"
     );
     assert_eq!(
         default_prepared.bindings[0].description(),
@@ -206,7 +206,7 @@ fn tool_description_override_appears_in_model_schema() {
     assert_eq!(default_prepared.bindings[0].model_description(), None);
     default_vm.teardown(&NullObserver, "Override");
 
-    // Mutating .description before tools.add overrides the model-facing schema.
+    // tools.add(alias, override) overrides the model-facing schema.
     let mut vm = SectionVm::new_for_section(
         &bindings,
         &<ModelBindings as Default>::default(),
@@ -220,9 +220,7 @@ fn tool_description_override_appears_in_model_schema() {
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
     let add_override = LuaProgram::compile(
-        "echo.description = 'Author override for the model'\n\
-         assert(echo.description == 'Author override for the model')\n\
-         tools.add(echo)",
+        "tools.add('echo', 'Author override for the model')",
         "prologue",
         NonZeroU32::new(1).expect("compile source line is non-zero"),
         EXECUTION,
@@ -231,7 +229,7 @@ fn tool_description_override_appears_in_model_schema() {
     )
     .expect("prologue must compile");
     vm.run_chunk(&add_override, &NullObserver, "Override")
-        .expect("description override before tools.add must succeed");
+        .expect("description override at tools.add must succeed");
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
     let mut bag = ToolBag::new(
         tool_bindings,
@@ -257,4 +255,77 @@ fn tool_description_override_appears_in_model_schema() {
     );
 
     vm.teardown(&NullObserver, "Override");
+}
+
+/// Precedence: a `tools.add` override beats the `model_description` recorded
+/// by `tools.need` / `tools.always`, which itself beats the catalog text.
+#[test]
+fn need_override_reaches_the_schema_and_add_beats_need() {
+    let bindings = crate::lua::ToolBindings::for_test(
+        vec![crate::lua::ToolBinding {
+            alias: "echo".to_owned(),
+            description: "echo capability for live matching".to_owned(),
+            id: ToolId::new("tests", "echo").expect("valid id"),
+            model_description: Some("need override".to_owned()),
+        }],
+        Vec::new(),
+    );
+    let echo = EchoTool;
+    let registry = ToolRegistry::new([&echo as &dyn Tool]).expect("unique test registry");
+    let mut vm = SectionVm::new_for_section(
+        &bindings,
+        &<ModelBindings as Default>::default(),
+        EXECUTION,
+        &NullObserver,
+        "Precedence",
+    )
+    .expect("captured bindings must install");
+    vm.install_captured_bindings()
+        .expect("alias globals must install");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host must inject");
+    let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
+    let mut bag = ToolBag::new(
+        tool_bindings,
+        Arc::clone(&tool_runtime),
+        vm.local_tools_handle(),
+    );
+
+    let add_plain = LuaProgram::compile(
+        "tools.add('echo')",
+        "prologue",
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
+        EXECUTION,
+        &NullObserver,
+        "Precedence",
+    )
+    .expect("prologue must compile");
+    vm.run_chunk(&add_plain, &NullObserver, "Precedence")
+        .expect("tools.add without override must succeed");
+    let prepared = bag.prepare(&registry).expect("prepare must build schemas");
+    assert_eq!(
+        prepared.schemas[0].description, "need override",
+        "the need/always override must beat the catalog text"
+    );
+
+    let add_override = LuaProgram::compile(
+        "tools.add('echo', 'add override')",
+        "prologue-2",
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
+        EXECUTION,
+        &NullObserver,
+        "Precedence",
+    )
+    .expect("second prologue must compile");
+    vm.run_chunk(&add_override, &NullObserver, "Precedence")
+        .expect("tools.add with override must succeed");
+    let prepared = bag
+        .prepare(&registry)
+        .expect("prepare after override must rebuild");
+    assert_eq!(
+        prepared.schemas[0].description, "add override",
+        "the add override must beat the need/always override"
+    );
+
+    vm.teardown(&NullObserver, "Precedence");
 }
