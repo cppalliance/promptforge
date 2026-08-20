@@ -165,7 +165,7 @@ impl FramedToolResult {
 ///
 /// Enforces, in every build (not just debug), that the two slices have equal
 /// length (count), that every call id is unique (uniqueness), and that
-/// `results[i].0 == calls[i].id` (order and id correlation). A violation is an
+/// `results[i].id() == calls[i].id` (order and id correlation). A violation is an
 /// internal invariant failure - the executor builds `results` in call order -
 /// surfaced as a concrete error rather than a truncating `zip` that could echo
 /// a result under the wrong call id.

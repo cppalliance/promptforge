@@ -152,14 +152,14 @@ impl GatewayClient {
         self
     }
 
-    /// Build a client from the environment.
+    /// Builds a client from the environment.
     ///
     /// - URL: `PROMPTFORGE_GATEWAY_URL`. Required.
     /// - Key: `PROMPTFORGE_GATEWAY_API_KEY`, the gateway's shared bearer. Required.
     ///
     /// # Errors
     /// Returns a [`CompletionError`] with `Config` kind when either variable is
-    /// not set.
+    /// not set or is set to a non-Unicode value.
     pub fn from_env() -> std::result::Result<GatewayClient, CompletionError> {
         from_env_with(|name| match std::env::var(name) {
             Ok(value) => Ok(Some(value)),

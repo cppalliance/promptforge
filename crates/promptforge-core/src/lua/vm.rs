@@ -873,7 +873,7 @@ impl SectionVm {
     /// Sets the heap ceiling (`lua_memory_bytes`) and resets the `log()` event
     /// budget (`lua_log_events`). Called by the executor right after
     /// construction, ahead of the shared replay, so the replay already spends
-    /// the caller's [`RunLimits`] rather than only the safe non-env defaults
+    /// the caller's [`crate::execute::RunLimits`] rather than only the safe non-env defaults
     /// installed in [`SectionVm::new`].
     ///
     /// # Errors

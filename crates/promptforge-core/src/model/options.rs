@@ -455,10 +455,12 @@ impl ModelBindings {
         self.default.as_deref()
     }
 
+    /// Returns the binding for `alias`, if it was declared.
     pub(crate) fn binding(&self, alias: &str) -> Option<&ModelBinding> {
         self.bindings.iter().find(|binding| binding.alias == alias)
     }
 
+    /// Builds the immutable binding set from its ordered entries and default.
     pub(crate) fn from_parts(bindings: Vec<ModelBinding>, default: Option<String>) -> Self {
         Self { bindings, default }
     }
@@ -486,7 +488,8 @@ mod tests {
     fn completion_options_equality_is_not_reflexive_for_nan() {
         // `CompletionOptions` carries an `Option<Temperature>` (an `f64` newtype)
         // temperature, so it must not implement `Eq`: a NaN temperature is not
-        // equal to itself. This test would fail to compile if `Eq` were (re)added.
+        // equal to itself. This assertion documents the violated reflexivity
+        // contract even though Rust permits a manual `Eq` implementation.
         let options = CompletionOptions {
             model: "m".to_owned(),
             temperature: Some(Temperature(f64::NAN)),

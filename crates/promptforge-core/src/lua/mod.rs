@@ -19,7 +19,7 @@
 //! run-scoped [`StoreRef`] handle threaded in from the executor, so every section
 //! in a run shares one set of virtual files even though contexts clear on each
 //! transition. A failed store op raises a Lua error, which surfaces from
-//! [`run_chunk`] as [`Error::Lua`].
+//! `SectionVm::run_chunk` as [`Error::Lua`].
 
 // These imports are re-exported `pub(crate)` so the `lua` child modules can pull
 // the full shared surface with a single `use super::*;`. The `lua` module itself

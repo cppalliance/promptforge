@@ -7,7 +7,7 @@
 //! itself; a hash member arrives as a pair table (`item.key` / `item.value`).
 //! A list section's pre-parsed items feed in through `list_from_section`:
 //! `fanout("### Worker", list_from_section("### List"))`. Arms execute
-//! concurrently on a [`tokio::task::JoinSet`]; each gets a fresh [`SectionVm`]
+//! concurrently on a [`tokio::task::JoinSet`]; each gets a fresh `SectionVm`
 //! with `item` and `sys.index` injected and `var` cloned in from the caller
 //! (arm writes never reach the caller), and runs the same engine the section
 //! walk drives: the shared VM setup, the `model:infer` hook, and the ordered

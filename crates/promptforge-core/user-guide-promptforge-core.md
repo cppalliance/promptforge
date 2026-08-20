@@ -74,7 +74,7 @@ let result = run(
 ).await?;
 ```
 
-The run resolves the H1 block once, then walks H2 sections top to bottom. A section falls through to the next when its Lua does not return a value. An explicit return stops fall-through. When execution falls off the last section, the result is the last model reply, then the generic string "done".
+The run resolves the H1 block once, then walks H2 sections top to bottom. A section falls through to the next when its Lua does not return a value. An explicit return stops fall-through. When execution falls off the last section, the result is the last model reply, or the generic string `"done"` only if no model reply exists.
 
 ### Run Configuration
 
