@@ -16,7 +16,7 @@ models.default("researcher", "A model suited for careful analysis, coding, and g
 ## Research
 
 ```lua
-tools.add("search", "fetch")
+tools.add({"search", "fetch"})
 ```
 
 You research people using live web tools and return a compact, factual summary.

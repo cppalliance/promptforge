@@ -150,9 +150,11 @@ pub(crate) fn prepare_scoped_tools(
         let tool = registry
             .get(binding.id())
             .ok_or_else(|| Error::UnknownScopedTool(binding.alias().to_owned()))?;
-        // Default model-facing text stays the registry description so bind
-        // capability strings never leak into schemas unless the author
-        // overrode `.description` on the Tool object before tools.add.
+        // Model-facing description precedence: `tools.add` override >
+        // `tools.need`/`tools.always` override > registry (catalog) text.
+        // The first two layers are already folded together by
+        // `binding_for_scope` (the H2 add runtime overwrites the frozen
+        // binding's `model_description`); the catalog fallback happens here.
         let description = binding
             .model_description()
             .unwrap_or_else(|| tool.description())

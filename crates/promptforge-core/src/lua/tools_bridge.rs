@@ -61,69 +61,66 @@ pub(crate) struct ToolsAddEntry {
     description_override: Option<String>,
 }
 
-/// Collects add entries from one `tools.add` argument.
-///
-/// Accepts a UTF-8 string, a [`LuaToolHandle`], or a sequence table of either.
-/// A Tool handle contributes a description override only when the author
-/// assigned `.description` on that object.
-pub(crate) fn push_tools_add_entry(
-    entries: &mut Vec<ToolsAddEntry>,
-    value: Value,
-) -> mlua::Result<()> {
+/// Reads one `tools.add` element as an alias: a string or a Tool handle.
+fn add_alias(value: Value) -> mlua::Result<String> {
     match value {
-        Value::String(s) => {
-            entries.push(ToolsAddEntry {
-                alias: s.to_string_lossy(),
-                description_override: None,
-            });
-            Ok(())
-        }
-        Value::UserData(ud) => {
-            let handle = ud.borrow::<LuaToolHandle>()?;
-            entries.push(ToolsAddEntry {
-                alias: handle.name().to_owned(),
-                description_override: handle.model_description_override().map(str::to_owned),
-            });
-            Ok(())
-        }
-        Value::Table(table) => {
-            for item in table.sequence_values::<Value>() {
-                match item? {
-                    Value::String(s) => entries.push(ToolsAddEntry {
-                        alias: s.to_string_lossy(),
-                        description_override: None,
-                    }),
-                    Value::UserData(ud) => {
-                        let handle = ud.borrow::<LuaToolHandle>()?;
-                        entries.push(ToolsAddEntry {
-                            alias: handle.name().to_owned(),
-                            description_override: handle
-                                .model_description_override()
-                                .map(str::to_owned),
-                        });
-                    }
-                    _ => {
-                        return Err(mlua::Error::external(
-                            "tools.add array elements must be strings or Tool objects",
-                        ));
-                    }
-                }
-            }
-            Ok(())
-        }
-        _ => Err(mlua::Error::external(
-            "tools.add expects strings, Tool objects, or arrays of either",
-        )),
+        Value::String(s) => Ok(s.to_string_lossy()),
+        Value::UserData(ud) => Ok(ud.borrow::<LuaToolHandle>()?.name().to_owned()),
+        other => Err(mlua::Error::external(format!(
+            "tools.add expects strings, Tool objects, or arrays of either, got {}",
+            other.type_name()
+        ))),
     }
 }
 
-/// Flattens a `tools.add` variadic into alias/override entries for scope.
+/// Flattens the `tools.add` arguments into alias/override entries.
+///
+/// `tools.add(alias, override?)` takes one alias (string or Tool handle) with
+/// an optional model-description override. The array form
+/// `tools.add({"a", "b"})` covers bulk and takes no per-element overrides.
 pub(crate) fn collect_tools_add_entries(args: Variadic<Value>) -> mlua::Result<Vec<ToolsAddEntry>> {
-    let mut entries = Vec::new();
-    for value in args {
-        push_tools_add_entry(&mut entries, value)?;
+    let mut args = args.into_iter();
+    let Some(target) = args.next() else {
+        return Ok(Vec::new());
+    };
+    let description_override = match args.next() {
+        None => None,
+        Some(Value::String(s)) => Some(s.to_string_lossy()),
+        Some(other) => {
+            return Err(mlua::Error::external(format!(
+                "tools.add override must be a string, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    if let Some(extra) = args.next() {
+        return Err(mlua::Error::external(format!(
+            "tools.add takes one alias plus an optional override, got extra {}",
+            extra.type_name()
+        )));
     }
-    Ok(entries)
+    match target {
+        Value::Table(table) => {
+            if description_override.is_some() {
+                return Err(mlua::Error::external(
+                    "tools.add array form takes no override",
+                ));
+            }
+            table
+                .sequence_values::<Value>()
+                .map(|item| {
+                    Ok(ToolsAddEntry {
+                        alias: add_alias(item?)?,
+                        description_override: None,
+                    })
+                })
+                .collect()
+        }
+        single => Ok(vec![ToolsAddEntry {
+            alias: add_alias(single)?,
+            description_override,
+        }]),
+    }
 }
 
 /// Builds the JSON Schema `parameters` object from a `tools.add_local` params

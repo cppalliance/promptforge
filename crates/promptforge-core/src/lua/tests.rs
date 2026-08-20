@@ -677,6 +677,47 @@ fn binding_records_exact_aliases_descriptions_identities_and_always_scope() {
 }
 
 #[test]
+fn need_and_always_record_model_description_overrides() {
+    let bindings = fixture_bindings(
+        "tools.need('web_search', 'search the web', 'need override')\n\
+             tools.need('web_fetch2', 'fetch a page')\n\
+             tools.always('web_fetch2', 'always override')",
+    );
+
+    assert_eq!(
+        bindings.bindings()[0].model_description(),
+        Some("need override"),
+        "tools.need's third argument records the model-facing override"
+    );
+    assert_eq!(
+        bindings.bindings()[1].model_description(),
+        Some("always override"),
+        "tools.always's second argument updates the recorded override"
+    );
+}
+
+#[test]
+fn tool_handles_are_frozen() {
+    let bindings = fixture_bindings("search = tools.need('search', 'search the web')");
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
+        .expect("captured bindings must install");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host must inject");
+    let error = run_scalar(
+        &vm,
+        &program("search.description = 'x'"),
+        &NullObserver,
+        "Section",
+    )
+    .expect_err("assigning .description on a Tool object must fail");
+    assert!(
+        error.to_string().contains("description"),
+        "the error must name the frozen field: {error}"
+    );
+    vm.teardown(&NullObserver, "Section");
+}
+
+#[test]
 fn tool_need_returns_inspectable_object() {
     let shared = program(
         "local tool = tools.need('search', 'search the web')\n\
@@ -804,7 +845,7 @@ fn h2_recording_closes_to_always_then_added_scope() {
              tools.need('fetch', 'fetch a page'); \
              tools.always('search')",
     );
-    let prologue = program("tools.add('fetch', 'search', 'fetch')");
+    let prologue = program("tools.add({'fetch', 'search'})");
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
@@ -857,7 +898,7 @@ fn h2_add_accepts_tool_objects_and_arrays() {
     let prologue = program(
         "tools.add(search); \
              tools.add({fetch}); \
-             tools.add(search, 'fetch', {search, fetch})",
+             tools.add({'fetch', search})",
     );
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("captured bindings must install");
@@ -876,14 +917,14 @@ fn h2_add_accepts_tool_objects_and_arrays() {
 }
 
 #[test]
-fn empty_add_is_a_no_op_and_failed_variadic_add_is_atomic() {
+fn empty_add_is_a_no_op_and_failed_bulk_add_is_atomic() {
     let bindings = fixture_bindings(
         "tools.need('search', 'search the web'); \
              tools.need('fetch', 'fetch a page')",
     );
     let prologue = program(
         "tools.add(); \
-             local ok = pcall(tools.add, 'search', 'missing'); \
+             local ok = pcall(tools.add, {'search', 'missing'}); \
              if ok then error('invalid add unexpectedly succeeded') end; \
              tools.add('fetch')",
     );
@@ -901,6 +942,46 @@ fn empty_add_is_a_no_op_and_failed_variadic_add_is_atomic() {
         ["fetch"],
         "empty add changes nothing and failed add records no partial aliases"
     );
+}
+
+#[test]
+fn add_rejects_misshapen_override_arguments() {
+    let bindings = fixture_bindings("tools.need('search', 'search the web')");
+    let prologue = program(
+        "local ok, err = pcall(tools.add, {'search'}, 'bulk override'); \
+         if ok or not string.find(tostring(err), 'array form takes no override') then \
+             error('array form with an override must fail loudly') \
+         end; \
+         local ok, err = pcall(tools.add, 'search', 42); \
+         if ok or not string.find(tostring(err), 'override must be a string') then \
+             error('a non-string override must fail loudly') \
+         end; \
+         local ok, err = pcall(tools.add, 'search', 'override', 'extra'); \
+         if ok or not string.find(tostring(err), 'one alias plus an optional override') then \
+             error('a third argument must fail loudly') \
+         end; \
+         tools.add('search')",
+    );
+    let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
+        .expect("captured bindings must install");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host must inject");
+    run_scalar(&vm, &prologue, &NullObserver, "Section")
+        .expect("rejected override forms must not poison recording");
+    let (bindings, runtime) = vm.tool_bag_handles();
+    let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
+
+    assert_eq!(
+        scope.iter().map(ToolBinding::alias).collect::<Vec<_>>(),
+        ["search"],
+        "rejected calls record nothing and the later valid add still lands"
+    );
+    assert_eq!(
+        scope[0].model_description(),
+        None,
+        "rejected overrides leave the model description untouched"
+    );
+    vm.teardown(&NullObserver, "Section");
 }
 
 #[test]
@@ -2027,22 +2108,25 @@ fn add_with_empty_frozen_needs_fails_as_undeclared() {
 }
 
 #[test]
-fn add_with_a_description_argument_fails_alias_validation() {
+fn add_with_an_override_argument_records_the_model_description() {
     let bindings = fixture_bindings("tools.need('search', 'search the web')");
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Test")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host values must inject");
-    let error = run_scalar(
+    run_scalar(
         &vm,
         &program("tools.add('search', 'Search the web for pages matching a query.')"),
         &NullObserver,
         "Test",
     )
-    .expect_err("a description passed to tools.add must fail alias validation");
-    assert!(
-        error.to_string().contains("invalid tool alias"),
-        "the error must report the invalid alias: {error}"
+    .expect("a description passed to tools.add is the model-facing override");
+    let (bindings, runtime) = vm.tool_bag_handles();
+    let scope = current_tool_bindings(&bindings, &runtime).expect("tool scope must snapshot");
+    assert_eq!(
+        scope[0].model_description(),
+        Some("Search the web for pages matching a query."),
+        "the add override must reach the scoped binding"
     );
     vm.teardown(&NullObserver, "Test");
 }
