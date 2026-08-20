@@ -30,7 +30,7 @@ use mlua::Value as LuaValue;
 
 use crate::lua::{LuaFanoutResult, LuaProgram, SectionVm};
 use crate::observe::Observer;
-use crate::store::StoreRef;
+use crate::store::{StoreRef, WriteScope};
 use crate::{Error, Result};
 
 /// What a section VM is seeded with beyond the shared host contract.
@@ -65,6 +65,9 @@ pub(crate) struct SectionVmSetup<'a> {
     /// The driver-specific seed: the walk's `var`, plus the collection
     /// `item` for an arm.
     pub(crate) seed: VmSeed<'a>,
+    /// The fanout arm's store-write identity; `None` on the walk, whose
+    /// `store.write` calls stay untracked.
+    pub(crate) write_scope: Option<WriteScope>,
     /// The observer `Arc`: the persistent host APIs (`log`, `store`) capture
     /// it, and the shared-library replay reports through it.
     pub(crate) observer_arc: &'a Arc<dyn Observer>,
@@ -119,6 +122,7 @@ where
         setup.store,
         setup.last_reply,
         setup.seed.var,
+        setup.write_scope,
     )?;
     vm.install_host_apis(setup.observer_arc, setup.section_name)?;
     if let Some(item) = setup.seed.item {

@@ -1,6 +1,6 @@
 use super::{
     Arc, AtomicU32, AtomicUsize, Error, LUA_LOG_CHARACTER_LIMIT, Lua, MultiValue, Observation,
-    Observer, Ordering, Result, StoreRef, Value, detail,
+    Observer, Ordering, Result, StoreRef, Value, WriteScope, detail,
 };
 
 /// Shared body of the persistent per-section `log(message)` host callback.
@@ -209,6 +209,12 @@ fn read_store_numbered(
 /// The `StoreRef` handle locks a mutex internally per call and is synchronous, so
 /// nothing is held across an await.
 ///
+/// A fanout arm's table carries its [`WriteScope`]: `store.write` goes
+/// through [`StoreRef::write_scoped`], so two arms of one fanout writing the
+/// same path fail the second writer with a write-write race error. Every
+/// other caller (walk sections, H1) installs with `None` and writes
+/// untracked.
+///
 /// [`StoreError`]: crate::store::StoreError
 ///
 /// # Errors
@@ -225,6 +231,7 @@ pub(crate) fn install_store_table(
     execution: &str,
     observer: &Arc<dyn Observer>,
     section: &str,
+    write_scope: Option<WriteScope>,
 ) -> Result<()> {
     let table = lua.create_table().map_err(Error::lua)?;
     let reporter = Arc::new(StoreReporter {
@@ -237,7 +244,10 @@ pub(crate) fn install_store_table(
     let report = Arc::clone(&reporter);
     let write = lua
         .create_function(move |_, (path, contents): (String, String)| {
-            let result = handle.write(&path, &contents);
+            let result = match write_scope {
+                Some(scope) => handle.write_scoped(&path, &contents, scope),
+                None => handle.write(&path, &contents),
+            };
             report.report(
                 result.is_ok(),
                 detail::STORE_WRITE_SUCCEEDED,

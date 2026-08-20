@@ -55,7 +55,7 @@ use crate::lua::{LuaFanoutResult, LuaProgram, SectionVm, ToolBindings, resolve_s
 use crate::model::ModelBindings;
 use crate::observe::{Observer, detail};
 use crate::parser::{Prompt, Section};
-use crate::store::StoreRef;
+use crate::store::{StoreRef, WriteScope};
 use crate::tools::SharedTools;
 use crate::{Error, Result};
 use mlua::Value as LuaValue;
@@ -378,6 +378,9 @@ async fn run_one_section(
             var: Some(var),
             item: None,
         },
+        // Walk-section store writes are untracked; only fanout arms carry a
+        // write scope.
+        None,
         &section.name,
     );
     if let Err(error) = setup_section_vm(
@@ -738,12 +741,14 @@ impl ControlContext {
     /// run-wide slots (`args`, `store`, `observer`, `shared`)
     /// from this context so the field list lives in one place; the driver
     /// supplies only its own deltas: the `sys` JSON, the incoming reply, the
-    /// seed, and the section name.
+    /// seed, the store-write scope (a fanout arm's identity; `None` on the
+    /// walk), and the section name.
     pub(crate) fn vm_setup<'a>(
         &'a self,
         sys: &'a serde_json::Value,
         last_reply: Option<&'a str>,
         seed: VmSeed<'a>,
+        write_scope: Option<WriteScope>,
         section_name: &'a str,
     ) -> SectionVmSetup<'a> {
         SectionVmSetup {
@@ -752,6 +757,7 @@ impl ControlContext {
             store: &self.store,
             last_reply,
             seed,
+            write_scope,
             observer_arc: &self.observer,
             section_name,
             shared: &self.shared,

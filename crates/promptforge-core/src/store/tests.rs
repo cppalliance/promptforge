@@ -104,6 +104,47 @@ fn read_missing_file_errors() {
 }
 
 #[test]
+fn scoped_writes_reject_a_second_arm_of_one_fanout() {
+    // Note 74: the write registry records each scoped write's (fanout token,
+    // arm index). A second arm of the same fanout writing the same path is a
+    // hard write-write race; the same arm rewriting, a later fanout's write,
+    // and untracked writes all stay legal.
+    let store = StoreRef::memory();
+    let token = store.next_write_token();
+    let arm_one = WriteScope::new(token, 1);
+    let arm_two = WriteScope::new(token, 2);
+    store
+        .write_scoped("a.txt", "one", arm_one)
+        .expect("first write");
+    store
+        .write_scoped("a.txt", "uno", arm_one)
+        .expect("the same arm may rewrite its own path");
+    let err = store
+        .write_scoped("a.txt", "two", arm_two)
+        .expect_err("a second arm of the same fanout must race");
+    assert_eq!(err.kind(), StoreErrorKind::WriteRace);
+    assert_eq!(err.path(), Some("a.txt"));
+    assert!(
+        err.to_string().contains("another arm of the same fanout"),
+        "error was: {err}"
+    );
+    // The raced write never reached the backend.
+    assert_eq!(store.read("a.txt").expect("read"), "uno");
+    // A later fanout overwrites the record, so sequential fanouts stay legal.
+    let later = WriteScope::new(store.next_write_token(), 1);
+    store
+        .write_scoped("a.txt", "new", later)
+        .expect("a later fanout may write the path");
+    assert_eq!(store.read("a.txt").expect("read"), "new");
+    // Untracked writes neither record nor race.
+    store
+        .write("a.txt", "walk")
+        .expect("walk-section writes are untracked");
+    store.append("a.txt", "+").expect("append is untracked");
+    assert_eq!(store.read("a.txt").expect("read"), "walk+");
+}
+
+#[test]
 fn read_range_with_start_only_reads_to_end() {
     let store = StoreRef::memory();
     store.write("a.txt", "one\ntwo\nthree\n").expect("write");

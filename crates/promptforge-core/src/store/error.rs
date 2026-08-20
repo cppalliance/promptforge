@@ -77,6 +77,8 @@ pub enum StoreErrorKind {
     InvalidPattern,
     /// A caller-supplied line range failed validation.
     InvalidRange,
+    /// Two arms of one fanout wrote the same path.
+    WriteRace,
     /// The backend itself failed.
     Backend,
 }
@@ -164,6 +166,15 @@ pub enum StoreError {
         reason: &'static str,
     },
 
+    /// Two arms of one fanout wrote the same path: a write-write race. The
+    /// losing write never reached the backend.
+    #[error("write-write race on {path}: another arm of the same fanout already wrote it")]
+    #[non_exhaustive]
+    WriteRace {
+        /// The logical path both arms wrote.
+        path: String,
+    },
+
     /// The backend failed for a reason of its own, kept as an opaque source.
     #[error("store backend failure")]
     #[non_exhaustive]
@@ -195,6 +206,7 @@ impl StoreError {
             StoreError::InvalidPath { .. } => StoreErrorKind::InvalidPath,
             StoreError::InvalidPattern { .. } => StoreErrorKind::InvalidPattern,
             StoreError::InvalidRange { .. } => StoreErrorKind::InvalidRange,
+            StoreError::WriteRace { .. } => StoreErrorKind::WriteRace,
             StoreError::Backend { .. } => StoreErrorKind::Backend,
         }
     }
@@ -230,7 +242,8 @@ impl StoreError {
             | StoreError::AnchorNotFound { path, .. }
             | StoreError::AnchorAmbiguous { path, .. }
             | StoreError::InvalidPath { path, .. }
-            | StoreError::InvalidRange { path, .. } => Some(path),
+            | StoreError::InvalidRange { path, .. }
+            | StoreError::WriteRace { path } => Some(path),
             StoreError::InvalidPattern { .. } | StoreError::Backend { .. } => None,
         }
     }
