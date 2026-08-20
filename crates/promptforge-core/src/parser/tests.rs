@@ -4,6 +4,24 @@ use super::list::parse_bullet_items;
 use super::*;
 use crate::observe::{NullObserver, Observation, detail};
 
+fn prompt_src(body: &str) -> String {
+    format!("---\nname: x\ndescription: d\n---\n\n# T\n\n{body}")
+}
+
+fn assert_runtime_error_line(program: &LuaProgram, absolute_line: u32) {
+    let lua = mlua::Lua::new();
+    let function = program.load(&lua).expect("bytecode must load");
+    let raw_error = function
+        .call::<()>(())
+        .expect_err("assert(false) must fail");
+    let mapped = program.map_runtime_error(&raw_error);
+    let msg = mapped.to_string();
+    assert!(
+        msg.contains(&format!(":{absolute_line}:")),
+        "error must contain absolute line {absolute_line}: {msg}"
+    );
+}
+
 #[test]
 fn invalid_frontmatter_preserves_the_yaml_cause_as_source() {
     // error.rs F3: a malformed-YAML frontmatter must classify as
@@ -183,8 +201,9 @@ fn parses_single_minimal_section() {
 
 #[test]
 fn name_and_description_are_sufficient_frontmatter_for_parsing() {
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\np\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).expect("minimum frontmatter must parse");
+    let src = prompt_src("## S\n\np\n");
+    let prompt =
+        Prompt::parse(&src, "test", &NullObserver).expect("minimum frontmatter must parse");
     assert_eq!(prompt.frontmatter.name, "x");
 }
 
@@ -947,8 +966,8 @@ fn bullet_parser_rejects_empty_item() {
 
 #[test]
 fn list_h3_parses_items_at_load_time() {
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Parent\n\np\n\n### Items\n\n- alpha\n- beta\n";
-    let p = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let src = prompt_src("## Parent\n\np\n\n### Items\n\n- alpha\n- beta\n");
+    let p = Prompt::parse(&src, "test", &NullObserver).unwrap();
     let items_section = &p.sections[0].children[0];
     assert_eq!(items_section.name, "Items");
     assert_eq!(items_section.items, vec!["alpha", "beta"]);
@@ -956,8 +975,10 @@ fn list_h3_parses_items_at_load_time() {
 
 #[test]
 fn non_list_h3_has_empty_items() {
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Parent\n\np\n\n### Worker\n\n```lua\nreturn item\n```\n\nDo work on {{ item }}.\n";
-    let p = Prompt::parse(src, "test", &NullObserver).unwrap();
+    let src = prompt_src(
+        "## Parent\n\np\n\n### Worker\n\n```lua\nreturn item\n```\n\nDo work on {{ item }}.\n",
+    );
+    let p = Prompt::parse(&src, "test", &NullObserver).unwrap();
     let worker = &p.sections[0].children[0];
     assert_eq!(worker.name, "Worker");
     assert!(worker.items.is_empty());
@@ -981,8 +1002,8 @@ fn epilog_source_line_maps_runtime_error_to_absolute_line() {
     // 13: local a = 1  <- epilog line 1 (source_line = 13)
     // 14: assert(false) <- epilog line 2 (absolute = 14)
     // 15: ```
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Check\n\nAsk the model.\n\n```lua\nlocal a = 1\nassert(false)\n```\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
+    let src = prompt_src("## Check\n\nAsk the model.\n\n```lua\nlocal a = 1\nassert(false)\n```\n");
+    let prompt = Prompt::parse(&src, "test", &NullObserver).expect("prompt must parse");
     let epilog = prompt
         .entry()
         .expect("has sections")
@@ -998,17 +1019,7 @@ fn epilog_source_line_maps_runtime_error_to_absolute_line() {
 
     // Simulate a runtime error: assert(false) is on chunk line 2.
     // Absolute line = 13 + 2 - 1 = 14.
-    let lua = mlua::Lua::new();
-    let function = epilog.load(&lua).expect("bytecode must load");
-    let raw_error = function
-        .call::<()>(())
-        .expect_err("assert(false) must fail");
-    let mapped = epilog.map_runtime_error(&raw_error);
-    let msg = mapped.to_string();
-    assert!(
-        msg.contains(":14:"),
-        "error must contain absolute line 14: {msg}"
-    );
+    assert_runtime_error_line(epilog, 14);
 }
 
 #[test]
@@ -1028,8 +1039,8 @@ fn prologue_source_line_maps_correctly() {
     // 12: ```
     // 13: (empty)
     // 14: Do the work.
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## Work\n\n```lua\nassert(false)\n```\n\nDo the work.\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
+    let src = prompt_src("## Work\n\n```lua\nassert(false)\n```\n\nDo the work.\n");
+    let prompt = Prompt::parse(&src, "test", &NullObserver).expect("prompt must parse");
     let prologue = prompt
         .entry()
         .expect("has sections")
@@ -1042,17 +1053,7 @@ fn prologue_source_line_maps_correctly() {
         "prologue Lua starts on line 11"
     );
 
-    let lua = mlua::Lua::new();
-    let function = prologue.load(&lua).expect("bytecode must load");
-    let raw_error = function
-        .call::<()>(())
-        .expect_err("assert(false) must fail");
-    let mapped = prologue.map_runtime_error(&raw_error);
-    let msg = mapped.to_string();
-    assert!(
-        msg.contains(":11:"),
-        "error must contain absolute line 11: {msg}"
-    );
+    assert_runtime_error_line(prologue, 11);
 }
 
 #[test]
@@ -1071,8 +1072,9 @@ fn multi_line_chunk_maps_inner_line_correctly() {
     // 14: local y = 2
     // 15: assert(false)  <- chunk line 3, absolute = 13 + 3 - 1 = 15
     // 16: ```
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n## S\n\nProse.\n\n```lua\nlocal x = 1\nlocal y = 2\nassert(false)\n```\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
+    let src =
+        prompt_src("## S\n\nProse.\n\n```lua\nlocal x = 1\nlocal y = 2\nassert(false)\n```\n");
+    let prompt = Prompt::parse(&src, "test", &NullObserver).expect("prompt must parse");
     let epilog = prompt
         .entry()
         .expect("has sections")
@@ -1081,17 +1083,7 @@ fn multi_line_chunk_maps_inner_line_correctly() {
 
     assert_eq!(epilog.source_line().get(), 13);
 
-    let lua = mlua::Lua::new();
-    let function = epilog.load(&lua).expect("bytecode must load");
-    let raw_error = function
-        .call::<()>(())
-        .expect_err("assert(false) must fail");
-    let mapped = epilog.map_runtime_error(&raw_error);
-    let msg = mapped.to_string();
-    assert!(
-        msg.contains(":15:"),
-        "error must contain absolute line 15: {msg}"
-    );
+    assert_runtime_error_line(epilog, 15);
 }
 
 #[test]
@@ -1112,8 +1104,8 @@ fn shared_library_source_line_is_correct() {
     // 13: ## S
     // 14: (empty)
     // 15: p
-    let src = "---\nname: x\ndescription: d\n---\n\n# T\n\n```lua shared\nfunction f()\nend\n```\n\n## S\n\np\n";
-    let prompt = Prompt::parse(src, "test", &NullObserver).expect("prompt must parse");
+    let src = prompt_src("```lua shared\nfunction f()\nend\n```\n\n## S\n\np\n");
+    let prompt = Prompt::parse(&src, "test", &NullObserver).expect("prompt must parse");
     let replay = prompt.replay.as_ref().expect("replay must exist");
     assert_eq!(replay.source_line().get(), 9, "shared Lua starts on line 9");
 }

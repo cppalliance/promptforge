@@ -2,12 +2,16 @@ use serde_json::{Value, json};
 
 use super::{Tool, ToolError, ToolId, ToolOutput, ToolRegistry, ToolRegistryErrorKind};
 
+fn inspect_id() -> ToolId {
+    ToolId::new("fixtures", "inspect").expect("fixture id is valid")
+}
+
 struct FixtureTool;
 
 #[async_trait::async_trait]
 impl Tool for FixtureTool {
     fn id(&self) -> ToolId {
-        ToolId::new("fixtures", "inspect").expect("fixture id is valid")
+        inspect_id()
     }
 
     #[expect(
@@ -119,10 +123,7 @@ fn tool_error_classifies_and_hides_source() {
 fn descriptor_surface_preserves_identity_description_and_schema() {
     let tool = FixtureTool;
 
-    assert_eq!(
-        tool.id(),
-        ToolId::new("fixtures", "inspect").expect("valid id")
-    );
+    assert_eq!(tool.id(), inspect_id());
     assert_eq!(tool.wire_name(), "inspect_wire");
     assert_eq!(tool.description(), "Inspect a fixture.");
     assert_eq!(
@@ -141,7 +142,7 @@ fn registry_lookup_uses_stable_identity_not_wire_name() {
     let registry = ToolRegistry::new([&tool as &dyn Tool]).expect("unique registry");
 
     let found = registry
-        .get(&ToolId::new("fixtures", "inspect").expect("valid id"))
+        .get(&inspect_id())
         .expect("the stable identity should resolve");
     assert_eq!(found.wire_name(), "inspect_wire");
     assert!(
@@ -176,7 +177,7 @@ fn registry_preserves_order_and_first_match_lookup() {
     assert_eq!(registry.len(), 2);
     assert_eq!(
         registry
-            .get(&ToolId::new("fixtures", "inspect").expect("valid id"))
+            .get(&inspect_id())
             .expect("the identity should resolve")
             .wire_name(),
         "first_inspect",
@@ -198,7 +199,7 @@ fn registry_rejects_duplicate_tool_ids() {
     assert_eq!(error.kind(), ToolRegistryErrorKind::DuplicateId);
     assert_eq!(
         error.duplicate_id(),
-        Some(&ToolId::new("fixtures", "inspect").expect("valid id")),
+        Some(&inspect_id()),
         "the error must name the duplicated identity"
     );
 }

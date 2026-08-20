@@ -30,23 +30,9 @@ Ask the model.\n";
         picker_catalog: None,
     };
 
-    let out = run(
-        &prompt,
-        "",
-        &[],
-        &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
-    )
-    .await
-    .unwrap();
+    let out = run(&prompt, "", &[], &StoreRef::memory(), gatewayed(addr))
+        .await
+        .unwrap();
     assert_eq!(out, "hello from the mock");
 
     let body = gateway
@@ -76,10 +62,7 @@ async fn an_explicit_client_is_used_instead_of_the_environment() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
+            client: Some(gateway_client(addr)),
             debug: None,
         },
     )
@@ -165,10 +148,7 @@ async fn epilog_runs_after_reply_and_can_return() {
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
+            client: Some(gateway_client(addr)),
             debug: None,
         },
     )
@@ -307,10 +287,7 @@ Ask using {{ var.question }}.\n\n\
         RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
+            client: Some(gateway_client(addr)),
             debug: None,
         },
     )
@@ -468,15 +445,7 @@ async fn prose_substitution_sees_sys_model_catalog_id() {
         "",
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .unwrap();
@@ -524,15 +493,7 @@ async fn fanout_arm_epilog_sees_sys_model_catalog_id() {
         "",
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .unwrap();
@@ -554,15 +515,7 @@ async fn fanout_item_substitution_renders_a_table_member_as_compact_json() {
         "",
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .unwrap();
@@ -596,15 +549,7 @@ async fn reply_carries_forward_to_next_section_prologue() {
         "",
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .unwrap();
@@ -625,15 +570,7 @@ async fn reply_substitution_in_prose_uses_previous_section_reply() {
         "",
         &[],
         &StoreRef::memory(),
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
+        gatewayed(addr),
     )
     .await
     .unwrap();
@@ -704,22 +641,7 @@ fn analyst_only_catalog() -> ModelCatalog {
 
 /// Run a parsed prompt against a scripted gateway with no external tools.
 async fn run_with_gateway(test: &TestPrompt, addr: SocketAddr, store: &StoreRef) -> Result<String> {
-    run(
-        test,
-        "",
-        &[],
-        store,
-        RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        },
-    )
-    .await
+    run(test, "", &[], store, gatewayed(addr)).await
 }
 
 #[tokio::test]

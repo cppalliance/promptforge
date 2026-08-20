@@ -223,79 +223,49 @@ mod tests {
     use super::*;
     use crate::client::CompletionResult;
 
-    #[test]
-    fn sole_tool_code_fence_becomes_tool_calls() {
-        let dialect = Gemma3ToolCodeDialect;
+    /// Parses one assistant content string and returns its classified tool calls.
+    fn parse_turn(content: &str) -> Vec<ToolCall> {
         let body = serde_json::json!({
             "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "```tool_code\nsearch(query=\"C++ Alliance founder\")\n```"
-                },
-                "finish_reason": "stop"
+                "message": { "role": "assistant", "content": content }
             }]
         });
-        let turn = dialect.parse_turn(&body).unwrap();
-        match turn.outcome {
-            CompletionResult::ToolCalls(calls) => {
-                assert_eq!(calls.len(), 1);
-                assert_eq!(calls[0].id, "call_tool_code_0");
-                assert_eq!(calls[0].name, "search");
-                assert_eq!(
-                    calls[0].arguments,
-                    serde_json::json!({ "query": "C++ Alliance founder" })
-                );
-            }
+        match Gemma3ToolCodeDialect.parse_turn(&body).unwrap().outcome {
+            CompletionResult::ToolCalls(calls) => calls,
             CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
         }
+    }
+
+    #[test]
+    fn sole_tool_code_fence_becomes_tool_calls() {
+        let calls = parse_turn("```tool_code\nsearch(query=\"C++ Alliance founder\")\n```");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_tool_code_0");
+        assert_eq!(calls[0].name, "search");
+        assert_eq!(
+            calls[0].arguments,
+            serde_json::json!({ "query": "C++ Alliance founder" })
+        );
     }
 
     #[test]
     fn positional_search_maps_to_query() {
-        let dialect = Gemma3ToolCodeDialect;
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "```tool_code\nsearch(\"C++ Alliance organization\")\n```"
-                }
-            }]
-        });
-        let turn = dialect.parse_turn(&body).unwrap();
-        match turn.outcome {
-            CompletionResult::ToolCalls(calls) => {
-                assert_eq!(calls[0].name, "search");
-                assert_eq!(
-                    calls[0].arguments,
-                    serde_json::json!({ "query": "C++ Alliance organization" })
-                );
-            }
-            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
-        }
+        let calls = parse_turn("```tool_code\nsearch(\"C++ Alliance organization\")\n```");
+        assert_eq!(calls[0].name, "search");
+        assert_eq!(
+            calls[0].arguments,
+            serde_json::json!({ "query": "C++ Alliance organization" })
+        );
     }
 
     #[test]
     fn positional_fetch_maps_to_url() {
-        let dialect = Gemma3ToolCodeDialect;
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "```tool_code\nfetch(\"https://cppalliance.org\")\n```"
-                }
-            }]
-        });
-        let turn = dialect.parse_turn(&body).unwrap();
-        match turn.outcome {
-            CompletionResult::ToolCalls(calls) => {
-                assert_eq!(calls[0].name, "fetch");
-                assert_eq!(
-                    calls[0].arguments,
-                    serde_json::json!({ "url": "https://cppalliance.org" })
-                );
-            }
-            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
-        }
+        let calls = parse_turn("```tool_code\nfetch(\"https://cppalliance.org\")\n```");
+        assert_eq!(calls[0].name, "fetch");
+        assert_eq!(
+            calls[0].arguments,
+            serde_json::json!({ "url": "https://cppalliance.org" })
+        );
     }
 
     #[test]
@@ -337,26 +307,14 @@ mod tests {
 
     #[test]
     fn fenced_json_tool_calls_parsed() {
-        let dialect = Gemma3ToolCodeDialect;
-        let body = serde_json::json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "```json\n{\"tool_calls\":[{\"id\":\"1\",\"type\":\"function\",\"function\":{\"name\":\"fetch\",\"arguments\":\"{\\\"url\\\":\\\"https://example.com\\\"}\"}}]}\n```"
-                }
-            }]
-        });
-        let turn = dialect.parse_turn(&body).unwrap();
-        match turn.outcome {
-            CompletionResult::ToolCalls(calls) => {
-                assert_eq!(calls[0].name, "fetch");
-                assert_eq!(
-                    calls[0].arguments,
-                    serde_json::json!({ "url": "https://example.com" })
-                );
-            }
-            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
-        }
+        let calls = parse_turn(
+            "```json\n{\"tool_calls\":[{\"id\":\"1\",\"type\":\"function\",\"function\":{\"name\":\"fetch\",\"arguments\":\"{\\\"url\\\":\\\"https://example.com\\\"}\"}}]}\n```",
+        );
+        assert_eq!(calls[0].name, "fetch");
+        assert_eq!(
+            calls[0].arguments,
+            serde_json::json!({ "url": "https://example.com" })
+        );
     }
 
     #[test]
@@ -414,21 +372,12 @@ mod tests {
     fn backticks_inside_quoted_value_do_not_close_fence() {
         // A ``` inside a quoted argument value must not terminate the fence at
         // the first triple-backtick; only a standalone ``` line closes it.
-        let dialect = Gemma3ToolCodeDialect;
-        let body = serde_json::json!({
-            "choices": [{ "message": { "content": "```tool_code\necho(value=\"a ``` b\")\n```" } }]
-        });
-        let turn = dialect.parse_turn(&body).unwrap();
-        match turn.outcome {
-            CompletionResult::ToolCalls(calls) => {
-                assert_eq!(calls.len(), 1);
-                assert_eq!(
-                    calls[0].arguments,
-                    serde_json::json!({ "value": "a ``` b" })
-                );
-            }
-            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
-        }
+        let calls = parse_turn("```tool_code\necho(value=\"a ``` b\")\n```");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].arguments,
+            serde_json::json!({ "value": "a ``` b" })
+        );
     }
 
     #[test]
@@ -539,24 +488,15 @@ mod tests {
 
     #[test]
     fn consecutive_fences_mint_unique_ids() {
-        let dialect = Gemma3ToolCodeDialect;
         let content =
             "```tool_code\nsearch(query=\"a\")\n```\n\n```tool_code\nfetch(\"https://x\")\n```";
-        let body = serde_json::json!({
-            "choices": [{ "message": { "role": "assistant", "content": content } }]
-        });
-        let turn = dialect.parse_turn(&body).unwrap();
-        match turn.outcome {
-            CompletionResult::ToolCalls(calls) => {
-                assert_eq!(calls.len(), 2);
-                assert_eq!(calls[0].id, "call_tool_code_0");
-                assert_eq!(
-                    calls[1].id, "call_tool_code_1",
-                    "ids must not restart per fence"
-                );
-            }
-            CompletionResult::Text(text) => panic!("expected tool calls, got text: {text}"),
-        }
+        let calls = parse_turn(content);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].id, "call_tool_code_0");
+        assert_eq!(
+            calls[1].id, "call_tool_code_1",
+            "ids must not restart per fence"
+        );
     }
 
     #[test]

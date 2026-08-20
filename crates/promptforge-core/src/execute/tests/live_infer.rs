@@ -283,10 +283,7 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
         to_config(RunOptions {
             execution: EXECUTION,
             observer: Arc::clone(&recorder) as Arc<dyn Observer>,
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
+            client: Some(gateway_client(addr)),
             debug: None,
         }),
     )
@@ -351,11 +348,7 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
         &StoreRef::memory(),
         RunConfig::new(EXECUTION)
             .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
-            .client(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{}/v1", gateway.addr()))
-                    .expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            ))
+            .client(gateway_client(gateway.addr()))
             .cancel(cancel),
     )
     .await
@@ -456,15 +449,7 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
         ResolutionContext::new(&picker, &models),
         &tools,
         &StoreRef::memory(),
-        to_config(RunOptions {
-            execution: EXECUTION,
-            observer: Arc::new(NullObserver),
-            client: Some(GatewayClient::new(
-                GatewayEndpoint::new(&format!("http://{addr}/v1")).expect("valid test endpoint"),
-                SecretString::new("test").expect("non-empty test key"),
-            )),
-            debug: None,
-        }),
+        to_config(gatewayed(addr)),
     )
     .await
     .expect("live H1 prose must preserve block semantics");
