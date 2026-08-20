@@ -398,7 +398,8 @@ async fn empty_prose_skips_model_but_runs_epilog_with_nil_reply() {
 async fn whitespace_only_prose_skips_model_without_binding() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n\
-## Only\n\n```lua\nif reply ~= nil then error('whitespace prose must not bind a reply') end\nreturn 'ok'\n```\n\n   \n\t\n";
+## Only\n\n```lua\n-- prologue\n```\n\n   \n\t\n\n\
+```lua\nif reply ~= nil then error('whitespace prose must not bind a reply') end\nreturn 'ok'\n```\n";
     assert_eq!(
         run(&fixture(md), "", &[], &StoreRef::memory(), silent())
             .await
@@ -456,18 +457,6 @@ async fn prologue_sys_model_unknown_before_scope_close() {
 }
 
 #[tokio::test]
-async fn epilog_sees_sys_model_catalog_id_not_alias() {
-    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
-## Only\n\n```lua\n-- prologue\n```\n\n```lua\nreturn sys.model\n```\n\n";
-    assert_eq!(
-        run(&bound_for_model(md), "", &[], &StoreRef::memory(), silent())
-            .await
-            .unwrap(),
-        "claude-sonnet-4-6"
-    );
-}
-
-#[tokio::test]
 async fn prose_substitution_sees_sys_model_catalog_id() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\n-- prologue\n```\n\nModel id is {{ sys.model }}.\n\n\
@@ -508,7 +497,7 @@ async fn prose_substitution_sees_sys_model_catalog_id() {
 }
 
 #[tokio::test]
-async fn empty_prose_epilog_sees_sys_model_when_binding_present() {
+async fn empty_prose_epilog_sees_model_catalog_id_not_alias() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 ## Only\n\n```lua\n-- prologue\n```\n\n```lua\nreturn sys.model\n```\n\n";
     assert_eq!(
