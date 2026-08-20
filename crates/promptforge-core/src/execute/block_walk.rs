@@ -73,7 +73,10 @@ pub(crate) enum BlockRunMode<'a> {
 /// loop. The conversation, the tool-call counts, and the one-time model
 /// resolution (with its `sys` model enrichment) are walk-local state
 /// installed at the first prose block. The reply starts at `incoming_reply`
-/// and rolls forward as prose produces text; `sys` arrives as the driver's
+/// and rolls forward as prose produces text; after each Lua chunk the walk
+/// reads the VM's `reply` global back, so an author's `reply = nil` (or a
+/// custom string) steers what a jump target or the next section sees.
+/// `sys` arrives as the driver's
 /// JSON and is enriched in place with the model binding and each outcome's
 /// finish reason. Prose substitution resolves `{{ item }}` against
 /// `ctx.item`, which is `Some` only when the driver is a fanout arm, and an
@@ -119,8 +122,10 @@ pub(crate) async fn run_one_section_impl(
     // its `None` check below is the one model-required gate.
     let mut completion_options: Option<CompletionOptions> = None;
     // The reply visible to this walk's prose. It starts at the incoming
-    // reply and rolls forward as prose produces text, so both the `{{reply}}`
-    // substitution and the Lua `reply` global stay consistent within a walk.
+    // reply and rolls forward as prose produces text, and after each
+    // section-mode Lua chunk it is read back from the VM's `reply` global,
+    // so both the `{{reply}}` substitution and the Lua `reply` global stay
+    // consistent within a walk and an author's `reply = nil` takes effect.
     let mut reply: Option<String> = incoming_reply.map(str::to_owned);
 
     for block in blocks {
@@ -142,9 +147,19 @@ pub(crate) async fn run_one_section_impl(
                         LuaBlockResult::Returned(Some(value)) => {
                             return Ok(SectionFlow::Returned(value));
                         }
-                        LuaBlockResult::Returned(None) => {}
+                        // The `reply` global is the author-writable shadow of
+                        // the walk-local reply: seeded at host injection and
+                        // rebound after prose, so reading it back after each
+                        // chunk honors an author's `reply = nil` (or a custom
+                        // string) at fall-through and across a jump.
+                        LuaBlockResult::Returned(None) => {
+                            reply = vm.reply()?;
+                        }
                         LuaBlockResult::Jump(heading) => {
-                            return Ok(SectionFlow::Jumped { heading, reply });
+                            return Ok(SectionFlow::Jumped {
+                                heading,
+                                reply: vm.reply()?,
+                            });
                         }
                     }
                 }
