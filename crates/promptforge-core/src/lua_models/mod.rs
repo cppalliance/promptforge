@@ -22,7 +22,9 @@ use decode::{parse_need_args, parse_single_alias, validate_alias};
 /// [`ModelsInferHook`] app data.
 ///
 /// Shared by the live H1 and H2 `models` tables; the hook carries everything
-/// else (current-model resolution, gateway client, section identity).
+/// else (current-model resolution, gateway client, section identity). The
+/// call runs the one infer shape: a single tool-free round on a fresh
+/// conversation that never sets `reply` or touches `sys`.
 fn call_models_infer_hook(lua: &Lua, prompt: &str) -> mlua::Result<String> {
     let hook = lua
         .app_data_ref::<ModelsInferHook>()

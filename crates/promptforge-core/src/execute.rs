@@ -48,7 +48,7 @@
 //! focused private children: `error` (the public [`RunError`]), `config`
 //! (`RunConfig`/`RunLimits`), `gateway` (client acquisition and
 //! [`ResolutionContext`]), `scope` (tool-scope analysis and validation),
-//! `tools` (the `model:infer` bag and hook), `tool_loop` (the model tool
+//! `tools` (the nested-inference hook), `tool_loop` (the model tool
 //! loop), `h1` (the live H1 pass), `section_vm` (the section VM setup half
 //! shared by the walk and the fanout arm), `block_walk` (the ordered block
 //! loop - the engine's walk half, shared by the live H1 pass, the walk, and
@@ -113,7 +113,7 @@ pub(crate) use gateway::env_client_with_limits;
 #[cfg(test)]
 pub(crate) use scope::OwnedNearDuplicate;
 #[cfg(test)]
-pub(crate) use scope::prepare_effective_scope;
+pub(crate) use scope::{prepare_effective_scope, prepare_scoped_tools};
 #[cfg(test)]
 pub(crate) use serde_json::json;
 #[cfg(test)]
@@ -121,9 +121,7 @@ pub(crate) use std::collections::BTreeMap;
 #[cfg(test)]
 pub(crate) use support::{advance_turn, bridge_blocking, now_rfc3339_checked};
 #[cfg(test)]
-pub(crate) use tool_loop::{SectionProgress, run_tool_loop};
-#[cfg(test)]
-pub(crate) use tools::ToolBag;
+pub(crate) use tool_loop::{LocalDispatch, ProseMode, SectionProgress, run_prose_inference};
 
 use crate::Error;
 use crate::cancel;

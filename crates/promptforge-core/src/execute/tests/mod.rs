@@ -19,7 +19,7 @@ use serde_json::Value;
 use super::*;
 use crate::client::{GatewayClient, GatewayEndpoint, SecretString};
 use crate::debug::DebugCapture;
-use crate::lua::LuaProgram;
+use crate::lua::{LuaProgram, current_tool_bindings};
 use crate::model::{CompletionOptions, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use crate::observe::{NullObserver, Observation, detail};
 use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput, ToolRegistry};
@@ -798,6 +798,199 @@ fn dispatch_for(tools: &[&dyn Tool]) -> BTreeMap<String, ToolId> {
         .collect()
 }
 
+/// The test-only port of the deleted production `run_tool_loop` wrapper: a
+/// fresh conversation looping until text, with exhaustion surfaced as
+/// [`Error::ToolLoopExhausted`]. The loop tests keep their original call
+/// shape through this shim over [`run_prose_inference`].
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shim mirrors the deleted wrapper's borrowed loop context"
+)]
+async fn run_tool_loop(
+    client: &GatewayClient,
+    schemas: &[ToolSchema],
+    dispatch: &BTreeMap<String, ToolId>,
+    registry: &ToolRegistry<'_>,
+    prose: String,
+    max_tool_iterations: usize,
+    progress: SectionProgress<'_>,
+    counts: Option<&ToolCallCounts>,
+    global_aliases: Option<&BTreeMap<String, ToolId>>,
+    local_dispatch: Option<&LocalDispatch<'_>>,
+) -> Result<(String, Option<String>)> {
+    let mut conversation = Vec::new();
+    let outcome = run_prose_inference(
+        client,
+        schemas,
+        dispatch,
+        registry,
+        &mut conversation,
+        prose,
+        ProseMode::Loop {
+            max_tool_iterations,
+        },
+        progress,
+        counts,
+        global_aliases,
+        local_dispatch,
+    )
+    .await?;
+    match outcome.text {
+        Some(text) => Ok((text, outcome.finish_reason)),
+        None => Err(Error::ToolLoopExhausted),
+    }
+}
+
+// --- Schema description overrides (ported from the deleted tool_bag.rs) ---
+//
+// `ToolBag::prepare` wrapped exactly this construction -
+// `current_tool_bindings` plus `prepare_scoped_tools` - so the schema-level
+// override coverage ports onto the prose path's scope building directly. The
+// bag's generation cache is deleted with the bag, so the cache test has no
+// behavior left to port; per-block scope rebuilds stay covered by the
+// tool-scoping and fanout-arm suites.
+
+/// The catalog text is advertised when no override exists at any layer, and a
+/// `tools.add` override reaches the advertised schema.
+#[test]
+fn tool_description_override_appears_in_model_schema() {
+    let bindings = crate::lua::ToolBindings::for_test(
+        vec![crate::lua::ToolBinding::for_test(
+            "echo",
+            "echo capability for live matching",
+            ToolId::new("tests", "echo").expect("valid id"),
+        )],
+        Vec::new(),
+    );
+    let echo = EchoTool;
+    let registry = ToolRegistry::new([&echo as &dyn Tool]).expect("unique test registry");
+    let mut vm = SectionVm::new_for_section(
+        &bindings,
+        &<ModelBindings as Default>::default(),
+        EXECUTION,
+        &NullObserver,
+        "Override",
+    )
+    .expect("captured bindings must install");
+    vm.install_captured_bindings()
+        .expect("alias globals must install");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host must inject");
+
+    // tools.add(alias) with no override keeps the registry (catalog) text.
+    let add_default = LuaProgram::compile(
+        "tools.add(echo)",
+        "prologue",
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
+        EXECUTION,
+        &NullObserver,
+        "Override",
+    )
+    .expect("prologue must compile");
+    vm.run_chunk(&add_default, &NullObserver, "Override")
+        .expect("tools.add(echo) without override must succeed");
+    let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
+    let scope =
+        current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
+    let (schemas, _) = prepare_scoped_tools(&scope, &[], &registry).expect("schemas must build");
+    assert_eq!(schemas.len(), 1);
+    assert_eq!(
+        schemas[0].description,
+        echo.description(),
+        "no override anywhere must advertise the registry description"
+    );
+
+    // tools.add(alias, override) overrides the model-facing schema.
+    let add_override = LuaProgram::compile(
+        "tools.add('echo', 'Author override for the model')",
+        "prologue-2",
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
+        EXECUTION,
+        &NullObserver,
+        "Override",
+    )
+    .expect("second prologue must compile");
+    vm.run_chunk(&add_override, &NullObserver, "Override")
+        .expect("description override at tools.add must succeed");
+    let scope =
+        current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
+    let (schemas, _) = prepare_scoped_tools(&scope, &[], &registry).expect("schemas must build");
+    assert_eq!(schemas[0].description, "Author override for the model");
+
+    vm.teardown(&NullObserver, "Override");
+}
+
+/// Precedence at the advertised schema: a `tools.add` override beats the
+/// `model_description` recorded by `tools.need` / `tools.always`, which itself
+/// beats the catalog text.
+#[test]
+fn need_override_reaches_the_schema_and_add_beats_need() {
+    let bindings = crate::lua::ToolBindings::for_test(
+        vec![crate::lua::ToolBinding {
+            alias: "echo".to_owned(),
+            description: "echo capability for live matching".to_owned(),
+            id: ToolId::new("tests", "echo").expect("valid id"),
+            model_description: Some("need override".to_owned()),
+        }],
+        Vec::new(),
+    );
+    let echo = EchoTool;
+    let registry = ToolRegistry::new([&echo as &dyn Tool]).expect("unique test registry");
+    let mut vm = SectionVm::new_for_section(
+        &bindings,
+        &<ModelBindings as Default>::default(),
+        EXECUTION,
+        &NullObserver,
+        "Precedence",
+    )
+    .expect("captured bindings must install");
+    vm.install_captured_bindings()
+        .expect("alias globals must install");
+    vm.inject_host("", &json!({}), &StoreRef::memory(), None)
+        .expect("host must inject");
+
+    let add_plain = LuaProgram::compile(
+        "tools.add('echo')",
+        "prologue",
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
+        EXECUTION,
+        &NullObserver,
+        "Precedence",
+    )
+    .expect("prologue must compile");
+    vm.run_chunk(&add_plain, &NullObserver, "Precedence")
+        .expect("tools.add without override must succeed");
+    let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
+    let scope =
+        current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
+    let (schemas, _) = prepare_scoped_tools(&scope, &[], &registry).expect("schemas must build");
+    assert_eq!(
+        schemas[0].description, "need override",
+        "the need/always override must beat the catalog text"
+    );
+
+    let add_override = LuaProgram::compile(
+        "tools.add('echo', 'add override')",
+        "prologue-2",
+        NonZeroU32::new(1).expect("compile source line is non-zero"),
+        EXECUTION,
+        &NullObserver,
+        "Precedence",
+    )
+    .expect("second prologue must compile");
+    vm.run_chunk(&add_override, &NullObserver, "Precedence")
+        .expect("tools.add with override must succeed");
+    let scope =
+        current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
+    let (schemas, _) = prepare_scoped_tools(&scope, &[], &registry).expect("schemas must build");
+    assert_eq!(
+        schemas[0].description, "add override",
+        "the add override must beat the need/always override"
+    );
+
+    vm.teardown(&NullObserver, "Precedence");
+}
+
 #[tokio::test]
 async fn tool_loop_dispatches_then_returns_text() {
     // The loop is tested against a real client pointed at the mock gateway.
@@ -1467,44 +1660,6 @@ impl RecordingCapture {
     }
 }
 
-/// A second fixture tool so the bag can grow from one alias to two.
-struct FetchTool;
-
-#[async_trait::async_trait]
-impl Tool for FetchTool {
-    fn id(&self) -> ToolId {
-        ToolId::new("tests", "fetch").expect("valid id")
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn wire_name(&self) -> &str {
-        "fetch"
-    }
-
-    #[expect(
-        clippy::unnecessary_literal_bound,
-        reason = "the Tool trait fixes this return type to &str, so the &'static str suggestion cannot be applied"
-    )]
-    fn description(&self) -> &str {
-        "Fetch a URL."
-    }
-
-    fn parameters_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": { "url": { "type": "string" } },
-            "required": ["url"]
-        })
-    }
-
-    async fn call(&self, _args: Value) -> std::result::Result<ToolOutput, ToolError> {
-        Ok(ToolOutput::trusted("fetched"))
-    }
-}
-
 mod debug_and_counts;
 mod exec_flow;
 mod exit_rules;
@@ -1512,6 +1667,5 @@ mod live_infer;
 mod local_tools;
 mod model_and_reply;
 mod observations;
-mod tool_bag;
 mod tool_loop;
 mod tool_scoping;
