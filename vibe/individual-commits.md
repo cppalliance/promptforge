@@ -54,3 +54,5 @@
 
 ## 2026-08-19 Move design documents into one design/ directory
 
+## 2026-08-21 Upgrade h2 to 0.4.18 and indicatif to 0.18
+
