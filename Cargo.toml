@@ -71,7 +71,7 @@ dotenvy = "0.15"
 tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 tar = { version = "0.4.46", default-features = false }
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
-indicatif = "0.17"
+indicatif = "0.18"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
