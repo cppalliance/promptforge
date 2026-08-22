@@ -46,17 +46,19 @@
 //!
 //! The orchestration boundary ([`run`]) lives here; the rest is split into
 //! focused private children: `error` (the public [`RunError`]), `config`
-//! (`RunConfig`/`RunLimits`), `gateway` (client acquisition and
-//! [`ResolutionContext`]), `scope` (tool-scope analysis and validation),
-//! `tools` (the nested-inference hook), `tool_loop` (the model tool
-//! loop), `h1` (the live H1 pass), `section_vm` (the section VM setup half
-//! shared by the walk and the fanout arm), `block_walk` (the ordered block
-//! loop - the engine's walk half, shared by the live H1 pass, the walk, and
-//! the fanout arm), `engine` (the section walkers),
-//! and `support` (the sync/async bridge and shared helpers).
+//! (`RunConfig`/`RunLimits`), `context` (the ambient [`RunContext`] run
+//! state), `gateway` (client acquisition and [`ResolutionContext`]),
+//! `scope` (tool-scope analysis and validation), `tools` (the
+//! nested-inference hook), `tool_loop` (the model tool loop), `h1` (the
+//! live H1 pass), `section_vm` (the section VM setup half shared by the
+//! walk and the fanout arm), `block_walk` (the ordered block loop - the
+//! engine's walk half, shared by the live H1 pass, the walk, and the
+//! fanout arm), `engine` (the section walkers), and `support` (the
+//! sync/async bridge and shared helpers).
 
 mod block_walk;
 mod config;
+mod context;
 mod engine;
 mod error;
 mod gateway;
@@ -85,6 +87,7 @@ pub use gateway::ResolutionContext;
 // Re-exported so the split stays surface-neutral for the public API while
 // keeping one import path for internal collaborators.
 pub(crate) use block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
+pub(crate) use context::RunContext;
 pub(crate) use engine::{ControlContext, RunFrame, make_control_globals};
 pub(crate) use scope::ToolAnalysis;
 pub(crate) use section_vm::{VmSeed, setup_section_vm};
@@ -223,6 +226,8 @@ pub async fn run(
         }
     }
 
+    let ctx = RunContext::new(prompt);
+
     let RunConfig {
         execution,
         observer,
@@ -291,7 +296,7 @@ pub async fn run(
             section_count: prompt.sections.len(),
             item: None,
         };
-        let h1 = execute_live_h1(prompt, resolution, &registry, client.as_ref(), &frame).await?;
+        let h1 = execute_live_h1(&ctx, resolution, &registry, client.as_ref(), &frame).await?;
         if let Some(value) = h1.returned {
             return Ok(value);
         }
@@ -300,7 +305,7 @@ pub async fn run(
         }
         let analysis = ToolAnalysis::new(&h1.bindings, resolution.picker)?;
         run_sections(
-            prompt,
+            &ctx,
             &h1.bindings,
             &h1.models,
             &analysis,
