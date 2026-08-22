@@ -1,6 +1,6 @@
 use super::{
-    Arc, Json, LuaSerdeExt, MetaMethod, Result, Tool, ToolId, UserData, UserDataFields,
-    UserDataMethods, Value, json,
+    Arc, Error, Json, LuaSerdeExt, MetaMethod, Mutex, Result, Tool, ToolId, UserData,
+    UserDataFields, UserDataMethods, Value, json,
 };
 
 /// Resolves one plain-English capability description to one stable live tool.
@@ -14,6 +14,20 @@ pub(crate) trait ToolResolver: Send + Sync {
     /// # Errors
     /// Returns a core error when the capability cannot be resolved uniquely.
     fn resolve(&self, description: &str) -> Result<ToolId>;
+
+    /// Reports the near-duplicate pairs among the bound `ids` as
+    /// `(first, second, similarity)` triples, for the bind-time conflict
+    /// scan.
+    ///
+    /// The default reports no pairs: a resolver without similarity
+    /// knowledge (a fixed test resolver) records no conflicts.
+    ///
+    /// # Errors
+    /// Returns a core error when the analysis backend fails.
+    fn near_duplicates(&self, ids: &[ToolId]) -> Result<Vec<(ToolId, ToolId, f32)>> {
+        let _ = ids;
+        Ok(Vec::new())
+    }
 }
 
 impl<F> ToolResolver for F
@@ -24,6 +38,28 @@ where
         self(description)
     }
 }
+
+/// One near-duplicate clash recorded at bind time.
+///
+/// The picker is an H1-phase capability, so the score is copied onto the
+/// binding when the clash is recorded; it cannot be recomputed later.
+#[derive(Debug, Clone)]
+pub(crate) struct Conflict {
+    /// The alias of the other binding in the clashing pair.
+    pub(crate) alias: String,
+    /// The picker's cosine similarity between the two bound tools.
+    pub(crate) similarity: f64,
+}
+
+/// Bit comparison on the score keeps equality reflexive (`f64 ==` is not,
+/// at NaN), which [`ToolBinding`]'s `Eq` relies on.
+impl PartialEq for Conflict {
+    fn eq(&self, other: &Self) -> bool {
+        self.alias == other.alias && self.similarity.to_bits() == other.similarity.to_bits()
+    }
+}
+
+impl Eq for Conflict {}
 
 /// One prompt-local alias bound to one stable live tool identity, carrying
 /// the resolved implementation attached at bind time.
@@ -45,17 +81,22 @@ pub(crate) struct ToolBinding {
     pub(crate) model_description: Option<String>,
     /// The resolved implementation, attached at bind time.
     pub(crate) tool: Arc<dyn Tool>,
+    /// Near-duplicate clashes with sibling bindings, recorded at bind time.
+    /// Binding records, never fails: a clash errors only when both halves
+    /// enter one model-visible scope.
+    pub(crate) conflicts: Vec<Conflict>,
 }
 
 /// Equality is keyed on the binding's data (alias, capability text, stable
-/// identity, override); the attached implementation is a trait object and
-/// takes no part in comparison.
+/// identity, override, recorded clashes); the attached implementation is a
+/// trait object and takes no part in comparison.
 impl PartialEq for ToolBinding {
     fn eq(&self, other: &Self) -> bool {
         self.alias == other.alias
             && self.description == other.description
             && self.id == other.id
             && self.model_description == other.model_description
+            && self.conflicts == other.conflicts
     }
 }
 
@@ -70,6 +111,7 @@ impl std::fmt::Debug for ToolBinding {
             .field("description", &self.description)
             .field("id", &self.id)
             .field("model_description", &self.model_description)
+            .field("conflicts", &self.conflicts)
             .finish_non_exhaustive()
     }
 }
@@ -83,6 +125,7 @@ impl ToolBinding {
             id: tool.id(),
             model_description: None,
             tool,
+            conflicts: Vec::new(),
         }
     }
 
@@ -114,6 +157,12 @@ impl ToolBinding {
     #[must_use]
     pub(crate) fn tool(&self) -> &dyn Tool {
         self.tool.as_ref()
+    }
+
+    /// Returns the near-duplicate clashes recorded at bind time.
+    #[must_use]
+    pub(crate) fn conflicts(&self) -> &[Conflict] {
+        &self.conflicts
     }
 }
 
@@ -272,16 +321,24 @@ pub(crate) fn resolve_section_target(value: Value) -> mlua::Result<String> {
     }
 }
 
-/// Immutable prompt-level tool bindings produced by live H1 execution.
+/// The run's tool set: the prompt-level bindings produced by live H1
+/// execution plus the prompt-wide `always` aliases.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ToolBindings {
+pub(crate) struct ToolSet {
     pub(crate) bindings: Vec<ToolBinding>,
     pub(crate) always: Vec<String>,
 }
 
-impl ToolBindings {
+impl ToolSet {
     #[cfg(test)]
     pub(crate) fn for_test(bindings: Vec<ToolBinding>, always: Vec<String>) -> Self {
+        Self { bindings, always }
+    }
+
+    /// Reassembles a set from owned snapshots of its two lists (the
+    /// [`ToolView`] read pair).
+    #[must_use]
+    pub(crate) fn from_parts(bindings: Vec<ToolBinding>, always: Vec<String>) -> Self {
         Self { bindings, always }
     }
 
@@ -300,5 +357,56 @@ impl ToolBindings {
     /// Returns the binding for `alias`, if it was declared.
     pub(crate) fn binding(&self, alias: &str) -> Option<&ToolBinding> {
         self.bindings.iter().find(|binding| binding.alias == alias)
+    }
+}
+
+/// The read-only view over the run's [`ToolSet`].
+///
+/// The run context shares the set as `Arc<dyn ToolView>`; the live H1 pass
+/// writes through its own concrete `Arc<Mutex<ToolSet>>` handle, and once
+/// that VM is dropped no write handle remains. The trait exposes no
+/// mutation, so post-H1 frozenness is structural. Every method locks
+/// briefly and returns an owned snapshot: a mutex guard cannot outlive the
+/// call.
+pub(crate) trait ToolView: Send + Sync {
+    /// Returns an owned snapshot of the bindings in declaration order.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
+    fn bindings(&self) -> Result<Vec<ToolBinding>>;
+
+    /// Returns an owned snapshot of the prompt-wide `always` aliases in
+    /// declaration order.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
+    fn always(&self) -> Result<Vec<String>>;
+
+    /// Returns an owned clone of the binding for `alias`, if it was
+    /// declared.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
+    fn binding(&self, alias: &str) -> Result<Option<ToolBinding>>;
+}
+
+/// Maps a poisoned set lock to [`Error::Lua`], matching every other mutex
+/// in the Lua host layer.
+fn lock_tool_set(set: &Mutex<ToolSet>) -> Result<std::sync::MutexGuard<'_, ToolSet>> {
+    set.lock()
+        .map_err(|_| Error::Lua("tool set mutex was poisoned".to_owned()))
+}
+
+impl ToolView for Mutex<ToolSet> {
+    fn bindings(&self) -> Result<Vec<ToolBinding>> {
+        Ok(lock_tool_set(self)?.bindings.clone())
+    }
+
+    fn always(&self) -> Result<Vec<String>> {
+        Ok(lock_tool_set(self)?.always.clone())
+    }
+
+    fn binding(&self, alias: &str) -> Result<Option<ToolBinding>> {
+        Ok(lock_tool_set(self)?.binding(alias).cloned())
     }
 }

@@ -191,9 +191,9 @@ fn a_silent_observer_counts_turns_without_a_queue() {
 fn unknown_details_are_tolerated_without_frames_or_counters() {
     let (observer, mut frames) = McpObserver::queued();
     for report in [
-        Observation::ToolRegistryValidationStarted,
-        Observation::ToolRegistryValidationSucceeded,
-        Observation::ToolRegistryValidationFailed,
+        Observation::ToolScopeValidationStarted,
+        Observation::ToolScopeValidationSucceeded,
+        Observation::ToolScopeValidationFailed,
         Observation::Other("A future detail".to_owned()),
     ] {
         observer.observe("test-run", "First", report);

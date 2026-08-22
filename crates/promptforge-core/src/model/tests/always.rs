@@ -3,7 +3,7 @@
 use super::*;
 
 /// Compiles and resolves one live H1 declaration fixture.
-fn resolve_shared(source: &str) -> Result<(ToolBindings, ModelBindings)> {
+fn resolve_shared(source: &str) -> Result<(ToolSet, ModelBindings)> {
     let shared = crate::lua::LuaProgram::compile(
         source,
         "shared",

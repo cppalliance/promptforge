@@ -202,7 +202,7 @@ fn execute_live_tool_binds(
     _execution: &str,
     _observer: &dyn Observer,
     _section: &str,
-) -> Result<ToolBindings> {
+) -> Result<ToolSet> {
     let tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(FixtureTool("search")),
         Arc::new(FixtureTool("fetch")),
@@ -213,7 +213,7 @@ fn execute_live_tool_binds(
             capability: description.to_owned(),
         })
     };
-    let producer = LiveBindingProducer::default();
+    let producer = LiveBindingProducer::new(Arc::new(Mutex::new(ToolSet::default())));
     let lua = Lua::new();
     harden(&lua)?;
     let result = lua.scope(|scope| {
@@ -230,7 +230,7 @@ fn execute_live_tool_binds(
 }
 
 fn section_vm_with_bindings(
-    bindings: &ToolBindings,
+    bindings: &ToolSet,
     execution: &str,
     observer: &dyn Observer,
     section: &str,
@@ -265,7 +265,7 @@ fn section_vm_with_shared(
     Ok(vm)
 }
 
-fn fixture_bindings(source: &str) -> ToolBindings {
+fn fixture_bindings(source: &str) -> ToolSet {
     let shared = program(source);
     let resolver = |description: &str| {
         Ok(ToolId::new(
@@ -335,7 +335,7 @@ fn direct_output_is_absent_in_every_executable_lua_vm() {
 #[test]
 fn logs_are_correlated_and_ordered_across_chunks() {
     let recorder = Arc::new(Recorder::default());
-    let bindings = ToolBindings::for_test(
+    let bindings = ToolSet::for_test(
         vec![ToolBinding::for_test(
             "search",
             "search the web",
@@ -1084,7 +1084,7 @@ fn unknown_h2_alias_fails_before_scope_closure() {
 
 #[test]
 fn captured_bindings_are_installed_without_payload_reports() {
-    let bindings = ToolBindings::for_test(
+    let bindings = ToolSet::for_test(
         vec![ToolBinding::for_test(
             "private_alias",
             "private capability",
@@ -1196,7 +1196,7 @@ fn section_vm_host_injection_bypasses_shared_global_metatables() {
     let inspect = program(
         "return tostring(captured.args) .. ',' .. tostring(captured.search) .. ',' .. args .. ',' .. type(search)",
     );
-    let bindings = ToolBindings::for_test(
+    let bindings = ToolSet::for_test(
         vec![ToolBinding::for_test(
             "search",
             "search the web",
@@ -1465,7 +1465,7 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
     // replay, so shared top-level code may scope tools at load. The bare
     // alias globals install only after the replay, so a declared alias wins
     // over a same-named shared global.
-    let bindings = ToolBindings::for_test(
+    let bindings = ToolSet::for_test(
         vec![ToolBinding::for_test(
             "search",
             "search the web",
@@ -1515,7 +1515,7 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
 fn shared_functions_resolve_host_globals_when_called_from_a_later_chunk() {
     // A shared function body resolves `tools`/`var` through the real globals
     // at call time, so a later chunk can drive host mutations through it.
-    let bindings = ToolBindings::for_test(
+    let bindings = ToolSet::for_test(
         vec![ToolBinding::for_test(
             "search",
             "search the web",

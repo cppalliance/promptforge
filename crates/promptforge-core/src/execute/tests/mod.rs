@@ -888,7 +888,7 @@ async fn run_tool_loop(
 #[test]
 fn tool_description_override_appears_in_model_schema() {
     let echo: Arc<dyn Tool> = Arc::new(EchoTool);
-    let bindings = crate::lua::ToolBindings::for_test(
+    let bindings = crate::lua::ToolSet::for_test(
         vec![crate::lua::ToolBinding::for_test(
             "echo",
             "echo capability for live matching",
@@ -958,13 +958,14 @@ fn tool_description_override_appears_in_model_schema() {
 /// beats the catalog text.
 #[test]
 fn bind_override_reaches_the_schema_and_add_beats_bind() {
-    let bindings = crate::lua::ToolBindings::for_test(
+    let bindings = crate::lua::ToolSet::for_test(
         vec![crate::lua::ToolBinding {
             alias: "echo".to_owned(),
             description: "echo capability for live matching".to_owned(),
             id: ToolId::new("tests", "echo").expect("valid id"),
             model_description: Some("bind override".to_owned()),
             tool: Arc::new(EchoTool),
+            conflicts: Vec::new(),
         }],
         Vec::new(),
     );

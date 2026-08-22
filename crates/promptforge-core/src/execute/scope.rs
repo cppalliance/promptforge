@@ -1,91 +1,12 @@
-//! Tool-scope analysis, near-duplicate validation, and schema/dispatch
-//! preparation for the model-visible tool set.
+//! Tool-scope near-duplicate validation and schema/dispatch preparation for
+//! the model-visible tool set.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use promptforge_tool_picker::{ToolId as PickerToolId, ToolPicker};
+use std::collections::BTreeMap;
 
 use crate::client::ToolSchema;
-use crate::lua::{ToolBinding, ToolBindings};
+use crate::lua::ToolBinding;
 use crate::observe::{Observer, detail};
-use crate::tools::ToolId;
 use crate::{Error, NearDuplicateDiagnostic, Result};
-
-/// One near-duplicate pair copied out of the picker's borrowing result.
-///
-/// The picker's [`promptforge_tool_picker::NearDuplicate`] borrows the picker,
-/// but [`ToolAnalysis`] outlives one resolution and is cloned into fanout and
-/// execute closures, so the pair's diagnostic values are copied out here.
-#[derive(Debug, Clone)]
-pub(crate) struct OwnedNearDuplicate {
-    pub(crate) first_id: ToolId,
-    pub(crate) second_id: ToolId,
-    pub(crate) similarity: f32,
-}
-
-/// Frozen prompt-level tool identity maps plus the picker's near-duplicate
-/// pairs, cloned into every section/fanout/execute closure that validates a
-/// model-visible scope.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ToolAnalysis {
-    pub(crate) alias_to_id: BTreeMap<String, ToolId>,
-    pub(crate) id_to_alias: BTreeMap<ToolId, String>,
-    pub(crate) near_duplicates: Vec<OwnedNearDuplicate>,
-}
-
-/// Returns the alias frozen for a selected tool identity.
-fn frozen_alias(analysis: &ToolAnalysis, id: &ToolId) -> Result<String> {
-    analysis
-        .id_to_alias
-        .get(id)
-        .cloned()
-        .ok_or_else(|| Error::ToolScopeAnalysis {
-            detail: "selected identity has no frozen alias".to_owned(),
-        })
-}
-
-impl ToolAnalysis {
-    pub(crate) fn new(bindings: &ToolBindings, picker: &ToolPicker) -> Result<Self> {
-        let alias_to_id = bindings
-            .bindings()
-            .iter()
-            .map(|binding| (binding.alias().to_owned(), binding.id().clone()))
-            .collect();
-        let id_to_alias = bindings
-            .bindings()
-            .iter()
-            .map(|binding| (binding.id().clone(), binding.alias().to_owned()))
-            .collect();
-        let ids = bindings
-            .bindings()
-            .iter()
-            .map(|binding| PickerToolId::new(binding.id().server(), binding.id().name()))
-            .collect::<Vec<_>>();
-        let near_duplicates = picker
-            .near_duplicates(&ids)
-            .map_err(|error| Error::ToolScopeAnalysisSource {
-                source: Box::new(error),
-            })?
-            .iter()
-            .map(|pair| OwnedNearDuplicate {
-                first_id: ToolId::from_validated(
-                    pair.first().id().server(),
-                    pair.first().id().name(),
-                ),
-                second_id: ToolId::from_validated(
-                    pair.second().id().server(),
-                    pair.second().id().name(),
-                ),
-                similarity: pair.similarity(),
-            })
-            .collect();
-        Ok(Self {
-            alias_to_id,
-            id_to_alias,
-            near_duplicates,
-        })
-    }
-}
 
 /// How the tool loop reaches the tool behind one in-scope alias.
 ///
@@ -102,7 +23,6 @@ pub(crate) enum DispatchTarget {
 }
 
 pub(crate) fn prepare_effective_scope(
-    analysis: &ToolAnalysis,
     bindings: &[ToolBinding],
     local_schemas: &[ToolSchema],
     execution: &str,
@@ -110,7 +30,7 @@ pub(crate) fn prepare_effective_scope(
     section: &str,
 ) -> Result<(Vec<ToolSchema>, BTreeMap<String, DispatchTarget>)> {
     observer.observe(execution, section, detail::TOOL_SCOPE_VALIDATION_STARTED);
-    let result = validate_effective_scope_inner(analysis, bindings)
+    let result = validate_effective_scope_inner(bindings)
         .and_then(|()| prepare_scoped_tools(bindings, local_schemas));
     observer.observe(
         execution,
@@ -124,29 +44,29 @@ pub(crate) fn prepare_effective_scope(
     result
 }
 
-pub(crate) fn validate_effective_scope_inner(
-    analysis: &ToolAnalysis,
-    bindings: &[ToolBinding],
-) -> Result<()> {
-    let effective = bindings
-        .iter()
-        .map(crate::lua::ToolBinding::id)
-        .collect::<BTreeSet<_>>();
-    for pair in &analysis.near_duplicates {
-        if !effective.contains(&pair.first_id) || !effective.contains(&pair.second_id) {
-            continue;
+/// The scope check is purely local: a clash errors when both halves of a
+/// bind-time conflict enter one model-visible scope. Conflicts were recorded
+/// symmetrically at bind time, so the first in-scope binding whose conflict
+/// list names another in-scope alias is the diagnostic's first half.
+pub(crate) fn validate_effective_scope_inner(bindings: &[ToolBinding]) -> Result<()> {
+    for binding in bindings {
+        for conflict in binding.conflicts() {
+            let Some(other) = bindings
+                .iter()
+                .find(|candidate| candidate.alias() == conflict.alias)
+            else {
+                continue;
+            };
+            return Err(Error::NearDuplicateTools {
+                diagnostic: Box::new(NearDuplicateDiagnostic {
+                    first_alias: binding.alias().to_owned(),
+                    first_id: binding.id().clone(),
+                    second_alias: other.alias().to_owned(),
+                    second_id: other.id().clone(),
+                    similarity: conflict.similarity,
+                }),
+            });
         }
-        let first_alias = frozen_alias(analysis, &pair.first_id)?;
-        let second_alias = frozen_alias(analysis, &pair.second_id)?;
-        return Err(Error::NearDuplicateTools {
-            diagnostic: Box::new(NearDuplicateDiagnostic {
-                first_alias,
-                first_id: pair.first_id.clone(),
-                second_alias,
-                second_id: pair.second_id.clone(),
-                similarity: pair.similarity,
-            }),
-        });
     }
     Ok(())
 }
