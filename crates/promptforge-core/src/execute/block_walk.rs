@@ -8,13 +8,18 @@
 //! so a walk error propagates bare and the driver tears the VM down exactly
 //! once on every path. Each driver (the live H1 pass, the section walk's
 //! `run_one_section`, the fanout arm) hands the loop the same borrowed
-//! [`RunFrame`] plus a [`BlockRunMode`]: H1-vs-section is a caller-set mode,
+//! [`RunFrame`] plus its per-frame state borrows and a [`BlockRunMode`]:
+//! H1-vs-section is a caller-set mode,
 //! not a second loop. Live mode reads only the frame's run-scoped fields;
 //! the walk-only fields it never touches carry empty defaults.
 
+use std::sync::atomic::AtomicU32;
+
 use crate::client::{GatewayClient, Message};
+use crate::debug::DebugCapture;
 use crate::lua::{LuaBlockResult, SectionVm, ToolBinding, ToolCallCounts, current_tool_bindings};
 use crate::model::CompletionOptions;
+use crate::observe::Observer;
 use crate::parser::Block;
 use crate::resolve::RuntimeResolution;
 use crate::subst;
@@ -23,7 +28,7 @@ use crate::{Error, Result};
 use super::engine::RunFrame;
 use super::gateway::env_client_with_limits;
 use super::scope::{prepare_effective_scope, prepare_scoped_tools};
-use super::tool_loop::{ProseMode, SectionProgress, run_prose_inference};
+use super::tool_loop::{ProseMode, run_prose_inference};
 
 /// How one section's block walk ended.
 pub(crate) enum SectionFlow {
@@ -65,21 +70,26 @@ pub(crate) enum BlockRunMode<'a> {
 /// shared engine runs. `name`/`blocks` are the driver's heading and block
 /// sequence (a section's, or the prompt's title and H1 blocks for the live
 /// H1 pass); `mode` selects the per-block behavior (see [`BlockRunMode`]).
+/// The per-frame state arrives as borrows out of the driver's frame: `sys`,
+/// `reply`, `conversation`, `counts`, and `completion_options` are the
+/// frame's slots (the walk's `SectionContext` fields; the live H1 pass and
+/// the fanout arm keep theirs in locals until they move onto a frame), and
+/// `observer`/`debug`/`turns` are the frame's effective reporting handles.
 ///
 /// In section mode a Lua chunk executes in place and may end the walk early
 /// (a scalar return or a `jump`); a prose block rebuilds its effective tool
 /// scope (so `tools.add`/`tools.add_local` between blocks reach the next
 /// model turn), substitutes against the rolling reply, and runs the tool
 /// loop. The conversation, the tool-call counts, and the one-time model
-/// resolution (with its `sys` model enrichment) are walk-local state
-/// installed at the first prose block. The reply starts at `incoming_reply`
+/// resolution (with its `sys` model enrichment) are installed at the first
+/// prose block. The reply starts at the driver's seed
 /// and rolls forward as prose produces text; after each Lua chunk the walk
 /// reads the VM's `reply` global back, so an author's `reply = nil` (or a
 /// custom string) steers what a jump target or the next section sees.
 /// `sys` arrives as the driver's
 /// JSON and is enriched in place with the model binding and each outcome's
 /// finish reason. Prose substitution resolves `{{ item }}` against
-/// `ctx.item`, which is `Some` only when the driver is a fanout arm, and an
+/// `item`, which is `Some` only when the driver is a fanout arm, and an
 /// unknown first path segment against the VM's bare globals via
 /// [`SectionVm::global_json`].
 ///
@@ -94,7 +104,7 @@ pub(crate) enum BlockRunMode<'a> {
 /// [`Error::Internal`] when prose reaches inference with no gateway client.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the loop keeps the VM, the shared frame, the block sequence, the mode, the sys JSON, the reply, and the client slot explicit and linear"
+    reason = "the loop keeps the VM, the shared frame, the block sequence, the mode, the frame's borrowed state, the effective reporting handles, and the client slot explicit and linear"
 )]
 #[expect(
     clippy::too_many_lines,
@@ -106,28 +116,30 @@ pub(crate) async fn run_one_section_impl(
     name: &str,
     blocks: &[Block],
     mode: BlockRunMode<'_>,
-    mut sys: serde_json::Value,
-    incoming_reply: Option<&str>,
+    sys: &mut serde_json::Value,
+    reply: &mut Option<String>,
+    conversation: &mut Vec<Message>,
+    counts: &mut Option<ToolCallCounts>,
+    completion_options: &mut Option<CompletionOptions>,
+    item: Option<&serde_json::Value>,
+    observer: &dyn Observer,
+    debug: Option<&dyn DebugCapture>,
+    turns: &AtomicU32,
     client: &mut Option<GatewayClient>,
 ) -> Result<SectionFlow> {
     // Walk-only state: the registry is read only inside the block walk.
     let registry = ctx.shared_tools.registry();
-    let mut conversation: Vec<Message> = Vec::new();
     // Section mode: `counts` doubles as the one-time gate: it is `Some`
     // exactly after the first prose block installed the counts and resolved
     // the model. Schemas and dispatch rebuild on EVERY prose block so
     // `tools.add`/`tools.add_local` between blocks reach the next model turn.
-    let mut counts: Option<ToolCallCounts> = None;
-    // Set at the first prose block exactly when a model binding resolved, so
-    // its `None` check below is the one model-required gate.
-    let mut completion_options: Option<CompletionOptions> = None;
-    // The reply visible to this walk's prose. It starts at the incoming
-    // reply and rolls forward as prose produces text, and after each
-    // section-mode Lua chunk it is read back from the VM's `reply` global,
-    // so both the `{{reply}}` substitution and the Lua `reply` global stay
-    // consistent within a walk and an author's `reply = nil` takes effect.
-    let mut reply: Option<String> = incoming_reply.map(str::to_owned);
-
+    // `completion_options` is set at the first prose block exactly when a
+    // model binding resolved, so its `None` check below is the one
+    // model-required gate. The reply rolls forward as prose produces text,
+    // and after each section-mode Lua chunk it is read back from the VM's
+    // `reply` global, so both the `{{reply}}` substitution and the Lua
+    // `reply` global stay consistent within a walk and an author's
+    // `reply = nil` takes effect.
     for block in blocks {
         match block {
             Block::Lua(program) => match mode {
@@ -136,14 +148,12 @@ pub(crate) async fn run_one_section_impl(
                 // recorded jump into an error, so only a scalar return ends
                 // the pass.
                 BlockRunMode::LiveH1(runtime) => {
-                    if let Some(value) =
-                        vm.run_live_h1_block(program, runtime, ctx.observer.as_ref(), name)?
-                    {
+                    if let Some(value) = vm.run_live_h1_block(program, runtime, observer, name)? {
                         return Ok(SectionFlow::Returned(value));
                     }
                 }
                 BlockRunMode::Section => {
-                    match vm.run_chunk(program, ctx.observer.as_ref(), name)? {
+                    match vm.run_chunk(program, observer, name)? {
                         LuaBlockResult::Returned(Some(value)) => {
                             return Ok(SectionFlow::Returned(value));
                         }
@@ -153,7 +163,7 @@ pub(crate) async fn run_one_section_impl(
                         // chunk honors an author's `reply = nil` (or a custom
                         // string) at fall-through and across a jump.
                         LuaBlockResult::Returned(None) => {
-                            reply = vm.reply()?;
+                            *reply = vm.reply()?;
                         }
                         LuaBlockResult::Jump(heading) => {
                             return Ok(SectionFlow::Jumped {
@@ -179,9 +189,9 @@ pub(crate) async fn run_one_section_impl(
                             text,
                             ctx.args,
                             reply.as_deref(),
-                            ctx.item,
+                            item,
                             &var,
-                            &sys,
+                            sys,
                             &|name| vm.global_json(name),
                         )?;
                         if prose.trim().is_empty() {
@@ -227,24 +237,22 @@ pub(crate) async fn run_one_section_impl(
                         let block_counts = ToolCallCounts::new(
                             scope.iter().map(|binding| binding.alias().to_owned()),
                         );
-                        let completion_options = model.completion_options();
+                        let model_options = model.completion_options();
                         let outcome = run_prose_inference(
                             active_client,
                             &schemas,
                             &dispatch,
                             &registry,
-                            &mut conversation,
+                            conversation,
                             prose,
                             prose_mode,
-                            SectionProgress {
-                                execution: ctx.execution,
-                                observer: ctx.observer.as_ref(),
-                                section: name,
-                                turns: ctx.turns.as_ref(),
-                                debug: ctx.debug.map(AsRef::as_ref),
-                                completion_options: &completion_options,
-                                nonce: ctx.nonce,
-                            },
+                            ctx.execution,
+                            observer,
+                            name,
+                            turns,
+                            debug,
+                            &model_options,
+                            ctx.nonce,
                             Some(&block_counts),
                             // Live H1 has no prompt-wide alias analysis and no
                             // local tools to dispatch.
@@ -254,22 +262,22 @@ pub(crate) async fn run_one_section_impl(
                         .await?;
                         if let Some(text) = outcome.text {
                             vm.set_global_string("reply", &text)?;
-                            reply = Some(text);
+                            *reply = Some(text);
                         }
                     }
                     BlockRunMode::Section => {
                         let effective_bindings =
                             current_tool_bindings(ctx.bindings, &vm.tool_runtime)?;
                         if counts.is_none() {
-                            counts = Some(vm.install_tool_call_counts(&effective_bindings)?);
+                            *counts = Some(vm.install_tool_call_counts(&effective_bindings)?);
                             let resolved_model =
                                 crate::lua::resolve_model_binding(ctx.models, &vm.model_runtime)?;
                             if let Some(binding) = resolved_model.as_ref() {
-                                let current = vm.current_sys(&sys)?;
+                                let current = vm.current_sys(sys)?;
                                 let enriched = crate::lua::enrich_sys_model(&current, binding);
                                 vm.re_seal_sys(&enriched)?;
-                                sys = enriched;
-                                completion_options = Some(binding.completion_options());
+                                *sys = enriched;
+                                *completion_options = Some(binding.completion_options());
                             }
                         }
                         let local_schemas = vm.local_tool_schemas()?;
@@ -292,7 +300,7 @@ pub(crate) async fn run_one_section_impl(
                             &local_schemas,
                             &registry,
                             ctx.execution,
-                            ctx.observer.as_ref(),
+                            observer,
                             name,
                         )?;
 
@@ -301,9 +309,9 @@ pub(crate) async fn run_one_section_impl(
                             text,
                             ctx.args,
                             reply.as_deref(),
-                            ctx.item,
+                            item,
                             &var,
-                            &sys,
+                            sys,
                             &|name| vm.global_json(name),
                         )?;
                         if prose.trim().is_empty() {
@@ -335,31 +343,29 @@ pub(crate) async fn run_one_section_impl(
                             &schemas,
                             &dispatch,
                             &registry,
-                            &mut conversation,
+                            conversation,
                             prose,
                             prose_mode,
-                            SectionProgress {
-                                execution: ctx.execution,
-                                observer: ctx.observer.as_ref(),
-                                section: name,
-                                turns: ctx.turns.as_ref(),
-                                debug: ctx.debug.map(AsRef::as_ref),
-                                completion_options: options,
-                                nonce: ctx.nonce,
-                            },
+                            ctx.execution,
+                            observer,
+                            name,
+                            turns,
+                            debug,
+                            options,
+                            ctx.nonce,
                             counts.as_ref(),
                             global_aliases,
                             Some(&local_dispatch),
                         )
                         .await?;
-                        sys = crate::lua::enrich_sys_reply_finish_reason(
-                            &sys,
+                        *sys = crate::lua::enrich_sys_reply_finish_reason(
+                            sys,
                             outcome.finish_reason.as_deref(),
                         );
-                        vm.re_seal_sys(&sys)?;
+                        vm.re_seal_sys(sys)?;
                         if let Some(text) = outcome.text {
-                            vm.bind_reply(&text, ctx.observer.as_ref(), name)?;
-                            reply = Some(text);
+                            vm.bind_reply(&text, observer, name)?;
+                            *reply = Some(text);
                         }
                     }
                 }
@@ -367,5 +373,7 @@ pub(crate) async fn run_one_section_impl(
         }
     }
 
-    Ok(SectionFlow::FellThrough { reply })
+    Ok(SectionFlow::FellThrough {
+        reply: reply.clone(),
+    })
 }

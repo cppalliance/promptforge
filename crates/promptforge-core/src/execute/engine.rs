@@ -37,13 +37,14 @@
 //! [`make_control_globals`] for both drivers, so an arm's
 //! `execute`/`fanout`/`list_from_section` and its jump behave exactly as a
 //! walked section's, resolved over the worker's visible set.
-//! Construction and the Lua limits install stay with the driver: a limits
-//! failure must propagate bare, before any teardown observation exists.
 //! The walk half - the ordered block loop with its conversation state,
 //! per-block scope rebuild, and reply roll-forward - lives in the sibling
-//! `block_walk` module; [`run_one_section`] composes setup, infer hook,
-//! walk, teardown, and observation, owning the teardown boundary so every
-//! path tears the VM down exactly once.
+//! `block_walk` module. [`run_one_section`] drives the lifecycle as one
+//! [`SectionContext`]: construction absorbs VM construction, the Lua limits
+//! install (a limits failure propagates bare, before any teardown
+//! observation exists), the setup half, and the infer hook; the block walk
+//! runs as the frame's `run`; and the driver owns the teardown boundary, so
+//! every path tears the VM down exactly once.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64};
@@ -61,12 +62,13 @@ use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
 use mlua::Value as LuaValue;
 
-use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
+use super::block_walk::{BlockRunMode, SectionFlow};
 use super::config::RunLimits;
 use super::context::RunContext;
 use super::gateway::GatewaySource;
 use super::scope::ToolAnalysis;
-use super::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
+use super::section_context::SectionContext;
+use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::{
     GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, bridge_blocking, next_id, now_rfc3339_checked, sys_json,
 };
@@ -312,11 +314,11 @@ async fn walk_siblings(
 
 /// Execute one section's block lifecycle over the shared [`RunFrame`].
 ///
-/// This is the single engine every chain drives: VM construction and limits,
-/// the control globals through [`make_control_globals`] (shared with the
-/// fanout arm), the setup half through [`setup_section_vm`], the infer hook,
-/// the block walk through [`run_one_section_impl`], then the teardown
-/// boundary and the section-finished observation.
+/// This is the single engine every chain drives: it constructs the
+/// section's [`SectionContext`] (VM construction and limits, the control
+/// globals, the setup half, the infer hook), runs the block walk on the
+/// frame, then owns the teardown boundary and the section-finished
+/// observation.
 /// `siblings` is the caller's
 /// own walk slice, from which the section's visible set (its siblings minus
 /// itself, plus its direct children) is built for the control globals.
@@ -342,101 +344,43 @@ async fn run_one_section(
     client: &mut Option<GatewayClient>,
     var: &serde_json::Value,
 ) -> Result<(SectionFlow, serde_json::Value)> {
-    let sys = control.sys_json(section_id, &section.name)?;
-
-    frame
-        .observer
-        .observe(frame.execution, &section.name, detail::SECTION_STARTED);
-
-    let mut vm = SectionVm::new_for_section(
-        frame.nonce,
-        frame.bindings,
-        frame.models,
-        frame.execution,
-        frame.observer.as_ref(),
-        &section.name,
-    )?;
-    // A limits failure propagates bare: no teardown runs here, so no
-    // LUA_TEARDOWN_* observation fires on this path.
-    vm.apply_lua_limits(
-        frame.limits.lua_memory().get(),
-        frame.limits.lua_logs().get(),
-    )?;
-
-    // Control globals are installed once for the section's whole lifecycle.
-    // The callbacks share the run-wide Arc of the owned run context plus a
-    // snapshot of the client at this section's start, so the persistent Lua
-    // closures hold no borrows.
-    let (execute_callback, fanout_callback, list_callback) = make_control_globals(
+    let mut section_frame = SectionContext::new(
+        frame,
         control,
-        client,
-        section.clone(),
-        siblings.to_vec(),
+        section,
+        siblings,
+        section_id,
         execute_depth,
-        incoming_reply.map(str::to_owned),
-    );
-
-    // The setup half of the section lifecycle - host injection, host APIs,
-    // the control globals, the shared replay, and the captured alias
-    // bindings - is shared with the fanout arm; only the seed, the `sys`
-    // extras, and the callbacks' parameters (home slice, caller, depth) are
-    // the walk's own.
-    let setup = control.vm_setup(
-        &sys,
         incoming_reply,
-        VmSeed {
-            var: Some(var),
-            item: None,
-        },
-        // Walk-section store writes are untracked; only fanout arms carry a
-        // write scope.
-        None,
-        &section.name,
-    );
-    if let Err(error) = setup_section_vm(
-        &mut vm,
-        &setup,
-        execute_callback,
-        fanout_callback,
-        list_callback,
-    ) {
-        vm.teardown(frame.observer.as_ref(), &section.name);
-        return Err(error);
-    }
-
-    // The infer hook carries a lazy client source (F5): a nested
-    // `models.infer` or `handle:infer` surfaces a concrete construction error
-    // on first use instead of the setup swallowing it. The direct prose path
-    // below still builds `client` and propagates its own error.
-    control.attach_infer_hook(&vm, client.clone(), &section.name);
+        client,
+        var,
+    )?;
 
     // The walk half - the ordered block loop - reports how the section
     // ended. The teardown boundary stays here: every path out of the walk
     // tears the VM down exactly once, and SECTION_FINISHED fires only when
     // the walk completed (a jump or return included), never on an error.
-    let result = run_one_section_impl(
-        &mut vm,
-        frame,
-        &section.name,
-        &section.blocks,
-        BlockRunMode::Section,
-        sys,
-        incoming_reply,
-        client,
-    )
-    .await;
-    let flow = match result {
+    let flow = match section_frame
+        .run(
+            frame,
+            &section.name,
+            &section.blocks,
+            BlockRunMode::Section,
+            client,
+        )
+        .await
+    {
         Ok(flow) => flow,
         Err(error) => {
-            vm.teardown(frame.observer.as_ref(), &section.name);
+            section_frame.teardown(&section.name);
             return Err(error);
         }
     };
     // Read the section's final var back before teardown so the walk rolls it
     // forward; the write guard keeps this conversion from failing in
     // practice.
-    let final_var = vm.var();
-    vm.teardown(frame.observer.as_ref(), &section.name);
+    let final_var = section_frame.read_var();
+    section_frame.teardown(&section.name);
     let final_var = final_var?;
     frame
         .observer

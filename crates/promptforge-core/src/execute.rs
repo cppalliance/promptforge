@@ -51,7 +51,10 @@
 //! `scope` (tool-scope analysis and validation), `tools` (the
 //! nested-inference hook), `tool_loop` (the model tool loop), `h1` (the
 //! live H1 pass), `section_vm` (the section VM setup half shared by the
-//! walk and the fanout arm), `block_walk` (the ordered block loop - the
+//! walk and the fanout arm), `section_context` (the per-section
+//! [`SectionContext`](section_context::SectionContext) frame the walk's
+//! driver constructs, runs, and tears down), `block_walk` (the
+//! ordered block loop - the
 //! engine's walk half, shared by the live H1 pass, the walk, and the
 //! fanout arm), `engine` (the section walkers), and `support` (the
 //! sync/async bridge and shared helpers).
@@ -64,6 +67,7 @@ mod error;
 mod gateway;
 mod h1;
 mod scope;
+mod section_context;
 mod section_vm;
 mod support;
 mod tool_loop;
@@ -124,7 +128,7 @@ pub(crate) use std::collections::BTreeMap;
 #[cfg(test)]
 pub(crate) use support::{advance_turn, bridge_blocking, now_rfc3339_checked};
 #[cfg(test)]
-pub(crate) use tool_loop::{LocalDispatch, ProseMode, SectionProgress, run_prose_inference};
+pub(crate) use tool_loop::{LocalDispatch, ProseMode, run_prose_inference};
 
 use crate::Error;
 use crate::cancel;
