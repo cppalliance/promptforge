@@ -54,7 +54,7 @@ use crate::fanout;
 use crate::lua::{LuaFanoutResult, LuaProgram, SectionVm, ToolBindings, resolve_section_target};
 use crate::model::ModelBindings;
 use crate::observe::{Observer, detail};
-use crate::parser::{Prompt, Section};
+use crate::parser::Section;
 use crate::store::{StoreRef, WriteScope};
 use crate::tools::SharedTools;
 use crate::{Error, Result};
@@ -62,6 +62,7 @@ use mlua::Value as LuaValue;
 
 use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
 use super::config::RunLimits;
+use super::context::RunContext;
 use super::gateway::GatewaySource;
 use super::scope::ToolAnalysis;
 use super::section_vm::{SectionVmSetup, VmSeed, setup_section_vm};
@@ -150,7 +151,7 @@ pub(crate) struct RunFrame<'a> {
 /// # Errors
 /// Returns the same errors as [`run`](super::run), which documents them.
 pub(super) async fn run_sections(
-    prompt: &Prompt,
+    ctx: &RunContext,
     bindings: &ToolBindings,
     models: &ModelBindings,
     analysis: &ToolAnalysis,
@@ -161,7 +162,7 @@ pub(super) async fn run_sections(
     let when = now_rfc3339_checked()?;
     // The walk's frame: the run-scoped fields carry over from the run frame;
     // the walk-only fields take their live values now that H1 produced them.
-    let ctx = RunFrame {
+    let frame = RunFrame {
         bindings,
         models,
         analysis,
@@ -172,7 +173,7 @@ pub(super) async fn run_sections(
     // The owned control context is built once per run: every field is
     // run-scoped, so all sections share one Arc and only the per-section
     // client snapshot is captured fresh by `make_control_globals`.
-    let control = Arc::new(ControlContext::from_walk(&ctx));
+    let control = Arc::new(ControlContext::from_walk(&frame));
 
     // The walk owns its client slot: seeded from the run's client (if any),
     // created lazily on first prose, and shared by every section.
@@ -183,9 +184,9 @@ pub(super) async fn run_sections(
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
     match walk_siblings(
-        &ctx,
+        &frame,
         &control,
-        &prompt.sections,
+        &ctx.prompt().sections,
         0,
         None,
         false,
@@ -226,7 +227,7 @@ pub(super) async fn run_sections(
     reason = "the chain keeps its shared contexts, position, entry mode, depth, and walk-owned var explicit and linear"
 )]
 async fn walk_siblings(
-    ctx: &RunFrame<'_>,
+    frame: &RunFrame<'_>,
     control: &Arc<ControlContext>,
     siblings: &[Section],
     start: usize,
@@ -251,11 +252,11 @@ async fn walk_siblings(
         }
         addressed = false;
         let (flow, final_var) = run_one_section(
-            ctx,
+            frame,
             control,
             section,
             siblings,
-            next_id(ctx.ids),
+            next_id(frame.ids),
             execute_depth,
             reply.as_deref(),
             client,
@@ -271,7 +272,7 @@ async fn walk_siblings(
                     // jumper's children from the target, and this chain
                     // resumes after the jumper when that level exhausts.
                     JumpTarget::Child(child_index) => match Box::pin(walk_siblings(
-                        ctx,
+                        frame,
                         control,
                         &section.children,
                         child_index,
@@ -327,7 +328,7 @@ async fn walk_siblings(
     reason = "the engine keeps the shared contexts, the section's chain position, its depth, and the walk's var explicit and linear"
 )]
 async fn run_one_section(
-    ctx: &RunFrame<'_>,
+    frame: &RunFrame<'_>,
     control: &Arc<ControlContext>,
     section: &Section,
     siblings: &[Section],
@@ -339,19 +340,23 @@ async fn run_one_section(
 ) -> Result<(SectionFlow, serde_json::Value)> {
     let sys = control.sys_json(section_id, &section.name)?;
 
-    ctx.observer
-        .observe(ctx.execution, &section.name, detail::SECTION_STARTED);
+    frame
+        .observer
+        .observe(frame.execution, &section.name, detail::SECTION_STARTED);
 
     let mut vm = SectionVm::new_for_section(
-        ctx.bindings,
-        ctx.models,
-        ctx.execution,
-        ctx.observer.as_ref(),
+        frame.bindings,
+        frame.models,
+        frame.execution,
+        frame.observer.as_ref(),
         &section.name,
     )?;
     // A limits failure propagates bare: no teardown runs here, so no
     // LUA_TEARDOWN_* observation fires on this path.
-    vm.apply_lua_limits(ctx.limits.lua_memory().get(), ctx.limits.lua_logs().get())?;
+    vm.apply_lua_limits(
+        frame.limits.lua_memory().get(),
+        frame.limits.lua_logs().get(),
+    )?;
 
     // Control globals are installed once for the section's whole lifecycle.
     // The callbacks share the run-wide Arc of the owned run context plus a
@@ -390,7 +395,7 @@ async fn run_one_section(
         fanout_callback,
         list_callback,
     ) {
-        vm.teardown(ctx.observer.as_ref(), &section.name);
+        vm.teardown(frame.observer.as_ref(), &section.name);
         return Err(error);
     }
 
@@ -406,7 +411,7 @@ async fn run_one_section(
     // the walk completed (a jump or return included), never on an error.
     let result = run_one_section_impl(
         &mut vm,
-        ctx,
+        frame,
         &section.name,
         &section.blocks,
         BlockRunMode::Section,
@@ -418,7 +423,7 @@ async fn run_one_section(
     let flow = match result {
         Ok(flow) => flow,
         Err(error) => {
-            vm.teardown(ctx.observer.as_ref(), &section.name);
+            vm.teardown(frame.observer.as_ref(), &section.name);
             return Err(error);
         }
     };
@@ -426,10 +431,11 @@ async fn run_one_section(
     // forward; the write guard keeps this conversion from failing in
     // practice.
     let final_var = vm.var();
-    vm.teardown(ctx.observer.as_ref(), &section.name);
+    vm.teardown(frame.observer.as_ref(), &section.name);
     let final_var = final_var?;
-    ctx.observer
-        .observe(ctx.execution, &section.name, detail::SECTION_FINISHED);
+    frame
+        .observer
+        .observe(frame.execution, &section.name, detail::SECTION_FINISHED);
     Ok((flow, final_var))
 }
 
@@ -616,24 +622,24 @@ impl ControlContext {
 
     /// The owned control context for a chain, cloned out of the chain's
     /// borrowed run frame.
-    fn from_walk(ctx: &RunFrame<'_>) -> Self {
+    fn from_walk(frame: &RunFrame<'_>) -> Self {
         Self::from_run_fields(
-            ctx.store,
-            ctx.args,
-            ctx.execution,
-            ctx.when,
-            ctx.shared,
-            ctx.bindings,
-            ctx.models,
-            ctx.shared_tools,
-            ctx.section_count,
-            ctx.analysis,
-            ctx.limits,
-            ctx.max_tool_iterations,
-            ctx.turns,
-            ctx.ids,
-            Arc::clone(ctx.observer),
-            ctx.debug.cloned(),
+            frame.store,
+            frame.args,
+            frame.execution,
+            frame.when,
+            frame.shared,
+            frame.bindings,
+            frame.models,
+            frame.shared_tools,
+            frame.section_count,
+            frame.analysis,
+            frame.limits,
+            frame.max_tool_iterations,
+            frame.turns,
+            frame.ids,
+            Arc::clone(frame.observer),
+            frame.debug.cloned(),
         )
     }
 
@@ -833,10 +839,10 @@ impl ControlContext {
             JumpTarget::Child(index) => (caller.children.as_slice(), index),
             JumpTarget::Sibling(index) => (home, index),
         };
-        let ctx = self.walk_context(args);
+        let frame = self.walk_context(args);
         let mut var = var;
         let end = walk_siblings(
-            &ctx,
+            &frame,
             self,
             chain_slice,
             start,
