@@ -25,29 +25,6 @@ use super::support::advance_turn;
 pub(crate) type LocalDispatch<'a> =
     dyn Fn(&str, serde_json::Value) -> Result<String> + Send + Sync + 'a;
 
-/// What one section's tool loop needs to report itself: where observations go, which
-/// section they belong to, and the run-wide turn counter it advances.
-///
-/// Bundled rather than passed as three parameters so the loop's signature stays
-/// readable, and so the counter is a run-wide total rather than a per-section
-/// one.
-pub(crate) struct SectionProgress<'a> {
-    /// The identifier every observation from this loop carries.
-    pub(crate) execution: &'a str,
-    /// Where the loop reports its turns and tool calls.
-    pub(crate) observer: &'a dyn Observer,
-    /// The heading text every observation from this loop carries.
-    pub(crate) section: &'a str,
-    /// The run's model-turn total, advanced once per round trip.
-    pub(crate) turns: &'a AtomicU32,
-    /// Opt-in raw request/response capture for each model turn.
-    pub(crate) debug: Option<&'a dyn DebugCapture>,
-    /// Per-call model fields from the section's selected binding.
-    pub(crate) completion_options: &'a CompletionOptions,
-    /// The run's untrusted-envelope nonce, shared by every wrap in the run.
-    pub(crate) nonce: &'a GuardNonce,
-}
-
 /// How many model rounds a prose block may take.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ProseMode {
@@ -85,7 +62,7 @@ pub(crate) struct ProseInferenceResult {
 #[expect(
     clippy::too_many_arguments,
     clippy::too_many_lines,
-    reason = "counts and global_aliases extend the loop's borrowed context for per-VM call tracking"
+    reason = "the reporting pieces arrive dissolved from the driver's frame - observer, debug, turns, and completion options are the frame's effective handles; counts and global_aliases extend the loop's borrowed context for per-VM call tracking"
 )]
 pub(crate) async fn run_prose_inference(
     client: &GatewayClient,
@@ -95,21 +72,17 @@ pub(crate) async fn run_prose_inference(
     conversation: &mut Vec<Message>,
     prose: String,
     mode: ProseMode,
-    progress: SectionProgress<'_>,
+    execution: &str,
+    observer: &dyn Observer,
+    section: &str,
+    turns: &AtomicU32,
+    debug: Option<&dyn DebugCapture>,
+    completion_options: &CompletionOptions,
+    nonce: &GuardNonce,
     counts: Option<&ToolCallCounts>,
     global_aliases: Option<&BTreeMap<String, ToolId>>,
     local_dispatch: Option<&LocalDispatch<'_>>,
 ) -> Result<ProseInferenceResult> {
-    let SectionProgress {
-        execution,
-        observer,
-        section,
-        turns,
-        debug,
-        completion_options,
-        nonce,
-    } = progress;
-
     let dialect_registry = ToolDialectRegistry::builtin();
     let dialect: &dyn ToolDialect = dialect_registry
         .get(completion_options.tool_dialect)
