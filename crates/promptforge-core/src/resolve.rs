@@ -13,23 +13,24 @@ use crate::lua::{LiveBindingProducer, ToolBindings, ToolResolver};
 use crate::model::{
     ModelBindOpts, ModelBindings, ModelCatalog, ModelResolver, PickerModelResolver, ResolvedModel,
 };
-use crate::tools::{ToolId, ToolRegistry};
+use crate::tools::{SharedTools, ToolId};
 use crate::{Error, Result};
 
 /// Run-scoped capability resolver and live H1 binding producer.
-pub(crate) struct RuntimeResolution<'a, 'tools: 'a> {
+pub(crate) struct RuntimeResolution<'a> {
     tool_resolver: PickerResolver<'a, ToolPicker>,
-    registry: &'a ToolRegistry<'tools>,
+    shared_tools: &'a SharedTools,
     models: &'a ModelCatalog,
     base_picker: &'a ToolPicker,
     producer: LiveBindingProducer,
 }
 
-impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
+impl<'a> RuntimeResolution<'a> {
     /// Creates one run-scoped resolver over live tool and model catalogs.
     ///
-    /// The `registry` already guarantees unique tool identities (duplicates are
-    /// rejected at registration), so no identity scan is needed here.
+    /// The shared tool set already guarantees unique tool identities
+    /// (duplicates are rejected at construction), so no identity scan is
+    /// needed here.
     ///
     /// Construction retains only the base picker/embedder (F7): it does NOT
     /// pre-build a full model index that model resolution would immediately
@@ -38,12 +39,12 @@ impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
     /// known, so the redundant full-catalog index is never materialized.
     pub(crate) fn new(
         picker: &'a ToolPicker,
-        registry: &'a ToolRegistry<'tools>,
+        shared_tools: &'a SharedTools,
         models: &'a ModelCatalog,
     ) -> Self {
         Self {
             tool_resolver: PickerResolver::new(picker),
-            registry,
+            shared_tools,
             models,
             base_picker: picker,
             producer: LiveBindingProducer::default(),
@@ -60,7 +61,7 @@ impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
         scope: &'scope Scope<'scope, 'env>,
     ) -> Result<()> {
         self.producer
-            .install(lua, scope, &self.tool_resolver, self.registry, self)
+            .install(lua, scope, &self.tool_resolver, self.shared_tools, self)
     }
 
     /// Returns the first typed error captured by a resolver callback.
@@ -89,7 +90,7 @@ impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
     }
 }
 
-impl ModelResolver for RuntimeResolution<'_, '_> {
+impl ModelResolver for RuntimeResolution<'_> {
     fn resolve(&self, description: &str, opts: &ModelBindOpts) -> Result<ResolvedModel> {
         // An empty catalog resolves every bind as absent without touching the
         // picker at all.
@@ -281,7 +282,7 @@ mod tests {
     use super::*;
     use crate::lua::LiveBindingProducer;
     use crate::model::ModelBindOpts;
-    use crate::tools::{Tool, ToolError, ToolOutput};
+    use crate::tools::{Tool, ToolError, ToolOutput, ToolRegistry};
 
     fn tid(name: &str) -> ToolId {
         ToolId::from_validated("tests", name)
@@ -386,8 +387,7 @@ mod tests {
 
     fn callback_error(source: &FixtureSource, tools: &[Arc<dyn Tool>], code: &str) -> Error {
         let resolver = PickerResolver::new(source);
-        let registry =
-            ToolRegistry::new(tools.iter().map(AsRef::as_ref)).expect("fixture tools are unique");
+        let shared = SharedTools::new(tools).expect("fixture tools are unique");
         let producer = LiveBindingProducer::default();
         let model_resolver = |description: &str, _: &ModelBindOpts| {
             Err(Error::ModelAbsent {
@@ -397,7 +397,7 @@ mod tests {
         let lua = Lua::new();
         let result = lua.scope(|scope| {
             producer
-                .install(&lua, scope, &resolver, &registry, &model_resolver)
+                .install(&lua, scope, &resolver, &shared, &model_resolver)
                 .map_err(mlua::Error::external)?;
             lua.load(code).exec()
         });

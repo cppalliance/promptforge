@@ -338,11 +338,10 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     let addr = gateway.addr();
     let client = gateway_client(addr);
 
-    let echo = EchoTool;
-    let tools: &[&dyn Tool] = &[&echo];
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
+    let tools: Vec<Arc<dyn Tool>> = vec![echo];
+    let schemas = schemas_for(&tools);
+    let dispatch = dispatch_for(&tools);
 
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
@@ -352,7 +351,6 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
         &client,
         &schemas,
         &dispatch,
-        &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         recorder.as_ref(),

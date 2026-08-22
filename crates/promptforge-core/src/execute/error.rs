@@ -77,10 +77,9 @@ impl RunError {
             | Error::UnknownDialect(_) => RunErrorKind::Completion,
             Error::Interrupted => RunErrorKind::Cancelled,
             Error::Substitution(_) => RunErrorKind::Substitution,
-            Error::ToolLoopExhausted
-            | Error::OutOfScopeToolCall { .. }
-            | Error::UnknownScopedTool(_)
-            | Error::Tool { .. } => RunErrorKind::Tool,
+            Error::ToolLoopExhausted | Error::OutOfScopeToolCall { .. } | Error::Tool { .. } => {
+                RunErrorKind::Tool
+            }
             Error::FanoutArmJoin(_)
             | Error::Internal(_)
             | Error::InvalidToolWireName { .. }

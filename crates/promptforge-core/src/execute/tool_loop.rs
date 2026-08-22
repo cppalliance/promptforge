@@ -10,16 +10,17 @@ use crate::dialects::{ToolDialect, ToolDialectRegistry};
 use crate::lua::ToolCallCounts;
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
-use crate::tools::{ToolId, ToolOutput, ToolRegistry};
+use crate::tools::{ToolId, ToolOutput};
 use crate::untrusted::{self, GuardNonce};
 use crate::{Error, Result};
 
+use super::scope::DispatchTarget;
 use super::support::advance_turn;
 
 /// Routes a local (Lua-registered) tool call back into its section VM.
 ///
-/// Local tools are prompt-author Lua functions with no registry entry; the
-/// loop dispatches them through this closure instead of the registry. The
+/// Local tools are prompt-author Lua functions with no live implementation;
+/// the loop dispatches them through this closure instead of a bound tool. The
 /// closure takes the tool alias and the call's JSON arguments and returns
 /// the handler's rendered string result.
 pub(crate) type LocalDispatch<'a> =
@@ -67,8 +68,7 @@ pub(crate) struct ProseInferenceResult {
 pub(crate) async fn run_prose_inference(
     client: &GatewayClient,
     schemas: &[ToolSchema],
-    dispatch: &BTreeMap<String, ToolId>,
-    registry: &ToolRegistry<'_>,
+    dispatch: &BTreeMap<String, DispatchTarget>,
     conversation: &mut Vec<Message>,
     prose: String,
     mode: ProseMode,
@@ -184,7 +184,7 @@ pub(crate) async fn run_prose_inference(
                 let mut results: Vec<crate::dialects::FramedToolResult> =
                     Vec::with_capacity(calls.len());
                 for call in &calls {
-                    let Some(id) = dispatch.get(&call.name) else {
+                    let Some(target) = dispatch.get(&call.name) else {
                         observer.observe(execution, section, detail::TOOL_CALL_FAILED);
                         let global_exists =
                             global_aliases.is_some_and(|g| g.contains_key(&call.name));
@@ -198,58 +198,60 @@ pub(crate) async fn run_prose_inference(
                     if let Some(counts) = counts {
                         counts.increment(&call.name)?;
                     }
-                    let output = if id.is_local() {
-                        // Local tools are Lua functions on the section VM; the
-                        // registry has no entry for the sentinel identity.
-                        let Some(local) = local_dispatch else {
-                            observer.observe(execution, section, detail::TOOL_CALL_FAILED);
-                            return Err(Error::Internal(
-                                "a local tool call reached the loop with no local dispatcher",
-                            ));
-                        };
-                        // The handler is synchronous Lua on this thread, so
-                        // there is no future to race against cancellation; a
-                        // stuck handler is bounded by the VM's instruction
-                        // budget instead.
-                        let call_result = local(id.name(), call.arguments.clone());
-                        observer.observe(
-                            execution,
-                            section,
-                            if call_result.is_ok() {
-                                detail::TOOL_CALL_SUCCEEDED
-                            } else {
-                                detail::TOOL_CALL_FAILED
-                            },
-                        );
-                        // The prompt author wrote the handler, so its output
-                        // is trusted.
-                        ToolOutput::trusted(call_result?)
-                    } else {
-                        let Some(tool) = registry.get(id) else {
-                            observer.observe(execution, section, detail::TOOL_CALL_FAILED);
-                            return Err(Error::UnknownScopedTool(call.name.clone()));
-                        };
-                        // Race the tool call against cancellation so a slow or stuck
-                        // tool cannot hold the run past a Ctrl-C. On cancel the tool
-                        // future is dropped and the run ends promptly.
-                        let call_result = tokio::select! {
-                            biased;
-                            () = cancel::wait_cancelled() => {
+                    let output = match target {
+                        DispatchTarget::Local => {
+                            // Local tools are Lua functions on the section VM;
+                            // they carry no attached implementation.
+                            let Some(local) = local_dispatch else {
                                 observer.observe(execution, section, detail::TOOL_CALL_FAILED);
-                                return Err(Error::Interrupted);
-                            }
-                            result = tool.call(call.arguments.clone()) => result,
-                        };
-                        observer.observe(
-                            execution,
-                            section,
-                            if call_result.is_ok() {
-                                detail::TOOL_CALL_SUCCEEDED
-                            } else {
-                                detail::TOOL_CALL_FAILED
-                            },
-                        );
-                        call_result.map_err(Error::tool)?
+                                return Err(Error::Internal(
+                                    "a local tool call reached the loop with no local dispatcher",
+                                ));
+                            };
+                            // The handler is synchronous Lua on this thread, so
+                            // there is no future to race against cancellation; a
+                            // stuck handler is bounded by the VM's instruction
+                            // budget instead.
+                            let call_result = local(&call.name, call.arguments.clone());
+                            observer.observe(
+                                execution,
+                                section,
+                                if call_result.is_ok() {
+                                    detail::TOOL_CALL_SUCCEEDED
+                                } else {
+                                    detail::TOOL_CALL_FAILED
+                                },
+                            );
+                            // The prompt author wrote the handler, so its output
+                            // is trusted.
+                            ToolOutput::trusted(call_result?)
+                        }
+                        DispatchTarget::Bound(binding) => {
+                            // The implementation was attached at bind time, so
+                            // dispatch never consults the catalog.
+                            let tool = binding.tool();
+                            // Race the tool call against cancellation so a slow or stuck
+                            // tool cannot hold the run past a Ctrl-C. On cancel the tool
+                            // future is dropped and the run ends promptly.
+                            let call_result = tokio::select! {
+                                biased;
+                                () = cancel::wait_cancelled() => {
+                                    observer.observe(execution, section, detail::TOOL_CALL_FAILED);
+                                    return Err(Error::Interrupted);
+                                }
+                                result = tool.call(call.arguments.clone()) => result,
+                            };
+                            observer.observe(
+                                execution,
+                                section,
+                                if call_result.is_ok() {
+                                    detail::TOOL_CALL_SUCCEEDED
+                                } else {
+                                    detail::TOOL_CALL_FAILED
+                                },
+                            );
+                            call_result.map_err(Error::tool)?
+                        }
                     };
                     successful_tool_calls += 1;
                     // Trust travels with the output: an untrusted result is

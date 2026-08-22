@@ -22,7 +22,7 @@ use crate::debug::DebugCapture;
 use crate::lua::{LuaProgram, current_tool_bindings};
 use crate::model::{CompletionOptions, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use crate::observe::{NullObserver, Observation, detail};
-use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput, ToolRegistry};
+use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 
 const EXECUTION: &str = "execute-test";
@@ -791,7 +791,7 @@ fn aliased_tool_script(alias: &str) -> Vec<GatewayReply> {
 }
 
 /// Build the tool schemas the loop advertises, mirroring what `run` does.
-fn schemas_for(tools: &[&dyn Tool]) -> Vec<ToolSchema> {
+fn schemas_for(tools: &[Arc<dyn Tool>]) -> Vec<ToolSchema> {
     tools
         .iter()
         .map(|t| {
@@ -805,10 +805,21 @@ fn schemas_for(tools: &[&dyn Tool]) -> Vec<ToolSchema> {
         .collect()
 }
 
-fn dispatch_for(tools: &[&dyn Tool]) -> BTreeMap<String, ToolId> {
+/// Build the loop's dispatch map: each fixture tool bound under its wire name,
+/// mirroring what `prepare_scoped_tools` produces for an always-scoped bind.
+fn dispatch_for(tools: &[Arc<dyn Tool>]) -> BTreeMap<String, DispatchTarget> {
     tools
         .iter()
-        .map(|tool| (tool.wire_name().to_owned(), tool.id()))
+        .map(|tool| {
+            (
+                tool.wire_name().to_owned(),
+                DispatchTarget::Bound(crate::lua::ToolBinding::for_test(
+                    tool.wire_name(),
+                    tool.description(),
+                    Arc::clone(tool),
+                )),
+            )
+        })
         .collect()
 }
 
@@ -824,8 +835,7 @@ fn dispatch_for(tools: &[&dyn Tool]) -> BTreeMap<String, ToolId> {
 async fn run_tool_loop(
     client: &GatewayClient,
     schemas: &[ToolSchema],
-    dispatch: &BTreeMap<String, ToolId>,
-    registry: &ToolRegistry<'_>,
+    dispatch: &BTreeMap<String, DispatchTarget>,
     prose: String,
     max_tool_iterations: usize,
     observer: &dyn Observer,
@@ -842,7 +852,6 @@ async fn run_tool_loop(
         client,
         schemas,
         dispatch,
-        registry,
         &mut conversation,
         prose,
         ProseMode::Loop {
@@ -879,16 +888,15 @@ async fn run_tool_loop(
 /// `tools.add` override reaches the advertised schema.
 #[test]
 fn tool_description_override_appears_in_model_schema() {
+    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
     let bindings = crate::lua::ToolBindings::for_test(
         vec![crate::lua::ToolBinding::for_test(
             "echo",
             "echo capability for live matching",
-            ToolId::new("tests", "echo").expect("valid id"),
+            Arc::clone(&echo),
         )],
         Vec::new(),
     );
-    let echo = EchoTool;
-    let registry = ToolRegistry::new([&echo as &dyn Tool]).expect("unique test registry");
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::fresh(),
         &bindings,
@@ -903,7 +911,7 @@ fn tool_description_override_appears_in_model_schema() {
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .expect("host must inject");
 
-    // tools.add(alias) with no override keeps the registry (catalog) text.
+    // tools.add(alias) with no override keeps the bound tool's catalog text.
     let add_default = LuaProgram::compile(
         "tools.add(echo)",
         "prologue",
@@ -918,12 +926,12 @@ fn tool_description_override_appears_in_model_schema() {
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
-    let (schemas, _) = prepare_scoped_tools(&scope, &[], &registry).expect("schemas must build");
+    let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(schemas.len(), 1);
     assert_eq!(
         schemas[0].description,
         echo.description(),
-        "no override anywhere must advertise the registry description"
+        "no override anywhere must advertise the bound tool's description"
     );
 
     // tools.add(alias, override) overrides the model-facing schema.
@@ -940,7 +948,7 @@ fn tool_description_override_appears_in_model_schema() {
         .expect("description override at tools.add must succeed");
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
-    let (schemas, _) = prepare_scoped_tools(&scope, &[], &registry).expect("schemas must build");
+    let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(schemas[0].description, "Author override for the model");
 
     vm.teardown(&NullObserver, "Override");
@@ -957,11 +965,10 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
             description: "echo capability for live matching".to_owned(),
             id: ToolId::new("tests", "echo").expect("valid id"),
             model_description: Some("bind override".to_owned()),
+            tool: Arc::new(EchoTool),
         }],
         Vec::new(),
     );
-    let echo = EchoTool;
-    let registry = ToolRegistry::new([&echo as &dyn Tool]).expect("unique test registry");
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::fresh(),
         &bindings,
@@ -990,7 +997,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
     let (tool_bindings, tool_runtime) = vm.tool_bag_handles();
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
-    let (schemas, _) = prepare_scoped_tools(&scope, &[], &registry).expect("schemas must build");
+    let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(
         schemas[0].description, "bind override",
         "the bind/always override must beat the catalog text"
@@ -1009,7 +1016,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
         .expect("tools.add with override must succeed");
     let scope =
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
-    let (schemas, _) = prepare_scoped_tools(&scope, &[], &registry).expect("schemas must build");
+    let (schemas, _) = prepare_scoped_tools(&scope, &[]).expect("schemas must build");
     assert_eq!(
         schemas[0].description, "add override",
         "the add override must beat the bind/always override"
@@ -1027,11 +1034,9 @@ async fn tool_loop_dispatches_then_returns_text() {
     let addr = gateway.addr();
     let client = gateway_client(addr);
 
-    let echo = EchoTool;
-    let tools: &[&dyn Tool] = &[&echo];
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+    let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(EchoTool)];
+    let schemas = schemas_for(&tools);
+    let dispatch = dispatch_for(&tools);
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -1040,7 +1045,6 @@ async fn tool_loop_dispatches_then_returns_text() {
         &client,
         &schemas,
         &dispatch,
-        &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         &NullObserver,
@@ -1107,11 +1111,9 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
     let gateway = ScriptedGateway::start(echo_then_text_script()).await;
     let addr = gateway.addr();
     let client = gateway_client(addr);
-    let slow = SlowTool;
-    let tools: &[&dyn Tool] = &[&slow];
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+    let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(SlowTool)];
+    let schemas = schemas_for(&tools);
+    let dispatch = dispatch_for(&tools);
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let nonce = GuardNonce::fresh();
@@ -1130,7 +1132,6 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
             &client,
             &schemas,
             &dispatch,
-            &registry,
             "ask the model".to_string(),
             DEFAULT_MAX_TOOL_ITERATIONS,
             &NullObserver,
@@ -1182,13 +1183,12 @@ async fn run_with_a_pre_cancelled_handle_fails_as_cancelled() {
 /// and the turn count so tests can assert on the accepted or failed turn.
 async fn run_tool_loop_recorded(
     addr: SocketAddr,
-    tools: &[&dyn Tool],
+    tools: &[Arc<dyn Tool>],
 ) -> (Result<String>, Vec<(String, String)>, u32) {
     let client = gateway_client(addr);
     let recorder = Arc::new(Recorder::default());
     let schemas = schemas_for(tools);
     let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let nonce = GuardNonce::fresh();
@@ -1196,7 +1196,6 @@ async fn run_tool_loop_recorded(
         &client,
         &schemas,
         &dispatch,
-        &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         recorder.as_ref(),
@@ -1272,8 +1271,8 @@ async fn empty_stop_turn_after_tool_call_is_a_clean_exit() {
     ])
     .await;
     let addr = gateway.addr();
-    let echo = EchoTool;
-    let (out, events, turns) = run_tool_loop_recorded(addr, &[&echo]).await;
+    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
+    let (out, events, turns) = run_tool_loop_recorded(addr, &[echo]).await;
     assert_eq!(
         out.as_deref().expect("the run must succeed"),
         "",
@@ -1305,8 +1304,8 @@ async fn empty_stop_turn_without_tool_calls_fails() {
     // empty "stop" turn stays an `EmptyModelReply` failure.
     let gateway = ScriptedGateway::start(vec![resp_text_finish("", "stop")]).await;
     let addr = gateway.addr();
-    let echo = EchoTool;
-    let (out, events, turns) = run_tool_loop_recorded(addr, &[&echo]).await;
+    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
+    let (out, events, turns) = run_tool_loop_recorded(addr, &[echo]).await;
     assert!(matches!(out, Err(Error::EmptyModelReply { .. })));
     assert_eq!(turns, 0);
     assert_eq!(
@@ -1325,8 +1324,8 @@ async fn empty_turn_without_finish_reason_after_tool_call_fails() {
     ])
     .await;
     let addr = gateway.addr();
-    let echo = EchoTool;
-    let (out, events, turns) = run_tool_loop_recorded(addr, &[&echo]).await;
+    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
+    let (out, events, turns) = run_tool_loop_recorded(addr, &[echo]).await;
     assert!(matches!(out, Err(Error::EmptyModelReply { .. })));
     assert_eq!(turns, 1, "only the tool-call turn completed");
     assert_eq!(
@@ -1370,11 +1369,10 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
     let addr = gateway.addr();
     let client = gateway_client(addr);
 
-    let echo = UntrustedEchoTool;
-    let tools: &[&dyn Tool] = &[&echo];
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+    let echo: Arc<dyn Tool> = Arc::new(UntrustedEchoTool);
+    let tools: Vec<Arc<dyn Tool>> = vec![echo];
+    let schemas = schemas_for(&tools);
+    let dispatch = dispatch_for(&tools);
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -1383,7 +1381,6 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
         &client,
         &schemas,
         &dispatch,
-        &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         &NullObserver,
@@ -1447,11 +1444,10 @@ async fn untrusted_nonce_is_stable_across_rounds() {
     let addr = gateway.addr();
     let client = gateway_client(addr);
 
-    let echo = UntrustedEchoTool;
-    let tools: &[&dyn Tool] = &[&echo];
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+    let echo: Arc<dyn Tool> = Arc::new(UntrustedEchoTool);
+    let tools: Vec<Arc<dyn Tool>> = vec![echo];
+    let schemas = schemas_for(&tools);
+    let dispatch = dispatch_for(&tools);
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -1460,7 +1456,6 @@ async fn untrusted_nonce_is_stable_across_rounds() {
         &client,
         &schemas,
         &dispatch,
-        &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         &NullObserver,
@@ -1531,11 +1526,10 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     let addr = gateway.addr();
     let client = gateway_client(addr);
 
-    let echo = EchoTool;
-    let tools: &[&dyn Tool] = &[&echo];
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
+    let tools: Vec<Arc<dyn Tool>> = vec![echo];
+    let schemas = schemas_for(&tools);
+    let dispatch = dispatch_for(&tools);
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -1544,7 +1538,6 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
         &client,
         &schemas,
         &dispatch,
-        &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         &NullObserver,
@@ -1581,11 +1574,10 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
     let addr = gateway.addr();
     let client = gateway_client(addr);
 
-    let echo = EchoTool;
-    let tools: &[&dyn Tool] = &[&echo];
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
+    let tools: Vec<Arc<dyn Tool>> = vec![echo];
+    let schemas = schemas_for(&tools);
+    let dispatch = dispatch_for(&tools);
 
     let turns = AtomicU32::new(0);
     let options = CompletionOptions {
@@ -1600,7 +1592,6 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
         &client,
         &schemas,
         &dispatch,
-        &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         &NullObserver,

@@ -1,6 +1,6 @@
 use super::{
-    Json, LuaSerdeExt, MetaMethod, Result, ToolId, UserData, UserDataFields, UserDataMethods,
-    Value, json,
+    Arc, Json, LuaSerdeExt, MetaMethod, Result, Tool, ToolId, UserData, UserDataFields,
+    UserDataMethods, Value, json,
 };
 
 /// Resolves one plain-English capability description to one stable live tool.
@@ -25,8 +25,14 @@ where
     }
 }
 
-/// One prompt-local alias bound to one stable live tool identity.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One prompt-local alias bound to one stable live tool identity, carrying
+/// the resolved implementation attached at bind time.
+///
+/// The implementation rides with the binding so post-H1 execution (schema
+/// preparation, dispatch) never consults the implementation catalog again: a
+/// capability whose tool is unavailable fails at the `tools.bind` call, before
+/// any binding exists.
+#[derive(Clone)]
 pub(crate) struct ToolBinding {
     pub(crate) alias: String,
     pub(crate) description: String,
@@ -35,18 +41,48 @@ pub(crate) struct ToolBinding {
     ///
     /// Capability text in [`Self::description`] stays the live H1 bind
     /// string. When set, [`crate::execute`] advertises this instead of the
-    /// registry tool's default description.
+    /// bound tool's default description.
     pub(crate) model_description: Option<String>,
+    /// The resolved implementation, attached at bind time.
+    pub(crate) tool: Arc<dyn Tool>,
+}
+
+/// Equality is keyed on the binding's data (alias, capability text, stable
+/// identity, override); the attached implementation is a trait object and
+/// takes no part in comparison.
+impl PartialEq for ToolBinding {
+    fn eq(&self, other: &Self) -> bool {
+        self.alias == other.alias
+            && self.description == other.description
+            && self.id == other.id
+            && self.model_description == other.model_description
+    }
+}
+
+impl Eq for ToolBinding {}
+
+/// Shows the stable identity, never the trait object.
+impl std::fmt::Debug for ToolBinding {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ToolBinding")
+            .field("alias", &self.alias)
+            .field("description", &self.description)
+            .field("id", &self.id)
+            .field("model_description", &self.model_description)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ToolBinding {
     #[cfg(test)]
-    pub(crate) fn for_test(alias: &str, description: &str, id: ToolId) -> Self {
+    pub(crate) fn for_test(alias: &str, description: &str, tool: Arc<dyn Tool>) -> Self {
         Self {
             alias: alias.to_owned(),
             description: description.to_owned(),
-            id,
+            id: tool.id(),
             model_description: None,
+            tool,
         }
     }
 
@@ -72,6 +108,12 @@ impl ToolBinding {
     #[must_use]
     pub(crate) fn model_description(&self) -> Option<&str> {
         self.model_description.as_deref()
+    }
+
+    /// Returns the resolved implementation attached at bind time.
+    #[must_use]
+    pub(crate) fn tool(&self) -> &dyn Tool {
+        self.tool.as_ref()
     }
 }
 
@@ -115,7 +157,7 @@ impl LuaToolHandle {
     pub(crate) fn from_live_binding(
         alias: impl Into<String>,
         description: impl Into<String>,
-        tool: &dyn crate::tools::Tool,
+        tool: &dyn Tool,
     ) -> Self {
         Self {
             name: alias.into(),
