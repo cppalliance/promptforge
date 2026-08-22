@@ -1,21 +1,18 @@
 //! The live H1 pass: the ordered top-of-prompt block walk that resolves
 //! capabilities and may short-circuit the whole run with a scalar return.
 
-use std::sync::Arc;
-
 use crate::client::GatewayClient;
-use crate::lua::{SectionVm, ToolBindings};
+use crate::lua::ToolBindings;
 use crate::model::ModelBindings;
 use crate::resolve::RuntimeResolution;
 use crate::tools::ToolRegistry;
 use crate::{Error, Result};
 
-use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
+use super::block_walk::{BlockRunMode, SectionFlow};
 use super::context::RunContext;
 use super::engine::RunFrame;
-use super::gateway::{GatewaySource, ResolutionContext};
-use super::support::{now_rfc3339_checked, sys_json};
-use super::tools::attach_infer_hook;
+use super::gateway::ResolutionContext;
+use super::section_context::SectionContext;
 
 pub(crate) struct LiveH1State {
     pub(crate) bindings: ToolBindings,
@@ -32,94 +29,36 @@ pub(crate) async fn execute_live_h1(
     client: Option<&GatewayClient>,
     frame: &RunFrame<'_>,
 ) -> Result<LiveH1State> {
-    let &RunFrame {
-        args,
-        store,
-        execution,
-        observer,
-        debug,
-        limits,
-        turns,
-        ..
-    } = frame;
     let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models);
-    let now = now_rfc3339_checked()?;
-    let mut sys = sys_json(
-        &now,
-        &now,
-        0,
-        &ctx.prompt().title,
-        execution,
-        ctx.prompt().sections.len(),
-    );
-    let mut vm = SectionVm::new(
-        ctx.nonce(),
-        execution,
-        observer.as_ref(),
-        &ctx.prompt().title,
-    )?;
-    vm.apply_lua_limits(limits.lua_memory().get(), limits.lua_logs().get())?;
+    // Construction and limits failures propagate bare, before any teardown
+    // observation exists; every failure past this point tears the frame's
+    // VM down exactly once.
+    let mut h1_frame = SectionContext::new_live_h1(ctx, frame, &runtime, client)?;
     macro_rules! h1_try {
         ($expression:expr) => {
             match $expression {
                 Ok(value) => value,
                 Err(error) => {
-                    vm.teardown(observer.as_ref(), &ctx.prompt().title);
+                    h1_frame.teardown(&ctx.prompt().title);
                     return Err(error);
                 }
             }
         };
     }
-    h1_try!(vm.inject_host(args, &sys, store, None));
-    // The infer hook carries a lazy client source so a nested `model:infer`
-    // surfaces a concrete construction error on first use instead of the setup
-    // swallowing it (F5). `active_client` stays lazy for the direct H1 prose
-    // path, which the shared block loop builds and propagates its own error
-    // for via `h1_try!`.
-    h1_try!(vm.install_host_apis(observer, &ctx.prompt().title));
-    h1_try!(vm.install_h1_control_stubs());
+    // The pass owns its client slot: seeded from the run's client, created
+    // lazily on the first prose block, whose construction error propagates
+    // through `h1_try!`.
     let mut active_client = client.cloned();
-    attach_infer_hook(
-        &vm,
-        GatewaySource::from_optional(active_client.clone(), limits),
-        Arc::clone(observer),
-        debug.cloned(),
-        execution,
-        &ctx.prompt().title,
-        turns,
-        Some(runtime.producer()),
-    );
-
-    // The ordered block loop is the shared one (`block_walk`) running in live
-    // H1 mode on the run frame directly: the frame's walk-only fields carry
-    // empty defaults here and live mode never reads them. This shell keeps
-    // only VM construction, limits, host setup, the infer hook, the state
-    // extraction, and the teardown boundary. The walk's per-frame state stays
-    // in locals here until the live H1 pass moves onto a SectionContext of
-    // its own.
-    let mut reply = None;
-    let mut conversation = Vec::new();
-    let mut counts = None;
-    let mut completion_options = None;
     let flow = h1_try!(
-        run_one_section_impl(
-            &mut vm,
-            frame,
-            &ctx.prompt().title,
-            &ctx.prompt().h1_blocks,
-            BlockRunMode::LiveH1(&runtime),
-            &mut sys,
-            &mut reply,
-            &mut conversation,
-            &mut counts,
-            &mut completion_options,
-            frame.item,
-            observer.as_ref(),
-            debug.map(AsRef::as_ref),
-            turns.as_ref(),
-            &mut active_client,
-        )
-        .await
+        h1_frame
+            .run(
+                frame,
+                &ctx.prompt().title,
+                &ctx.prompt().h1_blocks,
+                BlockRunMode::LiveH1(&runtime),
+                &mut active_client,
+            )
+            .await
     );
     let (returned, reply) = match flow {
         SectionFlow::Returned(value) => (Some(value), None),
@@ -127,13 +66,13 @@ pub(crate) async fn execute_live_h1(
         // `run_live_h1_block` turns a recorded jump into an error, so live
         // mode never yields a jump flow.
         SectionFlow::Jumped { .. } => {
-            vm.teardown(observer.as_ref(), &ctx.prompt().title);
+            h1_frame.teardown(&ctx.prompt().title);
             return Err(Error::Internal("live H1 block walk reported a jump"));
         }
     };
-    let var = h1_try!(vm.var());
+    let var = h1_try!(h1_frame.read_var());
     let (bindings, models) = h1_try!(runtime.bindings());
-    vm.teardown(observer.as_ref(), &ctx.prompt().title);
+    h1_frame.teardown(&ctx.prompt().title);
     Ok(LiveH1State {
         bindings,
         models,
