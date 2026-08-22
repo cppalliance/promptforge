@@ -84,7 +84,13 @@ cargo run -p promptforge-dev -- prompts/greet.md "world" --watch
 
 ### Cursor
 
-This repo ships `.cursor/mcp.json`, which spawns `promptforge-mcp-server` over stdio using `prompts.toml`. Start a gateway first, then set `PROMPTFORGE_GATEWAY_API_KEY` in the environment Cursor inherits, or put it in `prompts.env` next to `prompts.toml` (gitignored). Enable the **promptforge** MCP server in Cursor Settings → MCP. The harness then has four tools: `list_prompts`, `run_prompt`, `check_run`, and `need_prompt`. Ask the agent to list prompts or to run `hello`.
+This repo ships `.cursor/mcp.json`, which spawns `promptforge-mcp-server` over stdio using `prompts.toml`. For a local Ollama model, start the matching gateway (loopback password `whatever`, already set in both files):
+
+```bash
+cargo run -p promptforge-gateway -- serve gateway.ollama.toml
+```
+
+Enable the **promptforge** MCP server in Cursor Settings → MCP. The harness then has four tools: `list_prompts`, `run_prompt`, `check_run`, and `need_prompt`. Ask the agent to list prompts or to run `hello`.
 
 ![Gloves and sparks](images/banner-04.png)
 

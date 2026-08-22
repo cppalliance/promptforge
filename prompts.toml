@@ -16,16 +16,18 @@ api_key = "${PROMPTFORGE_MCP_SERVER_API_KEY}"
 [paths]
 prompts = "prompts"
 
-# The prompts run against the same gateway the CLI uses; it holds the vendor key.
+# The prompts run against the same gateway the CLI uses. The password is a
+# local loopback bearer, not a vendor key; it must match [server].api_key in
+# gateway.ollama.toml.
 [gateway]
 url = "http://127.0.0.1:8081/v1"
-api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
+api_key = "whatever"
 
-# Live tools: both enabled here to preserve the development profile's behavior.
-# A configuration with no [tools] section runs in a true sandbox.
+# Fetch is local. Search needs a gateway [tools.web_search] provider; the
+# Ollama profile does not ship one, so it stays off here.
 [tools]
 web_fetch = true
-web_search = true
+web_search = false
 
 # Everything written under prompts/ is available. `*` stops at a separator and
 # `**` crosses one, so `**/*.md` reaches a prompt in a subdirectory too. The

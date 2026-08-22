@@ -1,0 +1,23 @@
+# Local Ollama backend. No vendor keys. Serve from the repo root:
+#   cargo run -p promptforge-gateway -- serve gateway.ollama.toml
+#
+# The loopback password is the literal `whatever`. The MCP server in
+# prompts.toml uses the same string. Point `upstream` at `ollama list`.
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "whatever"
+
+[[endpoint]]
+id = "ollama"
+protocol = "openai"
+base_url = "http://127.0.0.1:11434/v1"
+api_key = ""
+
+[[model]]
+name = "writer"
+description = "A model suited for careful analysis, coding, and general assistance"
+context = 8192
+thinking = "never"
+upstream = "openhermes:latest"
+endpoints = ["ollama"]
