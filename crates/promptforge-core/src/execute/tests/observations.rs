@@ -347,6 +347,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
     let (out, _) = run_tool_loop(
         &client,
         &schemas,
@@ -361,6 +362,7 @@ async fn the_tool_loop_reports_each_turn_and_each_tool_call() {
             turns: &turns,
             debug: None,
             completion_options: &options,
+            nonce: &nonce,
         },
         None,
         None,

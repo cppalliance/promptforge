@@ -52,7 +52,12 @@ pub(crate) async fn execute_live_h1(
         execution,
         ctx.prompt().sections.len(),
     );
-    let mut vm = SectionVm::new(execution, observer.as_ref(), &ctx.prompt().title)?;
+    let mut vm = SectionVm::new(
+        ctx.nonce(),
+        execution,
+        observer.as_ref(),
+        &ctx.prompt().title,
+    )?;
     vm.apply_lua_limits(limits.lua_memory().get(), limits.lua_logs().get())?;
     macro_rules! h1_try {
         ($expression:expr) => {

@@ -444,6 +444,7 @@ struct FanoutFixture {
     shared: LuaProgram,
     var: serde_json::Value,
     ids: Arc<AtomicU64>,
+    nonce: crate::untrusted::GuardNonce,
 }
 
 impl FanoutFixture {
@@ -458,6 +459,7 @@ impl FanoutFixture {
             shared: LuaProgram::empty().expect("the empty chunk compiles"),
             var: json!({}),
             ids: Arc::new(AtomicU64::new(0)),
+            nonce: crate::untrusted::GuardNonce::fresh(),
         }
     }
 
@@ -471,6 +473,7 @@ impl FanoutFixture {
             args: "",
             store: &self.store,
             execution,
+            nonce: &self.nonce,
             observer,
             client: &self.client,
             debug: None,

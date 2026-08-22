@@ -8,6 +8,7 @@ use crate::lua::{
 use crate::observe::NullObserver;
 use crate::store::StoreRef;
 use crate::tools::ToolRegistry;
+use crate::untrusted::GuardNonce;
 use serde_json::json;
 
 const EXECUTION: &str = "model-bind-test";
@@ -95,7 +96,14 @@ fn section_vm_with_model_bindings(
     observer: &dyn crate::observe::Observer,
     section: &str,
 ) -> Result<SectionVm> {
-    let vm = SectionVm::new_for_section(tools, models, execution, observer, section)?;
+    let vm = SectionVm::new_for_section(
+        &GuardNonce::fresh(),
+        tools,
+        models,
+        execution,
+        observer,
+        section,
+    )?;
     vm.install_captured_bindings()?;
     Ok(vm)
 }
