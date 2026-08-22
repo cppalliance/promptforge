@@ -10,7 +10,6 @@ use crate::{Error, Result};
 
 use super::block_walk::{BlockRunMode, SectionFlow};
 use super::context::RunContext;
-use super::engine::RunFrame;
 use super::gateway::ResolutionContext;
 use super::section_context::SectionContext;
 
@@ -27,13 +26,12 @@ pub(crate) async fn execute_live_h1(
     resolution: ResolutionContext<'_>,
     registry: &ToolRegistry<'_>,
     client: Option<&GatewayClient>,
-    frame: &RunFrame<'_>,
 ) -> Result<LiveH1State> {
     let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models);
     // Construction and limits failures propagate bare, before any teardown
     // observation exists; every failure past this point tears the frame's
     // VM down exactly once.
-    let mut h1_frame = SectionContext::new_live_h1(ctx, frame, &runtime, client)?;
+    let mut h1_frame = SectionContext::new_live_h1(ctx, &runtime, client)?;
     macro_rules! h1_try {
         ($expression:expr) => {
             match $expression {
@@ -52,7 +50,7 @@ pub(crate) async fn execute_live_h1(
     let flow = h1_try!(
         h1_frame
             .run(
-                frame,
+                ctx,
                 &ctx.prompt().title,
                 &ctx.prompt().h1_blocks,
                 BlockRunMode::LiveH1(&runtime),
