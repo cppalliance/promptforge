@@ -67,7 +67,7 @@ The strongest practical feature in PromptForge may be its treatment of tools as 
 Declaring a tool with:
 
 ```lua
-tools.need("search", "Search the web and return a list of results.")
+tools.bind("search", "Search the web and return a list of results.")
 ```
 
 does not automatically expose that tool to the model.
@@ -530,7 +530,7 @@ PromptForge does not require prompt files to hard-code concrete infrastructure i
 Instead, they can declare semantic requirements:
 
 ```lua
-writer = models.need(
+writer = models.bind(
     "writer",
     "A careful analysis model",
     { thinking = false, temperature = 0, context = 32768 })
@@ -539,7 +539,7 @@ writer = models.need(
 and:
 
 ```lua
-search = tools.need(
+search = tools.bind(
     "search",
     "Search the web and return a list of results.")
 ```
@@ -897,7 +897,7 @@ The author states the policy.
 
 - **Explain progressive tool exposure with a small-model example.** Show a 3B-class workflow in which a first inference sees only `search`, a later inference gains `fetch`, and private or orchestration capabilities remain absent unless needed.
 
-- **Describe tools as grants of authority.** Make clear that `tools.need()` declares a dependency while exposure determines what the model is actually allowed to do. Extend that explanation naturally to model-facing orchestration tools.
+- **Describe tools as grants of authority.** Make clear that `tools.bind()` declares a dependency while exposure determines what the model is actually allowed to do. Extend that explanation naturally to model-facing orchestration tools.
 
 - **Document the orchestration ladder.** A concise progression such as `Lua → model:infer() → tool-using prose → model-facing orchestration tools` would show authors how to escalate from deterministic control to delegated agency only as necessary.
 

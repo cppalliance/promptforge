@@ -57,11 +57,11 @@ impl PreparedTools {
     /// A `GET /v1/models` failure is classified before it is acted on. A
     /// *transient* failure - a connection or timeout, or a 5xx the gateway may
     /// recover from - falls back to an empty catalog: prompts without
-    /// `models.need` keep working, and one that declares models fails at live H1
+    /// `models.bind` keep working, and one that declares models fails at live H1
     /// with a model-absent error. A *fatal* misconfiguration - a bad endpoint or
     /// key, a non-5xx backend status such as a 401, or a malformed response - is
     /// propagated instead, so a wrong key or URL refuses to boot rather than
-    /// silently serving an empty catalog that fails every `models.need` prompt.
+    /// silently serving an empty catalog that fails every `models.bind` prompt.
     ///
     /// # Examples
     /// ```no_run
@@ -81,7 +81,7 @@ impl PreparedTools {
     /// catalog fails *fatally* (a misconfiguration a retry cannot fix), with the
     /// underlying failure preserved as the error's source. A transient catalog
     /// failure is not an error here: it is logged and the catalog is left empty,
-    /// so prompts without `models.need` keep working.
+    /// so prompts without `models.bind` keep working.
     pub async fn load(config: &Config) -> Result<Self, PreparedToolsError> {
         let gateway = &config.gateway;
         let models = match fetch_model_catalog(gateway.url.as_str(), gateway.api_key.expose()).await
@@ -90,7 +90,7 @@ impl PreparedTools {
             Err(error) if is_transient(&error) => {
                 // A momentary outage: warn and serve on with an empty catalog,
                 // since the gateway may simply not be up yet and every prompt
-                // without `models.need` is unaffected.
+                // without `models.bind` is unaffected.
                 let kind = error.kind();
                 tracing::warn!(
                     ?kind,
@@ -101,7 +101,7 @@ impl PreparedTools {
             }
             Err(error) => {
                 // A fatal misconfiguration: booting with an empty catalog would
-                // hide a wrong key or URL behind a `models.need` prompt that
+                // hide a wrong key or URL behind a `models.bind` prompt that
                 // fails at runtime, so it is surfaced at boot with its cause
                 // preserved rather than swallowed as a momentary outage.
                 let kind = error.kind();
@@ -173,7 +173,7 @@ impl PreparedTools {
         &self.picker
     }
 
-    /// Returns the gateway model catalog used for live `models.need` resolution.
+    /// Returns the gateway model catalog used for live `models.bind` resolution.
     #[must_use]
     pub(crate) fn models(&self) -> &ModelCatalog {
         &self.models
@@ -187,7 +187,7 @@ impl PreparedTools {
 /// a 5xx the backend may recover from. Everything else - a bad configuration, a
 /// non-5xx backend status such as a 401, or a malformed response - is fatal,
 /// since serving an empty catalog would hide it behind a runtime failure of
-/// every `models.need` prompt.
+/// every `models.bind` prompt.
 fn is_transient(error: &CompletionError) -> bool {
     match error.kind() {
         CompletionErrorKind::Transport => true,

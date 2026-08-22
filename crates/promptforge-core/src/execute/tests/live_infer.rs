@@ -61,7 +61,7 @@ async fn caught_h1_callback_error_stops_before_a_later_block() {
     let source = "---\nname: callback-drain\ndescription: d\npromptforge: 1\n---\n\n\
         # Callback Drain\n\n\
         ```lua\n\
-        local ok = pcall(models.need, 'missing', 'unavailable model')\n\
+        local ok = pcall(models.bind, 'missing', 'unavailable model')\n\
         assert(not ok)\n\
         ```\n\n\
         ```lua\nstore.write('later.txt', 'ran')\n```\n\n\
@@ -160,8 +160,8 @@ async fn captured_bindings_reach_section_execute_and_fanout_vms() {
         "---\nname: captured-bindings\ndescription: d\npromptforge: 1\n---\n\n\
          # Captured Bindings\n\n\
          ```lua\n\
-         echo = tools.need('echo', {capability})\n\
-         writer = models.need('writer', 'A general model for tests')\n\
+         echo = tools.bind('echo', {capability})\n\
+         writer = models.bind('writer', 'A general model for tests')\n\
          ```\n\n\
          ```lua shared\n\
          function binding_names() return echo.name .. ':' .. writer.name end\n\
@@ -417,7 +417,7 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
         "---\nname: live-h1-prose\ndescription: d\npromptforge: 1\n---\n\n\
          # Live H1 Prose\n\n\
          ```lua\n\
-         tools.need('echo', {capability})\n\
+         tools.bind('echo', {capability})\n\
          tools.always('echo')\n\
          models.default('writer', 'A general model for tests')\n\
          var.executions = (var.executions or 0) + 1\n\

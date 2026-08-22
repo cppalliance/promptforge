@@ -45,7 +45,7 @@ fn catalog() -> ModelCatalog {
     .expect("test catalog has unique model ids")
 }
 
-fn fixture_resolver(description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel> {
+fn fixture_resolver(description: &str, opts: &ModelBindOpts) -> Result<ResolvedModel> {
     let catalog = catalog();
     let matches = catalog.filtered(opts);
     let hit = matches
@@ -111,9 +111,9 @@ fn section_vm_with_model_bindings(
 #[test]
 fn context_filter_drops_small_windows() {
     let catalog = catalog();
-    let matches = catalog.filtered(&ModelNeedOpts {
+    let matches = catalog.filtered(&ModelBindOpts {
         context: Some(ctx(40_000)),
-        ..ModelNeedOpts::default()
+        ..ModelBindOpts::default()
     });
     let names: Vec<_> = matches.iter().map(|m| m.id().name()).collect();
     assert_eq!(names, ["analyst", "always-think"]);
@@ -122,9 +122,9 @@ fn context_filter_drops_small_windows() {
 #[test]
 fn thinking_false_keeps_never_and_switchable() {
     let catalog = catalog();
-    let matches = catalog.filtered(&ModelNeedOpts {
+    let matches = catalog.filtered(&ModelBindOpts {
         thinking: Some(false),
-        ..ModelNeedOpts::default()
+        ..ModelBindOpts::default()
     });
     let names: Vec<_> = matches.iter().map(|m| m.id().name()).collect();
     assert_eq!(names, ["small", "analyst"]);
@@ -133,9 +133,9 @@ fn thinking_false_keeps_never_and_switchable() {
 #[test]
 fn thinking_true_keeps_switchable_and_always() {
     let catalog = catalog();
-    let matches = catalog.filtered(&ModelNeedOpts {
+    let matches = catalog.filtered(&ModelBindOpts {
         thinking: Some(true),
-        ..ModelNeedOpts::default()
+        ..ModelBindOpts::default()
     });
     let names: Vec<_> = matches.iter().map(|m| m.id().name()).collect();
     assert_eq!(names, ["analyst", "always-think"]);

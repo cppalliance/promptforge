@@ -228,7 +228,7 @@ async fn local_tool_alias_cannot_shadow_a_declared_tool() {
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua\n\
-tools.need('grab', 'capability')\n\
+tools.bind('grab', 'capability')\n\
 models.default('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\n\
 ```lua\n\
@@ -289,7 +289,7 @@ async fn tools_add_between_prose_blocks_takes_effect_on_the_second_block() {
     let prompt = bound_with_tools(
         "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # Test prompt\n\n```lua shared\n\
-tools.need('section_tool', 'capability')\n\
+tools.bind('section_tool', 'capability')\n\
 models.default('writer', 'A general model for tests')\n```\n\n\
 ## Only\n\n\
 First ask.\n\n\

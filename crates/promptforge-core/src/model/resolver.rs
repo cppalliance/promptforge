@@ -1,9 +1,9 @@
-//! The semantic `models.need` resolution adapter over the tool picker.
+//! The semantic `models.bind` resolution adapter over the tool picker.
 
 use promptforge_tool_picker::{CandidateGroup, ToolPicker};
 
 use super::{
-    ModelCatalog, ModelInvocation, ModelNeedOpts, ModelResolver, ResolvedModel,
+    ModelBindOpts, ModelCatalog, ModelInvocation, ModelResolver, ResolvedModel,
     model_from_picker_id, picker_catalog_from,
 };
 use crate::{Error, Result};
@@ -32,7 +32,7 @@ impl<'a> PickerModelResolver<'a> {
 }
 
 impl ModelResolver for PickerModelResolver<'_> {
-    fn resolve(&self, description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel> {
+    fn resolve(&self, description: &str, opts: &ModelBindOpts) -> Result<ResolvedModel> {
         // Borrowed filtered view (MODEL-017): no full-descriptor clone, and the
         // picker is built directly from these borrowed matches.
         let matches = self.catalog.filtered(opts);

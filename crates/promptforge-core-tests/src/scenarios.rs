@@ -29,7 +29,7 @@ const REAL_TEXT: &str = include_str!("../prompts/execution/real-text.md");
 const REAL_TOOL_CALL: &str = include_str!("../prompts/execution/real-tool-call.md");
 
 /// Catalog entry for scenario fixtures: a large switchable-context model so
-/// `models.need` can filter and request thinking without a live `/v1/models`
+/// `models.bind` can filter and request thinking without a live `/v1/models`
 /// fetch. Defined here (not in core) because it is only test scaffolding.
 fn pinned_qwen_dev_catalog(model_alias: &str) -> Result<ModelCatalog> {
     let context = NonZeroU32::new(131_072).context("131072 is a non-zero context window")?;
