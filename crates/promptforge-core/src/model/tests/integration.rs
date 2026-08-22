@@ -1,4 +1,4 @@
-//! Lua-driven `models.need`/`models.use`/`models.default` integration tests.
+//! Lua-driven `models.bind`/`models.use`/`models.default` integration tests.
 
 use super::*;
 
@@ -25,9 +25,9 @@ fn resolve_shared(source: &str) -> Result<(ToolBindings, ModelBindings)> {
 }
 
 #[test]
-fn models_need_resolves_and_use_selects_section_binding() {
+fn models_bind_resolves_and_use_selects_section_binding() {
     let (tools, models) = resolve_shared(
-        r#"models.need("analyst", "careful analysis", { thinking = false, temperature = 0, context = 40000 })"#,
+        r#"models.bind("analyst", "careful analysis", { thinking = false, temperature = 0, context = 40000 })"#,
     )
     .unwrap();
     assert_eq!(models.bindings()[0].id().name(), "analyst");
@@ -56,7 +56,7 @@ fn models_need_resolves_and_use_selects_section_binding() {
 
 #[test]
 fn no_models_use_or_always_leaves_section_unbound() {
-    let (tools, models) = resolve_shared(r#"models.need("analyst", "careful analysis")"#).unwrap();
+    let (tools, models) = resolve_shared(r#"models.bind("analyst", "careful analysis")"#).unwrap();
     let mut vm =
         section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
             .unwrap();
@@ -69,16 +69,16 @@ fn no_models_use_or_always_leaves_section_unbound() {
 }
 
 #[test]
-fn constraint_filter_makes_need_absent() {
+fn constraint_filter_makes_bind_absent() {
     let error =
-        resolve_shared(r#"models.need("analyst", "careful analysis", { context = 200000 })"#)
+        resolve_shared(r#"models.bind("analyst", "careful analysis", { context = 200000 })"#)
             .unwrap_err();
     assert!(matches!(error, Error::ModelAbsent { .. }));
 }
 
 #[test]
 fn undeclared_models_use_fails_loudly() {
-    let (tools, models) = resolve_shared(r#"models.need("analyst", "careful analysis")"#).unwrap();
+    let (tools, models) = resolve_shared(r#"models.bind("analyst", "careful analysis")"#).unwrap();
     let mut vm =
         section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
             .unwrap();
@@ -98,7 +98,7 @@ fn undeclared_models_use_fails_loudly() {
         .expect_err("an undeclared model alias must fail");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("models.use alias \"missing\" was not declared by models.need"),
+        rendered.contains("models.use alias \"missing\" was not declared by models.bind"),
         "the error must name the undeclared alias and declaration requirement: {rendered}"
     );
     vm.teardown(&NullObserver, "Section");

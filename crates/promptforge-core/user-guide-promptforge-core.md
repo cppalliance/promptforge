@@ -122,7 +122,7 @@ Lua blocks in the H1 region execute once in source order before any H2 section. 
 
 ```lua
 models.default("writer", "a capable writing model")
-tools.need("search", "web search capability")
+tools.bind("search", "web search capability")
 tools.always("search")
 var.topic = "Rust async patterns"
 ```
@@ -227,7 +227,7 @@ Models are declared by capability description and resolved semantically against 
 
 ```lua
 -- Declare a model by what you need it to do
-models.need("writer", "a creative writing model", {
+models.bind("writer", "a creative writing model", {
     thinking = true,
     temperature = 0.7,
     context = 128000,
@@ -238,7 +238,7 @@ models.need("writer", "a creative writing model", {
 models.default("writer")
 ```
 
-The `models.default(alias, description, opts)` form declares and designates in one atomic call; the single-alias form designates a model already declared with `models.need`. Within sections, `models.use(alias)` selects a specific model and returns its handle:
+The `models.default(alias, description, opts)` form declares and designates in one atomic call; the single-alias form designates a model already declared with `models.bind`. Within sections, `models.use(alias)` selects a specific model and returns its handle:
 
 ```lua
 local analyst = models.use("analyst")
@@ -291,14 +291,14 @@ Two tool-calling dialects ship: OpenAI (native tool calls) and Gemma-3 tool_code
 Tools are declared by capability description and resolved semantically at runtime via a picker:
 
 ```lua
--- Declare a tool need
-local search = tools.need("search", "web search capability")
+-- Declare a tool binding
+local search = tools.bind("search", "web search capability")
 
 -- Promote to prompt-wide scope (available in all sections)
 tools.always("search")
 ```
 
-A tool declared with `tools.need` is not exposed to the model unless `tools.always` or `tools.add` is called. This is explicit - you control exactly what the model sees.
+A tool declared with `tools.bind` is not exposed to the model unless `tools.always` or `tools.add` is called. This is explicit - you control exactly what the model sees.
 
 ```lua
 -- Section-local scoping
@@ -311,15 +311,15 @@ tools.add({"a", "b", tool_c}) -- arrays of strings or handles
 
 ### Tool Properties
 
-After `tools.need`, the returned handle exposes: `name`, `description`, `parameters` (JSON schema), `wire_name`, and `untrusted` flag. Tool objects are frozen - assigning a field errors. The model-facing description is overridden positionally at declaration or scoping time:
+After `tools.bind`, the returned handle exposes: `name`, `description`, `parameters` (JSON schema), `wire_name`, and `untrusted` flag. Tool objects are frozen - assigning a field errors. The model-facing description is overridden positionally at declaration or scoping time:
 
 ```lua
-tools.need("search", "web search capability", "Search the web for current information")
+tools.bind("search", "web search capability", "Search the web for current information")
 tools.always("search", "Search the web for current information")
 tools.add("search", "Search the web for current information")
 ```
 
-Precedence is `add` over `need`/`always` over the catalog description.
+Precedence is `add` over `bind`/`always` over the catalog description.
 
 ### Tool Dispatch Loop
 
@@ -361,7 +361,7 @@ tools.add_local("grab", "Grab a value from the store", {
 end)
 ```
 
-The alias must be unique within the section. It cannot reuse an alias declared by `tools.need` or `tools.always`, and a second `tools.add_local` call with the same alias is an error.
+The alias must be unique within the section. It cannot reuse an alias declared by `tools.bind` or `tools.always`, and a second `tools.add_local` call with the same alias is an error.
 
 The params table maps each parameter name to a bare type string or a `{type, description}` array. Supported types are `"string"`, `"integer"`, `"number"`, and `"boolean"`; all declared parameters are required. The handler receives the arguments as a Lua table and returns a string. It shares the section's VM (store, `var`, globals), may call `execute()`, `fanout`, and the `infer` forms (`models.infer(prompt)`, `handle:infer(prompt)`), and cannot call `jump()`. Local tool output is trusted - no nonce envelope. A local tool becomes visible to the model starting from the next prose block.
 

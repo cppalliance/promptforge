@@ -223,7 +223,7 @@ async fn tool_calls_count_increments_on_successful_dispatch() {
     ));
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        tools.need('echo', 'echo tool')\n\
+        tools.bind('echo', 'echo tool')\n\
         tools.always('echo')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\nUse the tool.\n\n\
@@ -307,7 +307,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
 async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        tools.need('search', 'search tool')\n\
+        tools.bind('search', 'search tool')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n```lua\ntools.add('search')\n```\n\n\
         ```lua\nassert(tools.calls['search'] > 0, 'search was never called')\n\
@@ -335,7 +335,7 @@ async fn tool_calls_count_zero_for_uncalled_alias_fails_epilog_assert() {
 async fn tool_calls_typo_alias_is_a_hard_error_with_in_scope_set() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        tools.need('search', 'search tool')\n\
+        tools.bind('search', 'search tool')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\n```lua\ntools.add('search')\n```\n\n\
         ```lua\nlocal _ = tools.calls['serach']\n\
@@ -372,8 +372,8 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
     let global = ScopedFixtureTool::new("global_tool", "canonical_global", "A global tool.");
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        tools.need('scoped', 'scoped tool')\n\
-        tools.need('global_tool', 'global tool')\n\
+        tools.bind('scoped', 'scoped tool')\n\
+        tools.bind('global_tool', 'global tool')\n\
         tools.always('scoped')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\nUse the tool.\n";
@@ -397,7 +397,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
             in_scope,
         } => {
             assert_eq!(name, "global_tool");
-            assert!(*global_exists, "the alias was declared by tools.need");
+            assert!(*global_exists, "the alias was declared by tools.bind");
             assert!(
                 in_scope.contains(&"scoped".to_string()),
                 "in_scope must list the scoped alias: {in_scope:?}"
@@ -411,7 +411,7 @@ async fn model_calling_global_but_unscoped_tool_is_a_hard_error() {
     }
     let msg = error.to_string();
     assert!(
-        msg.contains("declared by tools.need but not added"),
+        msg.contains("declared by tools.bind but not added"),
         "error message must hint declared-but-unscoped: {msg}"
     );
 }
@@ -423,7 +423,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
     let tool = ScopedFixtureTool::new("echo", "canonical_echo", "Echo a test value.");
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        tools.need('echo', 'echo tool')\n\
+        tools.bind('echo', 'echo tool')\n\
         tools.always('echo')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\nUse the tool.\n";
@@ -446,7 +446,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
             assert_eq!(name, "nonexistent");
             assert!(
                 !*global_exists,
-                "the alias was never declared by tools.need"
+                "the alias was never declared by tools.bind"
             );
             assert!(
                 in_scope.contains(&"echo".to_string()),
@@ -457,7 +457,7 @@ async fn model_calling_pure_unknown_tool_is_a_hard_error() {
     }
     let msg = error.to_string();
     assert!(
-        !msg.contains("declared by tools.need but not added"),
+        !msg.contains("declared by tools.bind but not added"),
         "pure unknown must not hint declared-but-unscoped: {msg}"
     );
 }

@@ -1,5 +1,5 @@
 //! Model value types: validated temperature, thinking mode, descriptor,
-//! need/invocation options, prompt-local bindings, and completion options.
+//! bind/invocation options, prompt-local bindings, and completion options.
 
 use std::num::NonZeroU32;
 
@@ -211,12 +211,12 @@ impl ModelDescriptor {
     }
 }
 
-/// Optional hard constraints and invocation parameters from `models.need`.
+/// Optional hard constraints and invocation parameters from `models.bind`.
 ///
 /// `context` and `thinking` filter the catalog. `temperature`, `max_tokens`,
 /// and a requested `thinking` switch ride on each completion for the binding.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct ModelNeedOpts {
+pub(crate) struct ModelBindOpts {
     /// When set, filters models by thinking capability and freezes the switch.
     pub(crate) thinking: Option<bool>,
     /// Minimum context window size in tokens.
@@ -243,9 +243,9 @@ pub(crate) struct ModelNeedOpts {
 /// Frozen per-request fields carried by a resolved model binding.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ModelInvocation {
-    /// Sampling temperature, when the need declared one.
+    /// Sampling temperature, when the bind declared one.
     pub(crate) temperature: Option<Temperature>,
-    /// Maximum generation tokens, when the need declared one (always non-zero).
+    /// Maximum generation tokens, when the bind declared one (always non-zero).
     pub(crate) max_tokens: Option<NonZeroU32>,
     /// Thinking switch for `chat_template_kwargs.enable_thinking`, when set.
     pub(crate) thinking: Option<bool>,
@@ -253,8 +253,8 @@ pub(crate) struct ModelInvocation {
 
 // No `Eq`: `temperature` is an `f64`, so equality is not reflexive for NaN.
 
-impl From<&ModelNeedOpts> for ModelInvocation {
-    fn from(opts: &ModelNeedOpts) -> Self {
+impl From<&ModelBindOpts> for ModelInvocation {
+    fn from(opts: &ModelBindOpts) -> Self {
         Self {
             temperature: opts.temperature,
             max_tokens: opts.max_tokens,

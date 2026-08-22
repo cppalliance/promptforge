@@ -11,7 +11,7 @@ use promptforge_tool_picker::{Outcome, ToolDescriptor, ToolPicker};
 use crate::error::SharedSource;
 use crate::lua::{LiveBindingProducer, ToolBindings, ToolResolver};
 use crate::model::{
-    ModelBindings, ModelCatalog, ModelNeedOpts, ModelResolver, PickerModelResolver, ResolvedModel,
+    ModelBindOpts, ModelBindings, ModelCatalog, ModelResolver, PickerModelResolver, ResolvedModel,
 };
 use crate::tools::{ToolId, ToolRegistry};
 use crate::{Error, Result};
@@ -34,7 +34,7 @@ impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
     /// Construction retains only the base picker/embedder (F7): it does NOT
     /// pre-build a full model index that model resolution would immediately
     /// discard and rebuild from the constraint-filtered subset. The filtered
-    /// model index is built on demand, when a `models.need`'s constraints are
+    /// model index is built on demand, when a `models.bind`'s constraints are
     /// known, so the redundant full-catalog index is never materialized.
     pub(crate) fn new(
         picker: &'a ToolPicker,
@@ -90,8 +90,8 @@ impl<'a, 'tools: 'a> RuntimeResolution<'a, 'tools> {
 }
 
 impl ModelResolver for RuntimeResolution<'_, '_> {
-    fn resolve(&self, description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel> {
-        // An empty catalog resolves every need as absent without touching the
+    fn resolve(&self, description: &str, opts: &ModelBindOpts) -> Result<ResolvedModel> {
+        // An empty catalog resolves every bind as absent without touching the
         // picker at all.
         if self.models.is_empty() {
             return Err(Error::ModelAbsent {
@@ -99,7 +99,7 @@ impl ModelResolver for RuntimeResolution<'_, '_> {
             });
         }
         // The filtered model index is built here, from the base embedder, over
-        // just the descriptors that satisfy the need's constraints (F7).
+        // just the descriptors that satisfy the bind's constraints (F7).
         PickerModelResolver::new(self.models, self.base_picker).resolve(description, opts)
     }
 }
@@ -280,7 +280,7 @@ mod tests {
 
     use super::*;
     use crate::lua::LiveBindingProducer;
-    use crate::model::ModelNeedOpts;
+    use crate::model::ModelBindOpts;
     use crate::tools::{Tool, ToolError, ToolOutput};
 
     fn tid(name: &str) -> ToolId {
@@ -389,7 +389,7 @@ mod tests {
         let registry =
             ToolRegistry::new(tools.iter().map(AsRef::as_ref)).expect("fixture tools are unique");
         let producer = LiveBindingProducer::default();
-        let model_resolver = |description: &str, _: &ModelNeedOpts| {
+        let model_resolver = |description: &str, _: &ModelBindOpts| {
             Err(Error::ModelAbsent {
                 capability: description.to_owned(),
             })
@@ -462,7 +462,7 @@ mod tests {
             callback_error(
                 &FixtureSource,
                 &[],
-                "tools.need('missing', 'absent')"
+                "tools.bind('missing', 'absent')"
             ),
             Error::Absent { capability } if capability == "absent"
         ));
@@ -470,7 +470,7 @@ mod tests {
             callback_error(
                 &FixtureSource,
                 &[],
-                "tools.need('missing', 'first')"
+                "tools.bind('missing', 'first')"
             ),
             Error::PickedToolNotLive { alias, id }
                 if alias == "missing" && id == ToolId::new("tests", "first").expect("valid id")
@@ -486,7 +486,7 @@ mod tests {
             callback_error(
                 &FixtureSource,
                 &tools,
-                "tools.need('same', 'first'); tools.need('same', 'first')"
+                "tools.bind('same', 'first'); tools.bind('same', 'first')"
             ),
             Error::DuplicateAlias { alias } if alias == "same"
         ));
@@ -494,7 +494,7 @@ mod tests {
             callback_error(
                 &FixtureSource,
                 &tools,
-                "tools.need('one', 'same-one'); tools.need('two', 'same-two')"
+                "tools.bind('one', 'same-one'); tools.bind('two', 'same-two')"
             ),
             Error::ToolIdSelectedTwice { id, first_alias, second_alias }
                 if id == ToolId::new("tests", "first").expect("valid id")

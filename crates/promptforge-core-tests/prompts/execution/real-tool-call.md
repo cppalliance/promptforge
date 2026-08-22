@@ -8,7 +8,7 @@ max_tool_iterations: 2
 # Real Tool Call
 
 ```lua
-tools.need("ask_fixture", "Return one deterministic fixture value for one supplied string.")
+tools.bind("ask_fixture", "Return one deterministic fixture value for one supplied string.")
 tools.always("ask_fixture")
 models.default("writer", "A careful analysis model suited to structured reasoning and long-context review")
 ```

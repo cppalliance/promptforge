@@ -22,8 +22,8 @@ impl BindingState {
 
 /// Run-scoped accumulator populated by live H1 capability calls.
 ///
-/// The producer is installed into one H1 VM. Every executed `tools.need`,
-/// `models.need`, and `models.default` call resolves immediately, while skipped
+/// The producer is installed into one H1 VM. Every executed `tools.bind`,
+/// `models.bind`, and `models.default` call resolves immediately, while skipped
 /// Lua branches produce no binding.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LiveBindingProducer {
@@ -94,7 +94,7 @@ impl LiveBindingProducer {
 
 /// Installs live H1 tool resolution into an existing Lua VM.
 ///
-/// `tools.need` consults `resolver` at the point Lua executes the call, verifies
+/// `tools.bind` consults `resolver` at the point Lua executes the call, verifies
 /// the selected identity against `registry`, records the frozen binding, and
 /// returns an inspectable Tool object populated from the live registry entry.
 ///
@@ -113,15 +113,15 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
 ) -> Result<()> {
     let tools = lua.create_table().map_err(Error::lua)?;
 
-    let needs = Arc::clone(state);
-    let need = scope
+    let bind_state = Arc::clone(state);
+    let bind = scope
         .create_function(
             move |_,
                   (alias, description, model_description): (String, String, Option<String>)|
                   -> mlua::Result<LuaToolHandle> {
                 validate_alias(&alias).map_err(mlua::Error::external)?;
                 {
-                    let mut bindings = needs
+                    let mut bindings = bind_state
                         .lock()
                         .map_err(|_| mlua::Error::external("tool binding recorder was poisoned"))?;
                     if bindings
@@ -139,7 +139,7 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                 let id = match resolver.resolve(&description) {
                     Ok(id) => id,
                     Err(error) => {
-                        let mut bindings = needs.lock().map_err(|_| {
+                        let mut bindings = bind_state.lock().map_err(|_| {
                             mlua::Error::external("tool binding recorder was poisoned")
                         })?;
                         bindings.record_error(error);
@@ -151,14 +151,14 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                         alias: alias.clone(),
                         id,
                     };
-                    let mut bindings = needs
+                    let mut bindings = bind_state
                         .lock()
                         .map_err(|_| mlua::Error::external("tool binding recorder was poisoned"))?;
                     bindings.record_error(error);
                     return Err(mlua::Error::external("picked tool is not live"));
                 };
                 let handle = LuaToolHandle::from_live_binding(&alias, &description, tool);
-                let mut bindings = needs
+                let mut bindings = bind_state
                     .lock()
                     .map_err(|_| mlua::Error::external("tool binding recorder was poisoned"))?;
                 if let Some(first) = bindings
@@ -187,7 +187,7 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
             },
         )
         .map_err(Error::lua)?;
-    tools.set("need", need).map_err(Error::lua)?;
+    tools.set("bind", bind).map_err(Error::lua)?;
 
     let prompt_wide = Arc::clone(state);
     let always = scope
@@ -208,7 +208,7 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                     .find(|binding| binding.alias == alias)
                 else {
                     return Err(mlua::Error::external(format!(
-                        "tools.always alias {alias:?} was not declared by tools.need"
+                        "tools.always alias {alias:?} was not declared by tools.bind"
                     )));
                 };
                 if let Some(model_description) = model_description {

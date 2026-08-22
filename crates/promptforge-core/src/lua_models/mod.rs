@@ -1,4 +1,4 @@
-//! Lua `models.need` / `models.use` host tables for live H1 and H2.
+//! Lua `models.bind` / `models.use` host tables for live H1 and H2.
 //!
 //! Kept beside [`crate::lua`] so the tool tables stay readable while model
 //! declaration recording mirrors their phase rules.
@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 use mlua::{Lua, MultiValue, Scope, Table};
 
-use crate::model::{ModelBinding, ModelBindings, ModelNeedOpts, ModelResolver};
+use crate::model::{ModelBindOpts, ModelBinding, ModelBindings, ModelResolver};
 use crate::{Error, Result};
 
 mod decode;
@@ -16,7 +16,7 @@ mod userdata;
 
 pub(crate) use userdata::{LuaModelHandle, ModelInferHook, ModelsInferHook};
 
-use decode::{parse_need_args, parse_single_alias, validate_alias};
+use decode::{parse_bind_args, parse_single_alias, validate_alias};
 
 /// Dispatches a `models.infer(prompt)` call through the executor-installed
 /// [`ModelsInferHook`] app data.
@@ -72,7 +72,7 @@ pub(crate) enum SelectError {
     AlreadyUsed,
 }
 
-/// Accumulator populated by model needs executed during live H1.
+/// Accumulator populated by model binds executed during live H1.
 #[derive(Debug, Default)]
 pub(crate) struct ModelBindingState {
     pub(crate) bindings: Vec<ModelBinding>,
@@ -80,14 +80,14 @@ pub(crate) struct ModelBindingState {
     pub(crate) callback_error: Option<Error>,
 }
 
-/// Records one `models.need` binding into the accumulator. Shared by
-/// `models.need` and the multi-arg `models.default` form.
-fn record_need_binding(
+/// Records one `models.bind` binding into the accumulator. Shared by
+/// `models.bind` and the multi-arg `models.default` form.
+fn record_bind_binding(
     state: &mut ModelBindingState,
     resolver: &dyn ModelResolver,
     alias: &str,
     description: &str,
-    opts: &ModelNeedOpts,
+    opts: &ModelBindOpts,
 ) -> mlua::Result<ModelBinding> {
     if state.bindings.iter().any(|b| b.alias() == alias) {
         if state.callback_error.is_none() {
@@ -133,7 +133,7 @@ fn record_default_selection(state: &mut ModelBindingState, alias: String) -> mlu
 /// atomically.
 ///
 /// All preconditions (the at-most-once `default` rule and, via
-/// [`record_need_binding`], the duplicate-alias and resolution rules) are
+/// [`record_bind_binding`], the duplicate-alias and resolution rules) are
 /// checked BEFORE any state is mutated, so a rejected call can never leave a
 /// half-recorded binding with no matching default alias behind. Only when every
 /// precondition passes are the binding and the default alias committed together.
@@ -142,21 +142,21 @@ fn record_default_binding(
     resolver: &dyn ModelResolver,
     alias: &str,
     description: &str,
-    opts: &ModelNeedOpts,
+    opts: &ModelBindOpts,
 ) -> mlua::Result<ModelBinding> {
     if state.default.is_some() {
         return Err(mlua::Error::external(
             "models.default may be called at most once per prompt",
         ));
     }
-    // `record_need_binding` only pushes after its own preconditions pass, and we
+    // `record_bind_binding` only pushes after its own preconditions pass, and we
     // have already verified `default` is unset, so this commit is atomic.
-    let binding = record_need_binding(state, resolver, alias, description, opts)?;
+    let binding = record_bind_binding(state, resolver, alias, description, opts)?;
     state.default = Some(alias.to_owned());
     Ok(binding)
 }
 
-/// Installs live H1 `models.need` / `models.default` resolvers and
+/// Installs live H1 `models.bind` / `models.default` resolvers and
 /// `models.infer`.
 ///
 /// Each call resolves immediately and records the resulting frozen binding.
@@ -171,25 +171,25 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
 ) -> Result<()> {
     let models = lua.create_table().map_err(Error::lua)?;
 
-    let needs = Arc::clone(state);
-    let need = scope
+    let bind_state = Arc::clone(state);
+    let bind = scope
         .create_function(move |_, args: MultiValue| -> mlua::Result<LuaModelHandle> {
-            let (alias, description, opts) = parse_need_args(args, "models.need")?;
+            let (alias, description, opts) = parse_bind_args(args, "models.bind")?;
             validate_alias(&alias).map_err(mlua::Error::external)?;
-            let mut guard = needs
+            let mut guard = bind_state
                 .lock()
                 .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
-            let binding = record_need_binding(&mut guard, resolver, &alias, &description, &opts)?;
+            let binding = record_bind_binding(&mut guard, resolver, &alias, &description, &opts)?;
             Ok(LuaModelHandle::from_binding(&binding))
         })
         .map_err(Error::lua)?;
-    models.set("need", need).map_err(Error::lua)?;
+    models.set("bind", bind).map_err(Error::lua)?;
 
     let default_state = Arc::clone(state);
     let default = scope
         .create_function(move |_, args: MultiValue| -> mlua::Result<LuaModelHandle> {
             if args.len() >= 2 {
-                let (alias, description, opts) = parse_need_args(args, "models.default")?;
+                let (alias, description, opts) = parse_bind_args(args, "models.default")?;
                 validate_alias(&alias).map_err(mlua::Error::external)?;
                 let mut guard = default_state
                     .lock()
@@ -210,7 +210,7 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
                     .cloned()
                     .ok_or_else(|| {
                         mlua::Error::external(format!(
-                            "models.default alias {alias:?} was not declared by models.need"
+                            "models.default alias {alias:?} was not declared by models.bind"
                         ))
                     })?;
                 record_default_selection(&mut guard, alias)?;
@@ -237,7 +237,7 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
     lua.globals().raw_set("models", models).map_err(Error::lua)
 }
 
-/// Switches to H2: forbids `models.need`, installs `models.use`,
+/// Switches to H2: forbids `models.bind`, installs `models.use`,
 /// `models.get`, and `models.infer`.
 pub(crate) fn install_h2_models(
     lua: &Lua,
@@ -247,14 +247,14 @@ pub(crate) fn install_h2_models(
 ) -> Result<()> {
     let models = lua.create_table().map_err(Error::lua)?;
 
-    let need = lua
+    let bind = lua
         .create_function(|_, _: MultiValue| -> mlua::Result<()> {
             Err(mlua::Error::external(
-                "models.need is only available during live H1 execution",
+                "models.bind is only available during live H1 execution",
             ))
         })
         .map_err(Error::lua)?;
-    models.set("need", need).map_err(Error::lua)?;
+    models.set("bind", bind).map_err(Error::lua)?;
 
     let default_fn = lua
         .create_function(|_, _: MultiValue| -> mlua::Result<()> {
@@ -275,7 +275,7 @@ pub(crate) fn install_h2_models(
                 .map_err(|_| mlua::Error::external("model declaration runtime was poisoned"))?;
             let binding = frozen.binding(&alias).cloned().ok_or_else(|| {
                 mlua::Error::external(format!(
-                    "models.use alias {alias:?} was not declared by models.need"
+                    "models.use alias {alias:?} was not declared by models.bind"
                 ))
             })?;
             state.select(alias).map_err(|_| {
@@ -292,7 +292,7 @@ pub(crate) fn install_h2_models(
             validate_alias(&alias).map_err(mlua::Error::external)?;
             let binding = frozen.binding(&alias).cloned().ok_or_else(|| {
                 mlua::Error::external(format!(
-                    "models.get alias {alias:?} was not declared by models.need"
+                    "models.get alias {alias:?} was not declared by models.bind"
                 ))
             })?;
             Ok(LuaModelHandle::from_binding(&binding))

@@ -106,7 +106,7 @@ fn test_completion_options() -> CompletionOptions {
 fn ensure_model_h1(md: &str) -> String {
     let first_section = md.find("\n\n## ");
     let mut source = md.to_string();
-    if source.contains("models.default") || source.contains("models.need") {
+    if source.contains("models.default") || source.contains("models.bind") {
         source = source
             .replace("```lua shared\nmodels.", "```lua\nmodels.")
             .replace("```lua shared\n  models.", "```lua\n  models.");
@@ -947,16 +947,16 @@ fn tool_description_override_appears_in_model_schema() {
 }
 
 /// Precedence at the advertised schema: a `tools.add` override beats the
-/// `model_description` recorded by `tools.need` / `tools.always`, which itself
+/// `model_description` recorded by `tools.bind` / `tools.always`, which itself
 /// beats the catalog text.
 #[test]
-fn need_override_reaches_the_schema_and_add_beats_need() {
+fn bind_override_reaches_the_schema_and_add_beats_bind() {
     let bindings = crate::lua::ToolBindings::for_test(
         vec![crate::lua::ToolBinding {
             alias: "echo".to_owned(),
             description: "echo capability for live matching".to_owned(),
             id: ToolId::new("tests", "echo").expect("valid id"),
-            model_description: Some("need override".to_owned()),
+            model_description: Some("bind override".to_owned()),
         }],
         Vec::new(),
     );
@@ -992,8 +992,8 @@ fn need_override_reaches_the_schema_and_add_beats_need() {
         current_tool_bindings(&tool_bindings, &tool_runtime).expect("tool scope must snapshot");
     let (schemas, _) = prepare_scoped_tools(&scope, &[], &registry).expect("schemas must build");
     assert_eq!(
-        schemas[0].description, "need override",
-        "the need/always override must beat the catalog text"
+        schemas[0].description, "bind override",
+        "the bind/always override must beat the catalog text"
     );
 
     let add_override = LuaProgram::compile(
@@ -1012,7 +1012,7 @@ fn need_override_reaches_the_schema_and_add_beats_need() {
     let (schemas, _) = prepare_scoped_tools(&scope, &[], &registry).expect("schemas must build");
     assert_eq!(
         schemas[0].description, "add override",
-        "the add override must beat the need/always override"
+        "the add override must beat the bind/always override"
     );
 
     vm.teardown(&NullObserver, "Precedence");
@@ -1494,7 +1494,7 @@ async fn untrusted_nonce_differs_across_runs() {
     // unguessable from one run to the next.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
         # Test prompt\n\n```lua shared\n\
-        tools.need('echo', 'echo tool')\n\
+        tools.bind('echo', 'echo tool')\n\
         tools.always('echo')\n\
         models.default('writer', 'A general model for tests')\n```\n\n\
         ## Only\n\nUse the tool.\n";

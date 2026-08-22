@@ -198,7 +198,7 @@ impl SectionVm {
     ///
     /// The VM carries no frozen tool bindings, so the validating `tools.add`
     /// installed by [`inject_host`](Self::inject_host) rejects every alias as
-    /// undeclared: a prompt without `tools.need` declarations cannot scope
+    /// undeclared: a prompt without `tools.bind` declarations cannot scope
     /// tools.
     ///
     /// # Errors
@@ -866,7 +866,7 @@ impl SectionVm {
     /// Installs `tools.calls` as a read-only Lua table backed by a fresh
     /// [`ToolCallCounts`]. Each in-scope alias reads its live count; indexing
     /// an unknown key is a hard error that names the bad key and lists the
-    /// in-scope set. When the key was declared by `tools.need` but not added
+    /// in-scope set. When the key was declared by `tools.bind` but not added
     /// to this section's scope, the diagnostic says so.
     ///
     /// Returns the `ToolCallCounts` handle so the executor's tool loop can
@@ -1064,7 +1064,7 @@ pub(crate) struct LuaOutcome {
 ///
 /// The `tools` table is the same validating one every section VM installs,
 /// with no frozen bindings: a chunk that calls `tools.add(...)` fails loudly
-/// because no alias was declared by `tools.need`.
+/// because no alias was declared by `tools.bind`.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] if the sandbox cannot be built, `sys`/`var`/`store`

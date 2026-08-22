@@ -29,7 +29,7 @@ cargo run -p promptforge-dev -- my-prompt.md "summarize this paragraph"
 
 The input becomes the prompt's `args`. If you omit it, it defaults to empty.
 
-Model runtime parameters - context window, thinking mode, max tokens - are not CLI flags. Declare them on the prompt file under `models.need` or `models.default`. The binary's argument surface is deliberately minimal:
+Model runtime parameters - context window, thinking mode, max tokens - are not CLI flags. Declare them on the prompt file under `models.bind` or `models.default`. The binary's argument surface is deliberately minimal:
 
 ```text
 promptforge-dev [--watch] [--capture-raw] <prompt.md> [input]

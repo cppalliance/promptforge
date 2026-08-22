@@ -15,7 +15,7 @@ Lua blocks in the H1 region execute once in source order before any H2 section. 
 
 ```lua
 models.default("writer", "a capable writing model")
-tools.need("search", "web search capability")
+tools.bind("search", "web search capability")
 tools.always("search")
 var.topic = "Rust async patterns"
 ```
@@ -142,11 +142,11 @@ Escalate this with recommended actions.
 
 | Function | Effect |
 |----------|--------|
-| `tools.need(alias, desc, override?)` | Resolve a tool by capability description; `override` sets the model-facing description |
+| `tools.bind(alias, desc, override?)` | Resolve a tool by capability description; `override` sets the model-facing description |
 | `tools.always(alias, override?)` | Make a resolved tool available in every section |
 | `tools.add(alias, override?)` | Make a resolved tool available in this section; `tools.add({"a", "b"})` for bulk |
 | `tools.add_local(alias, desc, params, handler)` | Declare a Lua-backed tool (H2 only) |
-| `models.need(alias, desc, opts?)` | Resolve a model by capability description |
+| `models.bind(alias, desc, opts?)` | Resolve a model by capability description |
 | `models.default(alias, desc, opts?)` | Declare and set the prompt-wide baseline model (H1) |
 | `models.use(alias)` | Select a declared model for this section; returns its handle |
 | `models.get(alias)` | Return a declared model's handle without changing the section model |
@@ -177,7 +177,7 @@ tools.add_local("extract_section", "Extract a range of lines from the paper", {
 end)
 ```
 
-The alias must be unique within the section. It cannot reuse an alias declared by `tools.need` or `tools.always`, and a second `tools.add_local` call with the same alias is an error.
+The alias must be unique within the section. It cannot reuse an alias declared by `tools.bind` or `tools.always`, and a second `tools.add_local` call with the same alias is an error.
 
 The params table maps each parameter name to either a bare type string or a `{type, description}` array. Supported types are `"string"`, `"integer"`, `"number"`, and `"boolean"`. All declared parameters are required. The engine converts the table into the JSON Schema the model sees.
 

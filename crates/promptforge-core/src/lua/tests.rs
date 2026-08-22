@@ -196,7 +196,7 @@ impl Tool for FixtureTool {
     }
 }
 
-fn execute_live_tool_needs(
+fn execute_live_tool_binds(
     source: &LuaProgram,
     resolver: &dyn ToolResolver,
     _execution: &str,
@@ -209,7 +209,7 @@ fn execute_live_tool_needs(
     ];
     let registry =
         ToolRegistry::new(tools.iter().map(AsRef::as_ref)).expect("unique test registry");
-    let models = |description: &str, _: &crate::model::ModelNeedOpts| {
+    let models = |description: &str, _: &crate::model::ModelBindOpts| {
         Err(Error::ModelAbsent {
             capability: description.to_owned(),
         })
@@ -279,8 +279,8 @@ fn fixture_bindings(source: &str) -> ToolBindings {
         )
         .expect("valid id"))
     };
-    execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
-        .expect("fixture needs must resolve")
+    execute_live_tool_binds(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+        .expect("fixture binds must resolve")
 }
 
 #[test]
@@ -299,10 +299,10 @@ fn direct_output_is_absent_in_every_executable_lua_vm() {
     let shared = program(
         "assert(print == nil)\n\
              assert(warn == nil)\n\
-             tools.need('search', 'search the web')",
+             tools.bind('search', 'search the web')",
     );
     let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
-    let bindings = execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+    let bindings = execute_live_tool_binds(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
         .expect("live H1 VM must not expose direct output");
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("section VM must not expose direct output");
@@ -708,8 +708,8 @@ fn concurrent_logs_keep_execution_ids_and_local_order() {
 
 #[test]
 fn binding_records_exact_aliases_descriptions_identities_and_always_scope() {
-    let source = "tools.need('web_search', 'search the web')\n\
-                      tools.need('web_fetch2', 'fetch a page')\n\
+    let source = "tools.bind('web_search', 'search the web')\n\
+                      tools.bind('web_fetch2', 'fetch a page')\n\
                       tools.always('web_search')";
     let bindings = fixture_bindings(source);
 
@@ -728,17 +728,17 @@ fn binding_records_exact_aliases_descriptions_identities_and_always_scope() {
 }
 
 #[test]
-fn need_and_always_record_model_description_overrides() {
+fn bind_and_always_record_model_description_overrides() {
     let bindings = fixture_bindings(
-        "tools.need('web_search', 'search the web', 'need override')\n\
-             tools.need('web_fetch2', 'fetch a page')\n\
+        "tools.bind('web_search', 'search the web', 'bind override')\n\
+             tools.bind('web_fetch2', 'fetch a page')\n\
              tools.always('web_fetch2', 'always override')",
     );
 
     assert_eq!(
         bindings.bindings()[0].model_description(),
-        Some("need override"),
-        "tools.need's third argument records the model-facing override"
+        Some("bind override"),
+        "tools.bind's third argument records the model-facing override"
     );
     assert_eq!(
         bindings.bindings()[1].model_description(),
@@ -749,7 +749,7 @@ fn need_and_always_record_model_description_overrides() {
 
 #[test]
 fn tool_handles_are_frozen() {
-    let bindings = fixture_bindings("search = tools.need('search', 'search the web')");
+    let bindings = fixture_bindings("search = tools.bind('search', 'search the web')");
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
@@ -769,9 +769,9 @@ fn tool_handles_are_frozen() {
 }
 
 #[test]
-fn tool_need_returns_inspectable_object() {
+fn tool_bind_returns_inspectable_object() {
     let shared = program(
-        "local tool = tools.need('search', 'search the web')\n\
+        "local tool = tools.bind('search', 'search the web')\n\
              assert(tool.name == 'search')\n\
              assert(tool.description == 'search the web')\n\
              assert(type(tool.parameters) == 'table')\n\
@@ -780,8 +780,8 @@ fn tool_need_returns_inspectable_object() {
              tools.always('search')",
     );
     let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
-    let bindings = execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
-        .expect("tools.need must return an inspectable Tool object");
+    let bindings = execute_live_tool_binds(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+        .expect("tools.bind must return an inspectable Tool object");
     assert_eq!(bindings.bindings()[0].alias(), "search");
 
     let vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
@@ -800,8 +800,8 @@ fn binding_validates_aliases_exactly() {
         "nonasciié",
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-a",
     ] {
-        let need = program(&format!("tools.need({alias:?}, 'capability')"));
-        let error = execute_live_tool_needs(&need, &resolver, EXECUTION, &NullObserver, "Prompt")
+        let bind = program(&format!("tools.bind({alias:?}, 'capability')"));
+        let error = execute_live_tool_binds(&bind, &resolver, EXECUTION, &NullObserver, "Prompt")
             .expect_err("invalid aliases must be rejected");
         assert!(
             error.to_string().contains("invalid tool alias"),
@@ -810,8 +810,8 @@ fn binding_validates_aliases_exactly() {
     }
 
     for valid in ["Upper", "has-dash", &format!("A{}", "2".repeat(63))] {
-        let need = program(&format!("tools.need({valid:?}, 'capability')"));
-        execute_live_tool_needs(&need, &resolver, EXECUTION, &NullObserver, "Prompt")
+        let bind = program(&format!("tools.bind({valid:?}, 'capability')"));
+        execute_live_tool_binds(&bind, &resolver, EXECUTION, &NullObserver, "Prompt")
             .expect("planned alias forms must be valid");
     }
 }
@@ -819,8 +819,8 @@ fn binding_validates_aliases_exactly() {
 #[test]
 fn live_h1_rejects_duplicate_aliases() {
     let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
-    let error = execute_live_tool_needs(
-        &program("tools.need('search', 'one'); tools.need('search', 'two')"),
+    let error = execute_live_tool_binds(
+        &program("tools.bind('search', 'one'); tools.bind('search', 'two')"),
         &resolver,
         EXECUTION,
         &NullObserver,
@@ -836,8 +836,8 @@ fn live_h1_rejects_duplicate_aliases() {
 #[test]
 fn duplicate_alias_error_cannot_be_suppressed_with_lua_pcall() {
     let resolver = |_: &str| Ok(ToolId::new("fixtures", "search").expect("valid id"));
-    let error = execute_live_tool_needs(
-        &program("tools.need('search', 'one'); pcall(tools.need, 'search', 'two')"),
+    let error = execute_live_tool_binds(
+        &program("tools.bind('search', 'one'); pcall(tools.bind, 'search', 'two')"),
         &resolver,
         EXECUTION,
         &NullObserver,
@@ -856,14 +856,14 @@ fn binding_rejects_unknown_and_duplicate_always_aliases() {
     for (source, expected) in [
         (
             "tools.always('missing')",
-            "tools.always alias \"missing\" was not declared by tools.need",
+            "tools.always alias \"missing\" was not declared by tools.bind",
         ),
         (
-            "tools.need('search', 'one'); tools.always('search'); tools.always('search')",
+            "tools.bind('search', 'one'); tools.always('search'); tools.always('search')",
             "tools.always alias \"search\" was recorded more than once",
         ),
     ] {
-        let error = execute_live_tool_needs(
+        let error = execute_live_tool_binds(
             &program(source),
             &resolver,
             EXECUTION,
@@ -882,7 +882,7 @@ fn binding_rejects_unknown_and_duplicate_always_aliases() {
 fn captured_bindings_do_not_execute_h1_source() {
     let bindings = fixture_bindings(
         "h1_was_executed = true; \
-         tools.need('search', 'search the web'); \
+         tools.bind('search', 'search the web'); \
          tools.always('search')",
     );
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
@@ -901,8 +901,8 @@ fn captured_bindings_do_not_execute_h1_source() {
 #[test]
 fn h2_recording_closes_to_always_then_added_scope() {
     let bindings = fixture_bindings(
-        "tools.need('search', 'search the web'); \
-             tools.need('fetch', 'fetch a page'); \
+        "tools.bind('search', 'search the web'); \
+             tools.bind('fetch', 'fetch a page'); \
              tools.always('search')",
     );
     let prologue = program("tools.add({'fetch', 'search'})");
@@ -933,9 +933,9 @@ fn h2_add_accepts_tool_objects_and_arrays() {
         )
         .expect("valid id"))
     };
-    let h1_error = execute_live_tool_needs(
+    let h1_error = execute_live_tool_binds(
         &program(
-            "local search = tools.need('search', 'search the web'); \
+            "local search = tools.bind('search', 'search the web'); \
                  tools.add(search)",
         ),
         &resolver,
@@ -952,8 +952,8 @@ fn h2_add_accepts_tool_objects_and_arrays() {
     );
 
     let bindings = fixture_bindings(
-        "search = tools.need('search', 'search the web'); \
-             fetch = tools.need('fetch', 'fetch a page')",
+        "search = tools.bind('search', 'search the web'); \
+             fetch = tools.bind('fetch', 'fetch a page')",
     );
     let prologue = program(
         "tools.add(search); \
@@ -979,8 +979,8 @@ fn h2_add_accepts_tool_objects_and_arrays() {
 #[test]
 fn empty_add_is_a_no_op_and_failed_bulk_add_is_atomic() {
     let bindings = fixture_bindings(
-        "tools.need('search', 'search the web'); \
-             tools.need('fetch', 'fetch a page')",
+        "tools.bind('search', 'search the web'); \
+             tools.bind('fetch', 'fetch a page')",
     );
     let prologue = program(
         "tools.add(); \
@@ -1006,7 +1006,7 @@ fn empty_add_is_a_no_op_and_failed_bulk_add_is_atomic() {
 
 #[test]
 fn add_rejects_misshapen_override_arguments() {
-    let bindings = fixture_bindings("tools.need('search', 'search the web')");
+    let bindings = fixture_bindings("tools.bind('search', 'search the web')");
     let prologue = program(
         "local ok, err = pcall(tools.add, {'search'}, 'bulk override'); \
          if ok or not string.find(tostring(err), 'array form takes no override') then \
@@ -1046,7 +1046,7 @@ fn add_rejects_misshapen_override_arguments() {
 
 #[test]
 fn tool_operations_enforce_their_lifecycle_phase_even_when_captured() {
-    let bindings = fixture_bindings("tools.need('search', 'search the web')");
+    let bindings = fixture_bindings("tools.bind('search', 'search the web')");
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
@@ -1054,11 +1054,11 @@ fn tool_operations_enforce_their_lifecycle_phase_even_when_captured() {
 
     let error = run_scalar(
         &vm,
-        &program("tools.need('other', 'fetch a page')"),
+        &program("tools.bind('other', 'fetch a page')"),
         &NullObserver,
         "Section",
     )
-    .expect_err("current H2 table must reject need");
+    .expect_err("current H2 table must reject bind");
     assert!(
         error
             .to_string()
@@ -1068,7 +1068,7 @@ fn tool_operations_enforce_their_lifecycle_phase_even_when_captured() {
 
 #[test]
 fn unknown_h2_alias_fails_before_scope_closure() {
-    let bindings = fixture_bindings("tools.need('search', 'search the web')");
+    let bindings = fixture_bindings("tools.bind('search', 'search the web')");
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Section")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
@@ -2209,7 +2209,7 @@ fn add_without_declarations_fails_as_undeclared_in_a_chunk() {
     assert!(
         error
             .to_string()
-            .contains("tools.add alias \"web_search\" was not declared by tools.need"),
+            .contains("tools.add alias \"web_search\" was not declared by tools.bind"),
         "the error must name the undeclared alias: {error}"
     );
 }
@@ -2228,20 +2228,20 @@ fn add_without_declarations_fails_in_a_prologue_without_a_shared_library() {
     )
     .expect_err("an undeclared alias must fail loudly");
     assert!(
-        error.to_string().contains("not declared by tools.need"),
+        error.to_string().contains("not declared by tools.bind"),
         "the error must report the missing declaration: {error}"
     );
     vm.teardown(&NullObserver, "Test");
 }
 
 #[test]
-fn add_with_empty_frozen_needs_fails_as_undeclared() {
+fn add_with_empty_frozen_bindings_fails_as_undeclared() {
     let shared = program("function helper() return 'no declarations' end");
     let resolver = |description: &str| -> Result<ToolId> {
         panic!("a declaration-free program must not resolve {description:?}")
     };
-    let bindings = execute_live_tool_needs(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
-        .expect("a need-free H1 program must execute");
+    let bindings = execute_live_tool_binds(&shared, &resolver, EXECUTION, &NullObserver, "Prompt")
+        .expect("a bind-free H1 program must execute");
     assert!(bindings.bindings().is_empty());
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Test")
         .expect("empty captured bindings must install");
@@ -2255,7 +2255,7 @@ fn add_with_empty_frozen_needs_fails_as_undeclared() {
     )
     .expect_err("an undeclared alias must fail loudly");
     assert!(
-        error.to_string().contains("not declared by tools.need"),
+        error.to_string().contains("not declared by tools.bind"),
         "the error must report the missing declaration: {error}"
     );
     vm.teardown(&NullObserver, "Test");
@@ -2263,7 +2263,7 @@ fn add_with_empty_frozen_needs_fails_as_undeclared() {
 
 #[test]
 fn add_with_an_override_argument_records_the_model_description() {
-    let bindings = fixture_bindings("tools.need('search', 'search the web')");
+    let bindings = fixture_bindings("tools.bind('search', 'search the web')");
     let mut vm = section_vm_with_bindings(&bindings, EXECUTION, &NullObserver, "Test")
         .expect("captured bindings must install");
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)

@@ -1,13 +1,13 @@
 //! Shared value decoding for the `models.*` host tables.
 //!
-//! Parses Lua argument shapes (`models.need`/`models.default` args and the opts
+//! Parses Lua argument shapes (`models.bind`/`models.default` args and the opts
 //! table) and validates scalar option values at the Lua trust boundary.
 
 use std::num::NonZeroU32;
 
 use mlua::{MultiValue, Table, Value};
 
-use crate::model::{ModelNeedOpts, Temperature};
+use crate::model::{ModelBindOpts, Temperature};
 use crate::{Error, Result};
 
 /// Extracts a single string alias from a `MultiValue` (for the 1-arg form).
@@ -23,10 +23,10 @@ pub(crate) fn parse_single_alias(args: &MultiValue, label: &str) -> mlua::Result
     }
 }
 
-pub(crate) fn parse_need_args(
+pub(crate) fn parse_bind_args(
     args: MultiValue,
     label: &str,
-) -> mlua::Result<(String, String, ModelNeedOpts)> {
+) -> mlua::Result<(String, String, ModelBindOpts)> {
     let mut values = args.into_iter();
     let alias = match values.next() {
         Some(Value::String(value)) => value
@@ -53,7 +53,7 @@ pub(crate) fn parse_need_args(
         }
     };
     let opts = match values.next() {
-        None | Some(Value::Nil) => ModelNeedOpts::default(),
+        None | Some(Value::Nil) => ModelBindOpts::default(),
         Some(Value::Table(table)) => parse_opts_table(&table, label)?,
         Some(_) => {
             return Err(mlua::Error::external(format!(
@@ -69,8 +69,8 @@ pub(crate) fn parse_need_args(
     Ok((alias, description, opts))
 }
 
-pub(crate) fn parse_opts_table(table: &Table, label: &str) -> mlua::Result<ModelNeedOpts> {
-    let mut opts = ModelNeedOpts::default();
+pub(crate) fn parse_opts_table(table: &Table, label: &str) -> mlua::Result<ModelBindOpts> {
+    let mut opts = ModelBindOpts::default();
     for pair in table.pairs::<Value, Value>() {
         // Propagate the original `mlua::Error` unchanged (PF-LM-012): it already
         // carries its source chain, so re-wrapping its text would discard it.

@@ -18,7 +18,7 @@ async fn models_use_forwards_binding_completion_options_to_the_gateway() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # T\n\n\
 ```lua\n\
-models.need('analyst', 'careful analysis', { temperature = 0.25, max_tokens = 64, thinking = false })\n\
+models.bind('analyst', 'careful analysis', { temperature = 0.25, max_tokens = 64, thinking = false })\n\
 ```\n\n\
 ## Only\n\n\
 ```lua\nmodels.use('analyst')\n```\n\n\
@@ -221,7 +221,7 @@ async fn epilog_runs_after_reply_and_can_return() {
 }
 
 #[tokio::test]
-async fn add_without_h1_needs_fails_the_run_loudly() {
+async fn add_without_h1_bindings_fails_the_run_loudly() {
     // Input with no shared library goes through the same validated VM with
     // empty frozen bindings, so the alias is rejected.
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
@@ -232,7 +232,7 @@ async fn add_without_h1_needs_fails_the_run_loudly() {
         .await
         .expect_err("an undeclared alias must fail the run");
     assert!(
-        error.to_string().contains("not declared by tools.need"),
+        error.to_string().contains("not declared by tools.bind"),
         "the error must report the missing declaration: {error}"
     );
 }
@@ -249,7 +249,7 @@ async fn add_with_an_empty_shared_library_fails_the_run_loudly() {
         .await
         .expect_err("an undeclared alias must fail the run");
     assert!(
-        error.to_string().contains("not declared by tools.need"),
+        error.to_string().contains("not declared by tools.bind"),
         "the error must report the missing declaration: {error}"
     );
 }
@@ -652,7 +652,7 @@ async fn models_get_returns_a_handle_without_changing_the_section_model() {
 # T\n\n\
 ```lua\n\
 models.default('writer', 'A general model for tests')\n\
-models.need('analyst', 'A careful analysis model')\n\
+models.bind('analyst', 'A careful analysis model')\n\
 ```\n\n\
 ## Only\n\n\
 ```lua\nstore.write('handle.txt', models.get('analyst').name)\n```\n\n\
@@ -719,7 +719,7 @@ async fn handle_infer_uses_that_model_regardless_of_the_section_model() {
 # T\n\n\
 ```lua\n\
 models.default('writer', 'A general model for tests')\n\
-models.need('analyst', 'A careful analysis model')\n\
+models.bind('analyst', 'A careful analysis model')\n\
 ```\n\n\
 ## Only\n\n\
 ```lua\nreturn models.get('analyst'):infer('ping')\n```\n";
@@ -763,7 +763,7 @@ Ask the model.\n\n\
 async fn models_infer_without_use_or_default_errors() {
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # T\n\n\
-```lua\nmodels.need('analyst', 'A careful analysis model')\n```\n\n\
+```lua\nmodels.bind('analyst', 'A careful analysis model')\n```\n\n\
 ## Only\n\n\
 ```lua\nreturn models.infer('ping')\n```\n";
     let prompt = TestPrompt {
@@ -788,7 +788,7 @@ async fn models_get_infer_works_without_any_section_model() {
     let addr = gateway.addr();
     let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
 # T\n\n\
-```lua\nmodels.need('analyst', 'A careful analysis model')\n```\n\n\
+```lua\nmodels.bind('analyst', 'A careful analysis model')\n```\n\n\
 ## Only\n\n\
 ```lua\nreturn models.get('analyst'):infer('ping')\n```\n";
     let prompt = TestPrompt {

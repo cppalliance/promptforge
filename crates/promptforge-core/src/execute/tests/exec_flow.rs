@@ -1883,13 +1883,13 @@ async fn fanout_arm_tools_add_between_prose_blocks_reaches_the_next_model_turn()
         "canonical_wire",
         "Section concrete.",
     ));
-    // `tools.need`/`models.default` are H1-only declarations, so the
+    // `tools.bind`/`models.default` are H1-only declarations, so the
     // declarations block is spliced into the shared scaffold ahead of
     // `## Parent`.
     let mut md = ARM_FANOUT_PARENT.replacen(
         "## Parent",
         "# Test prompt\n\n```lua shared\n\
-tools.need('section_tool', 'capability')\n\
+tools.bind('section_tool', 'capability')\n\
 models.default('writer', 'A general model for tests')\n```\n\n\
 ## Parent",
         1,
@@ -2503,7 +2503,7 @@ async fn fanout_exhausted_arm_exposes_failure_metadata() {
     let addr = gateway.addr();
     let md = "---\nname: t\ndescription: d\npromptforge: 1\nmax_tool_iterations: 2\n---\n\n\
 # Test prompt\n\n```lua shared\n\
-tools.need('echo', 'echo tool')\n\
+tools.bind('echo', 'echo tool')\n\
 models.default('writer', 'A general model for tests')\n```\n\n\
 ## Parent\n\n\
 ```lua\n\

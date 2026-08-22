@@ -101,12 +101,12 @@ Authoritative schema: `crates/promptforge-core/src/parser/build.rs`
 
 | Function | Effect |
 |---|---|
-| `tools.need(alias, desc, override?)` | Resolve a tool by description; `override` sets the model-facing description |
+| `tools.bind(alias, desc, override?)` | Resolve a tool by description; `override` sets the model-facing description |
 | `tools.always(alias, override?)` | Make a resolved tool available in every section |
 | `tools.add(alias, override?)` | Make a resolved tool available in this section; `tools.add({"a", "b"})` for bulk |
 | `tools.add_local(alias, desc, params, handler)` | Declare a Lua-backed tool (H2 only) |
 | `models.default(alias, desc)` | Declare and set the prompt-wide baseline model |
-| `models.need(alias, desc, opts)` | Bind with options (thinking, context, temperature) |
+| `models.bind(alias, desc, opts)` | Bind with options (thinking, context, temperature) |
 | `models.use(alias)` | Select a declared model for this section; returns its handle |
 | `models.get(alias)` | Return a declared model's handle without changing the section model |
 | `models.infer(prompt)` | One tool-free inference round on the section's current model |
@@ -143,8 +143,8 @@ max_tool_iterations: 20
 # Research a Person
 
 ```lua
-tools.need("search", "Search the web and return results.")
-tools.need("fetch", "Fetch a web page as markdown.")
+tools.bind("search", "Search the web and return results.")
+tools.bind("fetch", "Fetch a web page as markdown.")
 models.default("researcher", "A model suited for careful analysis")
 ```
 

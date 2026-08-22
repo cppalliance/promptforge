@@ -33,7 +33,7 @@ pub(crate) struct ToolBinding {
     pub(crate) id: ToolId,
     /// Author override for the model-facing schema description.
     ///
-    /// Capability text in [`Self::description`] stays the live H1 need
+    /// Capability text in [`Self::description`] stays the live H1 bind
     /// string. When set, [`crate::execute`] advertises this instead of the
     /// registry tool's default description.
     pub(crate) model_description: Option<String>,
@@ -75,11 +75,11 @@ impl ToolBinding {
     }
 }
 
-/// Inspectable Tool object returned by Lua `tools.need`.
+/// Inspectable Tool object returned by Lua `tools.bind`.
 ///
 /// Authors read `.name`, `.description`, `.parameters`, `.wire_name`, and
 /// `.untrusted`. The object is frozen: model-facing description overrides are
-/// positional arguments to `tools.need` / `tools.always` / `tools.add`, never
+/// positional arguments to `tools.bind` / `tools.always` / `tools.add`, never
 /// assignments on this handle. Existing callers that ignore the return value
 /// keep working.
 #[derive(Debug, Clone, PartialEq)]
