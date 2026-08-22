@@ -94,8 +94,7 @@ enum WalkEnd {
 /// and debug sink are carried only as their `Arc` forms; a use site that
 /// wants `&dyn Observer` / `&dyn DebugCapture` derefs in place.
 ///
-/// `item` is the one driver-specific one-off and stays `Option`: set only by
-/// a fanout arm. The walk-owned `var` is not in the frame: it rolls forward
+/// The walk-owned `var` is not in the frame: it rolls forward
 /// through `walk_siblings` as walk-local mutable state. The walk-only fields
 /// (`shared` through `section_count`) carry empty defaults while the live H1
 /// pass runs - live mode never reads them - and the section walk rebuilds
@@ -142,9 +141,6 @@ pub(crate) struct RunFrame<'a> {
     pub(crate) when: &'a str,
     /// The run's top-level section count, reported as `sys.section_count`.
     pub(crate) section_count: usize,
-    /// The fanout arm's collection member for `{{ item }}` substitution;
-    /// `None` outside a fanout arm.
-    pub(crate) item: Option<&'a serde_json::Value>,
 }
 
 /// Walk the prompt's top-level sections, reporting each boundary, and return
@@ -633,8 +629,7 @@ impl ControlContext {
     /// The borrowed run frame derived from this owned context, so the field
     /// list lives in one place for both chain drivers. `args` is the only
     /// parameter: an `execute` call's explicit input overrides the run's
-    /// args. `item` stays `None`; the fanout arm overlays its own `item` on
-    /// the returned frame.
+    /// args.
     pub(crate) fn walk_context<'a>(&'a self, args: &'a str) -> RunFrame<'a> {
         RunFrame {
             args,
@@ -654,7 +649,6 @@ impl ControlContext {
             max_tool_iterations: self.max_tool_iterations,
             when: &self.when,
             section_count: self.section_count,
-            item: None,
         }
     }
 

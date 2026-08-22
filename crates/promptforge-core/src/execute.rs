@@ -82,20 +82,17 @@ pub use error::{RunError, RunErrorKind};
 pub use gateway::ResolutionContext;
 
 // Crate-internal items reused through the historical `crate::execute::` path.
-// `ToolAnalysis` and the engine/section-VM items (the `RunFrame` borrowed
-// context, `ControlContext` and its control-global constructor,
-// `VmSeed`/`setup_section_vm`, the block walk, and the `next_id` counter
-// helper) are consumed by `fanout`;
-// `run_sections` and `execute_live_h1` serve only `run` below and stay
-// module-private.
+// `ToolAnalysis`, the engine items (the `RunFrame` borrowed context and
+// `ControlContext`), and the `SectionContext` frame are consumed by
+// `fanout`; `run_sections` and `execute_live_h1` serve only `run` below and
+// stay module-private.
 // Re-exported so the split stays surface-neutral for the public API while
 // keeping one import path for internal collaborators.
-pub(crate) use block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
+pub(crate) use block_walk::{BlockRunMode, SectionFlow};
 pub(crate) use context::RunContext;
-pub(crate) use engine::{ControlContext, RunFrame, make_control_globals};
+pub(crate) use engine::{ControlContext, RunFrame};
 pub(crate) use scope::ToolAnalysis;
-pub(crate) use section_vm::{VmSeed, setup_section_vm};
-pub(crate) use support::next_id;
+pub(crate) use section_context::SectionContext;
 
 use engine::run_sections;
 use h1::execute_live_h1;
@@ -299,7 +296,6 @@ pub async fn run(
                 .resolve(limits.tool_iterations().get() as usize),
             when: "",
             section_count: prompt.sections.len(),
-            item: None,
         };
         let h1 = execute_live_h1(&ctx, resolution, &registry, client.as_ref(), &frame).await?;
         if let Some(value) = h1.returned {
