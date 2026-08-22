@@ -29,7 +29,7 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A25. Every model-facing section uses a prompt-declared model binding; hosts never choose a model implicitly.
 - A26. Artifact credentials are read from process secrets at request time and are never persisted or logged.
 - A27. Model tool-wire dialects are resolved from runtime evidence and applied at one normalization boundary; prompts remain dialect-agnostic.
-- A30. Fan-out arms run concurrently, return in input order, and abort siblings on the first error.
+- A30. Fan-out arms run with bounded concurrency, return in input order, and abort siblings on the first error.
 
 
 - A42. External file I/O ends at the trusted host; prompts see only validated store paths.
@@ -43,13 +43,14 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A55. Fan-out maps an explicit collection across isolated JSON values and returns each original member with its result.
 
-- A56. Ordinary sections and fan-out arms share one VM and block-walk semantics; arms have no separate capability tier.
-- A57. Fan-out bounds concurrent arms, not finite collection cardinality; total work remains explicit in the input.
 
 - A58. Variable state rolls through one walk and its jumps; execute chains and fan-out arms receive isolated snapshots whose writes do not escape.
 - A59. Distinct concurrent fan-out arms writing the same store path fail visibly; concurrent append remains legal.
 
 - A60. Parse, model, and dialect failures are classified from explicit typed variants, never from user-controlled message text or wildcard fallbacks.
+
+- A61. Immutable run state is shared across the execute subtree; each section entry owns a fresh frame with explicit construction and teardown.
+- A62. Untrusted envelopes use one nonce per run: byte-stable within a run, unpredictable across runs, with escaping as the primary defense.
 
 ## Principles
 

@@ -66,3 +66,4 @@
 - [2026-08-19-2-promptforge-refactor] pure direct infer: Every infer call is one fresh tool-free turn and never mutates reply or sys; tool use requires an executed section.
 - [2026-08-20-1-fix-core-review-findings] alias uniqueness: Reject local tool aliases that collide with declared aliases or earlier local registrations at the authoring line.
 - [2026-08-20-1-fix-core-review-findings] malformed syntax containment: Grammar mismatches and bad offsets return categorized errors instead of reaching panic paths.
+- [2026-08-22-1-runcontext-seed] post-H1 capability freeze: H1 owns the only binding writers; later execution sees read-only views and self-contained bindings.
