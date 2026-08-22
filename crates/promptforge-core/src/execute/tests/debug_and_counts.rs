@@ -256,11 +256,10 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
     let addr = gateway.addr();
     let client = gateway_client(addr);
 
-    let failing = FailingTool;
-    let tools: &[&dyn Tool] = &[&failing];
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+    let failing: Arc<dyn Tool> = Arc::new(FailingTool);
+    let tools: Vec<Arc<dyn Tool>> = vec![failing];
+    let schemas = schemas_for(&tools);
+    let dispatch = dispatch_for(&tools);
 
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
@@ -273,7 +272,6 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
         &client,
         &schemas,
         &dispatch,
-        &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         recorder.as_ref(),

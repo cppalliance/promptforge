@@ -152,13 +152,21 @@ models.default('writer', 'A general model for tests')\n```\n\n\
 
 #[test]
 fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports() {
-    let first = ScopedFixtureTool::new("first", "first_wire", "First concrete.");
-    let second = ScopedFixtureTool::new("second", "second_wire", "Second concrete.");
+    let first: Arc<dyn Tool> = Arc::new(ScopedFixtureTool::new(
+        "first",
+        "first_wire",
+        "First concrete.",
+    ));
+    let second: Arc<dyn Tool> = Arc::new(ScopedFixtureTool::new(
+        "second",
+        "second_wire",
+        "Second concrete.",
+    ));
     let first_id = ToolId::new("tests", "first").expect("valid id");
     let second_id = ToolId::new("tests", "second").expect("valid id");
     let bindings = vec![
-        crate::lua::ToolBinding::for_test("first_local", "first", first_id.clone()),
-        crate::lua::ToolBinding::for_test("second_local", "second", second_id.clone()),
+        crate::lua::ToolBinding::for_test("first_local", "first", Arc::clone(&first)),
+        crate::lua::ToolBinding::for_test("second_local", "second", Arc::clone(&second)),
     ];
     let analysis = ToolAnalysis {
         alias_to_id: BTreeMap::from([
@@ -175,15 +183,12 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
             similarity: 0.98,
         }],
     };
-    let registry = ToolRegistry::new([&first as &dyn Tool, &second as &dyn Tool])
-        .expect("unique test registry");
     let recorder = Arc::new(Recorder::default());
 
     let error = prepare_effective_scope(
         &analysis,
         &bindings,
         &[],
-        &registry,
         EXECUTION,
         recorder.as_ref(),
         "Only",

@@ -7,7 +7,7 @@ use crate::lua::{
 };
 use crate::observe::NullObserver;
 use crate::store::StoreRef;
-use crate::tools::ToolRegistry;
+use crate::tools::SharedTools;
 use crate::untrusted::GuardNonce;
 use serde_json::json;
 
@@ -73,12 +73,12 @@ fn resolve_live_declarations_for_test(
     _observer: &dyn crate::observe::Observer,
     _section: &str,
 ) -> Result<(ToolBindings, ModelBindings)> {
-    let registry = ToolRegistry::new(std::iter::empty()).expect("unique test registry");
+    let shared = SharedTools::default();
     let producer = LiveBindingProducer::default();
     let lua = Lua::new();
     let result = lua.scope(|scope| {
         producer
-            .install(&lua, scope, tool_resolver, &registry, model_resolver)
+            .install(&lua, scope, tool_resolver, &shared, model_resolver)
             .map_err(|error| mlua::Error::external(error.to_string()))?;
         lua.load(source.source()).exec()
     });

@@ -464,11 +464,6 @@ pub(crate) enum Error {
         in_scope: Vec<String>,
     },
 
-    /// A section's Lua prologue scoped a tool by a name absent from the run's
-    /// supplied tool pool, so no matching tool could be advertised or dispatched.
-    #[error("section scoped unknown tool {0}")]
-    UnknownScopedTool(String),
-
     /// A model-facing section has non-empty prose but no `models.use` or
     /// prompt-wide `models.default` binding.
     #[error("model binding required for section {section}")]

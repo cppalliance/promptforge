@@ -66,7 +66,8 @@ pub(crate) struct RunContext {
     /// compiled chunk when the prompt declares no `lua shared` library, so
     /// the startup sequence carries no `Option` branch.
     shared: Arc<LuaProgram>,
-    /// The run's shared tool registry handle.
+    /// The run's shared tool set: the bind-time source of each binding's
+    /// resolved implementation.
     shared_tools: SharedTools,
     /// The frozen prompt-level tool bindings; empty until the walk starts
     /// (the live H1 pass resolves them and never reads them back).
@@ -165,7 +166,8 @@ impl RunContext {
         &self.ids
     }
 
-    /// The run's shared tool registry handle.
+    /// The run's shared tool set: the bind-time source of each binding's
+    /// resolved implementation.
     pub(crate) fn shared_tools(&self) -> &SharedTools {
         &self.shared_tools
     }

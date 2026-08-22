@@ -45,7 +45,7 @@ pub(crate) use crate::model::{ModelBinding, ModelBindings, ModelResolver};
 pub(crate) use crate::observe::{Observation, Observer, detail};
 pub(crate) use crate::resolve::RuntimeResolution;
 pub(crate) use crate::store::{StoreRef, WriteScope};
-pub(crate) use crate::tools::{ToolId, ToolRegistry};
+pub(crate) use crate::tools::{SharedTools, Tool, ToolId};
 pub(crate) use crate::untrusted::GuardNonce;
 pub(crate) use crate::{Error, Result};
 

@@ -207,8 +207,7 @@ fn execute_live_tool_binds(
         Arc::new(FixtureTool("search")),
         Arc::new(FixtureTool("fetch")),
     ];
-    let registry =
-        ToolRegistry::new(tools.iter().map(AsRef::as_ref)).expect("unique test registry");
+    let shared = SharedTools::new(&tools).expect("unique test registry");
     let models = |description: &str, _: &crate::model::ModelBindOpts| {
         Err(Error::ModelAbsent {
             capability: description.to_owned(),
@@ -219,7 +218,7 @@ fn execute_live_tool_binds(
     harden(&lua)?;
     let result = lua.scope(|scope| {
         producer
-            .install(&lua, scope, resolver, &registry, &models)
+            .install(&lua, scope, resolver, &shared, &models)
             .map_err(|error| mlua::Error::external(error.to_string()))?;
         lua.load(source.bytecode.as_slice()).exec()
     });
@@ -340,7 +339,7 @@ fn logs_are_correlated_and_ordered_across_chunks() {
         vec![ToolBinding::for_test(
             "search",
             "search the web",
-            ToolId::new("fixtures", "search").expect("valid id"),
+            Arc::new(FixtureTool("search")),
         )],
         Vec::new(),
     );
@@ -1089,7 +1088,7 @@ fn captured_bindings_are_installed_without_payload_reports() {
         vec![ToolBinding::for_test(
             "private_alias",
             "private capability",
-            ToolId::new("fixtures", "search").expect("valid id"),
+            Arc::new(FixtureTool("search")),
         )],
         Vec::new(),
     );
@@ -1201,7 +1200,7 @@ fn section_vm_host_injection_bypasses_shared_global_metatables() {
         vec![ToolBinding::for_test(
             "search",
             "search the web",
-            ToolId::new("fixtures", "search").expect("valid id"),
+            Arc::new(FixtureTool("search")),
         )],
         Vec::new(),
     );
@@ -1470,7 +1469,7 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
         vec![ToolBinding::for_test(
             "search",
             "search the web",
-            ToolId::new("fixtures", "search").expect("valid id"),
+            Arc::new(FixtureTool("search")),
         )],
         Vec::new(),
     );
@@ -1520,7 +1519,7 @@ fn shared_functions_resolve_host_globals_when_called_from_a_later_chunk() {
         vec![ToolBinding::for_test(
             "search",
             "search the web",
-            ToolId::new("fixtures", "search").expect("valid id"),
+            Arc::new(FixtureTool("search")),
         )],
         Vec::new(),
     );
