@@ -6,14 +6,15 @@
 //! the tool-call counts, and the resolved completion options - and it
 //! carries the frame's effective reporting handles (observer, debug sink,
 //! turn counter), so a fanout arm's proxies can arrive through the frame
-//! rather than a forged context. The walk's driver is one
-//! construct-run-teardown cycle: [`SectionContext::new`] absorbs the VM
-//! construction and setup preamble, [`SectionContext::run`] is the ordered
-//! block walk, and [`SectionContext::teardown`] is the single teardown
-//! boundary.
+//! rather than a forged context. Each driver is one
+//! construct-run-teardown cycle: the constructor absorbs the VM
+//! construction and setup preamble ([`SectionContext::new`] for a walked
+//! section, [`SectionContext::new_live_h1`] for the live H1 pass),
+//! [`SectionContext::run`] is the ordered block walk, and
+//! [`SectionContext::teardown`] is the single teardown boundary.
 //!
-//! Only the walk's driver rides the frame in this consolidation step; the
-//! live H1 pass and the fanout arm keep their own preambles and call the
+//! The walk's driver and the live H1 pass ride the frame in this
+//! consolidation step; the fanout arm keeps its own preamble and calls the
 //! shared block walk ([`run_one_section_impl`]) directly. The run-scoped
 //! inputs (bindings, models, limits, the shared registry) still arrive
 //! through the borrowed [`RunFrame`]; they migrate to the `RunContext` in a
@@ -29,11 +30,16 @@ use crate::lua::{SectionVm, ToolCallCounts};
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
 use crate::parser::{Block, Section};
-use crate::store::WriteScope;
+use crate::resolve::RuntimeResolution;
+use crate::store::{StoreRef, WriteScope};
 
 use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
+use super::context::RunContext;
 use super::engine::{ControlContext, RunFrame, make_control_globals};
+use super::gateway::GatewaySource;
 use super::section_vm::{VmSeed, setup_section_vm};
+use super::support::{now_rfc3339_checked, sys_json};
+use super::tools::attach_infer_hook;
 
 /// One section entry's owned frame within a run.
 ///
@@ -199,6 +205,95 @@ impl SectionContext {
         // error on first use instead of the setup swallowing it.
         control.attach_infer_hook(&section_frame.vm, client.clone(), &section.name);
         Ok(section_frame)
+    }
+
+    /// Constructs the frame for the live H1 pass and runs its setup
+    /// preamble: the `sys` JSON (id 0 under the prompt's title), VM
+    /// construction and limits, host injection, the host APIs, the H1
+    /// control-global stubs, and the infer hook carrying the live binding
+    /// producer, so a nested `models.infer` resolves against the bindings
+    /// recorded so far.
+    ///
+    /// H1 is the level-1 section: it runs first and is never re-entered, so
+    /// the frame seeds an empty `var`, no reply, no item, and no write
+    /// scope. `client` is the run's client, cloned into the infer hook's
+    /// lazy source (F5); the pass's own client slot stays with the caller.
+    ///
+    /// # Errors
+    /// Returns the [`Error`](crate::Error) of whichever step failed. A VM
+    /// construction or limits failure propagates bare, before any teardown
+    /// observation exists; a setup failure tears the fresh VM down first, so
+    /// the teardown boundary still fires exactly once on that path.
+    pub(crate) fn new_live_h1(
+        ctx: &RunContext,
+        frame: &RunFrame<'_>,
+        runtime: &RuntimeResolution<'_, '_>,
+        client: Option<&GatewayClient>,
+    ) -> Result<Self> {
+        let title = &ctx.prompt().title;
+        let now = now_rfc3339_checked()?;
+        let sys = sys_json(
+            &now,
+            &now,
+            0,
+            title,
+            frame.execution,
+            ctx.prompt().sections.len(),
+        );
+        let vm = SectionVm::new(ctx.nonce(), frame.execution, frame.observer.as_ref(), title)?;
+        // A limits failure propagates bare: no teardown runs here, so no
+        // LUA_TEARDOWN_* observation fires on this path.
+        vm.apply_lua_limits(
+            frame.limits.lua_memory().get(),
+            frame.limits.lua_logs().get(),
+        )?;
+        let mut h1_frame = Self {
+            vm,
+            sys,
+            var: serde_json::json!({}),
+            item: None,
+            reply: None,
+            conversation: Vec::new(),
+            counts: None,
+            completion_options: None,
+            write_scope: None,
+            // H1 installs the control-global stubs, not the callbacks, so
+            // no depth check ever reads this.
+            execute_depth: 0,
+            observer: Arc::clone(frame.observer),
+            debug: frame.debug.cloned(),
+            turns: Arc::clone(frame.turns),
+        };
+        if let Err(error) = h1_frame.setup_live_h1(frame.args, frame.store, title) {
+            h1_frame.teardown(title);
+            return Err(error);
+        }
+        // The infer hook carries a lazy client source (F5): a nested
+        // `models.infer` or `handle:infer` surfaces a concrete construction
+        // error on first use instead of the setup swallowing it.
+        attach_infer_hook(
+            &h1_frame.vm,
+            GatewaySource::from_optional(client.cloned(), frame.limits),
+            Arc::clone(&h1_frame.observer),
+            h1_frame.debug.clone(),
+            frame.execution,
+            title,
+            &h1_frame.turns,
+            Some(runtime.producer()),
+        );
+        Ok(h1_frame)
+    }
+
+    /// The fallible setup half of the live H1 lifecycle: host injection,
+    /// the host APIs, and the control-global stubs. One method, so the
+    /// constructor's single teardown-on-error branch covers every step.
+    ///
+    /// # Errors
+    /// Returns the [`Error`](crate::Error) of whichever step failed.
+    fn setup_live_h1(&mut self, args: &str, store: &StoreRef, title: &str) -> Result<()> {
+        self.vm.inject_host(args, &self.sys, store, None)?;
+        self.vm.install_host_apis(&self.observer, title)?;
+        self.vm.install_h1_control_stubs()
     }
 
     /// Runs the frame's ordered block walk: Lua chunks in place, prose
