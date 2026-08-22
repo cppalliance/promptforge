@@ -213,7 +213,10 @@ fn execute_live_tool_binds(
             capability: description.to_owned(),
         })
     };
-    let producer = LiveBindingProducer::new(Arc::new(Mutex::new(ToolSet::default())));
+    let producer = LiveBindingProducer::new(
+        Arc::new(Mutex::new(ToolSet::default())),
+        Arc::new(Mutex::new(ModelSet::default())),
+    );
     let lua = Lua::new();
     harden(&lua)?;
     let result = lua.scope(|scope| {
@@ -238,7 +241,7 @@ fn section_vm_with_bindings(
     let vm = SectionVm::new_for_section(
         &test_nonce(),
         bindings,
-        &<ModelBindings as Default>::default(),
+        &ModelSet::default(),
         execution,
         observer,
         section,
@@ -1207,7 +1210,7 @@ fn section_vm_host_injection_bypasses_shared_global_metatables() {
     let mut vm = SectionVm::new_for_section(
         &test_nonce(),
         &bindings,
-        &<ModelBindings as Default>::default(),
+        &ModelSet::default(),
         EXECUTION,
         &NullObserver,
         "Test",
@@ -1480,7 +1483,7 @@ fn shared_replay_sees_the_tables_but_not_the_bare_alias_globals() {
     let mut vm = SectionVm::new_for_section(
         &test_nonce(),
         &bindings,
-        &<ModelBindings as Default>::default(),
+        &ModelSet::default(),
         EXECUTION,
         &NullObserver,
         "Test",
@@ -1533,7 +1536,7 @@ fn shared_functions_resolve_host_globals_when_called_from_a_later_chunk() {
     let mut vm = SectionVm::new_for_section(
         &test_nonce(),
         &bindings,
-        &<ModelBindings as Default>::default(),
+        &ModelSet::default(),
         EXECUTION,
         &NullObserver,
         "Test",

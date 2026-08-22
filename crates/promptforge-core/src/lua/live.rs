@@ -1,7 +1,6 @@
 use super::{
-    Arc, Conflict, Error, Lua, LuaToolHandle, ModelBindingState, ModelBindings, ModelResolver,
-    MultiValue, Mutex, Result, ToolBinding, ToolCatalog, ToolResolver, ToolSet,
-    install_live_models,
+    Arc, Conflict, Error, Lua, LuaToolHandle, ModelResolver, ModelSet, MultiValue, Mutex, Result,
+    ToolBinding, ToolCatalog, ToolResolver, ToolSet, install_live_models,
 };
 
 /// Records the first concrete callback error, preserving its typed cause.
@@ -19,23 +18,26 @@ fn record_callback_error(errors: &Mutex<Option<Error>>, error: Error) -> mlua::R
 ///
 /// The producer is installed into one H1 VM. Every executed `tools.bind`,
 /// `models.bind`, and `models.default` call resolves immediately, while skipped
-/// Lua branches produce no binding. The tool half writes through the run's
-/// shared [`ToolSet`] handle - the same allocation the run context reads
-/// through its `ToolView` - so the walk needs no bindings handoff.
+/// Lua branches produce no binding. Both halves write through the run's
+/// shared set handles - the same allocations the run context reads through
+/// its views - so the walk needs no bindings handoff. The typed callback
+/// errors live outside the shared sets, in the producer's own slots.
 #[derive(Debug, Clone)]
 pub(crate) struct LiveBindingProducer {
     tools: Arc<Mutex<ToolSet>>,
     tool_error: Arc<Mutex<Option<Error>>>,
-    models: Arc<Mutex<ModelBindingState>>,
+    models: Arc<Mutex<ModelSet>>,
+    model_error: Arc<Mutex<Option<Error>>>,
 }
 
 impl LiveBindingProducer {
-    /// Builds a producer whose tool bindings land in the run's shared set.
-    pub(crate) fn new(tools: Arc<Mutex<ToolSet>>) -> Self {
+    /// Builds a producer whose bindings land in the run's shared sets.
+    pub(crate) fn new(tools: Arc<Mutex<ToolSet>>, models: Arc<Mutex<ModelSet>>) -> Self {
         Self {
             tools,
             tool_error: Arc::new(Mutex::new(None)),
-            models: Arc::new(Mutex::new(ModelBindingState::default())),
+            models,
+            model_error: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -60,7 +62,7 @@ impl LiveBindingProducer {
             &self.tools,
             &self.tool_error,
         )?;
-        install_live_models(lua, scope, model_resolver, &self.models)
+        install_live_models(lua, scope, model_resolver, &self.models, &self.model_error)
     }
 
     /// Returns the first concrete resolver error captured by a Lua callback.
@@ -74,19 +76,22 @@ impl LiveBindingProducer {
             .map_err(|_| Error::Lua("tool binding recorder was poisoned".to_owned()))?
             .take();
         let model_error = self
-            .models
+            .model_error
             .lock()
             .map_err(|_| Error::Lua("model binding recorder was poisoned".to_owned()))?
-            .callback_error
             .take();
         Ok(tool_error.or(model_error))
     }
 
     /// Snapshots all bindings resolved by the live H1 execution so far.
     ///
+    /// Test-only: production reads the shared sets through the run context's
+    /// views; tests snapshot straight from the producer.
+    ///
     /// # Errors
-    /// Returns [`Error::Lua`] if either recorder mutex is poisoned.
-    pub(crate) fn bindings(&self) -> Result<(ToolSet, ModelBindings)> {
+    /// Returns [`Error::Lua`] if either set's mutex is poisoned.
+    #[cfg(test)]
+    pub(crate) fn bindings(&self) -> Result<(ToolSet, ModelSet)> {
         let tools = self
             .tools
             .lock()
@@ -95,25 +100,7 @@ impl LiveBindingProducer {
             .models
             .lock()
             .map_err(|_| Error::Lua("model binding recorder was poisoned".to_owned()))?;
-        Ok((
-            tools.clone(),
-            ModelBindings::from_parts(models.bindings.clone(), models.default.clone()),
-        ))
-    }
-
-    /// Snapshots the model bindings resolved by the live H1 execution.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the recorder mutex is poisoned.
-    pub(crate) fn models(&self) -> Result<ModelBindings> {
-        let models = self
-            .models
-            .lock()
-            .map_err(|_| Error::Lua("model binding recorder was poisoned".to_owned()))?;
-        Ok(ModelBindings::from_parts(
-            models.bindings.clone(),
-            models.default.clone(),
-        ))
+        Ok((tools.clone(), models.clone()))
     }
 }
 

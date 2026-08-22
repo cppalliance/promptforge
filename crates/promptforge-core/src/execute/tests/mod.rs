@@ -899,7 +899,7 @@ fn tool_description_override_appears_in_model_schema() {
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::fresh(),
         &bindings,
-        &<ModelBindings as Default>::default(),
+        &ModelSet::default(),
         EXECUTION,
         &NullObserver,
         "Override",
@@ -972,7 +972,7 @@ fn bind_override_reaches_the_schema_and_add_beats_bind() {
     let mut vm = SectionVm::new_for_section(
         &GuardNonce::fresh(),
         &bindings,
-        &<ModelBindings as Default>::default(),
+        &ModelSet::default(),
         EXECUTION,
         &NullObserver,
         "Precedence",

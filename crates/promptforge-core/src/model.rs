@@ -27,7 +27,7 @@ pub use error::{CompletionError, CompletionErrorKind};
 pub use ids::{ModelCatalogError, ModelId, ModelIdError};
 pub use options::{CompletionOptions, ModelDescriptor, TemperatureError, ThinkingMode};
 pub(crate) use options::{
-    ModelBindOpts, ModelBinding, ModelBindings, ModelInvocation, Temperature,
+    ModelBindOpts, ModelBinding, ModelInvocation, ModelSet, ModelView, Temperature,
 };
 pub(crate) use resolver::PickerModelResolver;
 pub use transport::fetch_model_catalog;
