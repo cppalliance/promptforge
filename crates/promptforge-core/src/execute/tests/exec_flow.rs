@@ -2340,10 +2340,72 @@ async fn missing_bare_global_in_prose_errors() {
     );
 }
 
-/// The H1 VM never gets the control globals, so `list_from_section` is nil
-/// there and calling it is an ordinary Lua error.
+/// The H1 VM's control globals are stubs: H1 runs before sections exist, so
+/// calling one fails the run with a message naming the cause instead of
+/// Lua's stock nil-call error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn list_from_section_is_absent_on_the_h1() {
+async fn execute_is_a_clear_error_on_the_h1() {
+    let md = flow_prompt!(
+        "\
+# Test prompt\n\n\
+```lua\n\
+execute('## Nope')\n\
+```\n"
+    );
+    let error = run_offline(md)
+        .await
+        .expect_err("execute from the H1 must fail with the stub error");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("only available in sections"),
+        "the stub error must name the cause: {rendered}"
+    );
+}
+
+/// `jump` from the H1 hits the same stub: the run fails with the clear
+/// message, never a recorded jump.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn jump_is_a_clear_error_on_the_h1() {
+    let md = flow_prompt!(
+        "\
+# Test prompt\n\n\
+```lua\n\
+jump('## Nope')\n\
+```\n"
+    );
+    let error = run_offline(md)
+        .await
+        .expect_err("jump from the H1 must fail with the stub error");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("only available in sections"),
+        "the stub error must name the cause: {rendered}"
+    );
+}
+
+/// `fanout` from the H1 hits the same stub.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fanout_is_a_clear_error_on_the_h1() {
+    let md = flow_prompt!(
+        "\
+# Test prompt\n\n\
+```lua\n\
+fanout('## Nope', {'a'})\n\
+```\n"
+    );
+    let error = run_offline(md)
+        .await
+        .expect_err("fanout from the H1 must fail with the stub error");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("only available in sections"),
+        "the stub error must name the cause: {rendered}"
+    );
+}
+
+/// `list_from_section` from the H1 hits the same stub.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_from_section_is_a_clear_error_on_the_h1() {
     let md = flow_prompt!(
         "\
 # Test prompt\n\n\
@@ -2353,11 +2415,11 @@ list_from_section('## Nope')\n\
     );
     let error = run_offline(md)
         .await
-        .expect_err("list_from_section must be absent on the H1");
+        .expect_err("list_from_section from the H1 must fail with the stub error");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("list_from_section"),
-        "the nil-call error must name the global: {rendered}"
+        rendered.contains("only available in sections"),
+        "the stub error must name the cause: {rendered}"
     );
 }
 

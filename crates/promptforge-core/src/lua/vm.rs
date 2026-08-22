@@ -563,6 +563,32 @@ impl SectionVm {
             .map_err(Error::lua)
     }
 
+    /// Installs `execute`, `jump`, `fanout`, and `list_from_section` as
+    /// stubs that fail with a clear error, for the live H1 VM only.
+    ///
+    /// H1 runs before any section exists, so the real control globals
+    /// ([`install_control_globals`](Self::install_control_globals)) can never
+    /// operate there; without stubs a call dies with Lua's stock nil-call
+    /// error, which names no cause.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if any global cannot be installed.
+    pub(crate) fn install_h1_control_stubs(&self) -> Result<()> {
+        let globals = self.lua.globals();
+        for name in ["execute", "jump", "fanout", "list_from_section"] {
+            let stub = self
+                .lua
+                .create_function(move |_, _: MultiValue| -> mlua::Result<()> {
+                    Err(mlua::Error::external(format!(
+                        "{name} is only available in sections (## headings); H1 runs before sections exist"
+                    )))
+                })
+                .map_err(Error::lua)?;
+            globals.raw_set(name, stub).map_err(Error::lua)?;
+        }
+        Ok(())
+    }
+
     /// Executes one live H1 Lua block with call-time capability resolution.
     ///
     /// Resolver callbacks are scoped to this block and reinstalled for each
@@ -592,8 +618,9 @@ impl SectionVm {
                 Some(error) => Err(error),
                 None => Ok(value),
             },
-            // Control globals are never installed on the H1 VM, so `jump` is
-            // nil there; this arm is defensive against a recorded jump.
+            // The H1 VM carries only the stub control globals, which raise
+            // before anything is recorded; this arm stays defensive against
+            // a recorded jump.
             Ok(LuaBlockResult::Jump(heading)) => match callback_error {
                 Some(error) => Err(error),
                 None => Err(Error::Lua(format!(
