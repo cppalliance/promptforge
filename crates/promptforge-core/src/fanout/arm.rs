@@ -293,20 +293,33 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         // The shared block walk: every Lua and prose block in order, the
         // conversation and reply rolling forward, the tool scope rebuilt per
         // prose block, and a gateway client created from the environment when
-        // the arm was handed none. The arm's only frame delta is `item`.
+        // the arm was handed none. The arm's only frame delta is `item`. The
+        // walk's per-frame state stays in locals here until the arm moves
+        // onto a SectionContext of its own.
         let frame = RunFrame {
             item: Some(&item),
             ..control.walk_context(&control.args)
         };
         let mut client = inputs.client.clone();
+        let mut reply = inputs.last_reply.clone();
+        let mut conversation = Vec::new();
+        let mut counts = None;
+        let mut completion_options = None;
         match run_one_section_impl(
             &mut vm,
             &frame,
             &worker.name,
             &worker.blocks,
             BlockRunMode::Section,
-            sys,
-            inputs.last_reply.as_deref(),
+            &mut sys,
+            &mut reply,
+            &mut conversation,
+            &mut counts,
+            &mut completion_options,
+            frame.item,
+            frame.observer.as_ref(),
+            frame.debug.map(AsRef::as_ref),
+            frame.turns.as_ref(),
             &mut client,
         )
         .await

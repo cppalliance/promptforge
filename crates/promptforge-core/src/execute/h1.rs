@@ -44,7 +44,7 @@ pub(crate) async fn execute_live_h1(
     } = frame;
     let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models);
     let now = now_rfc3339_checked()?;
-    let sys = sys_json(
+    let mut sys = sys_json(
         &now,
         &now,
         0,
@@ -94,7 +94,13 @@ pub(crate) async fn execute_live_h1(
     // H1 mode on the run frame directly: the frame's walk-only fields carry
     // empty defaults here and live mode never reads them. This shell keeps
     // only VM construction, limits, host setup, the infer hook, the state
-    // extraction, and the teardown boundary.
+    // extraction, and the teardown boundary. The walk's per-frame state stays
+    // in locals here until the live H1 pass moves onto a SectionContext of
+    // its own.
+    let mut reply = None;
+    let mut conversation = Vec::new();
+    let mut counts = None;
+    let mut completion_options = None;
     let flow = h1_try!(
         run_one_section_impl(
             &mut vm,
@@ -102,8 +108,15 @@ pub(crate) async fn execute_live_h1(
             &ctx.prompt().title,
             &ctx.prompt().h1_blocks,
             BlockRunMode::LiveH1(&runtime),
-            sys,
-            None,
+            &mut sys,
+            &mut reply,
+            &mut conversation,
+            &mut counts,
+            &mut completion_options,
+            frame.item,
+            observer.as_ref(),
+            debug.map(AsRef::as_ref),
+            turns.as_ref(),
             &mut active_client,
         )
         .await

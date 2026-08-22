@@ -790,25 +790,6 @@ fn aliased_tool_script(alias: &str) -> Vec<GatewayReply> {
     ]
 }
 
-/// Progress that reports nowhere, for the loop tests that assert on the
-/// reply rather than on the events. The caller owns the turn counter and
-/// the nonce, so the borrows end with the call.
-fn silent_progress<'a>(
-    turns: &'a AtomicU32,
-    options: &'a CompletionOptions,
-    nonce: &'a GuardNonce,
-) -> SectionProgress<'a> {
-    SectionProgress {
-        execution: EXECUTION,
-        observer: &NullObserver,
-        section: "Only",
-        turns,
-        debug: None,
-        completion_options: options,
-        nonce,
-    }
-}
-
 /// Build the tool schemas the loop advertises, mirroring what `run` does.
 fn schemas_for(tools: &[&dyn Tool]) -> Vec<ToolSchema> {
     tools
@@ -834,7 +815,8 @@ fn dispatch_for(tools: &[&dyn Tool]) -> BTreeMap<String, ToolId> {
 /// The test-only port of the deleted production `run_tool_loop` wrapper: a
 /// fresh conversation looping until text, with exhaustion surfaced as
 /// [`Error::ToolLoopExhausted`]. The loop tests keep their original call
-/// shape through this shim over [`run_prose_inference`].
+/// shape through this shim over [`run_prose_inference`]; every call reports
+/// under [`EXECUTION`] with no debug capture.
 #[expect(
     clippy::too_many_arguments,
     reason = "the shim mirrors the deleted wrapper's borrowed loop context"
@@ -846,7 +828,11 @@ async fn run_tool_loop(
     registry: &ToolRegistry<'_>,
     prose: String,
     max_tool_iterations: usize,
-    progress: SectionProgress<'_>,
+    observer: &dyn Observer,
+    section: &str,
+    turns: &AtomicU32,
+    completion_options: &CompletionOptions,
+    nonce: &GuardNonce,
     counts: Option<&ToolCallCounts>,
     global_aliases: Option<&BTreeMap<String, ToolId>>,
     local_dispatch: Option<&LocalDispatch<'_>>,
@@ -862,7 +848,13 @@ async fn run_tool_loop(
         ProseMode::Loop {
             max_tool_iterations,
         },
-        progress,
+        EXECUTION,
+        observer,
+        section,
+        turns,
+        None,
+        completion_options,
+        nonce,
         counts,
         global_aliases,
         local_dispatch,
@@ -1051,7 +1043,11 @@ async fn tool_loop_dispatches_then_returns_text() {
         &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&turns, &options, &nonce),
+        &NullObserver,
+        "Only",
+        &turns,
+        &options,
+        &nonce,
         None,
         None,
         None,
@@ -1137,7 +1133,11 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
             &registry,
             "ask the model".to_string(),
             DEFAULT_MAX_TOOL_ITERATIONS,
-            silent_progress(&turns, &options, &nonce),
+            &NullObserver,
+            "Only",
+            &turns,
+            &options,
+            &nonce,
             None,
             None,
             None,
@@ -1199,15 +1199,11 @@ async fn run_tool_loop_recorded(
         &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        SectionProgress {
-            execution: EXECUTION,
-            observer: recorder.as_ref(),
-            section: "Gather",
-            turns: &turns,
-            debug: None,
-            completion_options: &options,
-            nonce: &nonce,
-        },
+        recorder.as_ref(),
+        "Gather",
+        &turns,
+        &options,
+        &nonce,
         None,
         None,
         None,
@@ -1390,7 +1386,11 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&turns, &options, &nonce),
+        &NullObserver,
+        "Only",
+        &turns,
+        &options,
+        &nonce,
         None,
         None,
         None,
@@ -1463,7 +1463,11 @@ async fn untrusted_nonce_is_stable_across_rounds() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&turns, &options, &nonce),
+        &NullObserver,
+        "Only",
+        &turns,
+        &options,
+        &nonce,
         None,
         None,
         None,
@@ -1543,7 +1547,11 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&turns, &options, &nonce),
+        &NullObserver,
+        "Only",
+        &turns,
+        &options,
+        &nonce,
         None,
         None,
         None,
@@ -1595,7 +1603,11 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&turns, &options, &nonce),
+        &NullObserver,
+        "Only",
+        &turns,
+        &options,
+        &nonce,
         None,
         None,
         None,
