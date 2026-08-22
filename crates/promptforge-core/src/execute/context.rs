@@ -14,7 +14,7 @@ use crate::Result;
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
 use crate::lua::{LuaProgram, SectionVm, ToolSet, ToolView};
-use crate::model::ModelBindings;
+use crate::model::{ModelSet, ModelView};
 use crate::observe::Observer;
 use crate::parser::Prompt;
 use crate::store::{StoreRef, WriteScope};
@@ -73,8 +73,15 @@ pub(crate) struct RunContext {
     /// producer (its Lua host closures write through it). Readers never
     /// touch it; they go through the view.
     tool_set: Arc<Mutex<ToolSet>>,
-    /// The frozen prompt-level model bindings; empty until the walk starts.
-    models: Arc<ModelBindings>,
+    /// The run's model set as a read-only view: created empty here and
+    /// filled by the live H1 pass through the concrete `model_set` handle.
+    /// The trait exposes no write methods, so once the H1 VM drops its
+    /// handle clones the set is structurally frozen.
+    models: Arc<dyn ModelView>,
+    /// The concrete handle behind `models`, handed to the live H1 binding
+    /// producer (its Lua host closures write through it). Readers never
+    /// touch it; they go through the view.
+    model_set: Arc<Mutex<ModelSet>>,
     /// The walk's start timestamp, stamped into every section's `sys.when`;
     /// empty until the walk starts (H1 stamps its own `now`).
     when: Arc<str>,
@@ -82,10 +89,9 @@ pub(crate) struct RunContext {
 
 impl RunContext {
     /// Builds the context for one run of `prompt`. The turn and id counters
-    /// are minted here (both start at zero), as is the empty tool set the
-    /// live H1 pass fills through the concrete handle; the walk-scoped
-    /// fields (`models`, `when`) start empty and take their live values at
-    /// the H1-to-walk handoff.
+    /// are minted here (both start at zero), as are the empty tool and model
+    /// sets the live H1 pass fills through the concrete handles; `when`
+    /// starts empty and takes its live value at the H1-to-walk handoff.
     #[must_use]
     pub(crate) fn new(
         prompt: &Prompt,
@@ -95,6 +101,7 @@ impl RunContext {
         config: &RunConfig,
     ) -> Self {
         let tool_set = Arc::new(Mutex::new(ToolSet::default()));
+        let model_set = Arc::new(Mutex::new(ModelSet::default()));
         Self {
             prompt: Arc::new(prompt.clone()),
             nonce: GuardNonce::fresh(),
@@ -109,7 +116,8 @@ impl RunContext {
             shared: Arc::new(shared),
             tools: tool_set.clone(),
             tool_set,
-            models: Arc::new(ModelBindings::from_parts(Vec::new(), None)),
+            models: model_set.clone(),
+            model_set,
             when: Arc::from(""),
         }
     }
@@ -190,9 +198,37 @@ impl RunContext {
         ))
     }
 
-    /// The frozen prompt-level model bindings.
-    pub(crate) fn models(&self) -> &ModelBindings {
-        &self.models
+    /// The run's model set, read-only.
+    pub(crate) fn models(&self) -> &dyn ModelView {
+        &*self.models
+    }
+
+    /// The run's model set as a shared read-only handle: the infer hook's
+    /// `models.infer` resolution is captured into Lua closures that outlive
+    /// the installer.
+    pub(crate) fn models_arc(&self) -> Arc<dyn ModelView> {
+        Arc::clone(&self.models)
+    }
+
+    /// The concrete handle behind the models view, for the live H1 binding
+    /// producer; its clones die with the H1 VM, after which the set is
+    /// structurally frozen.
+    pub(crate) fn model_set(&self) -> Arc<Mutex<ModelSet>> {
+        Arc::clone(&self.model_set)
+    }
+
+    /// An owned snapshot of the run's model set (bindings plus `default`),
+    /// read through the view. Post-H1 the set is frozen, so the two reads
+    /// always agree.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`](crate::Error::Lua) if the set's mutex is
+    /// poisoned.
+    pub(crate) fn model_set_snapshot(&self) -> Result<ModelSet> {
+        Ok(ModelSet::from_parts(
+            self.models.bindings()?,
+            self.models.default()?,
+        ))
     }
 
     /// The resolved per-section tool-loop cap: the frontmatter's
@@ -209,14 +245,13 @@ impl RunContext {
         self.prompt.sections.len()
     }
 
-    /// The H1-to-walk handoff: the frozen model bindings H1 produced plus
-    /// the walk's start timestamp, set on a cheap clone so the context H1
-    /// saw stays untouched. The tool set needs no delta: H1's binds already
-    /// landed in the shared set the view reads.
+    /// The H1-to-walk handoff: the walk's start timestamp, set on a cheap
+    /// clone so the context H1 saw stays untouched. The tool and model sets
+    /// need no delta: H1's binds already landed in the shared sets the views
+    /// read.
     #[must_use]
-    pub(crate) fn with_walk_state(&self, models: &ModelBindings, when: &str) -> Self {
+    pub(crate) fn with_walk_state(&self, when: &str) -> Self {
         let mut ctx = self.clone();
-        ctx.models = Arc::new(models.clone());
         ctx.when = Arc::from(when);
         ctx
     }
@@ -297,7 +332,7 @@ impl RunContext {
     /// Installs the infer hook both engine drivers share, sourcing every
     /// run-wide slot from this context; the driver supplies only its client
     /// snapshot and the section name. The handed client (or the environment)
-    /// is wrapped in the lazy [`GatewaySource`], with no live H1 bindings.
+    /// is wrapped in the lazy [`GatewaySource`].
     pub(crate) fn attach_infer_hook(
         &self,
         vm: &SectionVm,
@@ -312,7 +347,7 @@ impl RunContext {
             &self.execution,
             section_name,
             &self.turns,
-            None,
+            Arc::clone(&self.models),
         );
     }
 }
@@ -333,7 +368,8 @@ impl fmt::Debug for RunContext {
             .field("shared", &self.shared)
             .field("tools", &"<dyn ToolView>")
             .field("tool_set", &self.tool_set)
-            .field("models", &self.models)
+            .field("models", &"<dyn ModelView>")
+            .field("model_set", &self.model_set)
             .field("when", &self.when)
             .finish()
     }

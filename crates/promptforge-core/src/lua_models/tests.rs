@@ -3,9 +3,9 @@ use super::decode::{
     value_as_bool, value_as_nonzero_u32, value_as_temperature, value_as_u32,
 };
 use super::userdata::{LuaModelHandle, reject_infer_options};
-use super::{ModelBindingState, ModelRuntime, record_default_binding};
+use super::{ModelRuntime, record_default_binding};
 use crate::dialects::ToolDialectId;
-use crate::model::{ModelBindOpts, ModelBinding, ModelId, ModelInvocation};
+use crate::model::{ModelBindOpts, ModelBinding, ModelId, ModelInvocation, ModelSet};
 use mlua::Value;
 use mlua::{Lua, MultiValue};
 
@@ -76,20 +76,23 @@ fn default_multi_arg_rolls_back_when_already_selected() {
             context: std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
         })
     };
-    let mut state = ModelBindingState::default();
+    let mut set = ModelSet::default();
+    let errors = std::sync::Mutex::new(None);
     record_default_binding(
-        &mut state,
+        &mut set,
+        &errors,
         &resolver,
         "a",
         "desc",
         &ModelBindOpts::default(),
     )
     .expect("the first models.default must succeed");
-    assert_eq!(state.bindings.len(), 1);
-    assert_eq!(state.default.as_deref(), Some("a"));
+    assert_eq!(set.bindings.len(), 1);
+    assert_eq!(set.default.as_deref(), Some("a"));
 
     let err = record_default_binding(
-        &mut state,
+        &mut set,
+        &errors,
         &resolver,
         "b",
         "desc",
@@ -101,11 +104,11 @@ fn default_multi_arg_rolls_back_when_already_selected() {
         "error must explain the at-most-once rule: {err}"
     );
     assert_eq!(
-        state.bindings.len(),
+        set.bindings.len(),
         1,
         "a rejected second models.default must not record a binding (rollback)"
     );
-    assert_eq!(state.default.as_deref(), Some("a"));
+    assert_eq!(set.default.as_deref(), Some("a"));
 }
 
 #[test]
@@ -318,7 +321,8 @@ fn parse_single_alias_and_validate_alias_branches() {
 fn live_model_apis_label_nested_decoder_errors_by_entry_point() {
     let run = |source: &str| {
         let lua = Lua::new();
-        let state = std::sync::Arc::new(std::sync::Mutex::new(ModelBindingState::default()));
+        let set = std::sync::Arc::new(std::sync::Mutex::new(ModelSet::default()));
+        let errors = std::sync::Arc::new(std::sync::Mutex::new(None));
         let resolver = |_: &str, _: &ModelBindOpts| {
             Ok(crate::model::ResolvedModel {
                 id: ModelId::from_validated("gateway", "m1"),
@@ -328,7 +332,7 @@ fn live_model_apis_label_nested_decoder_errors_by_entry_point() {
             })
         };
         lua.scope(|scope| {
-            super::install_live_models(&lua, scope, &resolver, &state)
+            super::install_live_models(&lua, scope, &resolver, &set, &errors)
                 .map_err(mlua::Error::external)?;
             lua.load(source).exec()
         })

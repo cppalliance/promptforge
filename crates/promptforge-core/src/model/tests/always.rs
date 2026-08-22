@@ -3,7 +3,7 @@
 use super::*;
 
 /// Compiles and resolves one live H1 declaration fixture.
-fn resolve_shared(source: &str) -> Result<(ToolSet, ModelBindings)> {
+fn resolve_shared(source: &str) -> Result<(ToolSet, ModelSet)> {
     let shared = crate::lua::LuaProgram::compile(
         source,
         "shared",
@@ -31,7 +31,7 @@ fn models_always_records_binding() {
                models.default("writer")"#,
     )
     .unwrap();
-    assert_eq!(models.default(), Some("writer"));
+    assert_eq!(models.default.as_deref(), Some("writer"));
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn models_always_returns_inspectable_object() {
                assert(model.dialect == "openai")"#,
     )
     .unwrap();
-    assert_eq!(models.default(), Some("writer"));
+    assert_eq!(models.default.as_deref(), Some("writer"));
     assert_eq!(models.bindings()[0].context().get(), 8_192);
 
     let vm = section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
@@ -98,8 +98,7 @@ fn models_always_installs_exactly() {
             .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
-    let (mb, mr) = vm.model_bag_handles();
-    let model = resolve_model_binding(&mb, &mr).unwrap();
+    let model = resolve_section_model(&vm).unwrap();
     assert_eq!(model.as_ref().map(ModelBinding::alias), Some("writer"));
     vm.teardown(&NullObserver, "Section");
 }
@@ -116,8 +115,7 @@ fn models_always_provides_completion_options_without_use() {
             .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
-    let (mb, mr) = vm.model_bag_handles();
-    let model = resolve_model_binding(&mb, &mr).unwrap();
+    let model = resolve_section_model(&vm).unwrap();
     let opts = model.as_ref().map(ModelBinding::completion_options);
     let expected = CompletionOptions {
         model: "small".to_owned(),
@@ -163,14 +161,14 @@ fn models_always_multi_arg_records_bind_and_always() {
         r#"models.default("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
     )
     .unwrap();
-    assert_eq!(models.default(), Some("writer"));
+    assert_eq!(models.default.as_deref(), Some("writer"));
     assert!(models.binding("writer").is_some());
 }
 
 #[test]
 fn models_always_multi_arg_two_args() {
     let (_tools, models) = resolve_shared(r#"models.default("writer", "A tiny model")"#).unwrap();
-    assert_eq!(models.default(), Some("writer"));
+    assert_eq!(models.default.as_deref(), Some("writer"));
     assert!(models.binding("writer").is_some());
 }
 
@@ -185,8 +183,7 @@ fn models_always_multi_arg_provides_completion_options() {
             .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
-    let (mb, mr) = vm.model_bag_handles();
-    let model = resolve_model_binding(&mb, &mr).unwrap();
+    let model = resolve_section_model(&vm).unwrap();
     let opts = model.as_ref().map(ModelBinding::completion_options);
     let expected = CompletionOptions {
         model: "small".to_owned(),
@@ -209,8 +206,7 @@ fn models_always_multi_arg_installs_exactly() {
             .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
-    let (mb, mr) = vm.model_bag_handles();
-    let model = resolve_model_binding(&mb, &mr).unwrap();
+    let model = resolve_section_model(&vm).unwrap();
     assert_eq!(model.as_ref().map(ModelBinding::alias), Some("writer"));
     vm.teardown(&NullObserver, "Section");
 }
@@ -222,7 +218,7 @@ fn models_always_multi_arg_and_single_arg_cannot_both_be_called() {
                models.default("writer", "A tiny model")"#,
     )
     .unwrap();
-    assert_eq!(models.default(), Some("writer"));
+    assert_eq!(models.default.as_deref(), Some("writer"));
 
     // Now verify that a second always (single-arg) after multi-arg always fails.
     let error = resolve_shared(

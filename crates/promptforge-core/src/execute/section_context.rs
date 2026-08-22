@@ -31,7 +31,6 @@ use crate::lua::{SectionVm, ToolCallCounts};
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
 use crate::parser::{Block, Section};
-use crate::resolve::RuntimeResolution;
 use crate::store::{StoreRef, WriteScope};
 
 use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
@@ -133,10 +132,11 @@ impl SectionContext {
         ctx.observer()
             .observe(ctx.execution(), &section.name, detail::SECTION_STARTED);
         let tool_set = ctx.tool_set_snapshot()?;
+        let model_set = ctx.model_set_snapshot()?;
         let vm = SectionVm::new_for_section(
             ctx.nonce(),
             &tool_set,
-            ctx.models(),
+            &model_set,
             ctx.execution(),
             ctx.observer().as_ref(),
             &section.name,
@@ -210,8 +210,8 @@ impl SectionContext {
     /// Constructs the frame for the live H1 pass and runs its setup
     /// preamble: the `sys` JSON (id 0 under the prompt's title), VM
     /// construction and limits, host injection, the host APIs, the H1
-    /// control-global stubs, and the infer hook carrying the live binding
-    /// producer, so a nested `models.infer` resolves against the bindings
+    /// control-global stubs, and the infer hook reading the run's shared
+    /// model set, so a nested `models.infer` resolves against the bindings
     /// recorded so far.
     ///
     /// H1 is the level-1 section: it runs first and is never re-entered, so
@@ -224,11 +224,7 @@ impl SectionContext {
     /// construction or limits failure propagates bare, before any teardown
     /// observation exists; a setup failure tears the fresh VM down first, so
     /// the teardown boundary still fires exactly once on that path.
-    pub(crate) fn new_live_h1(
-        ctx: &RunContext,
-        runtime: &RuntimeResolution<'_>,
-        client: Option<&GatewayClient>,
-    ) -> Result<Self> {
+    pub(crate) fn new_live_h1(ctx: &RunContext, client: Option<&GatewayClient>) -> Result<Self> {
         let title = &ctx.prompt().title;
         let now = now_rfc3339_checked()?;
         let sys = sys_json(
@@ -278,7 +274,7 @@ impl SectionContext {
             ctx.execution(),
             title,
             &h1_frame.turns,
-            Some(runtime.producer()),
+            ctx.models_arc(),
         );
         Ok(h1_frame)
     }
@@ -338,10 +334,11 @@ impl SectionContext {
         var: &serde_json::Value,
     ) -> Result<Self> {
         let tool_set = ctx.tool_set_snapshot()?;
+        let model_set = ctx.model_set_snapshot()?;
         let vm = SectionVm::new_for_section(
             ctx.nonce(),
             &tool_set,
-            ctx.models(),
+            &model_set,
             ctx.execution(),
             ctx.observer().as_ref(),
             &worker.name,

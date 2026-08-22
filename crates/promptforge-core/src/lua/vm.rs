@@ -1,13 +1,12 @@
 use super::{
     Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
     Function, GuardNonce, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions,
-    LuaProgram, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook,
-    ModelRuntime, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result,
-    RuntimeResolution, StdLib, StoreRef, ToolBinding, ToolCallCounts, ToolRuntime, ToolSet, Value,
-    WriteScope, detail, guarded_var, harden, install_h2_models, install_h2_tools,
-    install_instruction_budget, install_log, install_lua_tool_calls, install_store_table,
-    install_untrusted, log_byte_budget, resolve_section_target, scalar_return, seal_sys,
-    var_to_json,
+    LuaProgram, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelInferHook, ModelRuntime, ModelSet,
+    ModelView, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution,
+    StdLib, StoreRef, ToolBinding, ToolCallCounts, ToolRuntime, ToolSet, Value, WriteScope, detail,
+    guarded_var, harden, install_h2_models, install_h2_tools, install_instruction_budget,
+    install_log, install_lua_tool_calls, install_store_table, install_untrusted, log_byte_budget,
+    resolve_section_target, scalar_return, seal_sys, var_to_json,
 };
 use crate::client::ToolSchema;
 
@@ -57,7 +56,7 @@ pub(crate) struct SectionVm {
     execution: String,
     lua: Lua,
     bound_tools: ToolSet,
-    bound_models: ModelBindings,
+    bound_models: ModelSet,
     pub(crate) tool_runtime: Arc<Mutex<ToolRuntime>>,
     pub(crate) model_runtime: Arc<Mutex<ModelRuntime>>,
     /// Set by Lua `jump` before it aborts the current chunk.
@@ -235,7 +234,7 @@ impl SectionVm {
             execution: execution.to_owned(),
             lua,
             bound_tools: ToolSet::default(),
-            bound_models: <ModelBindings as Default>::default(),
+            bound_models: ModelSet::default(),
             tool_runtime: Arc::new(Mutex::new(ToolRuntime {
                 added: Vec::new(),
                 description_overrides: BTreeMap::new(),
@@ -274,7 +273,7 @@ impl SectionVm {
     pub(crate) fn new_for_section(
         nonce: &GuardNonce,
         tools: &ToolSet,
-        models: &ModelBindings,
+        models: &ModelSet,
         execution: &str,
         observer: &dyn Observer,
         section: &str,
@@ -897,9 +896,12 @@ impl SectionVm {
     }
 
     /// Returns frozen model bindings and the live H2 selection runtime.
+    ///
+    /// Test-only: production reads the run's shared set through the model
+    /// view; tests snapshot straight from the VM.
     #[must_use]
-    #[allow(dead_code)]
-    pub(crate) fn model_bag_handles(&self) -> (ModelBindings, Arc<Mutex<ModelRuntime>>) {
+    #[cfg(test)]
+    pub(crate) fn model_bag_handles(&self) -> (ModelSet, Arc<Mutex<ModelRuntime>>) {
         (self.bound_models.clone(), Arc::clone(&self.model_runtime))
     }
 
@@ -1113,26 +1115,27 @@ pub(crate) fn current_tool_bindings(
         .collect()
 }
 
-/// Reads the section's effective model binding without mutating the model
-/// runtime: the H2 `models.use` selection, else the prompt-wide
-/// `models.default` baseline.
+/// Reads the section's effective model binding through the run's model view
+/// without mutating the model runtime: the H2 `models.use` selection, else
+/// the prompt-wide `models.default` baseline.
 pub(crate) fn resolve_model_binding(
-    bindings: &ModelBindings,
+    bindings: &dyn ModelView,
     runtime: &Mutex<ModelRuntime>,
 ) -> Result<Option<ModelBinding>> {
-    let alias = {
+    let used = {
         let runtime = runtime
             .lock()
             .map_err(|_| Error::Lua("model declaration runtime was poisoned".to_owned()))?;
-        runtime
-            .used()
-            .map(String::from)
-            .or_else(|| bindings.default().map(String::from))
+        runtime.used().map(String::from)
+    };
+    let alias = match used {
+        Some(alias) => Some(alias),
+        None => bindings.default()?,
     };
     match alias {
-        Some(alias) => Ok(Some(bindings.binding(&alias).cloned().ok_or_else(
-            || Error::Lua(format!("model alias {alias:?} has no frozen binding")),
-        )?)),
+        Some(alias) => Ok(Some(bindings.binding(&alias)?.ok_or_else(|| {
+            Error::Lua(format!("model alias {alias:?} has no frozen binding"))
+        })?)),
         None => Ok(None),
     }
 }
