@@ -18,6 +18,7 @@ promptforge-tool-picker = "0.1"
 use promptforge_core::model::ModelCatalog;
 use promptforge_core::observe::NullObserver;
 use promptforge_core::store::StoreRef;
+use promptforge_core::tools::ToolCatalog;
 use promptforge_core::{Prompt, ResolutionContext, RunConfig, run};
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 
@@ -25,13 +26,13 @@ async fn execute(source: &str) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = Prompt::parse(source, "readme", &NullObserver::default())?;
     let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())?;
     let models = ModelCatalog::empty();
+    let tools = ToolCatalog::new(&[])?;
     let store = StoreRef::memory();
 
     let result = run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models),
-        &[],
+        ResolutionContext::new(&picker, &models, &tools),
         &store,
         RunConfig::new("readme"),
     )

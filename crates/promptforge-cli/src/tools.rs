@@ -1,16 +1,16 @@
-//! Build the CLI's live tool registry and matching semantic-picker catalog.
+//! Build the CLI's live tool catalog and matching semantic-picker catalog.
 //!
 //! `web_fetch` runs locally and is always available. `web_search` proxies
 //! through the gateway, so it is offered only when a validated [`Gateway::Remote`]
 //! configuration supplies both an endpoint and a bearer token. The abstract
 //! picker descriptors are derived from the same live instances placed in the
-//! registry, keeping identity, description, and schema agreement structural
+//! catalog, keeping identity, description, and schema agreement structural
 //! rather than conventional.
 
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use promptforge_core::tools::{Tool, ToolRegistry, WebSearch};
+use promptforge_core::tools::{Tool, ToolCatalog, WebSearch};
 use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId};
 use promptforge_webfetch::WebFetch;
 
@@ -103,10 +103,11 @@ impl std::fmt::Debug for Remote {
 
 /// The complete set of concrete tools available to one CLI run.
 ///
-/// The picker catalog is built directly from `live`, so no descriptor can be
-/// offered without a callable tool carrying the same stable identity.
+/// The picker catalog is built directly from the validated tool catalog, so
+/// no descriptor can be offered without a callable tool carrying the same
+/// stable identity.
 pub(crate) struct AvailableTools {
-    live: Vec<Arc<dyn Tool>>,
+    live: ToolCatalog,
     catalog: Catalog,
 }
 
@@ -114,19 +115,17 @@ impl std::fmt::Debug for AvailableTools {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("AvailableTools")
-            .field(
-                "ids",
-                &self.live.iter().map(|tool| tool.id()).collect::<Vec<_>>(),
-            )
+            .field("live", &self.live)
             .field("catalog", &self.catalog)
             .finish()
     }
 }
 
 impl AvailableTools {
-    /// Returns the shared tool arcs for [`promptforge_core::execute::run`].
+    /// Returns the validated tool catalog handed to
+    /// [`ResolutionContext`](promptforge_core::execute::ResolutionContext).
     #[must_use]
-    pub(crate) fn tools(&self) -> &[Arc<dyn Tool>] {
+    pub(crate) fn tools(&self) -> &ToolCatalog {
         &self.live
     }
 
@@ -140,25 +139,30 @@ impl AvailableTools {
 ///
 /// `web_fetch` is unconditional. `web_search` is included only for
 /// [`Gateway::Remote`], using its validated endpoint and bearer token. The
-/// completed live set is validated against the callable [`ToolRegistry`] contract
+/// completed live set is validated against the callable [`ToolCatalog`] contract
 /// before the picker catalog is derived, so an invalid set fails here rather than
 /// after unnecessary picker work.
 ///
 /// # Errors
 /// Returns an error if `web_search` construction fails (for example, a malformed
-/// gateway URL), or if the assembled live set violates the registry contract
+/// gateway URL), or if the assembled live set violates the catalog contract
 /// (duplicate identity or invalid wire name).
 pub(crate) fn available_tools(gateway: &Gateway) -> Result<AvailableTools> {
-    let mut live: Vec<Arc<dyn Tool>> = vec![Arc::new(WebFetch::new())];
+    let mut tools: Vec<Arc<dyn Tool>> = vec![Arc::new(WebFetch::new())];
     if let Gateway::Remote(remote) = gateway {
         let search = WebSearch::new(remote.endpoint(), remote.token())
             .context("construct the web_search tool")?;
-        live.push(Arc::new(search));
+        tools.push(Arc::new(search));
     }
 
-    ToolRegistry::new(live.iter().map(Arc::as_ref)).context("validate the live tool registry")?;
+    let live = ToolCatalog::new(&tools).context("validate the live tool catalog")?;
 
-    let catalog = Catalog::new(live.iter().map(|tool| descriptor(tool.as_ref())).collect());
+    let catalog = Catalog::new(
+        live.tools()
+            .iter()
+            .map(|tool| descriptor(tool.as_ref()))
+            .collect(),
+    );
     Ok(AvailableTools { live, catalog })
 }
 
@@ -241,6 +245,7 @@ mod tests {
             let available = available_tools(&gateway).expect("available tools build");
             let has_search = available
                 .tools()
+                .tools()
                 .iter()
                 .any(|tool| tool.id().name() == "web_search");
             assert_eq!(has_search, expect_search, "gateway {gateway:?}");
@@ -271,10 +276,11 @@ mod tests {
     }
 
     #[test]
-    fn live_registry_and_picker_catalog_have_identical_ids() {
+    fn live_catalog_and_picker_catalog_have_identical_ids() {
         for gateway in [Gateway::LocalOnly, remote()] {
             let available = available_tools(&gateway).expect("available tools build");
             let live_ids = available
+                .tools()
                 .tools()
                 .iter()
                 .map(|tool| {

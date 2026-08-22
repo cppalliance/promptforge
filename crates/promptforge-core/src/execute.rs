@@ -74,8 +74,6 @@ mod support;
 mod tool_loop;
 mod tools;
 
-use std::sync::Arc;
-
 // Public API surface.
 pub use config::{RunConfig, RunLimits};
 pub use error::{RunError, RunErrorKind};
@@ -131,7 +129,6 @@ use crate::cancel;
 use crate::observe::detail;
 use crate::parser::{ParseErrorKind, Prompt};
 use crate::store::StoreRef;
-use crate::tools::{SharedTools, Tool};
 use support::{GENERIC_COMPLETION, SUPPORTED_MAJOR};
 
 // Re-exported for the executor test glob.
@@ -176,6 +173,7 @@ pub(crate) use crate::model::ModelBindings;
 /// use promptforge_core::observe::NullObserver;
 /// use promptforge_core::parser::Prompt;
 /// use promptforge_core::store::StoreRef;
+/// use promptforge_core::tools::ToolCatalog;
 /// use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 ///
 /// let source = concat!(
@@ -187,13 +185,13 @@ pub(crate) use crate::model::ModelBindings;
 /// let prompt = Prompt::parse(source, "doc-example", &NullObserver::default())?;
 /// let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())?;
 /// let models = ModelCatalog::empty();
+/// let tools = ToolCatalog::new(&[])?;
 ///
 /// let runtime = tokio::runtime::Builder::new_current_thread().build()?;
 /// let output = runtime.block_on(run(
 ///     &prompt,
 ///     "",
-///     ResolutionContext::new(&picker, &models),
-///     &[],
+///     ResolutionContext::new(&picker, &models, &tools),
 ///     &StoreRef::memory(),
 ///     RunConfig::new("doc-example"),
 /// ))?;
@@ -211,7 +209,6 @@ pub async fn run(
     prompt: &Prompt,
     args: &str,
     resolution: ResolutionContext<'_>,
-    tools: &[Arc<dyn Tool>],
     store: &StoreRef,
     config: RunConfig,
 ) -> std::result::Result<String, RunError> {
@@ -226,8 +223,6 @@ pub async fn run(
         }
     }
 
-    let shared_tools =
-        SharedTools::new(tools).map_err(|error| RunError::from(Error::from(error)))?;
     // Section startup replays the shared library unconditionally; a prompt
     // without one replays an empty compiled chunk instead, so the startup
     // sequence carries no `Option` branch.
@@ -235,7 +230,7 @@ pub async fn run(
         Some(program) => program.clone(),
         None => crate::lua::LuaProgram::empty().map_err(RunError::from)?,
     };
-    let ctx = RunContext::new(prompt, args, store, shared_tools, shared, &config);
+    let ctx = RunContext::new(prompt, args, store, shared, &config);
 
     let RunConfig {
         execution,

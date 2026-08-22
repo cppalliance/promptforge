@@ -1,24 +1,30 @@
-//! The [`Tool`] trait, the tool registry and its errors, and the shared
-//! tool set used by concurrent fanout arms.
+//! The [`Tool`] trait, the caller-provided [`ToolCatalog`] of executable
+//! tool implementations, and the catalog's construction error.
 
 use std::sync::Arc;
 
 use super::ids::{ToolId, validate_identifier};
 use super::output::{ToolError, ToolOutput};
 
-/// Cloneable tool set for concurrent fanout arms.
+/// The caller-provided catalog of tool implementations a run may bind.
 ///
-/// H1 resolution attaches these `Arc`s to the bindings it produces, so the
-/// resolved implementation travels with the binding for the whole run.
+/// The harness builds and validates the catalog once and then shares it by
+/// reference across every run, mirroring
+/// [`ModelCatalog`](crate::model::ModelCatalog): construction rejects a
+/// repeated [`ToolId`] or a transport-illegal [`wire_name`](Tool::wire_name),
+/// so the H1-phase [`get`](Self::get) lookup (where `tools.bind` attaches the
+/// resolved implementation to its binding) trusts the invariant without
+/// rescanning. Cloning is cheap: the tools live behind one refcounted slice.
 #[derive(Clone, Default)]
-pub(crate) struct SharedTools {
+#[non_exhaustive]
+pub struct ToolCatalog {
     tools: Arc<[Arc<dyn Tool>]>,
 }
 
-impl std::fmt::Debug for SharedTools {
+impl std::fmt::Debug for ToolCatalog {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("SharedTools")
+            .debug_struct("ToolCatalog")
             .field(
                 "ids",
                 &self.tools.iter().map(|tool| tool.id()).collect::<Vec<_>>(),
@@ -27,18 +33,43 @@ impl std::fmt::Debug for SharedTools {
     }
 }
 
-impl SharedTools {
-    /// Builds a shared set from caller-owned tool arcs.
+impl ToolCatalog {
+    /// Builds a catalog from caller-owned tool arcs.
     ///
-    /// Validates identity uniqueness once, here, so [`Self::get`] can trust
-    /// the invariant without rescanning.
+    /// Validates identity uniqueness and wire-name legality once, here, so
+    /// [`Self::get`] can trust the invariant without rescanning.
     ///
     /// # Errors
-    /// Returns [`ToolRegistryError::DuplicateId`] if two tools share a
-    /// [`ToolId`], or [`ToolRegistryError::InvalidWireName`] if a tool's wire
-    /// name is not transport-legal.
-    pub(crate) fn new(tools: &[Arc<dyn Tool>]) -> Result<Self, ToolRegistryError> {
-        ToolRegistry::new(tools.iter().map(AsRef::as_ref))?;
+    /// Returns [`ToolCatalogError::DuplicateId`] if two tools share a
+    /// [`ToolId`], or [`ToolCatalogError::InvalidWireName`] if a tool's
+    /// [`wire_name`](Tool::wire_name) is empty or carries a `/` separator or
+    /// a control character.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge_core::tools::ToolCatalog;
+    ///
+    /// let catalog = ToolCatalog::new(&[])?;
+    /// assert!(catalog.tools().is_empty());
+    /// # Ok::<(), promptforge_core::tools::ToolCatalogError>(())
+    /// ```
+    pub fn new(tools: &[Arc<dyn Tool>]) -> Result<Self, ToolCatalogError> {
+        let mut seen = std::collections::BTreeSet::new();
+        for tool in tools {
+            // The catalog is the transport boundary: reject a wire name that
+            // is empty or carries a separator/control character (tools.rs F4).
+            if let Err(error) = validate_identifier("wire name", tool.wire_name()) {
+                return Err(ToolCatalogError::InvalidWireName {
+                    wire_name: tool.wire_name().to_owned(),
+                    reason: error.reason(),
+                });
+            }
+            let id = tool.id();
+            if !seen.insert(id.clone()) {
+                return Err(ToolCatalogError::DuplicateId { id });
+            }
+        }
         Ok(Self {
             // `Arc::<[T]>::from(&[T])` clones each element straight into the
             // ref-counted slice; no intermediate owned `Vec` is allocated first.
@@ -46,17 +77,44 @@ impl SharedTools {
         })
     }
 
-    /// Returns the shared implementation for `id`, if one is registered.
+    /// Returns the shared implementation for `id`, if one is in the catalog.
     ///
     /// This is the bind-time lookup (`tools.bind` attaches the resolved
     /// implementation to its binding), a cold path run once per declaration,
     /// so it scans linearly rather than carrying a cached-identity index.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge_core::tools::{ToolCatalog, ToolId};
+    ///
+    /// let catalog = ToolCatalog::new(&[])?;
+    /// let missing = ToolId::new("promptforge", "missing")?;
+    /// assert!(catalog.get(&missing).is_none());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     #[must_use]
-    pub(crate) fn get(&self, id: &ToolId) -> Option<Arc<dyn Tool>> {
+    pub fn get(&self, id: &ToolId) -> Option<Arc<dyn Tool>> {
         self.tools
             .iter()
             .find(|tool| tool.id() == *id)
             .map(Arc::clone)
+    }
+
+    /// Returns the catalog's tool arcs in supplied order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use promptforge_core::tools::ToolCatalog;
+    ///
+    /// let catalog = ToolCatalog::new(&[])?;
+    /// assert!(catalog.tools().is_empty());
+    /// # Ok::<(), promptforge_core::tools::ToolCatalogError>(())
+    /// ```
+    #[must_use]
+    pub fn tools(&self) -> &[Arc<dyn Tool>] {
+        &self.tools
     }
 }
 
@@ -79,29 +137,29 @@ pub(crate) struct NearDuplicateDiagnostic {
     /// The cosine similarity reported by the picker.
     pub(crate) similarity: f32,
 }
-/// A stable, matchable classification of a [`ToolRegistryError`].
+/// A stable, matchable classification of a [`ToolCatalogError`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ToolRegistryErrorKind {
+pub enum ToolCatalogErrorKind {
     /// Two supplied tools shared a stable [`ToolId`].
     DuplicateId,
     /// A supplied tool's [`wire_name`](Tool::wire_name) was not transport-legal.
     InvalidWireName,
 }
 
-/// A [`ToolRegistry`] could not be built from the supplied tools.
+/// A [`ToolCatalog`] could not be built from the supplied tools.
 ///
 /// This classifying error supersedes the design's `DuplicateToolId` name
-/// (DESIGN-2.4): the registry is the schema/transport boundary, so besides
+/// (DESIGN-2.4): the catalog is the schema/transport boundary, so besides
 /// rejecting a repeated identity it also rejects a tool whose
 /// [`wire_name`](Tool::wire_name) is empty or carries a separator or control
 /// character (tools.rs F4). It exposes a stable [`kind`](Self::kind) classifier
 /// (DESIGN-5).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum ToolRegistryError {
+pub enum ToolCatalogError {
     /// The same stable identity was supplied by more than one tool.
-    #[error("duplicate tool identity {id:?} in registry")]
+    #[error("duplicate tool identity {id:?} in the tool catalog")]
     #[non_exhaustive]
     DuplicateId {
         /// The stable identity supplied more than once.
@@ -118,13 +176,13 @@ pub enum ToolRegistryError {
     },
 }
 
-impl ToolRegistryError {
+impl ToolCatalogError {
     /// Returns the stable classification of this error (DESIGN-5).
     #[must_use]
-    pub fn kind(&self) -> ToolRegistryErrorKind {
+    pub fn kind(&self) -> ToolCatalogErrorKind {
         match self {
-            ToolRegistryError::DuplicateId { .. } => ToolRegistryErrorKind::DuplicateId,
-            ToolRegistryError::InvalidWireName { .. } => ToolRegistryErrorKind::InvalidWireName,
+            ToolCatalogError::DuplicateId { .. } => ToolCatalogErrorKind::DuplicateId,
+            ToolCatalogError::InvalidWireName { .. } => ToolCatalogErrorKind::InvalidWireName,
         }
     }
 
@@ -132,26 +190,8 @@ impl ToolRegistryError {
     #[must_use]
     pub fn duplicate_id(&self) -> Option<&ToolId> {
         match self {
-            ToolRegistryError::DuplicateId { id } => Some(id),
-            ToolRegistryError::InvalidWireName { .. } => None,
-        }
-    }
-}
-
-impl From<ToolRegistryError> for crate::error::Error {
-    fn from(error: ToolRegistryError) -> Self {
-        match error {
-            ToolRegistryError::DuplicateId { id } => {
-                crate::error::Error::DuplicateLiveToolId { id }
-            }
-            // Preserve the structured registry error (rejected name + reason)
-            // as a private `#[source]` cause instead of flattening it to a bare
-            // reason string (AUDIT-DISCARDED-SOURCE).
-            invalid @ ToolRegistryError::InvalidWireName { .. } => {
-                crate::error::Error::InvalidToolWireName {
-                    source: Box::new(invalid),
-                }
-            }
+            ToolCatalogError::DuplicateId { id } => Some(id),
+            ToolCatalogError::InvalidWireName { .. } => None,
         }
     }
 }
@@ -216,13 +256,13 @@ impl From<ToolRegistryError> for crate::error::Error {
 /// **new required** method (one without a default body) is a breaking change for
 /// downstream implementers; new capabilities must therefore ship with a default
 /// implementation. Existing method signatures are stable. `ToolId`,
-/// `ToolRegistry`, `ToolError`, and `ToolOutput` are `#[non_exhaustive]` so they
+/// `ToolCatalog`, `ToolError`, and `ToolOutput` are `#[non_exhaustive]` so they
 /// can gain fields or variants without a break.
 ///
 /// # Invariants
 ///
 /// - [`id`](Tool::id) returns the same value on every call for a given tool; it
-///   is the registry key and must be unique within a [`ToolRegistry`].
+///   is the catalog key and must be unique within a [`ToolCatalog`].
 /// - [`wire_name`](Tool::wire_name) is the transport name, not identity; it is
 ///   distinct from [`id`](Tool::id) and may be aliased when advertised.
 /// - [`parameters_schema`](Tool::parameters_schema) returns a JSON-Schema
@@ -234,8 +274,8 @@ impl From<ToolRegistryError> for crate::error::Error {
 pub trait Tool: Send + Sync {
     /// Returns the tool's stable live identity.
     ///
-    /// This is the registry key. It must be stable across calls and unique
-    /// within any [`ToolRegistry`] the tool is registered in.
+    /// This is the catalog key. It must be stable across calls and unique
+    /// within any [`ToolCatalog`] the tool is registered in.
     fn id(&self) -> ToolId;
 
     /// Returns the concrete name used by the current model transport.
@@ -269,141 +309,4 @@ pub trait Tool: Send + Sync {
     /// Returns a [`ToolError`] if the arguments are unacceptable, the backend
     /// refuses, the transport fails, or the run is cancelled.
     async fn call(&self, args: serde_json::Value) -> Result<ToolOutput, ToolError>;
-}
-
-/// An ordered collection of callable live tools with unique identities.
-///
-/// Registration rejects repeated stable identities: a [`ToolRegistry`] can never
-/// hold two tools that share a [`ToolId`]. Iteration preserves supplied order and
-/// lookup is identity-based.
-#[non_exhaustive]
-pub struct ToolRegistry<'a> {
-    /// The live tools in supplied order; [`ToolRegistry::tools`] borrows this.
-    tools: Vec<&'a dyn Tool>,
-    /// Each tool's validated stable identity, parallel to `tools` by index.
-    ///
-    /// Caching identities here means [`ToolRegistry::get`] compares against a
-    /// stored [`ToolId`] instead of calling [`Tool::id`] (which allocates two
-    /// `String`s) for every entry on every lookup (tools.rs F9).
-    ids: Vec<ToolId>,
-}
-
-impl std::fmt::Debug for ToolRegistry<'_> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ToolRegistry")
-            .field("ids", &self.ids)
-            .finish()
-    }
-}
-
-impl<'a> ToolRegistry<'a> {
-    /// Builds a registry in the order the live tools are supplied.
-    ///
-    /// # Errors
-    /// Returns [`ToolRegistryError::DuplicateId`] if two supplied tools share a
-    /// [`ToolId`] (the registry never holds duplicate identities), or
-    /// [`ToolRegistryError::InvalidWireName`] if a tool's
-    /// [`wire_name`](Tool::wire_name) is empty or carries a `/` separator or a
-    /// control character.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge_core::tools::ToolRegistry;
-    ///
-    /// let registry = ToolRegistry::new(std::iter::empty())?;
-    /// assert!(registry.is_empty());
-    /// # Ok::<(), promptforge_core::tools::ToolRegistryError>(())
-    /// ```
-    pub fn new(
-        tools: impl IntoIterator<Item = &'a dyn Tool>,
-    ) -> Result<ToolRegistry<'a>, ToolRegistryError> {
-        let tools: Vec<&'a dyn Tool> = tools.into_iter().collect();
-        let mut ids = Vec::with_capacity(tools.len());
-        let mut seen = std::collections::BTreeSet::new();
-        for tool in &tools {
-            // The registry is the transport boundary: reject a wire name that is
-            // empty or carries a separator/control character (tools.rs F4).
-            if let Err(error) = validate_identifier("wire name", tool.wire_name()) {
-                return Err(ToolRegistryError::InvalidWireName {
-                    wire_name: tool.wire_name().to_owned(),
-                    reason: error.reason(),
-                });
-            }
-            let id = tool.id();
-            if !seen.insert(id.clone()) {
-                return Err(ToolRegistryError::DuplicateId { id });
-            }
-            ids.push(id);
-        }
-        Ok(Self { tools, ids })
-    }
-
-    /// Returns the number of live registry entries.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge_core::tools::ToolRegistry;
-    ///
-    /// assert_eq!(ToolRegistry::new(std::iter::empty())?.len(), 0);
-    /// # Ok::<(), promptforge_core::tools::ToolRegistryError>(())
-    /// ```
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.tools.len()
-    }
-
-    /// Returns whether the registry has no live entries.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge_core::tools::ToolRegistry;
-    ///
-    /// assert!(ToolRegistry::new(std::iter::empty())?.is_empty());
-    /// # Ok::<(), promptforge_core::tools::ToolRegistryError>(())
-    /// ```
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.tools.is_empty()
-    }
-
-    /// Returns the live entries in registry order.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge_core::tools::ToolRegistry;
-    ///
-    /// assert!(ToolRegistry::new(std::iter::empty())?.tools().is_empty());
-    /// # Ok::<(), promptforge_core::tools::ToolRegistryError>(())
-    /// ```
-    #[must_use]
-    pub fn tools(&self) -> &[&'a dyn Tool] {
-        &self.tools
-    }
-
-    /// Returns the first live tool with `id`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use promptforge_core::tools::{ToolId, ToolRegistry};
-    ///
-    /// let registry = ToolRegistry::new(std::iter::empty())?;
-    /// let missing = ToolId::new("promptforge", "missing")?;
-    /// assert!(registry.get(&missing).is_none());
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    #[must_use]
-    pub fn get(&self, id: &ToolId) -> Option<&'a dyn Tool> {
-        // Compare against the cached identity so a lookup never re-derives every
-        // entry's `ToolId` (two `String` allocations each) via `Tool::id`.
-        self.ids
-            .iter()
-            .position(|entry| entry == id)
-            .map(|index| self.tools[index])
-    }
 }

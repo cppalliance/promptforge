@@ -1,9 +1,9 @@
-//! The MCP host's prepared semantic picker and complete live tool registry.
+//! The MCP host's prepared semantic picker and complete live tool catalog.
 //!
 //! Both artifacts are derived from the same concrete instances once, before
 //! the async runtime starts. The server then shares this immutable environment
 //! across every run. A picker identity therefore cannot exist without a
-//! callable registry entry carrying the same stable identity.
+//! callable catalog entry carrying the same stable identity.
 
 use std::sync::Arc;
 
@@ -11,7 +11,7 @@ use promptforge_core::client::GatewayClient;
 use promptforge_core::model::{
     CompletionError, CompletionErrorKind, ModelCatalog, fetch_model_catalog,
 };
-use promptforge_core::tools::{Tool, WebSearch};
+use promptforge_core::tools::{Tool, ToolCatalog, WebSearch};
 use promptforge_tool_picker::{
     Catalog, Config as PickerConfig, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
@@ -23,7 +23,7 @@ use crate::error::PreparedToolsError;
 /// The immutable picker, live tools, and model catalog shared by every server run.
 #[non_exhaustive]
 pub struct PreparedTools {
-    live: Vec<Arc<dyn Tool>>,
+    tools: ToolCatalog,
     picker: ToolPicker,
     models: ModelCatalog,
 }
@@ -41,10 +41,7 @@ impl std::fmt::Debug for PreparedTools {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("PreparedTools")
-            .field(
-                "ids",
-                &self.live.iter().map(|tool| tool.id()).collect::<Vec<_>>(),
-            )
+            .field("tools", &self.tools)
             .field("picker", &self.picker)
             .field("models", &self.models)
             .finish()
@@ -52,7 +49,8 @@ impl std::fmt::Debug for PreparedTools {
 }
 
 impl PreparedTools {
-    /// Builds the complete MCP live registry, picker, and gateway model catalog.
+    /// Builds the complete MCP live tool catalog, picker, and gateway model
+    /// catalog.
     ///
     /// A `GET /v1/models` failure is classified before it is acted on. A
     /// *transient* failure - a connection or timeout, or a 5xx the gateway may
@@ -76,7 +74,7 @@ impl PreparedTools {
     /// ```
     ///
     /// # Errors
-    /// Returns [`PreparedToolsError`] when the live tool registry cannot be
+    /// Returns [`PreparedToolsError`] when the live tool catalog cannot be
     /// assembled, the tool picker index cannot be built, or the gateway model
     /// catalog fails *fatally* (a misconfiguration a retry cannot fix), with the
     /// underlying failure preserved as the error's source. A transient catalog
@@ -116,7 +114,7 @@ impl PreparedTools {
         Self::new(gateway, &config.tools, models)
     }
 
-    /// Builds the live registry and picker over an already-fetched model catalog.
+    /// Builds the live catalog and picker over an already-fetched model catalog.
     ///
     /// # Errors
     /// Returns [`PreparedToolsError`] when the live catalog cannot be assembled
@@ -127,11 +125,11 @@ impl PreparedTools {
         models: ModelCatalog,
     ) -> Result<Self, PreparedToolsError> {
         let live = live_tools(gateway, tools_config).map_err(PreparedToolsError::tools)?;
-        let catalog = catalog(&live);
-        let picker = ToolPicker::build(catalog, PickerConfig::default())
+        let tools = ToolCatalog::new(&live).map_err(PreparedToolsError::tools)?;
+        let picker = ToolPicker::build(catalog(tools.tools()), PickerConfig::default())
             .map_err(PreparedToolsError::picker)?;
         Ok(Self {
-            live,
+            tools,
             picker,
             models,
         })
@@ -150,21 +148,23 @@ impl PreparedTools {
         tools_config: &ToolsConfig,
     ) -> Result<Self, PreparedToolsError> {
         let live = live_tools(gateway, tools_config).map_err(PreparedToolsError::tools)?;
+        let tools = ToolCatalog::new(&live).map_err(PreparedToolsError::tools)?;
         let picker = self
             .picker
-            .rebuild(catalog(&live))
+            .rebuild(catalog(tools.tools()))
             .map_err(PreparedToolsError::index)?;
         Ok(Self {
-            live,
+            tools,
             picker,
             models: self.models.clone(),
         })
     }
 
-    /// Returns the shared tool arcs for [`promptforge_core::execute::run`].
+    /// Returns the validated tool catalog handed to
+    /// [`ResolutionContext`](promptforge_core::execute::ResolutionContext).
     #[must_use]
-    pub(crate) fn tools(&self) -> &[Arc<dyn Tool>] {
-        &self.live
+    pub(crate) fn tools(&self) -> &ToolCatalog {
+        &self.tools
     }
 
     /// Returns the process-lifetime prepared semantic picker.
@@ -276,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_live_registry_contains_both_canonical_tools() {
+    fn complete_live_catalog_contains_both_canonical_tools() {
         let config = gateway("");
         let tools = PreparedTools::new(
             &config.gateway,
@@ -284,7 +284,8 @@ mod tests {
             promptforge_core::model::ModelCatalog::empty(),
         )
         .expect("prepare fixture tools");
-        let registry_ids = tools
+        let catalog_ids = tools
+            .tools()
             .tools()
             .iter()
             .map(|tool| {
@@ -293,7 +294,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(
-            registry_ids,
+            catalog_ids,
             [
                 ("promptforge".to_owned(), "web_fetch".to_owned()),
                 ("promptforge".to_owned(), "web_search".to_owned()),
@@ -367,8 +368,7 @@ return 'resolved'
             let result = execute::run(
                 &prompt,
                 "",
-                ResolutionContext::new(tools.picker(), tools.models()),
-                tools.tools(),
+                ResolutionContext::new(tools.picker(), tools.models(), tools.tools()),
                 &StoreRef::memory(),
                 RunConfig::new("test-run"),
             )

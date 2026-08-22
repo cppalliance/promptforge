@@ -22,7 +22,7 @@ use crate::debug::DebugCapture;
 use crate::lua::{LuaProgram, current_tool_bindings};
 use crate::model::{CompletionOptions, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use crate::observe::{NullObserver, Observation, detail};
-use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput};
+use crate::tools::{Tool, ToolCatalog, ToolError, ToolErrorKind, ToolId, ToolOutput};
 use crate::untrusted::GuardNonce;
 
 const EXECUTION: &str = "execute-test";
@@ -285,6 +285,7 @@ async fn run(
         .and_then(|config| config.with_margin(0.0))
         .expect("test thresholds are in the supported domain");
     let picker = ToolPicker::build(catalog, config).expect("test picker must build");
+    let tool_catalog = ToolCatalog::new(tools).expect("fixture tools are unique");
     let mut run_config = RunConfig::new(opts.execution).observer(opts.observer);
     if let Some(client) = opts.client {
         run_config = run_config.client(client);
@@ -295,8 +296,7 @@ async fn run(
     super::run(
         &test.prompt,
         args,
-        ResolutionContext::new(&picker, &test.models),
-        tools,
+        ResolutionContext::new(&picker, &test.models, &tool_catalog),
         store,
         run_config,
     )
@@ -322,8 +322,7 @@ async fn run_with_config(
     super::run(
         &test.prompt,
         "",
-        ResolutionContext::new(&picker, &test.models),
-        &[],
+        ResolutionContext::new(&picker, &test.models, &ToolCatalog::default()),
         &StoreRef::memory(),
         configure(RunConfig::new(EXECUTION)),
     )

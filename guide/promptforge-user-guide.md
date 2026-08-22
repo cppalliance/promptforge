@@ -85,7 +85,7 @@ Two tools are available to prompts, depending on the gateway configuration:
 
 **`web_search`** proxies through the gateway and is available only when both `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` are set. When the gateway is not configured, `web_search` is omitted entirely rather than advertised as a tool that would fail on its first call.
 
-The tool picker resolves `tools.bind` calls from prompts against the live tool set. Picker descriptors are derived from the same live tool instances, so the registry and catalog have identical entries by construction. If a prompt needs a tool that is not available (for example, `web_search` without gateway credentials), the resolution produces the standard absent-capability error before any section executes.
+The tool picker resolves `tools.bind` calls from prompts against the live tool set. Picker descriptors are derived from the same live tool instances, so the tool catalog and picker catalog have identical entries by construction. If a prompt needs a tool that is not available (for example, `web_search` without gateway credentials), the resolution produces the standard absent-capability error before any section executes.
 
 ### File Validation
 
@@ -575,18 +575,19 @@ Parse errors report stable kind discriminants and optional byte spans for editor
 
 ### Execution Model
 
-Execution is a free function call over caller-owned resources. There is no process-global state. The caller owns the prompt, the execution id, the tool picker, the model catalog, the store, and the observer.
+Execution is a free function call over caller-owned resources. There is no process-global state. The caller owns the prompt, the execution id, the tool picker, the tool catalog, the model catalog, the store, and the observer.
 
 ```rust
 use promptforge_core::{run, Prompt, RunConfig, StoreRef, ResolutionContext};
+use promptforge_core::tools::ToolCatalog;
 
 let prompt = Prompt::parse(source, "my-execution", &observer)?;
+let tool_catalog = ToolCatalog::new(&tools)?;
 
 let result = run(
     &prompt,
     "user input here",
-    ResolutionContext::new(&picker, &models),
-    &tools,
+    ResolutionContext::new(&picker, &models, &tool_catalog),
     &StoreRef::memory(),
     RunConfig::new("my-execution"),
 ).await?;
@@ -1323,7 +1324,7 @@ At startup the server:
 2. Resolves the catalog (refuses to start on any fault)
 3. Builds the retrieval index over the catalog (if `picker` feature is present; a failure is logged and the server continues)
 4. Fetches the gateway model catalog via `GET /v1/models`
-5. Builds the live tool registry (`web_fetch`, `web_search`) and the semantic tool picker
+5. Builds the live tool catalog (`web_fetch`, `web_search`) and the semantic tool picker
 6. Starts the filesystem watcher
 7. Serves the chosen transport
 

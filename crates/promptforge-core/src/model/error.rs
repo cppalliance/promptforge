@@ -95,7 +95,6 @@ impl CompletionError {
             | Error::Duplicate { .. }
             | Error::Ambiguous { .. }
             | Error::DuplicateAlias { .. }
-            | Error::DuplicateLiveToolId { .. }
             | Error::ToolIdSelectedTwice { .. }
             | Error::PickedToolNotLive { .. }
             | Error::ToolScopeAnalysis { .. }
@@ -118,7 +117,6 @@ impl CompletionError {
             | Error::Tool { .. }
             | Error::FanoutArmJoin(_)
             | Error::Internal(_)
-            | Error::InvalidToolWireName { .. }
             | Error::LuaQuota { .. }
             | Error::TimestampFormat(_) => CompletionErrorKind::Config,
         }

@@ -207,7 +207,7 @@ fn execute_live_tool_binds(
         Arc::new(FixtureTool("search")),
         Arc::new(FixtureTool("fetch")),
     ];
-    let shared = SharedTools::new(&tools).expect("unique test registry");
+    let catalog = ToolCatalog::new(&tools).expect("unique test catalog");
     let models = |description: &str, _: &crate::model::ModelBindOpts| {
         Err(Error::ModelAbsent {
             capability: description.to_owned(),
@@ -218,7 +218,7 @@ fn execute_live_tool_binds(
     harden(&lua)?;
     let result = lua.scope(|scope| {
         producer
-            .install(&lua, scope, resolver, &shared, &models)
+            .install(&lua, scope, resolver, &catalog, &models)
             .map_err(|error| mlua::Error::external(error.to_string()))?;
         lua.load(source.bytecode.as_slice()).exec()
     });

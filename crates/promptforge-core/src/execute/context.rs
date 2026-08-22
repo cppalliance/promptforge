@@ -18,7 +18,6 @@ use crate::model::ModelBindings;
 use crate::observe::Observer;
 use crate::parser::Prompt;
 use crate::store::{StoreRef, WriteScope};
-use crate::tools::SharedTools;
 use crate::untrusted::GuardNonce;
 
 use super::config::{RunConfig, RunLimits};
@@ -66,9 +65,6 @@ pub(crate) struct RunContext {
     /// compiled chunk when the prompt declares no `lua shared` library, so
     /// the startup sequence carries no `Option` branch.
     shared: Arc<LuaProgram>,
-    /// The run's shared tool set: the bind-time source of each binding's
-    /// resolved implementation.
-    shared_tools: SharedTools,
     /// The frozen prompt-level tool bindings; empty until the walk starts
     /// (the live H1 pass resolves them and never reads them back).
     bindings: Arc<ToolBindings>,
@@ -92,7 +88,6 @@ impl RunContext {
         prompt: &Prompt,
         args: &str,
         store: &StoreRef,
-        shared_tools: SharedTools,
         shared: LuaProgram,
         config: &RunConfig,
     ) -> Self {
@@ -108,7 +103,6 @@ impl RunContext {
             turns: Arc::new(AtomicU32::new(0)),
             ids: Arc::new(AtomicU64::new(0)),
             shared: Arc::new(shared),
-            shared_tools,
             bindings: Arc::new(ToolBindings::default()),
             models: Arc::new(ModelBindings::from_parts(Vec::new(), None)),
             analysis: Arc::new(ToolAnalysis::default()),
@@ -164,12 +158,6 @@ impl RunContext {
     /// The run-global execution-id counter.
     pub(crate) fn ids(&self) -> &Arc<AtomicU64> {
         &self.ids
-    }
-
-    /// The run's shared tool set: the bind-time source of each binding's
-    /// resolved implementation.
-    pub(crate) fn shared_tools(&self) -> &SharedTools {
-        &self.shared_tools
     }
 
     /// The frozen prompt-level tool bindings.
@@ -331,7 +319,6 @@ impl fmt::Debug for RunContext {
             .field("turns", &self.turns)
             .field("ids", &self.ids)
             .field("shared", &self.shared)
-            .field("shared_tools", &self.shared_tools)
             .field("bindings", &self.bindings)
             .field("models", &self.models)
             .field("analysis", &self.analysis)
@@ -358,7 +345,6 @@ mod tests {
             prompt,
             "",
             &StoreRef::memory(),
-            SharedTools::default(),
             LuaProgram::empty().expect("the empty chunk compiles"),
             &RunConfig::new("run-context-test"),
         )

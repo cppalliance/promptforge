@@ -38,8 +38,8 @@
 //! ```
 //!
 //! Executing a parsed prompt goes through [`run`] with a [`RunConfig`], a
-//! [`ResolutionContext`], a tool slice, and a store; that path can perform
-//! gateway I/O, so it is shown as `no_run`:
+//! [`ResolutionContext`] (picker, model catalog, and tool catalog), and a
+//! store; that path can perform gateway I/O, so it is shown as `no_run`:
 //!
 //! ```no_run
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -47,6 +47,7 @@
 //! use promptforge_core::model::ModelCatalog;
 //! use promptforge_core::observe::NullObserver;
 //! use promptforge_core::store::StoreRef;
+//! use promptforge_core::tools::ToolCatalog;
 //! use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 //!
 //! let source = "---\nname: greeter\ndescription: says hi\npromptforge: 1\n---\n\n# Greeter\n\n## Say hi\n\nSay hello.\n";
@@ -54,11 +55,11 @@
 //!
 //! let picker = ToolPicker::build(Catalog::new(Vec::new()), Config::default())?;
 //! let models = ModelCatalog::empty();
+//! let tools = ToolCatalog::new(&[])?;
 //! let answer = run(
 //!     &prompt,
 //!     "",
-//!     ResolutionContext::new(&picker, &models),
-//!     &[],
+//!     ResolutionContext::new(&picker, &models, &tools),
 //!     &StoreRef::memory(),
 //!     RunConfig::new("run-example"),
 //! )

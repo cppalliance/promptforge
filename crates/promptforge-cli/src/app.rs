@@ -179,8 +179,7 @@ async fn run_with_gateway(request: RunRequest<'_>, gateway: Gateway) -> Result<S
     let output = execute::run(
         &prompt,
         input,
-        ResolutionContext::new(&picker, &models),
-        available.tools(),
+        ResolutionContext::new(&picker, &models, available.tools()),
         &store,
         config,
     )

@@ -12,7 +12,6 @@ use crate::lua::LuaProgram;
 use crate::observe::{NullObserver, Observer, detail};
 use crate::parser::Block;
 use crate::store::StoreRef;
-use crate::tools::SharedTools;
 
 #[test]
 fn resolve_sibling_finds_exact_match() {
@@ -479,7 +478,6 @@ fn shared_chunk(source: &str) -> LuaProgram {
 /// swap one out (a custom shared library) before building the context.
 struct FanoutFixture {
     store: StoreRef,
-    shared_tools: SharedTools,
     client: Option<GatewayClient>,
     shared: LuaProgram,
     var: serde_json::Value,
@@ -489,7 +487,6 @@ impl FanoutFixture {
     fn new() -> Self {
         Self {
             store: StoreRef::memory(),
-            shared_tools: SharedTools::default(),
             client: None,
             shared: LuaProgram::empty().expect("the empty chunk compiles"),
             var: json!({}),
@@ -507,7 +504,6 @@ impl FanoutFixture {
             &prompt,
             "",
             &self.store,
-            self.shared_tools.clone(),
             self.shared.clone(),
             &crate::execute::RunConfig::new(execution)
                 .limits(limits)

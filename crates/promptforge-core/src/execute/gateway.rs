@@ -6,6 +6,7 @@ use promptforge_tool_picker::ToolPicker;
 
 use crate::client::GatewayClient;
 use crate::model::ModelCatalog;
+use crate::tools::ToolCatalog;
 use crate::{Error, Result};
 
 use super::config::RunLimits;
@@ -18,13 +19,24 @@ pub struct ResolutionContext<'a> {
     pub(crate) picker: &'a ToolPicker,
     /// Live model catalog used by executed H1 model calls.
     pub(crate) models: &'a ModelCatalog,
+    /// Caller-provided tool catalog used by executed H1 `tools.bind` calls.
+    pub(crate) tools: &'a ToolCatalog,
 }
 
 impl<'a> ResolutionContext<'a> {
-    /// Builds a resolution context from a live picker and model catalog.
+    /// Builds a resolution context from a live picker, model catalog, and
+    /// tool catalog.
     #[must_use]
-    pub fn new(picker: &'a ToolPicker, models: &'a ModelCatalog) -> ResolutionContext<'a> {
-        ResolutionContext { picker, models }
+    pub fn new(
+        picker: &'a ToolPicker,
+        models: &'a ModelCatalog,
+        tools: &'a ToolCatalog,
+    ) -> ResolutionContext<'a> {
+        ResolutionContext {
+            picker,
+            models,
+            tools,
+        }
     }
 }
 
