@@ -126,12 +126,6 @@ pub enum Observation {
     LuaTeardownStarted,
     /// A section VM completed teardown.
     LuaTeardownSucceeded,
-    /// Live-registry and one-to-one binding validation began.
-    ToolRegistryValidationStarted,
-    /// Live-registry and one-to-one binding validation succeeded.
-    ToolRegistryValidationSucceeded,
-    /// Live-registry or one-to-one binding validation failed.
-    ToolRegistryValidationFailed,
     /// Semantic validation of a model-visible tool scope began.
     ToolScopeValidationStarted,
     /// A model-visible tool scope passed semantic validation.
@@ -240,9 +234,6 @@ impl Observation {
             Observation::LuaReplyBindingFailed => "Lua reply binding failed",
             Observation::LuaTeardownStarted => "Lua teardown started",
             Observation::LuaTeardownSucceeded => "Lua teardown succeeded",
-            Observation::ToolRegistryValidationStarted => "Tool registry validation started",
-            Observation::ToolRegistryValidationSucceeded => "Tool registry validation succeeded",
-            Observation::ToolRegistryValidationFailed => "Tool registry validation failed",
             Observation::ToolScopeValidationStarted => "Tool scope validation started",
             Observation::ToolScopeValidationSucceeded => "Tool scope validation succeeded",
             Observation::ToolScopeValidationFailed => "Tool scope validation failed",

@@ -4,12 +4,11 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use mlua::{Lua, Scope};
-#[cfg(test)]
 use promptforge_tool_picker::ToolId as PickerToolId;
 use promptforge_tool_picker::{Outcome, ToolDescriptor, ToolPicker};
 
 use crate::error::SharedSource;
-use crate::lua::{LiveBindingProducer, ToolBindings, ToolResolver};
+use crate::lua::{LiveBindingProducer, ToolResolver, ToolSet};
 use crate::model::{
     ModelBindOpts, ModelBindings, ModelCatalog, ModelResolver, PickerModelResolver, ResolvedModel,
 };
@@ -37,17 +36,22 @@ impl<'a> RuntimeResolution<'a> {
     /// discard and rebuild from the constraint-filtered subset. The filtered
     /// model index is built on demand, when a `models.bind`'s constraints are
     /// known, so the redundant full-catalog index is never materialized.
+    ///
+    /// `tool_set` is the run's shared set: executed `tools.bind`/`tools.always`
+    /// calls write through it, and the run context reads the same allocation
+    /// through its view.
     pub(crate) fn new(
         picker: &'a ToolPicker,
         tools: &'a ToolCatalog,
         models: &'a ModelCatalog,
+        tool_set: Arc<Mutex<ToolSet>>,
     ) -> Self {
         Self {
             tool_resolver: PickerResolver::new(picker),
             tools,
             models,
             base_picker: picker,
-            producer: LiveBindingProducer::default(),
+            producer: LiveBindingProducer::new(tool_set),
         }
     }
 
@@ -72,12 +76,12 @@ impl<'a> RuntimeResolution<'a> {
         self.producer.take_callback_error()
     }
 
-    /// Snapshots the tool and model bindings resolved by executed H1 code.
+    /// Snapshots the model bindings resolved by executed H1 code.
     ///
     /// # Errors
-    /// Returns [`Error::Lua`] if a binding recorder mutex is poisoned.
-    pub(crate) fn bindings(&self) -> Result<(ToolBindings, ModelBindings)> {
-        self.producer.bindings()
+    /// Returns [`Error::Lua`] if the binding recorder mutex is poisoned.
+    pub(crate) fn models(&self) -> Result<ModelBindings> {
+        self.producer.models()
     }
 
     /// Returns a shared handle to bindings resolved by live H1 so far.
@@ -179,11 +183,13 @@ impl CachedDecision {
 trait DecisionSource: Send + Sync {
     fn decide(&self, capability: &str) -> CachedDecision;
 
-    #[cfg(test)]
+    /// The bind-time conflict scan: near-duplicate pairs among the selected
+    /// identities, with the typed selection failure retained as a shareable
+    /// source (F4).
     fn near_duplicates(
         &self,
         ids: &[PickerToolId],
-    ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, String>;
+    ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, SharedSource>;
 }
 
 impl DecisionSource for ToolPicker {
@@ -191,11 +197,10 @@ impl DecisionSource for ToolPicker {
         CachedDecision::from_picker(self.resolve(capability))
     }
 
-    #[cfg(test)]
     fn near_duplicates(
         &self,
         ids: &[PickerToolId],
-    ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, String> {
+    ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, SharedSource> {
         ToolPicker::near_duplicates(self, ids)
             .map(|pairs| {
                 pairs
@@ -209,7 +214,7 @@ impl DecisionSource for ToolPicker {
                     })
                     .collect()
             })
-            .map_err(|error| error.to_string())
+            .map_err(SharedSource::new)
     }
 }
 
@@ -270,6 +275,30 @@ where
         let decision = cell.get_or_init(|| self.source.decide(capability));
         decision.result(capability)
     }
+
+    fn near_duplicates(&self, ids: &[ToolId]) -> Result<Vec<(ToolId, ToolId, f32)>> {
+        let picker_ids = ids
+            .iter()
+            .map(|id| PickerToolId::new(id.server(), id.name()))
+            .collect::<Vec<_>>();
+        self.source
+            .near_duplicates(&picker_ids)
+            .map(|pairs| {
+                pairs
+                    .into_iter()
+                    .map(|(first, second, similarity)| {
+                        (
+                            ToolId::from_validated(first.server(), first.name()),
+                            ToolId::from_validated(second.server(), second.name()),
+                            similarity,
+                        )
+                    })
+                    .collect()
+            })
+            .map_err(|source| Error::ToolScopeAnalysisSource {
+                source: Box::new(source),
+            })
+    }
 }
 
 #[cfg(test)]
@@ -307,7 +336,7 @@ mod tests {
         fn near_duplicates(
             &self,
             ids: &[PickerToolId],
-        ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, String> {
+        ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, SharedSource> {
             Ok(vec![(ids[0].clone(), ids[1].clone(), 0.97)])
         }
     }
@@ -334,7 +363,8 @@ mod tests {
             fn near_duplicates(
                 &self,
                 ids: &[PickerToolId],
-            ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, String> {
+            ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, SharedSource>
+            {
                 Ok(vec![(ids[0].clone(), ids[1].clone(), 0.0)])
             }
         }
@@ -388,7 +418,7 @@ mod tests {
     fn callback_error(source: &FixtureSource, tools: &[Arc<dyn Tool>], code: &str) -> Error {
         let resolver = PickerResolver::new(source);
         let catalog = ToolCatalog::new(tools).expect("fixture tools are unique");
-        let producer = LiveBindingProducer::default();
+        let producer = LiveBindingProducer::new(Arc::new(Mutex::new(ToolSet::default())));
         let model_resolver = |description: &str, _: &ModelBindOpts| {
             Err(Error::ModelAbsent {
                 capability: description.to_owned(),
@@ -504,6 +534,46 @@ mod tests {
     }
 
     #[test]
+    fn bind_records_near_duplicate_conflicts_symmetrically() {
+        let tools: Vec<Arc<dyn Tool>> = vec![
+            Arc::new(FixtureTool {
+                id: ToolId::new("tests", "first").expect("valid id"),
+            }),
+            Arc::new(FixtureTool {
+                id: ToolId::new("tests", "second").expect("valid id"),
+            }),
+        ];
+        let resolver = PickerResolver::new(&FixtureSource);
+        let catalog = ToolCatalog::new(&tools).expect("fixture tools are unique");
+        let producer = LiveBindingProducer::new(Arc::new(Mutex::new(ToolSet::default())));
+        let model_resolver = |description: &str, _: &ModelBindOpts| {
+            Err(Error::ModelAbsent {
+                capability: description.to_owned(),
+            })
+        };
+        let lua = Lua::new();
+        lua.scope(|scope| {
+            producer
+                .install(&lua, scope, &resolver, &catalog, &model_resolver)
+                .map_err(mlua::Error::external)?;
+            lua.load("tools.bind('one', 'first'); tools.bind('two', 'second')")
+                .exec()
+        })
+        .expect("both binds succeed: binding records, never fails");
+        let (tools, _) = producer.bindings().expect("bindings snapshot");
+        let one = tools.binding("one").expect("one is bound");
+        let two = tools.binding("two").expect("two is bound");
+        // The recorded score is the fixture's f32 widened to f64.
+        let expected = f64::from(0.97f32);
+        assert_eq!(one.conflicts().len(), 1);
+        assert_eq!(one.conflicts()[0].alias, "two");
+        assert!((one.conflicts()[0].similarity - expected).abs() < f64::EPSILON);
+        assert_eq!(two.conflicts().len(), 1);
+        assert_eq!(two.conflicts()[0].alias, "one");
+        assert!((two.conflicts()[0].similarity - expected).abs() < f64::EPSILON);
+    }
+
+    #[test]
     fn catalog_rejects_duplicate_live_ids() {
         let tools: Vec<Arc<dyn Tool>> = vec![
             Arc::new(FixtureTool {
@@ -574,7 +644,7 @@ mod tests {
         fn near_duplicates(
             &self,
             _ids: &[PickerToolId],
-        ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, String> {
+        ) -> std::result::Result<Vec<(PickerToolId, PickerToolId, f32)>, SharedSource> {
             Ok(Vec::new())
         }
     }

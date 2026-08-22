@@ -49,7 +49,8 @@
 //! focused private children: `error` (the public [`RunError`]), `config`
 //! (`RunConfig`/`RunLimits`), `context` (the ambient [`RunContext`] run
 //! state), `gateway` (client acquisition and [`ResolutionContext`]),
-//! `scope` (tool-scope analysis and validation), `tools` (the
+//! `scope` (tool-scope validation and schema/dispatch preparation),
+//! `tools` (the
 //! nested-inference hook), `tool_loop` (the model tool loop), `h1` (the
 //! live H1 pass), `section_vm` (the section VM setup half shared by the
 //! walk and the fanout arm), `section_context` (the per-section
@@ -80,7 +81,7 @@ pub use error::{RunError, RunErrorKind};
 pub use gateway::ResolutionContext;
 
 // Crate-internal items reused through the historical `crate::execute::` path.
-// `ToolAnalysis`, the engine's `drive_contained_chain`, and the
+// The engine's `drive_contained_chain` and the
 // `SectionContext` frame are consumed by `fanout`; `run_sections` and
 // `execute_live_h1` serve only `run` below and stay module-private.
 // Re-exported so the split stays surface-neutral for the public API while
@@ -88,7 +89,6 @@ pub use gateway::ResolutionContext;
 pub(crate) use block_walk::{BlockRunMode, SectionFlow};
 pub(crate) use context::RunContext;
 pub(crate) use engine::drive_contained_chain;
-pub(crate) use scope::ToolAnalysis;
 pub(crate) use section_context::SectionContext;
 
 use engine::run_sections;
@@ -111,8 +111,6 @@ pub(crate) use crate::observe::Observer;
 pub(crate) use gateway::GatewaySource;
 #[cfg(test)]
 pub(crate) use gateway::env_client_with_limits;
-#[cfg(test)]
-pub(crate) use scope::OwnedNearDuplicate;
 #[cfg(test)]
 pub(crate) use scope::{DispatchTarget, prepare_effective_scope, prepare_scoped_tools};
 #[cfg(test)]
@@ -252,16 +250,7 @@ pub async fn run(
         if prompt.sections.is_empty() {
             return Ok(h1.reply.unwrap_or_else(|| GENERIC_COMPLETION.to_string()));
         }
-        let analysis = ToolAnalysis::new(&h1.bindings, resolution.picker)?;
-        run_sections(
-            &ctx,
-            &h1.bindings,
-            &h1.models,
-            &analysis,
-            Some(&h1.var),
-            client.as_ref(),
-        )
-        .await
+        run_sections(&ctx, &h1.models, Some(&h1.var), client.as_ref()).await
     };
 
     // Explicit cancellation: when the caller supplies a handle it is installed

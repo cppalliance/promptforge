@@ -126,16 +126,16 @@ impl ToolCatalog {
 #[derive(Debug)]
 #[non_exhaustive]
 pub(crate) struct NearDuplicateDiagnostic {
-    /// The first prompt-local alias in picker catalog pair order.
+    /// The first prompt-local alias in scope order.
     pub(crate) first_alias: String,
     /// The first stable identity.
     pub(crate) first_id: ToolId,
-    /// The second prompt-local alias in picker catalog pair order.
+    /// The second prompt-local alias in scope order.
     pub(crate) second_alias: String,
     /// The second stable identity.
     pub(crate) second_id: ToolId,
-    /// The cosine similarity reported by the picker.
-    pub(crate) similarity: f32,
+    /// The cosine similarity the picker reported at bind time.
+    pub(crate) similarity: f64,
 }
 /// A stable, matchable classification of a [`ToolCatalogError`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

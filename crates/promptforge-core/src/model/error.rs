@@ -97,7 +97,6 @@ impl CompletionError {
             | Error::DuplicateAlias { .. }
             | Error::ToolIdSelectedTwice { .. }
             | Error::PickedToolNotLive { .. }
-            | Error::ToolScopeAnalysis { .. }
             | Error::ToolScopeAnalysisSource { .. }
             | Error::NearDuplicateTools { .. }
             | Error::ModelBind { .. }

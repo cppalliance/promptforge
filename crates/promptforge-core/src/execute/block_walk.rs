@@ -13,6 +13,7 @@
 //! not a second loop. Live mode reads only the context's run-scoped values;
 //! the walk-scoped values it never touches stay empty until the walk starts.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::AtomicU32;
 
 use crate::client::{GatewayClient, Message};
@@ -23,6 +24,7 @@ use crate::observe::Observer;
 use crate::parser::Block;
 use crate::resolve::RuntimeResolution;
 use crate::subst;
+use crate::tools::ToolId;
 use crate::{Error, Result};
 
 use super::context::RunContext;
@@ -194,7 +196,7 @@ pub(crate) async fn run_one_section_impl(
                         if prose.trim().is_empty() {
                             continue;
                         }
-                        let (tool_bindings, model_bindings) = runtime.bindings()?;
+                        let model_bindings = runtime.models()?;
                         let Some(model) = model_bindings
                             .default()
                             .and_then(|alias| model_bindings.binding(alias))
@@ -203,14 +205,13 @@ pub(crate) async fn run_one_section_impl(
                                 section: name.to_owned(),
                             });
                         };
+                        // The always-scope reads the bindings-so-far through
+                        // the run's tool view: H1's binds write the same
+                        // shared set the view reads.
                         let mut scope: Vec<ToolBinding> = Vec::new();
-                        for alias in tool_bindings.always() {
-                            if let Some(binding) = tool_bindings
-                                .bindings()
-                                .iter()
-                                .find(|binding| binding.alias() == alias)
-                            {
-                                scope.push(binding.clone());
+                        for alias in ctx.tools().always()? {
+                            if let Some(binding) = ctx.tools().binding(&alias)? {
+                                scope.push(binding);
                             }
                         }
                         // Live H1 registers no local tools; the list is always
@@ -261,8 +262,9 @@ pub(crate) async fn run_one_section_impl(
                         }
                     }
                     BlockRunMode::Section => {
+                        let tool_set = ctx.tool_set_snapshot()?;
                         let effective_bindings =
-                            current_tool_bindings(ctx.bindings(), &vm.tool_runtime)?;
+                            current_tool_bindings(&tool_set, &vm.tool_runtime)?;
                         if counts.is_none() {
                             *counts = Some(vm.install_tool_call_counts(&effective_bindings)?);
                             let resolved_model =
@@ -290,7 +292,6 @@ pub(crate) async fn run_one_section_impl(
                             }
                         }
                         let (schemas, dispatch) = prepare_effective_scope(
-                            ctx.analysis(),
                             &effective_bindings,
                             &local_schemas,
                             ctx.execution(),
@@ -327,7 +328,15 @@ pub(crate) async fn run_one_section_impl(
                                 "model-facing prose reached inference with no gateway client",
                             ));
                         };
-                        let global_aliases = Some(&ctx.analysis().alias_to_id);
+                        // The alias map is derived on demand from the
+                        // bindings list; the analysis type that precomputed
+                        // it at the H1 boundary is gone.
+                        let global_aliases: BTreeMap<String, ToolId> = tool_set
+                            .bindings()
+                            .iter()
+                            .map(|binding| (binding.alias().to_owned(), binding.id().clone()))
+                            .collect();
+                        let global_aliases = Some(&global_aliases);
                         // Local tools are Lua functions on this section VM; route
                         // their calls back into it rather than to a bound tool.
                         let local_dispatch =

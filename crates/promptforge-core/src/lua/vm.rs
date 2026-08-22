@@ -3,8 +3,8 @@ use super::{
     Function, GuardNonce, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions,
     LuaProgram, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook,
     ModelRuntime, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result,
-    RuntimeResolution, StdLib, StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime,
-    Value, WriteScope, detail, guarded_var, harden, install_h2_models, install_h2_tools,
+    RuntimeResolution, StdLib, StoreRef, ToolBinding, ToolCallCounts, ToolRuntime, ToolSet, Value,
+    WriteScope, detail, guarded_var, harden, install_h2_models, install_h2_tools,
     install_instruction_budget, install_log, install_lua_tool_calls, install_store_table,
     install_untrusted, log_byte_budget, resolve_section_target, scalar_return, seal_sys,
     var_to_json,
@@ -56,7 +56,7 @@ fn pack_sequence<T: mlua::IntoLua>(lua: &Lua, values: Vec<T>) -> mlua::Result<ml
 pub(crate) struct SectionVm {
     execution: String,
     lua: Lua,
-    bound_tools: ToolBindings,
+    bound_tools: ToolSet,
     bound_models: ModelBindings,
     pub(crate) tool_runtime: Arc<Mutex<ToolRuntime>>,
     pub(crate) model_runtime: Arc<Mutex<ModelRuntime>>,
@@ -234,7 +234,7 @@ impl SectionVm {
         let vm = Self {
             execution: execution.to_owned(),
             lua,
-            bound_tools: ToolBindings::default(),
+            bound_tools: ToolSet::default(),
             bound_models: <ModelBindings as Default>::default(),
             tool_runtime: Arc::new(Mutex::new(ToolRuntime {
                 added: Vec::new(),
@@ -273,7 +273,7 @@ impl SectionVm {
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
     pub(crate) fn new_for_section(
         nonce: &GuardNonce,
-        tools: &ToolBindings,
+        tools: &ToolSet,
         models: &ModelBindings,
         execution: &str,
         observer: &dyn Observer,
@@ -892,7 +892,7 @@ impl SectionVm {
     /// Returns frozen tool bindings and the live H2 addition runtime.
     #[must_use]
     #[allow(dead_code)] // exercised by the lua and executor scope tests
-    pub(crate) fn tool_bag_handles(&self) -> (ToolBindings, Arc<Mutex<ToolRuntime>>) {
+    pub(crate) fn tool_bag_handles(&self) -> (ToolSet, Arc<Mutex<ToolRuntime>>) {
         (self.bound_tools.clone(), Arc::clone(&self.tool_runtime))
     }
 
@@ -1099,14 +1099,14 @@ pub(crate) fn run_chunk(
 /// Rebuilt on every prose block so `tools.add` and `tools.add_local` calls
 /// between blocks reach the next model turn.
 pub(crate) fn current_tool_bindings(
-    bindings: &ToolBindings,
+    bindings: &ToolSet,
     runtime: &Mutex<ToolRuntime>,
 ) -> Result<Vec<ToolBinding>> {
     let runtime = runtime
         .lock()
         .map_err(|_| Error::Lua("tool declaration runtime was poisoned".to_owned()))?;
     bindings
-        .always
+        .always()
         .iter()
         .chain(runtime.added.iter())
         .map(|alias| binding_for_scope(bindings, &runtime, alias))
@@ -1139,7 +1139,7 @@ pub(crate) fn resolve_model_binding(
 
 /// Clones a frozen binding and applies any author model-description override.
 pub(crate) fn binding_for_scope(
-    bindings: &ToolBindings,
+    bindings: &ToolSet,
     runtime: &ToolRuntime,
     alias: &str,
 ) -> Result<ToolBinding> {
