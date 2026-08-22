@@ -242,7 +242,7 @@ pub(crate) enum Error {
     #[error("tool capability binding failure for {capability:?}: {detail}")]
     #[non_exhaustive]
     Bind {
-        /// The exact capability description passed to `tools.need`.
+        /// The exact capability description passed to `tools.bind`.
         capability: String,
         /// The picker failure without exposing its concrete error type.
         detail: String,
@@ -268,7 +268,7 @@ pub(crate) enum Error {
     #[error("tool capability binding failure for {capability:?}: {source}")]
     #[non_exhaustive]
     BindQuery {
-        /// The exact capability description passed to `tools.need`.
+        /// The exact capability description passed to `tools.bind`.
         capability: String,
         /// The picker's typed query failure, kept as a shareable cause.
         #[source]
@@ -279,7 +279,7 @@ pub(crate) enum Error {
     #[error("no tool matches capability {capability:?}")]
     #[non_exhaustive]
     Absent {
-        /// The exact capability description passed to `tools.need`.
+        /// The exact capability description passed to `tools.bind`.
         capability: String,
     },
 
@@ -287,7 +287,7 @@ pub(crate) enum Error {
     #[error("duplicate tools match capability {capability:?}: {candidates:?}")]
     #[non_exhaustive]
     Duplicate {
-        /// The exact capability description passed to `tools.need`.
+        /// The exact capability description passed to `tools.bind`.
         capability: String,
         /// The stable identities reported by the picker, in picker order.
         candidates: Vec<crate::tools::ToolId>,
@@ -297,7 +297,7 @@ pub(crate) enum Error {
     #[error("ambiguous tools match capability {capability:?}: {candidates:?}")]
     #[non_exhaustive]
     Ambiguous {
-        /// The exact capability description passed to `tools.need`.
+        /// The exact capability description passed to `tools.bind`.
         capability: String,
         /// The stable identities reported by the picker, in picker order.
         candidates: Vec<crate::tools::ToolId>,
@@ -384,7 +384,7 @@ pub(crate) enum Error {
     #[error("model capability binding failure for {capability:?}: {detail}")]
     #[non_exhaustive]
     ModelBind {
-        /// The exact capability description passed to `models.need`.
+        /// The exact capability description passed to `models.bind`.
         capability: String,
         /// The picker failure without exposing its concrete error type.
         detail: String,
@@ -397,7 +397,7 @@ pub(crate) enum Error {
     #[error("model capability binding failure for {capability:?}: {source}")]
     #[non_exhaustive]
     ModelBindQuery {
-        /// The exact capability description passed to `models.need`.
+        /// The exact capability description passed to `models.bind`.
         capability: String,
         /// The picker's typed rebuild/resolve failure, kept as a shareable cause.
         #[source]
@@ -408,7 +408,7 @@ pub(crate) enum Error {
     #[error("no model matches capability {capability:?}")]
     #[non_exhaustive]
     ModelAbsent {
-        /// The exact capability description passed to `models.need`.
+        /// The exact capability description passed to `models.bind`.
         capability: String,
     },
 
@@ -416,7 +416,7 @@ pub(crate) enum Error {
     #[error("duplicate models match capability {capability:?}: {candidates:?}")]
     #[non_exhaustive]
     ModelDuplicate {
-        /// The exact capability description passed to `models.need`.
+        /// The exact capability description passed to `models.bind`.
         capability: String,
         /// The stable identities reported by the picker, in picker order.
         candidates: Vec<crate::model::ModelId>,
@@ -426,7 +426,7 @@ pub(crate) enum Error {
     #[error("ambiguous models match capability {capability:?}: {candidates:?}")]
     #[non_exhaustive]
     ModelAmbiguous {
-        /// The exact capability description passed to `models.need`.
+        /// The exact capability description passed to `models.bind`.
         capability: String,
         /// The stable identities reported by the picker, in picker order.
         candidates: Vec<crate::model::ModelId>,
@@ -453,12 +453,12 @@ pub(crate) enum Error {
     ToolLoopExhausted,
 
     /// The model (or Lua) referenced a tool outside the VM's scoped aliases.
-    #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (alias was declared by tools.need but not added to this section's scope)" } else { "" })]
+    #[error("tool {name:?} is not in this section's scope; in-scope aliases: {in_scope:?}{}", if *.global_exists { " (alias was declared by tools.bind but not added to this section's scope)" } else { "" })]
     #[non_exhaustive]
     OutOfScopeToolCall {
         /// The alias or identifier the model/Lua code tried to use.
         name: String,
-        /// Whether the name exists in the prompt-wide `tools.need` map.
+        /// Whether the name exists in the prompt-wide `tools.bind` map.
         global_exists: bool,
         /// The aliases that are in scope for this VM.
         in_scope: Vec<String>,

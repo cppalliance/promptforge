@@ -27,7 +27,7 @@ fn resolve_shared(source: &str) -> Result<(ToolBindings, ModelBindings)> {
 #[test]
 fn models_always_records_binding() {
     let (_tools, models) = resolve_shared(
-        r#"models.need("writer", "A tiny model", { thinking = false, temperature = 0 })
+        r#"models.bind("writer", "A tiny model", { thinking = false, temperature = 0 })
                models.default("writer")"#,
     )
     .unwrap();
@@ -37,17 +37,17 @@ fn models_always_records_binding() {
 #[test]
 fn models_always_returns_inspectable_object() {
     let (tools, models) = resolve_shared(
-        r#"local needed = models.need("writer", "A tiny model", {
+        r#"local bound = models.bind("writer", "A tiny model", {
                    thinking = false, temperature = 0, max_tokens = 256
                })
-               assert(needed.name == "writer")
-               assert(needed.model_id == "small")
-               assert(needed.description == "A tiny model")
-               assert(needed.context == 8192)
-               assert(needed.thinking == false)
-               assert(needed.temperature == 0)
-               assert(needed.max_tokens == 256)
-               assert(needed.dialect == "openai")
+               assert(bound.name == "writer")
+               assert(bound.model_id == "small")
+               assert(bound.description == "A tiny model")
+               assert(bound.context == 8192)
+               assert(bound.thinking == false)
+               assert(bound.temperature == 0)
+               assert(bound.max_tokens == 256)
+               assert(bound.dialect == "openai")
                local model = models.default("writer")
                assert(model.name == "writer")
                assert(model.model_id == "small")
@@ -68,7 +68,7 @@ fn models_always_returns_inspectable_object() {
 }
 
 #[test]
-fn models_always_without_prior_need_fails() {
+fn models_always_without_prior_bind_fails() {
     let error = resolve_shared(r#"models.default("writer")"#).unwrap_err();
     let msg = error.to_string();
     assert!(msg.contains("not declared"), "unexpected error: {msg}");
@@ -77,7 +77,7 @@ fn models_always_without_prior_need_fails() {
 #[test]
 fn models_always_duplicate_fails() {
     let error = resolve_shared(
-        r#"models.need("writer", "A tiny model")
+        r#"models.bind("writer", "A tiny model")
                models.default("writer")
                models.default("writer")"#,
     )
@@ -89,7 +89,7 @@ fn models_always_duplicate_fails() {
 #[test]
 fn models_always_installs_exactly() {
     let (tools, models) = resolve_shared(
-        r#"models.need("writer", "A tiny model")
+        r#"models.bind("writer", "A tiny model")
                models.default("writer")"#,
     )
     .unwrap();
@@ -107,7 +107,7 @@ fn models_always_installs_exactly() {
 #[test]
 fn models_always_provides_completion_options_without_use() {
     let (tools, models) = resolve_shared(
-        r#"models.need("writer", "A tiny model", { thinking = false, temperature = 0 })
+        r#"models.bind("writer", "A tiny model", { thinking = false, temperature = 0 })
                models.default("writer")"#,
     )
     .unwrap();
@@ -132,7 +132,7 @@ fn models_always_provides_completion_options_without_use() {
 
 #[test]
 fn models_always_from_h2_prologue_fails() {
-    let (tools, models) = resolve_shared(r#"models.need("writer", "A tiny model")"#).unwrap();
+    let (tools, models) = resolve_shared(r#"models.bind("writer", "A tiny model")"#).unwrap();
     let mut vm =
         section_vm_with_model_bindings(&tools, &models, EXECUTION, &NullObserver, "Section")
             .unwrap();
@@ -158,7 +158,7 @@ fn models_always_from_h2_prologue_fails() {
 }
 
 #[test]
-fn models_always_multi_arg_records_need_and_always() {
+fn models_always_multi_arg_records_bind_and_always() {
     let (_tools, models) = resolve_shared(
         r#"models.default("writer", "A tiny model", { thinking = false, temperature = 0 })"#,
     )
@@ -218,7 +218,7 @@ fn models_always_multi_arg_installs_exactly() {
 #[test]
 fn models_always_multi_arg_and_single_arg_cannot_both_be_called() {
     let (_tools, models) = resolve_shared(
-        r#"models.need("analyst", "careful analysis")
+        r#"models.bind("analyst", "careful analysis")
                models.default("writer", "A tiny model")"#,
     )
     .unwrap();
@@ -237,7 +237,7 @@ fn models_always_multi_arg_and_single_arg_cannot_both_be_called() {
 #[test]
 fn models_always_multi_arg_duplicate_alias_fails() {
     let error = resolve_shared(
-        r#"models.need("writer", "A tiny model")
+        r#"models.bind("writer", "A tiny model")
                models.default("writer", "A tiny model")"#,
     )
     .unwrap_err();

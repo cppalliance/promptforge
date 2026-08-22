@@ -8,8 +8,8 @@ max_tool_iterations: 20
 # Research a Person
 
 ```lua
-tools.need("search", "Search the web and return a list of results (title, url, description).")
-tools.need("fetch", "Fetch a web page and return its main content as markdown.")
+tools.bind("search", "Search the web and return a list of results (title, url, description).")
+tools.bind("fetch", "Fetch a web page and return its main content as markdown.")
 models.default("researcher", "A model suited for careful analysis, coding, and general assistance")
 ```
 

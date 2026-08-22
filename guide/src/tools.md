@@ -5,14 +5,14 @@ Tools are declared by capability description and resolved semantically at runtim
 ## Declaring Tools
 
 ```lua
--- Declare a tool need
-local search = tools.need("search", "web search capability")
+-- Declare a tool binding
+local search = tools.bind("search", "web search capability")
 
 -- Promote to prompt-wide availability (available in all sections)
 tools.always("search")
 ```
 
-A tool declared with `tools.need` is not exposed to the model unless `tools.always` or `tools.add` is called.
+A tool declared with `tools.bind` is not exposed to the model unless `tools.always` or `tools.add` is called.
 
 ```lua
 -- Section-local scoping
@@ -25,15 +25,15 @@ tools.add({"a", "b", tool_c}) -- arrays of strings or handles
 
 ## Tool Properties
 
-After `tools.need`, the returned handle exposes: `name`, `description`, `parameters` (JSON schema), `wire_name`, and `untrusted` flag. Tool objects are frozen - assigning a field errors. The model-facing description is overridden positionally at declaration or scoping time:
+After `tools.bind`, the returned handle exposes: `name`, `description`, `parameters` (JSON schema), `wire_name`, and `untrusted` flag. Tool objects are frozen - assigning a field errors. The model-facing description is overridden positionally at declaration or scoping time:
 
 ```lua
-tools.need("search", "web search capability", "Search the web for current information")
+tools.bind("search", "web search capability", "Search the web for current information")
 tools.always("search", "Search the web for current information")
 tools.add("search", "Search the web for current information")
 ```
 
-Precedence is `add` over `need`/`always` over the catalog description.
+Precedence is `add` over `bind`/`always` over the catalog description.
 
 ## Tool Dispatch Loop
 
@@ -41,7 +41,7 @@ The tool loop runs the model in a cycle: dispatch tool calls, feed results back,
 
 ## Tool Safety
 
-Untrusted tool output is wrapped with a CSPRNG nonce envelope before reaching the model, preventing prompt injection. Each round uses a fresh nonce. Trusted tool output passes verbatim. Trust marking is mandatory at construction time.
+Untrusted tool output is wrapped with a CSPRNG nonce envelope before reaching the model, preventing prompt injection. One nonce per run; envelopes are deterministic within a run. Trusted tool output passes verbatim. Trust marking is mandatory at construction time.
 
 Near-duplicate tools available to the same section are detected and rejected before any model call, with similarity diagnostics. Tool calls for tools not available to the section produce a clear error distinguishing globally-declared-but-unavailable tools from truly unknown ones.
 
@@ -75,11 +75,11 @@ tools.add_local("grab", "Grab a value from the store", {
 end)
 ```
 
-The alias must be unique within the section. It cannot reuse an alias declared by `tools.need` or `tools.always`, and a second `tools.add_local` call with the same alias is an error.
+The alias must be unique within the section. It cannot reuse an alias declared by `tools.bind` or `tools.always`, and a second `tools.add_local` call with the same alias is an error.
 
 The four positional arguments:
 
-- `alias` - tool name, same rules as `tools.need` (`[A-Za-z][A-Za-z0-9_-]{0,63}`)
+- `alias` - tool name, same rules as `tools.bind` (`[A-Za-z][A-Za-z0-9_-]{0,63}`)
 - `description` - one-sentence description the model sees
 - `params` - flat table of parameter declarations (see below)
 - `handler` - function receiving an `args` table, returning a string

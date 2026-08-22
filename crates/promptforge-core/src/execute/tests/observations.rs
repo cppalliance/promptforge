@@ -260,7 +260,7 @@ async fn one_execution_id_spans_parse_and_the_complete_runtime_lifecycle() {
     let source = format!(
         "---\nname: lifecycle\ndescription: Correlated lifecycle fixture\npromptforge: 1\n---\n\n\
          # Lifecycle\n\n```lua\n\
-         tools.need('echo', {capability})\n\
+         tools.bind('echo', {capability})\n\
          tools.always('echo')\n\
          models.default('writer', 'A general model for tests')\n```\n\n\
          ## Gather\n\n```lua\nstore.write('state.txt', 'before')\n```\n\n\

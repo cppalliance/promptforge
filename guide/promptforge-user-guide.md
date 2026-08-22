@@ -85,7 +85,7 @@ Two tools are available to prompts, depending on the gateway configuration:
 
 **`web_search`** proxies through the gateway and is available only when both `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` are set. When the gateway is not configured, `web_search` is omitted entirely rather than advertised as a tool that would fail on its first call.
 
-The tool picker resolves `tools.need` calls from prompts against the live tool set. Picker descriptors are derived from the same live tool instances, so the registry and catalog have identical entries by construction. If a prompt needs a tool that is not available (for example, `web_search` without gateway credentials), the resolution produces the standard absent-capability error before any section executes.
+The tool picker resolves `tools.bind` calls from prompts against the live tool set. Picker descriptors are derived from the same live tool instances, so the registry and catalog have identical entries by construction. If a prompt needs a tool that is not available (for example, `web_search` without gateway credentials), the resolution produces the standard absent-capability error before any section executes.
 
 ### File Validation
 
@@ -640,7 +640,7 @@ Lua blocks in the H1 region execute once in source order before any H2 section. 
 
 ```lua
 models.default("writer", "a capable writing model")
-tools.need("search", "web search capability")
+tools.bind("search", "web search capability")
 tools.always("search")
 var.topic = "Rust async patterns"
 ```
@@ -745,7 +745,7 @@ Models are declared by capability description and resolved semantically against 
 
 ```lua
 -- Declare a model by what you need it to do
-models.need("writer", "a creative writing model", {
+models.bind("writer", "a creative writing model", {
     thinking = true,
     temperature = 0.7,
     context = 128000,
@@ -756,7 +756,7 @@ models.need("writer", "a creative writing model", {
 models.default("writer")
 ```
 
-The `models.default(alias, description, opts)` form declares and designates in one atomic call; the single-alias form designates a model already declared with `models.need`. Within sections, `models.use(alias)` selects a specific model and returns its handle:
+The `models.default(alias, description, opts)` form declares and designates in one atomic call; the single-alias form designates a model already declared with `models.bind`. Within sections, `models.use(alias)` selects a specific model and returns its handle:
 
 ```lua
 local analyst = models.use("analyst")
@@ -809,14 +809,14 @@ Two tool-calling dialects ship: OpenAI (native tool calls) and Gemma-3 tool_code
 Tools are declared by capability description and resolved semantically at runtime via a picker:
 
 ```lua
--- Declare a tool need
-local search = tools.need("search", "web search capability")
+-- Declare a tool binding
+local search = tools.bind("search", "web search capability")
 
 -- Promote to prompt-wide scope (available in all sections)
 tools.always("search")
 ```
 
-A tool declared with `tools.need` is not exposed to the model unless `tools.always` or `tools.add` is called. This is explicit - you control exactly what the model sees.
+A tool declared with `tools.bind` is not exposed to the model unless `tools.always` or `tools.add` is called. This is explicit - you control exactly what the model sees.
 
 ```lua
 -- Section-local scoping
@@ -829,15 +829,15 @@ tools.add({"a", "b", tool_c}) -- arrays of strings or handles
 
 #### Tool Properties
 
-After `tools.need`, the returned handle exposes: `name`, `description`, `parameters` (JSON schema), `wire_name`, and `untrusted` flag. Tool objects are frozen - assigning a field errors. The model-facing description is overridden positionally at declaration or scoping time:
+After `tools.bind`, the returned handle exposes: `name`, `description`, `parameters` (JSON schema), `wire_name`, and `untrusted` flag. Tool objects are frozen - assigning a field errors. The model-facing description is overridden positionally at declaration or scoping time:
 
 ```lua
-tools.need("search", "web search capability", "Search the web for current information")
+tools.bind("search", "web search capability", "Search the web for current information")
 tools.always("search", "Search the web for current information")
 tools.add("search", "Search the web for current information")
 ```
 
-Precedence is `add` over `need`/`always` over the catalog description.
+Precedence is `add` over `bind`/`always` over the catalog description.
 
 #### Tool Dispatch Loop
 
@@ -845,7 +845,7 @@ The tool loop runs the model in a cycle: dispatch tool calls, feed results back,
 
 #### Tool Safety
 
-Untrusted tool output is wrapped with a CSPRNG nonce envelope before reaching the model, preventing prompt injection. Each round uses a fresh nonce. Trusted tool output passes verbatim. Trust marking is mandatory at construction time.
+Untrusted tool output is wrapped with a CSPRNG nonce envelope before reaching the model, preventing prompt injection. One nonce per run; envelopes are deterministic within a run. Trusted tool output passes verbatim. Trust marking is mandatory at construction time.
 
 Near-duplicate tools in the same section scope are detected and rejected before any model call, with similarity diagnostics. Out-of-scope tool calls produce a clear error distinguishing globally-declared-but-unscoped tools from truly unknown ones.
 
@@ -1327,7 +1327,7 @@ At startup the server:
 6. Starts the filesystem watcher
 7. Serves the chosen transport
 
-The gateway fetch distinguishes transient failures from fatal ones. A connection timeout or a 5xx is transient: the server warns and serves with an empty model catalog, so prompts without `models.need` keep working. A 401, a bad URL, or a malformed response is fatal: the server refuses to boot rather than hiding a misconfiguration behind runtime failures.
+The gateway fetch distinguishes transient failures from fatal ones. A connection timeout or a 5xx is transient: the server warns and serves with an empty model catalog, so prompts without `models.bind` keep working. A 401, a bad URL, or a malformed response is fatal: the server refuses to boot rather than hiding a misconfiguration behind runtime failures.
 
 ---
 
@@ -1855,7 +1855,7 @@ cargo run -p promptforge-dev -- my-prompt.md "summarize this paragraph"
 
 The input becomes the prompt's `args`. If you omit it, it defaults to empty.
 
-Model runtime parameters - context window, thinking mode, max tokens - are not CLI flags. Declare them on the prompt file under `models.need` or `models.default`. The binary's argument surface is deliberately minimal: `promptforge-dev [--watch] [--capture-raw] <prompt.md> [input]`.
+Model runtime parameters - context window, thinking mode, max tokens - are not CLI flags. Declare them on the prompt file under `models.bind` or `models.default`. The binary's argument surface is deliberately minimal: `promptforge-dev [--watch] [--capture-raw] <prompt.md> [input]`.
 
 ### What Happens During a Run
 

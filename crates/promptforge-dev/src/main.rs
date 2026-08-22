@@ -3,7 +3,7 @@
 //! `promptforge-dev [--watch] [--capture-raw] <prompt.md> [input]` requires
 //! `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY`, then runs one
 //! prompt file. Context, thinking, and max tokens are declared on the prompt
-//! (`models.need` / `models.always`); this binary does not accept those flags.
+//! (`models.bind` / `models.always`); this binary does not accept those flags.
 //!
 //! `--capture-raw` opts into persisting verbatim request and response bodies
 //! (full prompts, tool arguments and results, and model output) under

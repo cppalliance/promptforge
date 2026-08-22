@@ -34,7 +34,7 @@ pub(crate) fn install_lua_tool_calls(
                     "tools.calls: {key:?} is not in this section's tool scope; \
                      in-scope aliases: {in_scope:?}{}",
                     if declared_unscoped {
-                        " (alias was declared by tools.need but not added to this section's scope)"
+                        " (alias was declared by tools.bind but not added to this section's scope)"
                     } else if in_scope.is_empty() {
                         ""
                     } else {
@@ -177,7 +177,7 @@ pub(crate) fn install_h2_tools(
     local_tools: &LocalTools,
 ) -> Result<()> {
     let tools = lua.create_table().map_err(Error::lua)?;
-    for name in ["need", "always"] {
+    for name in ["bind", "always"] {
         let operation = name;
         let forbidden = lua
             .create_function(move |_, _: MultiValue| -> mlua::Result<()> {
@@ -201,7 +201,7 @@ pub(crate) fn install_h2_tools(
                 validate_alias(&entry.alias).map_err(mlua::Error::external)?;
                 if frozen.binding(&entry.alias).is_none() {
                     return Err(mlua::Error::external(format!(
-                        "tools.add alias {:?} was not declared by tools.need",
+                        "tools.add alias {:?} was not declared by tools.bind",
                         entry.alias
                     )));
                 }

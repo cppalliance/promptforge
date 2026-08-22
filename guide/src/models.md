@@ -6,7 +6,7 @@ Models are declared by capability description and resolved semantically against 
 
 ```lua
 -- Declare a model by what you need it to do
-models.need("writer", "a creative writing model", {
+models.bind("writer", "a creative writing model", {
     thinking = true,
     temperature = 0.7,
     context = 128000,
@@ -17,7 +17,7 @@ models.need("writer", "a creative writing model", {
 models.default("writer")
 ```
 
-The `models.default(alias, description, opts)` form declares and designates in one atomic call; the single-alias form designates a model already declared with `models.need`. Within sections, `models.use(alias)` selects a specific model and returns its handle:
+The `models.default(alias, description, opts)` form declares and designates in one atomic call; the single-alias form designates a model already declared with `models.bind`. Within sections, `models.use(alias)` selects a specific model and returns its handle:
 
 ```lua
 local analyst = models.use("analyst")

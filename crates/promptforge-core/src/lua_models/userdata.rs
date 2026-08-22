@@ -1,4 +1,4 @@
-//! Inspectable Lua userdata returned by `models.need` / `models.default`.
+//! Inspectable Lua userdata returned by `models.bind` / `models.default`.
 //!
 //! Presentation only: the userdata exposes a frozen [`ModelBinding`]'s fields to
 //! Lua and dispatches `model:infer` through the executor's installed hook.
@@ -34,7 +34,7 @@ pub(crate) type ModelInferHook =
 /// means `models.infer` is unavailable in that context.
 pub(crate) type ModelsInferHook = Arc<dyn Fn(&Lua, &str) -> mlua::Result<String> + Send + Sync>;
 
-/// Inspectable Lua userdata returned by `models.need` / `models.default`.
+/// Inspectable Lua userdata returned by `models.bind` / `models.default`.
 #[derive(Debug, Clone)]
 pub(crate) struct LuaModelHandle {
     binding: ModelBinding,
@@ -67,7 +67,7 @@ impl LuaModelHandle {
         self.binding.id().name()
     }
 
-    /// Returns the capability description supplied to `models.need`.
+    /// Returns the capability description supplied to `models.bind`.
     #[must_use]
     pub(crate) fn description(&self) -> &str {
         self.binding.description()
@@ -82,13 +82,13 @@ impl LuaModelHandle {
         self.binding.context().get()
     }
 
-    /// Returns the frozen thinking switch, when the need declared one.
+    /// Returns the frozen thinking switch, when the bind declared one.
     #[must_use]
     pub(crate) fn thinking(&self) -> Option<bool> {
         self.binding.invocation().thinking
     }
 
-    /// Returns the frozen sampling temperature, when the need declared one.
+    /// Returns the frozen sampling temperature, when the bind declared one.
     ///
     /// The binding stores a validated [`crate::model::Temperature`]; the raw
     /// `f64` is exposed only here, at the Lua presentation boundary.
@@ -100,7 +100,7 @@ impl LuaModelHandle {
             .map(crate::model::Temperature::get)
     }
 
-    /// Returns the frozen max generation tokens, when the need declared one.
+    /// Returns the frozen max generation tokens, when the bind declared one.
     ///
     /// The binding stores a [`NonZeroU32`](std::num::NonZeroU32); the raw `u32`
     /// is exposed only here, at the Lua presentation boundary.

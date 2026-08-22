@@ -150,7 +150,7 @@ pub(crate) fn prepare_scoped_tools(
             .get(binding.id())
             .ok_or_else(|| Error::UnknownScopedTool(binding.alias().to_owned()))?;
         // Model-facing description precedence: `tools.add` override >
-        // `tools.need`/`tools.always` override > registry (catalog) text.
+        // `tools.bind`/`tools.always` override > registry (catalog) text.
         // The first two layers are already folded together by
         // `binding_for_scope` (the H2 add runtime overwrites the frozen
         // binding's `model_description`); the catalog fallback happens here.

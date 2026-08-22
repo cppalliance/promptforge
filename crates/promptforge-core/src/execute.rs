@@ -150,7 +150,7 @@ pub(crate) use crate::model::ModelBindings;
 ///   invalid.
 /// - [`RunErrorKind::Version`] - the prompt declared an unsupported
 ///   `promptforge:` major.
-/// - [`RunErrorKind::Binding`] - a `tools.need`/`models.need` capability could
+/// - [`RunErrorKind::Binding`] - a `tools.bind`/`models.bind` capability could
 ///   not be bound, was absent, or clashed.
 /// - [`RunErrorKind::Completion`] - a model completion failed at the transport,
 ///   backend, decode, or dialect layer.

@@ -1,7 +1,7 @@
-//! Prompt-local model bindings: catalog, need/use declarations, and invocation.
+//! Prompt-local model bindings: catalog, bind/use declarations, and invocation.
 //!
 //! A host builds a [`ModelCatalog`] from gateway `GET /v1/models` (or a pinned
-//! offline entry). H1 `models.need` resolves a description against that catalog
+//! offline entry). H1 `models.bind` resolves a description against that catalog
 //! under hard constraints, freezes invocation parameters, and stores the result
 //! in the run's crate-private model bindings. H2 `models.use` selects at most
 //! one binding per
@@ -27,7 +27,7 @@ pub use error::{CompletionError, CompletionErrorKind};
 pub use ids::{ModelCatalogError, ModelId, ModelIdError};
 pub use options::{CompletionOptions, ModelDescriptor, TemperatureError, ThinkingMode};
 pub(crate) use options::{
-    ModelBinding, ModelBindings, ModelInvocation, ModelNeedOpts, Temperature,
+    ModelBindOpts, ModelBinding, ModelBindings, ModelInvocation, Temperature,
 };
 pub(crate) use resolver::PickerModelResolver;
 pub use transport::fetch_model_catalog;
@@ -91,7 +91,7 @@ impl ModelCatalog {
         Self { models }
     }
 
-    /// An empty catalog; every `models.need` resolves as absent.
+    /// An empty catalog; every `models.bind` resolves as absent.
     #[must_use]
     pub fn empty() -> Self {
         Self::from_validated(Vec::new())
@@ -127,7 +127,7 @@ impl ModelCatalog {
     /// directly from these borrowed matches and selects the resolved descriptor
     /// back out of the same borrowed slice.
     #[must_use]
-    pub(crate) fn filtered(&self, opts: &ModelNeedOpts) -> Vec<&ModelDescriptor> {
+    pub(crate) fn filtered(&self, opts: &ModelBindOpts) -> Vec<&ModelDescriptor> {
         self.models
             .iter()
             .filter(|model| satisfies_constraints(model, opts))
@@ -182,21 +182,21 @@ pub(crate) fn model_from_picker_id(id: &PickerToolId) -> ModelId {
     }
 }
 
-/// Resolves one `models.need` description under optional hard constraints.
+/// Resolves one `models.bind` description under optional hard constraints.
 pub(crate) trait ModelResolver: Send + Sync {
     /// Resolves `description` with `opts` to a binding identity and invocation.
     ///
     /// # Errors
     /// Returns a core error when the capability cannot be resolved uniquely or
     /// no catalog entry satisfies the constraints.
-    fn resolve(&self, description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel>;
+    fn resolve(&self, description: &str, opts: &ModelBindOpts) -> Result<ResolvedModel>;
 }
 
 impl<F> ModelResolver for F
 where
-    F: Fn(&str, &ModelNeedOpts) -> Result<ResolvedModel> + Send + Sync,
+    F: Fn(&str, &ModelBindOpts) -> Result<ResolvedModel> + Send + Sync,
 {
-    fn resolve(&self, description: &str, opts: &ModelNeedOpts) -> Result<ResolvedModel> {
+    fn resolve(&self, description: &str, opts: &ModelBindOpts) -> Result<ResolvedModel> {
         self(description, opts)
     }
 }
@@ -207,7 +207,7 @@ where
 pub(crate) struct ResolvedModel {
     /// The selected catalog identity.
     pub(crate) id: ModelId,
-    /// Frozen per-request fields from the need's opts.
+    /// Frozen per-request fields from the bind's opts.
     pub(crate) invocation: ModelInvocation,
     /// The tool dialect from the catalog entry.
     pub(crate) tool_dialect: ToolDialectId,
@@ -215,7 +215,7 @@ pub(crate) struct ResolvedModel {
     pub(crate) context: NonZeroU32,
 }
 
-fn satisfies_constraints(model: &ModelDescriptor, opts: &ModelNeedOpts) -> bool {
+fn satisfies_constraints(model: &ModelDescriptor, opts: &ModelBindOpts) -> bool {
     if let Some(min_context) = opts.context
         && model.context() < min_context
     {

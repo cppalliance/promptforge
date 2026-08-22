@@ -176,7 +176,7 @@ At startup, the MCP server distinguishes transient gateway failures from
 fatal ones:
 
 - **Transient** (connection timeout, 5xx) - the server warns and serves with an
-  empty model catalog. Prompts that do not use `models.need` keep working.
+  empty model catalog. Prompts that do not use `models.bind` keep working.
 - **Fatal** (401, bad URL, malformed response) - the server refuses to boot
   rather than hiding a misconfiguration behind runtime failures.
 
