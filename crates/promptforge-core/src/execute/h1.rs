@@ -2,7 +2,6 @@
 //! capabilities and may short-circuit the whole run with a scalar return.
 
 use crate::client::GatewayClient;
-use crate::lua::ToolBindings;
 use crate::model::ModelBindings;
 use crate::resolve::RuntimeResolution;
 use crate::{Error, Result};
@@ -13,7 +12,6 @@ use super::gateway::ResolutionContext;
 use super::section_context::SectionContext;
 
 pub(crate) struct LiveH1State {
-    pub(crate) bindings: ToolBindings,
     pub(crate) models: ModelBindings,
     pub(crate) var: serde_json::Value,
     pub(crate) returned: Option<String>,
@@ -25,7 +23,12 @@ pub(crate) async fn execute_live_h1(
     resolution: ResolutionContext<'_>,
     client: Option<&GatewayClient>,
 ) -> Result<LiveH1State> {
-    let runtime = RuntimeResolution::new(resolution.picker, resolution.tools, resolution.models);
+    let runtime = RuntimeResolution::new(
+        resolution.picker,
+        resolution.tools,
+        resolution.models,
+        ctx.tool_set(),
+    );
     // Construction and limits failures propagate bare, before any teardown
     // observation exists; every failure past this point tears the frame's
     // VM down exactly once.
@@ -67,10 +70,11 @@ pub(crate) async fn execute_live_h1(
         }
     };
     let var = h1_try!(h1_frame.read_var());
-    let (bindings, models) = h1_try!(runtime.bindings());
+    // The tool bindings need no extraction: H1's binds already landed in
+    // the run's shared tool set, which the walk reads through the view.
+    let models = h1_try!(runtime.models());
     h1_frame.teardown(&ctx.prompt().title);
     Ok(LiveH1State {
-        bindings,
         models,
         var,
         returned,

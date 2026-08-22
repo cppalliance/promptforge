@@ -1,9 +1,11 @@
+use std::sync::{Arc, Mutex};
+
 use mlua::Lua;
 
 use super::*;
 use crate::Error;
 use crate::lua::{
-    LiveBindingProducer, LuaProgram, SectionVm, ToolBindings, ToolResolver, resolve_model_binding,
+    LiveBindingProducer, LuaProgram, SectionVm, ToolResolver, ToolSet, resolve_model_binding,
 };
 use crate::observe::NullObserver;
 use crate::store::StoreRef;
@@ -72,9 +74,9 @@ fn resolve_live_declarations_for_test(
     _execution: &str,
     _observer: &dyn crate::observe::Observer,
     _section: &str,
-) -> Result<(ToolBindings, ModelBindings)> {
+) -> Result<(ToolSet, ModelBindings)> {
     let catalog = ToolCatalog::default();
-    let producer = LiveBindingProducer::default();
+    let producer = LiveBindingProducer::new(Arc::new(Mutex::new(ToolSet::default())));
     let lua = Lua::new();
     let result = lua.scope(|scope| {
         producer
@@ -90,7 +92,7 @@ fn resolve_live_declarations_for_test(
 }
 
 fn section_vm_with_model_bindings(
-    tools: &ToolBindings,
+    tools: &ToolSet,
     models: &ModelBindings,
     execution: &str,
     observer: &dyn crate::observe::Observer,

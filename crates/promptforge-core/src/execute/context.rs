@@ -7,13 +7,13 @@
 //! in parameters or on the per-section frame.
 
 use std::fmt;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64};
+use std::sync::{Arc, Mutex};
 
 use crate::Result;
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
-use crate::lua::{LuaProgram, SectionVm, ToolBindings};
+use crate::lua::{LuaProgram, SectionVm, ToolSet, ToolView};
 use crate::model::ModelBindings;
 use crate::observe::Observer;
 use crate::parser::Prompt;
@@ -22,7 +22,6 @@ use crate::untrusted::GuardNonce;
 
 use super::config::{RunConfig, RunLimits};
 use super::gateway::GatewaySource;
-use super::scope::ToolAnalysis;
 use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::{now_rfc3339_checked, sys_json};
 
@@ -65,14 +64,17 @@ pub(crate) struct RunContext {
     /// compiled chunk when the prompt declares no `lua shared` library, so
     /// the startup sequence carries no `Option` branch.
     shared: Arc<LuaProgram>,
-    /// The frozen prompt-level tool bindings; empty until the walk starts
-    /// (the live H1 pass resolves them and never reads them back).
-    bindings: Arc<ToolBindings>,
+    /// The run's tool set as a read-only view: created empty here and
+    /// filled by the live H1 pass through the concrete `tool_set` handle.
+    /// The trait exposes no write methods, so once the H1 VM drops its
+    /// handle clones the set is structurally frozen.
+    tools: Arc<dyn ToolView>,
+    /// The concrete handle behind `tools`, handed to the live H1 binding
+    /// producer (its Lua host closures write through it). Readers never
+    /// touch it; they go through the view.
+    tool_set: Arc<Mutex<ToolSet>>,
     /// The frozen prompt-level model bindings; empty until the walk starts.
     models: Arc<ModelBindings>,
-    /// The prompt's tool-scope analysis (semantic duplicate check,
-    /// aliases); empty until the walk starts.
-    analysis: Arc<ToolAnalysis>,
     /// The walk's start timestamp, stamped into every section's `sys.when`;
     /// empty until the walk starts (H1 stamps its own `now`).
     when: Arc<str>,
@@ -80,9 +82,10 @@ pub(crate) struct RunContext {
 
 impl RunContext {
     /// Builds the context for one run of `prompt`. The turn and id counters
-    /// are minted here (both start at zero); the walk-scoped fields
-    /// (`bindings`, `models`, `analysis`, `when`) start empty and take their
-    /// live values at the H1-to-walk handoff.
+    /// are minted here (both start at zero), as is the empty tool set the
+    /// live H1 pass fills through the concrete handle; the walk-scoped
+    /// fields (`models`, `when`) start empty and take their live values at
+    /// the H1-to-walk handoff.
     #[must_use]
     pub(crate) fn new(
         prompt: &Prompt,
@@ -91,6 +94,7 @@ impl RunContext {
         shared: LuaProgram,
         config: &RunConfig,
     ) -> Self {
+        let tool_set = Arc::new(Mutex::new(ToolSet::default()));
         Self {
             prompt: Arc::new(prompt.clone()),
             nonce: GuardNonce::fresh(),
@@ -103,9 +107,9 @@ impl RunContext {
             turns: Arc::new(AtomicU32::new(0)),
             ids: Arc::new(AtomicU64::new(0)),
             shared: Arc::new(shared),
-            bindings: Arc::new(ToolBindings::default()),
+            tools: tool_set.clone(),
+            tool_set,
             models: Arc::new(ModelBindings::from_parts(Vec::new(), None)),
-            analysis: Arc::new(ToolAnalysis::default()),
             when: Arc::from(""),
         }
     }
@@ -160,19 +164,35 @@ impl RunContext {
         &self.ids
     }
 
-    /// The frozen prompt-level tool bindings.
-    pub(crate) fn bindings(&self) -> &ToolBindings {
-        &self.bindings
+    /// The run's tool set, read-only.
+    pub(crate) fn tools(&self) -> &dyn ToolView {
+        &*self.tools
+    }
+
+    /// The concrete handle behind the tools view, for the live H1 binding
+    /// producer; its clones die with the H1 VM, after which the set is
+    /// structurally frozen.
+    pub(crate) fn tool_set(&self) -> Arc<Mutex<ToolSet>> {
+        Arc::clone(&self.tool_set)
+    }
+
+    /// An owned snapshot of the run's tool set (bindings plus `always`),
+    /// read through the view. Post-H1 the set is frozen, so the two reads
+    /// always agree.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`](crate::Error::Lua) if the set's mutex is
+    /// poisoned.
+    pub(crate) fn tool_set_snapshot(&self) -> Result<ToolSet> {
+        Ok(ToolSet::from_parts(
+            self.tools.bindings()?,
+            self.tools.always()?,
+        ))
     }
 
     /// The frozen prompt-level model bindings.
     pub(crate) fn models(&self) -> &ModelBindings {
         &self.models
-    }
-
-    /// The prompt's tool-scope analysis.
-    pub(crate) fn analysis(&self) -> &ToolAnalysis {
-        &self.analysis
     }
 
     /// The resolved per-section tool-loop cap: the frontmatter's
@@ -189,22 +209,14 @@ impl RunContext {
         self.prompt.sections.len()
     }
 
-    /// The H1-to-walk handoff: the live values H1 produced (the frozen
-    /// bindings and models, the scope analysis) plus the walk's start
-    /// timestamp, set on a cheap clone so the context H1 saw stays
-    /// untouched.
+    /// The H1-to-walk handoff: the frozen model bindings H1 produced plus
+    /// the walk's start timestamp, set on a cheap clone so the context H1
+    /// saw stays untouched. The tool set needs no delta: H1's binds already
+    /// landed in the shared set the view reads.
     #[must_use]
-    pub(crate) fn with_walk_state(
-        &self,
-        bindings: &ToolBindings,
-        models: &ModelBindings,
-        analysis: &ToolAnalysis,
-        when: &str,
-    ) -> Self {
+    pub(crate) fn with_walk_state(&self, models: &ModelBindings, when: &str) -> Self {
         let mut ctx = self.clone();
-        ctx.bindings = Arc::new(bindings.clone());
         ctx.models = Arc::new(models.clone());
-        ctx.analysis = Arc::new(analysis.clone());
         ctx.when = Arc::from(when);
         ctx
     }
@@ -319,9 +331,9 @@ impl fmt::Debug for RunContext {
             .field("turns", &self.turns)
             .field("ids", &self.ids)
             .field("shared", &self.shared)
-            .field("bindings", &self.bindings)
+            .field("tools", &"<dyn ToolView>")
+            .field("tool_set", &self.tool_set)
             .field("models", &self.models)
-            .field("analysis", &self.analysis)
             .field("when", &self.when)
             .finish()
     }

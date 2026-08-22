@@ -1,6 +1,6 @@
 use super::{
     Arc, Error, Function, Json, LocalTools, Lua, LuaToolHandle, MultiValue, Mutex, Result,
-    ToolBindings, ToolCallCounts, ToolRuntime, Value, Variadic, json, validate_alias,
+    ToolCallCounts, ToolRuntime, ToolSet, Value, Variadic, json, validate_alias,
 };
 use crate::client::ToolSchema;
 
@@ -172,7 +172,7 @@ fn add_local_params_schema(params: &mlua::Table) -> mlua::Result<Json> {
 pub(crate) fn install_h2_tools(
     lua: &Lua,
     globals: &mlua::Table,
-    bindings: &ToolBindings,
+    bindings: &ToolSet,
     runtime: &Arc<Mutex<ToolRuntime>>,
     local_tools: &LocalTools,
 ) -> Result<()> {

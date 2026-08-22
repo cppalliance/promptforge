@@ -150,6 +150,56 @@ models.default('writer', 'A general model for tests')\n```\n\n\
     assert_eq!(gateway.call_count(), 2);
 }
 
+/// The always-scope path: both halves of a bind-time clash enter every
+/// section's scope through the `always` list, and the per-block scope
+/// rebuild fails on them. (An end-to-end twin-scope failure needs the real
+/// model to score two descriptions at or above the 0.98 duplicate
+/// threshold, which near-identical bind capabilities cannot reach
+/// deterministically - so the always path is pinned here, one layer up
+/// from the scope check.)
+#[test]
+fn near_duplicate_always_scope_fails_at_the_scope_rebuild() {
+    let first: Arc<dyn Tool> = Arc::new(ScopedFixtureTool::new(
+        "first",
+        "first_wire",
+        "First concrete.",
+    ));
+    let second: Arc<dyn Tool> = Arc::new(ScopedFixtureTool::new(
+        "second",
+        "second_wire",
+        "Second concrete.",
+    ));
+    let mut first_binding =
+        crate::lua::ToolBinding::for_test("first_local", "first", Arc::clone(&first));
+    first_binding.conflicts.push(crate::lua::Conflict {
+        alias: "second_local".to_owned(),
+        similarity: 0.98,
+    });
+    let mut second_binding =
+        crate::lua::ToolBinding::for_test("second_local", "second", Arc::clone(&second));
+    second_binding.conflicts.push(crate::lua::Conflict {
+        alias: "first_local".to_owned(),
+        similarity: 0.98,
+    });
+    let tool_set = crate::lua::ToolSet::for_test(
+        vec![first_binding, second_binding],
+        vec!["first_local".to_owned(), "second_local".to_owned()],
+    );
+    let runtime = Mutex::new(crate::lua::ToolRuntime {
+        added: Vec::new(),
+        description_overrides: BTreeMap::new(),
+    });
+
+    let effective = current_tool_bindings(&tool_set, &runtime).expect("the always scope snapshots");
+    let error =
+        prepare_effective_scope(&effective, &[], EXECUTION, &NullObserver, "Only").unwrap_err();
+
+    assert!(
+        matches!(error, Error::NearDuplicateTools { .. }),
+        "the always scope must fail on the recorded clash: {error}"
+    );
+}
+
 #[test]
 fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports() {
     let first: Arc<dyn Tool> = Arc::new(ScopedFixtureTool::new(
@@ -162,38 +212,25 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
         "second_wire",
         "Second concrete.",
     ));
-    let first_id = ToolId::new("tests", "first").expect("valid id");
-    let second_id = ToolId::new("tests", "second").expect("valid id");
-    let bindings = vec![
-        crate::lua::ToolBinding::for_test("first_local", "first", Arc::clone(&first)),
-        crate::lua::ToolBinding::for_test("second_local", "second", Arc::clone(&second)),
-    ];
-    let analysis = ToolAnalysis {
-        alias_to_id: BTreeMap::from([
-            ("first_local".to_owned(), first_id.clone()),
-            ("second_local".to_owned(), second_id.clone()),
-        ]),
-        id_to_alias: BTreeMap::from([
-            (first_id.clone(), "first_local".to_owned()),
-            (second_id.clone(), "second_local".to_owned()),
-        ]),
-        near_duplicates: vec![OwnedNearDuplicate {
-            first_id: first_id.clone(),
-            second_id: second_id.clone(),
-            similarity: 0.98,
-        }],
-    };
+    // Mirror the bind-time record: each half of the clash carries the other
+    // half's alias and the picker's score.
+    let mut first_binding =
+        crate::lua::ToolBinding::for_test("first_local", "first", Arc::clone(&first));
+    first_binding.conflicts.push(crate::lua::Conflict {
+        alias: "second_local".to_owned(),
+        similarity: 0.98,
+    });
+    let mut second_binding =
+        crate::lua::ToolBinding::for_test("second_local", "second", Arc::clone(&second));
+    second_binding.conflicts.push(crate::lua::Conflict {
+        alias: "first_local".to_owned(),
+        similarity: 0.98,
+    });
+    let bindings = vec![first_binding, second_binding];
     let recorder = Arc::new(Recorder::default());
 
-    let error = prepare_effective_scope(
-        &analysis,
-        &bindings,
-        &[],
-        EXECUTION,
-        recorder.as_ref(),
-        "Only",
-    )
-    .unwrap_err();
+    let error =
+        prepare_effective_scope(&bindings, &[], EXECUTION, recorder.as_ref(), "Only").unwrap_err();
 
     assert!(matches!(
         error,
@@ -203,7 +240,7 @@ fn near_duplicate_effective_scope_fails_before_the_model_without_payload_reports
             && diagnostic.first_id == ToolId::new("tests", "first").expect("valid id")
             && diagnostic.second_alias == "second_local"
             && diagnostic.second_id == ToolId::new("tests", "second").expect("valid id")
-            && (diagnostic.similarity - 0.98).abs() < f32::EPSILON
+            && (diagnostic.similarity - 0.98).abs() < f64::EPSILON
     ));
     let events = recorder.events();
     assert!(

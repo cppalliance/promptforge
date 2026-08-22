@@ -132,9 +132,10 @@ impl SectionContext {
         let sys = ctx.sys_json(section_id, &section.name)?;
         ctx.observer()
             .observe(ctx.execution(), &section.name, detail::SECTION_STARTED);
+        let tool_set = ctx.tool_set_snapshot()?;
         let vm = SectionVm::new_for_section(
             ctx.nonce(),
-            ctx.bindings(),
+            &tool_set,
             ctx.models(),
             ctx.execution(),
             ctx.observer().as_ref(),
@@ -336,9 +337,10 @@ impl SectionContext {
         client: &Option<GatewayClient>,
         var: &serde_json::Value,
     ) -> Result<Self> {
+        let tool_set = ctx.tool_set_snapshot()?;
         let vm = SectionVm::new_for_section(
             ctx.nonce(),
-            ctx.bindings(),
+            &tool_set,
             ctx.models(),
             ctx.execution(),
             ctx.observer().as_ref(),

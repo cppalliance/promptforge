@@ -338,14 +338,6 @@ pub(crate) enum Error {
         id: crate::tools::ToolId,
     },
 
-    /// The picker could not analyze the selected tool identities.
-    #[error("selected tool-scope analysis failure: {detail}")]
-    #[non_exhaustive]
-    ToolScopeAnalysis {
-        /// The picker failure without exposing its concrete error type.
-        detail: String,
-    },
-
     /// The picker's near-duplicate analysis of the selected tool scope failed,
     /// retaining the picker's typed selection error as the private `#[source]`
     /// cause (F5) rather than flattening it into a string.
