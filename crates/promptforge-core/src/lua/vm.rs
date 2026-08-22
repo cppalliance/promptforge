@@ -1,12 +1,13 @@
 use super::{
     Arc, AtomicU32, AtomicUsize, BTreeMap, DEFAULT_LUA_LOG_EVENTS, DEFAULT_LUA_MEMORY_BYTES, Error,
-    Function, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions, LuaProgram,
-    LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook, ModelRuntime,
-    ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result, RuntimeResolution, StdLib,
-    StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime, Value, WriteScope, detail,
-    guarded_var, harden, install_h2_models, install_h2_tools, install_instruction_budget,
-    install_log, install_lua_tool_calls, install_store_table, install_untrusted, log_byte_budget,
-    resolve_section_target, scalar_return, seal_sys, var_to_json,
+    Function, GuardNonce, Json, Lua, LuaBlockResult, LuaFanoutResult, LuaModelHandle, LuaOptions,
+    LuaProgram, LuaSerdeExt, LuaToolHandle, ModelBinding, ModelBindings, ModelInferHook,
+    ModelRuntime, ModelsInferHook, MultiValue, Mutex, Observer, Ordering, Result,
+    RuntimeResolution, StdLib, StoreRef, ToolBinding, ToolBindings, ToolCallCounts, ToolRuntime,
+    Value, WriteScope, detail, guarded_var, harden, install_h2_models, install_h2_tools,
+    install_instruction_budget, install_log, install_lua_tool_calls, install_store_table,
+    install_untrusted, log_byte_budget, resolve_section_target, scalar_return, seal_sys,
+    var_to_json,
 };
 use crate::client::ToolSchema;
 
@@ -44,8 +45,10 @@ fn pack_sequence<T: mlua::IntoLua>(lua: &Lua, values: Vec<T>) -> mlua::Result<ml
 /// ```text
 /// use promptforge_core::lua::SectionVm;
 /// use promptforge_core::observe::NullObserver;
+/// use promptforge_core::untrusted::GuardNonce;
 ///
-/// let vm = SectionVm::new("example-run", &NullObserver::default(), "Example")?;
+/// let nonce = GuardNonce::fresh();
+/// let vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
 /// vm.teardown(&NullObserver::default(), "Example");
 /// # Ok::<(), promptforge_core::Error>(())
 /// ```
@@ -185,7 +188,8 @@ impl SectionVm {
     /// Creates a hardened section VM.
     ///
     /// Construction installs only the sandbox, the default resource ceilings,
-    /// the instruction budget, and `untrusted`. Everything else - the run's
+    /// the instruction budget, and `untrusted` (wrapping under the run's
+    /// `nonce`). Everything else - the run's
     /// limits, the host values, the persistent host APIs, the control
     /// globals, the shared-library replay, and the captured alias globals -
     /// is a separate explicit step the caller drives in that order (see the
@@ -204,12 +208,19 @@ impl SectionVm {
     /// ```text
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
+    /// use promptforge_core::untrusted::GuardNonce;
     ///
-    /// let vm = SectionVm::new("example-run", &NullObserver::default(), "Example")?;
+    /// let nonce = GuardNonce::fresh();
+    /// let vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
     /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
-    pub(crate) fn new(execution: &str, observer: &dyn Observer, section: &str) -> Result<Self> {
+    pub(crate) fn new(
+        nonce: &GuardNonce,
+        execution: &str,
+        observer: &dyn Observer,
+        section: &str,
+    ) -> Result<Self> {
         let lua = Lua::new_with(
             StdLib::STRING | StdLib::TABLE | StdLib::MATH,
             LuaOptions::default(),
@@ -242,7 +253,7 @@ impl SectionVm {
         if let Err(error) = harden(&vm.lua) {
             return vm.construction_failed(error, observer, section);
         }
-        if let Err(error) = install_untrusted(&vm.lua) {
+        if let Err(error) = install_untrusted(&vm.lua, nonce) {
             return vm.construction_failed(error, observer, section);
         }
         install_instruction_budget(&vm.lua);
@@ -261,13 +272,14 @@ impl SectionVm {
     /// # Errors
     /// Returns [`Error::Lua`] if the VM cannot be built or hardened.
     pub(crate) fn new_for_section(
+        nonce: &GuardNonce,
         tools: &ToolBindings,
         models: &ModelBindings,
         execution: &str,
         observer: &dyn Observer,
         section: &str,
     ) -> Result<Self> {
-        let mut vm = Self::new(execution, observer, section)?;
+        let mut vm = Self::new(nonce, execution, observer, section)?;
         vm.bound_tools = tools.clone();
         vm.bound_models = models.clone();
         Ok(vm)
@@ -363,8 +375,10 @@ impl SectionVm {
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
+    /// use promptforge_core::untrusted::GuardNonce;
     ///
-    /// let mut vm = SectionVm::new("example-run", &NullObserver::default(), "Example")?;
+    /// let nonce = GuardNonce::fresh();
+    /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("input", &serde_json::json!({ "id": 1 }), &StoreRef::memory(), None)?;
     /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
@@ -689,8 +703,10 @@ impl SectionVm {
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
+    /// use promptforge_core::untrusted::GuardNonce;
     ///
-    /// let mut vm = SectionVm::new("example-run", &NullObserver::default(), "Example")?;
+    /// let nonce = GuardNonce::fresh();
+    /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
     /// vm.bind_reply("model answer", &NullObserver::default(), "Example")?;
     /// vm.teardown(&NullObserver::default(), "Example");
@@ -759,8 +775,10 @@ impl SectionVm {
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
     /// use promptforge_core::store::StoreRef;
+    /// use promptforge_core::untrusted::GuardNonce;
     ///
-    /// let mut vm = SectionVm::new("example-run", &NullObserver::default(), "Example")?;
+    /// let nonce = GuardNonce::fresh();
+    /// let mut vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
     /// vm.inject_host("", &serde_json::json!({}), &StoreRef::memory(), None)?;
     /// assert_eq!(vm.var()?, serde_json::json!({}));
     /// vm.teardown(&NullObserver::default(), "Example");
@@ -935,8 +953,10 @@ impl SectionVm {
     /// ```text
     /// use promptforge_core::lua::SectionVm;
     /// use promptforge_core::observe::NullObserver;
+    /// use promptforge_core::untrusted::GuardNonce;
     ///
-    /// let vm = SectionVm::new("example-run", &NullObserver::default(), "Example")?;
+    /// let nonce = GuardNonce::fresh();
+    /// let vm = SectionVm::new(&nonce, "example-run", &NullObserver::default(), "Example")?;
     /// vm.teardown(&NullObserver::default(), "Example");
     /// # Ok::<(), promptforge_core::Error>(())
     /// ```
@@ -1034,7 +1054,7 @@ pub(crate) fn run_chunk(
     observer: &Arc<dyn Observer>,
     section: &str,
 ) -> Result<LuaOutcome> {
-    let mut vm = SectionVm::new(execution, observer.as_ref(), section)?;
+    let mut vm = SectionVm::new(&GuardNonce::fresh(), execution, observer.as_ref(), section)?;
     vm.inject_host(args, sys, store, None)?;
     vm.install_host_apis(observer, section)?;
     let returned: MultiValue = vm.lua.load(source).eval().map_err(Error::lua)?;

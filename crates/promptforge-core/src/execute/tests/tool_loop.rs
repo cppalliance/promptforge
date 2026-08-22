@@ -11,6 +11,7 @@ async fn run_echo_loop(addr: SocketAddr, max_iterations: usize) -> Result<String
     let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
     run_tool_loop(
         &client,
         &schemas,
@@ -18,7 +19,7 @@ async fn run_echo_loop(addr: SocketAddr, max_iterations: usize) -> Result<String
         &registry,
         "loop forever".to_string(),
         max_iterations,
-        silent_progress(&turns, &options),
+        silent_progress(&turns, &options, &nonce),
         None,
         None,
         None,
@@ -99,6 +100,7 @@ async fn tool_loop_errors_on_unknown_tool() {
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
     let err = run_tool_loop(
         &client,
         &schemas,
@@ -106,7 +108,7 @@ async fn tool_loop_errors_on_unknown_tool() {
         &registry,
         "call unknown".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&turns, &options),
+        silent_progress(&turns, &options, &nonce),
         None,
         None,
         None,
@@ -146,6 +148,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
     let err = run_tool_loop(
         &client,
         &schemas,
@@ -160,6 +163,7 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
             turns: &turns,
             debug: None,
             completion_options: &options,
+            nonce: &nonce,
         },
         None,
         None,
@@ -217,6 +221,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
     let error = run_tool_loop(
         &client,
         &[],
@@ -231,6 +236,7 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
             turns: &turns,
             debug: None,
             completion_options: &options,
+            nonce: &nonce,
         },
         None,
         None,

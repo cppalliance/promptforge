@@ -243,6 +243,7 @@ pub(crate) async fn run_one_section_impl(
                                 turns: ctx.turns.as_ref(),
                                 debug: ctx.debug.map(AsRef::as_ref),
                                 completion_options: &completion_options,
+                                nonce: ctx.nonce,
                             },
                             Some(&block_counts),
                             // Live H1 has no prompt-wide alias analysis and no
@@ -344,6 +345,7 @@ pub(crate) async fn run_one_section_impl(
                                 turns: ctx.turns.as_ref(),
                                 debug: ctx.debug.map(AsRef::as_ref),
                                 completion_options: options,
+                                nonce: ctx.nonce,
                             },
                             counts.as_ref(),
                             global_aliases,

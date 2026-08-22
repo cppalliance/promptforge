@@ -23,6 +23,7 @@ use crate::lua::{LuaProgram, current_tool_bindings};
 use crate::model::{CompletionOptions, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use crate::observe::{NullObserver, Observation, detail};
 use crate::tools::{Tool, ToolError, ToolErrorKind, ToolId, ToolOutput, ToolRegistry};
+use crate::untrusted::GuardNonce;
 
 const EXECUTION: &str = "execute-test";
 
@@ -790,11 +791,12 @@ fn aliased_tool_script(alias: &str) -> Vec<GatewayReply> {
 }
 
 /// Progress that reports nowhere, for the loop tests that assert on the
-/// reply rather than on the events. The caller owns the turn counter, so
-/// the borrow ends with the call.
+/// reply rather than on the events. The caller owns the turn counter and
+/// the nonce, so the borrows end with the call.
 fn silent_progress<'a>(
     turns: &'a AtomicU32,
     options: &'a CompletionOptions,
+    nonce: &'a GuardNonce,
 ) -> SectionProgress<'a> {
     SectionProgress {
         execution: EXECUTION,
@@ -803,6 +805,7 @@ fn silent_progress<'a>(
         turns,
         debug: None,
         completion_options: options,
+        nonce,
     }
 }
 
@@ -895,6 +898,7 @@ fn tool_description_override_appears_in_model_schema() {
     let echo = EchoTool;
     let registry = ToolRegistry::new([&echo as &dyn Tool]).expect("unique test registry");
     let mut vm = SectionVm::new_for_section(
+        &GuardNonce::fresh(),
         &bindings,
         &<ModelBindings as Default>::default(),
         EXECUTION,
@@ -967,6 +971,7 @@ fn need_override_reaches_the_schema_and_add_beats_need() {
     let echo = EchoTool;
     let registry = ToolRegistry::new([&echo as &dyn Tool]).expect("unique test registry");
     let mut vm = SectionVm::new_for_section(
+        &GuardNonce::fresh(),
         &bindings,
         &<ModelBindings as Default>::default(),
         EXECUTION,
@@ -1038,6 +1043,7 @@ async fn tool_loop_dispatches_then_returns_text() {
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
     let (out, _) = run_tool_loop(
         &client,
         &schemas,
@@ -1045,7 +1051,7 @@ async fn tool_loop_dispatches_then_returns_text() {
         &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&turns, &options),
+        silent_progress(&turns, &options, &nonce),
         None,
         None,
         None,
@@ -1112,6 +1118,7 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
     let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
 
     let handle = CancelHandle::new();
     let canceller = handle.clone();
@@ -1130,7 +1137,7 @@ async fn cancel_during_in_flight_tool_call_returns_promptly() {
             &registry,
             "ask the model".to_string(),
             DEFAULT_MAX_TOOL_ITERATIONS,
-            silent_progress(&turns, &options),
+            silent_progress(&turns, &options, &nonce),
             None,
             None,
             None,
@@ -1184,6 +1191,7 @@ async fn run_tool_loop_recorded(
     let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
     let out = run_tool_loop(
         &client,
         &schemas,
@@ -1198,6 +1206,7 @@ async fn run_tool_loop_recorded(
             turns: &turns,
             debug: None,
             completion_options: &options,
+            nonce: &nonce,
         },
         None,
         None,
@@ -1373,6 +1382,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
     let (out, _) = run_tool_loop(
         &client,
         &schemas,
@@ -1380,7 +1390,7 @@ async fn untrusted_tool_result_is_guard_wrapped_in_the_loop() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&turns, &options),
+        silent_progress(&turns, &options, &nonce),
         None,
         None,
         None,
@@ -1424,7 +1434,10 @@ fn tool_turn_nonces(bodies: &[Value]) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn untrusted_nonce_is_fresh_per_round() {
+async fn untrusted_nonce_is_stable_across_rounds() {
+    // One nonce per run: every round's envelope in a single loop carries the
+    // same nonce, so identical content wraps byte-identically and KV-cache
+    // prefixes stay shared across rounds.
     let gateway = ScriptedGateway::start(vec![
         resp_tool_call("call_0", "echo", "{\"value\":\"hi\"}"),
         resp_tool_call("call_1", "echo", "{\"value\":\"hi\"}"),
@@ -1442,6 +1455,7 @@ async fn untrusted_nonce_is_fresh_per_round() {
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
     let (out, _) = run_tool_loop(
         &client,
         &schemas,
@@ -1449,7 +1463,7 @@ async fn untrusted_nonce_is_fresh_per_round() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&turns, &options),
+        silent_progress(&turns, &options, &nonce),
         None,
         None,
         None,
@@ -1463,9 +1477,47 @@ async fn untrusted_nonce_is_fresh_per_round() {
         nonces.len() >= 2,
         "expected two rounds of guard-wrapped tool output, got: {nonces:?}"
     );
+    assert!(
+        nonces.windows(2).all(|pair| pair[0] == pair[1]),
+        "every round's untrusted wrap in a run must carry the run's nonce: {nonces:?}"
+    );
+}
+
+#[tokio::test]
+async fn untrusted_nonce_differs_across_runs() {
+    // The nonce is minted once per run: two runs of the same prompt wrap the
+    // same tool output under different nonces, so an envelope's tag stays
+    // unguessable from one run to the next.
+    let md = "---\nname: t\ndescription: d\npromptforge: 1\n---\n\n\
+        # Test prompt\n\n```lua shared\n\
+        tools.need('echo', 'echo tool')\n\
+        tools.always('echo')\n\
+        models.default('writer', 'A general model for tests')\n```\n\n\
+        ## Only\n\nUse the tool.\n";
+    let mut run_nonces = Vec::new();
+    for _ in 0..2 {
+        let gateway = ScriptedGateway::start(echo_then_text_script()).await;
+        let out = run(
+            &bound_with_tools(md, Vec::new()),
+            "",
+            &[Arc::new(UntrustedEchoTool) as Arc<dyn Tool>],
+            &StoreRef::memory(),
+            gatewayed(gateway.addr()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out, "final answer");
+        let nonces = tool_turn_nonces(&gateway.requests());
+        assert_eq!(
+            nonces.len(),
+            1,
+            "each run wraps exactly one tool result, got: {nonces:?}"
+        );
+        run_nonces.push(nonces.into_iter().next().expect("one nonce"));
+    }
     assert_ne!(
-        nonces[0], nonces[1],
-        "each round's untrusted wrap must use a fresh nonce, never a reused one"
+        run_nonces[0], run_nonces[1],
+        "each run must mint its own nonce"
     );
 }
 
@@ -1483,6 +1535,7 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
     let (out, _) = run_tool_loop(
         &client,
         &schemas,
@@ -1490,7 +1543,7 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&turns, &options),
+        silent_progress(&turns, &options, &nonce),
         None,
         None,
         None,
@@ -1534,6 +1587,7 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
         thinking: None,
         tool_dialect: crate::dialects::ToolDialectId::Gemma3ToolCode,
     };
+    let nonce = GuardNonce::fresh();
     let (out, _) = run_tool_loop(
         &client,
         &schemas,
@@ -1541,7 +1595,7 @@ async fn content_fence_tool_loop_echoes_user_tool_result() {
         &registry,
         "ask".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
-        silent_progress(&turns, &options),
+        silent_progress(&turns, &options, &nonce),
         None,
         None,
         None,

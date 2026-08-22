@@ -11,7 +11,7 @@ use crate::lua::ToolCallCounts;
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
 use crate::tools::{ToolId, ToolOutput, ToolRegistry};
-use crate::untrusted;
+use crate::untrusted::{self, GuardNonce};
 use crate::{Error, Result};
 
 use super::support::advance_turn;
@@ -44,6 +44,8 @@ pub(crate) struct SectionProgress<'a> {
     pub(crate) debug: Option<&'a dyn DebugCapture>,
     /// Per-call model fields from the section's selected binding.
     pub(crate) completion_options: &'a CompletionOptions,
+    /// The run's untrusted-envelope nonce, shared by every wrap in the run.
+    pub(crate) nonce: &'a GuardNonce,
 }
 
 /// How many model rounds a prose block may take.
@@ -105,6 +107,7 @@ pub(crate) async fn run_prose_inference(
         turns,
         debug,
         completion_options,
+        nonce,
     } = progress;
 
     let dialect_registry = ToolDialectRegistry::builtin();
@@ -277,12 +280,16 @@ pub(crate) async fn run_prose_inference(
                     };
                     successful_tool_calls += 1;
                     // Trust travels with the output: an untrusted result is
-                    // nonce-wrapped before it can reach the next model turn. A
-                    // FRESH CSPRNG nonce is drawn per wrap so a guard tag is
-                    // never reused across tool results or rounds; reuse would let
-                    // content seen under one nonce forge a later block's close tag.
+                    // nonce-wrapped before it can reach the next model turn. Every
+                    // wrap in the run shares the run's nonce, so identical content
+                    // yields a byte-identical envelope and KV-cache prefixes stay
+                    // shared across rounds and fanout arms; the `<`-escaping is
+                    // what actually blocks a forged close tag, so the reuse costs
+                    // nothing.
                     let result = match output.trust() {
-                        crate::tools::OutputTrust::Untrusted => untrusted::wrap(output.text()),
+                        crate::tools::OutputTrust::Untrusted => {
+                            untrusted::wrap(nonce, output.text())
+                        }
                         crate::tools::OutputTrust::Trusted => output.text().to_owned(),
                     };
                     results.push(crate::dialects::FramedToolResult::new(

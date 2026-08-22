@@ -212,6 +212,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
     );
 
     let constructed = SectionVm::new_for_section(
+        &control.nonce,
         &control.bindings,
         &control.models,
         &control.execution,

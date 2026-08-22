@@ -1,6 +1,6 @@
 use super::{
-    Arc, AtomicU32, AtomicUsize, Error, LUA_LOG_CHARACTER_LIMIT, Lua, MultiValue, Observation,
-    Observer, Ordering, Result, StoreRef, Value, WriteScope, detail,
+    Arc, AtomicU32, AtomicUsize, Error, GuardNonce, LUA_LOG_CHARACTER_LIMIT, Lua, MultiValue,
+    Observation, Observer, Ordering, Result, StoreRef, Value, WriteScope, detail,
 };
 
 /// Shared body of the persistent per-section `log(message)` host callback.
@@ -90,13 +90,16 @@ pub(crate) fn is_log_line_break_or_control(character: char) -> bool {
 }
 
 /// Installs `untrusted(s)` as a persistent global valid for the section's
-/// whole lifecycle. The closure captures nothing and every string input
-/// succeeds, so the install needs no observer, no budget, and no
-/// [`mlua::Scope`]; a non-string argument fails through mlua's automatic
-/// type error.
-pub(crate) fn install_untrusted(lua: &Lua) -> Result<()> {
+/// whole lifecycle. The closure captures an owned clone of the run's nonce -
+/// mlua's `create_function` requires `Fn + Send + 'static`, so no borrow can
+/// cross the install - and every wrap the VM performs shares that one nonce.
+/// Every string input succeeds, so the install needs no observer, no budget,
+/// and no [`mlua::Scope`]; a non-string argument fails through mlua's
+/// automatic type error.
+pub(crate) fn install_untrusted(lua: &Lua, nonce: &GuardNonce) -> Result<()> {
+    let nonce = nonce.clone();
     let untrusted = lua
-        .create_function(|_, s: String| Ok(crate::untrusted::wrap(&s)))
+        .create_function(move |_, s: String| Ok(crate::untrusted::wrap(&nonce, &s)))
         .map_err(Error::lua)?;
     lua.globals()
         .raw_set("untrusted", untrusted)
