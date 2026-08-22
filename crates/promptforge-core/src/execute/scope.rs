@@ -8,7 +8,7 @@ use promptforge_tool_picker::{ToolId as PickerToolId, ToolPicker};
 use crate::client::ToolSchema;
 use crate::lua::{ToolBinding, ToolBindings};
 use crate::observe::{Observer, detail};
-use crate::tools::{ToolId, ToolRegistry};
+use crate::tools::ToolId;
 use crate::{Error, NearDuplicateDiagnostic, Result};
 
 /// One near-duplicate pair copied out of the picker's borrowing result.
@@ -87,18 +87,31 @@ impl ToolAnalysis {
     }
 }
 
+/// How the tool loop reaches the tool behind one in-scope alias.
+///
+/// Produced by [`prepare_scoped_tools`]: bound tools carry their binding
+/// (whose attached implementation is the dispatch target); local tools are
+/// prompt-author Lua functions with no live implementation, marked here so
+/// the loop routes them back into the section VM instead.
+#[derive(Debug, Clone)]
+pub(crate) enum DispatchTarget {
+    /// A bound live tool, called through the binding's attached implementation.
+    Bound(ToolBinding),
+    /// A Lua-local tool, dispatched through the section's local dispatcher.
+    Local,
+}
+
 pub(crate) fn prepare_effective_scope(
     analysis: &ToolAnalysis,
     bindings: &[ToolBinding],
     local_schemas: &[ToolSchema],
-    registry: &ToolRegistry<'_>,
     execution: &str,
     observer: &dyn Observer,
     section: &str,
-) -> Result<(Vec<ToolSchema>, BTreeMap<String, ToolId>)> {
+) -> Result<(Vec<ToolSchema>, BTreeMap<String, DispatchTarget>)> {
     observer.observe(execution, section, detail::TOOL_SCOPE_VALIDATION_STARTED);
     let result = validate_effective_scope_inner(analysis, bindings)
-        .and_then(|()| prepare_scoped_tools(bindings, local_schemas, registry));
+        .and_then(|()| prepare_scoped_tools(bindings, local_schemas));
     observer.observe(
         execution,
         section,
@@ -141,22 +154,19 @@ pub(crate) fn validate_effective_scope_inner(
 pub(crate) fn prepare_scoped_tools(
     bindings: &[ToolBinding],
     local_schemas: &[ToolSchema],
-    registry: &ToolRegistry<'_>,
-) -> Result<(Vec<ToolSchema>, BTreeMap<String, ToolId>)> {
+) -> Result<(Vec<ToolSchema>, BTreeMap<String, DispatchTarget>)> {
     let mut schemas = Vec::with_capacity(bindings.len() + local_schemas.len());
     let mut dispatch = BTreeMap::new();
     for binding in bindings {
-        let tool = registry
-            .get(binding.id())
-            .ok_or_else(|| Error::UnknownScopedTool(binding.alias().to_owned()))?;
         // Model-facing description precedence: `tools.add` override >
-        // `tools.bind`/`tools.always` override > registry (catalog) text.
-        // The first two layers are already folded together by
+        // `tools.bind`/`tools.always` override > the bound tool's catalog
+        // text. The first two layers are already folded together by
         // `binding_for_scope` (the H2 add runtime overwrites the frozen
-        // binding's `model_description`); the catalog fallback happens here.
+        // binding's `model_description`); the catalog fallback reads the
+        // implementation attached at bind time.
         let description = binding
             .model_description()
-            .unwrap_or_else(|| tool.description())
+            .unwrap_or_else(|| binding.tool().description())
             .to_owned();
         // F7: build every advertised schema through the validated constructor,
         // so an unusable wire name or a non-object JSON Schema is refused here
@@ -164,23 +174,24 @@ pub(crate) fn prepare_scoped_tools(
         let schema = ToolSchema::new(
             binding.alias().to_owned(),
             description,
-            tool.parameters_schema(),
+            binding.tool().parameters_schema(),
         )
         .map_err(|error| Error::BindSchema {
             alias: binding.alias().to_owned(),
             source: Box::new(error),
         })?;
         schemas.push(schema);
-        dispatch.insert(binding.alias().to_owned(), binding.id().clone());
-    }
-    // Local tools dispatch under a sentinel identity the tool loop recognizes
-    // by server name; they never enter the registry. The alias was validated
-    // at `tools.add_local` registration, so identity construction cannot fail.
-    for schema in local_schemas {
         dispatch.insert(
-            schema.name.clone(),
-            ToolId::from_validated("local", schema.name.clone()),
+            binding.alias().to_owned(),
+            DispatchTarget::Bound(binding.clone()),
         );
+    }
+    // Local tools are prompt-author Lua functions with no live implementation;
+    // the loop recognizes the `Local` marker and routes their calls back into
+    // the section VM. The alias was validated at `tools.add_local`
+    // registration.
+    for schema in local_schemas {
+        dispatch.insert(schema.name.clone(), DispatchTarget::Local);
         schemas.push(schema.clone());
     }
     Ok((schemas, dispatch))

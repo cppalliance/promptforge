@@ -31,7 +31,8 @@
 //! Rust installs tool bindings captured from live H1 into each section VM.
 //! Prompt-wide aliases and H2 additions form the effective model-visible scope,
 //! which is checked for semantic near-duplicates before concrete tools are
-//! advertised under their local aliases and dispatched by stable identity.
+//! advertised under their local aliases and dispatched through the
+//! implementation each binding carries.
 //!
 //! Lua `execute()` starts a contained chain at a visible section (fresh VM,
 //! fresh conversation, recursion capped at 8): the chain runs from the target
@@ -115,7 +116,7 @@ pub(crate) use gateway::env_client_with_limits;
 #[cfg(test)]
 pub(crate) use scope::OwnedNearDuplicate;
 #[cfg(test)]
-pub(crate) use scope::{prepare_effective_scope, prepare_scoped_tools};
+pub(crate) use scope::{DispatchTarget, prepare_effective_scope, prepare_scoped_tools};
 #[cfg(test)]
 pub(crate) use serde_json::json;
 #[cfg(test)]
@@ -235,7 +236,6 @@ pub async fn run(
         None => crate::lua::LuaProgram::empty().map_err(RunError::from)?,
     };
     let ctx = RunContext::new(prompt, args, store, shared_tools, shared, &config);
-    let registry = ctx.shared_tools().registry();
 
     let RunConfig {
         execution,
@@ -250,7 +250,7 @@ pub async fn run(
     observer.observe(&execution, &prompt.title, detail::RUN_STARTED);
 
     let run_body = async {
-        let h1 = execute_live_h1(&ctx, resolution, &registry, client.as_ref()).await?;
+        let h1 = execute_live_h1(&ctx, resolution, client.as_ref()).await?;
         if let Some(value) = h1.returned {
             return Ok(value);
         }

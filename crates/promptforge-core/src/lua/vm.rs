@@ -601,7 +601,7 @@ impl SectionVm {
     pub(crate) fn run_live_h1_block(
         &self,
         program: &LuaProgram,
-        resolution: &RuntimeResolution<'_, '_>,
+        resolution: &RuntimeResolution<'_>,
         observer: &dyn Observer,
         section: &str,
     ) -> Result<Option<String>> {

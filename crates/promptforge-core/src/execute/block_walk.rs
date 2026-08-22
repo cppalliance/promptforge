@@ -57,7 +57,7 @@ pub(crate) enum BlockRunMode<'a> {
     /// tool calls into a fresh per-block [`ToolCallCounts`], and writes the
     /// reply as a plain global - no `sys` enrichment, no local dispatch, no
     /// global aliases.
-    LiveH1(&'a RuntimeResolution<'a, 'a>),
+    LiveH1(&'a RuntimeResolution<'a>),
     /// An H2 section: the top-level walk, an `execute` chain, or a fanout
     /// arm.
     Section,
@@ -126,8 +126,6 @@ pub(crate) async fn run_one_section_impl(
     turns: &AtomicU32,
     client: &mut Option<GatewayClient>,
 ) -> Result<SectionFlow> {
-    // Walk-only state: the registry is read only inside the block walk.
-    let registry = ctx.shared_tools().registry();
     // Section mode: `counts` doubles as the one-time gate: it is `Some`
     // exactly after the first prose block installed the counts and resolved
     // the model. Schemas and dispatch rebuild on EVERY prose block so
@@ -218,8 +216,7 @@ pub(crate) async fn run_one_section_impl(
                         // Live H1 registers no local tools; the list is always
                         // empty here.
                         let local_schemas = vm.local_tool_schemas()?;
-                        let (schemas, dispatch) =
-                            prepare_scoped_tools(&scope, &local_schemas, &registry)?;
+                        let (schemas, dispatch) = prepare_scoped_tools(&scope, &local_schemas)?;
                         if client.is_none() {
                             *client = Some(env_client_with_limits(ctx.limits())?);
                         }
@@ -241,7 +238,6 @@ pub(crate) async fn run_one_section_impl(
                             active_client,
                             &schemas,
                             &dispatch,
-                            &registry,
                             conversation,
                             prose,
                             prose_mode,
@@ -297,7 +293,6 @@ pub(crate) async fn run_one_section_impl(
                             ctx.analysis(),
                             &effective_bindings,
                             &local_schemas,
-                            &registry,
                             ctx.execution(),
                             observer,
                             name,
@@ -334,14 +329,13 @@ pub(crate) async fn run_one_section_impl(
                         };
                         let global_aliases = Some(&ctx.analysis().alias_to_id);
                         // Local tools are Lua functions on this section VM; route
-                        // their calls back into it rather than the registry.
+                        // their calls back into it rather than to a bound tool.
                         let local_dispatch =
                             |alias: &str, args: serde_json::Value| vm.call_local_tool(alias, &args);
                         let outcome = run_prose_inference(
                             active_client,
                             &schemas,
                             &dispatch,
-                            &registry,
                             conversation,
                             prose,
                             prose_mode,

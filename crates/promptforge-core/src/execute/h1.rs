@@ -5,7 +5,6 @@ use crate::client::GatewayClient;
 use crate::lua::ToolBindings;
 use crate::model::ModelBindings;
 use crate::resolve::RuntimeResolution;
-use crate::tools::ToolRegistry;
 use crate::{Error, Result};
 
 use super::block_walk::{BlockRunMode, SectionFlow};
@@ -24,10 +23,9 @@ pub(crate) struct LiveH1State {
 pub(crate) async fn execute_live_h1(
     ctx: &RunContext,
     resolution: ResolutionContext<'_>,
-    registry: &ToolRegistry<'_>,
     client: Option<&GatewayClient>,
 ) -> Result<LiveH1State> {
-    let runtime = RuntimeResolution::new(resolution.picker, registry, resolution.models);
+    let runtime = RuntimeResolution::new(resolution.picker, ctx.shared_tools(), resolution.models);
     // Construction and limits failures propagate bare, before any teardown
     // observation exists; every failure past this point tears the frame's
     // VM down exactly once.

@@ -1,6 +1,6 @@
 use super::{
     Arc, Error, Lua, LuaToolHandle, ModelBindingState, ModelBindings, ModelResolver, MultiValue,
-    Mutex, Result, ToolBinding, ToolBindings, ToolRegistry, ToolResolver, install_live_models,
+    Mutex, Result, SharedTools, ToolBinding, ToolBindings, ToolResolver, install_live_models,
 };
 
 /// Stores tool bindings and the first callback failure recorded by live H1.
@@ -37,15 +37,15 @@ impl LiveBindingProducer {
     ///
     /// # Errors
     /// Returns [`Error::Lua`] when either table cannot be installed.
-    pub(crate) fn install<'scope, 'env: 'scope, 'tools: 'env>(
+    pub(crate) fn install<'scope, 'env: 'scope>(
         &self,
         lua: &'env Lua,
         scope: &'scope mlua::Scope<'scope, 'env>,
         tool_resolver: &'env dyn ToolResolver,
-        registry: &'env ToolRegistry<'tools>,
+        tools: &'env SharedTools,
         model_resolver: &'env dyn ModelResolver,
     ) -> Result<()> {
-        install_live_tools(lua, scope, tool_resolver, registry, &self.tools)?;
+        install_live_tools(lua, scope, tool_resolver, tools, &self.tools)?;
         install_live_models(lua, scope, model_resolver, &self.models)
     }
 
@@ -95,8 +95,9 @@ impl LiveBindingProducer {
 /// Installs live H1 tool resolution into an existing Lua VM.
 ///
 /// `tools.bind` consults `resolver` at the point Lua executes the call, verifies
-/// the selected identity against `registry`, records the frozen binding, and
-/// returns an inspectable Tool object populated from the live registry entry.
+/// the selected identity against the run's shared tool set, attaches the
+/// resolved implementation to the recorded binding, and returns an inspectable
+/// Tool object populated from it.
 ///
 /// # Errors
 /// Returns [`Error::Lua`] when the Lua table cannot be installed.
@@ -104,11 +105,11 @@ impl LiveBindingProducer {
     clippy::too_many_lines,
     reason = "one scoped table keeps its callbacks and shared recorder together"
 )]
-pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
+pub(crate) fn install_live_tools<'scope, 'env: 'scope>(
     lua: &'env Lua,
     scope: &'scope mlua::Scope<'scope, 'env>,
     resolver: &'env dyn ToolResolver,
-    registry: &'env ToolRegistry<'tools>,
+    shared_tools: &'env SharedTools,
     state: &Arc<Mutex<BindingState>>,
 ) -> Result<()> {
     let tools = lua.create_table().map_err(Error::lua)?;
@@ -146,7 +147,7 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                         return Err(mlua::Error::external("tool capability resolution failed"));
                     }
                 };
-                let Some(tool) = registry.get(&id) else {
+                let Some(tool) = shared_tools.get(&id) else {
                     let error = Error::PickedToolNotLive {
                         alias: alias.clone(),
                         id,
@@ -157,7 +158,7 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                     bindings.record_error(error);
                     return Err(mlua::Error::external("picked tool is not live"));
                 };
-                let handle = LuaToolHandle::from_live_binding(&alias, &description, tool);
+                let handle = LuaToolHandle::from_live_binding(&alias, &description, tool.as_ref());
                 let mut bindings = bind_state
                     .lock()
                     .map_err(|_| mlua::Error::external("tool binding recorder was poisoned"))?;
@@ -182,6 +183,7 @@ pub(crate) fn install_live_tools<'scope, 'env: 'scope, 'tools: 'env>(
                     description: description.clone(),
                     id,
                     model_description,
+                    tool,
                 });
                 Ok(handle)
             },

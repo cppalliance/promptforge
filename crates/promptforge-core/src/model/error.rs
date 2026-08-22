@@ -110,7 +110,6 @@ impl CompletionError {
             | Error::Substitution(_)
             | Error::ToolLoopExhausted
             | Error::OutOfScopeToolCall { .. }
-            | Error::UnknownScopedTool(_)
             | Error::ModelRequired { .. }
             | Error::UnsupportedVersion(_)
             | Error::DialectNone

@@ -8,7 +8,8 @@ use super::output::{ToolError, ToolOutput};
 
 /// Cloneable tool set for concurrent fanout arms.
 ///
-/// Each arm builds a short-lived [`ToolRegistry`] that borrows these `Arc`s.
+/// H1 resolution attaches these `Arc`s to the bindings it produces, so the
+/// resolved implementation travels with the binding for the whole run.
 #[derive(Clone, Default)]
 pub(crate) struct SharedTools {
     tools: Arc<[Arc<dyn Tool>]>,
@@ -29,8 +30,8 @@ impl std::fmt::Debug for SharedTools {
 impl SharedTools {
     /// Builds a shared set from caller-owned tool arcs.
     ///
-    /// Validates identity uniqueness once, here, so every [`Self::registry`] can
-    /// trust the invariant without rescanning.
+    /// Validates identity uniqueness once, here, so [`Self::get`] can trust
+    /// the invariant without rescanning.
     ///
     /// # Errors
     /// Returns [`ToolRegistryError::DuplicateId`] if two tools share a
@@ -45,12 +46,17 @@ impl SharedTools {
         })
     }
 
-    /// Borrowing registry over the shared arcs.
+    /// Returns the shared implementation for `id`, if one is registered.
     ///
-    /// Uniqueness was established by [`Self::new`], so this skips revalidation.
+    /// This is the bind-time lookup (`tools.bind` attaches the resolved
+    /// implementation to its binding), a cold path run once per declaration,
+    /// so it scans linearly rather than carrying a cached-identity index.
     #[must_use]
-    pub(crate) fn registry(&self) -> ToolRegistry<'_> {
-        ToolRegistry::from_unique(self.tools.iter().map(AsRef::as_ref))
+    pub(crate) fn get(&self, id: &ToolId) -> Option<Arc<dyn Tool>> {
+        self.tools
+            .iter()
+            .find(|tool| tool.id() == *id)
+            .map(Arc::clone)
     }
 }
 
@@ -332,16 +338,6 @@ impl<'a> ToolRegistry<'a> {
             ids.push(id);
         }
         Ok(Self { tools, ids })
-    }
-
-    /// Builds a registry from tools whose identities are already known unique.
-    ///
-    /// For internal callers that validated uniqueness when the tool set was
-    /// assembled (see [`SharedTools`]), avoiding a redundant second scan.
-    pub(crate) fn from_unique(tools: impl IntoIterator<Item = &'a dyn Tool>) -> ToolRegistry<'a> {
-        let tools: Vec<&'a dyn Tool> = tools.into_iter().collect();
-        let ids = tools.iter().map(|tool| tool.id()).collect();
-        Self { tools, ids }
     }
 
     /// Returns the number of live registry entries.

@@ -18,7 +18,7 @@
 //! All three drivers - the walk's `run_one_section`, the live H1 pass, and
 //! the fanout arm - are one construct-run-teardown cycle over the frame,
 //! differing only in seed and [`BlockRunMode`]. The run-scoped inputs
-//! (bindings, models, limits, the shared registry) arrive through the
+//! (bindings, models, limits, the shared tools) arrive through the
 //! [`RunContext`].
 
 use std::sync::Arc;
@@ -225,7 +225,7 @@ impl SectionContext {
     /// the teardown boundary still fires exactly once on that path.
     pub(crate) fn new_live_h1(
         ctx: &RunContext,
-        runtime: &RuntimeResolution<'_, '_>,
+        runtime: &RuntimeResolution<'_>,
         client: Option<&GatewayClient>,
     ) -> Result<Self> {
         let title = &ctx.prompt().title;
@@ -429,7 +429,7 @@ impl SectionContext {
     /// Runs the frame's ordered block walk: Lua chunks in place, prose
     /// through the tool loop, the reply rolling forward.
     ///
-    /// `ctx` supplies the run-scoped inputs (the shared registry, the
+    /// `ctx` supplies the run-scoped inputs (the shared tools, the
     /// bindings, models, limits, and the tool-loop cap); everything
     /// per-frame - the VM, the `sys` JSON, the reply, the conversation, the
     /// counts, the completion options, and the effective reporting handles -

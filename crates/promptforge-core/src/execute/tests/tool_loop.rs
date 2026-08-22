@@ -4,11 +4,9 @@ use super::*;
 /// Runs the standard echo fixture with the requested loop cap.
 async fn run_echo_loop(addr: SocketAddr, max_iterations: usize) -> Result<String> {
     let client = gateway_client(addr);
-    let echo = EchoTool;
-    let tools: &[&dyn Tool] = &[&echo];
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+    let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(EchoTool)];
+    let schemas = schemas_for(&tools);
+    let dispatch = dispatch_for(&tools);
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
     let nonce = GuardNonce::fresh();
@@ -16,7 +14,6 @@ async fn run_echo_loop(addr: SocketAddr, max_iterations: usize) -> Result<String
         &client,
         &schemas,
         &dispatch,
-        &registry,
         "loop forever".to_string(),
         max_iterations,
         &NullObserver,
@@ -98,9 +95,8 @@ async fn tool_loop_errors_on_unknown_tool() {
 
     // Advertise schemas so the request carries tools, but pass no dispatch
     // targets, so the returned call resolves to no tool.
-    let echo = EchoTool;
-    let schemas = schemas_for(&[&echo]);
-    let registry = ToolRegistry::new(std::iter::empty()).expect("unique test registry");
+    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
+    let schemas = schemas_for(&[echo]);
 
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
@@ -109,7 +105,6 @@ async fn tool_loop_errors_on_unknown_tool() {
         &client,
         &schemas,
         &BTreeMap::new(),
-        &registry,
         "call unknown".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         &NullObserver,
@@ -147,11 +142,10 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
     let addr = gateway.addr();
     let client = gateway_client(addr);
 
-    let failing = FailingTool;
-    let tools: &[&dyn Tool] = &[&failing];
-    let schemas = schemas_for(tools);
-    let dispatch = dispatch_for(tools);
-    let registry = ToolRegistry::new(tools.iter().copied()).expect("unique test registry");
+    let failing: Arc<dyn Tool> = Arc::new(FailingTool);
+    let tools: Vec<Arc<dyn Tool>> = vec![failing];
+    let schemas = schemas_for(&tools);
+    let dispatch = dispatch_for(&tools);
 
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
@@ -161,7 +155,6 @@ async fn a_failing_tool_is_reported_before_the_error_propagates() {
         &client,
         &schemas,
         &dispatch,
-        &registry,
         "ask the model".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         recorder.as_ref(),
@@ -230,7 +223,6 @@ async fn a_failing_model_turn_is_reported_before_the_error_propagates() {
         &client,
         &[],
         &BTreeMap::new(),
-        &ToolRegistry::new(std::iter::empty()).expect("unique test registry"),
         "private model input".to_string(),
         DEFAULT_MAX_TOOL_ITERATIONS,
         recorder.as_ref(),
