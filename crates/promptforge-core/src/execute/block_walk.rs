@@ -72,8 +72,8 @@ pub(crate) enum BlockRunMode<'a> {
 /// H1 pass); `mode` selects the per-block behavior (see [`BlockRunMode`]).
 /// The per-frame state arrives as borrows out of the driver's frame: `sys`,
 /// `reply`, `conversation`, `counts`, and `completion_options` are the
-/// frame's slots (the walk's `SectionContext` fields; the live H1 pass and
-/// the fanout arm keep theirs in locals until they move onto a frame), and
+/// frame's slots (the driver's `SectionContext` fields; the fanout arm
+/// keeps its own in locals until it moves onto a frame), and
 /// `observer`/`debug`/`turns` are the frame's effective reporting handles.
 ///
 /// In section mode a Lua chunk executes in place and may end the walk early
