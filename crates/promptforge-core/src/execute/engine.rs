@@ -25,8 +25,8 @@
 //!
 //! The engine parameterizes exactly the divergences the paths require: the
 //! walk's `var` seed, the `execute_depth`, and the cross-section reply
-//! carried in. The run-global `sys.id` counter rides the frame, shared by
-//! every chain and fanout. Everything else
+//! carried in. The run-global `sys.id` counter rides the [`RunContext`],
+//! shared by every chain and fanout. Everything else
 //! (the prose tool loop, scope validation, cancellation, teardown, and every
 //! observation) is shared, so a fix lands in one place for every path.
 //!
@@ -46,33 +46,22 @@
 //! runs as the frame's `run`; and the driver owns the teardown boundary, so
 //! every path tears the VM down exactly once.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64};
-
 use crate::client::GatewayClient;
-use crate::debug::DebugCapture;
 use crate::fanout;
-use crate::lua::{LuaFanoutResult, LuaProgram, SectionVm, ToolBindings, resolve_section_target};
+use crate::lua::{LuaFanoutResult, ToolBindings, resolve_section_target};
 use crate::model::ModelBindings;
-use crate::observe::{Observer, detail};
+use crate::observe::detail;
 use crate::parser::Section;
-use crate::store::{StoreRef, WriteScope};
-use crate::tools::SharedTools;
-use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
 use mlua::Value as LuaValue;
 
 use super::block_walk::{BlockRunMode, SectionFlow};
-use super::config::RunLimits;
 use super::context::RunContext;
-use super::gateway::GatewaySource;
 use super::scope::ToolAnalysis;
 use super::section_context::SectionContext;
-use super::section_vm::{SectionVmSetup, VmSeed};
 use super::support::{
-    GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, bridge_blocking, next_id, now_rfc3339_checked, sys_json,
+    GENERIC_COMPLETION, MAX_EXECUTE_DEPTH, bridge_blocking, next_id, now_rfc3339_checked,
 };
-use super::tools::attach_infer_hook;
 
 /// How one chain ended.
 enum WalkEnd {
@@ -83,64 +72,6 @@ enum WalkEnd {
     /// chain; the call's return value, for an `execute()` chain or a fanout
     /// arm's jump-started child walk).
     Returned(String),
-}
-
-/// The one borrowed frame every engine driver shares.
-///
-/// Bundled once in [`run`](super::run) so the live H1 pass, the section
-/// walk, and the fanout arm (via [`ControlContext::walk_context`]) each take
-/// one parameter instead of restating the same field tail. Every field is a
-/// borrow (or a `Copy` limit set) out of the run's owned state. The observer
-/// and debug sink are carried only as their `Arc` forms; a use site that
-/// wants `&dyn Observer` / `&dyn DebugCapture` derefs in place.
-///
-/// The walk-owned `var` is not in the frame: it rolls forward
-/// through `walk_siblings` as walk-local mutable state. The walk-only fields
-/// (`shared` through `section_count`) carry empty defaults while the live H1
-/// pass runs - live mode never reads them - and the section walk rebuilds
-/// the frame with the live values H1 produced. The client is not in the
-/// frame: each driver owns its client slot (seeded from the run's client,
-/// created lazily on first prose), so it is threaded as a separate
-/// parameter.
-#[derive(Clone, Copy)]
-pub(crate) struct RunFrame<'a> {
-    /// The run's argument string for `{{ args }}` substitution.
-    pub(crate) args: &'a str,
-    pub(crate) store: &'a StoreRef,
-    /// The execution identifier every observation carries.
-    pub(crate) execution: &'a str,
-    /// The run's untrusted-envelope nonce, minted once at run start and
-    /// shared by every wrap in the run.
-    pub(crate) nonce: &'a GuardNonce,
-    /// The run's observer handle.
-    pub(crate) observer: &'a Arc<dyn Observer>,
-    /// Opt-in raw request/response capture for each model turn.
-    pub(crate) debug: Option<&'a Arc<dyn DebugCapture>>,
-    /// The run's shared tool registry handle.
-    pub(crate) shared_tools: &'a SharedTools,
-    /// The run's resource limits, used to build a lazy gateway client.
-    pub(crate) limits: RunLimits,
-    /// The model-turn counter this walk advances (the run's, or one shared by
-    /// all arms of a fanout).
-    pub(crate) turns: &'a Arc<AtomicU32>,
-    /// The run-global execution-id counter: every section entry and every
-    /// fanout arm takes the next value (H1 keeps id 0). A fanout shares it
-    /// without resetting, unlike `turns`.
-    pub(crate) ids: &'a Arc<AtomicU64>,
-    /// The shared library replayed as every section's first chunk; an empty
-    /// compiled chunk when the prompt declares no `lua shared` library.
-    pub(crate) shared: &'a LuaProgram,
-    /// The frozen prompt-level tool bindings.
-    pub(crate) bindings: &'a ToolBindings,
-    /// The frozen prompt-level model bindings.
-    pub(crate) models: &'a ModelBindings,
-    /// The prompt's tool-scope analysis (semantic duplicate check, aliases).
-    pub(crate) analysis: &'a ToolAnalysis,
-    /// The resolved per-section tool-loop cap.
-    pub(crate) max_tool_iterations: usize,
-    pub(crate) when: &'a str,
-    /// The run's top-level section count, reported as `sys.section_count`.
-    pub(crate) section_count: usize,
 }
 
 /// Walk the prompt's top-level sections, reporting each boundary, and return
@@ -159,23 +90,11 @@ pub(super) async fn run_sections(
     analysis: &ToolAnalysis,
     initial_var: Option<&serde_json::Value>,
     client: Option<&GatewayClient>,
-    frame: &RunFrame<'_>,
 ) -> Result<String> {
     let when = now_rfc3339_checked()?;
-    // The walk's frame: the run-scoped fields carry over from the run frame;
-    // the walk-only fields take their live values now that H1 produced them.
-    let frame = RunFrame {
-        bindings,
-        models,
-        analysis,
-        when: &when,
-        ..*frame
-    };
-
-    // The owned control context is built once per run: every field is
-    // run-scoped, so all sections share one Arc and only the per-section
-    // client snapshot is captured fresh by `make_control_globals`.
-    let control = Arc::new(ControlContext::from_walk(&frame));
+    // The walk's context: the run-scoped values carry over; the walk-scoped
+    // fields take their live values now that H1 produced them.
+    let ctx = ctx.with_walk_state(bindings, models, analysis, &when);
 
     // The walk owns its client slot: seeded from the run's client (if any),
     // created lazily on first prose, and shared by every section.
@@ -186,8 +105,7 @@ pub(super) async fn run_sections(
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
     match walk_siblings(
-        &frame,
-        &control,
+        &ctx,
         &ctx.prompt().sections,
         0,
         None,
@@ -221,16 +139,15 @@ pub(super) async fn run_sections(
 /// jump or execute target), which runs even when marked off-walk.
 /// `execute_depth` is the chain's nesting depth, threaded into every section
 /// so nested `execute()` calls stay under the cap. Each section entry takes
-/// the next id from the frame's run-global counter. `var` is the
+/// the next id from the context's run-global counter. `var` is the
 /// walk's clipboard: each section's VM seeds from it, the section's final
 /// `var` replaces it, and a jump-started child walk shares the same value.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the chain keeps its shared contexts, position, entry mode, depth, and walk-owned var explicit and linear"
+    reason = "the chain keeps its shared context, position, entry mode, depth, and walk-owned var explicit and linear"
 )]
 async fn walk_siblings(
-    frame: &RunFrame<'_>,
-    control: &Arc<ControlContext>,
+    ctx: &RunContext,
     siblings: &[Section],
     start: usize,
     incoming_reply: Option<String>,
@@ -254,11 +171,10 @@ async fn walk_siblings(
         }
         addressed = false;
         let (flow, final_var) = run_one_section(
-            frame,
-            control,
+            ctx,
             section,
             siblings,
-            next_id(frame.ids),
+            next_id(ctx.ids()),
             execute_depth,
             reply.as_deref(),
             client,
@@ -274,8 +190,7 @@ async fn walk_siblings(
                     // jumper's children from the target, and this chain
                     // resumes after the jumper when that level exhausts.
                     JumpTarget::Child(child_index) => match Box::pin(walk_siblings(
-                        frame,
-                        control,
+                        ctx,
                         &section.children,
                         child_index,
                         reply,
@@ -308,7 +223,7 @@ async fn walk_siblings(
     Ok(WalkEnd::Exhausted(reply))
 }
 
-/// Execute one section's block lifecycle over the shared [`RunFrame`].
+/// Execute one section's block lifecycle over the shared [`RunContext`].
 ///
 /// This is the single engine every chain drives: it constructs the
 /// section's [`SectionContext`] (VM construction and limits, the control
@@ -327,11 +242,10 @@ async fn walk_siblings(
 /// [`SectionFlow`] so the walk rolls it forward.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the engine keeps the shared contexts, the section's chain position, its depth, and the walk's var explicit and linear"
+    reason = "the engine keeps the shared context, the section's chain position, its depth, and the walk's var explicit and linear"
 )]
 async fn run_one_section(
-    frame: &RunFrame<'_>,
-    control: &Arc<ControlContext>,
+    ctx: &RunContext,
     section: &Section,
     siblings: &[Section],
     section_id: u64,
@@ -341,8 +255,7 @@ async fn run_one_section(
     var: &serde_json::Value,
 ) -> Result<(SectionFlow, serde_json::Value)> {
     let mut section_frame = SectionContext::new(
-        frame,
-        control,
+        ctx,
         section,
         siblings,
         section_id,
@@ -358,7 +271,7 @@ async fn run_one_section(
     // the walk completed (a jump or return included), never on an error.
     let flow = match section_frame
         .run(
-            frame,
+            ctx,
             &section.name,
             &section.blocks,
             BlockRunMode::Section,
@@ -378,9 +291,8 @@ async fn run_one_section(
     let final_var = section_frame.read_var();
     section_frame.teardown(&section.name);
     let final_var = final_var?;
-    frame
-        .observer
-        .observe(frame.execution, &section.name, detail::SECTION_FINISHED);
+    ctx.observer()
+        .observe(ctx.execution(), &section.name, detail::SECTION_FINISHED);
     Ok((flow, final_var))
 }
 
@@ -483,335 +395,59 @@ pub(super) fn resolve_jump_target(
         ))
 }
 
-/// The owned run context the control-global callbacks capture.
-///
-/// The `execute`/`fanout`/`list_from_section` closures are installed once per
-/// section VM and may outlive the driver that built them, so they capture
-/// owned clones of the run context rather than borrows. Every field is
-/// run-scoped, so one `Arc` is built per chain (or per fanout) and shared by
-/// every section's install; only the client is captured separately, as a
-/// per-install snapshot (see [`make_control_globals`]). Bundling the shared
-/// fields into one `Arc` keeps the three capture lists from restating the
-/// same dozen clones, and gives the fanout arm the same construction the
-/// walk uses.
-pub(crate) struct ControlContext {
-    pub(crate) store: StoreRef,
-    pub(crate) args: String,
-    pub(crate) execution: String,
-    pub(crate) when: String,
-    /// The run's untrusted-envelope nonce, owned so the persistent
-    /// control-global closures capture no borrows.
-    pub(crate) nonce: GuardNonce,
-    pub(crate) shared: LuaProgram,
-    pub(crate) bindings: ToolBindings,
-    pub(crate) models: ModelBindings,
-    pub(crate) shared_tools: SharedTools,
-    /// The run's top-level section count, reported as `sys.section_count` in
-    /// contained chains and nested fanout arms.
-    pub(crate) section_count: usize,
-    pub(crate) turns: Arc<AtomicU32>,
-    /// The run-global execution-id counter, shared with every contained
-    /// chain and fanout this context spawns.
-    pub(crate) ids: Arc<AtomicU64>,
-    pub(crate) analysis: ToolAnalysis,
-    pub(crate) observer: Arc<dyn Observer>,
-    pub(crate) debug: Option<Arc<dyn DebugCapture>>,
-    pub(crate) limits: RunLimits,
-    pub(crate) max_tool_iterations: usize,
-}
-
-impl ControlContext {
-    /// The one field list both borrowed-context constructors share: every
-    /// run-scoped field is cloned out of the borrowed view here, so a future
-    /// field add cannot drift between the walk and fanout constructions. The
-    /// four trailing parameters are the per-driver deltas: the turns counter,
-    /// the id counter, the observer, and the debug sink.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the owned context is built from one linear borrowed field list; bundling it would add a second struct mirroring the same fields"
-    )]
-    fn from_run_fields(
-        store: &StoreRef,
-        args: &str,
-        execution: &str,
-        when: &str,
-        nonce: &GuardNonce,
-        shared: &LuaProgram,
-        bindings: &ToolBindings,
-        models: &ModelBindings,
-        shared_tools: &SharedTools,
-        section_count: usize,
-        analysis: &ToolAnalysis,
-        limits: RunLimits,
-        max_tool_iterations: usize,
-        turns: &Arc<AtomicU32>,
-        ids: &Arc<AtomicU64>,
-        observer: Arc<dyn Observer>,
-        debug: Option<Arc<dyn DebugCapture>>,
-    ) -> Self {
-        Self {
-            store: store.clone(),
-            args: args.to_string(),
-            execution: execution.to_string(),
-            when: when.to_string(),
-            nonce: nonce.clone(),
-            shared: shared.to_owned(),
-            bindings: bindings.clone(),
-            models: models.clone(),
-            shared_tools: shared_tools.clone(),
-            section_count,
-            turns: Arc::clone(turns),
-            ids: Arc::clone(ids),
-            analysis: analysis.clone(),
-            observer,
-            debug,
-            limits,
-            max_tool_iterations,
-        }
-    }
-
-    /// The owned control context for a chain, cloned out of the chain's
-    /// borrowed run frame.
-    fn from_walk(frame: &RunFrame<'_>) -> Self {
-        Self::from_run_fields(
-            frame.store,
-            frame.args,
-            frame.execution,
-            frame.when,
-            frame.nonce,
-            frame.shared,
-            frame.bindings,
-            frame.models,
-            frame.shared_tools,
-            frame.section_count,
-            frame.analysis,
-            frame.limits,
-            frame.max_tool_iterations,
-            frame.turns,
-            frame.ids,
-            Arc::clone(frame.observer),
-            frame.debug.cloned(),
-        )
-    }
-
-    /// The owned control context every arm of one fanout shares, cloned out
-    /// of the borrowed fanout context: the proxy observer/debug carry the
-    /// arms' report-only traffic over the bounded side channels, `turns`
-    /// is the counter all arms of the fanout share, and `ids` is the
-    /// run-global counter the fanout does not reset.
-    pub(crate) fn from_fanout(
-        ctx: &fanout::FanoutContext<'_>,
-        turns: &Arc<AtomicU32>,
-        observer: Arc<dyn Observer>,
-        debug: Option<Arc<dyn DebugCapture>>,
-    ) -> Self {
-        Self::from_run_fields(
-            ctx.store,
-            ctx.args,
-            ctx.execution,
-            ctx.when,
-            ctx.nonce,
-            ctx.shared,
-            ctx.bindings,
-            ctx.models,
-            ctx.shared_tools,
-            ctx.section_count,
-            ctx.analysis,
-            ctx.limits,
-            ctx.max_tool_iterations,
-            turns,
-            ctx.ids,
-            observer,
-            debug,
-        )
-    }
-
-    /// The borrowed run frame derived from this owned context, so the field
-    /// list lives in one place for both chain drivers. `args` is the only
-    /// parameter: an `execute` call's explicit input overrides the run's
-    /// args.
-    pub(crate) fn walk_context<'a>(&'a self, args: &'a str) -> RunFrame<'a> {
-        RunFrame {
-            args,
-            store: &self.store,
-            execution: &self.execution,
-            nonce: &self.nonce,
-            observer: &self.observer,
-            debug: self.debug.as_ref(),
-            shared_tools: &self.shared_tools,
-            limits: self.limits,
-            turns: &self.turns,
-            ids: &self.ids,
-            shared: &self.shared,
-            bindings: &self.bindings,
-            models: &self.models,
-            analysis: &self.analysis,
-            max_tool_iterations: self.max_tool_iterations,
-            when: &self.when,
-            section_count: self.section_count,
-        }
-    }
-
-    /// The borrowed fanout inputs derived from this owned context, beside
-    /// [`walk_context`](Self::walk_context) so both borrowed-context
-    /// derivations keep their field lists in one place. The fanout callback
-    /// supplies only its own deltas: the client snapshot, the reply seed,
-    /// the worker's home slice, the caller's execute depth,
-    /// and the caller's `var` snapshot each arm clones in.
-    #[expect(
-        clippy::ref_option,
-        reason = "the FanoutContext it builds borrows the Option<GatewayClient> itself, matching the context's field type"
-    )]
-    fn fanout_context<'a>(
-        &'a self,
-        client: &'a Option<GatewayClient>,
-        last_reply: Option<&'a str>,
-        home: &'a [Section],
-        execute_depth: usize,
-        var: &'a serde_json::Value,
-    ) -> fanout::FanoutContext<'a> {
-        fanout::FanoutContext {
-            args: &self.args,
-            store: &self.store,
-            execution: &self.execution,
-            nonce: &self.nonce,
-            observer: self.observer.as_ref(),
-            client,
-            debug: self.debug.as_deref(),
-            shared: &self.shared,
-            bindings: &self.bindings,
-            models: &self.models,
-            analysis: &self.analysis,
-            shared_tools: &self.shared_tools,
-            max_tool_iterations: self.max_tool_iterations,
-            limits: self.limits,
-            last_reply,
-            when: &self.when,
-            ids: &self.ids,
-            section_count: self.section_count,
-            home,
-            execute_depth,
-            var,
-        }
-    }
-
-    /// The borrowed VM-setup inputs both engine drivers share, sourcing the
-    /// run-wide slots (`args`, `store`, `observer`, `shared`)
-    /// from this context so the field list lives in one place; the driver
-    /// supplies only its own deltas: the `sys` JSON, the incoming reply, the
-    /// seed, the store-write scope (a fanout arm's identity; `None` on the
-    /// walk), and the section name.
-    pub(crate) fn vm_setup<'a>(
-        &'a self,
-        sys: &'a serde_json::Value,
-        last_reply: Option<&'a str>,
-        seed: VmSeed<'a>,
-        write_scope: Option<WriteScope>,
-        section_name: &'a str,
-    ) -> SectionVmSetup<'a> {
-        SectionVmSetup {
-            args: &self.args,
-            sys,
-            store: &self.store,
-            last_reply,
-            seed,
-            write_scope,
-            observer_arc: &self.observer,
-            section_name,
-            shared: &self.shared,
-        }
-    }
-
-    /// The `sys` JSON for one section or arm of this run: a fresh `now`
-    /// timestamp under the run's `when`, with the driver supplying only the
-    /// next value from the run-global id counter and the section name.
-    pub(crate) fn sys_json(&self, id: u64, section_name: &str) -> Result<serde_json::Value> {
-        let now = now_rfc3339_checked()?;
-        Ok(sys_json(
-            &self.when,
-            &now,
-            id,
-            section_name,
-            &self.execution,
-            self.section_count,
-        ))
-    }
-
-    /// Installs the infer hook both engine drivers share, sourcing every
-    /// run-wide slot from this context; the driver supplies only its client
-    /// snapshot and the section name. The handed client (or the environment)
-    /// is wrapped in the lazy [`GatewaySource`], with no live H1 bindings.
-    pub(crate) fn attach_infer_hook(
-        &self,
-        vm: &SectionVm,
-        client: Option<GatewayClient>,
-        section_name: &str,
-    ) {
-        attach_infer_hook(
-            vm,
-            GatewaySource::from_optional(client, self.limits),
-            Arc::clone(&self.observer),
-            self.debug.clone(),
-            &self.execution,
-            section_name,
-            &self.turns,
-            None,
-        );
-    }
-
-    /// Drives a contained chain from an execute/jump target: resolves the
-    /// target over the caller's visible set, walks the target's chain slice
-    /// from its index under every normal rule (each entry taking the next
-    /// run-global `sys.id`), and maps the chain's end to its text - a
-    /// return's value,
-    /// else the final reply. The chain seeds its `var` from `var` (a clone
-    /// of the caller's, taken at the call site) and discards it when the
-    /// chain ends, so the caller never sees the chain's writes. Both chain
-    /// drivers call this one helper: the `execute` callback bridges it
-    /// synchronously, the fanout arm's jump awaits it directly.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the chain drive keeps the caller, home slice, target, args, reply, depth, client, and var clone explicit and linear beside the shared control context"
-    )]
-    pub(crate) async fn drive_contained_chain(
-        self: &Arc<Self>,
-        caller: &Section,
-        home: &[Section],
-        heading: &str,
-        args: &str,
-        incoming_reply: Option<String>,
-        execute_depth: usize,
-        client: &mut Option<GatewayClient>,
-        var: serde_json::Value,
-    ) -> Result<String> {
-        // The contained chain runs the target's own slice from the target's
-        // index: a child target sits beside the caller's children, a sibling
-        // target beside the caller's home slice.
-        let (chain_slice, start) = match resolve_jump_target(heading, home, caller)? {
-            JumpTarget::Child(index) => (caller.children.as_slice(), index),
-            JumpTarget::Sibling(index) => (home, index),
-        };
-        let frame = self.walk_context(args);
-        let mut var = var;
-        let end = walk_siblings(
-            &frame,
-            self,
-            chain_slice,
-            start,
-            incoming_reply,
-            true,
-            execute_depth,
-            client,
-            &mut var,
-        )
-        .await?;
-        // A return ends the chain, and its value is the call's return; an
-        // exhausted chain returns its final reply.
-        Ok(match end {
-            WalkEnd::Returned(value) => value,
-            WalkEnd::Exhausted(reply) => reply.unwrap_or_default(),
-        })
-    }
+/// Drives a contained chain from an execute/jump target: resolves the
+/// target over the caller's visible set, walks the target's chain slice
+/// from its index under every normal rule (each entry taking the next
+/// run-global `sys.id`), and maps the chain's end to its text - a
+/// return's value,
+/// else the final reply. The chain seeds its `var` from `var` (a clone
+/// of the caller's, taken at the call site) and discards it when the
+/// chain ends, so the caller never sees the chain's writes. Both chain
+/// drivers call this one helper: the `execute` callback bridges it
+/// synchronously, the fanout arm's jump awaits it directly.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the chain drive keeps the caller, home slice, target, args, reply, depth, client, and var clone explicit and linear beside the shared run context"
+)]
+pub(crate) async fn drive_contained_chain(
+    ctx: &RunContext,
+    caller: &Section,
+    home: &[Section],
+    heading: &str,
+    args: &str,
+    incoming_reply: Option<String>,
+    execute_depth: usize,
+    client: &mut Option<GatewayClient>,
+    var: serde_json::Value,
+) -> Result<String> {
+    // The contained chain runs the target's own slice from the target's
+    // index: a child target sits beside the caller's children, a sibling
+    // target beside the caller's home slice.
+    let (chain_slice, start) = match resolve_jump_target(heading, home, caller)? {
+        JumpTarget::Child(index) => (caller.children.as_slice(), index),
+        JumpTarget::Sibling(index) => (home, index),
+    };
+    // The chain sees the call's args: an `execute` call's explicit input
+    // overrides the run's own.
+    let ctx = ctx.with_args(args);
+    let mut var = var;
+    let end = walk_siblings(
+        &ctx,
+        chain_slice,
+        start,
+        incoming_reply,
+        true,
+        execute_depth,
+        client,
+        &mut var,
+    )
+    .await?;
+    // A return ends the chain, and its value is the call's return; an
+    // exhausted chain returns its final reply.
+    Ok(match end {
+        WalkEnd::Returned(value) => value,
+        WalkEnd::Exhausted(reply) => reply.unwrap_or_default(),
+    })
 }
 
 /// The one recursion-cap boundary check, shared by the `execute` and `fanout`
@@ -844,7 +480,9 @@ fn check_execute_depth(depth: usize, op: &str) -> Result<()> {
 /// `fanout` closures receive the caller VM's `var` as a JSON snapshot taken
 /// at the call site (see [`SectionVm::install_control_globals`]): an
 /// `execute` chain seeds from that clone and discards it, and each fanout
-/// arm seeds from its own copy.
+/// arm seeds from its own copy. The closures may outlive the driver that
+/// built them, so they capture owned clones of the run context (cheap -
+/// every field is shared ownership) rather than borrows.
 #[expect(
     clippy::type_complexity,
     reason = "the triple of anonymous control-global closures is the product; a named struct cannot hold them without type_alias_impl_trait, and boxing would allocate per VM install"
@@ -854,7 +492,7 @@ fn check_execute_depth(depth: usize, op: &str) -> Result<()> {
     reason = "the client snapshot is cloned into the returned 'static closures, so the parameter must borrow the Option itself"
 )]
 pub(crate) fn make_control_globals(
-    control: &Arc<ControlContext>,
+    ctx: &RunContext,
     client: &Option<GatewayClient>,
     caller: Section,
     home: Vec<Section>,
@@ -875,7 +513,7 @@ pub(crate) fn make_control_globals(
 ) {
     let visible = visible_sections(&home, &caller);
     let execute_callback = {
-        let control = Arc::clone(control);
+        let ctx = ctx.clone();
         let client = client.clone();
         move |target: LuaValue,
               input: Option<String>,
@@ -885,12 +523,13 @@ pub(crate) fn make_control_globals(
             // Each execute chain runs one level deeper than its caller.
             let next_depth = execute_depth + 1;
             check_execute_depth(next_depth, "execute")?;
-            let call_args = input.as_deref().unwrap_or(&control.args);
+            let call_args = input.as_deref().unwrap_or_else(|| ctx.args());
             let mut client = client.clone();
             // Return the structured error directly (LUA-012): the typed error
             // and its source cross the Lua boundary via `mlua::Error::external`
             // rather than being flattened to a string here.
-            bridge_blocking(control.drive_contained_chain(
+            bridge_blocking(drive_contained_chain(
+                &ctx,
                 &caller,
                 &home,
                 &heading,
@@ -905,7 +544,7 @@ pub(crate) fn make_control_globals(
     // The caller's visible set is built once and shared: the fanout callback
     // takes a clone, the list callback takes the original.
     let fanout_callback = {
-        let control = Arc::clone(control);
+        let ctx = ctx.clone();
         let client = client.clone();
         let visible = visible.clone();
         move |worker_heading: String, items: Vec<serde_json::Value>, var: serde_json::Value| {
@@ -914,8 +553,8 @@ pub(crate) fn make_control_globals(
                 &items,
                 &var,
                 &visible,
-                &control,
-                &client,
+                &ctx,
+                client.as_ref(),
                 last_reply.as_deref(),
                 execute_depth,
             )
@@ -938,19 +577,15 @@ pub(crate) fn make_control_globals(
 /// a list section rather than a worker template.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the fanout callback threads the resolution set, the owned run context, and the client snapshot through to the arm scheduler as one linear parameter list"
-)]
-#[expect(
-    clippy::ref_option,
-    reason = "the FanoutContext it builds borrows the Option<GatewayClient> itself, matching the context's field type"
+    reason = "the fanout callback threads the resolution set, the run context, and the client snapshot through to the arm scheduler as one linear parameter list"
 )]
 fn make_fanout_callback(
     worker_heading: &str,
     items: &[serde_json::Value],
     caller_var: &serde_json::Value,
     visible: &[Section],
-    control: &ControlContext,
-    client: &Option<GatewayClient>,
+    ctx: &RunContext,
+    client: Option<&GatewayClient>,
     last_reply: Option<&str>,
     execute_depth: usize,
 ) -> std::result::Result<Vec<LuaFanoutResult>, Error> {
@@ -971,9 +606,17 @@ fn make_fanout_callback(
     // control globals derive their resolution set from it (the home slice
     // plus the worker's children), so the arm never inverts this layout.
     let worker_home = home_without(visible, worker);
-    let ctx = control.fanout_context(client, last_reply, &worker_home, execute_depth, caller_var);
 
     // The collection was converted to JSON member-by-member at the Lua
     // boundary (the same bridge `var` uses); the cap inside counts members.
-    bridge_blocking(fanout::run_fanout_arms(worker, items, &ctx))
+    bridge_blocking(fanout::run_fanout_arms(
+        ctx,
+        worker,
+        items,
+        client,
+        last_reply,
+        &worker_home,
+        execute_depth,
+        caller_var,
+    ))
 }

@@ -5,8 +5,9 @@
 //! the `sys` JSON, the seeded `var`, the rolling reply, the conversation,
 //! the tool-call counts, and the resolved completion options - and it
 //! carries the frame's effective reporting handles (observer, debug sink,
-//! turn counter), so a fanout arm's proxies can arrive through the frame
-//! rather than a forged context. Each driver is one
+//! turn counter) seeded out of the run context; a fanout arm's context is
+//! the fanout's fork, so the proxies reach the frame and the arm's nested
+//! chains through the one value. Each driver is one
 //! construct-run-teardown cycle: the constructor absorbs the VM
 //! construction and setup preamble ([`SectionContext::new`] for a walked
 //! section, [`SectionContext::new_live_h1`] for the live H1 pass,
@@ -17,8 +18,8 @@
 //! All three drivers - the walk's `run_one_section`, the live H1 pass, and
 //! the fanout arm - are one construct-run-teardown cycle over the frame,
 //! differing only in seed and [`BlockRunMode`]. The run-scoped inputs
-//! (bindings, models, limits, the shared registry) still arrive through the
-//! borrowed [`RunFrame`]; they migrate to the `RunContext` in a later pass.
+//! (bindings, models, limits, the shared registry) arrive through the
+//! [`RunContext`].
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
@@ -35,7 +36,7 @@ use crate::store::{StoreRef, WriteScope};
 
 use super::block_walk::{BlockRunMode, SectionFlow, run_one_section_impl};
 use super::context::RunContext;
-use super::engine::{ControlContext, RunFrame, make_control_globals};
+use super::engine::make_control_globals;
 use super::gateway::GatewaySource;
 use super::section_vm::{VmSeed, setup_section_vm};
 use super::support::{next_id, now_rfc3339_checked, sys_json};
@@ -48,7 +49,7 @@ use super::tools::attach_infer_hook;
 /// jump, execute); a jump ends the current frame and the driver builds a
 /// fresh one for the target - only `reply` and `var` cross, as call data.
 /// No derives: the VM and the trait-object handles support neither `Clone`
-/// nor `Debug`, matching [`ControlContext`].
+/// nor `Debug`.
 pub(crate) struct SectionContext {
     /// The frame's engine: the owned section VM. `SectionVm` stays a
     /// standalone type in `lua/` with its own test suite - composition, not
@@ -112,15 +113,14 @@ impl SectionContext {
     /// the teardown boundary still fires exactly once on that path.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the frame's construction absorbs the walk's whole driver preamble: the shared frame and control context, the section and its home slice, its id, depth, reply seed, client snapshot, and var seed stay explicit and linear"
+        reason = "the frame's construction absorbs the walk's whole driver preamble: the shared run context, the section and its home slice, its id, depth, reply seed, client snapshot, and var seed stay explicit and linear"
     )]
     #[expect(
         clippy::ref_option,
         reason = "the client snapshot is cloned into the control-global closures and the infer hook, so the parameter borrows the Option itself"
     )]
     pub(crate) fn new(
-        frame: &RunFrame<'_>,
-        control: &Arc<ControlContext>,
+        ctx: &RunContext,
         section: &Section,
         siblings: &[Section],
         section_id: u64,
@@ -129,23 +129,22 @@ impl SectionContext {
         client: &Option<GatewayClient>,
         var: &serde_json::Value,
     ) -> Result<Self> {
-        let sys = control.sys_json(section_id, &section.name)?;
-        frame
-            .observer
-            .observe(frame.execution, &section.name, detail::SECTION_STARTED);
+        let sys = ctx.sys_json(section_id, &section.name)?;
+        ctx.observer()
+            .observe(ctx.execution(), &section.name, detail::SECTION_STARTED);
         let vm = SectionVm::new_for_section(
-            frame.nonce,
-            frame.bindings,
-            frame.models,
-            frame.execution,
-            frame.observer.as_ref(),
+            ctx.nonce(),
+            ctx.bindings(),
+            ctx.models(),
+            ctx.execution(),
+            ctx.observer().as_ref(),
             &section.name,
         )?;
         // A limits failure propagates bare: no teardown runs here, so no
         // LUA_TEARDOWN_* observation fires on this path.
         vm.apply_lua_limits(
-            frame.limits.lua_memory().get(),
-            frame.limits.lua_logs().get(),
+            ctx.limits().lua_memory().get(),
+            ctx.limits().lua_logs().get(),
         )?;
         let mut section_frame = Self {
             vm,
@@ -160,15 +159,15 @@ impl SectionContext {
             // carry a write scope.
             write_scope: None,
             execute_depth,
-            observer: Arc::clone(frame.observer),
-            debug: frame.debug.cloned(),
-            turns: Arc::clone(frame.turns),
+            observer: Arc::clone(ctx.observer()),
+            debug: ctx.debug().cloned(),
+            turns: Arc::clone(ctx.turns()),
         };
         // The control globals are installed once for the section's whole
-        // lifecycle; their callbacks capture the run-wide control context
-        // plus the client snapshot, so they hold no borrows.
+        // lifecycle; their callbacks capture an owned clone of the run
+        // context plus the client snapshot, so they hold no borrows.
         let (execute_callback, fanout_callback, list_callback) = make_control_globals(
-            control,
+            ctx,
             client,
             section.clone(),
             siblings.to_vec(),
@@ -180,7 +179,7 @@ impl SectionContext {
         // alias bindings - is shared with the fanout arm; only the seed, the
         // `sys` extras, and the callbacks' parameters (home slice, caller,
         // depth) are the walk's own.
-        let setup = control.vm_setup(
+        let setup = ctx.vm_setup(
             &section_frame.sys,
             section_frame.reply.as_deref(),
             VmSeed {
@@ -203,7 +202,7 @@ impl SectionContext {
         // The infer hook carries a lazy client source (F5): a nested
         // `models.infer` or `handle:infer` surfaces a concrete construction
         // error on first use instead of the setup swallowing it.
-        control.attach_infer_hook(&section_frame.vm, client.clone(), &section.name);
+        ctx.attach_infer_hook(&section_frame.vm, client.clone(), &section.name);
         Ok(section_frame)
     }
 
@@ -226,7 +225,6 @@ impl SectionContext {
     /// the teardown boundary still fires exactly once on that path.
     pub(crate) fn new_live_h1(
         ctx: &RunContext,
-        frame: &RunFrame<'_>,
         runtime: &RuntimeResolution<'_, '_>,
         client: Option<&GatewayClient>,
     ) -> Result<Self> {
@@ -237,15 +235,15 @@ impl SectionContext {
             &now,
             0,
             title,
-            frame.execution,
+            ctx.execution(),
             ctx.prompt().sections.len(),
         );
-        let vm = SectionVm::new(ctx.nonce(), frame.execution, frame.observer.as_ref(), title)?;
+        let vm = SectionVm::new(ctx.nonce(), ctx.execution(), ctx.observer().as_ref(), title)?;
         // A limits failure propagates bare: no teardown runs here, so no
         // LUA_TEARDOWN_* observation fires on this path.
         vm.apply_lua_limits(
-            frame.limits.lua_memory().get(),
-            frame.limits.lua_logs().get(),
+            ctx.limits().lua_memory().get(),
+            ctx.limits().lua_logs().get(),
         )?;
         let mut h1_frame = Self {
             vm,
@@ -260,11 +258,11 @@ impl SectionContext {
             // H1 installs the control-global stubs, not the callbacks, so
             // no depth check ever reads this.
             execute_depth: 0,
-            observer: Arc::clone(frame.observer),
-            debug: frame.debug.cloned(),
-            turns: Arc::clone(frame.turns),
+            observer: Arc::clone(ctx.observer()),
+            debug: ctx.debug().cloned(),
+            turns: Arc::clone(ctx.turns()),
         };
-        if let Err(error) = h1_frame.setup_live_h1(frame.args, frame.store, title) {
+        if let Err(error) = h1_frame.setup_live_h1(ctx.args(), ctx.store(), title) {
             h1_frame.teardown(title);
             return Err(error);
         }
@@ -273,10 +271,10 @@ impl SectionContext {
         // error on first use instead of the setup swallowing it.
         attach_infer_hook(
             &h1_frame.vm,
-            GatewaySource::from_optional(client.cloned(), frame.limits),
+            GatewaySource::from_optional(client.cloned(), ctx.limits()),
             Arc::clone(&h1_frame.observer),
             h1_frame.debug.clone(),
-            frame.execution,
+            ctx.execution(),
             title,
             &h1_frame.turns,
             Some(runtime.producer()),
@@ -308,8 +306,7 @@ impl SectionContext {
     /// execute level deeper than the caller. The effective reporting handles
     /// are the fanout's too: the proxy observer and debug sink (report-only
     /// traffic over the bounded side channels) and the fanout's fresh turn
-    /// counter arrive as frame fields, not through a forged context. The
-    /// shared control context carries the same handles, so the arm's nested
+    /// counter arrive through the context's fanout fork, so the arm's nested
     /// `execute`/`fanout` chains report through the proxies as well.
     ///
     /// # Errors
@@ -321,14 +318,14 @@ impl SectionContext {
     /// once.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the frame's construction absorbs the arm's whole driver preamble: the shared control context, the worker and its home slice, the arm's position, item, write token, depth, reply and var seeds, client snapshot, and effective reporting handles stay explicit and linear"
+        reason = "the frame's construction absorbs the arm's whole driver preamble: the fanout's run-context fork, the worker and its home slice, the arm's position, item, write token, depth, reply and var seeds, and client snapshot stay explicit and linear"
     )]
     #[expect(
         clippy::ref_option,
         reason = "the client snapshot is cloned into the control-global closures and the infer hook, so the parameter borrows the Option itself"
     )]
     pub(crate) fn new_fanout_arm(
-        control: &Arc<ControlContext>,
+        ctx: &RunContext,
         worker: &Section,
         home: &[Section],
         index: usize,
@@ -338,16 +335,13 @@ impl SectionContext {
         incoming_reply: Option<&str>,
         client: &Option<GatewayClient>,
         var: &serde_json::Value,
-        observer: Arc<dyn Observer>,
-        debug: Option<Arc<dyn DebugCapture>>,
-        turns: Arc<AtomicU32>,
     ) -> Result<Self> {
         let vm = SectionVm::new_for_section(
-            &control.nonce,
-            &control.bindings,
-            &control.models,
-            &control.execution,
-            observer.as_ref(),
+            ctx.nonce(),
+            ctx.bindings(),
+            ctx.models(),
+            ctx.execution(),
+            ctx.observer().as_ref(),
             &worker.name,
         )?;
         // The limits install and the `sys` build are the construction
@@ -356,11 +350,11 @@ impl SectionContext {
         // epilogue owns for the run phase.
         let sys = match vm
             .apply_lua_limits(
-                control.limits.lua_memory().get(),
-                control.limits.lua_logs().get(),
+                ctx.limits().lua_memory().get(),
+                ctx.limits().lua_logs().get(),
             )
             .and_then(|()| {
-                let mut sys = control.sys_json(next_id(&control.ids), &worker.name)?;
+                let mut sys = ctx.sys_json(next_id(ctx.ids()), &worker.name)?;
                 // The arm's own sys extra: its 1-based position within this
                 // fanout. Absent outside a fanout, so a walked section
                 // reading `sys.index` raises the sealed-sys unknown-field
@@ -370,7 +364,7 @@ impl SectionContext {
             }) {
             Ok(sys) => sys,
             Err(error) => {
-                vm.teardown(observer.as_ref(), &worker.name);
+                vm.teardown(ctx.observer().as_ref(), &worker.name);
                 return Err(error);
             }
         };
@@ -387,15 +381,15 @@ impl SectionContext {
             // arm's 1-based index, matching `sys.index`.
             write_scope: Some(WriteScope::new(write_token, index + 1)),
             execute_depth,
-            observer,
-            debug,
-            turns,
+            observer: Arc::clone(ctx.observer()),
+            debug: ctx.debug().cloned(),
+            turns: Arc::clone(ctx.turns()),
         };
         // The control globals are installed once for the arm's whole
-        // lifecycle; their callbacks capture the run-wide control context
-        // plus the client snapshot, so they hold no borrows.
+        // lifecycle; their callbacks capture an owned clone of the run
+        // context plus the client snapshot, so they hold no borrows.
         let (execute_callback, fanout_callback, list_callback) = make_control_globals(
-            control,
+            ctx,
             client,
             worker.clone(),
             home.to_vec(),
@@ -405,7 +399,7 @@ impl SectionContext {
         // The setup half is shared with the walk; only the seed, the `sys`
         // extra, and the callbacks' parameters (home slice, caller, depth)
         // are the arm's own.
-        let setup = control.vm_setup(
+        let setup = ctx.vm_setup(
             &arm_frame.sys,
             arm_frame.reply.as_deref(),
             VmSeed {
@@ -428,14 +422,14 @@ impl SectionContext {
         // The infer hook carries a lazy client source (F5): a nested
         // `models.infer` or `handle:infer` surfaces a concrete construction
         // error on first use instead of the setup swallowing it.
-        control.attach_infer_hook(&arm_frame.vm, client.clone(), &worker.name);
+        ctx.attach_infer_hook(&arm_frame.vm, client.clone(), &worker.name);
         Ok(arm_frame)
     }
 
     /// Runs the frame's ordered block walk: Lua chunks in place, prose
     /// through the tool loop, the reply rolling forward.
     ///
-    /// `frame` supplies the run-scoped inputs (the shared registry, the
+    /// `ctx` supplies the run-scoped inputs (the shared registry, the
     /// bindings, models, limits, and the tool-loop cap); everything
     /// per-frame - the VM, the `sys` JSON, the reply, the conversation, the
     /// counts, the completion options, and the effective reporting handles -
@@ -448,7 +442,7 @@ impl SectionContext {
     /// documented on [`run_one_section_impl`].
     pub(crate) async fn run(
         &mut self,
-        frame: &RunFrame<'_>,
+        ctx: &RunContext,
         name: &str,
         blocks: &[Block],
         mode: BlockRunMode<'_>,
@@ -456,7 +450,7 @@ impl SectionContext {
     ) -> Result<SectionFlow> {
         run_one_section_impl(
             &mut self.vm,
-            frame,
+            ctx,
             name,
             blocks,
             mode,

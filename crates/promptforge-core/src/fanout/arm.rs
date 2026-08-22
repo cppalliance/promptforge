@@ -2,20 +2,17 @@
 //! guard, and the thin adapter over the shared engine.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
 
 use serde_json::Value;
 
 use crate::client::GatewayClient;
-use crate::debug::DebugCapture;
-use crate::execute::{BlockRunMode, ControlContext, SectionContext, SectionFlow};
+use crate::execute::{
+    BlockRunMode, RunContext, SectionContext, SectionFlow, drive_contained_chain,
+};
 use crate::lua::LuaFanoutResult;
 use crate::observe::{Observation, Observer, detail};
 use crate::parser::Section;
 use crate::{Error, Result, cancel, subst};
-
-use super::FanoutContext;
-use super::proxies::ProxyObserver;
 
 /// The inputs every arm of one fanout shares, carried by `Arc` into each
 /// arm's payload.
@@ -23,11 +20,12 @@ use super::proxies::ProxyObserver;
 /// Built once per `run_fanout_arms` call so the per-arm spawn copies one
 /// `Arc` instead of deep-cloning the worker subtree and the home slice.
 pub(crate) struct ArmInputs {
-    /// The owned run context the arm's control globals capture, shared by
-    /// every arm of the fanout. It carries the fanout's effective reporting
-    /// handles as well, so the arm's nested `execute`/`fanout` chains report
-    /// through the proxies.
-    pub(crate) control: Arc<ControlContext>,
+    /// The run context every arm's frame is seeded from and every arm's
+    /// control globals capture: the fanout's fork, already carrying the
+    /// effective reporting handles (the proxy observer/debug over the
+    /// bounded side channels and the fanout's fresh turn counter), so the
+    /// arm's nested `execute`/`fanout` chains report through the proxies.
+    pub(crate) ctx: RunContext,
     pub(crate) worker: Section,
     /// The worker's home slice - the set it was resolved from, minus the
     /// worker - built by the fanout callback where the layout is constructed.
@@ -52,54 +50,6 @@ pub(crate) struct ArmInputs {
     /// Explicit cancellation handle carried across the spawn boundary, since a
     /// spawned arm does not inherit the parent task-local (PF-CANCEL-002).
     pub(crate) cancel: Option<cancel::CancelHandle>,
-    /// The arm's effective observer: the fanout's proxy over the bounded
-    /// observation side channel. Each arm's frame is seeded with it directly
-    /// (the effective-handles move), and the finalizer reports through it.
-    pub(crate) observer: Arc<dyn Observer>,
-    /// The arm's effective debug sink: the fanout's proxy over the bounded
-    /// debug side channel, when the run captures debug traffic.
-    pub(crate) debug: Option<Arc<dyn DebugCapture>>,
-    /// The fanout's fresh model-turn counter, shared by every arm's frame.
-    pub(crate) turns: Arc<AtomicU32>,
-}
-
-impl ArmInputs {
-    /// Builds the shared arm inputs from the borrowed fanout context, so the
-    /// field copy lives in exactly one place. Each arm runs one execute level
-    /// deeper than the fanout caller, so recursion accounting accumulates
-    /// across the fanout boundary instead of resetting. The fanout's
-    /// effective reporting handles (the proxy observer/debug, the fresh turn
-    /// counter) are stored here for the frame constructor to seed each arm's
-    /// frame from, and inside the shared control context for the arm's
-    /// nested chains to report through.
-    pub(crate) fn from_context(
-        ctx: &FanoutContext<'_>,
-        worker: &Section,
-        turns: &Arc<AtomicU32>,
-        observer: Arc<ProxyObserver>,
-        debug: Option<Arc<dyn DebugCapture>>,
-        cancel: Option<cancel::CancelHandle>,
-    ) -> Self {
-        Self {
-            control: Arc::new(ControlContext::from_fanout(
-                ctx,
-                turns,
-                observer.clone(),
-                debug.clone(),
-            )),
-            worker: worker.clone(),
-            home: ctx.home.to_vec(),
-            client: ctx.client.clone(),
-            last_reply: ctx.last_reply.map(str::to_owned),
-            var: ctx.var.clone(),
-            write_token: ctx.store.next_write_token(),
-            execute_depth: ctx.execute_depth + 1,
-            cancel,
-            observer,
-            debug,
-            turns: Arc::clone(turns),
-        }
-    }
 }
 
 /// Everything one spawned fanout arm owns for its independent execution: the
@@ -213,21 +163,20 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
         item.as_str() != Some(PANIC_ARM_SENTINEL),
         "test-injected arm panic"
     );
-    let control = &inputs.control;
+    let ctx = &inputs.ctx;
     let worker = &inputs.worker;
 
-    // The proxy handle inside the shared inputs is the one observer the
+    // The proxy handle inside the shared context is the one observer the
     // started observation, the finalizer, and the frame's effective handle
     // all share.
-    inputs
-        .observer
-        .observe(&control.execution, &worker.name, detail::FANOUT_ARM_STARTED);
+    ctx.observer()
+        .observe(ctx.execution(), &worker.name, detail::FANOUT_ARM_STARTED);
 
     // The guard defaults to a CANCELLED terminal event; the epilogue below
     // upgrades it to the arm's real outcome unless the arm is aborted first.
     let mut finalizer = ArmFinalizer::new(
-        Arc::clone(&inputs.observer),
-        control.execution.clone(),
+        Arc::clone(ctx.observer()),
+        ctx.execution().to_owned(),
         worker.name.clone(),
     );
 
@@ -248,7 +197,7 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
     // for the epilogue's teardown.
     let mut frame = match cancel::maybe_scope(inputs.cancel.clone(), async {
         SectionContext::new_fanout_arm(
-            control,
+            ctx,
             worker,
             &inputs.home,
             index,
@@ -258,9 +207,6 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
             inputs.last_reply.as_deref(),
             &inputs.client,
             &inputs.var,
-            Arc::clone(&inputs.observer),
-            inputs.debug.clone(),
-            Arc::clone(&inputs.turns),
         )
     })
     .await
@@ -275,11 +221,10 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
     // The body performs no teardown; every fallible step uses `?`. It returns
     // the arm result paired with its distinct terminal event.
     let body = async {
-        let run_frame = control.walk_context(&control.args);
         let mut client = inputs.client.clone();
         match frame
             .run(
-                &run_frame,
+                ctx,
                 &worker.name,
                 &worker.blocks,
                 BlockRunMode::Section,
@@ -298,18 +243,18 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
                     // contained execute chain.
                     SectionFlow::Jumped { heading, reply } => {
                         let var = frame.read_var()?;
-                        control
-                            .drive_contained_chain(
-                                worker,
-                                &inputs.home,
-                                &heading,
-                                &control.args,
-                                reply,
-                                inputs.execute_depth,
-                                &mut client,
-                                var,
-                            )
-                            .await?
+                        drive_contained_chain(
+                            ctx,
+                            worker,
+                            &inputs.home,
+                            &heading,
+                            ctx.args(),
+                            reply,
+                            inputs.execute_depth,
+                            &mut client,
+                            var,
+                        )
+                        .await?
                     }
                 };
                 Ok((

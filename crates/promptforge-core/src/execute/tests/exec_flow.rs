@@ -70,6 +70,51 @@ Research {{ args }}.\n\n\
     assert_eq!(out, "research-reply");
 }
 
+/// The `with_args` fork scopes an execute call's input over its whole chain:
+/// a no-input `execute` nested inside the chain defaults to the chain's
+/// args, not the run's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nested_execute_without_input_inherits_the_chains_args() {
+    let gateway = ScriptedGateway::start(vec![resp_text("inner-reply")]).await;
+    let addr = gateway.addr();
+    let md = flow_prompt!(
+        "\
+## Main\n\n\
+```lua\n\
+local r = execute('## Sub', 'chain-args')\n\
+assert(r == 'inner-reply')\n\
+return r\n\
+```\n\n\
+## Sub\n\n\
+```lua\nreturn execute('## Inner')\n```\n\n\
+## Inner\n\n\
+Args: {{ args }}\n"
+    );
+    let store = StoreRef::memory();
+    let out = run(
+        &bound_for_model(md),
+        "run-args",
+        &[],
+        &store,
+        gatewayed(addr),
+    )
+    .await
+    .expect("the nested execute must inherit the chain's args");
+    assert_eq!(out, "inner-reply");
+    let body = gateway
+        .last_request()
+        .expect("the inner section's prose must reach the gateway");
+    let text = body.to_string();
+    assert!(
+        text.contains("chain-args"),
+        "the nested no-input execute substitutes the chain's args: {text}"
+    );
+    assert!(
+        !text.contains("run-args"),
+        "the run's args must not leak into the chain: {text}"
+    );
+}
+
 /// The `tasks` table is gone (note 42): the global is absent, so indexing it
 /// is an ordinary Lua error, and control flow takes heading strings only.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
