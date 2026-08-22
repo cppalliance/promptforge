@@ -11,6 +11,7 @@ use promptforge_core::model::ModelCatalog;
 use promptforge_core::observe::{NullObserver, Observation, Observer};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
+use promptforge_core::tools::ToolCatalog;
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 use tracing::Level;
 
@@ -114,8 +115,7 @@ async fn a_pump_that_never_drains_still_lets_the_run_finish() {
     let value = execute::run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models),
-        &[],
+        ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
         &store,
         RunConfig::new("test-run").observer(Arc::clone(&observer) as Arc<dyn Observer>),
     )

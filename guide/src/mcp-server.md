@@ -276,7 +276,7 @@ At startup the server:
 2. Resolves the catalog (refuses to start on any fault)
 3. Builds the retrieval index over the catalog (if `picker` feature is present; a failure is logged and the server continues)
 4. Fetches the gateway model catalog via `GET /v1/models`
-5. Builds the live tool registry (`web_fetch`, `web_search`) and the semantic tool picker
+5. Builds the live tool catalog (`web_fetch`, `web_search`) and the semantic tool picker
 6. Starts the filesystem watcher
 7. Serves the chosen transport
 

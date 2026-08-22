@@ -6,7 +6,7 @@
 
 The calling interface is deliberately as small as a shell can express. One subcommand, one positional path, and at most one further argument, which reaches the prompt as the whole of `args`. There are no `key=value` pairs, no flags, and no schema between the terminal and the prompt, so nothing here has to be kept in step with a prompt's declared parameters.
 
-Two facts bound what a run can do. The store backing the run is in memory, so a prompt's filed state lives exactly as long as the process. The live tool registry is host-owned and launch-stable: local `web_fetch` is always present, while gateway-backed `web_search` is present only when both `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` are set. A prompt that needs an unavailable capability fails at that live H1 call before any section executes.
+Two facts bound what a run can do. The store backing the run is in memory, so a prompt's filed state lives exactly as long as the process. The live tool catalog is host-owned and launch-stable: local `web_fetch` is always present, while gateway-backed `web_search` is present only when both `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY` are set. A prompt that needs an unavailable capability fails at that live H1 call before any section executes.
 
 The result is on stdout, everything else is on stderr, and the exit status is success or failure with nothing in between.
 

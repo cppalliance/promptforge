@@ -30,7 +30,7 @@ failures from every subsystem - parsing, model inference, tool dispatch, Lua
 execution, and store operations - into a single type with discriminated kinds.
 
 ```rust
-match run(&prompt, input, ctx, &tools, &store, config).await {
+match run(&prompt, input, ctx, &store, config).await {
     Ok(result) => println!("{result}"),
     Err(e) if e.is_cancelled() => println!("run was cancelled"),
     Err(e) if e.is_retryable() => println!("transient failure: {e}"),

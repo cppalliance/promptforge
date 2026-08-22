@@ -155,7 +155,7 @@ pub fn run(args: &ServerArgs) -> Result<(), RunError> {
         .build()
         .map_err(RunError::runtime)?;
     // Tool/model capability binding is synchronous and model-backed. Prepare
-    // the live registry, picker, and gateway model catalog once, then share
+    // the live tool catalog, picker, and gateway model catalog once, then share
     // the immutable result across every run.
     let tools = Arc::new(runtime.block_on(PreparedTools::load(&config))?);
     let stdio = args.stdio;

@@ -57,18 +57,19 @@ Parse errors report stable kind discriminants and optional byte spans for editor
 
 ## Execution Model
 
-Execution is a free function call over caller-owned resources. There is no process-global state. The caller owns the prompt, the execution id, the tool picker, the model catalog, the store, and the observer.
+Execution is a free function call over caller-owned resources. There is no process-global state. The caller owns the prompt, the execution id, the tool picker, the tool catalog, the model catalog, the store, and the observer.
 
 ```rust
 use promptforge_core::{run, Prompt, RunConfig, StoreRef, ResolutionContext};
+use promptforge_core::tools::ToolCatalog;
 
 let prompt = Prompt::parse(source, "my-execution", &observer)?;
+let tool_catalog = ToolCatalog::new(&tools)?;
 
 let result = run(
     &prompt,
     "user input here",
-    ResolutionContext::new(&picker, &models),
-    &tools,
+    ResolutionContext::new(&picker, &models, &tool_catalog),
     &StoreRef::memory(),
     RunConfig::new("my-execution"),
 ).await?;

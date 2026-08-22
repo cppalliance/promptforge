@@ -165,8 +165,7 @@ impl RunEnv {
         let result = run(
             &prompt,
             input,
-            ResolutionContext::new(&self.picker, &self.models),
-            self.tools.tools(),
+            ResolutionContext::new(&self.picker, &self.models, self.tools.tools()),
             &store,
             config,
         )

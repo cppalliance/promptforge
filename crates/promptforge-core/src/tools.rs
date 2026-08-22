@@ -8,8 +8,8 @@
 //!
 //! This facade splits into focused child modules (tools.rs F/AUDIT-FILE-500):
 //! `ids` (identity + validation errors), `output` (trusted output + the
-//! model-safe error), `registry` (the [`Tool`] trait, the registry, and the
-//! shared fanout set), and `web_search` (the in-crate WebSearch tool). The
+//! model-safe error), `registry` (the [`Tool`] trait and the caller-provided
+//! [`ToolCatalog`]), and `web_search` (the in-crate WebSearch tool). The
 //! public surface is unchanged; every public item is re-exported here.
 
 mod ids;
@@ -19,10 +19,10 @@ mod web_search;
 
 pub use ids::{ToolId, ToolIdError, ToolIdErrorKind};
 pub use output::{OutputTrust, ToolError, ToolErrorKind, ToolOutput};
-pub use registry::{Tool, ToolRegistry, ToolRegistryError, ToolRegistryErrorKind};
+pub use registry::{Tool, ToolCatalog, ToolCatalogError, ToolCatalogErrorKind};
 pub use web_search::WebSearch;
 
-pub(crate) use registry::{NearDuplicateDiagnostic, SharedTools};
+pub(crate) use registry::NearDuplicateDiagnostic;
 
 #[cfg(test)]
 mod tests;

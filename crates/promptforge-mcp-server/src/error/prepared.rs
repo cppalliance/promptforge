@@ -40,7 +40,7 @@ pub struct PreparedToolsError {
 /// free to change behind [`PreparedToolsError::kind`].
 #[derive(Debug)]
 enum PreparedToolsErrorRepr {
-    /// The live tool registry could not be assembled. Carries the underlying
+    /// The live tool catalog could not be assembled. Carries the underlying
     /// error erased as its source.
     Tools {
         source: Box<dyn std::error::Error + Send + Sync>,
@@ -60,7 +60,7 @@ enum PreparedToolsErrorRepr {
 }
 
 impl PreparedToolsError {
-    /// The live tool registry could not be assembled.
+    /// The live tool catalog could not be assembled.
     pub(crate) fn tools(
         source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
     ) -> PreparedToolsError {
@@ -99,7 +99,7 @@ impl PreparedToolsError {
 impl fmt::Display for PreparedToolsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.repr {
-            PreparedToolsErrorRepr::Tools { .. } => f.write_str("assemble the live tool registry"),
+            PreparedToolsErrorRepr::Tools { .. } => f.write_str("assemble the live tool catalog"),
             PreparedToolsErrorRepr::Picker { .. } => f.write_str("build the tool picker index"),
             #[cfg(test)]
             PreparedToolsErrorRepr::Index { .. } => f.write_str("rebuild the tool picker index"),
@@ -134,7 +134,7 @@ impl std::error::Error for PreparedToolsError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum PreparedToolsErrorKind {
-    /// The live tool registry could not be assembled.
+    /// The live tool catalog could not be assembled.
     Tools,
     /// The tool picker index could not be built.
     Picker,
@@ -149,7 +149,7 @@ impl PreparedToolsError {
     /// ```
     /// use promptforge_mcp_server::{PreparedToolsError, PreparedToolsErrorKind};
     ///
-    /// fn registry_failed(err: &PreparedToolsError) -> bool {
+    /// fn catalog_failed(err: &PreparedToolsError) -> bool {
     ///     err.kind() == PreparedToolsErrorKind::Tools
     /// }
     /// ```

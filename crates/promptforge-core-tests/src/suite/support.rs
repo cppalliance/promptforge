@@ -10,7 +10,7 @@ use promptforge_core::model::ModelCatalog;
 use promptforge_core::observe::{Observation, Observer};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
-use promptforge_core::tools::Tool;
+use promptforge_core::tools::{Tool, ToolCatalog};
 use promptforge_tool_picker::{Catalog, Config, ToolPicker};
 
 /// One correlated observation: which execution and section emitted it, plus the
@@ -51,11 +51,11 @@ pub(super) async fn run(
     let picker = ToolPicker::build(Catalog::default(), Config::default())
         .expect("empty fixture picker must build");
     let models = ModelCatalog::empty();
+    let tools = ToolCatalog::new(tools).expect("fixture tools are unique");
     run_core(
         prompt,
         args,
-        ResolutionContext::new(&picker, &models),
-        tools,
+        ResolutionContext::new(&picker, &models, &tools),
         store,
         RunConfig::new(opts.execution).observer(opts.observer),
     )

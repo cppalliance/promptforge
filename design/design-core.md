@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-`promptforge-core` turns one PromptForge Markdown source into a validated run result. A host creates one execution id, parses the source into `Prompt`, then supplies that prompt, one raw input string, a prepared tool picker, a complete live tool registry, a model catalog, a run-scoped virtual file store, and an observer to `execute::run` under the same id.
+`promptforge-core` turns one PromptForge Markdown source into a validated run result. A host creates one execution id, parses the source into `Prompt`, then supplies that prompt, one raw input string, a prepared tool picker, a validated tool catalog, a model catalog, a run-scoped virtual file store, and an observer to `execute::run` under the same id.
 
 The language requires one H1 and executes top-level H2 sections in file order when present. A prompt with no H2 sections executes H1 blocks and returns the model reply. Ordinary H1 blocks alternate exactly like section blocks:
 
@@ -69,7 +69,7 @@ A prompt declares tools, models, context, thinking, and temperature. The host su
 
 18. **Prompts resolve semantic needs live under local aliases.** H1 `tools.bind(alias, description)` and `models.bind(alias, description, opts?)` use case-sensitive aliases matching `[A-Za-z][A-Za-z0-9_-]{0,63}`. Each call immediately asks the prepared picker and returns a frozen Tool or Model object. Optional model `opts`: `context`, `thinking`, `temperature`, `max_tokens`. A bind exposes nothing and selects no model. H2 `tools.add` makes tools available to the model; H1 `tools.always` is for every model-facing section. H2 `models.use` selects at most one captured model and returns its handle; H1 `models.default` is the prompt-wide baseline. Non-empty model-facing prose without either fails with `Error::ModelRequired`.
 
-19. **Live H1 resolution captures one-to-one maps during execution.** Conditional needs resolve only when their branch runs. Duplicate live IDs, duplicate aliases, two aliases selecting one tool ID, and selected IDs absent from the registry fail at the resolving call. Rust installs the captured handles directly into every section VM. Effective-scope near-duplicates fail before a model sees tools.
+19. **Live H1 resolution captures one-to-one maps during execution.** Conditional needs resolve only when their branch runs. Duplicate live IDs fail at catalog construction, before any run; duplicate aliases, two aliases selecting one tool ID, and selected IDs absent from the tool catalog fail at the resolving call. Rust installs the captured handles directly into every section VM. Effective-scope near-duplicates fail before a model sees tools.
 
 20. **Per-VM `tools.calls` counts measure model behaviour.** Seeded at 0 for every in-scope alias. Incremented when dispatch is attempted. Unknown keys are hard errors. Out-of-scope model tool calls are `Error::OutOfScopeToolCall`. Counts are not rolled up across fanout arms.
 
@@ -89,7 +89,7 @@ A prompt declares tools, models, context, thinking, and temperature. The host su
 
 `Prompt::parse(source, execution, observer)` validates structure, compiles executable Lua, and returns a `Prompt` containing frontmatter, title, `h1_blocks`, optional `replay`, and the top-level section tree.
 
-`execute::run(prompt, args, ResolutionContext, tools, store, RunOptions)` gates the engine major, executes `h1_blocks` live exactly once, captures resolved Tool and Model objects plus the serialized H1 `var`, then walks top-level H2 sections in source order while honoring `jump` transfers. `ResolutionContext` carries the picker, complete tool registry, and model catalog. At first model interaction, a selected `models.use` or prompt-wide `models.default` supplies `CompletionOptions`. The model loop and infer path are capped by `max_tool_iterations` (default 24). Falling off the last section returns the last model reply, else `"done"`.
+`execute::run(prompt, args, ResolutionContext, store, RunOptions)` gates the engine major, executes `h1_blocks` live exactly once, captures resolved Tool and Model objects plus the serialized H1 `var`, then walks top-level H2 sections in source order while honoring `jump` transfers. `ResolutionContext` carries the picker, model catalog, and tool catalog. At first model interaction, a selected `models.use` or prompt-wide `models.default` supplies `CompletionOptions`. The model loop and infer path are capped by `max_tool_iterations` (default 24). Falling off the last section returns the last model reply, else `"done"`.
 
 ## Exact grammar keeps Markdown examples inert
 
@@ -127,9 +127,9 @@ pub trait DebugCapture: Send + Sync {
 }
 ```
 
-## Host registries
+## Host catalogs
 
-Every `Tool` exposes stable `ToolId`, wire name, description, parameter schema, trust classification, and async call behavior. Hosts construct the live registry and derive the picker catalog from the same instances, plus a `ModelCatalog` from gateway `GET /v1/models` (or a pinned offline entry).
+Every `Tool` exposes stable `ToolId`, wire name, description, parameter schema, trust classification, and async call behavior. Hosts construct the tool catalog and derive the picker catalog from the same instances, plus a `ModelCatalog` from gateway `GET /v1/models` (or a pinned offline entry).
 
 ## Failures and non-goals
 

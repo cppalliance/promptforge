@@ -136,7 +136,7 @@ pub(crate) struct LuaToolHandle {
 impl LuaToolHandle {
     /// Builds a handle from a bound alias, capability description, and identity.
     ///
-    /// Without a live registry lookup, `wire_name` is the identity's stable
+    /// Without a live catalog lookup, `wire_name` is the identity's stable
     /// name, `parameters` is an empty object, and `untrusted` is false.
     #[must_use]
     pub(crate) fn from_binding(

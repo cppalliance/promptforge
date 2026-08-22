@@ -311,14 +311,6 @@ pub(crate) enum Error {
         alias: String,
     },
 
-    /// The live registry contains more than one entry with one stable identity.
-    #[error("live tool registry contains duplicate identity {id:?}")]
-    #[non_exhaustive]
-    DuplicateLiveToolId {
-        /// The repeated stable identity.
-        id: crate::tools::ToolId,
-    },
-
     /// Two prompt-local aliases selected the same stable tool identity.
     #[error(
         "tool identity {id:?} was selected by both aliases {first_alias:?} and {second_alias:?}"
@@ -333,15 +325,16 @@ pub(crate) enum Error {
         second_alias: String,
     },
 
-    /// A picker-selected stable identity is not callable in the live registry.
+    /// A picker-selected stable identity is not callable in the live tool
+    /// catalog.
     #[error(
-        "alias {alias:?} selected tool identity {id:?}, which is absent from the live registry"
+        "alias {alias:?} selected tool identity {id:?}, which is absent from the live tool catalog"
     )]
     #[non_exhaustive]
     PickedToolNotLive {
         /// The prompt-local alias whose selection cannot be fulfilled.
         alias: String,
-        /// The selected stable identity absent from the registry.
+        /// The selected stable identity absent from the catalog.
         id: crate::tools::ToolId,
     },
 
@@ -524,19 +517,6 @@ pub(crate) enum Error {
     #[error("internal invariant violated: {0}")]
     Internal(&'static str),
 
-    /// A supplied tool's transport wire name was not legal when binding the
-    /// live registry, retaining the structured [`crate::tools::ToolRegistryError`]
-    /// as the private `#[source]` cause (tools AUDIT-DISCARDED-SOURCE) so the
-    /// rejected name and reason survive instead of being flattened to a bare
-    /// `&'static str`.
-    #[error("internal invariant violated: invalid tool wire name")]
-    #[non_exhaustive]
-    InvalidToolWireName {
-        /// The originating registry validation failure, kept as the cause.
-        #[source]
-        source: BoxedSource,
-    },
-
     /// A Lua host resource quota (log events, log bytes, or instructions) was
     /// exhausted. A stable typed error rather than a bare `Lua(String)` so hosts
     /// can distinguish quota exhaustion from an authoring error.
@@ -668,24 +648,6 @@ mod tests {
             }),
         };
         assert_source_survives_run_error(compile);
-    }
-
-    #[test]
-    fn invalid_tool_wire_name_preserves_the_registry_error_and_its_context() {
-        // tools AUDIT-DISCARDED-SOURCE: converting the registry error keeps the
-        // rejected name and reason reachable through the private source instead
-        // of collapsing to a bare `&'static str`.
-        let registry = crate::tools::ToolRegistryError::InvalidWireName {
-            wire_name: "bad name!".to_owned(),
-            reason: "may contain only [A-Za-z0-9_.-]",
-        };
-        let error = Error::from(registry);
-        let source = std::error::Error::source(&error).expect("registry cause preserved");
-        assert!(
-            source.to_string().contains("bad name!"),
-            "the rejected wire name must survive on the source: {source}"
-        );
-        assert_source_survives_run_error(error);
     }
 
     #[test]
