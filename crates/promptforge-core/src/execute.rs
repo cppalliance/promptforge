@@ -74,7 +74,6 @@ mod tool_loop;
 mod tools;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64};
 
 // Public API surface.
 pub use config::{RunConfig, RunLimits};
@@ -82,15 +81,14 @@ pub use error::{RunError, RunErrorKind};
 pub use gateway::ResolutionContext;
 
 // Crate-internal items reused through the historical `crate::execute::` path.
-// `ToolAnalysis`, the engine items (the `RunFrame` borrowed context and
-// `ControlContext`), and the `SectionContext` frame are consumed by
-// `fanout`; `run_sections` and `execute_live_h1` serve only `run` below and
-// stay module-private.
+// `ToolAnalysis`, the engine's `drive_contained_chain`, and the
+// `SectionContext` frame are consumed by `fanout`; `run_sections` and
+// `execute_live_h1` serve only `run` below and stay module-private.
 // Re-exported so the split stays surface-neutral for the public API while
 // keeping one import path for internal collaborators.
 pub(crate) use block_walk::{BlockRunMode, SectionFlow};
 pub(crate) use context::RunContext;
-pub(crate) use engine::{ControlContext, RunFrame};
+pub(crate) use engine::drive_contained_chain;
 pub(crate) use scope::ToolAnalysis;
 pub(crate) use section_context::SectionContext;
 
@@ -129,14 +127,14 @@ pub(crate) use tool_loop::{LocalDispatch, ProseMode, run_prose_inference};
 
 use crate::Error;
 use crate::cancel;
-use crate::debug::DebugCapture;
 use crate::observe::detail;
 use crate::parser::{ParseErrorKind, Prompt};
 use crate::store::StoreRef;
 use crate::tools::{SharedTools, Tool};
 use support::{GENERIC_COMPLETION, SUPPORTED_MAJOR};
 
-// Used by `run` below and re-exported for the executor test glob.
+// Re-exported for the executor test glob.
+#[cfg(test)]
 pub(crate) use crate::model::ModelBindings;
 
 /// Executes a parsed prompt and returns its final text.
@@ -227,77 +225,32 @@ pub async fn run(
         }
     }
 
-    let ctx = RunContext::new(prompt);
+    let shared_tools =
+        SharedTools::new(tools).map_err(|error| RunError::from(Error::from(error)))?;
+    // Section startup replays the shared library unconditionally; a prompt
+    // without one replays an empty compiled chunk instead, so the startup
+    // sequence carries no `Option` branch.
+    let shared = match prompt.replay.as_ref() {
+        Some(program) => program.clone(),
+        None => crate::lua::LuaProgram::empty().map_err(RunError::from)?,
+    };
+    let ctx = RunContext::new(prompt, args, store, shared_tools, shared, &config);
+    let registry = ctx.shared_tools().registry();
 
     let RunConfig {
         execution,
         observer,
-        debug,
         client,
         cancel,
         limits,
+        ..
     } = config;
-    let execution = execution.as_str();
-    let observer_arc = observer;
-    let observer = observer_arc.as_ref();
-    // Keep the owned debug Arc so it can reach the nested `model:infer` hook
-    // (F4); the frame carries the Arc and use sites deref for direct capture.
-    let debug_arc: Option<&Arc<dyn DebugCapture>> = debug.as_ref();
     let client =
         client.map(|client| client.with_request_limits(limits.timeout(), limits.response_bytes()));
-    let shared_tools =
-        SharedTools::new(tools).map_err(|error| RunError::from(Error::from(error)))?;
-    let registry = shared_tools.registry();
-    observer.observe(execution, &prompt.title, detail::RUN_STARTED);
-    let turns = Arc::new(AtomicU32::new(0));
-    // The run-global execution-id counter: H1 keeps id 0, and every section
-    // entry and fanout arm takes the next value, across every chain.
-    let ids = Arc::new(AtomicU64::new(0));
+    observer.observe(&execution, &prompt.title, detail::RUN_STARTED);
 
     let run_body = async {
-        // The one borrowed frame every driver shares, built once so no driver
-        // restates the tail. The walk-only fields carry empty defaults for
-        // the live H1 pass, which never reads them; the section walk rebuilds
-        // the frame with the live values H1 produced. `shared`,
-        // `section_count`, and `max_tool_iterations` are prompt-derived, so
-        // they carry their real values from the start.
-        //
-        // Section startup replays the shared library unconditionally; a
-        // prompt without one replays an empty compiled chunk instead, so the
-        // startup sequence carries no `Option` branch.
-        let empty_shared;
-        let shared = if let Some(program) = prompt.replay.as_ref() {
-            program
-        } else {
-            empty_shared = crate::lua::LuaProgram::empty()?;
-            &empty_shared
-        };
-        let empty_bindings = crate::lua::ToolBindings::default();
-        let empty_models = ModelBindings::from_parts(Vec::new(), None);
-        let empty_analysis = ToolAnalysis::default();
-        let frame = RunFrame {
-            args,
-            store,
-            execution,
-            nonce: ctx.nonce(),
-            observer: &observer_arc,
-            debug: debug_arc,
-            shared_tools: &shared_tools,
-            limits,
-            turns: &turns,
-            ids: &ids,
-            shared,
-            bindings: &empty_bindings,
-            models: &empty_models,
-            analysis: &empty_analysis,
-            max_tool_iterations: prompt
-                .frontmatter
-                .max_tool_iterations
-                .resolve(limits.tool_iterations().get() as usize),
-            when: "",
-            section_count: prompt.sections.len(),
-        };
-        let h1 = execute_live_h1(&ctx, resolution, &registry, client.as_ref(), &frame).await?;
+        let h1 = execute_live_h1(&ctx, resolution, &registry, client.as_ref()).await?;
         if let Some(value) = h1.returned {
             return Ok(value);
         }
@@ -312,7 +265,6 @@ pub async fn run(
             &analysis,
             Some(&h1.var),
             client.as_ref(),
-            &frame,
         )
         .await
     };
@@ -323,7 +275,7 @@ pub async fn run(
     let result = cancel::maybe_scope(cancel, run_body).await;
 
     observer.observe(
-        execution,
+        &execution,
         &prompt.title,
         if result.is_ok() {
             detail::RUN_SUCCEEDED

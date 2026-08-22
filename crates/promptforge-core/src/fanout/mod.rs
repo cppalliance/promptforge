@@ -32,7 +32,7 @@
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64};
+use std::sync::atomic::AtomicU32;
 
 use mlua::{Lua, LuaSerdeExt, Value};
 use serde_json::json;
@@ -42,13 +42,10 @@ use tokio::task::JoinSet;
 use crate::cancel;
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
-use crate::execute::RunLimits;
-use crate::lua::{LuaFanoutResult, LuaProgram, ToolBindings};
-use crate::model::ModelBindings;
-use crate::observe::{Observation, Observer};
+use crate::execute::RunContext;
+use crate::lua::LuaFanoutResult;
+use crate::observe::Observation;
 use crate::parser::Section;
-use crate::store::StoreRef;
-use crate::tools::SharedTools;
 use crate::{Error, Result};
 
 /// Parses a section heading like `"### Name"` into an exact `(level, name)`
@@ -209,49 +206,20 @@ fn member_to_json(lua: &Lua, member: Value, index: &str) -> Result<serde_json::V
     }
 }
 
-/// Everything a fanout needs from the invoker's context.
-pub(crate) struct FanoutContext<'a> {
-    pub args: &'a str,
-    pub store: &'a StoreRef,
-    pub execution: &'a str,
-    /// The run's untrusted-envelope nonce, shared by every arm's wraps.
-    pub nonce: &'a crate::untrusted::GuardNonce,
-    pub observer: &'a dyn Observer,
-    pub client: &'a Option<GatewayClient>,
-    pub debug: Option<&'a dyn DebugCapture>,
-    /// The shared library every arm replays as its first chunk; an empty
-    /// compiled chunk when the prompt declares no `lua shared` library.
-    pub shared: &'a LuaProgram,
-    pub bindings: &'a ToolBindings,
-    pub models: &'a ModelBindings,
-    pub analysis: &'a crate::execute::ToolAnalysis,
-    pub shared_tools: &'a SharedTools,
-    pub max_tool_iterations: usize,
-    /// The run's resource limits: the concurrency window is read from it
-    /// here, each arm reads its Lua ceilings from it, and a lazily
-    /// created gateway client inherits its HTTP limits.
-    pub limits: RunLimits,
-    pub last_reply: Option<&'a str>,
-    pub when: &'a str,
-    /// The run-global execution-id counter every arm takes its `sys.id`
-    /// from; a fanout shares it without resetting (unlike `turns`).
-    pub ids: &'a Arc<AtomicU64>,
-    /// Total H2 section count in the top-level prompt.
-    pub section_count: usize,
-    /// The worker's home slice - the set it was resolved from, minus the
-    /// worker. Each arm's control globals (`execute`, `fanout`,
-    /// `list_from_section`, and a jump's target) derive their resolution set
-    /// from it as the home slice plus the worker's children.
-    pub home: &'a [Section],
-    /// The fanout caller's execute depth. Each arm runs one level deeper, so
-    /// recursion accounting accumulates across the fanout boundary.
-    pub execute_depth: usize,
-    /// The fanout caller's `var`, snapshotted at the call site: each arm
-    /// seeds from its own clone, and arm writes never reach the caller.
-    pub var: &'a serde_json::Value,
-}
-
 /// Runs the worker section template once per item, concurrently.
+///
+/// `ctx` is the fanout caller's run context; each arm runs under a fork of
+/// it carrying the fanout's effective reporting handles (the proxy
+/// observer/debug over the bounded side channels and a fresh turn counter).
+/// The fanout call's own inputs travel as parameters: `client` is the
+/// caller's client snapshot (each arm starts from it, creating one lazily
+/// when absent), `last_reply` seeds each arm's reply roll-forward, `home`
+/// is the worker's home slice - the set it was resolved from, minus the
+/// worker - from which each arm's control globals derive their resolution
+/// set (the home slice plus the worker's children), `execute_depth` is the
+/// caller's nesting depth (each arm runs one level deeper), and `var` is
+/// the caller's `var` snapshot (each arm seeds from its own clone, and arm
+/// writes never reach the caller).
 ///
 /// Returns the ordered structured results from each arm (collection order,
 /// not finish order).
@@ -260,10 +228,19 @@ pub(crate) struct FanoutContext<'a> {
 /// Returns [`Error::Lua`] when `items` is empty: no work is likely a bug, so
 /// the fanout is rejected before any scheduling. Fatal arm errors abort
 /// siblings; tool-loop exhaustion soft-degrades.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the fanout call's own inputs (client, reply seed, home slice, depth, var) ride beside the run context as one linear parameter list"
+)]
 pub(crate) async fn run_fanout_arms(
+    ctx: &RunContext,
     worker: &Section,
     items: &[serde_json::Value],
-    ctx: &FanoutContext<'_>,
+    client: Option<&GatewayClient>,
+    last_reply: Option<&str>,
+    home: &[Section],
+    execute_depth: usize,
+    var: &serde_json::Value,
 ) -> Result<Vec<LuaFanoutResult>> {
     // An empty collection runs zero arms; that is an authoring bug (a list
     // section that parsed empty, a wrong variable), not a valid run.
@@ -290,7 +267,7 @@ pub(crate) async fn run_fanout_arms(
         debug_rx,
     };
     let proxy_observer = Arc::new(ProxyObserver { tx: observe_tx });
-    let proxy_debug = ctx.debug.map(|_| {
+    let proxy_debug = ctx.debug().map(|_| {
         Arc::new(ProxyDebugCapture {
             tx: debug_tx.clone(),
         }) as Arc<dyn DebugCapture>
@@ -298,22 +275,27 @@ pub(crate) async fn run_fanout_arms(
 
     // The inputs every arm shares, built once and carried by Arc into each
     // arm's payload across the spawn boundary, so an N-item fanout pays one
-    // inputs construction rather than N deep clones.
-    let inputs = Arc::new(ArmInputs::from_context(
-        ctx,
-        worker,
-        &turns,
-        Arc::clone(&proxy_observer),
-        proxy_debug.clone(),
-        arm_cancel.clone(),
-    ));
+    // inputs construction rather than N deep clones. Each arm runs one
+    // execute level deeper than the fanout caller, so recursion accounting
+    // accumulates across the fanout boundary instead of resetting.
+    let inputs = Arc::new(ArmInputs {
+        ctx: ctx.with_effective_handles(proxy_observer, proxy_debug, Arc::clone(&turns)),
+        worker: worker.clone(),
+        home: home.to_vec(),
+        client: client.cloned(),
+        last_reply: last_reply.map(str::to_owned),
+        var: var.clone(),
+        write_token: ctx.store().next_write_token(),
+        execute_depth: execute_depth + 1,
+        cancel: arm_cancel.clone(),
+    });
 
     let mut join_set: JoinSet<Result<(usize, LuaFanoutResult)>> = JoinSet::new();
     let mut replies: Vec<Option<LuaFanoutResult>> = vec![None; items.len()];
 
     // At most `fanout_concurrency` arms are resident at once: seed the initial
     // window, then schedule the next queued item whenever one completes.
-    let mut window = ArmWindow::new(items.len(), ctx.limits.fanout_concurrency());
+    let mut window = ArmWindow::new(items.len(), ctx.limits().fanout_concurrency());
     fill_window(&inputs, items, &mut window, &mut join_set);
 
     // Drop the unused sender clone so the debug channel can close when arms finish.
@@ -327,7 +309,7 @@ pub(crate) async fn run_fanout_arms(
                 return Err(Error::Interrupted);
             }
             Some((section, event)) = side_channels.observe_rx.recv() => {
-                ctx.observer.observe(ctx.execution, &section, event);
+                ctx.observer().observe(ctx.execution(), &section, event);
             }
             Some(msg) = side_channels.debug_rx.recv() => {
                 forward_debug(ctx, msg);
@@ -395,7 +377,7 @@ async fn handle_joined_arm(
     window: &mut ArmWindow,
     join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>,
     replies: &mut [Option<LuaFanoutResult>],
-    ctx: &FanoutContext<'_>,
+    ctx: &RunContext,
     side_channels: &mut SideChannels,
 ) -> Result<bool> {
     match joined {
@@ -462,9 +444,9 @@ impl ArmWindow {
 }
 
 /// Forwards one arm debug event to the run's capture sink, when one is set.
-fn forward_debug(ctx: &FanoutContext<'_>, msg: DebugMsg) {
-    if let Some(capture) = ctx.debug {
-        capture.on_event(ctx.execution, &msg.section, msg.turn_index, msg.event);
+fn forward_debug(ctx: &RunContext, msg: DebugMsg) {
+    if let Some(capture) = ctx.debug() {
+        capture.on_event(ctx.execution(), &msg.section, msg.turn_index, msg.event);
     }
 }
 
@@ -477,9 +459,9 @@ struct SideChannels {
 
 impl SideChannels {
     /// Forwards every event the arms left buffered, draining both channels.
-    fn drain(&mut self, ctx: &FanoutContext<'_>) {
+    fn drain(&mut self, ctx: &RunContext) {
         while let Ok((section, event)) = self.observe_rx.try_recv() {
-            ctx.observer.observe(ctx.execution, &section, event);
+            ctx.observer().observe(ctx.execution(), &section, event);
         }
         while let Ok(msg) = self.debug_rx.try_recv() {
             forward_debug(ctx, msg);
@@ -491,7 +473,7 @@ impl SideChannels {
 /// channels so events the arms already buffered still reach the run's sinks.
 async fn abort_fanout_arms(
     join_set: &mut JoinSet<Result<(usize, LuaFanoutResult)>>,
-    ctx: &FanoutContext<'_>,
+    ctx: &RunContext,
     side_channels: &mut SideChannels,
 ) {
     join_set.abort_all();

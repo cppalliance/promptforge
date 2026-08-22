@@ -8,10 +8,10 @@
 //! so a walk error propagates bare and the driver tears the VM down exactly
 //! once on every path. Each driver (the live H1 pass, the section walk's
 //! `run_one_section`, the fanout arm) hands the loop the same borrowed
-//! [`RunFrame`] plus its per-frame state borrows and a [`BlockRunMode`]:
+//! [`RunContext`] plus its per-frame state borrows and a [`BlockRunMode`]:
 //! H1-vs-section is a caller-set mode,
-//! not a second loop. Live mode reads only the frame's run-scoped fields;
-//! the walk-only fields it never touches carry empty defaults.
+//! not a second loop. Live mode reads only the context's run-scoped values;
+//! the walk-scoped values it never touches stay empty until the walk starts.
 
 use std::sync::atomic::AtomicU32;
 
@@ -25,7 +25,7 @@ use crate::resolve::RuntimeResolution;
 use crate::subst;
 use crate::{Error, Result};
 
-use super::engine::RunFrame;
+use super::context::RunContext;
 use super::gateway::env_client_with_limits;
 use super::scope::{prepare_effective_scope, prepare_scoped_tools};
 use super::tool_loop::{ProseMode, run_prose_inference};
@@ -103,7 +103,7 @@ pub(crate) enum BlockRunMode<'a> {
 /// [`Error::Internal`] when prose reaches inference with no gateway client.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the loop keeps the VM, the shared frame, the block sequence, the mode, the frame's borrowed state, the effective reporting handles, and the client slot explicit and linear"
+    reason = "the loop keeps the VM, the shared run context, the block sequence, the mode, the frame's borrowed state, the effective reporting handles, and the client slot explicit and linear"
 )]
 #[expect(
     clippy::too_many_lines,
@@ -111,7 +111,7 @@ pub(crate) enum BlockRunMode<'a> {
 )]
 pub(crate) async fn run_one_section_impl(
     vm: &mut SectionVm,
-    ctx: &RunFrame<'_>,
+    ctx: &RunContext,
     name: &str,
     blocks: &[Block],
     mode: BlockRunMode<'_>,
@@ -127,7 +127,7 @@ pub(crate) async fn run_one_section_impl(
     client: &mut Option<GatewayClient>,
 ) -> Result<SectionFlow> {
     // Walk-only state: the registry is read only inside the block walk.
-    let registry = ctx.shared_tools.registry();
+    let registry = ctx.shared_tools().registry();
     // Section mode: `counts` doubles as the one-time gate: it is `Some`
     // exactly after the first prose block installed the counts and resolved
     // the model. Schemas and dispatch rebuild on EVERY prose block so
@@ -176,7 +176,7 @@ pub(crate) async fn run_one_section_impl(
             Block::Prose { text, loop_capable } => {
                 let prose_mode = if *loop_capable {
                     ProseMode::Loop {
-                        max_tool_iterations: ctx.max_tool_iterations,
+                        max_tool_iterations: ctx.max_tool_iterations(),
                     }
                 } else {
                     ProseMode::SingleShot
@@ -186,7 +186,7 @@ pub(crate) async fn run_one_section_impl(
                         let var = vm.var()?;
                         let prose = subst::substitute(
                             text,
-                            ctx.args,
+                            ctx.args(),
                             reply.as_deref(),
                             item,
                             &var,
@@ -221,7 +221,7 @@ pub(crate) async fn run_one_section_impl(
                         let (schemas, dispatch) =
                             prepare_scoped_tools(&scope, &local_schemas, &registry)?;
                         if client.is_none() {
-                            *client = Some(env_client_with_limits(ctx.limits)?);
+                            *client = Some(env_client_with_limits(ctx.limits())?);
                         }
                         let Some(active_client) = client.as_ref() else {
                             // The block just above guarantees a client exists
@@ -245,13 +245,13 @@ pub(crate) async fn run_one_section_impl(
                             conversation,
                             prose,
                             prose_mode,
-                            ctx.execution,
+                            ctx.execution(),
                             observer,
                             name,
                             turns,
                             debug,
                             &model_options,
-                            ctx.nonce,
+                            ctx.nonce(),
                             Some(&block_counts),
                             // Live H1 has no prompt-wide alias analysis and no
                             // local tools to dispatch.
@@ -266,11 +266,11 @@ pub(crate) async fn run_one_section_impl(
                     }
                     BlockRunMode::Section => {
                         let effective_bindings =
-                            current_tool_bindings(ctx.bindings, &vm.tool_runtime)?;
+                            current_tool_bindings(ctx.bindings(), &vm.tool_runtime)?;
                         if counts.is_none() {
                             *counts = Some(vm.install_tool_call_counts(&effective_bindings)?);
                             let resolved_model =
-                                crate::lua::resolve_model_binding(ctx.models, &vm.model_runtime)?;
+                                crate::lua::resolve_model_binding(ctx.models(), &vm.model_runtime)?;
                             if let Some(binding) = resolved_model.as_ref() {
                                 let current = vm.current_sys(sys)?;
                                 let enriched = crate::lua::enrich_sys_model(&current, binding);
@@ -294,11 +294,11 @@ pub(crate) async fn run_one_section_impl(
                             }
                         }
                         let (schemas, dispatch) = prepare_effective_scope(
-                            ctx.analysis,
+                            ctx.analysis(),
                             &effective_bindings,
                             &local_schemas,
                             &registry,
-                            ctx.execution,
+                            ctx.execution(),
                             observer,
                             name,
                         )?;
@@ -306,7 +306,7 @@ pub(crate) async fn run_one_section_impl(
                         let var = vm.var()?;
                         let prose = subst::substitute(
                             text,
-                            ctx.args,
+                            ctx.args(),
                             reply.as_deref(),
                             item,
                             &var,
@@ -322,7 +322,7 @@ pub(crate) async fn run_one_section_impl(
                             });
                         };
                         if client.is_none() {
-                            *client = Some(env_client_with_limits(ctx.limits)?);
+                            *client = Some(env_client_with_limits(ctx.limits())?);
                         }
                         let Some(active_client) = client.as_ref() else {
                             // The block just above guarantees a client exists
@@ -332,7 +332,7 @@ pub(crate) async fn run_one_section_impl(
                                 "model-facing prose reached inference with no gateway client",
                             ));
                         };
-                        let global_aliases = Some(&ctx.analysis.alias_to_id);
+                        let global_aliases = Some(&ctx.analysis().alias_to_id);
                         // Local tools are Lua functions on this section VM; route
                         // their calls back into it rather than the registry.
                         let local_dispatch =
@@ -345,13 +345,13 @@ pub(crate) async fn run_one_section_impl(
                             conversation,
                             prose,
                             prose_mode,
-                            ctx.execution,
+                            ctx.execution(),
                             observer,
                             name,
                             turns,
                             debug,
                             options,
-                            ctx.nonce,
+                            ctx.nonce(),
                             counts.as_ref(),
                             global_aliases,
                             Some(&local_dispatch),
