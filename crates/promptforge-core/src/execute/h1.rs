@@ -77,6 +77,7 @@ pub(crate) async fn execute_live_h1(
     // path, which the shared block loop builds and propagates its own error
     // for via `h1_try!`.
     h1_try!(vm.install_host_apis(observer, &ctx.prompt().title));
+    h1_try!(vm.install_h1_control_stubs());
     let mut active_client = client.cloned();
     attach_infer_hook(
         &vm,
