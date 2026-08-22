@@ -214,6 +214,8 @@ pub(crate) struct FanoutContext<'a> {
     pub args: &'a str,
     pub store: &'a StoreRef,
     pub execution: &'a str,
+    /// The run's untrusted-envelope nonce, shared by every arm's wraps.
+    pub nonce: &'a crate::untrusted::GuardNonce,
     pub observer: &'a dyn Observer,
     pub client: &'a Option<GatewayClient>,
     pub debug: Option<&'a dyn DebugCapture>,

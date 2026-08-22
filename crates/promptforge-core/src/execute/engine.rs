@@ -57,6 +57,7 @@ use crate::observe::{Observer, detail};
 use crate::parser::Section;
 use crate::store::{StoreRef, WriteScope};
 use crate::tools::SharedTools;
+use crate::untrusted::GuardNonce;
 use crate::{Error, Result};
 use mlua::Value as LuaValue;
 
@@ -107,6 +108,9 @@ pub(crate) struct RunFrame<'a> {
     pub(crate) store: &'a StoreRef,
     /// The execution identifier every observation carries.
     pub(crate) execution: &'a str,
+    /// The run's untrusted-envelope nonce, minted once at run start and
+    /// shared by every wrap in the run.
+    pub(crate) nonce: &'a GuardNonce,
     /// The run's observer handle.
     pub(crate) observer: &'a Arc<dyn Observer>,
     /// Opt-in raw request/response capture for each model turn.
@@ -345,6 +349,7 @@ async fn run_one_section(
         .observe(frame.execution, &section.name, detail::SECTION_STARTED);
 
     let mut vm = SectionVm::new_for_section(
+        frame.nonce,
         frame.bindings,
         frame.models,
         frame.execution,
@@ -554,6 +559,9 @@ pub(crate) struct ControlContext {
     pub(crate) args: String,
     pub(crate) execution: String,
     pub(crate) when: String,
+    /// The run's untrusted-envelope nonce, owned so the persistent
+    /// control-global closures capture no borrows.
+    pub(crate) nonce: GuardNonce,
     pub(crate) shared: LuaProgram,
     pub(crate) bindings: ToolBindings,
     pub(crate) models: ModelBindings,
@@ -587,6 +595,7 @@ impl ControlContext {
         args: &str,
         execution: &str,
         when: &str,
+        nonce: &GuardNonce,
         shared: &LuaProgram,
         bindings: &ToolBindings,
         models: &ModelBindings,
@@ -605,6 +614,7 @@ impl ControlContext {
             args: args.to_string(),
             execution: execution.to_string(),
             when: when.to_string(),
+            nonce: nonce.clone(),
             shared: shared.to_owned(),
             bindings: bindings.clone(),
             models: models.clone(),
@@ -628,6 +638,7 @@ impl ControlContext {
             frame.args,
             frame.execution,
             frame.when,
+            frame.nonce,
             frame.shared,
             frame.bindings,
             frame.models,
@@ -659,6 +670,7 @@ impl ControlContext {
             ctx.args,
             ctx.execution,
             ctx.when,
+            ctx.nonce,
             ctx.shared,
             ctx.bindings,
             ctx.models,
@@ -684,6 +696,7 @@ impl ControlContext {
             args,
             store: &self.store,
             execution: &self.execution,
+            nonce: &self.nonce,
             observer: &self.observer,
             debug: self.debug.as_ref(),
             shared_tools: &self.shared_tools,
@@ -723,6 +736,7 @@ impl ControlContext {
             args: &self.args,
             store: &self.store,
             execution: &self.execution,
+            nonce: &self.nonce,
             observer: self.observer.as_ref(),
             client,
             debug: self.debug.as_deref(),

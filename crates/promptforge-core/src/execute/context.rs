@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use crate::parser::Prompt;
+use crate::untrusted::GuardNonce;
 
 /// The ambient state one run shares across the execute subtree.
 ///
@@ -17,6 +18,9 @@ use crate::parser::Prompt;
 pub(crate) struct RunContext {
     /// The prompt this run executes.
     prompt: Arc<Prompt>,
+    /// The untrusted-envelope nonce, minted once here so every wrap in the
+    /// run shares it.
+    nonce: GuardNonce,
 }
 
 impl RunContext {
@@ -25,12 +29,18 @@ impl RunContext {
     pub(crate) fn new(prompt: &Prompt) -> Self {
         Self {
             prompt: Arc::new(prompt.clone()),
+            nonce: GuardNonce::fresh(),
         }
     }
 
     /// The prompt this run executes.
     pub(crate) fn prompt(&self) -> &Prompt {
         &self.prompt
+    }
+
+    /// The run's untrusted-envelope nonce.
+    pub(crate) fn nonce(&self) -> &GuardNonce {
+        &self.nonce
     }
 }
 

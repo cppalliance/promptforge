@@ -265,6 +265,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
     let recorder = Arc::new(Recorder::default());
     let turns = AtomicU32::new(0);
     let options = test_completion_options();
+    let nonce = GuardNonce::fresh();
     // The gateway always calls the tool wired as "echo".
     let counts = ToolCallCounts::new(["echo".to_string()]);
 
@@ -282,6 +283,7 @@ async fn tool_calls_count_increments_even_when_tool_errors() {
             turns: &turns,
             debug: None,
             completion_options: &options,
+            nonce: &nonce,
         },
         Some(&counts),
         None,

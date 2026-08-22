@@ -278,6 +278,7 @@ pub async fn run(
             args,
             store,
             execution,
+            nonce: ctx.nonce(),
             observer: &observer_arc,
             debug: debug_arc,
             shared_tools: &shared_tools,
