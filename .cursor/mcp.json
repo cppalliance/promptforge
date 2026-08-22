@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "promptforge": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "--quiet",
+        "-p",
+        "promptforge-mcp-server",
+        "--",
+        "serve",
+        "--stdio",
+        "prompts.toml"
+      ]
+    }
+  }
+}
