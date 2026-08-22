@@ -8,14 +8,10 @@ use serde_json::Value;
 
 use crate::client::GatewayClient;
 use crate::debug::DebugCapture;
-use crate::execute::{
-    BlockRunMode, ControlContext, RunFrame, SectionFlow, VmSeed, make_control_globals, next_id,
-    run_one_section_impl, setup_section_vm,
-};
-use crate::lua::{LuaFanoutResult, SectionVm};
+use crate::execute::{BlockRunMode, ControlContext, SectionContext, SectionFlow};
+use crate::lua::LuaFanoutResult;
 use crate::observe::{Observation, Observer, detail};
 use crate::parser::Section;
-use crate::store::WriteScope;
 use crate::{Error, Result, cancel, subst};
 
 use super::FanoutContext;
@@ -28,7 +24,9 @@ use super::proxies::ProxyObserver;
 /// `Arc` instead of deep-cloning the worker subtree and the home slice.
 pub(crate) struct ArmInputs {
     /// The owned run context the arm's control globals capture, shared by
-    /// every arm of the fanout.
+    /// every arm of the fanout. It carries the fanout's effective reporting
+    /// handles as well, so the arm's nested `execute`/`fanout` chains report
+    /// through the proxies.
     pub(crate) control: Arc<ControlContext>,
     pub(crate) worker: Section,
     /// The worker's home slice - the set it was resolved from, minus the
@@ -54,13 +52,26 @@ pub(crate) struct ArmInputs {
     /// Explicit cancellation handle carried across the spawn boundary, since a
     /// spawned arm does not inherit the parent task-local (PF-CANCEL-002).
     pub(crate) cancel: Option<cancel::CancelHandle>,
+    /// The arm's effective observer: the fanout's proxy over the bounded
+    /// observation side channel. Each arm's frame is seeded with it directly
+    /// (the effective-handles move), and the finalizer reports through it.
+    pub(crate) observer: Arc<dyn Observer>,
+    /// The arm's effective debug sink: the fanout's proxy over the bounded
+    /// debug side channel, when the run captures debug traffic.
+    pub(crate) debug: Option<Arc<dyn DebugCapture>>,
+    /// The fanout's fresh model-turn counter, shared by every arm's frame.
+    pub(crate) turns: Arc<AtomicU32>,
 }
 
 impl ArmInputs {
     /// Builds the shared arm inputs from the borrowed fanout context, so the
     /// field copy lives in exactly one place. Each arm runs one execute level
     /// deeper than the fanout caller, so recursion accounting accumulates
-    /// across the fanout boundary instead of resetting.
+    /// across the fanout boundary instead of resetting. The fanout's
+    /// effective reporting handles (the proxy observer/debug, the fresh turn
+    /// counter) are stored here for the frame constructor to seed each arm's
+    /// frame from, and inside the shared control context for the arm's
+    /// nested chains to report through.
     pub(crate) fn from_context(
         ctx: &FanoutContext<'_>,
         worker: &Section,
@@ -70,7 +81,12 @@ impl ArmInputs {
         cancel: Option<cancel::CancelHandle>,
     ) -> Self {
         Self {
-            control: Arc::new(ControlContext::from_fanout(ctx, turns, observer, debug)),
+            control: Arc::new(ControlContext::from_fanout(
+                ctx,
+                turns,
+                observer.clone(),
+                debug.clone(),
+            )),
             worker: worker.clone(),
             home: ctx.home.to_vec(),
             client: ctx.client.clone(),
@@ -79,6 +95,9 @@ impl ArmInputs {
             write_token: ctx.store.next_write_token(),
             execute_depth: ctx.execute_depth + 1,
             cancel,
+            observer,
+            debug,
+            turns: Arc::clone(turns),
         }
     }
 }
@@ -149,35 +168,35 @@ pub(crate) const FAIL_ARM_VM_SENTINEL: &str = "__fanout_test_fail_arm_vm__";
 
 /// Runs one fanout arm to completion.
 ///
-/// The arm is a thin adapter over the shared engine: the body builds the
-/// engine's inputs from the payload (the `sys` JSON carrying the arm's
-/// run-global `id` and its per-fanout `index`, the caller's cloned `var`,
-/// the `item` seed, the
-/// proxy observer, the shared turns counter), installs the engine's real
-/// control globals resolved over the worker's visible set
-/// ([`make_control_globals`]), runs the setup half
-/// ([`setup_section_vm`]), installs the infer hook (`models.infer` /
-/// `handle:infer`) with a lazy client
-/// source, and drives the shared block walk ([`run_one_section_impl`]).
+/// The arm is one construct-run-teardown cycle over a [`SectionContext`]:
+/// construction absorbs the arm's setup preamble (VM construction and
+/// limits, the `sys` JSON carrying the arm's run-global `id` and its
+/// per-fanout `index`, the control globals resolved over the worker's
+/// visible set, the shared setup half, the infer hook with its lazy client
+/// source), the body runs the shared block walk on the frame, and the
+/// epilogue owns the teardown boundary. The frame is seeded with the arm's
+/// own: the collection `item`, its store-write scope, the caller's cloned
+/// `var`, one deeper execute level, and the fanout's effective reporting
+/// handles (the proxy observer/debug and the fanout's fresh turn counter).
 ///
 /// A [`SectionFlow::Jumped`] transfers control rather than erroring: the
 /// arm's remaining blocks are skipped and a child walk runs from the target
 /// under the engine's chain-slice rule (a child target walks the worker's
 /// children; any other visible target walks the worker's home slice),
 /// each entry taking the next run-global `sys.id` like a contained
-/// `execute` chain. The
-/// arm's result text is the child walk's returned value or final reply.
-/// [`SectionFlow::Returned`] and [`SectionFlow::FellThrough`] map to
+/// `execute` chain. The child walk shares the arm's var, read back at the
+/// jump. The arm's result text is the child walk's returned value or final
+/// reply. [`SectionFlow::Returned`] and [`SectionFlow::FellThrough`] map to
 /// [`LuaFanoutResult::success`]; [`Error::ToolLoopExhausted`] soft-degrades to
 /// the incomplete stub so one stuck arm cannot kill sibling evidence.
 ///
 /// VM teardown and the terminal arm observation happen in ONE epilogue
-/// (FANOUT-006): the fallible body runs against a borrowed VM without any inline
-/// teardown, then the epilogue tears the VM down once and records the single
-/// distinct terminal event via [`ArmFinalizer`].
+/// (FANOUT-006): the fallible body runs against the frame without any inline
+/// teardown, then the epilogue tears the frame's VM down once and records
+/// the single distinct terminal event via [`ArmFinalizer`].
 #[expect(
     clippy::too_many_lines,
-    reason = "the arm adapter is one cohesive linear sequence: payload destructuring, engine input construction, the walk, and the outcome mapping"
+    reason = "the arm adapter is one cohesive linear sequence: payload destructuring, frame construction, the walk, and the outcome mapping"
 )]
 pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanoutResult)> {
     let ArmPayload {
@@ -197,132 +216,76 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
     let control = &inputs.control;
     let worker = &inputs.worker;
 
-    // The proxy handle inside the shared control context is the one observer
-    // handle the finalizer, the persistent host APIs, and the direct
-    // observation calls all share.
-    let observer: &dyn Observer = control.observer.as_ref();
-    observer.observe(&control.execution, &worker.name, detail::FANOUT_ARM_STARTED);
+    // The proxy handle inside the shared inputs is the one observer the
+    // started observation, the finalizer, and the frame's effective handle
+    // all share.
+    inputs
+        .observer
+        .observe(&control.execution, &worker.name, detail::FANOUT_ARM_STARTED);
 
     // The guard defaults to a CANCELLED terminal event; the epilogue below
     // upgrades it to the arm's real outcome unless the arm is aborted first.
     let mut finalizer = ArmFinalizer::new(
-        Arc::clone(&control.observer),
+        Arc::clone(&inputs.observer),
         control.execution.clone(),
         worker.name.clone(),
     );
 
-    let constructed = SectionVm::new_for_section(
-        &control.nonce,
-        &control.bindings,
-        &control.models,
-        &control.execution,
-        observer,
-        &worker.name,
-    );
     // Test-only fault injection: an arm whose worker is named the sentinel
-    // fails VM construction here, driving the finalizer's
+    // fails frame construction here, driving the finalizer's
     // construction-failure branch (finish FAILED, return before the body).
+    // No production input can fail construction on cue - the failure modes
+    // (Lua init, host injection) are not name-keyed.
     #[cfg(test)]
-    let constructed = if worker.name == FAIL_ARM_VM_SENTINEL {
-        Err(Error::Internal("test-injected VM construction failure"))
-    } else {
-        constructed
-    };
-    let mut vm = match constructed {
-        Ok(vm) => vm,
+    if worker.name == FAIL_ARM_VM_SENTINEL {
+        finalizer.finish(detail::FANOUT_ARM_FAILED);
+        return Err(Error::Internal("test-injected VM construction failure"));
+    }
+    // Construction runs under the arm's cancel scope: the setup preamble
+    // executes Lua (the shared replay), and the instruction hook reads the
+    // task-local handle, which a spawned task holds only inside the scope
+    // (PF-CANCEL-002). The frame still outlives the cancel-scoped body below
+    // for the epilogue's teardown.
+    let mut frame = match cancel::maybe_scope(inputs.cancel.clone(), async {
+        SectionContext::new_fanout_arm(
+            control,
+            worker,
+            &inputs.home,
+            index,
+            item.clone(),
+            inputs.write_token,
+            inputs.execute_depth,
+            inputs.last_reply.as_deref(),
+            &inputs.client,
+            &inputs.var,
+            Arc::clone(&inputs.observer),
+            inputs.debug.clone(),
+            Arc::clone(&inputs.turns),
+        )
+    })
+    .await
+    {
+        Ok(frame) => frame,
         Err(error) => {
             finalizer.finish(detail::FANOUT_ARM_FAILED);
             return Err(error);
         }
     };
 
-    // The body performs no teardown; every fallible step uses `?`. It returns the
-    // arm result paired with its distinct terminal event.
+    // The body performs no teardown; every fallible step uses `?`. It returns
+    // the arm result paired with its distinct terminal event.
     let body = async {
-        vm.apply_lua_limits(
-            control.limits.lua_memory().get(),
-            control.limits.lua_logs().get(),
-        )?;
-        let mut sys = control.sys_json(next_id(&control.ids), &worker.name)?;
-        // The arm's own sys extra: its 1-based position within this fanout.
-        // Absent outside a fanout, so a walked section reading `sys.index`
-        // raises the sealed-sys unknown-field error; a nested fanout's arms
-        // restart at 1.
-        sys["index"] = Value::from(index + 1);
-
-        // The arm installs the engine's real control globals: `execute`,
-        // `fanout`, and `list_from_section` resolve over the worker's visible
-        // set (its home slice plus its children), and the arm's execute depth
-        // keeps recursion accounting accumulating across the fanout boundary.
-        let (execute_callback, fanout_callback, list_callback) = make_control_globals(
-            control,
-            &inputs.client,
-            worker.clone(),
-            inputs.home.clone(),
-            inputs.execute_depth,
-            inputs.last_reply.clone(),
-        );
-
-        // The arm runs the walk's shared VM setup with its own deltas: the
-        // `sys` extra (`index`), the caller's cloned
-        // `var`, the `item` seed, and its store-write scope (this fanout's
-        // token plus the arm's 1-based index, matching `sys.index`).
-        let setup = control.vm_setup(
-            &sys,
-            inputs.last_reply.as_deref(),
-            VmSeed {
-                var: Some(&inputs.var),
-                item: Some(&item),
-            },
-            Some(WriteScope::new(inputs.write_token, index + 1)),
-            &worker.name,
-        );
-        setup_section_vm(
-            &mut vm,
-            &setup,
-            execute_callback,
-            fanout_callback,
-            list_callback,
-        )?;
-
-        // The infer hook carries a lazy client source: a nested
-        // `models.infer` or `handle:infer` surfaces a concrete construction
-        // error on first use instead of the setup swallowing it.
-        control.attach_infer_hook(&vm, inputs.client.clone(), &worker.name);
-
-        // The shared block walk: every Lua and prose block in order, the
-        // conversation and reply rolling forward, the tool scope rebuilt per
-        // prose block, and a gateway client created from the environment when
-        // the arm was handed none. The arm's only frame delta is `item`. The
-        // walk's per-frame state stays in locals here until the arm moves
-        // onto a SectionContext of its own.
-        let frame = RunFrame {
-            item: Some(&item),
-            ..control.walk_context(&control.args)
-        };
+        let run_frame = control.walk_context(&control.args);
         let mut client = inputs.client.clone();
-        let mut reply = inputs.last_reply.clone();
-        let mut conversation = Vec::new();
-        let mut counts = None;
-        let mut completion_options = None;
-        match run_one_section_impl(
-            &mut vm,
-            &frame,
-            &worker.name,
-            &worker.blocks,
-            BlockRunMode::Section,
-            &mut sys,
-            &mut reply,
-            &mut conversation,
-            &mut counts,
-            &mut completion_options,
-            frame.item,
-            frame.observer.as_ref(),
-            frame.debug.map(AsRef::as_ref),
-            frame.turns.as_ref(),
-            &mut client,
-        )
-        .await
+        match frame
+            .run(
+                &run_frame,
+                &worker.name,
+                &worker.blocks,
+                BlockRunMode::Section,
+                &mut client,
+            )
+            .await
         {
             Ok(flow) => {
                 let text = match flow {
@@ -332,12 +295,9 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
                     // own remaining blocks are skipped, and a child walk runs
                     // from the target under the engine's chain-slice rule,
                     // each entry taking the next run-global `sys.id` like a
-                    // contained
-                    // execute chain. The child walk shares the arm's var,
-                    // read back at the jump. The arm's result text is the
-                    // child walk's returned value or final reply.
+                    // contained execute chain.
                     SectionFlow::Jumped { heading, reply } => {
-                        let var = vm.var()?;
+                        let var = frame.read_var()?;
                         control
                             .drive_contained_chain(
                                 worker,
@@ -378,9 +338,9 @@ pub(crate) async fn run_one_arm(payload: ArmPayload) -> Result<(usize, LuaFanout
     let outcome: Result<(LuaFanoutResult, Observation)> =
         cancel::maybe_scope(inputs.cancel.clone(), body).await;
 
-    // Single epilogue: tear the VM down once, then record exactly one terminal
-    // observation matching the arm's real outcome.
-    vm.teardown(observer, &worker.name);
+    // Single epilogue: tear the frame's VM down once, then record exactly one
+    // terminal observation matching the arm's real outcome.
+    frame.teardown(&worker.name);
     match outcome {
         Ok((result, event)) => {
             finalizer.finish(event);
