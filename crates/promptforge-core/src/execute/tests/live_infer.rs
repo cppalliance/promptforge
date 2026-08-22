@@ -21,8 +21,7 @@ async fn live_h1_infer_runs_once() {
     let out = super::super::run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models),
-        &[],
+        ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
         &StoreRef::memory(),
         to_config(gatewayed(addr)),
     )
@@ -97,8 +96,7 @@ async fn shared_function_resolves_host_globals_when_called() {
     let out = super::super::run(
         &prompt,
         "later host value",
-        ResolutionContext::new(&picker, &models),
-        &[],
+        ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
         &StoreRef::memory(),
         to_config(silent()),
     )
@@ -129,8 +127,7 @@ async fn shared_library_calls_host_apis_at_load_time() {
     let out = super::super::run(
         &prompt,
         "load-time args",
-        ResolutionContext::new(&picker, &models),
-        &[],
+        ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
         &store,
         to_config(silent()),
     )
@@ -186,11 +183,11 @@ async fn captured_bindings_reach_section_execute_and_fanout_vms() {
         .expect("tool picker must build");
     let models = test_model_catalog();
     let tools: [Arc<dyn Tool>; 1] = [echo];
+    let catalog = ToolCatalog::new(&tools).expect("the fixture tool is unique");
     let out = super::super::run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models),
-        &tools,
+        ResolutionContext::new(&picker, &models, &catalog),
         &StoreRef::memory(),
         to_config(silent()),
     )
@@ -225,8 +222,7 @@ async fn live_h1_models_infer_resolves_the_default_model_without_touching_sys() 
     let out = super::super::run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models),
-        &[],
+        ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
         &StoreRef::memory(),
         to_config(gatewayed(gateway.addr())),
     )
@@ -277,8 +273,7 @@ async fn nested_lua_infer_emits_a_model_turn_observation() {
     let out = super::super::run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models),
-        &[],
+        ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
         &StoreRef::memory(),
         to_config(RunOptions {
             execution: EXECUTION,
@@ -343,8 +338,7 @@ async fn cancelled_nested_infer_does_not_report_model_turn_failed() {
     let error = super::super::run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models),
-        &[],
+        ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
         &StoreRef::memory(),
         RunConfig::new(EXECUTION)
             .observer(Arc::clone(&recorder) as Arc<dyn Observer>)
@@ -442,12 +436,12 @@ async fn live_h1_prose_preserves_non_final_and_final_semantics_and_captures_var(
         .expect("tool picker must build");
     let models = test_model_catalog();
     let tools: [Arc<dyn Tool>; 1] = [echo];
+    let catalog = ToolCatalog::new(&tools).expect("the fixture tool is unique");
 
     let out = super::super::run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models),
-        &tools,
+        ResolutionContext::new(&picker, &models, &catalog),
         &StoreRef::memory(),
         to_config(gatewayed(addr)),
     )
@@ -480,8 +474,7 @@ async fn h1_and_h2_prose_both_run_through_the_shared_block_loop() {
     let out = super::super::run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models),
-        &[],
+        ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
         &StoreRef::memory(),
         to_config(gatewayed(gateway.addr())),
     )
@@ -532,8 +525,7 @@ async fn live_h1_chunk_keeps_sys_id_zero_and_the_first_walked_section_takes_one(
     let out = super::super::run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models),
-        &[],
+        ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
         &StoreRef::memory(),
         to_config(silent()),
     )

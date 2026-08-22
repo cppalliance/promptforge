@@ -128,7 +128,7 @@ impl ToolIdError {
     }
 
     /// The crate-internal human-readable reason, reused when a wire-name
-    /// rejection is re-reported as a [`super::ToolRegistryError`].
+    /// rejection is re-reported as a [`super::ToolCatalogError`].
     pub(crate) fn reason(&self) -> &'static str {
         self.reason
     }

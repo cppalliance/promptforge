@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use serde_json::{Value, json};
 
-use super::{Tool, ToolError, ToolId, ToolOutput, ToolRegistry, ToolRegistryErrorKind};
+use super::{Tool, ToolCatalog, ToolCatalogErrorKind, ToolError, ToolId, ToolOutput};
 
 fn inspect_id() -> ToolId {
     ToolId::new("fixtures", "inspect").expect("fixture id is valid")
@@ -43,13 +45,13 @@ impl Tool for FixtureTool {
     }
 }
 
-struct RegistryFixtureTool {
+struct CatalogFixtureTool {
     id_name: &'static str,
     wire_name: &'static str,
 }
 
 #[async_trait::async_trait]
-impl Tool for RegistryFixtureTool {
+impl Tool for CatalogFixtureTool {
     fn id(&self) -> ToolId {
         ToolId::new("fixtures", self.id_name).expect("fixture id is valid")
     }
@@ -86,12 +88,12 @@ fn tool_output_carries_mandatory_trust() {
 }
 
 #[test]
-fn tool_registry_is_send_and_sync() {
-    // The public dyn-bearing registry must stay `Send + Sync` so downstream
+fn tool_catalog_is_send_and_sync() {
+    // The public dyn-bearing catalog must stay `Send + Sync` so downstream
     // callers can share it across tasks; a representation change that dropped
     // either auto trait would fail to compile here (tools.rs F6).
     fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<ToolRegistry<'static>>();
+    assert_send_sync::<ToolCatalog>();
 }
 
 #[test]
@@ -137,16 +139,16 @@ fn descriptor_surface_preserves_identity_description_and_schema() {
 }
 
 #[test]
-fn registry_lookup_uses_stable_identity_not_wire_name() {
-    let tool = FixtureTool;
-    let registry = ToolRegistry::new([&tool as &dyn Tool]).expect("unique registry");
+fn catalog_lookup_uses_stable_identity_not_wire_name() {
+    let tool: Arc<dyn Tool> = Arc::new(FixtureTool);
+    let catalog = ToolCatalog::new(std::slice::from_ref(&tool)).expect("unique catalog");
 
-    let found = registry
+    let found = catalog
         .get(&inspect_id())
         .expect("the stable identity should resolve");
     assert_eq!(found.wire_name(), "inspect_wire");
     assert!(
-        registry
+        catalog
             .get(&ToolId::new("fixtures", "inspect_wire").expect("valid id"))
             .is_none(),
         "the transport name must not become identity"
@@ -154,29 +156,30 @@ fn registry_lookup_uses_stable_identity_not_wire_name() {
 }
 
 #[test]
-fn registry_preserves_order_and_first_match_lookup() {
-    let first = RegistryFixtureTool {
-        id_name: "inspect",
-        wire_name: "first_inspect",
-    };
-    let middle = RegistryFixtureTool {
-        id_name: "summarize",
-        wire_name: "summarize",
-    };
-    let registry = ToolRegistry::new([&first as &dyn Tool, &middle as &dyn Tool])
-        .expect("distinct identities build a registry");
+fn catalog_preserves_order_and_first_match_lookup() {
+    let tools: Vec<Arc<dyn Tool>> = vec![
+        Arc::new(CatalogFixtureTool {
+            id_name: "inspect",
+            wire_name: "first_inspect",
+        }),
+        Arc::new(CatalogFixtureTool {
+            id_name: "summarize",
+            wire_name: "summarize",
+        }),
+    ];
+    let catalog = ToolCatalog::new(&tools).expect("distinct identities build a catalog");
 
     assert_eq!(
-        registry
+        catalog
             .tools()
             .iter()
             .map(|tool| tool.wire_name())
             .collect::<Vec<_>>(),
         ["first_inspect", "summarize"]
     );
-    assert_eq!(registry.len(), 2);
+    assert_eq!(catalog.tools().len(), 2);
     assert_eq!(
-        registry
+        catalog
             .get(&inspect_id())
             .expect("the identity should resolve")
             .wire_name(),
@@ -185,18 +188,20 @@ fn registry_preserves_order_and_first_match_lookup() {
 }
 
 #[test]
-fn registry_rejects_duplicate_tool_ids() {
-    let first = RegistryFixtureTool {
-        id_name: "inspect",
-        wire_name: "first_inspect",
-    };
-    let repeated = RegistryFixtureTool {
-        id_name: "inspect",
-        wire_name: "second_inspect",
-    };
-    let error = ToolRegistry::new([&first as &dyn Tool, &repeated as &dyn Tool])
-        .expect_err("a repeated tool identity must be rejected at registration");
-    assert_eq!(error.kind(), ToolRegistryErrorKind::DuplicateId);
+fn catalog_rejects_duplicate_tool_ids() {
+    let tools: Vec<Arc<dyn Tool>> = vec![
+        Arc::new(CatalogFixtureTool {
+            id_name: "inspect",
+            wire_name: "first_inspect",
+        }),
+        Arc::new(CatalogFixtureTool {
+            id_name: "inspect",
+            wire_name: "second_inspect",
+        }),
+    ];
+    let error = ToolCatalog::new(&tools)
+        .expect_err("a repeated tool identity must be rejected at catalog construction");
+    assert_eq!(error.kind(), ToolCatalogErrorKind::DuplicateId);
     assert_eq!(
         error.duplicate_id(),
         Some(&inspect_id()),
@@ -246,7 +251,7 @@ fn tool_id_new_rejects_empty_separator_and_control() {
 }
 
 #[test]
-fn registry_rejects_illegal_wire_name() {
+fn catalog_rejects_illegal_wire_name() {
     struct BadWire;
 
     #[async_trait::async_trait]
@@ -276,9 +281,9 @@ fn registry_rejects_illegal_wire_name() {
         }
     }
 
-    let bad = BadWire;
-    let error = ToolRegistry::new([&bad as &dyn Tool])
-        .expect_err("an illegal wire name must be rejected at registration");
-    assert_eq!(error.kind(), ToolRegistryErrorKind::InvalidWireName);
+    let bad: Arc<dyn Tool> = Arc::new(BadWire);
+    let error = ToolCatalog::new(std::slice::from_ref(&bad))
+        .expect_err("an illegal wire name must be rejected at catalog construction");
+    assert_eq!(error.kind(), ToolCatalogErrorKind::InvalidWireName);
     assert!(error.duplicate_id().is_none());
 }

@@ -64,7 +64,7 @@ struct Launch {
     input_text: String,
     /// Filesystem path to write the prompt's output to (empty if unused).
     output_file: String,
-    /// The complete immutable live registry and prepared picker.
+    /// The complete immutable live tool catalog and prepared picker.
     tools: Arc<PreparedTools>,
     /// Where the run reports itself, and what counts its turns.
     observer: Arc<McpObserver>,
@@ -321,8 +321,7 @@ async fn execute_run(launch: Launch) -> RunResult {
     let outcome = execute::run(
         &prompt,
         &args,
-        ResolutionContext::new(tools.picker(), tools.models()),
-        tools.tools(),
+        ResolutionContext::new(tools.picker(), tools.models(), tools.tools()),
         &store,
         config,
     )

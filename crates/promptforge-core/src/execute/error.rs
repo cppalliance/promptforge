@@ -80,10 +80,9 @@ impl RunError {
             Error::ToolLoopExhausted | Error::OutOfScopeToolCall { .. } | Error::Tool { .. } => {
                 RunErrorKind::Tool
             }
-            Error::FanoutArmJoin(_)
-            | Error::Internal(_)
-            | Error::InvalidToolWireName { .. }
-            | Error::TimestampFormat(_) => RunErrorKind::Internal,
+            Error::FanoutArmJoin(_) | Error::Internal(_) | Error::TimestampFormat(_) => {
+                RunErrorKind::Internal
+            }
             Error::Bind { .. }
             | Error::BindSchema { .. }
             | Error::BindQuery { .. }
@@ -91,7 +90,6 @@ impl RunError {
             | Error::Duplicate { .. }
             | Error::Ambiguous { .. }
             | Error::DuplicateAlias { .. }
-            | Error::DuplicateLiveToolId { .. }
             | Error::ToolIdSelectedTwice { .. }
             | Error::PickedToolNotLive { .. }
             | Error::ToolScopeAnalysis { .. }

@@ -1,27 +1,28 @@
-//! Build the runner's live tool registry and matching semantic-picker catalog.
+//! Build the runner's live tool catalog and matching semantic-picker catalog.
 //!
 //! Both tools are always live: `web_fetch` runs locally and `web_search`
 //! proxies through the gateway. Unlike the CLI, the dev runner has no
 //! offline mode: it always has a validated gateway URL and bearer credential
 //! (see [`crate::config::GatewayEnv`]), so both concrete tools are constructed
 //! unconditionally. The assembled live set is validated against the callable
-//! [`ToolRegistry`] contract before the picker catalog is derived, so an
+//! [`ToolCatalog`] contract before the picker catalog is derived, so an
 //! invalid set fails here rather than after unnecessary picker work, and the
-//! catalog can never advertise a descriptor with no matching callable tool.
+//! picker catalog can never advertise a descriptor with no matching callable tool.
 
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use promptforge_core::tools::{Tool, ToolRegistry, WebSearch};
+use promptforge_core::tools::{Tool, ToolCatalog, WebSearch};
 use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId};
 use promptforge_webfetch::WebFetch;
 
 /// The complete set of concrete tools available to one run.
 ///
-/// The picker catalog is built directly from `live`, so no descriptor can be
-/// offered without a callable tool carrying the same stable identity.
+/// The picker catalog is built directly from the validated tool catalog, so
+/// no descriptor can be offered without a callable tool carrying the same
+/// stable identity.
 pub(crate) struct AvailableTools {
-    live: Vec<Arc<dyn Tool>>,
+    live: ToolCatalog,
     catalog: Catalog,
 }
 
@@ -29,19 +30,17 @@ impl std::fmt::Debug for AvailableTools {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("AvailableTools")
-            .field(
-                "ids",
-                &self.live.iter().map(|tool| tool.id()).collect::<Vec<_>>(),
-            )
+            .field("live", &self.live)
             .field("catalog", &self.catalog)
             .finish()
     }
 }
 
 impl AvailableTools {
-    /// Returns the shared tool arcs for [`promptforge_core::execute::run`].
+    /// Returns the validated tool catalog handed to
+    /// [`ResolutionContext`](promptforge_core::execute::ResolutionContext).
     #[must_use]
-    pub(crate) fn tools(&self) -> &[Arc<dyn Tool>] {
+    pub(crate) fn tools(&self) -> &ToolCatalog {
         &self.live
     }
 
@@ -60,21 +59,26 @@ impl AvailableTools {
 /// # Errors
 /// Returns an error if `web_search` construction fails (for example, a
 /// malformed gateway URL or a blank credential), or if the assembled live set
-/// violates the registry contract (duplicate identity or invalid wire name).
+/// violates the catalog contract (duplicate identity or invalid wire name).
 pub(crate) fn available_tools(base_url: &str, key: &str) -> Result<AvailableTools> {
     let web_search = WebSearch::new(base_url, key).context("construct the web_search tool")?;
     let live: Vec<Arc<dyn Tool>> = vec![Arc::new(WebFetch::new()), Arc::new(web_search)];
-    assemble(live)
+    assemble(&live)
 }
 
 /// Validates the complete live tool set and derives its picker catalog.
 ///
-/// Validation runs through [`ToolRegistry::new`], the existing boundary that
+/// Validation runs through [`ToolCatalog::new`], the existing boundary that
 /// rejects a duplicate stable identity or a non-transport-legal wire name,
 /// before any picker work.
-fn assemble(live: Vec<Arc<dyn Tool>>) -> Result<AvailableTools> {
-    ToolRegistry::new(live.iter().map(Arc::as_ref)).context("validate the live tool registry")?;
-    let catalog = Catalog::new(live.iter().map(|tool| descriptor(tool.as_ref())).collect());
+fn assemble(tools: &[Arc<dyn Tool>]) -> Result<AvailableTools> {
+    let live = ToolCatalog::new(tools).context("validate the live tool catalog")?;
+    let catalog = Catalog::new(
+        live.tools()
+            .iter()
+            .map(|tool| descriptor(tool.as_ref()))
+            .collect(),
+    );
     Ok(AvailableTools { live, catalog })
 }
 
@@ -98,7 +102,7 @@ mod tests {
 
     const BASE_URL: &str = "http://127.0.0.1:8081/v1";
 
-    /// A minimal tool used only to exercise registry validation with
+    /// A minimal tool used only to exercise catalog validation with
     /// caller-chosen identity and wire name.
     struct FakeTool {
         id: ToolId,
@@ -148,12 +152,14 @@ mod tests {
         assert!(
             available
                 .tools()
+                .tools()
                 .iter()
                 .any(|tool| tool.id().name() == "web_search"),
             "web_search must always be present"
         );
         assert!(
             available
+                .tools()
                 .tools()
                 .iter()
                 .any(|tool| tool.id().name() == "web_fetch"),
@@ -194,9 +200,10 @@ mod tests {
     }
 
     #[test]
-    fn live_registry_and_picker_catalog_have_identical_ids() {
+    fn live_catalog_and_picker_catalog_have_identical_ids() {
         let available = available_tools(BASE_URL, "test-token").expect("available tools build");
         let live_ids = available
+            .tools()
             .tools()
             .iter()
             .map(|tool| {
@@ -218,7 +225,7 @@ mod tests {
             fake("promptforge", "dup", "dup_a"),
             fake("promptforge", "dup", "dup_b"),
         ];
-        let error = assemble(live).expect_err("a duplicate identity must fail validation");
+        let error = assemble(&live).expect_err("a duplicate identity must fail validation");
         assert!(
             format!("{error:#}").contains("duplicate tool identity"),
             "unexpected error: {error:#}"
@@ -228,7 +235,7 @@ mod tests {
     #[test]
     fn assembly_rejects_an_invalid_wire_name() {
         let live = vec![fake("promptforge", "bad", "not/legal")];
-        let error = assemble(live).expect_err("an invalid wire name must fail validation");
+        let error = assemble(&live).expect_err("an invalid wire name must fail validation");
         assert!(
             format!("{error:#}").contains("wire name"),
             "unexpected error: {error:#}"

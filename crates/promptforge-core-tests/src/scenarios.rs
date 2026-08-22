@@ -10,7 +10,7 @@ use promptforge_core::model::{ModelCatalog, ModelDescriptor, ModelId, ThinkingMo
 use promptforge_core::observe::{Observation, Observer};
 use promptforge_core::parser::Prompt;
 use promptforge_core::store::StoreRef;
-use promptforge_core::tools::{Tool, ToolError, ToolId, ToolOutput};
+use promptforge_core::tools::{Tool, ToolCatalog, ToolError, ToolId, ToolOutput};
 use promptforge_tool_picker::{
     Catalog, Config, ToolDescriptor, ToolId as PickerToolId, ToolPicker,
 };
@@ -164,8 +164,7 @@ async fn run_text(base_url: &str, api_key: &str, model_alias: &str) -> Result<()
     let result = run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models),
-        &[],
+        ResolutionContext::new(&picker, &models, &ToolCatalog::default()),
         &StoreRef::memory(),
         RunConfig::new(TEXT_EXECUTION)
             .observer(Arc::clone(&observer) as Arc<dyn Observer>)
@@ -209,6 +208,7 @@ async fn run_tool_call(base_url: &str, api_key: &str, model_alias: &str) -> Resu
     )
     .context("build deterministic one-tool fixture picker")?;
     let tools: [Arc<dyn Tool>; 1] = [Arc::clone(&tool) as Arc<dyn Tool>];
+    let tools = ToolCatalog::new(&tools).context("the fixture tool is unique")?;
     let models = pinned_qwen_dev_catalog(model_alias)?;
 
     let client = GatewayClient::new(
@@ -218,8 +218,7 @@ async fn run_tool_call(base_url: &str, api_key: &str, model_alias: &str) -> Resu
     let result = run(
         &prompt,
         "",
-        ResolutionContext::new(&picker, &models),
-        &tools,
+        ResolutionContext::new(&picker, &models, &tools),
         &StoreRef::memory(),
         RunConfig::new(TOOL_EXECUTION)
             .observer(Arc::clone(&observer) as Arc<dyn Observer>)

@@ -8,7 +8,7 @@
 
 1. **Argument surface.** `<prompt.md> [input] [--watch]` only. Hand-rolled argv parsing; no clap. Unknown flags (including the old `--context` / `--max-tokens` / `--no-think`) fail with usage text.
 2. **Required gateway env.** Both URL and key must be present and non-empty before any prompt parse. Friendly hard-fail names the missing variable and reminds the author to start the gateway.
-3. **Live catalog and tools.** Model catalog comes from `fetch_model_catalog`. Tool registry mirrors the CLI: `WebFetch` always, `WebSearch` when credentials are present. No pinned Qwen catalog.
+3. **Live catalog and tools.** Model catalog comes from `fetch_model_catalog`. Tool catalog mirrors the CLI: `WebFetch` always, `WebSearch` when credentials are present. No pinned Qwen catalog.
 4. **Per-invocation execution id.** Each run mints `dev-` plus 128 random bits, prints `run id: ...` on stderr before observer traffic, and reuses that id for parse and execution. Watch-mode reruns mint a new id.
 5. **Store dump and traces.** Clear `<stem>.store/` once at run start. `MirrorStore` writes store files as they mutate; `TraceCapture` writes `.trace/turn-N-*.json` on each model turn. End-of-run reconcile syncs orphans without wiping `.trace/`.
 6. **Watch debounce.** Parent-directory watcher filtered to the prompt file name, 300 ms quiet period, dump writes must not retrigger reruns.
@@ -27,6 +27,6 @@
 | `run.rs` | One-shot parse and execute with live H1 resolution |
 | `watch.rs` | Debounced rerun loop |
 | `dump.rs` | Store dump and `.trace/` |
-| `tools.rs` | Live registry + picker catalog |
+| `tools.rs` | Live tool catalog + picker catalog |
 
 *2026-08-08 - Cursor Grok 4.5*

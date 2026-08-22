@@ -13,13 +13,13 @@ use crate::lua::{LiveBindingProducer, ToolBindings, ToolResolver};
 use crate::model::{
     ModelBindOpts, ModelBindings, ModelCatalog, ModelResolver, PickerModelResolver, ResolvedModel,
 };
-use crate::tools::{SharedTools, ToolId};
+use crate::tools::{ToolCatalog, ToolId};
 use crate::{Error, Result};
 
 /// Run-scoped capability resolver and live H1 binding producer.
 pub(crate) struct RuntimeResolution<'a> {
     tool_resolver: PickerResolver<'a, ToolPicker>,
-    shared_tools: &'a SharedTools,
+    tools: &'a ToolCatalog,
     models: &'a ModelCatalog,
     base_picker: &'a ToolPicker,
     producer: LiveBindingProducer,
@@ -28,7 +28,7 @@ pub(crate) struct RuntimeResolution<'a> {
 impl<'a> RuntimeResolution<'a> {
     /// Creates one run-scoped resolver over live tool and model catalogs.
     ///
-    /// The shared tool set already guarantees unique tool identities
+    /// The tool catalog already guarantees unique tool identities
     /// (duplicates are rejected at construction), so no identity scan is
     /// needed here.
     ///
@@ -39,12 +39,12 @@ impl<'a> RuntimeResolution<'a> {
     /// known, so the redundant full-catalog index is never materialized.
     pub(crate) fn new(
         picker: &'a ToolPicker,
-        shared_tools: &'a SharedTools,
+        tools: &'a ToolCatalog,
         models: &'a ModelCatalog,
     ) -> Self {
         Self {
             tool_resolver: PickerResolver::new(picker),
-            shared_tools,
+            tools,
             models,
             base_picker: picker,
             producer: LiveBindingProducer::default(),
@@ -61,7 +61,7 @@ impl<'a> RuntimeResolution<'a> {
         scope: &'scope Scope<'scope, 'env>,
     ) -> Result<()> {
         self.producer
-            .install(lua, scope, &self.tool_resolver, self.shared_tools, self)
+            .install(lua, scope, &self.tool_resolver, self.tools, self)
     }
 
     /// Returns the first typed error captured by a resolver callback.
@@ -282,7 +282,7 @@ mod tests {
     use super::*;
     use crate::lua::LiveBindingProducer;
     use crate::model::ModelBindOpts;
-    use crate::tools::{Tool, ToolError, ToolOutput, ToolRegistry};
+    use crate::tools::{Tool, ToolError, ToolOutput};
 
     fn tid(name: &str) -> ToolId {
         ToolId::from_validated("tests", name)
@@ -387,7 +387,7 @@ mod tests {
 
     fn callback_error(source: &FixtureSource, tools: &[Arc<dyn Tool>], code: &str) -> Error {
         let resolver = PickerResolver::new(source);
-        let shared = SharedTools::new(tools).expect("fixture tools are unique");
+        let catalog = ToolCatalog::new(tools).expect("fixture tools are unique");
         let producer = LiveBindingProducer::default();
         let model_resolver = |description: &str, _: &ModelBindOpts| {
             Err(Error::ModelAbsent {
@@ -397,7 +397,7 @@ mod tests {
         let lua = Lua::new();
         let result = lua.scope(|scope| {
             producer
-                .install(&lua, scope, &resolver, &shared, &model_resolver)
+                .install(&lua, scope, &resolver, &catalog, &model_resolver)
                 .map_err(mlua::Error::external)?;
             lua.load(code).exec()
         });
@@ -457,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn callback_boundary_retains_absent_and_missing_registry_errors() {
+    fn callback_boundary_retains_absent_and_missing_catalog_errors() {
         assert!(matches!(
             callback_error(
                 &FixtureSource,
@@ -504,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn registration_rejects_duplicate_live_registry_ids() {
+    fn catalog_rejects_duplicate_live_ids() {
         let tools: Vec<Arc<dyn Tool>> = vec![
             Arc::new(FixtureTool {
                 id: ToolId::new("tests", "same").expect("valid id"),
@@ -513,8 +513,8 @@ mod tests {
                 id: ToolId::new("tests", "same").expect("valid id"),
             }),
         ];
-        let error = ToolRegistry::new(tools.iter().map(AsRef::as_ref))
-            .expect_err("a repeated live identity must be rejected at registration");
+        let error = ToolCatalog::new(&tools)
+            .expect_err("a repeated live identity must be rejected at catalog construction");
         assert_eq!(
             error.duplicate_id(),
             Some(&ToolId::new("tests", "same").expect("valid id"))
