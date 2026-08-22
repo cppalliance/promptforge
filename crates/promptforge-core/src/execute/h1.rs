@@ -2,7 +2,6 @@
 //! capabilities and may short-circuit the whole run with a scalar return.
 
 use crate::client::GatewayClient;
-use crate::model::ModelBindings;
 use crate::resolve::RuntimeResolution;
 use crate::{Error, Result};
 
@@ -12,7 +11,6 @@ use super::gateway::ResolutionContext;
 use super::section_context::SectionContext;
 
 pub(crate) struct LiveH1State {
-    pub(crate) models: ModelBindings,
     pub(crate) var: serde_json::Value,
     pub(crate) returned: Option<String>,
     pub(crate) reply: Option<String>,
@@ -28,11 +26,12 @@ pub(crate) async fn execute_live_h1(
         resolution.tools,
         resolution.models,
         ctx.tool_set(),
+        ctx.model_set(),
     );
     // Construction and limits failures propagate bare, before any teardown
     // observation exists; every failure past this point tears the frame's
     // VM down exactly once.
-    let mut h1_frame = SectionContext::new_live_h1(ctx, &runtime, client)?;
+    let mut h1_frame = SectionContext::new_live_h1(ctx, client)?;
     macro_rules! h1_try {
         ($expression:expr) => {
             match $expression {
@@ -70,12 +69,10 @@ pub(crate) async fn execute_live_h1(
         }
     };
     let var = h1_try!(h1_frame.read_var());
-    // The tool bindings need no extraction: H1's binds already landed in
-    // the run's shared tool set, which the walk reads through the view.
-    let models = h1_try!(runtime.models());
+    // The bindings need no extraction: H1's binds already landed in the
+    // run's shared sets, which the walk reads through the views.
     h1_frame.teardown(&ctx.prompt().title);
     Ok(LiveH1State {
-        models,
         var,
         returned,
         reply,

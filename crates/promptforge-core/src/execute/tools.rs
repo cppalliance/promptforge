@@ -14,11 +14,8 @@ use crate::Error;
 use crate::cancel;
 use crate::client::{CompletionResult, Message};
 use crate::debug::{DebugCapture, DebugEvent};
-use crate::lua::{
-    LiveBindingProducer, ModelBindings, ModelInferHook, ModelRuntime, ModelsInferHook, SectionVm,
-    resolve_model_binding,
-};
-use crate::model::ModelBinding;
+use crate::lua::{ModelInferHook, ModelRuntime, ModelsInferHook, SectionVm, resolve_model_binding};
+use crate::model::{ModelBinding, ModelView};
 use crate::observe::{Observer, detail};
 
 use super::gateway::GatewaySource;
@@ -36,9 +33,9 @@ pub(crate) struct InferContext {
     execution: String,
     section: String,
     turns: Arc<AtomicU32>,
-    live_bindings: Option<LiveBindingProducer>,
-    /// Frozen prompt-level model bindings for `models.infer` resolution.
-    model_bindings: ModelBindings,
+    /// The run's model set, read through the view: bindings-so-far during
+    /// the live H1 pass, the frozen set in H2 - one read path for both.
+    models: Arc<dyn ModelView>,
     /// The section's `models.use` selection runtime for `models.infer`.
     model_runtime: Arc<Mutex<ModelRuntime>>,
 }
@@ -46,17 +43,10 @@ pub(crate) struct InferContext {
 impl InferContext {
     /// Resolves the section's current model binding for `models.infer`.
     ///
-    /// On the live H1 path the bindings are still being recorded, so the
-    /// snapshot comes from the run's producer; on the H2 path the VM's frozen
-    /// bindings are used. The current alias is the H2 `models.use` selection,
-    /// else the prompt-wide `models.default` baseline.
+    /// The current alias is the H2 `models.use` selection, else the
+    /// prompt-wide `models.default` baseline.
     fn current_model_binding(&self) -> mlua::Result<ModelBinding> {
-        let bindings = if let Some(live) = &self.live_bindings {
-            live.bindings().map_err(mlua::Error::external)?.1
-        } else {
-            self.model_bindings.clone()
-        };
-        resolve_model_binding(&bindings, &self.model_runtime)
+        resolve_model_binding(self.models.as_ref(), &self.model_runtime)
             .map_err(mlua::Error::external)?
             .ok_or_else(|| {
                 mlua::Error::external(Error::ModelRequired {
@@ -151,9 +141,8 @@ pub(crate) fn attach_infer_hook(
     execution: &str,
     section: &str,
     turns: &Arc<AtomicU32>,
-    live_bindings: Option<LiveBindingProducer>,
+    models: Arc<dyn ModelView>,
 ) {
-    let (model_bindings, model_runtime) = vm.model_bag_handles();
     let ctx = Arc::new(InferContext {
         client,
         // The run's owned observer reaches the nested infer hook, so
@@ -164,9 +153,8 @@ pub(crate) fn attach_infer_hook(
         execution: execution.to_owned(),
         section: section.to_owned(),
         turns: Arc::clone(turns),
-        live_bindings,
-        model_bindings,
-        model_runtime,
+        models,
+        model_runtime: Arc::clone(&vm.model_runtime),
     });
     let direct = Arc::clone(&ctx);
     // `handle:infer` runs the direct path with the handle's frozen binding.

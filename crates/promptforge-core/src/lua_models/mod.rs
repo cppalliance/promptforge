@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 use mlua::{Lua, MultiValue, Scope, Table};
 
-use crate::model::{ModelBindOpts, ModelBinding, ModelBindings, ModelResolver};
+use crate::model::{ModelBindOpts, ModelBinding, ModelResolver, ModelSet};
 use crate::{Error, Result};
 
 mod decode;
@@ -72,37 +72,44 @@ pub(crate) enum SelectError {
     AlreadyUsed,
 }
 
-/// Accumulator populated by model binds executed during live H1.
-#[derive(Debug, Default)]
-pub(crate) struct ModelBindingState {
-    pub(crate) bindings: Vec<ModelBinding>,
-    pub(crate) default: Option<String>,
-    pub(crate) callback_error: Option<Error>,
+/// Records the first concrete callback error, preserving its typed cause.
+///
+/// The error slot lives outside the shared [`ModelSet`] (the run context
+/// reads that allocation through its view), so a poisoned set lock can never
+/// swallow the typed resolution failure the H1 executor reports.
+fn record_callback_error(errors: &Mutex<Option<Error>>, error: Error) -> mlua::Result<()> {
+    let mut slot = errors
+        .lock()
+        .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
+    if slot.is_none() {
+        *slot = Some(error);
+    }
+    Ok(())
 }
 
-/// Records one `models.bind` binding into the accumulator. Shared by
+/// Records one `models.bind` binding into the shared set. Shared by
 /// `models.bind` and the multi-arg `models.default` form.
 fn record_bind_binding(
-    state: &mut ModelBindingState,
+    set: &mut ModelSet,
+    errors: &Mutex<Option<Error>>,
     resolver: &dyn ModelResolver,
     alias: &str,
     description: &str,
     opts: &ModelBindOpts,
 ) -> mlua::Result<ModelBinding> {
-    if state.bindings.iter().any(|b| b.alias() == alias) {
-        if state.callback_error.is_none() {
-            state.callback_error = Some(Error::DuplicateModelAlias {
+    if set.bindings.iter().any(|b| b.alias() == alias) {
+        record_callback_error(
+            errors,
+            Error::DuplicateModelAlias {
                 alias: alias.to_owned(),
-            });
-        }
+            },
+        )?;
         return Err(mlua::Error::external("duplicate model alias"));
     }
     let selection = match resolver.resolve(description, opts) {
         Ok(sel) => sel,
         Err(error) => {
-            if state.callback_error.is_none() {
-                state.callback_error = Some(error);
-            }
+            record_callback_error(errors, error)?;
             return Err(mlua::Error::external("model capability resolution failed"));
         }
     };
@@ -114,18 +121,18 @@ fn record_bind_binding(
         selection.tool_dialect,
         selection.context,
     );
-    state.bindings.push(binding.clone());
+    set.bindings.push(binding.clone());
     Ok(binding)
 }
 
 /// Records a `models.default` selection, enforcing at-most-once.
-fn record_default_selection(state: &mut ModelBindingState, alias: String) -> mlua::Result<()> {
-    if state.default.is_some() {
+fn record_default_selection(set: &mut ModelSet, alias: String) -> mlua::Result<()> {
+    if set.default.is_some() {
         return Err(mlua::Error::external(
             "models.default may be called at most once per prompt",
         ));
     }
-    state.default = Some(alias);
+    set.default = Some(alias);
     Ok(())
 }
 
@@ -138,69 +145,88 @@ fn record_default_selection(state: &mut ModelBindingState, alias: String) -> mlu
 /// half-recorded binding with no matching default alias behind. Only when every
 /// precondition passes are the binding and the default alias committed together.
 fn record_default_binding(
-    state: &mut ModelBindingState,
+    set: &mut ModelSet,
+    errors: &Mutex<Option<Error>>,
     resolver: &dyn ModelResolver,
     alias: &str,
     description: &str,
     opts: &ModelBindOpts,
 ) -> mlua::Result<ModelBinding> {
-    if state.default.is_some() {
+    if set.default.is_some() {
         return Err(mlua::Error::external(
             "models.default may be called at most once per prompt",
         ));
     }
     // `record_bind_binding` only pushes after its own preconditions pass, and we
     // have already verified `default` is unset, so this commit is atomic.
-    let binding = record_bind_binding(state, resolver, alias, description, opts)?;
-    state.default = Some(alias.to_owned());
+    let binding = record_bind_binding(set, errors, resolver, alias, description, opts)?;
+    set.default = Some(alias.to_owned());
     Ok(binding)
 }
 
 /// Installs live H1 `models.bind` / `models.default` resolvers and
 /// `models.infer`.
 ///
-/// Each call resolves immediately and records the resulting frozen binding.
-/// `models.use` remains unavailable until section execution. `models.infer`
-/// dispatches through the executor-installed hook, which resolves the current
-/// model from the live binding state.
+/// Each call resolves immediately and records the resulting frozen binding
+/// into the run's shared [`ModelSet`] - the same allocation the run context
+/// reads through its `ModelView`. `models.use` remains unavailable until
+/// section execution. `models.infer` dispatches through the
+/// executor-installed hook, which resolves the current model from the shared
+/// set.
 pub(crate) fn install_live_models<'scope, 'env: 'scope>(
     lua: &'env Lua,
     scope: &'scope Scope<'scope, 'env>,
     resolver: &'env dyn ModelResolver,
-    state: &Arc<Mutex<ModelBindingState>>,
+    set: &Arc<Mutex<ModelSet>>,
+    errors: &Arc<Mutex<Option<Error>>>,
 ) -> Result<()> {
     let models = lua.create_table().map_err(Error::lua)?;
 
-    let bind_state = Arc::clone(state);
+    let bind_set = Arc::clone(set);
+    let bind_errors = Arc::clone(errors);
     let bind = scope
         .create_function(move |_, args: MultiValue| -> mlua::Result<LuaModelHandle> {
             let (alias, description, opts) = parse_bind_args(args, "models.bind")?;
             validate_alias(&alias).map_err(mlua::Error::external)?;
-            let mut guard = bind_state
+            let mut guard = bind_set
                 .lock()
                 .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
-            let binding = record_bind_binding(&mut guard, resolver, &alias, &description, &opts)?;
+            let binding = record_bind_binding(
+                &mut guard,
+                &bind_errors,
+                resolver,
+                &alias,
+                &description,
+                &opts,
+            )?;
             Ok(LuaModelHandle::from_binding(&binding))
         })
         .map_err(Error::lua)?;
     models.set("bind", bind).map_err(Error::lua)?;
 
-    let default_state = Arc::clone(state);
+    let default_set = Arc::clone(set);
+    let default_errors = Arc::clone(errors);
     let default = scope
         .create_function(move |_, args: MultiValue| -> mlua::Result<LuaModelHandle> {
             if args.len() >= 2 {
                 let (alias, description, opts) = parse_bind_args(args, "models.default")?;
                 validate_alias(&alias).map_err(mlua::Error::external)?;
-                let mut guard = default_state
+                let mut guard = default_set
                     .lock()
                     .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
-                let binding =
-                    record_default_binding(&mut guard, resolver, &alias, &description, &opts)?;
+                let binding = record_default_binding(
+                    &mut guard,
+                    &default_errors,
+                    resolver,
+                    &alias,
+                    &description,
+                    &opts,
+                )?;
                 Ok(LuaModelHandle::from_binding(&binding))
             } else {
                 let alias = parse_single_alias(&args, "models.default")?;
                 validate_alias(&alias).map_err(mlua::Error::external)?;
-                let mut guard = default_state
+                let mut guard = default_set
                     .lock()
                     .map_err(|_| mlua::Error::external("model binding recorder was poisoned"))?;
                 let binding = guard
@@ -242,7 +268,7 @@ pub(crate) fn install_live_models<'scope, 'env: 'scope>(
 pub(crate) fn install_h2_models(
     lua: &Lua,
     globals: &Table,
-    bindings: &ModelBindings,
+    bindings: &ModelSet,
     runtime: &Arc<Mutex<ModelRuntime>>,
 ) -> Result<()> {
     let models = lua.create_table().map_err(Error::lua)?;

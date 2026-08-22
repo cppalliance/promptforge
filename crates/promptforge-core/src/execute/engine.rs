@@ -49,7 +49,6 @@
 use crate::client::GatewayClient;
 use crate::fanout;
 use crate::lua::{LuaFanoutResult, resolve_section_target};
-use crate::model::ModelBindings;
 use crate::observe::detail;
 use crate::parser::Section;
 use crate::{Error, Result};
@@ -84,15 +83,14 @@ enum WalkEnd {
 /// Returns the same errors as [`run`](super::run), which documents them.
 pub(super) async fn run_sections(
     ctx: &RunContext,
-    models: &ModelBindings,
     initial_var: Option<&serde_json::Value>,
     client: Option<&GatewayClient>,
 ) -> Result<String> {
     let when = now_rfc3339_checked()?;
-    // The walk's context: the run-scoped values carry over (the tool set
-    // rides the view, already filled by H1); the walk-scoped fields take
-    // their live values now that H1 produced them.
-    let ctx = ctx.with_walk_state(models, &when);
+    // The walk's context: the run-scoped values carry over (the tool and
+    // model sets ride the views, already filled by H1); only `when` takes
+    // its live value at the handoff.
+    let ctx = ctx.with_walk_state(&when);
 
     // The walk owns its client slot: seeded from the run's client (if any),
     // created lazily on first prose, and shared by every section.

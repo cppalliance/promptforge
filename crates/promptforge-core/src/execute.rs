@@ -131,7 +131,7 @@ use support::{GENERIC_COMPLETION, SUPPORTED_MAJOR};
 
 // Re-exported for the executor test glob.
 #[cfg(test)]
-pub(crate) use crate::model::ModelBindings;
+pub(crate) use crate::model::ModelSet;
 
 /// Executes a parsed prompt and returns its final text.
 ///
@@ -250,7 +250,7 @@ pub async fn run(
         if prompt.sections.is_empty() {
             return Ok(h1.reply.unwrap_or_else(|| GENERIC_COMPLETION.to_string()));
         }
-        run_sections(&ctx, &h1.models, Some(&h1.var), client.as_ref()).await
+        run_sections(&ctx, Some(&h1.var), client.as_ref()).await
     };
 
     // Explicit cancellation: when the caller supplies a handle it is installed

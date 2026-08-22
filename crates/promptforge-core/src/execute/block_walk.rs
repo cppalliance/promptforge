@@ -54,11 +54,11 @@ pub(crate) enum SectionFlow {
 pub(crate) enum BlockRunMode<'a> {
     /// The live H1 pass. Lua blocks run through
     /// [`SectionVm::run_live_h1_block`] with capability resolvers scoped to
-    /// each block; prose binds the default model from the live producer's
-    /// bindings-so-far, prepares the `always` scope without analysis, counts
-    /// tool calls into a fresh per-block [`ToolCallCounts`], and writes the
-    /// reply as a plain global - no `sys` enrichment, no local dispatch, no
-    /// global aliases.
+    /// each block; prose binds the default model from the shared set's
+    /// bindings-so-far (read through the run's model view), prepares the
+    /// `always` scope without analysis, counts tool calls into a fresh
+    /// per-block [`ToolCallCounts`], and writes the reply as a plain
+    /// global - no `sys` enrichment, no local dispatch, no global aliases.
     LiveH1(&'a RuntimeResolution<'a>),
     /// An H2 section: the top-level walk, an `execute` chain, or a fanout
     /// arm.
@@ -182,7 +182,7 @@ pub(crate) async fn run_one_section_impl(
                     ProseMode::SingleShot
                 };
                 match mode {
-                    BlockRunMode::LiveH1(runtime) => {
+                    BlockRunMode::LiveH1(..) => {
                         let var = vm.var()?;
                         let prose = subst::substitute(
                             text,
@@ -196,11 +196,14 @@ pub(crate) async fn run_one_section_impl(
                         if prose.trim().is_empty() {
                             continue;
                         }
-                        let model_bindings = runtime.models()?;
-                        let Some(model) = model_bindings
-                            .default()
-                            .and_then(|alias| model_bindings.binding(alias))
-                        else {
+                        // The default model reads the bindings-so-far through
+                        // the run's model view: H1's binds write the same
+                        // shared set the view reads.
+                        let model = match ctx.models().default()? {
+                            Some(alias) => ctx.models().binding(&alias)?,
+                            None => None,
+                        };
+                        let Some(model) = model else {
                             return Err(Error::ModelRequired {
                                 section: name.to_owned(),
                             });

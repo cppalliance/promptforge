@@ -74,9 +74,12 @@ fn resolve_live_declarations_for_test(
     _execution: &str,
     _observer: &dyn crate::observe::Observer,
     _section: &str,
-) -> Result<(ToolSet, ModelBindings)> {
+) -> Result<(ToolSet, ModelSet)> {
     let catalog = ToolCatalog::default();
-    let producer = LiveBindingProducer::new(Arc::new(Mutex::new(ToolSet::default())));
+    let producer = LiveBindingProducer::new(
+        Arc::new(Mutex::new(ToolSet::default())),
+        Arc::new(Mutex::new(ModelSet::default())),
+    );
     let lua = Lua::new();
     let result = lua.scope(|scope| {
         producer
@@ -93,7 +96,7 @@ fn resolve_live_declarations_for_test(
 
 fn section_vm_with_model_bindings(
     tools: &ToolSet,
-    models: &ModelBindings,
+    models: &ModelSet,
     execution: &str,
     observer: &dyn crate::observe::Observer,
     section: &str,
@@ -108,6 +111,13 @@ fn section_vm_with_model_bindings(
     )?;
     vm.install_captured_bindings()?;
     Ok(vm)
+}
+
+/// Reads the section's effective model binding through a view over the VM's
+/// frozen set, mirroring the engine's read path.
+fn resolve_section_model(vm: &SectionVm) -> Result<Option<ModelBinding>> {
+    let (models, runtime) = vm.model_bag_handles();
+    resolve_model_binding(&Mutex::new(models), &runtime)
 }
 
 #[test]

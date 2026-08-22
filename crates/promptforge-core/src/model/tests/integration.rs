@@ -3,7 +3,7 @@
 use super::*;
 
 /// Compiles and resolves one live H1 declaration fixture.
-fn resolve_shared(source: &str) -> Result<(ToolSet, ModelBindings)> {
+fn resolve_shared(source: &str) -> Result<(ToolSet, ModelSet)> {
     let shared = crate::lua::LuaProgram::compile(
         source,
         "shared",
@@ -48,8 +48,7 @@ fn models_bind_resolves_and_use_selects_section_binding() {
     )
     .unwrap();
     vm.run_chunk(&prologue, &NullObserver, "Section").unwrap();
-    let (mb, mr) = vm.model_bag_handles();
-    let model = resolve_model_binding(&mb, &mr).unwrap();
+    let model = resolve_section_model(&vm).unwrap();
     assert_eq!(model.unwrap().alias(), "analyst");
     vm.teardown(&NullObserver, "Section");
 }
@@ -62,8 +61,7 @@ fn no_models_use_or_always_leaves_section_unbound() {
             .unwrap();
     vm.inject_host("", &json!({}), &StoreRef::memory(), None)
         .unwrap();
-    let (mb, mr) = vm.model_bag_handles();
-    let model = resolve_model_binding(&mb, &mr).unwrap();
+    let model = resolve_section_model(&vm).unwrap();
     assert!(model.is_none());
     vm.teardown(&NullObserver, "Section");
 }

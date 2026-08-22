@@ -10,7 +10,7 @@ use promptforge_tool_picker::{Outcome, ToolDescriptor, ToolPicker};
 use crate::error::SharedSource;
 use crate::lua::{LiveBindingProducer, ToolResolver, ToolSet};
 use crate::model::{
-    ModelBindOpts, ModelBindings, ModelCatalog, ModelResolver, PickerModelResolver, ResolvedModel,
+    ModelBindOpts, ModelCatalog, ModelResolver, ModelSet, PickerModelResolver, ResolvedModel,
 };
 use crate::tools::{ToolCatalog, ToolId};
 use crate::{Error, Result};
@@ -37,21 +37,23 @@ impl<'a> RuntimeResolution<'a> {
     /// model index is built on demand, when a `models.bind`'s constraints are
     /// known, so the redundant full-catalog index is never materialized.
     ///
-    /// `tool_set` is the run's shared set: executed `tools.bind`/`tools.always`
-    /// calls write through it, and the run context reads the same allocation
-    /// through its view.
+    /// `tool_set` and `model_set` are the run's shared sets: executed
+    /// `tools.bind`/`tools.always` and `models.bind`/`models.default` calls
+    /// write through them, and the run context reads the same allocations
+    /// through its views.
     pub(crate) fn new(
         picker: &'a ToolPicker,
         tools: &'a ToolCatalog,
         models: &'a ModelCatalog,
         tool_set: Arc<Mutex<ToolSet>>,
+        model_set: Arc<Mutex<ModelSet>>,
     ) -> Self {
         Self {
             tool_resolver: PickerResolver::new(picker),
             tools,
             models,
             base_picker: picker,
-            producer: LiveBindingProducer::new(tool_set),
+            producer: LiveBindingProducer::new(tool_set, model_set),
         }
     }
 
@@ -74,23 +76,6 @@ impl<'a> RuntimeResolution<'a> {
     /// Returns [`Error::Lua`] if a binding recorder mutex is poisoned.
     pub(crate) fn take_callback_error(&self) -> Result<Option<Error>> {
         self.producer.take_callback_error()
-    }
-
-    /// Snapshots the model bindings resolved by executed H1 code.
-    ///
-    /// # Errors
-    /// Returns [`Error::Lua`] if the binding recorder mutex is poisoned.
-    pub(crate) fn models(&self) -> Result<ModelBindings> {
-        self.producer.models()
-    }
-
-    /// Returns a shared handle to bindings resolved by live H1 so far.
-    ///
-    /// `#[must_use]`: the returned clone is this call's sole effect (F6), so
-    /// discarding it silently drops the snapshot handle the caller asked for.
-    #[must_use]
-    pub(crate) fn producer(&self) -> LiveBindingProducer {
-        self.producer.clone()
     }
 }
 
@@ -418,7 +403,10 @@ mod tests {
     fn callback_error(source: &FixtureSource, tools: &[Arc<dyn Tool>], code: &str) -> Error {
         let resolver = PickerResolver::new(source);
         let catalog = ToolCatalog::new(tools).expect("fixture tools are unique");
-        let producer = LiveBindingProducer::new(Arc::new(Mutex::new(ToolSet::default())));
+        let producer = LiveBindingProducer::new(
+            Arc::new(Mutex::new(ToolSet::default())),
+            Arc::new(Mutex::new(ModelSet::default())),
+        );
         let model_resolver = |description: &str, _: &ModelBindOpts| {
             Err(Error::ModelAbsent {
                 capability: description.to_owned(),
@@ -545,7 +533,10 @@ mod tests {
         ];
         let resolver = PickerResolver::new(&FixtureSource);
         let catalog = ToolCatalog::new(&tools).expect("fixture tools are unique");
-        let producer = LiveBindingProducer::new(Arc::new(Mutex::new(ToolSet::default())));
+        let producer = LiveBindingProducer::new(
+            Arc::new(Mutex::new(ToolSet::default())),
+            Arc::new(Mutex::new(ModelSet::default())),
+        );
         let model_resolver = |description: &str, _: &ModelBindOpts| {
             Err(Error::ModelAbsent {
                 capability: description.to_owned(),

@@ -2,11 +2,13 @@
 //! bind/invocation options, prompt-local bindings, and completion options.
 
 use std::num::NonZeroU32;
+use std::sync::Mutex;
 
 use serde::Deserialize;
 
 use super::ModelId;
 use crate::dialects::{ToolDialectId, ToolsMode};
+use crate::{Error, Result};
 
 /// The largest sampling temperature the backend accepts.
 const TEMPERATURE_MAX: f64 = 2.0;
@@ -434,35 +436,86 @@ impl CompletionOptions {
     }
 }
 
-/// Immutable prompt-level model bindings from live H1 execution.
+/// The run's model set: the prompt-level bindings produced by live H1
+/// execution plus the prompt-wide `default` alias.
 // No `Eq`: bindings carry `f64` temperatures transitively.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct ModelBindings {
-    bindings: Vec<ModelBinding>,
-    default: Option<String>,
+pub(crate) struct ModelSet {
+    pub(crate) bindings: Vec<ModelBinding>,
+    /// The prompt-wide default alias set by `models.default`, if any. No
+    /// inherent `default()` accessor: it would shadow `Default::default()`
+    /// at every construction site; readers use the field or the
+    /// [`ModelView`] trait.
+    pub(crate) default: Option<String>,
 }
 
-impl ModelBindings {
+impl ModelSet {
+    /// Reassembles a set from owned snapshots of its two parts (the
+    /// [`ModelView`] read pair).
+    #[must_use]
+    pub(crate) fn from_parts(bindings: Vec<ModelBinding>, default: Option<String>) -> Self {
+        Self { bindings, default }
+    }
+
     /// Returns bindings in declaration order.
     #[must_use]
     pub(crate) fn bindings(&self) -> &[ModelBinding] {
         &self.bindings
     }
 
-    /// Returns the prompt-wide default alias set by `models.default`, if any.
-    #[must_use]
-    pub(crate) fn default(&self) -> Option<&str> {
-        self.default.as_deref()
-    }
-
     /// Returns the binding for `alias`, if it was declared.
     pub(crate) fn binding(&self, alias: &str) -> Option<&ModelBinding> {
         self.bindings.iter().find(|binding| binding.alias == alias)
     }
+}
 
-    /// Builds the immutable binding set from its ordered entries and default.
-    pub(crate) fn from_parts(bindings: Vec<ModelBinding>, default: Option<String>) -> Self {
-        Self { bindings, default }
+/// The read-only view over the run's [`ModelSet`].
+///
+/// The run context shares the set as `Arc<dyn ModelView>`; the live H1 pass
+/// writes through its own concrete `Arc<Mutex<ModelSet>>` handle, and once
+/// that VM is dropped no write handle remains. The trait exposes no
+/// mutation, so post-H1 frozenness is structural. Every method locks
+/// briefly and returns an owned snapshot: a mutex guard cannot outlive the
+/// call.
+pub(crate) trait ModelView: Send + Sync {
+    /// Returns an owned snapshot of the bindings in declaration order.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
+    fn bindings(&self) -> Result<Vec<ModelBinding>>;
+
+    /// Returns the prompt-wide default alias set by `models.default`, if any.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
+    fn default(&self) -> Result<Option<String>>;
+
+    /// Returns an owned clone of the binding for `alias`, if it was
+    /// declared.
+    ///
+    /// # Errors
+    /// Returns [`Error::Lua`] if the set's mutex is poisoned.
+    fn binding(&self, alias: &str) -> Result<Option<ModelBinding>>;
+}
+
+/// Maps a poisoned set lock to [`Error::Lua`], matching every other mutex
+/// in the Lua host layer.
+fn lock_model_set(set: &Mutex<ModelSet>) -> Result<std::sync::MutexGuard<'_, ModelSet>> {
+    set.lock()
+        .map_err(|_| Error::Lua("model set mutex was poisoned".to_owned()))
+}
+
+impl ModelView for Mutex<ModelSet> {
+    fn bindings(&self) -> Result<Vec<ModelBinding>> {
+        Ok(lock_model_set(self)?.bindings.clone())
+    }
+
+    fn default(&self) -> Result<Option<String>> {
+        Ok(lock_model_set(self)?.default.clone())
+    }
+
+    fn binding(&self, alias: &str) -> Result<Option<ModelBinding>> {
+        Ok(lock_model_set(self)?.binding(alias).cloned())
     }
 }
 
