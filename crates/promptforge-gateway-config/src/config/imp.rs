@@ -24,10 +24,10 @@ impl Config {
     ///
     /// # Examples
     /// ```no_run
-    /// use promptforge_gateway::Config;
+    /// use promptforge_gateway_config::Config;
     /// use std::path::Path;
     ///
-    /// # fn demo() -> Result<(), promptforge_gateway::ConfigError> {
+    /// # fn demo() -> Result<(), promptforge_gateway_config::ConfigError> {
     /// let config = Config::load(Path::new("gateway.toml"))?;
     /// let _ = config;
     /// # Ok(())
@@ -46,7 +46,7 @@ impl Config {
     ///
     /// # Examples
     /// ```no_run
-    /// use promptforge_gateway::{Config, ProfileName};
+    /// use promptforge_gateway_config::{Config, ProfileName};
     /// use std::path::Path;
     ///
     /// # fn demo() -> Result<(), Box<dyn std::error::Error>> {
@@ -65,19 +65,19 @@ impl Config {
 
     /// The server bind address.
     #[must_use]
-    pub(crate) fn bind_addr(&self) -> SocketAddr {
+    pub fn bind_addr(&self) -> SocketAddr {
         self.server.bind
     }
 
     /// A clone of the server's bearer key.
     #[must_use]
-    pub(crate) fn server_key(&self) -> Secret {
+    pub fn server_key(&self) -> Secret {
         self.server.api_key.clone()
     }
 
     /// The web-search configuration, when `[tools.web_search]` is present.
     #[must_use]
-    pub(crate) fn web_search_config(&self) -> Option<&WebSearchConfig> {
+    pub fn web_search_config(&self) -> Option<&WebSearchConfig> {
         self.tools
             .as_ref()
             .and_then(|tools| tools.web_search.as_ref())
@@ -87,7 +87,7 @@ impl Config {
     /// `concurrency`, else the referenced remote device's concurrency, else
     /// unlimited (`None`).
     #[must_use]
-    pub(crate) fn endpoint_concurrency(&self, endpoint: &EndpointConfig) -> Option<usize> {
+    pub fn endpoint_concurrency(&self, endpoint: &EndpointConfig) -> Option<usize> {
         if let Some(n) = endpoint.concurrency {
             return Some(n);
         }
@@ -102,8 +102,20 @@ impl Config {
     /// device/lane is declared.
     ///
     /// # Errors
-    /// Returns [`ConfigError::Validation`] when the device or lane is missing.
-    pub(crate) fn local_model_concurrency(
+    /// Returns a [`ConfigError`](crate::ConfigError) of kind
+    /// [`ConfigErrorKind::Validation`](crate::ConfigErrorKind::Validation) when
+    /// the device or lane is missing.
+    pub fn local_model_concurrency(
+        &self,
+        model: &LocalModelConfig,
+    ) -> Result<usize, crate::api_error::ConfigError> {
+        self.resolve_local_concurrency(model)
+            .map_err(crate::api_error::ConfigError::from)
+    }
+
+    /// The crate-internal form of [`Self::local_model_concurrency`], returning
+    /// the private representation so validation can propagate it directly.
+    pub(crate) fn resolve_local_concurrency(
         &self,
         model: &LocalModelConfig,
     ) -> Result<usize, ConfigError> {
@@ -158,7 +170,7 @@ impl Config {
     ///
     /// # Examples
     /// ```
-    /// use promptforge_gateway::Config;
+    /// use promptforge_gateway_config::Config;
     ///
     /// let toml = r#"
     /// [server]

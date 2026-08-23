@@ -65,13 +65,7 @@ async fn concurrency_one_serializes_two_admits() {
 #[tokio::test]
 async fn queue_full_rejects_when_max_depth_waiters_present() {
     // concurrency=1, max_depth=1: one in-flight + one waiting; third fails.
-    let lane = EndpointLane::new(
-        1,
-        &QueueConfig {
-            max_depth: 1,
-            fair_scheduling: true,
-        },
-    );
+    let lane = EndpointLane::new(1, &QueueConfig::new(1, true));
     let inflight = lane.admit("a").await.unwrap();
 
     let lane_wait = lane.clone();
@@ -89,13 +83,7 @@ async fn queue_full_rejects_when_max_depth_waiters_present() {
 async fn fair_scheduling_interleaves_clients() {
     // concurrency=1; enqueue A, A, B while one A holds. Fair wake order
     // is A, B, A (not FIFO A, A, B).
-    let lane = EndpointLane::new(
-        1,
-        &QueueConfig {
-            max_depth: 10,
-            fair_scheduling: true,
-        },
-    );
+    let lane = EndpointLane::new(1, &QueueConfig::new(10, true));
     let held = lane.admit("A").await.unwrap();
 
     let order = Arc::new(Mutex::new(Vec::new()));
@@ -138,13 +126,7 @@ async fn cancel_while_queued_frees_the_waiter_slot() {
     use std::future::{Future, poll_fn};
     use std::task::Poll;
 
-    let lane = EndpointLane::new(
-        1,
-        &QueueConfig {
-            max_depth: 10,
-            fair_scheduling: true,
-        },
-    );
+    let lane = EndpointLane::new(1, &QueueConfig::new(10, true));
     let held = lane.admit("a").await.unwrap();
 
     let mut waiting = Box::pin(lane.admit("b"));
@@ -185,13 +167,7 @@ async fn cancel_after_wake_does_not_leak_slot() {
     use std::future::{Future, poll_fn};
     use std::task::Poll;
 
-    let lane = EndpointLane::new(
-        1,
-        &QueueConfig {
-            max_depth: 10,
-            fair_scheduling: true,
-        },
-    );
+    let lane = EndpointLane::new(1, &QueueConfig::new(10, true));
     let held = lane.admit("a").await.unwrap();
 
     let mut waiting = Box::pin(lane.admit("b"));
@@ -218,13 +194,7 @@ fn new_is_total_and_never_panics_on_zero_settings() {
     // clamped. Construction never panics on out-of-range runtime settings.
     let unlimited = EndpointLane::new(0, &QueueConfig::default());
     assert!(matches!(unlimited.inner, LaneInner::Unlimited));
-    let clamped = EndpointLane::new(
-        1,
-        &QueueConfig {
-            max_depth: 0,
-            fair_scheduling: true,
-        },
-    );
+    let clamped = EndpointLane::new(1, &QueueConfig::new(0, true));
     assert!(matches!(clamped.inner, LaneInner::Limited(_)));
 }
 
@@ -232,13 +202,7 @@ fn new_is_total_and_never_panics_on_zero_settings() {
 async fn distinct_client_labels_are_capped_to_bound_fair_scheduling() {
     // Q-001: one caller minting many labels cannot expand the round-robin
     // breadth without bound; labels beyond the cap fold into `default`.
-    let lane = EndpointLane::new(
-        1,
-        &QueueConfig {
-            max_depth: 1000,
-            fair_scheduling: true,
-        },
-    );
+    let lane = EndpointLane::new(1, &QueueConfig::new(1000, true));
     // Occupy the only in-flight slot so subsequent admits queue as waiters.
     let _held = lane.admit("holder").await.unwrap();
 

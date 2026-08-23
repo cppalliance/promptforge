@@ -12,7 +12,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::config::Secret;
+use promptforge_gateway_config::Secret;
+
 use crate::local::error::LocalError;
 use support::{
     ChildSpawner, SharedCapture, capture_reader, display_invocation, free_port,

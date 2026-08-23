@@ -3,8 +3,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::config::{Config, Protocol, ThinkingMode};
-use crate::error::{ConfigError, GatewayError};
+use promptforge_gateway_config::{Config, ConfigError, Protocol, ThinkingMode};
+
+use crate::error::GatewayError;
 use crate::queue::EndpointLane;
 use crate::upstream::{OpenAiUpstream, Upstream};
 
@@ -71,7 +72,7 @@ impl Routing {
                 .insert(model.name.clone(), Arc::clone(model))
                 .is_some()
             {
-                return Err(ConfigError::Validation(format!(
+                return Err(ConfigError::validation(format!(
                     "duplicate model name {}",
                     model.name
                 )));
@@ -119,10 +120,10 @@ impl Routing {
         let mut models = Vec::with_capacity(config.models.len());
         for model in &config.models {
             let endpoint_id = model.endpoints.first().ok_or_else(|| {
-                ConfigError::Validation(format!("model {} has no endpoints", model.name))
+                ConfigError::validation(format!("model {} has no endpoints", model.name))
             })?;
             let endpoint = endpoints.get(endpoint_id.as_str()).ok_or_else(|| {
-                ConfigError::Validation(format!(
+                ConfigError::validation(format!(
                     "model {} names undefined endpoint {endpoint_id}",
                     model.name
                 ))
@@ -152,7 +153,7 @@ impl Routing {
     ) -> Result<Routing, ConfigError> {
         for model in extras {
             if self.by_name.contains_key(&model.name) {
-                return Err(ConfigError::Validation(format!(
+                return Err(ConfigError::validation(format!(
                     "duplicate model name {}",
                     model.name
                 )));
@@ -178,14 +179,14 @@ impl Routing {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+    use promptforge_gateway_config::{ConfigErrorKind, Secret};
 
     fn model_named(name: &str) -> Arc<Model> {
         let endpoint = Arc::new(Endpoint {
             id: "e".to_owned(),
             upstream: Arc::new(OpenAiUpstream::new(
                 "http://127.0.0.1:9",
-                crate::config::Secret::new(String::new()),
+                Secret::new(String::new()),
             )),
             lane: EndpointLane::unlimited(),
         });
@@ -244,7 +245,10 @@ endpoints = ["e"]
     #[test]
     fn new_rejects_duplicate_model_names() {
         let dup = Routing::new(vec![model_named("m"), model_named("m")]);
-        assert!(matches!(dup, Err(ConfigError::Validation(_))));
+        assert!(matches!(
+            dup,
+            Err(e) if e.kind() == ConfigErrorKind::Validation
+        ));
     }
 
     #[test]
@@ -259,7 +263,10 @@ endpoints = ["e"]
     fn merge_rejects_duplicate_model_names() {
         let base = Routing::new(vec![model_named("known")]).expect("distinct");
         let merged = base.merge([model_named("known")]);
-        assert!(matches!(merged, Err(ConfigError::Validation(_))));
+        assert!(matches!(
+            merged,
+            Err(e) if e.kind() == ConfigErrorKind::Validation
+        ));
     }
 
     #[test]
