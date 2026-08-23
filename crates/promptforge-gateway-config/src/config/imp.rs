@@ -16,6 +16,9 @@ use crate::error::ConfigError;
 impl Config {
     /// Load a configuration file with recursive `include` resolution.
     ///
+    /// `${VAR}` interpolation reads the process environment as the caller left
+    /// it; this crate never populates it from env files.
+    ///
     /// # Errors
     /// Returns [`ConfigError`](crate::ConfigError) if the file cannot be read,
     /// an include cycle or depth limit is hit, an interpolation is malformed or
@@ -36,6 +39,9 @@ impl Config {
 
     /// Load a named profile from `dir` with recursive `include` resolution.
     ///
+    /// `${VAR}` interpolation reads the process environment as the caller left
+    /// it; this crate never populates it from env files.
+    ///
     /// # Errors
     /// Returns [`ConfigError`](crate::ConfigError) when the profile is missing,
     /// includes cycle or exceed depth, or the resolved document fails config
@@ -55,6 +61,36 @@ impl Config {
         name: &crate::profile::ProfileName,
     ) -> Result<Config, crate::api_error::ConfigError> {
         crate::profile::load_named(dir, name).map_err(crate::api_error::ConfigError::from)
+    }
+
+    /// Load a named profile like [`Config::load_profile`], additionally
+    /// returning the resolved include chain (the profile itself first, then
+    /// included files depth-first).
+    ///
+    /// The chain lets a caller log exactly which files produced the config and
+    /// check whether another file (for example the boot config) appears in it.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError`](crate::ConfigError) under the same conditions
+    /// as [`Config::load_profile`].
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use promptforge_gateway_config::{Config, ProfileName};
+    /// use std::path::Path;
+    ///
+    /// let name = ProfileName::parse("dev")?;
+    /// let (config, chain) =
+    ///     Config::load_profile_with_chain(Path::new("/etc/promptforge/profiles"), &name)?;
+    /// println!("resolved through {} files", chain.len());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn load_profile_with_chain(
+        dir: &Path,
+        name: &crate::profile::ProfileName,
+    ) -> Result<(Config, Vec<std::path::PathBuf>), crate::api_error::ConfigError> {
+        crate::profile::load_named_with_chain(dir, name)
+            .map_err(crate::api_error::ConfigError::from)
     }
 
     /// The server bind address.

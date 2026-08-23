@@ -8,7 +8,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use promptforge_gateway::{ConfigSource, ProfileName, ServeOptions, run};
+use promptforge_gateway::{ProfileName, ServeOptions, run};
 
 const USAGE: &str = concat!(
     "usage: promptforge-gateway serve [config.toml] --profile NAME\n",
@@ -31,7 +31,7 @@ fn main() -> ExitCode {
         }
     };
 
-    match run(options) {
+    match run(&options) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             print_error_chain(&error);
@@ -120,17 +120,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<ServeOptions, 
     let config_path =
         resolve_config_path(config_path, std::env::var_os("PROMPTFORGE_GATEWAY_CONFIG"))?;
 
-    // Interim mapping until the runner takes {config_path, profile} directly:
-    // the profiles dir is the config file's sibling `profiles/`, and the boot
-    // source is the named profile within it.
-    let profiles_dir = config_path.parent().map_or_else(
-        || PathBuf::from("profiles"),
-        |parent| parent.join("profiles"),
-    );
-    Ok(ServeOptions::new(
-        profiles_dir,
-        ConfigSource::Profile(profile),
-    ))
+    Ok(ServeOptions::new(config_path, profile))
 }
 
 /// Resolve the boot config path: the CLI positional wins, then the
@@ -187,11 +177,8 @@ mod tests {
     fn parses_path_and_profile() {
         let options =
             parse_args(args(&["serve", "gateway.toml", "--profile", "dev"])).expect("parse");
-        let ConfigSource::Profile(name) = options.source else {
-            panic!("expected a profile source");
-        };
-        assert_eq!(name.to_string(), "dev");
-        assert_eq!(options.profiles_dir, PathBuf::from("profiles"));
+        assert_eq!(options.profile.to_string(), "dev");
+        assert_eq!(options.config_path, PathBuf::from("gateway.toml"));
     }
 
     #[test]

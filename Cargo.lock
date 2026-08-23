@@ -2906,6 +2906,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "dotenvy",
  "flate2",
  "indicatif",
  "promptforge-core",
@@ -2930,7 +2931,6 @@ dependencies = [
 name = "promptforge-gateway-config"
 version = "0.1.0"
 dependencies = [
- "dotenvy",
  "serde",
  "tempfile",
  "thiserror 2.0.19",

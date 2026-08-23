@@ -1,8 +1,13 @@
-//! Named profiles: recursive `include` resolution and the profiles directory.
+//! Named profiles and boot-file inspection: recursive `include` resolution.
 //!
-//! A profile is a TOML file under `~/.promptforge/profiles/` (or a path passed
-//! to `serve`). Includes resolve depth-first relative to the including file;
-//! later definitions replace earlier ones with the same `id` or `name`.
+//! A profile is a TOML file in a profiles directory chosen by the caller (the
+//! gateway uses the boot config's sibling `profiles/` directory). Includes
+//! resolve depth-first relative to the including file; later definitions
+//! replace earlier ones with the same `id` or `name`.
+//!
+//! This crate does no env-file loading: `${VAR}` interpolation reads the
+//! process environment, and populating that environment (for example from
+//! `<profile>.env` and `<boot>.env` files) is the calling binary's job.
 
 use std::collections::HashSet;
 use std::fs;
@@ -10,9 +15,8 @@ use std::path::{Path, PathBuf};
 
 use toml::Value;
 
-use crate::config::Config;
+use crate::config::{Config, ServerConfig, interpolate_value};
 use crate::error::ConfigError;
-use crate::paths::default_promptforge_root;
 
 /// Maximum `include` nesting depth (guards against runaway trees).
 pub(crate) const MAX_INCLUDE_DEPTH: usize = 16;
@@ -36,18 +40,6 @@ pub use name::{ProfileName, ProfileNameError};
 
 #[cfg(test)]
 mod tests;
-
-/// Default directory for named profiles: `~/.promptforge/profiles`.
-///
-/// # Examples
-/// ```
-/// let dir = promptforge_gateway_config::default_profiles_dir();
-/// assert!(dir.ends_with("profiles"));
-/// ```
-#[must_use]
-pub fn default_profiles_dir() -> PathBuf {
-    default_promptforge_root().join("profiles")
-}
 
 /// Lists profile names (`*.toml` stems) in `dir`, sorted.
 ///
@@ -120,31 +112,83 @@ fn list_profiles_repr(dir: &Path) -> Result<Vec<String>, ConfigError> {
 /// - [`ConfigError::Validation`] when a merge is ill-typed or the resolved
 ///   document fails config validation.
 pub(crate) fn load_named(dir: &Path, name: &ProfileName) -> Result<Config, ConfigError> {
-    let path = dir.join(format!("{}.toml", name.as_str()));
-    load_path(&path)
+    load_named_with_chain(dir, name).map(|(config, _chain)| config)
 }
 
-/// Loads a profile TOML path with recursive include resolution.
+/// Loads `dir/<name>.toml` like [`load_named`], additionally returning the
+/// resolved include chain (root first, depth-first) so the caller can log it
+/// and check whether another file (for example the boot config) appears in it.
+pub(crate) fn load_named_with_chain(
+    dir: &Path,
+    name: &ProfileName,
+) -> Result<(Config, Vec<PathBuf>), ConfigError> {
+    let path = dir.join(format!("{}.toml", name.as_str()));
+    let (value, chain) = collect_config_chain(&path)?;
+    let config = Config::from_value(value)?;
+    Ok((config, chain))
+}
+
+/// Loads only the `[server]` section of a config file: includes are resolved
+/// and `${VAR}` references interpolated, but full validation is skipped.
 ///
-/// Before interpolating `${VAR}` references, walks the include chain for
-/// name-matched env files (e.g. `gateway.env` for `gateway.toml`). Every
-/// found env file is loaded into the process environment, root first; values
-/// already set are not overridden, so the root config's env file takes
-/// precedence and included configs supply defaults.
+/// The boot file is the catalog and may legitimately fail checks that apply
+/// to a loaded profile, so callers enforcing the boot-owned `[server]` rule
+/// need the section without running that validation.
+///
+/// # Errors
+/// Returns a [`ConfigError`](crate::ConfigError) when the file (or an
+/// included file) cannot be read or parsed, an include cycles or exceeds
+/// depth, an interpolation fails, the `[server]` section is absent, or the
+/// section itself does not deserialize (for example a malformed `bind`).
+///
+/// # Examples
+/// ```no_run
+/// use promptforge_gateway_config::load_server;
+/// use std::path::Path;
+///
+/// let server = load_server(Path::new("gateway.toml"))?;
+/// println!("boot file binds {}", server.bind());
+/// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+/// ```
+pub fn load_server(path: &Path) -> Result<ServerConfig, crate::api_error::ConfigError> {
+    load_server_repr(path).map_err(crate::api_error::ConfigError::from)
+}
+
+/// The crate-internal form of [`load_server`], returning the private
+/// representation.
+fn load_server_repr(path: &Path) -> Result<ServerConfig, ConfigError> {
+    let (mut value, _chain) = collect_config_chain(path)?;
+    interpolate_value(&mut value)?;
+    let server = value
+        .as_table()
+        .and_then(|table| table.get("server"))
+        .cloned()
+        .ok_or_else(|| {
+            ConfigError::Validation(format!("no [server] section in {}", path.display()))
+        })?;
+    server.try_into().map_err(|source| ConfigError::Parse {
+        path: Some(path.to_owned()),
+        source: Box::new(source),
+    })
+}
+
+/// Loads a config TOML path with recursive include resolution.
+///
+/// `${VAR}` interpolation reads the process environment as the caller left
+/// it; this crate never populates it from env files.
 ///
 /// # Errors
 /// Returns [`ConfigError`] on read, include, parse, or validation failure.
 pub(crate) fn load_path(path: &Path) -> Result<Config, ConfigError> {
-    let (value, config_chain) = collect_config_chain(path)?;
-    load_env_chain(&config_chain);
+    let (value, _chain) = collect_config_chain(path)?;
     Config::from_value(value)
 }
 
 /// Collects config file paths in include-chain order (root first, depth-first)
 /// alongside the merged TOML value.
 ///
-/// The returned path list drives env-file loading and is testable without
-/// touching the process environment.
+/// The returned path list lets the caller log the resolved chain and check
+/// whether another file (for example the boot config) appears in it.
 ///
 /// # Errors
 /// Returns [`ConfigError`] on read, include, parse, or validation failure.
@@ -154,19 +198,6 @@ pub(crate) fn collect_config_chain(path: &Path) -> Result<(Value, Vec<PathBuf>),
     let mut config_chain = Vec::new();
     let value = load_value(path, 0, &mut stack, &mut visiting, &mut config_chain)?;
     Ok((value, config_chain))
-}
-
-/// Loads env files from the config chain into the process environment.
-///
-/// Root values take precedence because [`dotenvy::from_path`] does not
-/// override existing vars. Missing env files are silently skipped.
-pub(crate) fn load_env_chain(config_chain: &[PathBuf]) {
-    for config_path in config_chain {
-        let env_path = config_path.with_extension("env");
-        if env_path.exists() {
-            let _ = dotenvy::from_path(&env_path);
-        }
-    }
 }
 
 fn load_value(

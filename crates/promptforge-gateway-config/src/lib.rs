@@ -12,8 +12,15 @@
 //!
 //! Start at [`Config`]: [`Config::load`] reads a file with include resolution,
 //! [`Config::load_profile`] loads a named profile from a profiles directory,
-//! and [`Config::from_toml_str`] parses a TOML string. Failures are reported
-//! as the opaque [`ConfigError`]; classify them with [`ConfigError::kind`].
+//! and [`Config::from_toml_str`] parses a TOML string.
+//! [`Config::load_profile_with_chain`] additionally returns the resolved
+//! include chain, and [`load_server`] reads only a boot file's `[server]`
+//! section (includes and interpolation, without full validation). Failures
+//! are reported as the opaque [`ConfigError`]; classify them with
+//! [`ConfigError::kind`].
+//!
+//! The crate never mutates the process environment: `${VAR}` interpolation
+//! reads it, and loading env files into it is the calling binary's job.
 //!
 //! # Examples
 //!
@@ -29,7 +36,6 @@
 mod api_error;
 mod config;
 mod error;
-mod paths;
 mod profile;
 mod queue;
 
@@ -39,5 +45,5 @@ pub use crate::config::{
     ModelConfig, Protocol, SearchProvider, Secret, ServerConfig, ThinkingMode, ToolsConfig,
     WebSearchConfig,
 };
-pub use crate::profile::{ProfileName, ProfileNameError, default_profiles_dir, list_profiles};
+pub use crate::profile::{ProfileName, ProfileNameError, list_profiles, load_server};
 pub use crate::queue::QueueConfig;

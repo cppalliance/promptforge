@@ -29,10 +29,9 @@ mod web_search_process;
 mod wire;
 
 pub use crate::api_error::{ServeError, StartupError, StartupErrorKind};
-pub use crate::runner::{ConfigSource, Gateway, ProfilesContext, ServeOptions, run};
+pub use crate::runner::{Gateway, ProfilesContext, ServeOptions, run};
 pub use promptforge_gateway_config::{
     Config, ConfigError, ConfigErrorKind, ProfileName, ProfileNameError, Secret,
-    default_profiles_dir,
 };
 
 use std::path::{Path, PathBuf};
@@ -52,7 +51,7 @@ use crate::local::LocalRuntime;
 use crate::routing::Routing;
 use crate::tools::WebSearchState;
 use crate::wire::{ChatRequest, ChatResponse, ModelInfo, ModelsResponse};
-use promptforge_gateway_config::WebSearchConfig;
+use promptforge_gateway_config::{ServerConfig, WebSearchConfig};
 
 /// Mutable live configuration held behind a lock so profile switches can swap
 /// routing and local children without rebuilding the axum router.
@@ -71,11 +70,15 @@ struct AdminProfiles {
     dir: PathBuf,
 }
 
-/// Shared handler state: live routing/key/local runtime, and optional profiles dir.
+/// Shared handler state: live routing/key/local runtime, the boot-owned
+/// `[server]` settings, and optional profiles dir.
 #[derive(Debug, Clone)]
 pub(crate) struct AppState {
     live: Arc<RwLock<LiveState>>,
     profiles: Option<Arc<AdminProfiles>>,
+    /// The boot file's `[server]`, retained so profile switches can enforce
+    /// the boot-owned `[server]` rule (fixed socket and bearer key).
+    boot_server: Arc<ServerConfig>,
     /// Serializes profile switches so two concurrent switches cannot interleave
     /// their reads and writes of the live state.
     switch: Arc<tokio::sync::Mutex<()>>,
@@ -91,6 +94,7 @@ impl AppState {
         web_search: Option<&WebSearchConfig>,
         profiles_dir: Option<PathBuf>,
         profile_name: Option<String>,
+        boot_server: ServerConfig,
     ) -> AppState {
         AppState {
             live: Arc::new(RwLock::new(LiveState {
@@ -101,6 +105,7 @@ impl AppState {
                 profile_name,
             })),
             profiles: profiles_dir.map(|dir| Arc::new(AdminProfiles { dir })),
+            boot_server: Arc::new(boot_server),
             switch: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
@@ -234,15 +239,20 @@ async fn admin_status(
 /// Immediately switches to another named profile.
 ///
 /// Switches are serialized by a dedicated mutex, so two concurrent requests
-/// cannot interleave. Configuration is loaded and validated off the live lock;
+/// cannot interleave. The new profile's env file loads before the profile
+/// itself (the boot file's env file is already in the process environment
+/// from startup). Configuration is loaded and validated off the live lock;
 /// a config or routing failure returns an error and leaves the live state
-/// untouched. The bearer key, routing, and web-search settings of the new
-/// profile are committed only after the new local runtime starts successfully,
-/// via a single atomic swap under the write lock, so a failed switch never
-/// rotates the admin credential. Because old and new `llama-server` children
-/// must not both hold VRAM, the old children are stopped before the new ones
-/// start; a start failure therefore leaves the previous profile authenticated
-/// and remote-routable but without its local models (a documented degraded
+/// untouched. The boot file owns `[server]`: a profile whose merged
+/// `[server]` differs from the boot `[server]` is rejected, so the socket
+/// and the gateway bearer key are fixed for the process lifetime and a
+/// switch never rotates the admin credential. The routing and web-search
+/// settings of the new profile are committed only after the new local
+/// runtime starts successfully, via a single atomic swap under the write
+/// lock. Because old and new `llama-server` children must not both hold
+/// VRAM, the old children are stopped before the new ones start; a start
+/// failure therefore leaves the previous profile authenticated and
+/// remote-routable but without its local models (a documented degraded
 /// state) rather than a half-applied new profile.
 async fn admin_switch_profile(
     State(state): State<AppState>,
@@ -262,10 +272,17 @@ async fn admin_switch_profile(
         return Err(GatewayError::ProfileNotFound(name.to_string()));
     }
 
+    // The profile's env file must be in the process environment before the
+    // profile is interpolated. dotenvy never overrides, so anything already
+    // set (the process environment, the boot env file) wins.
+    crate::runner::load_env_file(&path.with_extension("env"));
+
     // Build and validate the entire remote side off the live lock. Any failure
     // here returns before mutating live state at all (LIB-009).
     let config = Config::load_profile(&dir, &name)
         .map_err(|e| GatewayError::switch_failed("load-profile", e))?;
+    crate::runner::check_server_matches_boot(&state.boot_server, config.server(), &name)
+        .map_err(|e| GatewayError::switch_failed("server-mismatch", e))?;
     let remote_routing = Routing::from_config(&config)
         .map_err(|e| GatewayError::switch_failed("build-routing", e))?;
     let new_web_search = config
