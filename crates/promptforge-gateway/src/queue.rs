@@ -7,7 +7,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use serde::Deserialize;
+use promptforge_gateway_config::QueueConfig;
 use tokio::sync::oneshot;
 
 /// A bounded scheduling identity parsed from the client header.
@@ -49,41 +49,6 @@ impl ClientId {
     /// The validated id as a string slice.
     pub(crate) fn as_str(&self) -> &str {
         &self.0
-    }
-}
-
-/// Waiting-queue settings shared by every limited endpoint lane.
-///
-/// `max_depth` counts only requests waiting for a concurrency slot, not
-/// requests already admitted (in-flight).
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-#[non_exhaustive]
-pub(crate) struct QueueConfig {
-    /// Maximum number of waiting requests before new admits return
-    /// [`AdmitError::QueueFull`]. Defaults to 100.
-    #[serde(default = "default_max_depth")]
-    pub max_depth: usize,
-    /// When true, waiting callers are served round-robin by client key.
-    /// Defaults to true.
-    #[serde(default = "default_fair_scheduling")]
-    pub fair_scheduling: bool,
-}
-
-fn default_max_depth() -> usize {
-    100
-}
-
-fn default_fair_scheduling() -> bool {
-    true
-}
-
-impl Default for QueueConfig {
-    fn default() -> Self {
-        Self {
-            max_depth: default_max_depth(),
-            fair_scheduling: default_fair_scheduling(),
-        }
     }
 }
 

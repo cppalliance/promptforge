@@ -19,9 +19,9 @@ use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use crate::config::{Config, LocalModelConfig, ThinkingMode};
 use crate::queue::EndpointLane;
 use crate::routing::{Endpoint, Model};
+use promptforge_gateway_config::{Config, LocalModelConfig, ThinkingMode};
 
 pub(crate) use error::LocalError;
 
@@ -311,7 +311,7 @@ fn startup_interrupt_flag() -> Arc<AtomicBool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+    use promptforge_gateway_config::Config;
 
     #[test]
     fn empty_local_models_starts_noop_runtime() {

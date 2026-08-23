@@ -2906,10 +2906,10 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
- "dotenvy",
  "flate2",
  "indicatif",
  "promptforge-core",
+ "promptforge-gateway-config",
  "rand 0.9.5",
  "reqwest 0.12.28",
  "serde",
@@ -2920,11 +2920,22 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
- "toml",
  "tracing",
  "tracing-subscriber",
  "url",
  "zip",
+]
+
+[[package]]
+name = "promptforge-gateway-config"
+version = "0.1.0"
+dependencies = [
+ "dotenvy",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.19",
+ "toml",
+ "url",
 ]
 
 [[package]]

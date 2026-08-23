@@ -17,11 +17,9 @@
 //! streaming, and the Anthropic protocol shim are deferred.
 
 mod api_error;
-mod config;
 mod error;
 mod http_util;
 mod local;
-mod profile;
 mod queue;
 mod routing;
 mod runner;
@@ -30,12 +28,12 @@ mod upstream;
 mod web_search_process;
 mod wire;
 
-pub use crate::api_error::{
-    ConfigError, ConfigErrorKind, ServeError, StartupError, StartupErrorKind,
-};
-pub use crate::config::{Config, Secret};
-pub use crate::profile::{ProfileName, ProfileNameError, default_profiles_dir};
+pub use crate::api_error::{ServeError, StartupError, StartupErrorKind};
 pub use crate::runner::{ConfigSource, Gateway, ProfilesContext, ServeOptions, run};
+pub use promptforge_gateway_config::{
+    Config, ConfigError, ConfigErrorKind, ProfileName, ProfileNameError, Secret,
+    default_profiles_dir,
+};
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -49,12 +47,12 @@ use axum::{Router, response::IntoResponse};
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
-use crate::config::WebSearchConfig;
 use crate::error::GatewayError;
 use crate::local::LocalRuntime;
 use crate::routing::Routing;
 use crate::tools::WebSearchState;
 use crate::wire::{ChatRequest, ChatResponse, ModelInfo, ModelsResponse};
+use promptforge_gateway_config::WebSearchConfig;
 
 /// Mutable live configuration held behind a lock so profile switches can swap
 /// routing and local children without rebuilding the axum router.
@@ -207,8 +205,8 @@ async fn admin_list_profiles(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &headers).await?;
     let dir = profiles_dir(&state)?;
-    let profiles =
-        profile::list_profiles(dir).map_err(|e| GatewayError::switch_failed("list-profiles", e))?;
+    let profiles = promptforge_gateway_config::list_profiles(dir)
+        .map_err(|e| GatewayError::switch_failed("list-profiles", e))?;
     Ok(Json(serde_json::json!({ "profiles": profiles })))
 }
 
@@ -253,7 +251,7 @@ async fn admin_switch_profile(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     check_auth(&state, &headers).await?;
     let dir = profiles_dir(&state)?.to_path_buf();
-    let name = crate::profile::ProfileName::parse(&request.name)
+    let name = ProfileName::parse(&request.name)
         .map_err(|e| GatewayError::switch_failed("parse-name", e))?;
 
     // Serialize switches for the whole operation (LIB-008).
@@ -266,7 +264,7 @@ async fn admin_switch_profile(
 
     // Build and validate the entire remote side off the live lock. Any failure
     // here returns before mutating live state at all (LIB-009).
-    let config = crate::config::Config::load_profile(&dir, &name)
+    let config = Config::load_profile(&dir, &name)
         .map_err(|e| GatewayError::switch_failed("load-profile", e))?;
     let remote_routing = Routing::from_config(&config)
         .map_err(|e| GatewayError::switch_failed("build-routing", e))?;

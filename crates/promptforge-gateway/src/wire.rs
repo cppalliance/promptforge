@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::config::ThinkingMode;
+use promptforge_gateway_config::ThinkingMode;
 
 /// An incoming chat completions request.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
