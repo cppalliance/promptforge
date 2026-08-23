@@ -27,6 +27,7 @@ mod runner;
 #[cfg(test)]
 mod tests;
 
+use std::future::Future;
 use std::sync::Arc;
 
 use rmcp::ServerHandler;
@@ -424,12 +425,12 @@ impl ServerHandler for PromptForgeServer {
             .with_instructions(INSTRUCTIONS)
     }
 
-    async fn list_tools(
+    fn list_tools(
         &self,
         request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
-    ) -> Result<ListToolsResult, ErrorData> {
-        self.list_page(request.and_then(|request| request.cursor).as_deref())
+    ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> {
+        std::future::ready(self.list_page(request.and_then(|request| request.cursor).as_deref()))
     }
 
     async fn call_tool(
