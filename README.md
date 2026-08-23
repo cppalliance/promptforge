@@ -51,7 +51,7 @@ Prose goes to the model. Lua sets up the turn. The response is the run's result.
 
 ```bash
 cargo install promptforge-cli promptforge-gateway
-promptforge-gateway serve gateway.toml &
+promptforge-gateway serve gateway.toml --profile main &
 promptforge run prompts/hello.md
 ```
 
@@ -70,7 +70,7 @@ Two processes: the gateway holds the vendor credential; the client points at it.
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 export PROMPTFORGE_GATEWAY_API_KEY=dev-secret
-cargo run -p promptforge-gateway -- serve gateway.toml &
+cargo run -p promptforge-gateway -- serve gateway.toml --profile main &
 
 export PROMPTFORGE_GATEWAY_URL=http://127.0.0.1:8081/v1
 cargo run -p promptforge-cli -- run prompts/hello.md
