@@ -64,3 +64,7 @@ pre-existing clippy 1.98 breakage blocked step 1; vibe rule 7 gives old bugs the
 
 surfaced by the full-workspace clippy Verify after per-crate passes; pre-existing on master, committed separately per rule 7. (assistant reasoned)
 
+## 2026-08-23 Normalize CRLF in golden tool-list tests
+
+git checks golden files out as CRLF on Windows while serde_json emits LF; normalize line endings in the comparison since the JSON payload is identical either way. (assistant reasoned)
+

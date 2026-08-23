@@ -96,10 +96,9 @@ fn published_by(server: &PromptForgeServer) -> Vec<String> {
 #[cfg(feature = "picker")]
 fn the_published_tool_list_is_the_golden_one() {
     let published = serde_json::to_string_pretty(&tool_definitions()).expect("tools serialize");
-    assert_eq!(
-        published,
-        include_str!("tests/golden-tools-list.json").trim_end()
-    );
+    // Git may check the golden out as CRLF on Windows; the serializer is LF.
+    let golden = include_str!("tests/golden-tools-list.json").replace("\r\n", "\n");
+    assert_eq!(published, golden.trim_end());
 }
 
 #[test]
@@ -109,10 +108,9 @@ fn the_published_tool_list_is_the_no_picker_golden_one() {
     // resolver is gated out. Its own golden pins that surface so the
     // feature-off contract cannot silently regress.
     let published = serde_json::to_string_pretty(&tool_definitions()).expect("tools serialize");
-    assert_eq!(
-        published,
-        include_str!("tests/golden-tools-list-no-picker.json").trim_end()
-    );
+    // Git may check the golden out as CRLF on Windows; the serializer is LF.
+    let golden = include_str!("tests/golden-tools-list-no-picker.json").replace("\r\n", "\n");
+    assert_eq!(published, golden.trim_end());
 }
 
 #[test]
