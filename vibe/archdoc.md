@@ -39,18 +39,18 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 
 
-- A52. Every untrusted string is guard-wrapped explicitly at the model-facing insertion boundary, independent of its origin.
 
-- A55. Fan-out maps an explicit collection across isolated JSON values and returns each original member with its result.
 
 
 - A58. Variable state rolls through one walk and its jumps; execute chains and fan-out arms receive isolated snapshots whose writes do not escape.
 - A59. Distinct concurrent fan-out arms writing the same store path fail visibly; concurrent append remains legal.
 
-- A60. Parse, model, and dialect failures are classified from explicit typed variants, never from user-controlled message text or wildcard fallbacks.
 
 - A61. Immutable run state is shared across the execute subtree; each section entry owns a fresh frame with explicit construction and teardown.
 - A62. Untrusted envelopes use one nonce per run: byte-stable within a run, unpredictable across runs, with escaping as the primary defense.
+
+- A63. The boot catalog defines available models; a required named profile selects the loaded subset while server identity stays fixed.
+- A64. Endpoints bind by id to one shared dominion admission queue; local dominions also enforce complete VRAM co-residency budgets.
 
 ## Principles
 

@@ -67,3 +67,4 @@
 - [2026-08-20-1-fix-core-review-findings] alias uniqueness: Reject local tool aliases that collide with declared aliases or earlier local registrations at the authoring line.
 - [2026-08-20-1-fix-core-review-findings] malformed syntax containment: Grammar mismatches and bad offsets return categorized errors instead of reaching panic paths.
 - [2026-08-22-1-runcontext-seed] post-H1 capability freeze: H1 owns the only binding writers; later execution sees read-only views and self-contained bindings.
+- [2026-08-23-1-dominion-refactor] canonical gateway protocol: Clients speak one OpenAI-shaped protocol while backend dialect and thinking translation remain gateway-internal and incremental.
