@@ -19,6 +19,7 @@ path = "src/main.rs"
 [dependencies]
 axum.workspace = true
 async-trait.workspace = true
+dotenvy.workspace = true
 flate2.workspace = true
 indicatif.workspace = true
 promptforge-core.workspace = true

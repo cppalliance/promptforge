@@ -17,15 +17,15 @@ use crate::local::LocalError;
 ///
 /// # Examples
 /// ```no_run
-/// use promptforge_gateway::{run, ConfigSource, ProfileName, ServeOptions, StartupErrorKind};
+/// use promptforge_gateway::{ProfileName, ServeOptions, StartupErrorKind, run};
 /// use std::path::PathBuf;
 ///
 /// # fn demo() {
 /// let options = ServeOptions::new(
-///     PathBuf::from("/tmp/profiles"),
-///     ConfigSource::Profile(ProfileName::parse("dev").unwrap()),
+///     PathBuf::from("/etc/promptforge/gateway.toml"),
+///     ProfileName::parse("dev").unwrap(),
 /// );
-/// if let Err(err) = run(options) {
+/// if let Err(err) = run(&options) {
 ///     assert!(matches!(err.kind(), StartupErrorKind::Config | StartupErrorKind::Bind));
 /// }
 /// # }
