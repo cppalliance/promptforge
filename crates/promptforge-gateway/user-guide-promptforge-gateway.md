@@ -12,7 +12,7 @@ Model resolution is one exact string lookup. A miss is a 404. There is no prefix
 
 ## Configuration
 
-The gateway reads one TOML file. Every configuration struct uses `deny_unknown_fields`, so a misspelled key is a boot failure rather than a setting silently ignored.
+The gateway boots from two TOML files: the boot file named on the command line, which is the catalog and infrastructure, and a named profile from the boot file's sibling `profiles/` directory, which is the initial loaded set. Every configuration struct uses `deny_unknown_fields`, so a misspelled key is a boot failure rather than a setting silently ignored.
 
 A minimal configuration defines a server (bind address and bearer key), one endpoint, and one model:
 
@@ -41,6 +41,8 @@ Any string value can use `${VAR}` to reference an environment variable. Interpol
 
 There is no implicit pickup of `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` from the ambient environment. Every credential must appear in the configuration as an explicit `${VAR}` reference.
 
+At boot the process environment is populated from at most two env files: the profile's own file first (`profiles/main.env` for `--profile main`), then the boot file's sibling env file (`gateway.env` beside `gateway.toml`). Neither file overrides a variable that is already set, so precedence is the process environment, then the profile's file, then the boot file's. Included files' env files are never loaded. On a profile switch only the new profile's env file is loaded; the boot file's is already in the process.
+
 ### Model fields
 
 | Field | Required | Default | Purpose |
@@ -67,16 +69,20 @@ There is no implicit pickup of `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` from the 
 ## Starting the Gateway
 
 ```
-promptforge-gateway serve gateway.toml
-promptforge-gateway serve --profile analytical
-promptforge-gateway serve --profiles-dir ./profiles --profile base
+promptforge-gateway serve gateway.toml --profile main
 ```
 
-The `serve` subcommand is required. Provide either `--profile NAME` (loads `<profiles-dir>/<name>.toml` with include resolution) or a config file path. Both cannot be given at the same time.
+Boot requires two things: a config path and a profile name. The config path comes from the positional argument or the `PROMPTFORGE_GATEWAY_CONFIG` environment variable; the CLI argument wins, and with neither set the boot fails with a usage error naming both sources. The profile name comes from `--profile` only (no env var). It is required - there is no anonymous boot. Every gateway has at least one profile; the initial loaded set always has a name.
 
-The default profiles directory is `~/.promptforge/profiles/` (Windows: `%USERPROFILE%\.promptforge\profiles\`). Override with `--profiles-dir DIR`.
+The profiles directory is always the `profiles/` directory beside the config file - never independently configurable, and there is no `~/.promptforge/profiles` default. Booting with an unknown profile name fails with a startup error listing the available profiles; a missing `profiles/` directory or a missing profile file is likewise a startup error.
 
-Startup order: load configuration, start local model runtime (when `[[local_model]]` is present), build the routing table, bind, serve. A broken config never reaches a listening socket.
+The boot file is the catalog and infrastructure; it is not loaded as the runtime config directly. The named profile is loaded with include resolution and becomes the initial config. The single-file setup needs one minimal profile, `profiles/main.toml` beside `gateway.toml`:
+
+```toml
+include = ["../gateway.toml"]
+```
+
+Startup order: load the two env files, resolve the profile's include chain, start local model runtime (when `[[local_model]]` is present), build the routing table, bind, serve. A broken config never reaches a listening socket.
 
 ## Model Catalog and Routing
 
@@ -251,20 +257,24 @@ When `[tools.web_search]` is absent, the route returns 404 - an absent resource,
 
 ## Named Profiles
 
-Organize configurations for different environments as TOML files in a profiles directory:
+Organize configurations for different environments as TOML files in the `profiles/` directory beside the boot file:
 
 ```
-~/.promptforge/profiles/
-  base.toml
-  analytical.toml
-  dev.toml
+<config-parent>/
+  gateway.toml
+  profiles/
+    main.toml
+    analytical.toml
+    dev.toml
 ```
 
 Start with a named profile:
 
 ```
-promptforge-gateway serve --profile analytical
+promptforge-gateway serve gateway.toml --profile analytical
 ```
+
+Every gateway boots into a profile, so the initial loaded set always has a name. A profile typically contains `include = ["../gateway.toml"]` plus its own overrides, keeping the boot file as the shared catalog.
 
 ### Profile inheritance
 
@@ -288,6 +298,12 @@ Merge rules:
 - Arrays (`[[endpoint]]`, `[[model]]`, `[[local_model]]`, `[[device]]`): merged by append. An entry with the same `id` or `name` replaces the earlier definition.
 - Scalars (`server.*`, `queue.*`, `[local].cache_dir`): later wins.
 
+### The boot file owns `[server]`
+
+After include resolution, the profile's merged `[server]` section must equal the boot file's `[server]` exactly - bind address and api_key, compared as values after `${VAR}` interpolation. A mismatch fails the boot (or the profile switch): a bind mismatch names both addresses, while an api_key mismatch names only the profile and the field, with both keys redacted. The conventional setup passes by construction because profiles include the boot file. The consequence: the socket and the gateway bearer key are fixed for the process lifetime, and a profile switch never rotates the admin credential.
+
+Includes remain free-form: a profile may include a different file than the boot path, or be self-contained - a self-contained profile must replicate the boot file's `[server]` verbatim to boot. At startup the gateway logs the resolved include chain, plus a warning when the boot file is not in it: the likely-mistake case, where edits to the boot file have no effect.
+
 ### Admin routes
 
 All admin routes use the same bearer token as `/v1`:
@@ -306,9 +322,9 @@ Switch with:
 
 Send this as `POST /admin/switch-profile` with `Authorization: Bearer <token>`.
 
-Profile switches are serialized by a mutex. The old local children are stopped (freeing VRAM) before new ones start. The new configuration is built and validated before touching live state. On success, the routing, key, web-search settings, and local runtime are atomically swapped. On failure, the previous state stays intact with a stable admin credential.
+Profile switches are serialized by a mutex. The old local children are stopped (freeing VRAM) before new ones start. The new configuration is built and validated before touching live state. On success, the routing, web-search settings, and local runtime are atomically swapped. On failure, the previous state stays intact with a stable admin credential.
 
-The bind address does not change on switch; a restart is required for that.
+The `[server]` section does not change on switch: the boot file owns it, and a profile whose merged `[server]` differs from the boot file's is rejected. Moving the socket or rotating the gateway key requires a restart.
 
 Profile names must be a single path component - no separators, no `.` or `..`, no empty string. This confinement prevents directory traversal through the admin API.
 

@@ -15,10 +15,12 @@ cargo install promptforge-gateway
 ## Usage
 
 ```bash
-promptforge-gateway serve gateway.toml
+promptforge-gateway serve gateway.toml --profile main
 ```
 
-Configure endpoints, models, and credentials in a single TOML file. The gateway accepts `POST /v1/chat/completions` and serves a model catalog at `GET /v1/models`.
+Boot requires two things: a config path and a profile name. The config path comes from the positional argument or the `PROMPTFORGE_GATEWAY_CONFIG` environment variable (the CLI argument wins). The profile is required and is loaded from the `profiles/` directory beside the boot file; a minimal `profiles/main.toml` containing only `include = ["../gateway.toml"]` loads the full catalog.
+
+Configure endpoints, models, and credentials in the TOML catalog. The gateway accepts `POST /v1/chat/completions` and serves a model catalog at `GET /v1/models`.
 
 See the [PromptForge User Guide](https://cppalliance.github.io/promptforge/) for full documentation.
 
