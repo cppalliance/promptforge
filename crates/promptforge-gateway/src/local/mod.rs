@@ -49,40 +49,39 @@ impl LocalRuntime {
 
     /// Provisions binaries/models and starts one `llama-server` per local model.
     ///
-    /// When `config.local_models` is empty, returns an empty runtime without
-    /// downloading anything.
+    /// When the config declares no `[[local_model]]`, returns an empty runtime
+    /// without downloading anything.
     ///
     /// # Errors
     /// Returns [`LocalError`] when download, verification, spawn, or readiness fails.
     pub(crate) fn start(config: &Config) -> Result<LocalRuntime, LocalError> {
-        if config.local_models.is_empty() {
+        if config.local_models().is_empty() {
             return Ok(LocalRuntime::empty());
         }
 
-        let cache_root = resolve_cache_root(config.local.cache_dir.as_deref())?;
+        let cache_root = resolve_cache_root(config.local().cache_dir())?;
         tracing::info!(path = %cache_root.display(), "local model cache");
         let store = ArtifactStore::new(cache_root)?;
         let llama_server = store.provision_llama_server()?;
         tracing::info!(path = %llama_server.display(), "provisioned llama-server");
 
         let interrupted = startup_interrupt_flag();
-        let mut models = Vec::with_capacity(config.local_models.len());
+        let mut models = Vec::with_capacity(config.local_models().len());
 
-        for local_model in &config.local_models {
-            let model_path =
-                store.ensure_model(&local_model.source, local_model.sha256.as_deref())?;
+        for local_model in config.local_models() {
+            let model_path = store.ensure_model(local_model.source(), local_model.sha256())?;
             tracing::info!(
-                model = %local_model.name,
+                model = %local_model.name(),
                 path = %model_path.display(),
                 "provisioned local GGUF"
             );
 
-            maybe_write_sidecar(&store, &local_model.source, &model_path);
+            maybe_write_sidecar(&store, local_model.source(), &model_path);
 
             let concurrency = config
                 .local_model_concurrency(local_model)
                 .map_err(|source| LocalError::LaneConcurrency {
-                    model: local_model.name.clone(),
+                    model: local_model.name().to_owned(),
                     source,
                 })?;
             let parallel =
@@ -90,9 +89,9 @@ impl LocalRuntime {
             let options = launch_options(local_model, parallel);
             let guard =
                 ServerGuard::start(&llama_server, &model_path, &options, interrupted.as_ref())?;
-            let endpoint_id = format!("local-{}", local_model.name);
+            let endpoint_id = format!("local-{}", local_model.name());
             let (tool_dialect, tools_mode) =
-                resolve_local_dialect(&guard, &local_model.name, &model_path)?;
+                resolve_local_dialect(&guard, local_model.name(), &model_path)?;
             let upstream_name = guard.model_alias().to_owned();
             let base_url = guard.base_url();
             let upstream = Arc::new(LocalUpstream::new(
@@ -100,26 +99,26 @@ impl LocalRuntime {
                 llama_server.clone(),
                 model_path.clone(),
                 options,
-                local_model.name.clone(),
+                local_model.name().to_owned(),
             ));
-            let lane = EndpointLane::new(concurrency, &config.queue);
+            let lane = EndpointLane::new(concurrency, config.queue());
             let endpoint = Arc::new(Endpoint {
                 id: endpoint_id,
                 upstream,
                 lane,
             });
             models.push(Arc::new(Model {
-                name: local_model.name.clone(),
-                description: local_model.description.clone(),
-                context: local_model.context,
-                thinking: local_model.thinking,
+                name: local_model.name().to_owned(),
+                description: local_model.description().to_owned(),
+                context: local_model.context(),
+                thinking: local_model.thinking(),
                 tool_dialect,
                 tools_mode,
                 upstream_name,
                 endpoint,
             }));
             tracing::info!(
-                model = %local_model.name,
+                model = %local_model.name(),
                 base_url = %base_url,
                 "local llama-server ready"
             );
@@ -191,15 +190,15 @@ fn expand_configured_path(path: &str) -> Result<PathBuf, LocalError> {
 
 fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
     LaunchOptions {
-        ctx_size: model.context,
-        n_predict: model.n_predict,
+        ctx_size: model.context(),
+        n_predict: model.n_predict(),
         parallel,
-        gpu_layers: model.gpu_layers,
-        flash_attention: model.flash_attention,
-        cache_type_k: model.cache_type_k.clone(),
-        cache_type_v: model.cache_type_v.clone(),
-        think: !matches!(model.thinking, ThinkingMode::Never),
-        chat_template_file: model.chat_template_file.as_ref().map(PathBuf::from),
+        gpu_layers: model.gpu_layers(),
+        flash_attention: model.flash_attention(),
+        cache_type_k: model.cache_type_k().to_owned(),
+        cache_type_v: model.cache_type_v().to_owned(),
+        think: !matches!(model.thinking(), ThinkingMode::Never),
+        chat_template_file: model.chat_template_file().map(PathBuf::from),
     }
 }
 

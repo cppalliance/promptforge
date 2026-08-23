@@ -224,16 +224,16 @@ upstream = "u1"
 endpoints = ["anthropic"]
 "#;
     let config = Config::from_toml_str(toml).unwrap();
-    assert_eq!(config.queue.max_depth, 50);
-    assert!(!config.queue.fair_scheduling);
+    assert_eq!(config.queue().max_depth(), 50);
+    assert!(!config.queue().fair_scheduling());
     assert_eq!(config.endpoints[0].concurrency, Some(4));
 }
 
 #[test]
 fn queue_defaults_when_section_absent() {
     let config = Config::from_toml_str(SAMPLE).unwrap();
-    assert_eq!(config.queue.max_depth, 100);
-    assert!(config.queue.fair_scheduling);
+    assert_eq!(config.queue().max_depth(), 100);
+    assert!(config.queue().fair_scheduling());
     assert_eq!(config.endpoints[0].concurrency, None);
 }
 

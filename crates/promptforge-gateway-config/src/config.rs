@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::queue::QueueConfig;
 
+mod accessors;
 mod imp;
 mod interpolate;
 mod validate;
@@ -50,6 +51,7 @@ fn default_n_predict() -> u32 {
 /// redacting secret can never be round-tripped from a downstream consumer.
 /// `expose` is the single read accessor.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct Secret(String);
 
 impl Secret {
@@ -101,6 +103,7 @@ impl fmt::Display for Secret {
 /// the Anthropic translation shim is deferred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum Protocol {
     /// The OpenAI `/chat/completions` shape.
     Openai,
@@ -116,22 +119,22 @@ pub enum Protocol {
 #[non_exhaustive]
 pub struct Config {
     /// Server bind address and shared key.
-    pub server: ServerConfig,
+    server: ServerConfig,
     /// Waiting-queue settings for limited endpoints.
-    pub queue: QueueConfig,
+    queue: QueueConfig,
     /// Cache and binary settings for gateway-owned local inference.
-    pub local: LocalConfig,
+    local: LocalConfig,
     /// Physical compute resources with concurrency limits.
-    pub devices: Vec<DeviceConfig>,
+    devices: Vec<DeviceConfig>,
     /// The configured backends.
-    pub endpoints: Vec<EndpointConfig>,
+    endpoints: Vec<EndpointConfig>,
     /// The routing table from model name to remote backend.
-    pub models: Vec<ModelConfig>,
+    models: Vec<ModelConfig>,
     /// Local generative models served by a managed `llama-server` child.
-    pub local_models: Vec<LocalModelConfig>,
+    local_models: Vec<LocalModelConfig>,
     /// Optional built-in tool configuration. Absent when no `[tools]` section
     /// is present.
-    pub tools: Option<ToolsConfig>,
+    tools: Option<ToolsConfig>,
 }
 
 /// Private deserialization DTO for [`Config`]. Holds the raw TOML shape before
@@ -188,17 +191,17 @@ pub enum DeviceKind {
 #[non_exhaustive]
 pub struct DeviceConfig {
     /// Operator-chosen device id, referenced by endpoints and local models.
-    pub id: String,
+    id: String,
     /// Remote provider or local GPU.
     #[serde(rename = "type")]
-    pub kind: DeviceKind,
+    kind: DeviceKind,
     /// Max concurrent requests for a remote device. Ignored for local devices
     /// (use lanes instead).
     #[serde(default)]
-    pub concurrency: Option<usize>,
+    concurrency: Option<usize>,
     /// Lanes nested via `[[device.lane]]` under this device.
     #[serde(default, rename = "lane")]
-    pub lanes: Vec<LaneConfig>,
+    lanes: Vec<LaneConfig>,
 }
 
 /// A concurrency lane within a local device (`[[device.lane]]`).
@@ -207,12 +210,12 @@ pub struct DeviceConfig {
 #[non_exhaustive]
 pub struct LaneConfig {
     /// Lane id referenced by `[[local_model]].lane`.
-    pub id: String,
+    id: String,
     /// Max concurrent inferences on this lane.
-    pub concurrency: usize,
+    concurrency: usize,
     /// Optional explicit device id (redundant when nested under `[[device]]`).
     #[serde(default)]
-    pub device: Option<String>,
+    device: Option<String>,
 }
 
 /// Settings under `[local]` for artifact cache paths.
@@ -226,7 +229,7 @@ pub struct LocalConfig {
     /// Models land in `<cache_dir>/models`; llama.cpp installs in
     /// `<cache_dir>/llama.cpp`.
     #[serde(default)]
-    pub cache_dir: Option<String>,
+    cache_dir: Option<String>,
 }
 
 /// One local generative model declared as `[[local_model]]`.
@@ -235,46 +238,46 @@ pub struct LocalConfig {
 #[non_exhaustive]
 pub struct LocalModelConfig {
     /// Caller-facing model name in `/v1/models` and chat completions.
-    pub name: String,
+    name: String,
     /// Prose describing the model for catalog consumers and semantic bind.
-    pub description: String,
+    description: String,
     /// Hugging Face (or other) URL, or a local filesystem path to a GGUF.
-    pub source: String,
+    source: String,
     /// Optional SHA-256 pin (lowercase hex). Verified after download when set.
     #[serde(default)]
-    pub sha256: Option<String>,
-    /// Optional device id (`[[device]]`); used with [`Self::lane`] for concurrency.
+    sha256: Option<String>,
+    /// Optional device id (`[[device]]`); used with `lane` for concurrency.
     #[serde(default)]
-    pub device: Option<String>,
+    device: Option<String>,
     /// Optional lane id under the device (`[[device.lane]]`).
     #[serde(default)]
-    pub lane: Option<String>,
+    lane: Option<String>,
     /// Context window size in tokens (`--ctx-size`).
-    pub context: u32,
+    context: u32,
     /// Whether thinking tokens are never, always, or switchably available.
     #[serde(default)]
-    pub thinking: ThinkingMode,
+    thinking: ThinkingMode,
     /// GPU layers offloaded (`-ngl`). Defaults to 99.
     #[serde(default = "default_gpu_layers")]
-    pub gpu_layers: u32,
+    gpu_layers: u32,
     /// Enable flash attention (`--flash-attn on`). Defaults to true.
     #[serde(default = "default_true")]
-    pub flash_attention: bool,
+    flash_attention: bool,
     /// KV cache type for K. Defaults to `q8_0`.
     #[serde(default = "default_cache_type_k")]
-    pub cache_type_k: String,
+    cache_type_k: String,
     /// KV cache type for V. Defaults to `q4_0`.
     #[serde(default = "default_cache_type_v")]
-    pub cache_type_v: String,
+    cache_type_v: String,
     /// Generation ceiling (`--n-predict`). Defaults to 8192.
     #[serde(default = "default_n_predict")]
-    pub n_predict: u32,
+    n_predict: u32,
     /// Optional path to a Jinja chat template file (`--chat-template-file`).
     ///
     /// Use when the GGUF embeds a template without tool-calling support (common
     /// for Mistral Small Instruct quants) and a tools-capable override is needed.
     #[serde(default)]
-    pub chat_template_file: Option<String>,
+    chat_template_file: Option<String>,
 }
 
 /// Server-level settings.
@@ -283,10 +286,10 @@ pub struct LocalModelConfig {
 #[non_exhaustive]
 pub struct ServerConfig {
     /// The socket address to bind.
-    pub bind: SocketAddr,
+    bind: SocketAddr,
     /// The shared bearer key every `/v1/*` request must present.
     #[serde(deserialize_with = "de_secret")]
-    pub api_key: Secret,
+    api_key: Secret,
 }
 
 /// One backend the gateway can forward to.
@@ -296,23 +299,23 @@ pub struct ServerConfig {
 pub struct EndpointConfig {
     /// The endpoint's id: an operator-chosen handle referenced by `[[model]]`
     /// entries. Distinct from a model's caller-facing `name`.
-    pub id: String,
+    id: String,
     /// The wire protocol this endpoint speaks.
-    pub protocol: Protocol,
+    protocol: Protocol,
     /// The backend base URL (a trailing slash is trimmed).
-    pub base_url: String,
+    base_url: String,
     /// The credential sent to this backend.
     #[serde(deserialize_with = "de_secret")]
-    pub api_key: Secret,
+    api_key: Secret,
     /// Maximum in-flight requests to this endpoint. Absent means unlimited
     /// (the waiting queue is a no-op pass-through for that endpoint).
-    /// When [`Self::device`] is set and this field is absent, the device's
+    /// When `device` is set and this field is absent, the device's
     /// concurrency is used instead.
     #[serde(default)]
-    pub concurrency: Option<usize>,
+    concurrency: Option<usize>,
     /// Optional remote device id whose concurrency governs this endpoint.
     #[serde(default)]
-    pub device: Option<String>,
+    device: Option<String>,
 }
 
 /// How a model exposes chain-of-thought / thinking tokens to callers.
@@ -340,21 +343,21 @@ pub enum ThinkingMode {
 #[non_exhaustive]
 pub struct ModelConfig {
     /// The name callers request and that a slot resolves to.
-    pub name: String,
+    name: String,
     /// Prose describing the model for catalog consumers and semantic bind.
-    pub description: String,
+    description: String,
     /// Context window size in tokens.
-    pub context: u32,
+    context: u32,
     /// Whether thinking tokens are never, always, or switchably available.
     #[serde(default)]
-    pub thinking: ThinkingMode,
+    thinking: ThinkingMode,
     /// The string the backend knows this model by.
-    pub upstream: String,
+    upstream: String,
     /// The endpoint ids serving this model (v0 uses the first).
-    pub endpoints: Vec<String>,
+    endpoints: Vec<String>,
     /// A `max_tokens` default supplied when the caller omits one.
     #[serde(default)]
-    pub default_max_tokens: Option<u32>,
+    default_max_tokens: Option<u32>,
 }
 
 /// Built-in tool configuration under the `[tools]` section.
@@ -365,7 +368,7 @@ pub struct ToolsConfig {
     /// The web-search tool configuration. Absent when no `[tools.web_search]`
     /// section is present.
     #[serde(default)]
-    pub web_search: Option<WebSearchConfig>,
+    web_search: Option<WebSearchConfig>,
 }
 
 /// Configuration for the web-search tool.
@@ -374,32 +377,32 @@ pub struct ToolsConfig {
 #[non_exhaustive]
 pub struct WebSearchConfig {
     /// The search provider backing the tool.
-    pub provider: SearchProvider,
+    provider: SearchProvider,
     /// The credential sent to the search provider.
     #[serde(deserialize_with = "de_secret")]
-    pub api_key: Secret,
+    api_key: Secret,
     /// The search API base URL. Defaults to the Brave Search endpoint;
     /// override to point at a proxy or a test server.
     #[serde(default = "default_brave_base_url")]
-    pub base_url: String,
+    base_url: String,
     /// Used when the request omits `count`.
     #[serde(default = "default_web_search_count")]
-    pub default_count: u8,
+    default_count: u8,
     /// Clamp and over-fetch ceiling for result counts.
     #[serde(default = "default_web_search_max_count")]
-    pub max_count: u8,
+    max_count: u8,
     /// Diversity cap per hostname group.
     #[serde(default = "default_web_search_max_per_host")]
-    pub max_per_host: u8,
+    max_per_host: u8,
     /// Applied when the request omits `freshness` and this is non-empty.
     #[serde(default)]
-    pub default_freshness: String,
+    default_freshness: String,
     /// Applied when the request omits `safesearch` and this is non-empty.
     #[serde(default)]
-    pub default_safesearch: String,
+    default_safesearch: String,
     /// When true, scrub known tracking query params from result URLs.
     #[serde(default = "default_true")]
-    pub strip_tracking: bool,
+    strip_tracking: bool,
 }
 
 /// The default Brave Search API base URL.

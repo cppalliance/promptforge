@@ -17,11 +17,11 @@ pub struct QueueConfig {
     /// Maximum number of waiting requests before new admits are rejected.
     /// Defaults to 100.
     #[serde(default = "default_max_depth")]
-    pub max_depth: usize,
+    max_depth: usize,
     /// When true, waiting callers are served round-robin by client key.
     /// Defaults to true.
     #[serde(default = "default_fair_scheduling")]
-    pub fair_scheduling: bool,
+    fair_scheduling: bool,
 }
 
 fn default_max_depth() -> usize {
@@ -34,12 +34,47 @@ fn default_fair_scheduling() -> bool {
 
 impl QueueConfig {
     /// Queue settings with the given waiting-queue depth and fairness switch.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_gateway_config::QueueConfig;
+    ///
+    /// let queue = QueueConfig::new(50, false);
+    /// assert_eq!(queue.max_depth(), 50);
+    /// assert!(!queue.fair_scheduling());
+    /// ```
     #[must_use]
     pub fn new(max_depth: usize, fair_scheduling: bool) -> QueueConfig {
         QueueConfig {
             max_depth,
             fair_scheduling,
         }
+    }
+
+    /// Maximum number of waiting requests before new admits are rejected.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_gateway_config::QueueConfig;
+    ///
+    /// assert_eq!(QueueConfig::default().max_depth(), 100);
+    /// ```
+    #[must_use]
+    pub fn max_depth(&self) -> usize {
+        self.max_depth
+    }
+
+    /// Whether waiting callers are served round-robin by client key.
+    ///
+    /// # Examples
+    /// ```
+    /// use promptforge_gateway_config::QueueConfig;
+    ///
+    /// assert!(QueueConfig::default().fair_scheduling());
+    /// ```
+    #[must_use]
+    pub fn fair_scheduling(&self) -> bool {
+        self.fair_scheduling
     }
 }
 
