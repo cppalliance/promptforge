@@ -493,7 +493,7 @@ id = "not-an-array"
     assert!(msg.contains("expected"), "expected type hint in {msg}");
 }
 
-// ---- env-chain tests ----
+// ---- include-chain tests ----
 
 #[test]
 fn config_chain_ordering_is_root_first_depth_first() {
@@ -529,43 +529,6 @@ fn config_chain_ordering_is_root_first_depth_first() {
 }
 
 #[test]
-fn env_file_sets_vars_for_single_config() {
-    let tmp = TempDir::new().unwrap();
-    write(tmp.path(), "solo.toml", MINIMAL_CONFIG);
-    write(tmp.path(), "solo.env", "PFG_ENVTEST_SOLO=hello\n");
-
-    let _config = load_path(&tmp.path().join("solo.toml")).unwrap();
-    assert_eq!(std::env::var("PFG_ENVTEST_SOLO").unwrap(), "hello");
-}
-
-#[test]
-fn root_env_takes_precedence_over_included_env() {
-    let tmp = TempDir::new().unwrap();
-    write(tmp.path(), "parent.toml", MINIMAL_CONFIG);
-    write(
-        tmp.path(),
-        "parent.env",
-        "PFG_ENVTEST_PREC=parent_val\nPFG_ENVTEST_DFLT=extra_val\n",
-    );
-    write(tmp.path(), "root.toml", "include = [\"parent.toml\"]\n");
-    write(tmp.path(), "root.env", "PFG_ENVTEST_PREC=root_val\n");
-
-    let _config = load_path(&tmp.path().join("root.toml")).unwrap();
-    // dotenvy does not override vars already set; root is loaded first,
-    // so root_val wins even though parent.env also defines PFG_ENVTEST_PREC.
-    assert_eq!(
-        std::env::var("PFG_ENVTEST_PREC").unwrap(),
-        "root_val",
-        "root env should win"
-    );
-    assert_eq!(
-        std::env::var("PFG_ENVTEST_DFLT").unwrap(),
-        "extra_val",
-        "parent env should supply defaults"
-    );
-}
-
-#[test]
 fn load_succeeds_with_no_env_file() {
     let tmp = TempDir::new().unwrap();
     write(tmp.path(), "bare.toml", MINIMAL_CONFIG);
@@ -573,38 +536,91 @@ fn load_succeeds_with_no_env_file() {
     assert_eq!(config.models()[0].name(), "m");
 }
 
+// ---- chain-aware profile load and boot [server] extraction ----
+
 #[test]
-fn partial_chain_loads_leaf_env_only() {
+fn load_named_with_chain_returns_config_and_chain() {
     let tmp = TempDir::new().unwrap();
-    let nested = tmp.path().join("nested");
-    fs::create_dir(&nested).unwrap();
+    write(tmp.path(), "base.toml", MINIMAL_CONFIG);
+    write(tmp.path(), "alpha.toml", "include = [\"base.toml\"]\n");
 
-    write(&nested, "leaf.toml", MINIMAL_CONFIG);
-    write(&nested, "leaf.env", "PFG_ENVTEST_LEAF=leaf_val\n");
-    write(tmp.path(), "mid.toml", "include = [\"nested/leaf.toml\"]\n");
-    write(tmp.path(), "root.toml", "include = [\"mid.toml\"]\n");
-
-    let _config = load_path(&tmp.path().join("root.toml")).unwrap();
-    assert_eq!(std::env::var("PFG_ENVTEST_LEAF").unwrap(), "leaf_val");
+    let (config, chain) =
+        load_named_with_chain(tmp.path(), &ProfileName::parse("alpha").unwrap()).unwrap();
+    assert_eq!(config.models()[0].name(), "m");
+    assert_eq!(chain.len(), 2);
+    assert!(chain[0].ends_with("alpha.toml"), "profile first: {chain:?}");
+    assert!(chain[1].ends_with("base.toml"), "include second: {chain:?}");
 }
 
 #[test]
-fn env_chain_collects_all_env_files() {
+fn load_server_reads_server_section_without_full_validation() {
+    // The bare catalog may fail checks that apply to a loaded profile (here a
+    // model naming an undefined endpoint); load_server still extracts [server].
     let tmp = TempDir::new().unwrap();
-    write(tmp.path(), "parent.toml", MINIMAL_CONFIG);
-    write(tmp.path(), "parent.env", "PFG_ENVTEST_ALL_P=from_parent\n");
-    write(tmp.path(), "root.toml", "include = [\"parent.toml\"]\n");
-    write(tmp.path(), "root.env", "PFG_ENVTEST_ALL_R=from_root\n");
+    write(
+        tmp.path(),
+        "gateway.toml",
+        r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "boot-key"
 
-    let _config = load_path(&tmp.path().join("root.toml")).unwrap();
-    assert_eq!(
-        std::env::var("PFG_ENVTEST_ALL_R").unwrap(),
-        "from_root",
-        "root env should be loaded"
+[[model]]
+name = "m"
+description = "prose"
+context = 1
+upstream = "u"
+endpoints = ["ghost"]
+"#,
     );
-    assert_eq!(
-        std::env::var("PFG_ENVTEST_ALL_P").unwrap(),
-        "from_parent",
-        "parent env should also be loaded"
+
+    let server = load_server(&tmp.path().join("gateway.toml")).unwrap();
+    assert_eq!(server.bind().to_string(), "127.0.0.1:8081");
+    assert_eq!(server.api_key().expose(), "boot-key");
+    assert!(
+        load_path(&tmp.path().join("gateway.toml")).is_err(),
+        "full validation must reject the undefined endpoint"
     );
+}
+
+#[test]
+fn load_server_resolves_the_boot_files_own_include_chain() {
+    // The boot file's [server] may itself come from an include.
+    let tmp = TempDir::new().unwrap();
+    write(
+        tmp.path(),
+        "base.toml",
+        "[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"from-base\"\n",
+    );
+    write(tmp.path(), "gateway.toml", "include = [\"base.toml\"]\n");
+
+    let server = load_server(&tmp.path().join("gateway.toml")).unwrap();
+    assert_eq!(server.api_key().expose(), "from-base");
+}
+
+#[test]
+fn load_server_interpolates_from_the_process_environment() {
+    let tmp = TempDir::new().unwrap();
+    write(
+        tmp.path(),
+        "gateway.toml",
+        "[server]\nbind = \"127.0.0.1:8081\"\napi_key = \"${PFG_DEFINITELY_UNSET_BOOT_KEY}\"\n",
+    );
+
+    let err = load_server(&tmp.path().join("gateway.toml")).unwrap_err();
+    assert_eq!(err.kind(), crate::ConfigErrorKind::UnresolvedVar);
+}
+
+#[test]
+fn load_server_requires_a_server_section() {
+    let tmp = TempDir::new().unwrap();
+    write(
+        tmp.path(),
+        "gateway.toml",
+        "[local]\ncache_dir = \"/tmp/x\"\n",
+    );
+
+    let err = load_server(&tmp.path().join("gateway.toml")).unwrap_err();
+    assert_eq!(err.kind(), crate::ConfigErrorKind::Validation);
+    assert!(err.to_string().contains("[server]"), "got: {err}");
 }
