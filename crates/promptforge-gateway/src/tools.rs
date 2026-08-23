@@ -10,11 +10,12 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use serde::{Deserialize, Serialize};
 
+use promptforge_gateway_config::{Secret, WebSearchConfig};
+
 mod brave;
 
 use crate::AppState;
 use crate::check_auth;
-use crate::config::{Secret, WebSearchConfig};
 use crate::error::GatewayError;
 use crate::web_search_process::post_process_results;
 use brave::{BraveSearchParams, brave_overfetch_count, brave_search};
@@ -71,7 +72,9 @@ impl WebSearchState {
     pub(crate) fn new(cfg: &WebSearchConfig) -> WebSearchState {
         // v0 supports only the Brave provider; the query path below is
         // Brave-shaped. Reading the provider keeps the selection explicit.
-        let crate::config::SearchProvider::Brave = cfg.provider;
+        let promptforge_gateway_config::SearchProvider::Brave = cfg.provider else {
+            unreachable!("SearchProvider is non_exhaustive; wire up new providers here")
+        };
         WebSearchState {
             api_key: cfg.api_key.clone(),
             base_url: cfg.base_url.trim_end_matches('/').to_string(),

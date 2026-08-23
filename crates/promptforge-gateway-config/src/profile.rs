@@ -12,7 +12,7 @@ use toml::Value;
 
 use crate::config::Config;
 use crate::error::ConfigError;
-use crate::local::artifacts::default_promptforge_root;
+use crate::paths::default_promptforge_root;
 
 /// Maximum `include` nesting depth (guards against runaway trees).
 pub(crate) const MAX_INCLUDE_DEPTH: usize = 16;
@@ -41,7 +41,7 @@ mod tests;
 ///
 /// # Examples
 /// ```
-/// let dir = promptforge_gateway::default_profiles_dir();
+/// let dir = promptforge_gateway_config::default_profiles_dir();
 /// assert!(dir.ends_with("profiles"));
 /// ```
 #[must_use]
@@ -52,12 +52,20 @@ pub fn default_profiles_dir() -> PathBuf {
 /// Lists profile names (`*.toml` stems) in `dir`, sorted.
 ///
 /// Missing directories yield an empty list. Non-directory paths yield
-/// [`ConfigError::Validation`].
+/// a validation-classified error.
 ///
 /// # Errors
-/// Returns [`ConfigError::Read`] when the directory cannot be read, or
-/// [`ConfigError::Validation`] when `dir` exists but is not a directory.
-pub(crate) fn list_profiles(dir: &Path) -> Result<Vec<String>, ConfigError> {
+/// Returns a [`ConfigError`](crate::ConfigError) of kind
+/// [`ConfigErrorKind::Read`](crate::ConfigErrorKind::Read) when the directory
+/// cannot be read, or [`ConfigErrorKind::Validation`](crate::ConfigErrorKind::Validation)
+/// when `dir` exists but is not a directory.
+pub fn list_profiles(dir: &Path) -> Result<Vec<String>, crate::api_error::ConfigError> {
+    list_profiles_repr(dir).map_err(crate::api_error::ConfigError::from)
+}
+
+/// The crate-internal form of [`list_profiles`], returning the private
+/// representation.
+fn list_profiles_repr(dir: &Path) -> Result<Vec<String>, ConfigError> {
     if !dir.exists() {
         return Ok(Vec::new());
     }

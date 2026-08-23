@@ -45,19 +45,20 @@ fn default_n_predict() -> u32 {
 /// A secret string (an API key or the shared token) that never serializes and
 /// redacts in both `Debug` and `Display`.
 ///
-/// The type has no public `Deserialize` or `From<String>` impl: it is
-/// constructed only inside this crate (via a crate-private constructor and a
-/// private field deserializer), so a redacting secret can never be minted or
-/// round-tripped by a downstream consumer. `expose` is the single accessor.
+/// The type has no public `Deserialize` or `From<String>` impl: configuration
+/// deserialization constructs it through a private field deserializer, so a
+/// redacting secret can never be round-tripped from a downstream consumer.
+/// `expose` is the single read accessor.
 #[derive(Clone)]
 pub struct Secret(String);
 
 impl Secret {
-    /// Wrap a plaintext secret. Crate-internal: the only construction path,
-    /// used by config deserialization and by adapters that mint an ephemeral
-    /// loopback credential.
+    /// Wrap a plaintext secret.
+    ///
+    /// Used by config deserialization and by the gateway's adapters that mint
+    /// an ephemeral loopback credential.
     #[must_use]
-    pub(crate) fn new(value: String) -> Secret {
+    pub fn new(value: String) -> Secret {
         Secret(value)
     }
 
@@ -69,7 +70,7 @@ impl Secret {
 
     /// Whether the secret is empty (an intentionally credential-free endpoint).
     #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }
@@ -100,7 +101,7 @@ impl fmt::Display for Secret {
 /// the Anthropic translation shim is deferred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Protocol {
+pub enum Protocol {
     /// The OpenAI `/chat/completions` shape.
     Openai,
 }
@@ -115,22 +116,22 @@ pub(crate) enum Protocol {
 #[non_exhaustive]
 pub struct Config {
     /// Server bind address and shared key.
-    pub(crate) server: ServerConfig,
+    pub server: ServerConfig,
     /// Waiting-queue settings for limited endpoints.
-    pub(crate) queue: QueueConfig,
+    pub queue: QueueConfig,
     /// Cache and binary settings for gateway-owned local inference.
-    pub(crate) local: LocalConfig,
+    pub local: LocalConfig,
     /// Physical compute resources with concurrency limits.
-    pub(crate) devices: Vec<DeviceConfig>,
+    pub devices: Vec<DeviceConfig>,
     /// The configured backends.
-    pub(crate) endpoints: Vec<EndpointConfig>,
+    pub endpoints: Vec<EndpointConfig>,
     /// The routing table from model name to remote backend.
-    pub(crate) models: Vec<ModelConfig>,
+    pub models: Vec<ModelConfig>,
     /// Local generative models served by a managed `llama-server` child.
-    pub(crate) local_models: Vec<LocalModelConfig>,
+    pub local_models: Vec<LocalModelConfig>,
     /// Optional built-in tool configuration. Absent when no `[tools]` section
     /// is present.
-    pub(crate) tools: Option<ToolsConfig>,
+    pub tools: Option<ToolsConfig>,
 }
 
 /// Private deserialization DTO for [`Config`]. Holds the raw TOML shape before
@@ -174,7 +175,7 @@ impl From<RawConfig> for Config {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
-pub(crate) enum DeviceKind {
+pub enum DeviceKind {
     /// A remote HTTP provider; concurrency is flat (no lanes required).
     Remote,
     /// A local GPU; concurrency comes from `[[device.lane]]` entries.
@@ -185,7 +186,7 @@ pub(crate) enum DeviceKind {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub(crate) struct DeviceConfig {
+pub struct DeviceConfig {
     /// Operator-chosen device id, referenced by endpoints and local models.
     pub id: String,
     /// Remote provider or local GPU.
@@ -204,7 +205,7 @@ pub(crate) struct DeviceConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub(crate) struct LaneConfig {
+pub struct LaneConfig {
     /// Lane id referenced by `[[local_model]].lane`.
     pub id: String,
     /// Max concurrent inferences on this lane.
@@ -218,7 +219,7 @@ pub(crate) struct LaneConfig {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub(crate) struct LocalConfig {
+pub struct LocalConfig {
     /// Root directory for GGUF files and the pinned `llama-server` install.
     ///
     /// Defaults to `~/.promptforge` (Windows: `%USERPROFILE%\.promptforge`).
@@ -232,7 +233,7 @@ pub(crate) struct LocalConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub(crate) struct LocalModelConfig {
+pub struct LocalModelConfig {
     /// Caller-facing model name in `/v1/models` and chat completions.
     pub name: String,
     /// Prose describing the model for catalog consumers and semantic bind.
@@ -280,7 +281,7 @@ pub(crate) struct LocalModelConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub(crate) struct ServerConfig {
+pub struct ServerConfig {
     /// The socket address to bind.
     pub bind: SocketAddr,
     /// The shared bearer key every `/v1/*` request must present.
@@ -292,7 +293,7 @@ pub(crate) struct ServerConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub(crate) struct EndpointConfig {
+pub struct EndpointConfig {
     /// The endpoint's id: an operator-chosen handle referenced by `[[model]]`
     /// entries. Distinct from a model's caller-facing `name`.
     pub id: String,
@@ -323,7 +324,7 @@ pub(crate) struct EndpointConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
-pub(crate) enum ThinkingMode {
+pub enum ThinkingMode {
     /// The backend never emits thinking tokens; a per-call switch is ignored.
     #[default]
     Never,
@@ -337,7 +338,7 @@ pub(crate) enum ThinkingMode {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub(crate) struct ModelConfig {
+pub struct ModelConfig {
     /// The name callers request and that a slot resolves to.
     pub name: String,
     /// Prose describing the model for catalog consumers and semantic bind.
@@ -360,7 +361,7 @@ pub(crate) struct ModelConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub(crate) struct ToolsConfig {
+pub struct ToolsConfig {
     /// The web-search tool configuration. Absent when no `[tools.web_search]`
     /// section is present.
     #[serde(default)]
@@ -371,7 +372,7 @@ pub(crate) struct ToolsConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub(crate) struct WebSearchConfig {
+pub struct WebSearchConfig {
     /// The search provider backing the tool.
     pub provider: SearchProvider,
     /// The credential sent to the search provider.
@@ -422,7 +423,7 @@ fn default_web_search_max_per_host() -> u8 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
-pub(crate) enum SearchProvider {
+pub enum SearchProvider {
     /// The Brave Search API.
     Brave,
 }

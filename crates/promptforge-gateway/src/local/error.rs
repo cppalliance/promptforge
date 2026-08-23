@@ -301,7 +301,7 @@ pub(crate) enum LocalError {
         model: String,
         /// The underlying configuration error.
         #[source]
-        source: crate::error::ConfigError,
+        source: promptforge_gateway_config::ConfigError,
     },
 
     /// A lane concurrency value did not fit the child's `--parallel` argument.

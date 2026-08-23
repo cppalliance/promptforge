@@ -346,7 +346,7 @@ impl Config {
                     local_model.name
                 )));
             }
-            self.local_model_concurrency(local_model)?;
+            self.resolve_local_concurrency(local_model)?;
         }
         Ok(())
     }

@@ -6,8 +6,8 @@
 //! behind this same trait, with no change to routing or the request handler.
 
 use async_trait::async_trait;
+use promptforge_gateway_config::Secret;
 
-use crate::config::Secret;
 use crate::error::GatewayError;
 use crate::wire::{ChatRequest, ChatResponse};
 

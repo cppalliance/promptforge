@@ -373,28 +373,10 @@ fn expand_tilde(source: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(source))
 }
 
-/// Returns the operator home directory used for `~` expansion and defaults.
-///
-/// Infallible: falls back to the working directory when unset. Used only by the
-/// infallible public profiles-directory default; the artifact path uses
-/// [`default_home_checked`] instead so a missing home is a typed error (ART-009).
-#[must_use]
-pub(crate) fn default_home() -> PathBuf {
-    #[cfg(windows)]
-    {
-        std::env::var_os("USERPROFILE").map_or_else(|| PathBuf::from("."), PathBuf::from)
-    }
-    #[cfg(not(windows))]
-    {
-        std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from)
-    }
-}
-
 /// Resolves the operator home for artifact provisioning, or a typed error.
 ///
-/// Unlike [`default_home`], this returns [`LocalError::MissingHome`] rather than
-/// silently using the working directory when the home variable is unset or empty
-/// (ART-009).
+/// Returns [`LocalError::MissingHome`] rather than silently using the working
+/// directory when the home variable is unset or empty (ART-009).
 pub(crate) fn default_home_checked() -> Result<PathBuf> {
     #[cfg(windows)]
     let (var, value) = ("USERPROFILE", std::env::var_os("USERPROFILE"));
@@ -409,12 +391,6 @@ fn home_or_missing(var: &'static str, value: Option<std::ffi::OsString>) -> Resu
         Some(value) if !value.is_empty() => Ok(PathBuf::from(value)),
         _ => Err(LocalError::MissingHome { var }),
     }
-}
-
-/// Default root for gateway local artifacts (`~/.promptforge`), infallible.
-#[must_use]
-pub(crate) fn default_promptforge_root() -> PathBuf {
-    default_home().join(".promptforge")
 }
 
 /// Default artifact root (`~/.promptforge`), erroring when home is unset (ART-009).

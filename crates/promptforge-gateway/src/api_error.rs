@@ -6,83 +6,9 @@
 //! toml, axum, io) leaks into the crate's semver surface. Callers classify
 //! failures with the `kind()` method instead of matching private variants.
 
-use crate::error::ConfigError as ConfigErrorRepr;
+use promptforge_gateway_config::ConfigError;
+
 use crate::local::LocalError;
-
-/// A configuration load or validation failure.
-///
-/// Opaque wrapper: the underlying `toml`, `io`, and validation detail are kept
-/// as a private `source()`; classify with [`ConfigError::kind`].
-///
-/// # Examples
-/// ```
-/// use promptforge_gateway::{Config, ConfigErrorKind};
-///
-/// let err = Config::from_toml_str("this is not valid = = toml").unwrap_err();
-/// assert_eq!(err.kind(), ConfigErrorKind::Parse);
-/// ```
-#[non_exhaustive]
-pub struct ConfigError(ConfigErrorRepr);
-
-/// The classification of a [`ConfigError`], for stable caller decisions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ConfigErrorKind {
-    /// The configuration file could not be read.
-    Read,
-    /// The configuration was not valid TOML.
-    Parse,
-    /// A `${...}` interpolation was malformed.
-    Interpolation,
-    /// A `${VAR}` referenced an unset environment variable.
-    UnresolvedVar,
-    /// The configuration parsed but failed a semantic check.
-    Validation,
-    /// An `include` chain revisited a file already being resolved.
-    IncludeCycle,
-    /// An `include` chain exceeded the maximum nesting depth.
-    IncludeDepth,
-}
-
-impl ConfigError {
-    /// Classify this failure without matching a private representation.
-    #[must_use]
-    pub fn kind(&self) -> ConfigErrorKind {
-        match self.0 {
-            ConfigErrorRepr::Read { .. } => ConfigErrorKind::Read,
-            ConfigErrorRepr::Parse { .. } => ConfigErrorKind::Parse,
-            ConfigErrorRepr::Interpolation(_) => ConfigErrorKind::Interpolation,
-            ConfigErrorRepr::UnresolvedVar(_) => ConfigErrorKind::UnresolvedVar,
-            ConfigErrorRepr::Validation(_) => ConfigErrorKind::Validation,
-            ConfigErrorRepr::IncludeCycle { .. } => ConfigErrorKind::IncludeCycle,
-            ConfigErrorRepr::IncludeDepth { .. } => ConfigErrorKind::IncludeDepth,
-        }
-    }
-}
-
-impl std::fmt::Debug for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&self.0, f)
-    }
-}
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.0, f)
-    }
-}
-
-impl std::error::Error for ConfigError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.0.source()
-    }
-}
-
-impl From<ConfigErrorRepr> for ConfigError {
-    fn from(repr: ConfigErrorRepr) -> Self {
-        ConfigError(repr)
-    }
-}
 
 /// A startup failure while assembling or serving the gateway.
 ///
@@ -124,7 +50,7 @@ pub enum StartupErrorKind {
 #[derive(Debug, thiserror::Error)]
 enum StartupRepr {
     #[error("configuration error")]
-    Config(#[source] ConfigErrorRepr),
+    Config(#[source] ConfigError),
     #[error("local provisioning error")]
     Provisioning(#[source] LocalError),
     #[error("failed to bind the listener")]
@@ -145,7 +71,7 @@ impl StartupError {
         }
     }
 
-    pub(crate) fn config(err: ConfigErrorRepr) -> Self {
+    pub(crate) fn config(err: ConfigError) -> Self {
         StartupError(StartupRepr::Config(err))
     }
 
@@ -216,81 +142,10 @@ impl std::error::Error for ServeError {
 mod tests {
     use super::*;
     use std::error::Error as _;
-    use std::path::PathBuf;
-
-    fn de_error() -> toml::de::Error {
-        toml::from_str::<toml::Table>("= bad").unwrap_err()
-    }
-
-    #[test]
-    fn config_error_kind_is_table_driven() {
-        let cases: Vec<(ConfigErrorRepr, ConfigErrorKind)> = vec![
-            (
-                ConfigErrorRepr::Read {
-                    path: PathBuf::from("c.toml"),
-                    source: std::io::Error::other("x"),
-                },
-                ConfigErrorKind::Read,
-            ),
-            (
-                ConfigErrorRepr::Parse {
-                    path: None,
-                    source: Box::new(de_error()),
-                },
-                ConfigErrorKind::Parse,
-            ),
-            (
-                ConfigErrorRepr::UnresolvedVar("V".to_owned()),
-                ConfigErrorKind::UnresolvedVar,
-            ),
-            (
-                ConfigErrorRepr::Interpolation("bad".to_owned()),
-                ConfigErrorKind::Interpolation,
-            ),
-            (
-                ConfigErrorRepr::Validation("bad".to_owned()),
-                ConfigErrorKind::Validation,
-            ),
-            (
-                ConfigErrorRepr::IncludeCycle {
-                    path: PathBuf::from("a.toml"),
-                    chain: vec![PathBuf::from("a.toml")],
-                },
-                ConfigErrorKind::IncludeCycle,
-            ),
-            (
-                ConfigErrorRepr::IncludeDepth {
-                    path: PathBuf::from("a.toml"),
-                    max: 16,
-                },
-                ConfigErrorKind::IncludeDepth,
-            ),
-        ];
-        for (repr, kind) in cases {
-            assert_eq!(ConfigError::from(repr).kind(), kind);
-        }
-    }
-
-    #[test]
-    fn config_error_read_and_parse_preserve_source_and_path() {
-        let read = ConfigError::from(ConfigErrorRepr::Read {
-            path: PathBuf::from("c.toml"),
-            source: std::io::Error::other("x"),
-        });
-        assert!(read.source().is_some());
-        assert!(read.to_string().contains("c.toml"));
-
-        let parse = ConfigError::from(ConfigErrorRepr::Parse {
-            path: Some(PathBuf::from("inc.toml")),
-            source: Box::new(de_error()),
-        });
-        assert!(parse.source().is_some());
-        assert!(parse.to_string().contains("inc.toml"));
-    }
 
     #[test]
     fn startup_error_kind_is_table_driven_and_source_preserving() {
-        let cfg = StartupError::config(ConfigErrorRepr::Validation("bad".to_owned()));
+        let cfg = StartupError::config(ConfigError::validation("bad".to_owned()));
         assert_eq!(cfg.kind(), StartupErrorKind::Config);
         assert!(cfg.source().is_some());
 

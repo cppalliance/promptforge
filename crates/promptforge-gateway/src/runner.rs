@@ -11,10 +11,10 @@ use std::sync::Arc;
 
 use tokio::net::TcpListener;
 
+use promptforge_gateway_config::{Config, ProfileName};
+
 use crate::api_error::{ServeError, StartupError};
-use crate::config::Config;
 use crate::local::LocalRuntime;
-use crate::profile::ProfileName;
 use crate::routing::Routing;
 use crate::{AppState, build_router};
 
@@ -231,12 +231,12 @@ async fn shutdown_signal() {
 fn load_startup(options: &ServeOptions) -> Result<(Config, Option<ProfileName>), StartupError> {
     match &options.source {
         ConfigSource::Profile(name) => {
-            let config = crate::profile::load_named(&options.profiles_dir, name)
-                .map_err(StartupError::config)?;
+            let config =
+                Config::load_profile(&options.profiles_dir, name).map_err(StartupError::config)?;
             Ok((config, Some(name.clone())))
         }
         ConfigSource::Path(path) => {
-            let config = crate::profile::load_path(path).map_err(StartupError::config)?;
+            let config = Config::load(path).map_err(StartupError::config)?;
             let active = path
                 .file_stem()
                 .and_then(|stem| stem.to_str())

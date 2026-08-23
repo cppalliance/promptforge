@@ -11,7 +11,7 @@ use std::path::Path;
 ///
 /// # Examples
 /// ```
-/// use promptforge_gateway::ProfileName;
+/// use promptforge_gateway_config::ProfileName;
 ///
 /// assert!(ProfileName::parse("dev").is_ok());
 /// assert!(ProfileName::parse("../secrets").is_err());
