@@ -139,9 +139,8 @@ pub(crate) enum LocalError {
 
     /// No operator home directory could be resolved for artifact provisioning.
     ///
-    /// Unlike the infallible public profiles-directory default, artifact cache
-    /// resolution refuses to silently fall back to the working directory when
-    /// `{var}` is unset (ART-009).
+    /// Artifact cache resolution refuses to silently fall back to the working
+    /// directory when `{var}` is unset (ART-009).
     #[error("cannot resolve artifact cache: environment variable {var} is not set")]
     MissingHome {
         /// The home environment variable that was expected (`HOME`/`USERPROFILE`).
