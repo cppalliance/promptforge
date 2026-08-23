@@ -81,13 +81,13 @@ endpoints = ["anthropic"]
     );
 
     let config = load_path(&tmp.path().join("child.toml")).unwrap();
-    assert_eq!(config.endpoints.len(), 1);
-    assert_eq!(config.endpoints[0].base_url, "http://child");
-    assert_eq!(config.endpoints[0].concurrency, Some(9));
-    assert_eq!(config.models.len(), 2);
-    assert_eq!(config.models[0].description, "from child");
-    assert_eq!(config.models[0].context, 2000);
-    assert_eq!(config.models[1].name, "m2");
+    assert_eq!(config.endpoints().len(), 1);
+    assert_eq!(config.endpoints()[0].base_url(), "http://child");
+    assert_eq!(config.endpoints()[0].concurrency(), Some(9));
+    assert_eq!(config.models().len(), 2);
+    assert_eq!(config.models()[0].description(), "from child");
+    assert_eq!(config.models()[0].context(), 2000);
+    assert_eq!(config.models()[1].name(), "m2");
 }
 
 #[test]
@@ -125,7 +125,7 @@ include = ["nested/base.toml"]
 "#,
     );
     let config = load_path(&tmp.path().join("root.toml")).unwrap();
-    assert_eq!(config.models[0].name, "m");
+    assert_eq!(config.models()[0].name(), "m");
 }
 
 #[test]
@@ -188,9 +188,9 @@ max_depth = 50
 "#,
     );
     let config = load_path(&tmp.path().join("child.toml")).unwrap();
-    assert_eq!(config.server.api_key.expose(), "child-token");
-    assert_eq!(config.queue.max_depth, 50);
-    assert_eq!(config.server.bind.to_string(), "127.0.0.1:8081");
+    assert_eq!(config.server().api_key().expose(), "child-token");
+    assert_eq!(config.queue().max_depth(), 50);
+    assert_eq!(config.server().bind().to_string(), "127.0.0.1:8081");
 }
 
 #[test]
@@ -239,7 +239,7 @@ endpoints = ["e"]
 "#,
     );
     let config = load_named(tmp.path(), &ProfileName::parse("alpha").unwrap()).unwrap();
-    assert_eq!(config.models[0].name, "m");
+    assert_eq!(config.models()[0].name(), "m");
 }
 
 #[test]
@@ -272,7 +272,7 @@ endpoints = ["e"]
 "#,
     );
     let config = load_named(tmp.path(), &name).unwrap();
-    assert_eq!(config.models[0].name, "m");
+    assert_eq!(config.models()[0].name(), "m");
 }
 
 #[test]
@@ -309,9 +309,9 @@ context = 2048
 "#,
     );
     let config = load_path(&tmp.path().join("child.toml")).unwrap();
-    assert_eq!(config.local_models.len(), 1);
-    assert_eq!(config.local_models[0].description, "child");
-    assert_eq!(config.local_models[0].context, 2048);
+    assert_eq!(config.local_models().len(), 1);
+    assert_eq!(config.local_models()[0].description(), "child");
+    assert_eq!(config.local_models()[0].context(), 2048);
 }
 
 #[test]
@@ -362,10 +362,14 @@ concurrency = 1
 "#,
     );
     let config = load_path(&tmp.path().join("child.toml")).unwrap();
-    assert_eq!(config.devices.len(), 2);
-    let local = config.devices.iter().find(|d| d.id == "local-gpu").unwrap();
-    assert_eq!(local.lanes.len(), 1);
-    assert_eq!(local.lanes[0].id, "generative");
+    assert_eq!(config.devices().len(), 2);
+    let local = config
+        .devices()
+        .iter()
+        .find(|d| d.id() == "local-gpu")
+        .unwrap();
+    assert_eq!(local.lanes().len(), 1);
+    assert_eq!(local.lanes()[0].id(), "generative");
 }
 
 #[test]
@@ -407,13 +411,13 @@ lane = "generative"
 "#,
     );
     let config = load_path(&tmp.path().join("gemma.toml")).unwrap();
-    assert_eq!(config.devices.len(), 1);
-    assert_eq!(config.devices[0].lanes.len(), 1);
-    assert_eq!(config.devices[0].lanes[0].id, "generative");
-    assert_eq!(config.devices[0].lanes[0].concurrency, 3);
+    assert_eq!(config.devices().len(), 1);
+    assert_eq!(config.devices()[0].lanes().len(), 1);
+    assert_eq!(config.devices()[0].lanes()[0].id(), "generative");
+    assert_eq!(config.devices()[0].lanes()[0].concurrency(), 3);
     assert_eq!(
         config
-            .local_model_concurrency(&config.local_models[0])
+            .local_model_concurrency(&config.local_models()[0])
             .unwrap(),
         3
     );
@@ -566,7 +570,7 @@ fn load_succeeds_with_no_env_file() {
     let tmp = TempDir::new().unwrap();
     write(tmp.path(), "bare.toml", MINIMAL_CONFIG);
     let config = load_path(&tmp.path().join("bare.toml")).unwrap();
-    assert_eq!(config.models[0].name, "m");
+    assert_eq!(config.models()[0].name(), "m");
 }
 
 #[test]

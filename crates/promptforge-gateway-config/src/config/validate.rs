@@ -28,7 +28,7 @@ impl Config {
                 "server.key must not be empty".to_string(),
             ));
         }
-        if self.queue.max_depth < 1 {
+        if self.queue.max_depth() < 1 {
             return Err(ConfigError::Validation(
                 "queue.max_depth must be at least 1".to_string(),
             ));

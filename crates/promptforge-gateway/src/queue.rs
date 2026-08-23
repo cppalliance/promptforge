@@ -154,8 +154,8 @@ impl EndpointLane {
         EndpointLane {
             inner: LaneInner::Limited(Arc::new(LimitedLane {
                 max_inflight: max_inflight.get(),
-                max_depth: queue.max_depth.max(1),
-                fair: queue.fair_scheduling,
+                max_depth: queue.max_depth().max(1),
+                fair: queue.fair_scheduling(),
                 state: Mutex::new(WaitState {
                     inflight: 0,
                     waiter_count: 0,

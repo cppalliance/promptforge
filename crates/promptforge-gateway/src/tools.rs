@@ -42,12 +42,12 @@ impl WebSearchSettings {
     #[must_use]
     pub(crate) fn from_config(cfg: &WebSearchConfig) -> WebSearchSettings {
         WebSearchSettings {
-            default_count: cfg.default_count,
-            max_count: cfg.max_count,
-            max_per_host: cfg.max_per_host,
-            default_freshness: cfg.default_freshness.clone(),
-            default_safesearch: cfg.default_safesearch.clone(),
-            strip_tracking: cfg.strip_tracking,
+            default_count: cfg.default_count(),
+            max_count: cfg.max_count(),
+            max_per_host: cfg.max_per_host(),
+            default_freshness: cfg.default_freshness().to_owned(),
+            default_safesearch: cfg.default_safesearch().to_owned(),
+            strip_tracking: cfg.strip_tracking(),
         }
     }
 }
@@ -72,12 +72,12 @@ impl WebSearchState {
     pub(crate) fn new(cfg: &WebSearchConfig) -> WebSearchState {
         // v0 supports only the Brave provider; the query path below is
         // Brave-shaped. Reading the provider keeps the selection explicit.
-        let promptforge_gateway_config::SearchProvider::Brave = cfg.provider else {
+        let promptforge_gateway_config::SearchProvider::Brave = cfg.provider() else {
             unreachable!("SearchProvider is non_exhaustive; wire up new providers here")
         };
         WebSearchState {
-            api_key: cfg.api_key.clone(),
-            base_url: cfg.base_url.trim_end_matches('/').to_string(),
+            api_key: cfg.api_key().clone(),
+            base_url: cfg.base_url().trim_end_matches('/').to_string(),
             settings: WebSearchSettings::from_config(cfg),
             http: crate::http_util::bounded_client(),
         }

@@ -14,6 +14,17 @@
 //! [`Config::load_profile`] loads a named profile from a profiles directory,
 //! and [`Config::from_toml_str`] parses a TOML string. Failures are reported
 //! as the opaque [`ConfigError`]; classify them with [`ConfigError::kind`].
+//!
+//! # Examples
+//!
+//! ```no_run
+//! use promptforge_gateway_config::Config;
+//! use std::path::Path;
+//!
+//! let config = Config::load(Path::new("gateway.toml"))?;
+//! println!("{} models configured", config.models().len());
+//! # Ok::<(), promptforge_gateway_config::ConfigError>(())
+//! ```
 
 mod api_error;
 mod config;

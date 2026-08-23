@@ -96,46 +96,47 @@ impl Routing {
     /// is a defensive second check).
     pub(crate) fn from_config(config: &Config) -> Result<Routing, ConfigError> {
         let mut endpoints: HashMap<&str, Arc<Endpoint>> = HashMap::new();
-        for endpoint in &config.endpoints {
-            let upstream: Arc<dyn Upstream> = match endpoint.protocol {
+        for endpoint in config.endpoints() {
+            let upstream: Arc<dyn Upstream> = match endpoint.protocol() {
                 Protocol::Openai => Arc::new(OpenAiUpstream::new(
-                    &endpoint.base_url,
-                    endpoint.api_key.clone(),
+                    endpoint.base_url(),
+                    endpoint.api_key().clone(),
                 )),
+                _ => unreachable!("Protocol is non_exhaustive; wire up new protocols here"),
             };
             let lane = match config.endpoint_concurrency(endpoint) {
-                Some(n) => EndpointLane::new(n, &config.queue),
+                Some(n) => EndpointLane::new(n, config.queue()),
                 None => EndpointLane::unlimited(),
             };
             endpoints.insert(
-                endpoint.id.as_str(),
+                endpoint.id(),
                 Arc::new(Endpoint {
-                    id: endpoint.id.clone(),
+                    id: endpoint.id().to_owned(),
                     upstream,
                     lane,
                 }),
             );
         }
 
-        let mut models = Vec::with_capacity(config.models.len());
-        for model in &config.models {
-            let endpoint_id = model.endpoints.first().ok_or_else(|| {
-                ConfigError::validation(format!("model {} has no endpoints", model.name))
+        let mut models = Vec::with_capacity(config.models().len());
+        for model in config.models() {
+            let endpoint_id = model.endpoints().first().ok_or_else(|| {
+                ConfigError::validation(format!("model {} has no endpoints", model.name()))
             })?;
             let endpoint = endpoints.get(endpoint_id.as_str()).ok_or_else(|| {
                 ConfigError::validation(format!(
                     "model {} names undefined endpoint {endpoint_id}",
-                    model.name
+                    model.name()
                 ))
             })?;
             models.push(Arc::new(Model {
-                name: model.name.clone(),
-                description: model.description.clone(),
-                context: model.context,
-                thinking: model.thinking,
+                name: model.name().to_owned(),
+                description: model.description().to_owned(),
+                context: model.context(),
+                thinking: model.thinking(),
                 tool_dialect: "openai".to_owned(),
                 tools_mode: "native".to_owned(),
-                upstream_name: model.upstream.clone(),
+                upstream_name: model.upstream().to_owned(),
                 endpoint: Arc::clone(endpoint),
             }));
         }
