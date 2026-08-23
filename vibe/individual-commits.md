@@ -60,3 +60,7 @@
 
 pre-existing clippy 1.98 breakage blocked step 1; vibe rule 7 gives old bugs their own commit to keep refactor commits clean. (assistant reasoned, rulebook policy)
 
+## 2026-08-23 Return a ready future from list_tools
+
+surfaced by the full-workspace clippy Verify after per-crate passes; pre-existing on master, committed separately per rule 7. (assistant reasoned)
+
