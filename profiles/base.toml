@@ -1,5 +1,5 @@
 # Shared remote Anthropic endpoint. Secrets expand from the environment.
-# Install under ~/.promptforge/profiles/ or pass --profiles-dir pointing here.
+# Install as the `profiles/` directory beside your boot gateway.toml.
 
 [server]
 bind = "127.0.0.1:8081"

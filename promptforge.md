@@ -8,7 +8,7 @@ When the user says `promptforge <name> [input]`:
 
 1. **Gateway.** Check terminals for a running `promptforge-gateway`. If absent, start one in a background terminal from the repo root:
    ```
-   cargo run -p promptforge-gateway -- serve local/gateway.toml
+   cargo run -p promptforge-gateway -- serve local/gateway.toml --profile main
    ```
    Wait for the line containing "serving" before proceeding.
 2. **MCP server.** Call `GetMcpTools(server: "user-promptforge")`. If status is not `ready`, check terminals for a running `promptforge-mcp-server`. If absent, start one in a background terminal from the repo root:
@@ -24,14 +24,14 @@ Steps 1-3 are one-time. Subsequent `promptforge <name> [input]` calls go straigh
 **NEVER read, open, cat, or load any `.env` file into context.** These files contain secrets. The servers load them at startup - the agent must not.
 
 Secrets live in name-matched `.env` files next to their `.toml` configs in `local/`:
-- Gateway: `local/gateway.env` (`ANTHROPIC_API_KEY`, `BRAVE_API_KEY`, `PROMPTFORGE_GATEWAY_API_KEY`). The gateway loads env files hierarchically through its `include` chain - root values take precedence.
+- Gateway: `local/gateway.env` (`ANTHROPIC_API_KEY`, `BRAVE_API_KEY`, `PROMPTFORGE_GATEWAY_API_KEY`). The gateway loads at most two env files: the profile's (`local/profiles/main.env`) then the boot file's (`local/gateway.env`); the process environment wins over both, and included files' env files are never loaded.
 - MCP server: `local/mcp-service.env` (`PROMPTFORGE_MCP_SERVER_API_KEY`, `PROMPTFORGE_GATEWAY_API_KEY`). Flat - one toml, one env file, no chain.
 
 ## Components
 
 | Component | Command | Env file | Default bind |
 |---|---|---|---|
-| Gateway | `cargo run -p promptforge-gateway -- serve local/gateway.toml` | `local/gateway.env` (hierarchical, follows include chain) | `127.0.0.1:8081` |
+| Gateway | `cargo run -p promptforge-gateway -- serve local/gateway.toml --profile main` | `local/profiles/main.env`, then `local/gateway.env` (process env wins) | `127.0.0.1:8081` |
 | MCP Server | `cargo run -p promptforge-mcp-server -- serve local/mcp-service.toml` | `local/mcp-service.env` (flat, one file) | `127.0.0.1:9310` |
 
 Start the gateway first. The MCP server calls through it.
@@ -70,7 +70,7 @@ endpoints = ["anthropic"]
 
 - `[[local_model]]` for GGUF: `source`, `sha256`, `context`, `gpu_layers`, `flash_attention`.
 - `[tools.web_search]`: `provider = "brave"`, `api_key = "${BRAVE_API_KEY}"`.
-- `${VAR}` references resolve from a name-matched env file (`local/gateway.env` for `local/gateway.toml`), then from the process environment. The gateway supports `include` for config inheritance - when configs use it, the full include chain is walked and all found env files are loaded, root values taking precedence.
+- `${VAR}` references resolve from the process environment first, then the profile's env file (`local/profiles/main.env`), then the boot file's env file (`local/gateway.env`); earlier sources win, and included files' env files are never loaded. The gateway supports `include` for config inheritance.
 - Full schema: `design/design-gateway.md`
 
 ## YAML Frontmatter

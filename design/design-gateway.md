@@ -45,12 +45,10 @@ What is not here is as load-bearing as what is: no streaming, no retries, no tok
 A profile is a TOML file describing the active model catalog, endpoints, optional devices/lanes, and local models. The gateway runs one profile at a time.
 
 ```
-promptforge-gateway serve --profile analytical
-promptforge-gateway serve --profiles-dir ./profiles --profile base
-promptforge-gateway serve gateway.toml   # path still works; includes resolve relative to the file
+promptforge-gateway serve gateway.toml --profile analytical
 ```
 
-Default profiles directory: `~/.promptforge/profiles/` (Windows: `%USERPROFILE%\.promptforge\profiles\`). Example profiles live in the repo under `profiles/` (`base.toml`, `analytical.toml`).
+Boot requires a config path and a profile name: the path comes from the positional argument or `PROMPTFORGE_GATEWAY_CONFIG` (the CLI wins), and `--profile NAME` is required - there is no anonymous boot. The profiles directory is always `profiles/` beside the boot file; there is no default and no override flag. Example profiles live in the repo under `profiles/` (`base.toml`, `analytical.toml`).
 
 Inheritance:
 
@@ -479,10 +477,10 @@ Two departures from the rule the unbuilt design states, that `code` is the varia
 
 ## The runtime is built by hand so the service and foreground paths cannot drift
 
-`promptforge-gateway serve <gateway.toml>`. The path is explicit and positional and has no default; anything else prints the usage line and exits with failure.
+`promptforge-gateway serve <gateway.toml> --profile NAME`. The path is explicit and positional, falling back to `PROMPTFORGE_GATEWAY_CONFIG`; a missing path or a missing `--profile` prints the usage line and exits with failure.
 
 No `#[tokio::main]` anywhere in the crate. A Windows service entry point is called by the SCM on a thread the SCM owns, after `main` has already handed control to `service_dispatcher`, so the runtime has to be constructed inside the service handler. An attribute macro on `main` builds it in the wrong place and at the wrong time. The foreground path builds a runtime the same way, so when the service path is added there is exactly one construction site and the two cannot drift.
 
-Startup order is load profile (with includes), start `LocalRuntime` (provision + spawn children when `[[local_model]]` is set), build the routing table (remote then local), build handler state (including profiles dir for admin routes), bind, serve. A configuration that will not load or validate is a startup failure with the error on stderr, so a broken file never reaches a listening socket. Process exit or profile switch drops the previous `LocalRuntime` and kills its children.
+Startup order is load the two env files (the profile's, then the boot file's; dotenvy never overrides), load the profile (with includes), check the profile's merged `[server]` against the boot file's, start `LocalRuntime` (provision + spawn children when `[[local_model]]` is set), build the routing table (remote then local), build handler state (including profiles dir for admin routes), bind, serve. A configuration that will not load or validate is a startup failure with the error on stderr, so a broken file never reaches a listening socket. Process exit or profile switch drops the previous `LocalRuntime` and kills its children.
 
 *2026-08-08 - cursor-grok-4.5*
