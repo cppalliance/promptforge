@@ -56,3 +56,7 @@
 
 ## 2026-08-21 Upgrade h2 to 0.4.18 and indicatif to 0.18
 
+## 2026-08-23 Use as_chunks in the tool-picker build script
+
+pre-existing clippy 1.98 breakage blocked step 1; vibe rule 7 gives old bugs their own commit to keep refactor commits clean. (assistant reasoned, rulebook policy)
+

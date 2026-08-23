@@ -266,8 +266,8 @@ fn convert(name: &str, view: &TensorView<'_>) -> Result<OwnedTensor> {
         );
     }
     let mut data = Vec::with_capacity(source.len() / 2);
-    for chunk in source.chunks_exact(4) {
-        let bits = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+    for chunk in source.as_chunks::<4>().0 {
+        let bits = u32::from_le_bytes(*chunk);
         data.extend_from_slice(&f16::from_f32(f32::from_bits(bits)).to_le_bytes());
     }
     Ok(OwnedTensor {
