@@ -18,6 +18,7 @@ use std::path::Path;
 /// assert!(ProfileName::parse("a/b").is_err());
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ProfileName(String);
 
 impl ProfileName {

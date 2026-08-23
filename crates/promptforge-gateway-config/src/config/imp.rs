@@ -27,11 +27,8 @@ impl Config {
     /// use promptforge_gateway_config::Config;
     /// use std::path::Path;
     ///
-    /// # fn demo() -> Result<(), promptforge_gateway_config::ConfigError> {
     /// let config = Config::load(Path::new("gateway.toml"))?;
-    /// let _ = config;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
     /// ```
     pub fn load(path: &Path) -> Result<Config, crate::api_error::ConfigError> {
         crate::profile::load_path(path).map_err(crate::api_error::ConfigError::from)
@@ -49,12 +46,9 @@ impl Config {
     /// use promptforge_gateway_config::{Config, ProfileName};
     /// use std::path::Path;
     ///
-    /// # fn demo() -> Result<(), Box<dyn std::error::Error>> {
     /// let name = ProfileName::parse("dev")?;
     /// let config = Config::load_profile(Path::new("/etc/promptforge/profiles"), &name)?;
-    /// let _ = config;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn load_profile(
         dir: &Path,
@@ -190,8 +184,9 @@ impl Config {
     /// upstream = "u"
     /// endpoints = ["e"]
     /// "#;
-    /// let config = Config::from_toml_str(toml).unwrap();
-    /// let _ = config;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.models()[0].name(), "m");
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
     /// ```
     pub fn from_toml_str(raw: &str) -> Result<Config, crate::api_error::ConfigError> {
         Self::parse_toml(raw).map_err(crate::api_error::ConfigError::from)
