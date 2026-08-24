@@ -1,0 +1,20 @@
+{
+  "name": "promptforge-wb-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PromptForge Workbench UI: TypeScript sources bundled by esbuild into dist/ and served by promptforge-wb-server.",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dockview": "^8.2.0",
+    "marked": "^18.0.10"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

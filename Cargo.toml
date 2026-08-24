@@ -54,6 +54,9 @@ rmcp = { version = "3.1.0", features = [
 ] }
 tower = { version = "0.5", features = ["util"] }
 arc-swap = "1"
+# Serves the workbench UI: reads ui/dist from disk in debug builds, embeds it
+# into the binary in release builds.
+rust-embed = "8"
 glob = "0.3"
 humantime = "2"
 humantime-serde = "1"

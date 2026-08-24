@@ -106,45 +106,54 @@ async fn health() -> impl IntoResponse {
     )
 }
 
-/// Serves the chat UI's `index.html`, embedded into the binary.
-async fn ui_index() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        include_str!("../ui/index.html"),
-    )
+/// The workbench UI assets under `ui/dist/`, written by the crate's build
+/// script (the esbuild bundle plus copies of the static files). Debug builds
+/// read the files from disk at request time, so UI edits need no Rust
+/// recompile; release builds embed them into the binary.
+#[derive(rust_embed::Embed)]
+#[folder = "ui/dist/"]
+struct UiAssets;
+
+/// Serves one UI asset from [`UiAssets`] with the given content type.
+fn ui_asset(path: &str, content_type: &'static str) -> Response {
+    match UiAssets::get(path) {
+        Some(asset) => (
+            [(header::CONTENT_TYPE, content_type)],
+            asset.data.into_owned(),
+        )
+            .into_response(),
+        None => (
+            axum::http::StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            format!("ui asset not found: {path}"),
+        )
+            .into_response(),
+    }
 }
 
-/// Serves the chat UI's application script, embedded into the binary.
-async fn ui_app_js() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        include_str!("../ui/app.js"),
-    )
+/// Serves the chat UI's `index.html`.
+async fn ui_index() -> Response {
+    ui_asset("index.html", "text/html; charset=utf-8")
 }
 
-/// Serves the chat UI's stylesheet, embedded into the binary.
-async fn ui_style_css() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        include_str!("../ui/style.css"),
-    )
+/// Serves the chat UI's bundled application script.
+async fn ui_app_js() -> Response {
+    ui_asset("app.js", "text/javascript; charset=utf-8")
 }
 
-/// Serves the vendored markdown-it 14.1.0 renderer, embedded into the
-/// binary.
-async fn ui_markdown_it() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        include_str!("../ui/markdown-it.min.js"),
-    )
+/// Serves the chat UI's stylesheet.
+async fn ui_style_css() -> Response {
+    ui_asset("style.css", "text/css; charset=utf-8")
 }
 
-/// Serves the AudioWorklet PCM capture processor, embedded into the binary.
-async fn ui_pcm_worklet() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        include_str!("../ui/pcm-worklet.js"),
-    )
+/// Serves the vendored markdown-it 14.1.0 renderer.
+async fn ui_markdown_it() -> Response {
+    ui_asset("markdown-it.min.js", "text/javascript; charset=utf-8")
+}
+
+/// Serves the AudioWorklet PCM capture processor.
+async fn ui_pcm_worklet() -> Response {
+    ui_asset("pcm-worklet.js", "text/javascript; charset=utf-8")
 }
 
 /// Relays the gateway's model catalog to the caller verbatim.
