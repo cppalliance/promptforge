@@ -12,6 +12,7 @@ use promptforge_wb_server::{AppState, Config, DEFAULT_CONFIG_PATH};
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    tracing_subscriber::fmt::init();
     match serve().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -24,7 +25,7 @@ async fn main() -> ExitCode {
 async fn serve() -> anyhow::Result<()> {
     let config = Config::load(Path::new(DEFAULT_CONFIG_PATH))
         .with_context(|| format!("load {DEFAULT_CONFIG_PATH}"))?;
-    let state = AppState::new(&config).context("build gateway client")?;
+    let state = AppState::new(&config).context("build shared state")?;
     promptforge_wb_server::run(state, &config.server.bind)
         .await
         .context("serve workbench")
