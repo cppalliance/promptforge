@@ -2,8 +2,8 @@
 //!
 //! Search order, first found wins: beside the executable, then the current
 //! directory, then `%USERPROFILE%\.promptforge\` (the user profile's
-//! `.promptforge` directory). A missing config is an error naming every
-//! path tried.
+//! `.promptforge` directory). When no file is found, returns `None` so the
+//! caller can fall through to the environment-variable-only config path.
 
 use std::path::{Path, PathBuf};
 
@@ -15,11 +15,13 @@ const CONFIG_FILE_NAME: &str = "workbench.toml";
 /// Locates `workbench.toml`, searching beside the executable first, then
 /// the current directory, then the user profile's `.promptforge` directory.
 ///
+/// Returns `None` when no location holds a config file, allowing the caller
+/// to fall through to the env-only configuration path.
+///
 /// # Errors
-/// Returns an error naming every path tried when no location holds a
-/// config, or when the executable or current directory cannot be
+/// Returns an error when the executable or current directory cannot be
 /// determined.
-pub(crate) fn discover_config() -> anyhow::Result<PathBuf> {
+pub(crate) fn discover_config() -> anyhow::Result<Option<PathBuf>> {
     let exe_dir = std::env::current_exe()
         .context("locate the executable")
         .and_then(|exe| {
@@ -30,7 +32,7 @@ pub(crate) fn discover_config() -> anyhow::Result<PathBuf> {
     let cwd = std::env::current_dir().context("locate the current directory")?;
     let home = std::env::home_dir().context("locate the user profile directory")?;
     let candidates = candidates_from(&exe_dir, &cwd, &home);
-    first_existing(&candidates).ok_or_else(|| missing_config_error(&candidates))
+    Ok(first_existing(&candidates))
 }
 
 /// Builds the candidate list in search order from the three base
@@ -46,17 +48,6 @@ fn candidates_from(exe_dir: &Path, cwd: &Path, home: &Path) -> Vec<PathBuf> {
 /// Returns the first candidate path that exists, if any.
 fn first_existing(candidates: &[PathBuf]) -> Option<PathBuf> {
     candidates.iter().find(|path| path.is_file()).cloned()
-}
-
-/// Builds the error for a search that found nothing, naming every path
-/// tried in search order.
-fn missing_config_error(candidates: &[PathBuf]) -> anyhow::Error {
-    use std::fmt::Write as _;
-    let mut message = format!("no {CONFIG_FILE_NAME} found; searched:");
-    for path in candidates {
-        let _ = write!(message, "\n  {}", path.display());
-    }
-    anyhow::anyhow!(message)
 }
 
 #[cfg(test)]
@@ -109,20 +100,11 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_config_names_every_path_tried() {
+    fn no_config_returns_none() {
         let exe_dir = tempfile::TempDir::new().expect("tempdir");
         let cwd_dir = tempfile::TempDir::new().expect("tempdir");
         let home_dir = tempfile::TempDir::new().expect("tempdir");
         let candidates = candidates_from(exe_dir.path(), cwd_dir.path(), home_dir.path());
         assert_eq!(first_existing(&candidates), None);
-
-        let message = missing_config_error(&candidates).to_string();
-        for path in &candidates {
-            assert!(
-                message.contains(&path.display().to_string()),
-                "the error names {}: {message}",
-                path.display()
-            );
-        }
     }
 }

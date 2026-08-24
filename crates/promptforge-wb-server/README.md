@@ -14,6 +14,15 @@ base_url = "http://127.0.0.1:8081"
 api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 ```
 
+Or skip the TOML entirely and set environment variables:
+
+```bash
+export PROMPTFORGE_GATEWAY_API_KEY="your-key"
+cargo run -p promptforge-wb-server
+```
+
+When no `workbench.toml` is found the server builds its config from environment variables (see table below). The only required variable is `PROMPTFORGE_GATEWAY_API_KEY`; all others have sensible defaults.
+
 Then run:
 
 ```bash
@@ -39,6 +48,22 @@ Every field of `workbench.toml`:
 | `voice.final_model` | (empty) | Path to the whisper model for the pipelined final pass; empty falls back to the interim model |
 | `voice.window_seconds` | `5` | Seconds of trailing audio each interim pass transcribes |
 | `voice.interval_ms` | `800` | Milliseconds between interim passes while a take is recording |
+
+### Environment-variable-only mode
+
+When no `workbench.toml` is found, config is built entirely from environment variables:
+
+| Variable | Maps to | Default |
+| --- | --- | --- |
+| `PROMPTFORGE_GATEWAY_BASE_URL` | `gateway.base_url` | `http://127.0.0.1:8081` |
+| `PROMPTFORGE_GATEWAY_API_KEY` | `gateway.api_key` | **(required)** |
+| `PROMPTFORGE_TAPE_PATH` | `tape.path` | `tape.jsonl` |
+| `PROMPTFORGE_SERVER_BIND` | `server.bind` | `127.0.0.1:7910` |
+| `PROMPTFORGE_SERVER_OPEN_BROWSER` | `server.open_browser` | `false` (accepts `true` or `1`) |
+| `PROMPTFORGE_VOICE_INTERIM_MODEL` | `voice.interim_model` | empty (disabled) |
+| `PROMPTFORGE_VOICE_FINAL_MODEL` | `voice.final_model` | empty |
+| `PROMPTFORGE_VOICE_WINDOW_SECONDS` | `voice.window_seconds` | `5` |
+| `PROMPTFORGE_VOICE_INTERVAL_MS` | `voice.interval_ms` | `800` |
 
 ## Routes
 
