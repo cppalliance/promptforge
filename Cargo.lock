@@ -2987,6 +2987,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge-wb"
+version = "0.1.0"
+
+[[package]]
+name = "promptforge-wb-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "promptforge-webfetch"
 version = "0.1.0"
 dependencies = [
