@@ -155,7 +155,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/v1/rerank", post(rerank))
         .route("/v1/models", get(list_models))
         .route("/v1/tools/web_search", post(tools::web_search))
-        .route("/v1/cache", get(cache::list_cache))
+        .route("/v1/cache", get(cache::list_cache).post(cache::post_cache))
         .route("/health", get(health))
         .route("/admin/profiles", get(admin_list_profiles))
         .route("/admin/status", get(admin_status))
