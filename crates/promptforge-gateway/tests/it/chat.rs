@@ -1,5 +1,7 @@
 //! Chat-completions, models-catalog, and health routes through the real client.
 
+use axum::routing::post;
+use axum::{Json, Router};
 use promptforge_core::client::{GatewayClient, GatewayEndpoint, SecretString};
 use promptforge_core::model::CompletionOptions;
 use promptforge_gateway::{Config, Gateway, ProfilesContext};
@@ -7,7 +9,7 @@ use serde_json::Value;
 
 use crate::support::{
     PHASE_TIMEOUT, TestServer, canned_reply, chat_body, fake_backend, gateway_for, json_within,
-    recording_backend, send_within,
+    recording_backend, send_within, spawn_backend,
 };
 
 #[tokio::test]
@@ -87,6 +89,38 @@ async fn forwards_method_path_model_and_messages_to_backend() {
         request.authorization.as_deref(),
         Some("Bearer test-token"),
         "caller bearer must not leak to the upstream"
+    );
+    gateway.shutdown().await;
+}
+
+/// A 200 upstream response that fails shape validation is a protocol error
+/// (UP-004): the gateway must not fabricate an upstream status that never
+/// happened.
+#[tokio::test]
+async fn invalid_shape_200_is_upstream_protocol_not_upstream_error() {
+    async fn completions() -> Json<Value> {
+        Json(serde_json::json!({
+            "id": "cmpl-test",
+            "object": "chat.completion",
+            "model": "backend-model",
+            "choices": [{ "index": 0 }]
+        }))
+    }
+    let backend = spawn_backend(Router::new().route("/chat/completions", post(completions))).await;
+    let gateway = gateway_for(backend).await;
+
+    let response = send_within(
+        reqwest::Client::new()
+            .post(format!("http://{}/v1/chat/completions", gateway.addr))
+            .bearer_auth("test-token")
+            .json(&chat_body()),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 502);
+    let body = json_within(response).await;
+    assert_eq!(
+        body.pointer("/error/code").and_then(Value::as_str),
+        Some("upstream_protocol")
     );
     gateway.shutdown().await;
 }
