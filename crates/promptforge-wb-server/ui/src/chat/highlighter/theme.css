@@ -1,0 +1,171 @@
+/* Highlighter theme: one file, light + dark, scoped to Murm UI. */
+
+.mur-app {
+	--hl-cmt: #6a737d;
+	--hl-cmt-style: italic;
+	--hl-kw: #cf222e;
+	--hl-str: #0a3069;
+	--hl-num: #0550ae;
+	--hl-fn: #8250df;
+	--hl-tag: #1a7f37;
+	--hl-prop: #0550ae;
+	--hl-op: #24292f;
+	--hl-var: #953800;
+	--hl-regex: #0a3069;
+	--hl-url: #0a3069;
+	--hl-ent: #8250df;
+	--hl-ins: #1a7f37;
+	--hl-ins-bg: #dafbe1;
+	--hl-del: #cf222e;
+	--hl-del-bg: #ffebe9;
+	--hl-md-h: #24292f;
+	--hl-md-h-w: 600;
+	--hl-md-i: #6a737d;
+}
+
+.mur-app[data-theme="dark"],
+.dark .mur-app:not([data-theme="light"]) {
+	--hl-cmt: #8b949e;
+	--hl-kw: #ff7b72;
+	--hl-str: #a5d6ff;
+	--hl-num: #79c0ff;
+	--hl-fn: #d2a8ff;
+	--hl-tag: #7ee787;
+	--hl-prop: #79c0ff;
+	--hl-op: #c9d1d9;
+	--hl-var: #ffa657;
+	--hl-regex: #a5d6ff;
+	--hl-url: #a5d6ff;
+	--hl-ent: #d2a8ff;
+	--hl-ins: #56d364;
+	--hl-ins-bg: rgba(63, 185, 80, 0.15);
+	--hl-del: #ff7b72;
+	--hl-del-bg: rgba(248, 81, 73, 0.1);
+	--hl-md-h: #c9d1d9;
+	--hl-md-i: #8b949e;
+}
+
+@media (prefers-color-scheme: dark) {
+	.mur-app:not([data-theme]) {
+		--hl-cmt: #8b949e;
+		--hl-kw: #ff7b72;
+		--hl-str: #a5d6ff;
+		--hl-num: #79c0ff;
+		--hl-fn: #d2a8ff;
+		--hl-tag: #7ee787;
+		--hl-prop: #79c0ff;
+		--hl-op: #c9d1d9;
+		--hl-var: #ffa657;
+		--hl-regex: #a5d6ff;
+		--hl-url: #a5d6ff;
+		--hl-ent: #d2a8ff;
+		--hl-ins: #56d364;
+		--hl-ins-bg: rgba(63, 185, 80, 0.15);
+		--hl-del: #ff7b72;
+		--hl-del-bg: rgba(248, 81, 73, 0.1);
+		--hl-md-h: #c9d1d9;
+		--hl-md-i: #8b949e;
+	}
+}
+
+.mur-app .token {
+	color: var(--hl-op);
+}
+
+.mur-app .token.comment,
+.mur-app .token.prolog,
+.mur-app .token.doctype {
+	color: var(--hl-cmt);
+	font-style: var(--hl-cmt-style);
+}
+
+.mur-app .token.keyword,
+.mur-app .token.builtin,
+.mur-app .token.atrule,
+.mur-app .token.important {
+	color: var(--hl-kw);
+}
+
+.mur-app .token.important {
+	font-weight: 700;
+}
+
+.mur-app .token.string,
+.mur-app .token.attr-value {
+	color: var(--hl-str);
+}
+
+.mur-app .token.number,
+.mur-app .token.boolean,
+.mur-app .token.constant {
+	color: var(--hl-num);
+}
+
+.mur-app .token.function,
+.mur-app .token.class-name,
+.mur-app .token.decorator,
+.mur-app .token.annotation {
+	color: var(--hl-fn);
+}
+
+.mur-app .token.tag,
+.mur-app .token.selector {
+	color: var(--hl-tag);
+}
+
+.mur-app .token.property,
+.mur-app .token.attr-name {
+	color: var(--hl-prop);
+}
+
+.mur-app .token.operator,
+.mur-app .token.punctuation {
+	color: var(--hl-op);
+}
+
+.mur-app .token.variable,
+.mur-app .token.parameter {
+	color: var(--hl-var);
+}
+
+.mur-app .token.regex,
+.mur-app .token.interpolation {
+	color: var(--hl-regex);
+}
+
+.mur-app .token.url {
+	color: var(--hl-url);
+}
+
+.mur-app .token.entity {
+	color: var(--hl-ent);
+}
+
+.mur-app .token.inserted {
+	color: var(--hl-ins);
+	background: var(--hl-ins-bg);
+}
+
+.mur-app .token.deleted {
+	color: var(--hl-del);
+	background: var(--hl-del-bg);
+}
+
+.mur-app .token.coord {
+	color: var(--hl-cmt);
+}
+
+.mur-app .token.heading,
+.mur-app .token.bold {
+	color: var(--hl-md-h);
+	font-weight: var(--hl-md-h-w);
+}
+
+.mur-app .token.italic {
+	color: var(--hl-md-i);
+	font-style: italic;
+}
+
+.mur-app .token.url .token.content {
+	text-decoration: underline;
+}

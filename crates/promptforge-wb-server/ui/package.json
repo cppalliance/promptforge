@@ -7,7 +7,8 @@
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node test/smoke.mjs"
   },
   "dependencies": {
     "dockview": "^8.2.0",
@@ -15,6 +16,7 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
     "typescript": "^7.0.2"
   }
 }

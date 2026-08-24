@@ -1,0 +1,140 @@
+.mur-settings-overlay {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background: var(--mur-overlay-bg);
+	backdrop-filter: blur(2px);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1000;
+}
+
+.mur-settings-modal {
+	background: var(--mur-bg);
+	color: var(--mur-text);
+	width: 90%;
+	max-width: 450px;
+	border-radius: 12px;
+	box-shadow: var(--mur-shadow-modal);
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--mur-border);
+	overflow: hidden;
+	animation: mur-modal-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes mur-modal-pop {
+	0% {
+		transform: scale(0.95);
+		opacity: 0;
+	}
+
+	100% {
+		transform: scale(1);
+		opacity: 1;
+	}
+}
+
+.mur-settings-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 16px 20px;
+	border-bottom: 1px solid var(--mur-border);
+	background: var(--mur-surface);
+}
+
+.mur-settings-header h3 {
+	margin: 0;
+	font-size: 1.1rem;
+	font-weight: 600;
+}
+
+.mur-settings-close-btn {
+	background: none;
+	border: none;
+	font-size: 1.5rem;
+	cursor: pointer;
+	color: var(--mur-text-muted);
+	line-height: 1;
+}
+
+.mur-settings-close-btn:hover {
+	color: var(--mur-text);
+}
+
+.mur-settings-body {
+	padding: 20px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.mur-settings-group {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.mur-settings-group label {
+	font-size: 0.85rem;
+	font-weight: 600;
+	color: var(--mur-text);
+}
+
+.mur-settings-group input,
+.mur-settings-group textarea {
+	width: 100%;
+	padding: 10px 12px;
+	border-radius: 6px;
+	font-family: inherit;
+	font-size: 0.9rem;
+	border: 1px solid var(--mur-border);
+	background: var(--mur-bg);
+	color: var(--mur-text);
+}
+
+.mur-settings-group input:focus,
+.mur-settings-group textarea:focus {
+	outline: none;
+	border-color: var(--mur-primary);
+	box-shadow: 0 0 0 2px var(--mur-border);
+}
+
+.mur-settings-hint {
+	font-size: 0.75rem;
+	color: var(--mur-text-muted);
+}
+
+.mur-settings-footer {
+	padding: 16px 20px;
+	border-top: 1px solid var(--mur-border);
+	background: var(--mur-surface);
+	display: flex;
+	justify-content: flex-end;
+}
+
+.mur-set-save-btn {
+	width: auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	padding: 0.6rem 1rem;
+	background-color: var(--mur-bg);
+	color: var(--mur-text);
+	border: 1px solid var(--mur-border);
+	border-radius: 0.5rem;
+	box-shadow: var(--mur-shadow-button);
+	cursor: pointer;
+	font-size: 0.95rem;
+	font-weight: 500;
+	transition: background-color 0.2s;
+}
+
+.mur-set-save-btn:hover {
+	background-color: var(--mur-hover-bg);
+}
