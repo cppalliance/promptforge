@@ -19,6 +19,9 @@ const options = {
   bundle: true,
   format: "esm",
   target: "es2022",
+  // `node build.mjs --minify` matches what build.rs does for cargo release
+  // builds.
+  minify: process.argv.includes("--minify"),
   outfile: path.join(distDir, "app.js"),
   logLevel: "info",
 };
