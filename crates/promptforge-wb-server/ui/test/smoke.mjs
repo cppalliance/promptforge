@@ -62,10 +62,10 @@ class FakeWebSocket {
     this.url = url;
     this.readyState = FakeWebSocket.CONNECTING;
     chatSockets.push(this);
-    queueMicrotask(() => {
+    setTimeout(() => {
       this.readyState = FakeWebSocket.OPEN;
       this.onopen?.();
-    });
+    }, 0);
   }
   // The voice path attaches with addEventListener; chain listeners onto the
   // on* properties the chat path assigns directly.
