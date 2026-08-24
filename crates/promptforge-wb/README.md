@@ -18,7 +18,7 @@ The shell loads the same `workbench.toml` as the server (see the [promptforge-wb
 2. The current directory
 3. `%USERPROFILE%\.promptforge\workbench.toml`
 
-A total miss is an error naming every path tried, in order.
+When no file is found at any of these locations, the shell falls through to environment-variable-only configuration (see the server README's env-var table). The only required variable in that mode is `PROMPTFORGE_GATEWAY_API_KEY`.
 
 ## Browser fallback
 

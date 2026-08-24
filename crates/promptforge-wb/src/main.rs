@@ -31,9 +31,12 @@ fn main() -> ExitCode {
 }
 
 fn run() -> anyhow::Result<()> {
-    let config_path = discover::discover_config()?;
-    let config =
-        Config::load(&config_path).with_context(|| format!("load {}", config_path.display()))?;
+    let config = match discover::discover_config()? {
+        Some(config_path) => {
+            Config::load(&config_path).with_context(|| format!("load {}", config_path.display()))?
+        }
+        None => Config::from_env().context("build config from environment variables")?,
+    };
     let server = promptforge_wb_server::spawn(config).context("start workbench server")?;
     let url = server.url().to_string();
 
