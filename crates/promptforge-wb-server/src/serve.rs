@@ -170,6 +170,7 @@ fn serve_thread(
             state.gateway_client().clone(),
             state.status(),
             state.health().clone(),
+            state.catalog(),
             heartbeat::HEARTBEAT_INTERVAL,
         );
         axum::serve(listener, router(state))

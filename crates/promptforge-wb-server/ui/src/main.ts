@@ -15,7 +15,7 @@ import { MemoryStorage } from "./memory-storage";
 import { StatusBar } from "./status-bar";
 import { setupVoice } from "./voice";
 import { WorkbenchProvider } from "./workbench-provider";
-import { WorkbenchSocket } from "./workbench-socket";
+import { type CatalogModel, WorkbenchSocket } from "./workbench-socket";
 
 const pickerEl = document.getElementById("model-picker") as HTMLSelectElement;
 const descriptionEl = document.getElementById("model-description") as HTMLDivElement;
@@ -31,11 +31,6 @@ const statusBar = new StatusBar(statusBarRoot);
 const workbenchSocket = new WorkbenchSocket();
 workbenchSocket.onStatus((frame) => statusBar.render(frame));
 workbenchSocket.connect();
-
-interface ModelEntry {
-  id: string;
-  description?: string;
-}
 
 function selectedModel(): string {
   return pickerEl.value;
@@ -129,28 +124,39 @@ function showDescription(): void {
   descriptionEl.textContent = (option && option.dataset.description) || "";
 }
 
+// Rebuilds the model picker from a catalog, keeping the user's selection
+// when it survives the refresh. Used by the boot fetch and by the pushed
+// catalogs the server sends when the gateway comes back.
+function renderModels(entries: CatalogModel[]): void {
+  const previous = pickerEl.value;
+  pickerEl.textContent = "";
+  if (entries.length === 0) {
+    pickerEl.appendChild(new Option("No models available", ""));
+    pickerEl.disabled = true;
+    return;
+  }
+  for (const entry of entries) {
+    const option = new Option(entry.id, entry.id);
+    option.dataset.description = entry.description || "";
+    pickerEl.appendChild(option);
+  }
+  if (entries.some((entry) => entry.id === previous)) {
+    pickerEl.value = previous;
+  }
+  pickerEl.disabled = false;
+  descriptionEl.classList.remove("sidebar__model-description--error");
+  showDescription();
+  applyModel();
+}
+
 async function loadModels(): Promise<void> {
   try {
     const response = await fetch("/v1/models");
     if (!response.ok) {
       throw new Error(`GET /v1/models answered ${response.status}`);
     }
-    const catalog = (await response.json()) as { data?: ModelEntry[] };
-    const entries = Array.isArray(catalog.data) ? catalog.data : [];
-    pickerEl.textContent = "";
-    if (entries.length === 0) {
-      pickerEl.appendChild(new Option("No models available", ""));
-      pickerEl.disabled = true;
-      return;
-    }
-    for (const entry of entries) {
-      const option = new Option(entry.id, entry.id);
-      option.dataset.description = entry.description || "";
-      pickerEl.appendChild(option);
-    }
-    pickerEl.disabled = false;
-    showDescription();
-    applyModel();
+    const catalog = (await response.json()) as { data?: CatalogModel[] };
+    renderModels(Array.isArray(catalog.data) ? catalog.data : []);
   } catch (error) {
     pickerEl.textContent = "";
     pickerEl.appendChild(new Option("Model catalog unavailable", ""));
@@ -159,6 +165,10 @@ async function loadModels(): Promise<void> {
     descriptionEl.classList.add("sidebar__model-description--error");
   }
 }
+
+// A pushed catalog means the gateway returned after an outage; refresh the
+// picker in place so a boot-time "Model catalog unavailable" heals itself.
+workbenchSocket.onModels(renderModels);
 
 pickerEl.addEventListener("change", () => {
   showDescription();

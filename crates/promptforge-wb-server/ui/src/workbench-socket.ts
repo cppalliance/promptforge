@@ -15,6 +15,18 @@ export interface StatusFrame {
   progress: { current: number; total: number } | null;
 }
 
+/** One entry of the gateway's model catalog, as fetched or pushed. */
+export interface CatalogModel {
+  id: string;
+  description?: string;
+}
+
+/** A pushed model catalog, sent when the gateway comes back after an outage. */
+export interface ModelsFrame {
+  type: "models";
+  models: CatalogModel[];
+}
+
 /** The chat payload sent upstream in one `{"type":"chat",...}` frame. */
 export interface ChatPayload {
   model: string;
@@ -34,6 +46,7 @@ interface ServerFrame {
   id?: unknown;
   content?: unknown;
   message?: unknown;
+  models?: unknown;
 }
 
 function defaultUrl(): string {
@@ -46,6 +59,7 @@ export class WorkbenchSocket {
   private nextId = 1;
   private readonly pending = new Map<number, PendingChat>();
   private readonly statusHandlers = new Set<(frame: StatusFrame) => void>();
+  private readonly modelsHandlers = new Set<(models: CatalogModel[]) => void>();
 
   constructor(private readonly url: string = defaultUrl()) {}
 
@@ -59,6 +73,11 @@ export class WorkbenchSocket {
   /** Registers a handler for unsolicited status frames. */
   onStatus(handler: (frame: StatusFrame) => void): void {
     this.statusHandlers.add(handler);
+  }
+
+  /** Registers a handler for pushed model catalogs. */
+  onModels(handler: (models: CatalogModel[]) => void): void {
+    this.modelsHandlers.add(handler);
   }
 
   /**
@@ -167,6 +186,13 @@ export class WorkbenchSocket {
       const status = frame as unknown as StatusFrame;
       for (const handler of this.statusHandlers) {
         handler(status);
+      }
+      return;
+    }
+    if (frame.type === "models") {
+      const models = Array.isArray(frame.models) ? (frame.models as CatalogModel[]) : [];
+      for (const handler of this.modelsHandlers) {
+        handler(models);
       }
       return;
     }
