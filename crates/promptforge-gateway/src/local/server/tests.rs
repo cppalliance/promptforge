@@ -617,6 +617,7 @@ fn local_upstream_send_respawns_dead_child_once() {
             ChatRequest {
                 model: "qwen-local".to_owned(),
                 messages: Vec::new(),
+                stream: false,
                 rest: Map::new(),
             },
             &alias,
@@ -840,6 +841,7 @@ fn local_upstream_send_honors_cooldown_after_failed_respawn() {
     let make_req = || ChatRequest {
         model: "qwen-local".to_owned(),
         messages: Vec::new(),
+        stream: false,
         rest: Map::new(),
     };
     let err1 = runtime
@@ -925,6 +927,7 @@ fn local_upstream_concurrent_sends_respawn_child_at_most_once() {
     let make_req = || ChatRequest {
         model: "qwen-local".to_owned(),
         messages: Vec::new(),
+        stream: false,
         rest: Map::new(),
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -1087,6 +1090,7 @@ fn local_upstream_shutdown_kills_child_and_disables_respawn() {
         ChatRequest {
             model: "qwen-local".to_owned(),
             messages: Vec::new(),
+            stream: false,
             rest: Map::new(),
         },
         &alias,
@@ -1215,6 +1219,7 @@ fn switch_shutdown_terminates_an_in_flight_respawned_child() {
             ChatRequest {
                 model: "qwen-local".to_owned(),
                 messages: Vec::new(),
+                stream: false,
                 rest: Map::new(),
             },
             "qwen-local",

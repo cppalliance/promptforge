@@ -26,9 +26,22 @@ pub(crate) struct ChatRequest {
     pub model: String,
     /// The conversation messages, passed through to the backend verbatim.
     pub messages: Vec<Value>,
+    /// Whether the caller asked for a streaming (SSE) completion. Absent
+    /// means non-streaming; an absent `stream` is never forwarded.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub stream: bool,
     /// Every field the gateway does not name, preserved verbatim.
     #[serde(flatten)]
     pub rest: Map<String, Value>,
+}
+
+/// serde `skip_serializing_if` predicate for the `stream` flag.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if predicates receive the field by reference"
+)]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Chat roles the gateway recognizes at the request boundary (OpenAI set).
@@ -43,7 +56,7 @@ const SUPPORTED_ROLES: [&str; 6] = [
 
 impl ChatRequest {
     /// Reserved top-level keys that must never appear in the passthrough `rest`.
-    const RESERVED: [&'static str; 2] = ["model", "messages"];
+    const RESERVED: [&'static str; 3] = ["model", "messages", "stream"];
 
     /// Validate the request shape at the trust boundary, without coercion.
     ///
@@ -71,7 +84,7 @@ impl ChatRequest {
             .iter()
             .any(|key| self.rest.contains_key(*key))
         {
-            return Err("rest must not contain a reserved key (model, messages)");
+            return Err("rest must not contain a reserved key (model, messages, stream)");
         }
         Ok(())
     }
@@ -173,10 +186,6 @@ fn validate_choice(choice: &Value) -> Result<(), &'static str> {
 /// type; the relay special-cases it before parsing.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired up by the stream:true SSE relay step")
-)]
 pub(crate) struct ChatChunk {
     /// The model name, rewritten to the caller's requested name.
     pub model: String,
@@ -193,10 +202,6 @@ pub(crate) struct ChatChunk {
 /// fragments thereafter).
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired up by the stream:true SSE relay step")
-)]
 pub(crate) struct ChatChunkChoice {
     /// The completion choice this delta belongs to.
     pub index: u32,
@@ -458,6 +463,7 @@ mod tests {
         ChatRequest {
             model: model.to_owned(),
             messages,
+            stream: false,
             rest: Map::new(),
         }
     }
@@ -599,7 +605,8 @@ mod tests {
         let req: ChatRequest = serde_json::from_value(json.clone()).expect("parse request");
         // Unnamed fields land in `rest`, not on named fields.
         assert!(req.rest.contains_key("temperature"));
-        assert!(req.rest.contains_key("stream"));
+        assert!(!req.stream);
+        assert!(!req.rest.contains_key("stream"));
         assert!(!req.rest.contains_key("model"));
         assert!(!req.rest.contains_key("messages"));
         // Serialize back and re-parse: the value is stable.
@@ -607,6 +614,34 @@ mod tests {
             serde_json::from_value(serde_json::to_value(&req).expect("serialize"))
                 .expect("reparse");
         assert_eq!(req, reparsed);
+    }
+
+    #[test]
+    fn request_stream_flag_round_trips_and_omits_when_absent() {
+        let json = serde_json::json!({
+            "model": "m",
+            "messages": [{ "role": "user", "content": "hi" }],
+            "stream": true,
+        });
+        let req: ChatRequest = serde_json::from_value(json).expect("parse request");
+        assert!(req.stream);
+        assert_eq!(
+            serde_json::to_value(&req).expect("serialize").get("stream"),
+            Some(&serde_json::json!(true))
+        );
+        // An absent stream flag neither errors nor serializes as false.
+        let req = request(
+            "m",
+            vec![serde_json::json!({ "role": "user", "content": "hi" })],
+        );
+        assert!(!req.stream);
+        assert!(
+            !serde_json::to_value(&req)
+                .expect("serialize")
+                .as_object()
+                .expect("object")
+                .contains_key("stream")
+        );
     }
 
     #[test]
