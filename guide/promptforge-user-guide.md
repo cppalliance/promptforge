@@ -788,7 +788,7 @@ let result = run(
 ).await?;
 ```
 
-The run resolves the H1 block once, then walks H2 sections top to bottom. A section falls through to the next when its Lua does not return a value. An explicit return stops fall-through. When execution falls off the last section, the result is the last model reply, then the generic string "done".
+The run resolves the H1 block once, then walks H2 sections top to bottom. A section falls through to the next when its Lua does not return a value. An explicit return stops fall-through. When execution falls off the last section, the result is the last model reply, or the generic string `"done"` only if no model reply exists.
 
 #### Run Configuration
 
@@ -1072,6 +1072,8 @@ tools.add_local("grab", "Grab a value from the store", {
     return store.read(args.key)
 end)
 ```
+
+The alias must be unique within the section. It cannot reuse an alias declared by `tools.need` or `tools.always`, and a second `tools.add_local` call with the same alias is an error.
 
 The params table maps each parameter name to a bare type string or a `{type, description}` array. Supported types are `"string"`, `"integer"`, `"number"`, and `"boolean"`; all declared parameters are required. The handler receives the arguments as a Lua table and returns a string. It shares the section's VM (store, `var`, globals), may call `execute()`, `fanout`, and the `infer` forms (`models.infer(prompt)`, `handle:infer(prompt)`), and cannot call `jump()`. Local tool output is trusted - no nonce envelope. A local tool becomes visible to the model starting from the next prose block.
 
