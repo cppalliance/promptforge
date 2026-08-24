@@ -70,6 +70,60 @@ The chat UI itself is [murm-ui](https://github.com/levmv/murm-ui) 0.2.0, vendore
 
 The status bar at the bottom of the window renders the observer's `{"type":"status",...}` frames (`ui/src/status-bar.ts`): the label as the bar text, the description as the tooltip, error frames in a distinct color. Debug-severity frames are internal instrumentation and never touch the text. The right slot holds a `<progress>` bar while a frame carries progress, and an activity LED otherwise: a small circle that pulses green on gateway traffic and amber on voice activity (green wins when both coincide), lit for one pulse window per frame and faded by a CSS transition. The bar's colors, glow radii, and pulse window are CSS custom properties (`--led-green`, `--led-amber`, `--led-off`, `--led-glow-radius`, `--led-pulse-ms`, `--progress-fill`, `--progress-glow`, ...) at the top of `ui/style.css`.
 
+## Skinning
+
+The whole UI skins from the `:root` block at the top of `ui/style.css` - every color, spacing step, radius, font, scrollbar metric, and the status bar's LED and progress effect is a CSS custom property there. The vendored murm-ui chat panel skins from the same block through a bridge in `ui/style.css` (the `.mur-app[data-theme="dark"]` rule, with a comment mapping each `--mur-*` variable to the workbench variable it follows).
+
+Two ways to reskin:
+
+1. **Edit the block.** Change values in the `:root` block of `ui/style.css` and rebuild (`cargo build`; debug builds serve `ui/dist/` from disk). This is the path for changes you keep.
+2. **Override from an additional stylesheet.** Add a `<link>` after `/style.css` in `ui/index.html` and redeclare any variable on `:root`. Later declarations win the cascade, and because the murm-ui bridge dereferences the workbench variables at computed-value time, overriding e.g. `--bg` re-skins the chat panel too. To retune murm-ui-only knobs (`--mur-chat-form-width`, the shadows), target `.mur-app[data-theme="dark"]` in the same stylesheet.
+
+The variables:
+
+| Variable | Default | What it paints |
+| --- | --- | --- |
+| `--bg` | `#0d0e12` | Window and chat background |
+| `--bg-raised` | `#14161c` | Raised surfaces (cards, code blocks) |
+| `--bg-hover` | `#1a1d25` | Hover washes, user message bubble |
+| `--bg-sidebar` | `--bg-raised` | Sidebar background |
+| `--bg-composer` | `--bg` | Chat composer form |
+| `--text` | `#d6d9e0` | Body text (13:1 on `--bg`) |
+| `--text-muted` | `#8b90a0` | Dimmed text (6:1 on `--bg`; do not go dimmer, 4.5:1 is the floor) |
+| `--border` | `#262a33` | Hairline borders |
+| `--accent` | `#7c7fd4` | Primary action (send button) |
+| `--accent-dim` | `#5658a0` | Focus border |
+| `--danger` | `#b0606a` | Recording background, danger accents (non-text) |
+| `--danger-text` | `#cf7f88` | Danger as text on dark surfaces |
+| `--on-danger` | `#ffffff` | Icon or text on a `--danger` fill |
+| `--font-prose` | system stack | UI font |
+| `--code-font` | ui-monospace stack | Code blocks, code chrome |
+| `--space-xs`..`--space-xl` | `4/6/8/12/16px` | Shell spacing scale |
+| `--radius` | `6px` | Control corner radius |
+| `--sidebar-width` | `220px` | Sidebar width |
+| `--status-bar-height` | `24px` | Status bar height |
+| `--status-bar-bg` | `--bg-raised` | Status bar background |
+| `--status-bar-text` | `--text-muted` | Status bar text |
+| `--status-bar-text-error` | `--danger-text` | Status bar error text |
+| `--status-bar-padding-inline` | `--space-lg` | Status bar horizontal padding |
+| `--status-bar-gap` | `--space-lg` | Status bar item gap |
+| `--progress-width` | `96px` | Progress bar width (also the slot's minimum) |
+| `--progress-height` | `6px` | Progress bar height (drives its rounding) |
+| `--progress-fill` | `#4caf7d` | Progress fill |
+| `--progress-track` | `rgba(255,255,255,0.08)` | Progress track |
+| `--progress-glow` | `4px` | Blur radius of the fill's glow |
+| `--led-size` | `10px` | Activity LED diameter |
+| `--led-green` / `--led-amber` | `#4caf7d` / `#d9a03f` | Gateway / voice activity colors |
+| `--led-off` | `rgba(255,255,255,0.08)` | The unlit LED lens |
+| `--led-core` | `#ffffff` | Hot center of the lit gradient |
+| `--led-glow-radius` | `6px` | Base blur of the layered bloom |
+| `--led-pulse-ms` | `250ms` | Pulse hold window and fade-out (also read by the status bar's JS) |
+| `--led-fade-in-ms` | `60ms` | Fade-in when a pulse lights the LED |
+| `--led-lens-highlight` / `--led-lens-shadow` | white/black alphas | Idle lens inset shading |
+| `--scrollbar-width` | `8px` | Scrollbar thickness (drives thumb rounding) |
+| `--scrollbar-thumb` | `rgba(255,255,255,0.16)` | Scrollbar thumb |
+| `--scrollbar-thumb-hover` | `rgba(255,255,255,0.28)` | Scrollbar thumb on hover |
+
 ## Whisper models
 
 Whisper models are not downloaded by the build; fetch them out of band from the whisper.cpp GGML model collection on Hugging Face: <https://huggingface.co/ggerganov/whisper.cpp>. Production configs typically pair `ggml-large-v3-turbo.bin` (interim) with `ggml-large-v3.bin` (final). The test suite uses the tiny English model (`ggml-tiny.en.bin`) plus the `jfk.wav` speech fixture, placed in `tests/fixtures/` (gitignored); a missing fixture fails the test with the download URL in the message.
