@@ -152,6 +152,24 @@ impl StatusBus {
         self.report(label, description, Severity::Info, activity);
     }
 
+    /// Broadcasts a user-visible update carrying determinate progress,
+    /// which the status bar renders as its progress bar.
+    pub(crate) fn progress(
+        &self,
+        label: impl Into<String>,
+        description: impl Into<String>,
+        progress: Progress,
+        activity: Activity,
+    ) {
+        self.emit(StatusBarUpdate {
+            label: label.into(),
+            description: description.into(),
+            progress: Some(progress),
+            severity: Severity::Info,
+            activity,
+        });
+    }
+
     /// Broadcasts an internal instrumentation pulse the UI does not
     /// display.
     pub(crate) fn debug(
