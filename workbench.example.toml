@@ -1,5 +1,10 @@
 # PromptForge Workbench example configuration.
 #
+# The TOML file is optional. When no workbench.toml is found, the server
+# and shell build config entirely from environment variables (see the
+# promptforge-wb-server README for the variable table). The only required
+# variable in that mode is PROMPTFORGE_GATEWAY_API_KEY.
+#
 # Copy to workbench.toml and edit. The promptforge-wb desktop shell
 # searches beside its executable, then the current directory, then
 # ~/.promptforge/; the promptforge-wb-server binary reads the current
