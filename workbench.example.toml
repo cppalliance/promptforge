@@ -1,20 +1,21 @@
 # PromptForge Workbench example configuration.
 #
-# The TOML file is optional. When no workbench.toml is found, the server
-# and shell build config entirely from environment variables (see the
-# promptforge-wb-server README for the variable table). The only required
-# variable in that mode is PROMPTFORGE_GATEWAY_API_KEY.
+# The promptforge-wb desktop shell generates ~/.promptforge/workbench.toml
+# from a built-in template on first run, so no setup is needed there. This
+# file is the commented reference: copy it to workbench.toml and edit when
+# you want a configuration the template does not produce - beside the
+# shell's executable or in the current directory to shadow the profile
+# copy, or in the current directory for the promptforge-wb-server binary,
+# which reads workbench.toml from there only.
 #
-# Copy to workbench.toml and edit. The promptforge-wb desktop shell
-# searches beside its executable, then the current directory, then
-# ~/.promptforge/; the promptforge-wb-server binary reads the current
-# directory only.
-# String values support ${VAR} environment interpolation; $$ is a literal $.
+# String values support ${VAR} environment interpolation; $$ is a literal
+# $, and an unset variable interpolates to the empty string.
 
 [gateway]
-# Base URL of the PromptForge gateway. (required)
+# Base URL of the PromptForge gateway.
+# Default when empty: "http://127.0.0.1:8081"
 base_url = "http://127.0.0.1:8081"
-# Bearer key for the gateway API. (required)
+# Bearer key for the gateway API. Empty sends no Authorization header.
 api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 
 [tape]
@@ -42,6 +43,12 @@ interim_model = "models/ggml-large-v3-turbo.bin"
 # Path to the whisper model for the pipelined final pass over a take.
 # Empty falls back to one last interim-model window.
 final_model = "models/ggml-large-v3.bin"
+# URL the interim model can be downloaded from.
+# Default: "" (no known source)
+interim_source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+# URL the final-pass model can be downloaded from.
+# Default: "" (no known source)
+final_source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
 # Seconds of trailing audio each interim pass transcribes.
 # Default: 5
 window_seconds = 5

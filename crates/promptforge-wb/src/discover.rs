@@ -69,13 +69,20 @@ pub(crate) fn discover_config() -> anyhow::Result<Option<PathBuf>> {
     Ok(first_existing(&candidates))
 }
 
+/// The profile candidate: `<home>/.promptforge/workbench.toml`. This is
+/// the one place that knows where the profile configuration lives, so
+/// first-run generation writes where discovery reads.
+pub(crate) fn profile_config_path(home: &Path) -> PathBuf {
+    home.join(".promptforge").join(CONFIG_FILE_NAME)
+}
+
 /// Builds the candidate list in search order from the three base
 /// directories.
 fn candidates_from(exe_dir: &Path, cwd: &Path, home: &Path) -> Vec<PathBuf> {
     vec![
         exe_dir.join(CONFIG_FILE_NAME),
         cwd.join(CONFIG_FILE_NAME),
-        home.join(".promptforge").join(CONFIG_FILE_NAME),
+        profile_config_path(home),
     ]
 }
 
@@ -168,8 +175,11 @@ mod tests {
         let path = generate_default(&dir.path().join(CONFIG_FILE_NAME)).expect("template writes");
         let config = promptforge_wb_server::Config::load(&path)
             .expect("the generated config loads on a bare machine");
-        let expected_url = std::env::var("PROMPTFORGE_GATEWAY_URL")
-            .unwrap_or_else(|_| promptforge_wb_server::DEFAULT_GATEWAY_BASE_URL.to_string());
+        // An empty value falls back to the default, same as the loader.
+        let expected_url = match std::env::var("PROMPTFORGE_GATEWAY_URL") {
+            Ok(value) if !value.is_empty() => value,
+            _ => promptforge_wb_server::DEFAULT_GATEWAY_BASE_URL.to_string(),
+        };
         assert_eq!(config.gateway.base_url, expected_url);
         assert_eq!(
             config.gateway.api_key,
