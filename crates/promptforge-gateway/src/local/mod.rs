@@ -103,6 +103,7 @@ impl LocalRuntime {
             });
             models.push(Arc::new(Model {
                 name: local_model.name().to_owned(),
+                kind: local_model.kind(),
                 description: local_model.description().to_owned(),
                 context: local_model.context(),
                 thinking: local_model.thinking(),

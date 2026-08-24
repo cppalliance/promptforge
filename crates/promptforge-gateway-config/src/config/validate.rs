@@ -2,15 +2,16 @@
 //!
 //! A `Config` value cannot hold an invalid state: construction runs [`Config::validate`],
 //! which rejects empty ids, unresolved references, kind-incompatible dominion
-//! payloads, malformed HTTP(S) URLs, out-of-vocabulary web-search knobs, and
-//! VRAM over-booking of a local dominion. Downstream code therefore never
-//! re-validates or clamps operator input.
+//! payloads, chat-only fields on non-chat model kinds, malformed HTTP(S) URLs,
+//! out-of-vocabulary web-search knobs, and VRAM over-booking of a local
+//! dominion. Downstream code therefore never re-validates or clamps operator
+//! input.
 
 use std::collections::HashSet;
 
 use url::Url;
 
-use super::{Config, DominionKind, is_sha256_hex};
+use super::{Config, DominionKind, ModelKind, ThinkingMode, is_sha256_hex};
 use crate::error::ConfigError;
 
 impl Config {
@@ -57,7 +58,8 @@ impl Config {
     /// duplicate id, a model with no or duplicate endpoints, a model naming an
     /// undefined endpoint, a malformed endpoint or web-search URL, an
     /// out-of-vocabulary freshness/safesearch default, an invalid
-    /// `[[local_model]]`, a `parallel` below 1, or a `[[dominion]]` violation
+    /// `[[local_model]]`, a `parallel` below 1, a chat-only field set on a
+    /// non-chat model kind, or a `[[dominion]]` violation
     /// (duplicate or empty id, `max_concurrency` or `max_queue` below 1,
     /// `vram_gb` on a remote dominion, a binding to an undefined or
     /// wrong-kind dominion, or a VRAM co-residency failure: a local
@@ -303,6 +305,13 @@ impl Config {
                     )));
                 }
             }
+            validate_kind_scope(
+                "model",
+                &model.name,
+                model.kind,
+                model.thinking,
+                &[("default_max_tokens", model.default_max_tokens.is_some())],
+            )?;
         }
 
         self.validate_local_models(&mut model_names)
@@ -389,24 +398,75 @@ impl Config {
                     local_model.name
                 )));
             }
-            if let Some(dominion_id) = &local_model.dominion {
-                let dominion = self.dominions.iter().find(|d| d.id == *dominion_id);
-                let Some(dominion) = dominion else {
-                    return Err(ConfigError::Validation(format!(
-                        "local_model {} names undefined dominion {dominion_id}",
-                        local_model.name
-                    )));
-                };
-                if dominion.kind != DominionKind::Local {
-                    return Err(ConfigError::Validation(format!(
-                        "local_model {} must reference a local dominion, but {dominion_id} is remote",
-                        local_model.name
-                    )));
-                }
-            }
+            self.validate_local_model_dominion(local_model)?;
+            validate_kind_scope(
+                "local_model",
+                &local_model.name,
+                local_model.kind,
+                local_model.thinking,
+                &[(
+                    "chat_template_file",
+                    local_model.chat_template_file.is_some(),
+                )],
+            )?;
         }
         Ok(())
     }
+
+    /// A local model's `dominion` must name a defined local dominion.
+    fn validate_local_model_dominion(
+        &self,
+        local_model: &super::LocalModelConfig,
+    ) -> Result<(), ConfigError> {
+        let Some(dominion_id) = &local_model.dominion else {
+            return Ok(());
+        };
+        let dominion = self.dominions.iter().find(|d| d.id == *dominion_id);
+        let Some(dominion) = dominion else {
+            return Err(ConfigError::Validation(format!(
+                "local_model {} names undefined dominion {dominion_id}",
+                local_model.name
+            )));
+        };
+        if dominion.kind != DominionKind::Local {
+            return Err(ConfigError::Validation(format!(
+                "local_model {} must reference a local dominion, but {dominion_id} is remote",
+                local_model.name
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Reject chat-only fields on a non-chat model kind.
+///
+/// `thinking` is chat-only on every model type; `extra` carries each model
+/// type's remaining chat-only fields as `(field, is_set)` pairs. `context`
+/// applies to every kind and is never rejected here. A chat model carries
+/// the default kind and passes unconditionally.
+fn validate_kind_scope(
+    label: &str,
+    name: &str,
+    kind: ModelKind,
+    thinking: ThinkingMode,
+    extra: &[(&str, bool)],
+) -> Result<(), ConfigError> {
+    if kind == ModelKind::Chat {
+        return Ok(());
+    }
+    if thinking != ThinkingMode::Never {
+        return Err(ConfigError::Validation(format!(
+            "{kind} {label} {name} must not set thinking (chat-only)"
+        )));
+    }
+    for (field, is_set) in extra {
+        if *is_set {
+            return Err(ConfigError::Validation(format!(
+                "{kind} {label} {name} must not set {field} (chat-only)"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Parse `raw` and require an `http`/`https` scheme with a non-empty host.

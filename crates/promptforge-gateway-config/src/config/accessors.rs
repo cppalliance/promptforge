@@ -9,8 +9,8 @@ use std::net::SocketAddr;
 
 use super::{
     Config, DominionConfig, DominionKind, EndpointConfig, LocalConfig, LocalModelConfig,
-    ModelConfig, Protocol, QueuePolicy, SearchProvider, Secret, ServerConfig, ThinkingMode,
-    ToolsConfig, WebSearchConfig,
+    ModelConfig, ModelKind, Protocol, QueuePolicy, SearchProvider, Secret, ServerConfig,
+    ThinkingMode, ToolsConfig, WebSearchConfig,
 };
 
 impl Config {
@@ -627,6 +627,40 @@ impl ModelConfig {
         &self.name
     }
 
+    /// Returns the workload this model serves: chat (the default),
+    /// embedding, or classifier.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::{Config, ModelKind};
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// #
+    /// # [[model]]
+    /// # name = "m"
+    /// # kind = "embedding"
+    /// # description = "a model"
+    /// # context = 8192
+    /// # upstream = "u"
+    /// # endpoints = ["e"]
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.models()[0].kind(), ModelKind::Embedding);
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn kind(&self) -> ModelKind {
+        self.kind
+    }
+
     /// Returns the prose describing the model for catalog consumers and
     /// semantic bind.
     ///
@@ -848,6 +882,33 @@ impl LocalModelConfig {
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the workload this model serves: chat (the default),
+    /// embedding, or classifier.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::{Config, ModelKind};
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[local_model]]
+    /// # name = "q"
+    /// # kind = "classifier"
+    /// # description = "a local model"
+    /// # source = "/models/q.gguf"
+    /// # context = 4096
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.local_models()[0].kind(), ModelKind::Classifier);
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn kind(&self) -> ModelKind {
+        self.kind
     }
 
     /// Returns the prose describing the model for catalog consumers and
