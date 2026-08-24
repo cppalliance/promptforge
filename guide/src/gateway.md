@@ -232,7 +232,7 @@ vram_gb = 14              # footprint estimate for the co-residency check
 
 Binding is by explicit id and is kind-checked: an endpoint's `dominion` must name a remote dominion, a local model's `dominion` must name a local one, and an unknown id is a boot failure. `vram_gb` on a remote dominion is rejected. Dominion ids must be unique and non-empty, and `max_concurrency` and `max_queue` must be at least 1 when set.
 
-Dominions are being introduced alongside the legacy knobs: `concurrency`, `device`, `lane`, and `[queue]` still parse and govern runtime limits during the transition. The dominion fields above are parsed and validated now; shared-queue enforcement and the VRAM co-residency check land as the queue rework completes.
+Dominions are being introduced alongside the legacy knobs: `concurrency`, `device`, `lane`, and `[queue]` still parse during the transition, and an endpoint with only those fields keeps its own per-endpoint queue. An endpoint bound to a remote dominion shares that dominion's queue with every other bound endpoint - the shared limit is enforced now. Local-model dominion binding and the VRAM co-residency check land as the queue rework completes.
 
 ## Web Search Tool
 
@@ -350,7 +350,7 @@ Includes resolve depth-first relative to the including file. Max nesting depth i
 
 Merge rules:
 
-- Arrays (`[[endpoint]]`, `[[model]]`, `[[local_model]]`, `[[device]]`): merged by append. An entry with the same `id` or `name` replaces the earlier definition.
+- Arrays (`[[endpoint]]`, `[[model]]`, `[[local_model]]`, `[[device]]`, `[[dominion]]`): merged by append. An entry with the same `id` or `name` replaces the earlier definition.
 - Scalars (`server.*`, `queue.*`, `[local].cache_dir`): later wins.
 
 ### The Boot File Owns `[server]`
