@@ -35,7 +35,10 @@ fn run() -> anyhow::Result<()> {
         Some(config_path) => {
             Config::load(&config_path).with_context(|| format!("load {}", config_path.display()))?
         }
-        None => Config::from_env().context("build config from environment variables")?,
+        None => anyhow::bail!(
+            "no workbench.toml found beside the executable, in the current directory, \
+             or in the profile's .promptforge directory"
+        ),
     };
     let server = promptforge_wb_server::spawn(config).context("start workbench server")?;
     let url = server.url().to_string();
