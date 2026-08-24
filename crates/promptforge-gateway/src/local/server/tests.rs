@@ -265,7 +265,7 @@ fn launch_args_emit_chat_template_file() {
 }
 
 #[test]
-fn launch_args_emit_lane_parallel() {
+fn launch_args_emit_parallel() {
     let mut opts = options(false);
     opts.parallel = 3;
     let args = server_args(Path::new("model.gguf"), 1, "alias", "key", &opts);
