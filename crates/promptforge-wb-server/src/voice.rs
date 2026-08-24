@@ -1,17 +1,24 @@
 //! The `/voice` WebSocket endpoint: push-to-talk PCM capture with streaming
-//! interim transcription.
+//! interim transcription and a pipelined final pass.
 //!
 //! A client upgrades `GET /voice`, sends the text control message `start`,
 //! streams binary messages of little-endian f32 PCM (16 kHz mono), and sends
 //! `stop` to end a take. While a take records, an interim loop transcribes
 //! the trailing `voice.window_seconds` of audio every `voice.interval_ms`
-//! and pushes `{"type":"interim","text":"..."}` text messages; on `stop` the
-//! server answers with one `{"type":"final","text":"...","frames":N}` text
-//! message holding the best full-window transcript and the total PCM frames
-//! received since the most recent `start`. Silent windows are never
-//! transcribed (whisper hallucinates on silence), and empty transcripts are
-//! never sent as interims. Without a configured `[voice]` model the endpoint
-//! still captures and counts PCM, and transcripts come back empty.
+//! and pushes `{"type":"interim","text":"..."}` text messages. In parallel,
+//! an energy-based segmenter ([`crate::segment::Segmenter`]) cuts completed
+//! speech segments at silence boundaries and hands them to the final-pass
+//! worker, which transcribes them with the `voice.final_model` model in the
+//! background, each conditioned on the take's accumulated transcript. On
+//! `stop` the worker transcribes the unprocessed tail and the server answers
+//! with one `{"type":"final","text":"...","frames":N}` text message holding
+//! the assembled transcript and the total PCM frames received since the
+//! most recent `start`. Without a configured final model the final pass
+//! falls back to one last interim-model window (logged); without any
+//! `[voice]` model the endpoint still captures and counts PCM, and
+//! transcripts come back empty. Silent audio is never transcribed (whisper
+//! hallucinates on silence), and empty transcripts are never sent as
+//! interims.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -22,6 +29,7 @@ use axum::response::Response;
 use futures_util::{SinkExt, StreamExt};
 
 use crate::app::AppState;
+use crate::segment::Segmenter;
 use crate::transcribe::{self, MIN_WINDOW_SAMPLES, VoiceEngine};
 
 /// Session ids for log correlation, handed out in connection order.
@@ -87,9 +95,10 @@ fn spawn_interim_loop(
     })
 }
 
-/// The stop-message transcript: one last pass over the trailing window, or
-/// an empty string when there is no engine, the window is silent, or the
-/// pass fails (logged; the client still gets its reply).
+/// The stop-message transcript when the final model is absent or fails: one
+/// last interim-model pass over the trailing window, or an empty string when
+/// there is no engine, the window is silent, or the pass fails (logged; the
+/// client still gets its reply).
 async fn final_transcript(
     session: u64,
     engine: Option<&VoiceEngine>,
@@ -107,6 +116,39 @@ async fn final_transcript(
         Err(error) => {
             tracing::warn!(session, %error, "final transcription failed");
             String::new()
+        }
+    }
+}
+
+/// The stop-message transcript: the pipelined final pass over the whole
+/// take when a final model is configured (the tail is queued behind the
+/// take's background segments, so awaiting its reply drains them), falling
+/// back to the interim-model window when it is not or when it fails.
+async fn stop_transcript(
+    session: u64,
+    engine: Option<&VoiceEngine>,
+    buffer: &Mutex<Vec<f32>>,
+    segmenter: &Segmenter,
+) -> String {
+    let Some(engine) = engine else {
+        return String::new();
+    };
+    let tail = {
+        let guard = lock_buffer(buffer);
+        guard[segmenter.consumed()..].to_vec()
+    };
+    match engine.final_finish(tail).await {
+        Some(Ok(text)) => text,
+        Some(Err(error)) => {
+            tracing::warn!(session, %error, "final-pass transcription failed; falling back to the interim model");
+            final_transcript(session, Some(engine), buffer).await
+        }
+        None => {
+            tracing::info!(
+                session,
+                "no final model configured; the final pass uses the interim model"
+            );
+            final_transcript(session, Some(engine), buffer).await
         }
     }
 }
@@ -129,6 +171,7 @@ async fn run_session(session: u64, socket: WebSocket, engine: Option<Arc<VoiceEn
     let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
     let mut frames = 0u64;
     let mut interim: Option<tokio::task::JoinHandle<()>> = None;
+    let mut segmenter = Segmenter::new();
 
     while let Some(received) = stream.next().await {
         match received {
@@ -143,11 +186,29 @@ async fn run_session(session: u64, socket: WebSocket, engine: Option<Arc<VoiceEn
                     .collect();
                 frames += samples.len() as u64;
                 lock_buffer(&buffer).extend_from_slice(&samples);
+                // Cut any speech segments the new audio completed and hand
+                // them to the background final pass.
+                if let Some(engine) = &engine {
+                    loop {
+                        let segment = {
+                            let guard = lock_buffer(&buffer);
+                            segmenter.poll(&guard).map(|range| guard[range].to_vec())
+                        };
+                        match segment {
+                            Some(samples) => engine.final_submit(samples),
+                            None => break,
+                        }
+                    }
+                }
             }
             Ok(Message::Text(text)) => match text.as_str() {
                 "start" => {
                     frames = 0;
                     lock_buffer(&buffer).clear();
+                    segmenter.reset();
+                    if let Some(engine) = &engine {
+                        engine.final_reset();
+                    }
                     stop_interim(&mut interim);
                     if let Some(engine) = &engine {
                         interim = Some(spawn_interim_loop(
@@ -161,7 +222,8 @@ async fn run_session(session: u64, socket: WebSocket, engine: Option<Arc<VoiceEn
                 }
                 "stop" => {
                     stop_interim(&mut interim);
-                    let text = final_transcript(session, engine.as_deref(), &buffer).await;
+                    let text =
+                        stop_transcript(session, engine.as_deref(), &buffer, &segmenter).await;
                     tracing::info!(session, frames, "voice capture stopped");
                     let reply = serde_json::json!({
                         "type": "final",
@@ -430,6 +492,66 @@ mod tests {
         assert!(
             text.to_lowercase().contains("country"),
             "the final transcript names the fixture's words: {text:?}"
+        );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    /// The pipelined final pass: two speech segments separated by a silence
+    /// gap (the jfk fixture, a second of zeros, then the fixture again).
+    /// The first segment closes mid-take and is transcribed in the
+    /// background; the second is the unclosed tail transcribed on `stop`,
+    /// conditioned on the first. The assembled final transcript must carry
+    /// both. Both model paths point at the tiny fixture model; production
+    /// config selects large-v3 for the final pass.
+    #[tokio::test]
+    async fn pipelined_final_pass_assembles_both_segments() {
+        let voice = VoiceConfig {
+            interim_model: fixtures::require_model(),
+            final_model: fixtures::require_model(),
+            window_seconds: 8,
+            interval_ms: 400,
+        };
+        let (url, _tape_dir) = spawn_voice_server(voice).await;
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /voice");
+        socket
+            .send(tungstenite::Message::Text("start".into()))
+            .await
+            .expect("send start");
+        let jfk = fixtures::jfk_samples();
+        send_samples(&mut socket, &jfk).await;
+        send_pcm(&mut socket, 16000).await;
+        send_samples(&mut socket, &jfk).await;
+        socket
+            .send(tungstenite::Message::Text("stop".into()))
+            .await
+            .expect("send stop");
+
+        // Interims may interleave; read until the stop reply arrives.
+        let reply = tokio::time::timeout(Duration::from_secs(180), async {
+            loop {
+                let message = parse_message(&read_text(&mut socket).await);
+                if message["type"] == "final" {
+                    break message;
+                }
+            }
+        })
+        .await
+        .expect("the final reply arrives within 180 s");
+        let text = reply["text"].as_str().expect("final text is a string");
+        let lower = text.to_lowercase();
+        assert!(
+            lower.contains("country"),
+            "the final transcript names the fixture's words: {text:?}"
+        );
+        // One pass over the fixture says "country" twice ("ask not what your
+        // country can do for you, ask what you can do for your country"), so
+        // three or more occurrences prove both segments contributed.
+        let countries = lower.matches("country").count();
+        assert!(
+            countries >= 3,
+            "both segments are in the assembled transcript ({countries} countries): {text:?}"
         );
         socket.close(None).await.expect("close the socket");
     }

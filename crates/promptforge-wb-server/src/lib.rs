@@ -9,6 +9,7 @@
 mod app;
 mod config;
 mod gateway;
+mod segment;
 mod tape;
 mod transcribe;
 mod voice;
