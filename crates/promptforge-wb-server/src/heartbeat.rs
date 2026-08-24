@@ -48,13 +48,6 @@ impl GatewayHealth {
     }
 
     /// Whether the gateway is currently believed reachable.
-    // The chat and catalog routes read this from the graceful-degradation
-    // commit; today only the heartbeat's own tests do. Those tests make an
-    // `expect` unfulfilled in the test target, so this is an `allow`.
-    #[allow(
-        dead_code,
-        reason = "the chat and catalog routes read it two commits on"
-    )]
     pub(crate) fn is_reachable(&self) -> bool {
         *self.reachable.borrow()
     }
@@ -251,6 +244,11 @@ mod tests {
             .route("/health", get(flippable_health))
             .route("/v1/models", get(mock_models))
             .with_state(healthy);
+        serve(app).await
+    }
+
+    /// Binds `app` on a free loopback port and returns its base URL.
+    async fn serve(app: Router) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind mock gateway");
@@ -386,6 +384,38 @@ mod tests {
                 .clone(),
             "the push carries the gateway's data array verbatim"
         );
+        heartbeat.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_reconnect_whose_refresh_is_declined_pushes_no_catalog() {
+        // No /v1/models route: the refresh is declined with a 404, and a
+        // declined refresh is skipped rather than pushed - pushing it
+        // would empty pickers that still hold a usable list.
+        let healthy = Arc::new(AtomicBool::new(false));
+        let base_url = serve(
+            Router::new()
+                .route("/health", get(flippable_health))
+                .with_state(Arc::clone(&healthy)),
+        )
+        .await;
+        let status = StatusBus::new();
+        let catalog = CatalogBus::new();
+        let mut status_rx = status.subscribe();
+        let mut catalog_rx = catalog.subscribe();
+        let (heartbeat, _health) = heartbeat_on(&base_url, &status, &catalog);
+
+        assert_eq!(
+            next_update(&mut status_rx).await.label,
+            "Gateway unreachable"
+        );
+        healthy.store(true, Ordering::Relaxed);
+        assert_eq!(
+            next_update(&mut status_rx).await.label,
+            "Connected to gateway"
+        );
+        let quiet = tokio::time::timeout(Duration::from_millis(200), catalog_rx.recv()).await;
+        assert!(quiet.is_err(), "a declined refresh is skipped, not pushed");
         heartbeat.shutdown().await;
     }
 

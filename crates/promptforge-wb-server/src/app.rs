@@ -212,7 +212,13 @@ async fn ui_pcm_worklet() -> Response {
 }
 
 /// Relays the gateway's model catalog to the caller verbatim.
+///
+/// While the heartbeat reports the gateway down, the catalog is not
+/// attempted: the route answers 502 with a user-visible message instead.
 async fn models(State(state): State<AppState>) -> Response {
+    if !state.health().is_reachable() {
+        return gateway_unreachable();
+    }
     let status = state.status();
     status.info(
         "Loading models...",
@@ -264,6 +270,11 @@ async fn chat(State(state): State<AppState>, body: String) -> Response {
         Ok(request) => request,
         Err(error) => return bad_request(&error),
     };
+    // A gateway the heartbeat knows is down is not attempted, matching the
+    // /ws chat short-circuit.
+    if !state.health().is_reachable() {
+        return gateway_unreachable();
+    }
     let status = state.status();
     status.info(
         "Submitting request...",
@@ -291,6 +302,23 @@ async fn chat(State(state): State<AppState>, body: String) -> Response {
         .await;
     }
     relay(result)
+}
+
+/// Renders the 502 envelope for a gateway the heartbeat knows is down: the
+/// request is not attempted, and the message is user-visible.
+fn gateway_unreachable() -> Response {
+    (
+        axum::http::StatusCode::BAD_GATEWAY,
+        [(header::CONTENT_TYPE, "application/json")],
+        serde_json::json!({
+            "error": {
+                "message": "Gateway unreachable",
+                "code": "gateway_unreachable",
+            }
+        })
+        .to_string(),
+    )
+        .into_response()
 }
 
 /// Renders the 400 envelope for a chat request that asked for a stream.
@@ -714,6 +742,49 @@ mod tests {
         let body = body_bytes(response).await;
         let json: serde_json::Value = serde_json::from_slice(&body).expect("error body is JSON");
         assert_eq!(json["error"]["code"], "gateway_unreachable");
+    }
+
+    #[tokio::test]
+    async fn a_gateway_known_down_short_circuits_the_catalog_with_bad_gateway() {
+        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        state.health().publish(false);
+        let request = Request::builder()
+            .uri("/v1/models")
+            .body(Body::empty())
+            .expect("static request parts are valid");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = body_bytes(response).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("error body is JSON");
+        assert_eq!(json["error"]["code"], "gateway_unreachable");
+        assert_eq!(
+            json["error"]["message"], "Gateway unreachable",
+            "the short-circuit message is user-visible"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_gateway_known_down_short_circuits_buffered_chat_with_bad_gateway() {
+        let (state, tape_dir) = state_for("http://127.0.0.1:1");
+        state.health().publish(false);
+        let response = router(state)
+            .oneshot(chat_request())
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = body_bytes(response).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("error body is JSON");
+        assert_eq!(json["error"]["code"], "gateway_unreachable");
+        assert_eq!(json["error"]["message"], "Gateway unreachable");
+        let raw =
+            std::fs::read_to_string(tape_dir.path().join("tape.jsonl")).expect("the tape exists");
+        assert!(
+            raw.trim().is_empty(),
+            "no upstream attempt means no tape event"
+        );
     }
 
     #[tokio::test]
