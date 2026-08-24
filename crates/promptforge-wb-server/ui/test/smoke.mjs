@@ -141,6 +141,10 @@ const input = window.document.querySelector(".mur-chat-input");
 const send = window.document.querySelector(".mur-send-btn");
 const mic = window.document.querySelector(".mic-button");
 const statusBar = window.document.querySelector(".status-bar");
+const statusText = window.document.querySelector(".status-bar__text");
+const statusSlot = window.document.querySelector(".status-bar__slot");
+const progressEl = window.document.querySelector(".status-bar__progress");
+const ledEl = window.document.querySelector(".status-bar__led");
 
 const failures = [];
 if (!dock) failures.push("#dock missing");
@@ -156,6 +160,21 @@ if (!input) failures.push(".mur-chat-input missing");
 if (!send) failures.push(".mur-send-btn missing");
 if (!mic) failures.push("voice plugin did not insert the mic button");
 if (!statusBar) failures.push("status bar placeholder missing");
+if (statusBar && statusBar.tagName !== "FOOTER") {
+  failures.push("the status bar is not a <footer> landmark");
+}
+if (!statusText) {
+  failures.push("status bar text element missing");
+} else if (statusText.textContent !== "Ready") {
+  failures.push(`status bar placeholder text is "${statusText.textContent}", expected "Ready"`);
+}
+if (!statusSlot) failures.push("status bar slot missing");
+if (!progressEl) {
+  failures.push("status bar progress element missing");
+} else if (!progressEl.hidden) {
+  failures.push("progress bar must start hidden");
+}
+if (!ledEl) failures.push("status bar activity LED missing");
 if (app && !app.classList.contains("mur-chat-empty")) {
   failures.push("fresh mount is not in the empty-chat state");
 }
