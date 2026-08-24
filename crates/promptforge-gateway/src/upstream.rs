@@ -6,11 +6,13 @@
 //! behind this same trait, with no change to routing or the request handler.
 
 use async_trait::async_trait;
+use futures_util::stream::BoxStream;
 use promptforge_gateway_config::Secret;
 
 use crate::error::GatewayError;
 use crate::wire::{
-    ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, RerankRequest, RerankResponse,
+    ChatChunk, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, RerankRequest,
+    RerankResponse,
 };
 
 /// A backend the gateway can forward a chat completion to.
@@ -65,6 +67,36 @@ pub(crate) trait Upstream: Send + Sync {
         req: RerankRequest,
         _upstream_model: &str,
     ) -> Result<RerankResponse, GatewayError> {
+        Err(GatewayError::ModelUnavailable(req.model))
+    }
+
+    /// Open a streaming chat completion for `req`, substituting
+    /// `upstream_model` for the caller's model name, and return the chunk
+    /// stream.
+    ///
+    /// The stream is boxed because the trait is used as `Arc<dyn Upstream>`:
+    /// an `impl Stream` return would break object safety. Each item is a
+    /// validated [`ChatChunk`]; a mid-stream failure surfaces as an `Err`
+    /// item rather than a silently truncated stream.
+    ///
+    /// The default is [`GatewayError::ModelUnavailable`]: upstreams without a
+    /// streaming implementation decline the workload rather than fabricate a
+    /// response.
+    ///
+    /// # Errors
+    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure
+    /// before the stream starts, [`GatewayError::UpstreamStatus`] on a
+    /// non-success backend status, and [`GatewayError::ModelUnavailable`]
+    /// when the upstream cannot stream at all.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "wired up by the stream:true SSE relay step")
+    )]
+    async fn stream(
+        &self,
+        req: ChatRequest,
+        _upstream_model: &str,
+    ) -> Result<BoxStream<'static, Result<ChatChunk, GatewayError>>, GatewayError> {
         Err(GatewayError::ModelUnavailable(req.model))
     }
 
@@ -414,6 +446,36 @@ mod tests {
         match err {
             GatewayError::ModelUnavailable(model) => assert_eq!(model, "local-classifier"),
             other => panic!("expected ModelUnavailable, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn default_stream_is_model_unavailable_and_object_safe() {
+        // Upstreams without a streaming implementation decline the workload
+        // with ModelUnavailable naming the caller's model. The call goes
+        // through `Arc<dyn Upstream>` to prove the boxed-stream signature
+        // stays object-safe.
+        struct ChatOnly;
+
+        #[async_trait]
+        impl Upstream for ChatOnly {
+            async fn send(
+                &self,
+                _req: ChatRequest,
+                _upstream_model: &str,
+            ) -> Result<ChatResponse, GatewayError> {
+                unreachable!("not under test")
+            }
+        }
+
+        let upstream: std::sync::Arc<dyn Upstream> = std::sync::Arc::new(ChatOnly);
+        match upstream
+            .stream(request("local-chat"), "ignored-alias")
+            .await
+        {
+            Err(GatewayError::ModelUnavailable(model)) => assert_eq!(model, "local-chat"),
+            Err(other) => panic!("expected ModelUnavailable, got {other:?}"),
+            Ok(_) => panic!("default must decline"),
         }
     }
 

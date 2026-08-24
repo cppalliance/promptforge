@@ -165,6 +165,50 @@ fn validate_choice(choice: &Value) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// One chunk of a streaming chat completion (OpenAI streaming shape).
+///
+/// A `stream: true` completion arrives as a sequence of these chunks, each
+/// carrying partial `delta` content instead of a complete `message`. The
+/// terminal `[DONE]` sentinel is not JSON and never deserializes into this
+/// type; the relay special-cases it before parsing.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "wired up by the stream:true SSE relay step")
+)]
+pub(crate) struct ChatChunk {
+    /// The model name, rewritten to the caller's requested name.
+    pub model: String,
+    /// The partial choices for this chunk.
+    pub choices: Vec<ChatChunkChoice>,
+    /// Every field the gateway does not name (for example `usage` on a
+    /// final chunk), preserved verbatim.
+    #[serde(flatten)]
+    pub rest: Map<String, Value>,
+}
+
+/// One partial choice in a [`ChatChunk`]: an `index` plus a `delta` carrying
+/// the incremental payload (`role` on the first chunk, content or tool-call
+/// fragments thereafter).
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "wired up by the stream:true SSE relay step")
+)]
+pub(crate) struct ChatChunkChoice {
+    /// The completion choice this delta belongs to.
+    pub index: u32,
+    /// The incremental payload, kept as opaque JSON so every field the
+    /// gateway does not route passes through untouched.
+    pub delta: Value,
+    /// Every field the gateway does not name (for example `finish_reason`
+    /// on the terminal chunk), preserved verbatim.
+    #[serde(flatten)]
+    pub rest: Map<String, Value>,
+}
+
 /// The text to embed: one string or a batch of strings (OpenAI shape).
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
@@ -578,6 +622,60 @@ mod tests {
             serde_json::from_value(serde_json::to_value(&resp).expect("serialize"))
                 .expect("reparse");
         assert_eq!(resp, reparsed);
+    }
+
+    #[test]
+    fn chat_chunk_round_trips_and_preserves_unknown_fields() {
+        let json = serde_json::json!({
+            "id": "chatcmpl-1",
+            "object": "chat.completion.chunk",
+            "model": "backend",
+            "choices": [
+                { "index": 0, "delta": { "role": "assistant", "content": "Hel" }, "finish_reason": null }
+            ],
+        });
+        let chunk: ChatChunk = serde_json::from_value(json).expect("parse chunk");
+        assert_eq!(chunk.model, "backend");
+        assert_eq!(chunk.choices.len(), 1);
+        assert_eq!(chunk.choices[0].index, 0);
+        assert_eq!(
+            chunk.choices[0]
+                .delta
+                .get("content")
+                .and_then(Value::as_str),
+            Some("Hel")
+        );
+        // Unnamed fields land in `rest`, not on named fields.
+        assert!(chunk.rest.contains_key("id"));
+        assert!(chunk.choices[0].rest.contains_key("finish_reason"));
+        assert!(!chunk.rest.contains_key("model"));
+        assert!(!chunk.rest.contains_key("choices"));
+        let reparsed: ChatChunk =
+            serde_json::from_value(serde_json::to_value(&chunk).expect("serialize"))
+                .expect("reparse");
+        assert_eq!(chunk, reparsed);
+    }
+
+    #[test]
+    fn chat_chunk_round_trips_an_empty_delta() {
+        // The terminal chunk legitimately carries an empty delta plus a
+        // finish_reason; it must survive the round-trip.
+        let json = serde_json::json!({
+            "model": "backend",
+            "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }],
+        });
+        let chunk: ChatChunk = serde_json::from_value(json).expect("parse chunk");
+        assert_eq!(
+            chunk.choices[0]
+                .rest
+                .get("finish_reason")
+                .and_then(Value::as_str),
+            Some("stop")
+        );
+        let reparsed: ChatChunk =
+            serde_json::from_value(serde_json::to_value(&chunk).expect("serialize"))
+                .expect("reparse");
+        assert_eq!(chunk, reparsed);
     }
 
     fn embedding_request(model: &str, input: EmbeddingInput) -> EmbeddingRequest {
