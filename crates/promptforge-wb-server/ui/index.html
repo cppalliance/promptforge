@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PromptForge</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">PromptForge</div>
+    <label class="picker-label" for="model-picker">Model</label>
+    <select id="model-picker" class="picker" disabled>
+      <option>Loading&hellip;</option>
+    </select>
+    <div id="model-description" class="model-description"></div>
+  </aside>
+  <main class="chat">
+    <div id="messages" class="messages" aria-live="polite"></div>
+    <form id="composer" class="composer">
+      <textarea id="input" rows="1" placeholder="Message&hellip;" autocomplete="off"></textarea>
+      <button id="send" type="submit" title="Send (Enter)" disabled>Send</button>
+    </form>
+  </main>
+</div>
+<script src="/markdown-it.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
