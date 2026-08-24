@@ -99,7 +99,8 @@ pub enum GatewayError {
 }
 
 /// Bearer-authenticated client for the gateway's OpenAI-compatible
-/// endpoints.
+/// endpoints. An empty API key sends no `Authorization` header at all, for
+/// gateways running with authentication disabled.
 #[derive(Clone)]
 pub struct GatewayClient {
     http: reqwest::Client,
@@ -121,6 +122,8 @@ impl GatewayClient {
     /// Builds a client for `base_url` authenticating with `api_key`.
     ///
     /// A trailing slash on `base_url` is trimmed so route joins stay clean.
+    /// An empty `api_key` disables authentication: requests then carry no
+    /// `Authorization` header.
     ///
     /// # Errors
     /// Returns [`GatewayError::Build`] if the TLS backend cannot initialize.
@@ -135,6 +138,17 @@ impl GatewayClient {
         })
     }
 
+    /// Applies bearer authentication to `request`, unless the client was
+    /// built with an empty API key, in which case the request goes out with
+    /// no `Authorization` header.
+    fn authorize(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if self.api_key.is_empty() {
+            request
+        } else {
+            request.bearer_auth(&self.api_key)
+        }
+    }
+
     /// Fetches the gateway's model catalog from `GET /v1/models`.
     ///
     /// A non-success status is relayed in the returned
@@ -146,9 +160,7 @@ impl GatewayClient {
     /// be read.
     pub async fn list_models(&self) -> Result<GatewayResponse, GatewayError> {
         let response = self
-            .http
-            .get(format!("{}/v1/models", self.base_url))
-            .bearer_auth(&self.api_key)
+            .authorize(self.http.get(format!("{}/v1/models", self.base_url)))
             .send()
             .await
             .map_err(|source| GatewayError::Transport(Box::new(source)))?;
@@ -170,9 +182,10 @@ impl GatewayClient {
         request: &ChatRequest,
     ) -> Result<GatewayResponse, GatewayError> {
         let response = self
-            .http
-            .post(format!("{}/v1/chat/completions", self.base_url))
-            .bearer_auth(&self.api_key)
+            .authorize(
+                self.http
+                    .post(format!("{}/v1/chat/completions", self.base_url)),
+            )
             .json(request)
             .send()
             .await
@@ -203,9 +216,10 @@ impl GatewayClient {
             object.insert("stream".to_string(), serde_json::Value::Bool(true));
         }
         let response = self
-            .http
-            .post(format!("{}/v1/chat/completions", self.base_url))
-            .bearer_auth(&self.api_key)
+            .authorize(
+                self.http
+                    .post(format!("{}/v1/chat/completions", self.base_url)),
+            )
             .json(&body)
             .send()
             .await

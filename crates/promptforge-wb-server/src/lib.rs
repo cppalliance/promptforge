@@ -17,7 +17,7 @@ mod voice;
 
 pub use app::{AppError, AppState, DEFAULT_ADDR, router};
 pub use config::{
-    Config, ConfigError, DEFAULT_CONFIG_PATH, DEFAULT_VOICE_INTERVAL_MS,
+    Config, ConfigError, DEFAULT_CONFIG_PATH, DEFAULT_GATEWAY_BASE_URL, DEFAULT_VOICE_INTERVAL_MS,
     DEFAULT_VOICE_WINDOW_SECONDS, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig,
 };
 pub use gateway::{
