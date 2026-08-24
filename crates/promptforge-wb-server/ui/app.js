@@ -13,6 +13,7 @@ const pickerEl = document.getElementById("model-picker");
 const descriptionEl = document.getElementById("model-description");
 const micEl = document.getElementById("mic");
 const voiceStatusEl = document.getElementById("voice-status");
+const interimEl = document.getElementById("interim");
 
 // OpenAI-shaped history: [{role, content}, ...], sent verbatim to /chat.
 const history = [];
@@ -198,6 +199,18 @@ function setRecording(next) {
   micEl.title = next ? "Stop recording" : "Push to talk";
 }
 
+// The live interim transcript above the composer: each interim replaces the
+// last, so the user watches the take rewrite itself as they speak.
+function showInterim(text) {
+  interimEl.textContent = text;
+  interimEl.classList.add("visible");
+}
+
+function clearInterim() {
+  interimEl.textContent = "";
+  interimEl.classList.remove("visible");
+}
+
 // Tears down a session's audio half. The socket half is closed by the
 // caller, after any in-flight "stop" reply has had a chance to arrive.
 function releaseAudio(session) {
@@ -260,8 +273,9 @@ async function startVoice() {
       }
     };
     ws.addEventListener("message", (event) => {
-      showVoiceStatus(voiceReplyNote(event.data), false);
-      ws.close();
+      if (handleVoiceMessage(event.data)) {
+        ws.close();
+      }
     });
     ws.addEventListener("close", () => {
       if (voice === session) {
@@ -276,6 +290,7 @@ async function startVoice() {
     // keeps the graph pulling on every engine.
     node.connect(ctx.destination);
     voice = session;
+    clearInterim();
     ws.send("start");
     setRecording(true);
     showVoiceStatus("Recording - press the mic button again to stop.", false);
@@ -296,18 +311,38 @@ async function startVoice() {
   }
 }
 
-// Renders the server's reply to "stop" as a human note. The reply is JSON
-// ({"frames":N}); anything else is shown verbatim.
-function voiceReplyNote(data) {
+// Handles one server text message. An interim rewrites the live area above
+// the composer; a final replaces the interims and lands in the input box,
+// ready to edit and send. Returns true when the take is over and the socket
+// should close.
+function handleVoiceMessage(data) {
+  let msg;
   try {
-    const parsed = JSON.parse(data);
-    if (typeof parsed.frames === "number") {
-      return `Captured ${parsed.frames} PCM frames (16 kHz mono).`;
-    }
+    msg = JSON.parse(data);
   } catch {
-    // Not JSON: fall through and show the raw text.
+    msg = null;
   }
-  return String(data);
+  if (msg && msg.type === "interim" && typeof msg.text === "string") {
+    showInterim(msg.text);
+    return false;
+  }
+  if (msg && msg.type === "final") {
+    clearInterim();
+    const text = typeof msg.text === "string" ? msg.text.trim() : "";
+    if (text !== "") {
+      inputEl.value = text;
+      autoResize();
+      inputEl.focus();
+      showVoiceStatus("Transcript ready - edit, then send.", false);
+    } else {
+      const frames = typeof msg.frames === "number" ? msg.frames : 0;
+      showVoiceStatus(`No speech detected (${frames} PCM frames captured).`, false);
+    }
+    return true;
+  }
+  // Anything else is shown verbatim and ends the take.
+  showVoiceStatus(String(data), false);
+  return true;
 }
 
 function stopVoice() {
@@ -321,8 +356,8 @@ function stopVoice() {
   const { ws } = session;
   if (ws.readyState === WebSocket.OPEN) {
     ws.send("stop");
-    // The frame-count reply closes the socket from the message listener;
-    // this is the fallback if the reply never comes.
+    // The final reply closes the socket from the message listener; this is
+    // the fallback if the reply never comes.
     setTimeout(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.close();

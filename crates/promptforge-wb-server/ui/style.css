@@ -281,6 +281,25 @@ body {
   }
 }
 
+.interim {
+  flex: none;
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 24px;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text-dim);
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.15s ease-out, padding 0.15s ease-out;
+}
+
+.interim.visible {
+  max-height: 60px;
+  padding: 0 24px 4px;
+}
+
 .voice-status {
   flex: none;
   max-width: 760px;

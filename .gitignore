@@ -5,3 +5,5 @@
 /local/
 /guide/book/
 *.env
+# Voice test fixtures, downloaded out of band (see design-promptforge-wb-1.md).
+/crates/promptforge-wb-server/tests/fixtures/
