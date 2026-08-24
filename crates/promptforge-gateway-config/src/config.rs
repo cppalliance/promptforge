@@ -43,6 +43,10 @@ fn default_n_predict() -> u32 {
     8192
 }
 
+fn default_max_queue() -> usize {
+    100
+}
+
 /// A secret string (an API key or the shared token) that never serializes and
 /// redacts in both `Debug` and `Display`.
 ///
@@ -126,6 +130,8 @@ pub struct Config {
     local: LocalConfig,
     /// Physical compute resources with concurrency limits.
     devices: Vec<DeviceConfig>,
+    /// Named pools of compute with a shared concurrency limit and queue.
+    dominions: Vec<DominionConfig>,
     /// The configured backends.
     endpoints: Vec<EndpointConfig>,
     /// The routing table from model name to remote backend.
@@ -149,6 +155,8 @@ struct RawConfig {
     local: LocalConfig,
     #[serde(rename = "device", default)]
     devices: Vec<DeviceConfig>,
+    #[serde(rename = "dominion", default)]
+    dominions: Vec<DominionConfig>,
     #[serde(rename = "endpoint", default)]
     endpoints: Vec<EndpointConfig>,
     #[serde(rename = "model", default)]
@@ -166,6 +174,7 @@ impl From<RawConfig> for Config {
             queue: raw.queue,
             local: raw.local,
             devices: raw.devices,
+            dominions: raw.dominions,
             endpoints: raw.endpoints,
             models: raw.models,
             local_models: raw.local_models,
@@ -218,6 +227,62 @@ pub struct LaneConfig {
     device: Option<String>,
 }
 
+/// Whether a dominion pools remote providers or local GPUs managed by the
+/// gateway.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum DominionKind {
+    /// A pool of remote HTTP providers, bindable by `[[endpoint]]` entries.
+    Remote,
+    /// A local GPU, bindable by `[[local_model]]` entries.
+    Local,
+}
+
+/// What a dominion's admission queue does when it is full.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum QueuePolicy {
+    /// Wait for a slot up to `max_queue` waiting requests, then reject.
+    #[default]
+    Queue,
+    /// Reject immediately when no concurrency slot is free (fail-fast).
+    Reject,
+}
+
+/// One named pool of compute declared as `[[dominion]]`.
+///
+/// A dominion carries a concurrency limit and a bounded waiting queue that
+/// every bound endpoint or local model shares. An endpoint or local model
+/// without a `dominion` is unlimited, as when no cap is set at all.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct DominionConfig {
+    /// Operator-chosen dominion id, referenced by endpoints and local models.
+    id: String,
+    /// Remote provider pool or local GPU.
+    kind: DominionKind,
+    /// Max concurrent requests admitted across every binder. Absent means
+    /// unlimited.
+    #[serde(default)]
+    max_concurrency: Option<usize>,
+    /// Max waiting requests before new admits are rejected. Defaults to 100.
+    #[serde(default = "default_max_queue")]
+    max_queue: usize,
+    /// Whether a full queue waits or rejects. Defaults to `queue`.
+    #[serde(default)]
+    policy: QueuePolicy,
+    /// Whether waiting callers are served round-robin by client key.
+    /// Defaults to true.
+    #[serde(default = "default_true")]
+    fair_scheduling: bool,
+    /// VRAM budget in gibibytes for co-residency checks. Local kind only.
+    #[serde(default)]
+    vram_gb: Option<u32>,
+}
+
 /// Settings under `[local]` for artifact cache paths.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -252,6 +317,18 @@ pub struct LocalModelConfig {
     /// Optional lane id under the device (`[[device.lane]]`).
     #[serde(default)]
     lane: Option<String>,
+    /// Optional local dominion id (`[[dominion]]`) binding this model.
+    #[serde(default)]
+    dominion: Option<String>,
+    /// Max concurrent inferences: the child's `--parallel` and the gateway
+    /// queue limit. Stays optional during the dominion transition so an unset
+    /// field cannot override a legacy lane's concurrency with the default.
+    #[serde(default)]
+    parallel: Option<u32>,
+    /// VRAM footprint estimate in gibibytes for the dominion co-residency
+    /// check.
+    #[serde(default)]
+    vram_gb: Option<u32>,
     /// Context window size in tokens (`--ctx-size`).
     context: u32,
     /// Whether thinking tokens are never, always, or switchably available.
@@ -316,6 +393,10 @@ pub struct EndpointConfig {
     /// Optional remote device id whose concurrency governs this endpoint.
     #[serde(default)]
     device: Option<String>,
+    /// Optional remote dominion id (`[[dominion]]`) whose shared limit and
+    /// queue govern this endpoint. Absent means unlimited pass-through.
+    #[serde(default)]
+    dominion: Option<String>,
 }
 
 /// How a model exposes chain-of-thought / thinking tokens to callers.

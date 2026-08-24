@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 use url::Url;
 
-use super::{Config, DeviceKind, is_sha256_hex};
+use super::{Config, DeviceKind, DominionKind, is_sha256_hex};
 use crate::error::ConfigError;
 
 impl Config {
@@ -21,7 +21,10 @@ impl Config {
     /// duplicate id, a model with no or duplicate endpoints, a model naming an
     /// undefined endpoint, a malformed endpoint or web-search URL, an
     /// out-of-vocabulary freshness/safesearch default, an invalid
-    /// `[[local_model]]`, `queue.max_depth` below 1, or a concurrency below 1.
+    /// `[[local_model]]`, `queue.max_depth` below 1, a concurrency below 1, or
+    /// a `[[dominion]]` violation (duplicate or empty id, `max_concurrency` or
+    /// `max_queue` below 1, `vram_gb` on a remote dominion, or a binding to an
+    /// undefined or wrong-kind dominion).
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
         if self.server.api_key.is_empty() {
             return Err(ConfigError::Validation(
@@ -34,6 +37,7 @@ impl Config {
             ));
         }
         self.validate_devices()?;
+        self.validate_dominions()?;
         let endpoint_ids = self.validate_endpoints()?;
         self.validate_models(&endpoint_ids)?;
         self.validate_tools()?;
@@ -157,6 +161,46 @@ impl Config {
         Ok(())
     }
 
+    fn validate_dominions(&self) -> Result<(), ConfigError> {
+        let mut dominion_ids = HashSet::new();
+        for dominion in &self.dominions {
+            if dominion.id.trim().is_empty() {
+                return Err(ConfigError::Validation(
+                    "dominion id must not be empty".to_string(),
+                ));
+            }
+            if !dominion_ids.insert(dominion.id.as_str()) {
+                return Err(ConfigError::Validation(format!(
+                    "duplicate dominion id {}",
+                    dominion.id
+                )));
+            }
+            if let Some(max_concurrency) = dominion.max_concurrency
+                && max_concurrency < 1
+            {
+                return Err(ConfigError::Validation(format!(
+                    "dominion {} max_concurrency must be at least 1",
+                    dominion.id
+                )));
+            }
+            if dominion.max_queue < 1 {
+                return Err(ConfigError::Validation(format!(
+                    "dominion {} max_queue must be at least 1",
+                    dominion.id
+                )));
+            }
+            // Kind-incompatible payloads are rejected, same spirit as
+            // CFG-004: a VRAM budget is meaningful only for a local GPU.
+            if dominion.kind == DominionKind::Remote && dominion.vram_gb.is_some() {
+                return Err(ConfigError::Validation(format!(
+                    "remote dominion {} must not set vram_gb",
+                    dominion.id
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn validate_endpoints(&self) -> Result<HashSet<&str>, ConfigError> {
         let mut endpoint_ids = HashSet::new();
         for endpoint in &self.endpoints {
@@ -199,6 +243,21 @@ impl Config {
                 if device.kind != DeviceKind::Remote {
                     return Err(ConfigError::Validation(format!(
                         "endpoint {} references non-remote device {device_id}",
+                        endpoint.id
+                    )));
+                }
+            }
+            if let Some(dominion_id) = &endpoint.dominion {
+                let dominion = self.dominions.iter().find(|d| d.id == *dominion_id);
+                let Some(dominion) = dominion else {
+                    return Err(ConfigError::Validation(format!(
+                        "endpoint {} names undefined dominion {dominion_id}",
+                        endpoint.id
+                    )));
+                };
+                if dominion.kind != DominionKind::Remote {
+                    return Err(ConfigError::Validation(format!(
+                        "endpoint {} references non-remote dominion {dominion_id}",
                         endpoint.id
                     )));
                 }
@@ -345,6 +404,29 @@ impl Config {
                     "local_model {} sha256 must be 64 lowercase hex characters",
                     local_model.name
                 )));
+            }
+            if let Some(parallel) = local_model.parallel
+                && parallel < 1
+            {
+                return Err(ConfigError::Validation(format!(
+                    "local_model {} parallel must be at least 1",
+                    local_model.name
+                )));
+            }
+            if let Some(dominion_id) = &local_model.dominion {
+                let dominion = self.dominions.iter().find(|d| d.id == *dominion_id);
+                let Some(dominion) = dominion else {
+                    return Err(ConfigError::Validation(format!(
+                        "local_model {} names undefined dominion {dominion_id}",
+                        local_model.name
+                    )));
+                };
+                if dominion.kind != DominionKind::Local {
+                    return Err(ConfigError::Validation(format!(
+                        "local_model {} must reference a local dominion, but {dominion_id} is remote",
+                        local_model.name
+                    )));
+                }
             }
             self.resolve_local_concurrency(local_model)?;
         }
