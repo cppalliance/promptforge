@@ -11,6 +11,7 @@ use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, post};
 use futures_util::stream::{self, StreamExt};
 
+use crate::chat_ws;
 use crate::config::Config;
 use crate::gateway::{ChatRequest, ChatStream, GatewayClient, GatewayError, GatewayResponse};
 use crate::tape::{Tape, TapeError, TapeEvent};
@@ -61,6 +62,16 @@ impl AppState {
     pub(crate) fn voice_engine(&self) -> Option<Arc<VoiceEngine>> {
         self.voice.clone()
     }
+
+    /// The gateway client, shared with the chat WebSocket sessions.
+    pub(crate) fn gateway_client(&self) -> &GatewayClient {
+        &self.gateway
+    }
+
+    /// The session tape, shared with the chat WebSocket sessions.
+    pub(crate) fn tape(&self) -> &Arc<Tape> {
+        &self.tape
+    }
 }
 
 /// A shared-state construction failure.
@@ -94,6 +105,7 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/v1/models", get(models))
         .route("/chat", post(chat))
+        .route("/ws", get(chat_ws::upgrade))
         .route("/voice", get(voice::upgrade))
         .with_state(state)
 }
@@ -279,7 +291,7 @@ async fn chat_stream(
 ///
 /// Role-priming and usage events have no `choices[0].delta.content` and
 /// contribute nothing to the assembled response.
-fn delta_content(payload: &str) -> Option<String> {
+pub(crate) fn delta_content(payload: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(payload).ok()?;
     let content = value
         .get("choices")?
@@ -292,7 +304,7 @@ fn delta_content(payload: &str) -> Option<String> {
 }
 
 /// Parses a gateway body as JSON, falling back to a plain string.
-fn value_from_bytes(body: &[u8]) -> serde_json::Value {
+pub(crate) fn value_from_bytes(body: &[u8]) -> serde_json::Value {
     serde_json::from_slice(body)
         .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(body).into_owned()))
 }
@@ -300,7 +312,7 @@ fn value_from_bytes(body: &[u8]) -> serde_json::Value {
 /// Records one chat round-trip on the session tape.
 ///
 /// A tape failure is logged and never changes the response.
-async fn tape_round_trip(
+pub(crate) async fn tape_round_trip(
     tape: &Arc<Tape>,
     model: String,
     request: serde_json::Value,
@@ -322,25 +334,29 @@ async fn tape_round_trip(
     }
 }
 
-/// Tape bookkeeping carried through one streaming chat's SSE body stream.
+/// Tape bookkeeping carried through one streaming chat.
 ///
 /// The stream's finalizer consumes this exactly once, so a streamed chat
 /// always tapes exactly one event.
-struct StreamTape {
-    tape: Arc<Tape>,
-    model: String,
-    request: serde_json::Value,
-    started: Instant,
+pub(crate) struct StreamTape {
+    /// The session tape to write to.
+    pub(crate) tape: Arc<Tape>,
+    /// The model the request named.
+    pub(crate) model: String,
+    /// The request as received, taped verbatim.
+    pub(crate) request: serde_json::Value,
+    /// When the gateway call started, for the latency field.
+    pub(crate) started: Instant,
     /// Concatenation of every content delta forwarded so far.
-    assembled: String,
+    pub(crate) assembled: String,
     /// The mid-stream failure note, when the gateway stream errored.
-    error: Option<String>,
+    pub(crate) error: Option<String>,
 }
 
 impl StreamTape {
     /// Writes the stream's single tape event: the assembled content on
     /// success, or an error note plus the partial content on failure.
-    async fn record(self) {
+    pub(crate) async fn record(self) {
         let Self {
             tape,
             model,
@@ -684,6 +700,23 @@ mod tests {
     #[tokio::test]
     async fn pcm_worklet_is_served_as_javascript() {
         assert_ui_asset("/pcm-worklet.js", "text/javascript; charset=utf-8").await;
+    }
+
+    /// A plain GET to `/ws` without upgrade headers is rejected with 400,
+    /// which proves the route is mounted; the WebSocket chat flow is covered
+    /// by the `chat_ws` module's own tests over a live socket.
+    #[tokio::test]
+    async fn ws_route_rejects_a_non_upgrade_get() {
+        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let request = Request::builder()
+            .uri("/ws")
+            .body(Body::empty())
+            .expect("static request parts are valid");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     /// A plain GET to `/voice` without upgrade headers is rejected with 400,
