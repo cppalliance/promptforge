@@ -6,14 +6,12 @@ use std::time::{Duration, Instant};
 use axum::Router;
 use axum::extract::State;
 use axum::http::header;
-use axum::response::sse::Event;
-use axum::response::{IntoResponse, Response, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use futures_util::stream::{self, StreamExt};
 
 use crate::chat_ws;
 use crate::config::Config;
-use crate::gateway::{ChatRequest, ChatStream, GatewayClient, GatewayError, GatewayResponse};
+use crate::gateway::{ChatRequest, GatewayClient, GatewayError, GatewayResponse};
 use crate::tape::{Tape, TapeError, TapeEvent};
 use crate::transcribe::{TranscribeError, VoiceEngine};
 use crate::voice;
@@ -174,24 +172,28 @@ async fn models(State(state): State<AppState>) -> Response {
     relay(state.gateway.list_models().await)
 }
 
-/// Forwards a chat completion to the gateway, tapes the round-trip, and
-/// relays the reply verbatim.
+/// Forwards a buffered chat completion to the gateway, tapes the
+/// round-trip, and relays the reply verbatim.
 ///
 /// A completed round-trip is recorded on the session tape; a tape failure is
-/// logged and never changes the response. A request carrying
-/// `"stream": true` is answered with a workbench SSE stream instead.
+/// logged and never changes the response. Streaming moved to `GET /ws`: a
+/// request carrying `"stream": true` is rejected with 400.
 async fn chat(State(state): State<AppState>, body: String) -> Response {
     let request_value: serde_json::Value = match serde_json::from_str(&body) {
         Ok(value) => value,
         Err(error) => return bad_request(&error),
     };
+    if request_value
+        .get("stream")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        return stream_unsupported();
+    }
     let request: ChatRequest = match serde_json::from_value(request_value.clone()) {
         Ok(request) => request,
         Err(error) => return bad_request(&error),
     };
-    if wants_stream(&request_value) {
-        return chat_stream(state, request, request_value).await;
-    }
     let started = Instant::now();
     let result = state.gateway.chat_completion(&request).await;
     let latency = started.elapsed();
@@ -209,98 +211,20 @@ async fn chat(State(state): State<AppState>, body: String) -> Response {
     relay(result)
 }
 
-/// Returns true when the client asked for an SSE stream with
-/// `"stream": true` in the request JSON.
-fn wants_stream(request: &serde_json::Value) -> bool {
-    request.get("stream").and_then(serde_json::Value::as_bool) == Some(true)
-}
-
-/// Forwards a streaming chat completion as a workbench SSE stream.
-///
-/// The gateway's SSE payloads are relayed event-for-event as they arrive,
-/// including the terminal `[DONE]`. Exactly one tape event is written when
-/// the stream ends: the assembled content on success, or an error note when
-/// the gateway stream fails mid-way. A gateway that declines the stream with
-/// a non-success status is relayed and taped exactly like a buffered chat.
-async fn chat_stream(
-    state: AppState,
-    request: ChatRequest,
-    request_value: serde_json::Value,
-) -> Response {
-    let started = Instant::now();
-    let result = state.gateway.chat_completion_stream(&request).await;
-    let chat_stream = match result {
-        Ok(chat_stream) => chat_stream,
-        Err(error) => return relay(Err(error)),
-    };
-    match chat_stream {
-        ChatStream::Relay(upstream) => {
-            let latency = started.elapsed();
-            let response_value = value_from_bytes(&upstream.body);
-            tape_round_trip(
-                &state.tape,
-                request.model,
-                request_value,
-                response_value,
-                latency,
-            )
-            .await;
-            relay(Ok(upstream))
-        }
-        ChatStream::Stream { status, payloads } => {
-            let finish = StreamTape {
-                tape: Arc::clone(&state.tape),
-                model: request.model,
-                request: request_value,
-                started,
-                assembled: String::new(),
-                error: None,
-            };
-            let events = stream::unfold(
-                (payloads, finish),
-                |(mut payloads, mut finish)| async move {
-                    match payloads.next().await {
-                        Some(Ok(payload)) => {
-                            if payload != "[DONE]"
-                                && let Some(text) = delta_content(&payload)
-                            {
-                                finish.assembled.push_str(&text);
-                            }
-                            let event =
-                                Ok::<_, std::convert::Infallible>(Event::default().data(payload));
-                            Some((event, (payloads, finish)))
-                        }
-                        Some(Err(error)) => {
-                            finish.error = Some(error.to_string());
-                            finish.record().await;
-                            None
-                        }
-                        None => {
-                            finish.record().await;
-                            None
-                        }
-                    }
-                },
-            );
-            (status, Sse::new(events)).into_response()
-        }
-    }
-}
-
-/// Extracts the text delta from one SSE payload, if it carries content.
-///
-/// Role-priming and usage events have no `choices[0].delta.content` and
-/// contribute nothing to the assembled response.
-pub(crate) fn delta_content(payload: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
-    let content = value
-        .get("choices")?
-        .as_array()?
-        .first()?
-        .get("delta")?
-        .get("content")?
-        .as_str()?;
-    Some(content.to_string())
+/// Renders the 400 envelope for a chat request that asked for a stream.
+fn stream_unsupported() -> Response {
+    (
+        axum::http::StatusCode::BAD_REQUEST,
+        [(header::CONTENT_TYPE, "application/json")],
+        serde_json::json!({
+            "error": {
+                "message": "streaming moved to GET /ws; POST /chat is buffered only",
+                "code": "stream_unsupported",
+            }
+        })
+        .to_string(),
+    )
+        .into_response()
 }
 
 /// Parses a gateway body as JSON, falling back to a plain string.
@@ -331,48 +255,6 @@ pub(crate) async fn tape_round_trip(
         Ok(Ok(())) => {}
         Ok(Err(error)) => tracing::error!(%error, "session tape event was not recorded"),
         Err(error) => tracing::error!(%error, "session tape writer did not finish"),
-    }
-}
-
-/// Tape bookkeeping carried through one streaming chat.
-///
-/// The stream's finalizer consumes this exactly once, so a streamed chat
-/// always tapes exactly one event.
-pub(crate) struct StreamTape {
-    /// The session tape to write to.
-    pub(crate) tape: Arc<Tape>,
-    /// The model the request named.
-    pub(crate) model: String,
-    /// The request as received, taped verbatim.
-    pub(crate) request: serde_json::Value,
-    /// When the gateway call started, for the latency field.
-    pub(crate) started: Instant,
-    /// Concatenation of every content delta forwarded so far.
-    pub(crate) assembled: String,
-    /// The mid-stream failure note, when the gateway stream errored.
-    pub(crate) error: Option<String>,
-}
-
-impl StreamTape {
-    /// Writes the stream's single tape event: the assembled content on
-    /// success, or an error note plus the partial content on failure.
-    pub(crate) async fn record(self) {
-        let Self {
-            tape,
-            model,
-            request,
-            started,
-            assembled,
-            error,
-        } = self;
-        let response = match error {
-            Some(message) => serde_json::json!({
-                "error": message,
-                "content": assembled,
-            }),
-            None => serde_json::Value::String(assembled),
-        };
-        tape_round_trip(&tape, model, request, response, started.elapsed()).await;
     }
 }
 
@@ -440,12 +322,6 @@ mod tests {
         r#"{"model":"test-model","messages":[{"role":"user","content":"ping"}]}"#;
     const STREAM_CHAT_BODY: &str =
         r#"{"model":"test-model","messages":[{"role":"user","content":"ping"}],"stream":true}"#;
-    const STREAM_BODY: &str = concat!(
-        "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n",
-        "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"po\"}}]}\n\n",
-        "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ng\"}}]}\n\n",
-        "data: [DONE]\n\n",
-    );
 
     fn config_for(base_url: &str, tape_path: &Path) -> Config {
         Config {
@@ -509,66 +385,6 @@ mod tests {
         (
             [(header::CONTENT_TYPE, "text/plain")],
             "gateway replied in plain text",
-        )
-            .into_response()
-    }
-
-    async fn mock_chat_stream(headers: HeaderMap, Json(body): Json<serde_json::Value>) -> Response {
-        if !authorized(&headers) {
-            return StatusCode::UNAUTHORIZED.into_response();
-        }
-        assert_eq!(body["stream"], true, "the stream flag is forwarded");
-        ([(header::CONTENT_TYPE, "text/event-stream")], STREAM_BODY).into_response()
-    }
-
-    /// Answers with one good SSE event, then aborts the body mid-stream.
-    ///
-    /// The pause after the first chunk gives hyper time to flush the headers
-    /// and the event before the body errors, so the client observes a stream
-    /// that fails mid-way rather than a connection that never answered.
-    async fn mock_chat_stream_dies(
-        headers: HeaderMap,
-        Json(body): Json<serde_json::Value>,
-    ) -> Response {
-        if !authorized(&headers) {
-            return StatusCode::UNAUTHORIZED.into_response();
-        }
-        assert_eq!(body["stream"], true, "the stream flag is forwarded");
-        let chunks = stream::unfold(0u8, |step| async move {
-            match step {
-                0 => Some((
-                    Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
-                        b"data: {\"choices\":[{\"delta\":{\"content\":\"po\"}}]}\n\n",
-                    )),
-                    1,
-                )),
-                1 => {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    Some((Err(std::io::Error::other("injected upstream failure")), 2))
-                }
-                _ => None,
-            }
-        });
-        (
-            [(header::CONTENT_TYPE, "text/event-stream")],
-            Body::from_stream(chunks),
-        )
-            .into_response()
-    }
-
-    /// Declines a streaming request with an ordinary JSON error envelope.
-    async fn mock_chat_declines_stream(
-        headers: HeaderMap,
-        Json(body): Json<serde_json::Value>,
-    ) -> Response {
-        if !authorized(&headers) {
-            return StatusCode::UNAUTHORIZED.into_response();
-        }
-        assert_eq!(body["stream"], true, "the stream flag is forwarded");
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            [(header::CONTENT_TYPE, "application/json")],
-            UPSTREAM_ERROR,
         )
             .into_response()
     }
@@ -896,119 +712,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn streaming_chat_relays_every_event_in_order_including_done() {
-        let base_url =
-            spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_stream)))
-                .await;
-        let (state, _tape_dir) = state_for(&base_url);
+    async fn a_streaming_chat_request_is_rejected_with_bad_request() {
+        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
         let response = router(state)
             .oneshot(stream_chat_request())
             .await
             .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::OK);
-        let content_type = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .expect("an SSE response sets content-type");
-        assert_eq!(content_type, "text/event-stream");
-        assert_eq!(
-            &body_bytes(response).await[..],
-            STREAM_BODY.as_bytes(),
-            "every gateway event is relayed in order, [DONE] included"
-        );
-    }
-
-    #[tokio::test]
-    async fn streamed_chat_writes_one_tape_event_with_the_assembled_response() {
-        let base_url =
-            spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_stream)))
-                .await;
-        let (state, tape_dir) = state_for(&base_url);
-        let response = router(state)
-            .oneshot(stream_chat_request())
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::OK);
-        let _ = body_bytes(response).await;
-
-        let raw =
-            std::fs::read_to_string(tape_dir.path().join("tape.jsonl")).expect("the tape exists");
-        let lines: Vec<&str> = raw.lines().collect();
-        assert_eq!(lines.len(), 1, "exactly one event per streamed chat");
-        let event: serde_json::Value =
-            serde_json::from_str(lines[0]).expect("the tape line is valid JSON");
-        assert_eq!(event["kind"], "chat");
-        assert_eq!(event["model"], "test-model");
-        assert_eq!(
-            event["request"]["stream"], true,
-            "the request is taped as received"
-        );
-        assert_eq!(
-            event["response"], "pong",
-            "the tape holds the assembled content, not the raw SSE"
-        );
-        assert!(event["latency_ms"].is_u64(), "latency_ms is an integer");
-    }
-
-    #[tokio::test]
-    async fn a_mid_stream_gateway_error_is_taped_as_an_error_note() {
-        let base_url =
-            spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_stream_dies)))
-                .await;
-        let (state, tape_dir) = state_for(&base_url);
-        let response = router(state)
-            .oneshot(stream_chat_request())
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let body = body_bytes(response).await;
-        let text = String::from_utf8(body.to_vec()).expect("the SSE body is UTF-8");
-        assert!(
-            text.contains("data: {\"choices\":[{\"delta\":{\"content\":\"po\"}}]}"),
-            "the good event arrived before the failure: {text:?}"
-        );
-        assert!(
-            !text.contains("[DONE]"),
-            "no terminal event after a mid-stream error: {text:?}"
-        );
-
-        let raw =
-            std::fs::read_to_string(tape_dir.path().join("tape.jsonl")).expect("the tape exists");
-        let lines: Vec<&str> = raw.lines().collect();
-        assert_eq!(lines.len(), 1, "an errored stream still tapes one event");
-        let event: serde_json::Value =
-            serde_json::from_str(lines[0]).expect("the tape line is valid JSON");
-        let message = event["response"]["error"]
-            .as_str()
-            .expect("the error note is a string");
-        assert!(!message.is_empty(), "the error note names the failure");
-        assert_eq!(
-            event["response"]["content"], "po",
-            "the partial content is taped alongside the error"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_declined_stream_is_relayed_and_taped_like_a_buffered_chat() {
-        let base_url = spawn_gateway(
-            Router::new().route("/v1/chat/completions", post(mock_chat_declines_stream)),
-        )
-        .await;
-        let (state, tape_dir) = state_for(&base_url);
-        let response = router(state)
-            .oneshot(stream_chat_request())
-            .await
-            .expect("the router is infallible");
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(&body_bytes(response).await[..], UPSTREAM_ERROR.as_bytes());
-
-        let raw =
-            std::fs::read_to_string(tape_dir.path().join("tape.jsonl")).expect("the tape exists");
-        let lines: Vec<&str> = raw.lines().collect();
-        assert_eq!(lines.len(), 1, "a declined stream tapes exactly one event");
-        let event: serde_json::Value =
-            serde_json::from_str(lines[0]).expect("the tape line is valid JSON");
-        assert_eq!(event["response"]["error"]["code"], "upstream_unavailable");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("error body is JSON");
+        assert_eq!(json["error"]["code"], "stream_unsupported");
     }
 
     #[tokio::test]
