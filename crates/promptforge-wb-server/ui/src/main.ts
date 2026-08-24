@@ -1,33 +1,45 @@
-"use strict";
-
 const md = window.markdownit({
   breaks: true,
   linkify: true,
 });
 
-const messagesEl = document.getElementById("messages");
-const composerEl = document.getElementById("composer");
-const inputEl = document.getElementById("input");
-const sendEl = document.getElementById("send");
-const pickerEl = document.getElementById("model-picker");
-const descriptionEl = document.getElementById("model-description");
-const micEl = document.getElementById("mic");
-const voiceStatusEl = document.getElementById("voice-status");
-const interimEl = document.getElementById("interim");
+const messagesEl = document.getElementById("messages") as HTMLDivElement;
+const composerEl = document.getElementById("composer") as HTMLFormElement;
+const inputEl = document.getElementById("input") as HTMLTextAreaElement;
+const sendEl = document.getElementById("send") as HTMLButtonElement;
+const pickerEl = document.getElementById("model-picker") as HTMLSelectElement;
+const descriptionEl = document.getElementById("model-description") as HTMLDivElement;
+const micEl = document.getElementById("mic") as HTMLButtonElement;
+const voiceStatusEl = document.getElementById("voice-status") as HTMLDivElement;
+const interimEl = document.getElementById("interim") as HTMLDivElement;
+
+interface HistoryEntry {
+  role: string;
+  content: string;
+}
+
+interface SseChunk {
+  choices?: Array<{ delta?: { content?: unknown } }>;
+}
+
+interface ModelEntry {
+  id: string;
+  description?: string;
+}
 
 // OpenAI-shaped history: [{role, content}, ...], sent verbatim to /chat.
-const history = [];
+const chatHistory: HistoryEntry[] = [];
 let streaming = false;
 
-function selectedModel() {
+function selectedModel(): string {
   return pickerEl.value;
 }
 
-function scrollToBottom() {
+function scrollToBottom(): void {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-function addBubble(role, text) {
+function addBubble(role: string, text: string): HTMLDivElement {
   const message = document.createElement("div");
   message.className = `message ${role}`;
   const bubble = document.createElement("div");
@@ -39,28 +51,28 @@ function addBubble(role, text) {
   return bubble;
 }
 
-function addErrorBubble(text) {
+function addErrorBubble(text: string): void {
   addBubble("error", text);
 }
 
-function setStreaming(next) {
+function setStreaming(next: boolean): void {
   streaming = next;
   sendEl.disabled = next || !pickerEl.value;
   inputEl.readOnly = next;
 }
 
-function autoResize() {
+function autoResize(): void {
   inputEl.style.height = "auto";
   inputEl.style.height = `${Math.min(inputEl.scrollHeight, 200)}px`;
 }
 
-async function loadModels() {
+async function loadModels(): Promise<void> {
   try {
     const response = await fetch("/v1/models");
     if (!response.ok) {
       throw new Error(`GET /v1/models answered ${response.status}`);
     }
-    const catalog = await response.json();
+    const catalog = (await response.json()) as { data?: ModelEntry[] };
     const entries = Array.isArray(catalog.data) ? catalog.data : [];
     pickerEl.textContent = "";
     if (entries.length === 0) {
@@ -80,17 +92,17 @@ async function loadModels() {
     pickerEl.textContent = "";
     pickerEl.appendChild(new Option("Model catalog unavailable", ""));
     pickerEl.disabled = true;
-    addErrorBubble(`Could not load the model catalog: ${error.message}`);
+    addErrorBubble(`Could not load the model catalog: ${(error as Error).message}`);
   }
 }
 
-function showDescription() {
-  const option = pickerEl.selectedOptions[0];
+function showDescription(): void {
+  const option = pickerEl.selectedOptions[0] as (HTMLOptionElement & { dataset: DOMStringMap }) | undefined;
   descriptionEl.textContent = (option && option.dataset.description) || "";
 }
 
-async function send(text) {
-  history.push({ role: "user", content: text });
+async function send(text: string): Promise<void> {
+  chatHistory.push({ role: "user", content: text });
   addBubble("user", text);
 
   const message = document.createElement("div");
@@ -109,7 +121,7 @@ async function send(text) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: selectedModel(),
-        messages: history,
+        messages: chatHistory,
         stream: true,
       }),
     });
@@ -117,17 +129,20 @@ async function send(text) {
       const detail = await response.text();
       throw new Error(`POST /chat answered ${response.status}: ${detail}`);
     }
+    if (!response.body) {
+      throw new Error("POST /chat answered without a body");
+    }
     await streamInto(response.body, (delta) => {
       assembled += delta;
       bubble.innerHTML = md.render(assembled);
       scrollToBottom();
     });
     if (assembled.length > 0) {
-      history.push({ role: "assistant", content: assembled });
+      chatHistory.push({ role: "assistant", content: assembled });
     }
   } catch (error) {
     message.remove();
-    addErrorBubble(error.message);
+    addErrorBubble((error as Error).message);
   } finally {
     message.classList.remove("streaming");
     setStreaming(false);
@@ -137,17 +152,21 @@ async function send(text) {
 
 // Reads an SSE body, invoking onDelta for each choices[0].delta.content.
 // fetch + ReadableStream rather than EventSource because /chat is a POST.
-async function streamInto(body, onDelta) {
-  const reader = body.pipeThrough(new TextDecoderStream()).getReader();
+async function streamInto(
+  body: ReadableStream<Uint8Array>,
+  onDelta: (delta: string) => void,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
   let buffer = "";
   for (;;) {
     const { value, done } = await reader.read();
     if (done) {
       break;
     }
-    buffer += value;
+    buffer += decoder.decode(value, { stream: true });
     const events = buffer.split("\n\n");
-    buffer = events.pop();
+    buffer = events.pop() ?? "";
     for (const event of events) {
       const data = event
         .split("\n")
@@ -160,7 +179,7 @@ async function streamInto(body, onDelta) {
       if (data === "[DONE]") {
         return;
       }
-      let chunk;
+      let chunk: unknown;
       try {
         chunk = JSON.parse(data);
       } catch {
@@ -168,7 +187,7 @@ async function streamInto(body, onDelta) {
         // reading the stream.
         continue;
       }
-      const delta = chunk.choices?.[0]?.delta?.content;
+      const delta = (chunk as SseChunk).choices?.[0]?.delta?.content;
       if (typeof delta === "string") {
         onDelta(delta);
       }
@@ -178,22 +197,30 @@ async function streamInto(body, onDelta) {
   // 15): the partial text stays on screen and the cursor stops blinking.
 }
 
-// Voice capture: the active session's {ws, ctx, source, node, stream}, or
-// null while idle. One session at a time; the mic button toggles it.
-let voice = null;
+interface VoiceSession {
+  ws: WebSocket;
+  ctx: AudioContext;
+  source: MediaStreamAudioSourceNode;
+  node: AudioWorkletNode;
+  stream: MediaStream;
+}
+
+// Voice capture: the active session, or null while idle. One session at a
+// time; the mic button toggles it.
+let voice: VoiceSession | null = null;
 let voiceStatusTimer = 0;
 
-function showVoiceStatus(text, isError) {
+function showVoiceStatus(text: string, isError: boolean): void {
   voiceStatusEl.textContent = text;
   voiceStatusEl.classList.toggle("error", Boolean(isError));
   voiceStatusEl.classList.add("visible");
   clearTimeout(voiceStatusTimer);
-  voiceStatusTimer = setTimeout(() => {
+  voiceStatusTimer = window.setTimeout(() => {
     voiceStatusEl.classList.remove("visible");
   }, 8000);
 }
 
-function setRecording(next) {
+function setRecording(next: boolean): void {
   micEl.classList.toggle("recording", next);
   micEl.setAttribute("aria-pressed", String(next));
   micEl.title = next ? "Stop recording" : "Push to talk";
@@ -201,19 +228,19 @@ function setRecording(next) {
 
 // The live interim transcript above the composer: each interim replaces the
 // last, so the user watches the take rewrite itself as they speak.
-function showInterim(text) {
+function showInterim(text: string): void {
   interimEl.textContent = text;
   interimEl.classList.add("visible");
 }
 
-function clearInterim() {
+function clearInterim(): void {
   interimEl.textContent = "";
   interimEl.classList.remove("visible");
 }
 
 // Tears down a session's audio half. The socket half is closed by the
 // caller, after any in-flight "stop" reply has had a chance to arrive.
-function releaseAudio(session) {
+function releaseAudio(session: VoiceSession): void {
   session.node.port.onmessage = null;
   session.source.disconnect();
   session.node.disconnect();
@@ -224,12 +251,12 @@ function releaseAudio(session) {
   session.ctx.close().catch(() => {});
 }
 
-async function startVoice() {
+async function startVoice(): Promise<void> {
   if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext || !window.WebSocket) {
     showVoiceStatus("Voice capture is not available in this browser.", true);
     return;
   }
-  let stream;
+  let stream: MediaStream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -241,24 +268,26 @@ async function startVoice() {
     });
   } catch (error) {
     const detail =
-      error && error.name === "NotAllowedError"
+      error instanceof Error && error.name === "NotAllowedError"
         ? "microphone permission denied"
-        : `microphone unavailable: ${error.message || error}`;
+        : `microphone unavailable: ${(error as Error).message || error}`;
     showVoiceStatus(detail, true);
     return;
   }
-  let ws;
-  let ctx;
+  let ws: WebSocket | undefined;
+  let ctx: AudioContext | undefined;
   try {
     ws = new WebSocket(
       `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/voice`,
     );
     ws.binaryType = "arraybuffer";
-    await new Promise((resolve, reject) => {
-      ws.addEventListener("open", resolve, { once: true });
-      ws.addEventListener("error", () => reject(new Error("the /voice socket failed to open")), {
-        once: true,
-      });
+    await new Promise<void>((resolve, reject) => {
+      ws!.addEventListener("open", () => resolve(), { once: true });
+      ws!.addEventListener(
+        "error",
+        () => reject(new Error("the /voice socket failed to open")),
+        { once: true },
+      );
     });
     // The context resamples the mic stream to 16 kHz before the worklet
     // sees it, so the wire format is 16 kHz mono f32 on any device.
@@ -266,15 +295,15 @@ async function startVoice() {
     await ctx.audioWorklet.addModule("/pcm-worklet.js");
     const source = ctx.createMediaStreamSource(stream);
     const node = new AudioWorkletNode(ctx, "pcm-capture");
-    const session = { ws, ctx, source, node, stream };
+    const session: VoiceSession = { ws, ctx, source, node, stream };
     node.port.onmessage = (event) => {
-      if (voice === session && ws.readyState === WebSocket.OPEN) {
-        ws.send(event.data);
+      if (voice === session && ws!.readyState === WebSocket.OPEN) {
+        ws!.send(event.data);
       }
     };
     ws.addEventListener("message", (event) => {
       if (handleVoiceMessage(event.data)) {
-        ws.close();
+        ws!.close();
       }
     });
     ws.addEventListener("close", () => {
@@ -307,7 +336,7 @@ async function startVoice() {
     if (ctx) {
       ctx.close().catch(() => {});
     }
-    showVoiceStatus(`Voice capture failed: ${error.message || error}`, true);
+    showVoiceStatus(`Voice capture failed: ${(error as Error).message || error}`, true);
   }
 }
 
@@ -315,8 +344,11 @@ async function startVoice() {
 // the composer; a final replaces the interims and lands in the input box,
 // ready to edit and send. Returns true when the take is over and the socket
 // should close.
-function handleVoiceMessage(data) {
-  let msg;
+function handleVoiceMessage(data: unknown): boolean {
+  if (typeof data !== "string") {
+    return true;
+  }
+  let msg: { type?: unknown; text?: unknown; frames?: unknown } | null;
   try {
     msg = JSON.parse(data);
   } catch {
@@ -345,7 +377,7 @@ function handleVoiceMessage(data) {
   return true;
 }
 
-function stopVoice() {
+function stopVoice(): void {
   const session = voice;
   voice = null;
   setRecording(false);
