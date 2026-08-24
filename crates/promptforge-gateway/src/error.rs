@@ -57,6 +57,12 @@ pub(crate) enum GatewayError {
     #[error("queue full")]
     QueueFull,
 
+    /// The queue's fail-fast `Reject` policy turned the request away at
+    /// capacity. Maps to 429 so an OpenAI client surfaces a retryable
+    /// rate-limit error rather than a server failure.
+    #[error("queue rejected at capacity")]
+    QueueRejected,
+
     /// `POST /admin/switch-profile` named a profile that is not on disk.
     #[non_exhaustive]
     #[error("profile not found: {0}")]
@@ -87,6 +93,9 @@ impl From<crate::queue::AdmitError> for GatewayError {
             crate::queue::AdmitError::QueueFull | crate::queue::AdmitError::Unavailable => {
                 GatewayError::QueueFull
             }
+            // Fail-fast rejection is client-visible back-pressure (429), not
+            // a server-side failure.
+            crate::queue::AdmitError::Rejected => GatewayError::QueueRejected,
         }
     }
 }
@@ -161,6 +170,11 @@ impl GatewayError {
                 "server_error",
                 "queue_full",
             ),
+            GatewayError::QueueRejected => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limit_error",
+                "queue_rejected",
+            ),
             GatewayError::ProfileNotFound(_) => (
                 StatusCode::NOT_FOUND,
                 "invalid_request_error",
@@ -223,6 +237,14 @@ mod tests {
                 ),
             ),
             (
+                GatewayError::QueueRejected,
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "rate_limit_error",
+                    "queue_rejected",
+                ),
+            ),
+            (
                 GatewayError::switch_failed("build-routing", std::io::Error::other("x")),
                 (
                     StatusCode::BAD_REQUEST,
@@ -258,12 +280,16 @@ mod tests {
     }
 
     #[test]
-    fn admit_error_maps_both_variants_to_queue_full() {
+    fn admit_error_maps_to_queue_errors() {
         for admit in [
             crate::queue::AdmitError::QueueFull,
             crate::queue::AdmitError::Unavailable,
         ] {
             assert!(matches!(GatewayError::from(admit), GatewayError::QueueFull));
         }
+        assert!(matches!(
+            GatewayError::from(crate::queue::AdmitError::Rejected),
+            GatewayError::QueueRejected
+        ));
     }
 }

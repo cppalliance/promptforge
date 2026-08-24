@@ -19,7 +19,7 @@ use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use crate::queue::EndpointLane;
+use crate::queue::DominionQueue;
 use crate::routing::{Endpoint, Model};
 use promptforge_gateway_config::{Config, LocalModelConfig, ThinkingMode};
 
@@ -101,11 +101,11 @@ impl LocalRuntime {
                 options,
                 local_model.name().to_owned(),
             ));
-            let lane = EndpointLane::new(concurrency, config.queue());
+            let queue = DominionQueue::from_queue_config(concurrency, config.queue());
             let endpoint = Arc::new(Endpoint {
                 id: endpoint_id,
                 upstream,
-                lane,
+                queue,
             });
             models.push(Arc::new(Model {
                 name: local_model.name().to_owned(),
