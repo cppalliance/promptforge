@@ -7,9 +7,6 @@
 //! [`LocalRuntime`] kills the children.
 
 pub(crate) mod artifacts;
-// The store is exercised by its unit tests here; the `/v1/cache` route
-// handlers that consume it land with the following commits.
-#[allow(dead_code, reason = "the /v1/cache route handlers land next")]
 pub(crate) mod cache;
 mod dialect;
 mod error;

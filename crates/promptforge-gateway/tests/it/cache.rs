@@ -2,14 +2,24 @@
 //! SSE progress, and removal, against a tempdir cache root.
 
 use std::fmt::Write as _;
-use std::path::Path;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use axum::Router;
+use axum::body::Body;
+use axum::extract::State;
 use axum::http::StatusCode;
+use axum::http::header::CONTENT_TYPE;
+use axum::response::Response;
+use axum::routing::get;
 use promptforge_gateway::{Config, Gateway, ProfilesContext};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
-use crate::support::{TestServer, json_within, send_within};
+use crate::support::{PHASE_TIMEOUT, TestServer, json_within, send_within, spawn_backend};
 
 /// Starts the gateway with `[local].cache_dir` rooted at `cache_dir`.
 ///
@@ -133,6 +143,242 @@ async fn get_cache_requires_auth() {
     let gateway = cache_gateway(temp.path()).await;
     let response =
         send_within(reqwest::Client::new().get(format!("http://{}/v1/cache", gateway.addr))).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    gateway.shutdown().await;
+}
+
+/// Shared state for the fake file server: the body to serve and a hit count.
+struct FileServerState {
+    body: Vec<u8>,
+    requests: AtomicUsize,
+}
+
+/// Serves `body` at `/model.bin` with an accurate Content-Length.
+async fn fake_file_server(body: &[u8]) -> (SocketAddr, Arc<FileServerState>) {
+    async fn file(State(state): State<Arc<FileServerState>>) -> Response {
+        state.requests.fetch_add(1, Ordering::AcqRel);
+        Response::new(Body::from(state.body.clone()))
+    }
+    let state = Arc::new(FileServerState {
+        body: body.to_owned(),
+        requests: AtomicUsize::new(0),
+    });
+    let router = Router::new()
+        .route("/model.bin", get(file))
+        .with_state(Arc::clone(&state));
+    (spawn_backend(router).await, state)
+}
+
+/// Parses an SSE body into its `data:` JSON payloads.
+fn parse_sse(body: &str) -> Vec<Value> {
+    body.split("\n\n")
+        .filter(|chunk| !chunk.trim().is_empty())
+        .map(|chunk| {
+            let data = chunk.trim().strip_prefix("data: ").expect("data prefix");
+            serde_json::from_str(data).expect("json event")
+        })
+        .collect()
+}
+
+/// Every regular file under `root`, recursively.
+fn all_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("read dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+#[tokio::test]
+async fn post_cache_streams_progress_then_ready_and_caches_the_blob() {
+    let body = b"sse-cache-fixture-bytes";
+    let digest = hex_sha256(body);
+    let (file_addr, file_server) = fake_file_server(body).await;
+    let temp = TempDir::new().unwrap();
+    let gateway = cache_gateway(temp.path()).await;
+    let http = reqwest::Client::new();
+    let source = format!("http://{file_addr}/model.bin");
+
+    let response = send_within(
+        http.post(format!("http://{}/v1/cache", gateway.addr))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({ "source": source, "sha256": digest })),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(CONTENT_TYPE).unwrap(),
+        "text/event-stream"
+    );
+    let text = tokio::time::timeout(PHASE_TIMEOUT, response.text())
+        .await
+        .expect("SSE body exceeded the phase timeout")
+        .expect("SSE body read failed");
+    let events = parse_sse(&text);
+    assert!(
+        events.len() >= 2,
+        "expected progress plus ready: {events:?}"
+    );
+
+    let (terminal, progress) = events.split_last().unwrap();
+    let mut last_bytes = 0;
+    for event in progress {
+        assert_eq!(event["status"], "downloading");
+        let bytes = event["bytes"].as_u64().expect("bytes");
+        assert!(bytes >= last_bytes, "bytes must not regress: {events:?}");
+        last_bytes = bytes;
+        assert_eq!(event["total"], body.len() as u64);
+    }
+    assert_eq!(last_bytes, body.len() as u64);
+
+    assert_eq!(terminal["status"], "ready");
+    let path = PathBuf::from(terminal["path"].as_str().expect("path"));
+    assert_eq!(std::fs::read(&path).expect("read blob"), body);
+    let sidecar: Value = serde_json::from_str(
+        &std::fs::read_to_string(format!("{}.meta.json", path.display())).expect("sidecar"),
+    )
+    .expect("parse sidecar");
+    assert_eq!(sidecar["source"], source);
+    assert_eq!(sidecar["sha256"], digest);
+    assert_eq!(sidecar["size_bytes"], body.len() as u64);
+    assert_eq!(
+        file_server.requests.load(Ordering::Acquire),
+        1,
+        "exactly one download"
+    );
+
+    // A second POST for the same source is an immediate JSON cache hit.
+    let response = send_within(
+        http.post(format!("http://{}/v1/cache", gateway.addr))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({ "source": source, "sha256": digest })),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(CONTENT_TYPE).unwrap(),
+        "application/json"
+    );
+    let hit = json_within(response).await;
+    assert_eq!(hit["status"], "ready");
+    assert_eq!(hit["path"], serde_json::json!(path));
+    assert_eq!(
+        file_server.requests.load(Ordering::Acquire),
+        1,
+        "a cache hit must not re-download"
+    );
+    gateway.shutdown().await;
+}
+
+#[tokio::test]
+async fn post_cache_digest_mismatch_streams_an_error_event() {
+    let body = b"real-bytes-wrong-pin";
+    let (file_addr, _state) = fake_file_server(body).await;
+    let temp = TempDir::new().unwrap();
+    let gateway = cache_gateway(temp.path()).await;
+    let source = format!("http://{file_addr}/model.bin");
+
+    let response = send_within(
+        reqwest::Client::new()
+            .post(format!("http://{}/v1/cache", gateway.addr))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({ "source": source, "sha256": "0".repeat(64) })),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(CONTENT_TYPE).unwrap(),
+        "text/event-stream"
+    );
+    let text = tokio::time::timeout(PHASE_TIMEOUT, response.text())
+        .await
+        .expect("SSE body exceeded the phase timeout")
+        .expect("SSE body read failed");
+    let events = parse_sse(&text);
+    let terminal = events.last().expect("a terminal event");
+    assert_eq!(terminal["status"], "error");
+    assert!(
+        terminal["message"]
+            .as_str()
+            .expect("message")
+            .contains("mismatch"),
+        "terminal event: {terminal}"
+    );
+
+    // No blob, sidecar, or staging file survives a failed publication; only
+    // the artifact lock file remains under the cache root.
+    let left = all_files(temp.path());
+    assert!(
+        left.iter()
+            .all(|path| path.parent().is_some_and(|dir| dir.ends_with(".locks"))),
+        "only lock files may remain: {left:?}"
+    );
+    gateway.shutdown().await;
+}
+
+#[tokio::test]
+async fn post_cache_validates_source_and_pin_before_downloading() {
+    let body = b"never-served";
+    let (file_addr, file_server) = fake_file_server(body).await;
+    let temp = TempDir::new().unwrap();
+    let gateway = cache_gateway(temp.path()).await;
+    let http = reqwest::Client::new();
+    let url = format!("http://{}/v1/cache", gateway.addr);
+
+    for source in [
+        "not a url",
+        "ftp://example.com/f.bin",
+        "https://example.com/",
+    ] {
+        let response = send_within(
+            http.post(&url)
+                .bearer_auth("test-token")
+                .json(&serde_json::json!({ "source": source })),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "source {source}"
+        );
+        let envelope = json_within(response).await;
+        assert_eq!(envelope["error"]["code"], "malformed_request");
+    }
+
+    let response = send_within(http.post(&url).bearer_auth("test-token").json(
+        &serde_json::json!({ "source": format!("http://{file_addr}/model.bin"), "sha256": "abc" }),
+    ))
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let envelope = json_within(response).await;
+    assert_eq!(envelope["error"]["code"], "malformed_request");
+
+    assert_eq!(
+        file_server.requests.load(Ordering::Acquire),
+        0,
+        "validation failures must not reach the network"
+    );
+    gateway.shutdown().await;
+}
+
+#[tokio::test]
+async fn post_cache_requires_auth() {
+    let temp = TempDir::new().unwrap();
+    let gateway = cache_gateway(temp.path()).await;
+    let response = send_within(
+        reqwest::Client::new()
+            .post(format!("http://{}/v1/cache", gateway.addr))
+            .json(&serde_json::json!({ "source": "http://127.0.0.1:9/model.bin" })),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     gateway.shutdown().await;
 }
