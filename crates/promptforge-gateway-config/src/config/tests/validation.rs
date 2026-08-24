@@ -814,6 +814,155 @@ parallel = 0
     ));
 }
 
+#[test]
+fn rejects_vram_budget_overflow() {
+    let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[dominion]]
+id = "gpu0"
+kind = "local"
+vram_gb = 24
+
+[[local_model]]
+name = "a"
+description = "prose"
+source = "/models/a.gguf"
+context = 4096
+dominion = "gpu0"
+vram_gb = 14
+
+[[local_model]]
+name = "b"
+description = "prose"
+source = "/models/b.gguf"
+context = 4096
+dominion = "gpu0"
+vram_gb = 14
+"#;
+    match Config::parse_toml(toml) {
+        Err(ConfigError::Validation(message)) => {
+            assert!(
+                message.contains("gpu0"),
+                "expected the error to name the dominion: {message}"
+            );
+            assert!(
+                message.contains("exceeded by 4"),
+                "expected the error to name the overflow amount: {message}"
+            );
+        }
+        other => panic!("expected a validation error, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_bound_model_without_vram_estimate() {
+    // Budgets must be complete to be meaningful: a model bound to a budgeted
+    // dominion without its own estimate is an error.
+    let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[dominion]]
+id = "gpu0"
+kind = "local"
+vram_gb = 24
+
+[[local_model]]
+name = "a"
+description = "prose"
+source = "/models/a.gguf"
+context = 4096
+dominion = "gpu0"
+vram_gb = 14
+
+[[local_model]]
+name = "b"
+description = "prose"
+source = "/models/b.gguf"
+context = 4096
+dominion = "gpu0"
+"#;
+    match Config::parse_toml(toml) {
+        Err(ConfigError::Validation(message)) => {
+            assert!(
+                message.contains("local_model b "),
+                "expected the error to name the model: {message}"
+            );
+            assert!(
+                message.contains("gpu0"),
+                "expected the error to name the dominion: {message}"
+            );
+        }
+        other => panic!("expected a validation error, got {other:?}"),
+    }
+}
+
+#[test]
+fn accepts_exact_vram_fit() {
+    let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[dominion]]
+id = "gpu0"
+kind = "local"
+vram_gb = 24
+
+[[local_model]]
+name = "a"
+description = "prose"
+source = "/models/a.gguf"
+context = 4096
+dominion = "gpu0"
+vram_gb = 14
+
+[[local_model]]
+name = "b"
+description = "prose"
+source = "/models/b.gguf"
+context = 4096
+dominion = "gpu0"
+vram_gb = 10
+"#;
+    assert!(Config::parse_toml(toml).is_ok());
+}
+
+#[test]
+fn accepts_bound_models_when_dominion_has_no_budget() {
+    // A local dominion without vram_gb imposes no co-residency obligation:
+    // bound models need no estimate.
+    let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[dominion]]
+id = "gpu0"
+kind = "local"
+
+[[local_model]]
+name = "a"
+description = "prose"
+source = "/models/a.gguf"
+context = 4096
+dominion = "gpu0"
+
+[[local_model]]
+name = "b"
+description = "prose"
+source = "/models/b.gguf"
+context = 4096
+dominion = "gpu0"
+vram_gb = 14
+"#;
+    assert!(Config::parse_toml(toml).is_ok());
+}
+
 /// A config whose only variable part is one `[[endpoint]]` block. Table-driven
 /// endpoint-validation tests substitute the block to exercise one invariant each.
 fn config_with_endpoint(endpoint_block: &str) -> String {

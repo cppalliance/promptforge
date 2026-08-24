@@ -232,7 +232,9 @@ vram_gb = 14              # footprint estimate for the co-residency check
 
 Binding is by explicit id and is kind-checked: an endpoint's `dominion` must name a remote dominion, a local model's `dominion` must name a local one, and an unknown id is a boot failure. `vram_gb` on a remote dominion is rejected. Dominion ids must be unique and non-empty, and `max_concurrency` and `max_queue` must be at least 1 when set.
 
-Dominions are being introduced alongside the legacy knobs: `concurrency`, `device`, `lane`, and `[queue]` still parse during the transition, and an endpoint with only those fields keeps its own per-endpoint queue. An endpoint bound to a remote dominion shares that dominion's queue with every other bound endpoint, and a local model bound to a local dominion shares that dominion's queue with every other bound local model - the shared limit is enforced now. The VRAM co-residency check lands as the queue rework completes.
+Dominions are being introduced alongside the legacy knobs: `concurrency`, `device`, `lane`, and `[queue]` still parse during the transition, and an endpoint with only those fields keeps its own per-endpoint queue. An endpoint bound to a remote dominion shares that dominion's queue with every other bound endpoint, and a local model bound to a local dominion shares that dominion's queue with every other bound local model - the shared limit is enforced now.
+
+When a local dominion sets `vram_gb`, every local model bound to it must set its own `vram_gb` footprint estimate, and the estimates must sum to no more than the budget: an over-booked or incomplete budget fails validation at boot and at profile switch, before any child process starts and surfaces as an OOM. A local dominion without `vram_gb` imposes no co-residency obligation.
 
 ## Web Search Tool
 
