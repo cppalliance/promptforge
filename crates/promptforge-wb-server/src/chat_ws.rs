@@ -185,7 +185,7 @@ async fn relay_chat(
     status.info(
         "Submitting request...",
         format!("a streaming chat completion from {}", request.model),
-        Activity::Gateway,
+        Activity::Thinking,
     );
     let chat_stream = match state
         .gateway_client()
@@ -194,7 +194,7 @@ async fn relay_chat(
     {
         Ok(chat_stream) => chat_stream,
         Err(error) => {
-            status.error("Connection lost", error.to_string(), Activity::Gateway);
+            status.error("Connection lost", error.to_string(), Activity::General);
             send_error(out, id.as_ref(), error.to_string()).await;
             return;
         }
@@ -204,7 +204,7 @@ async fn relay_chat(
             status.info(
                 "Streaming response...",
                 "the gateway is streaming the reply",
-                Activity::Gateway,
+                Activity::Thinking,
             );
             payloads
         }
@@ -243,11 +243,11 @@ async fn relay_chat(
                 };
                 finish.assembled.push_str(&text);
                 // A chunk pulse at Debug: the UI ignores the text, but the
-                // activity field keeps the gateway indicator alive.
+                // activity field keeps the generating LED lit.
                 status.debug(
                     "Streaming response...",
                     "a gateway response chunk",
-                    Activity::Gateway,
+                    Activity::Generating,
                 );
                 let delta = tagged(
                     id.as_ref(),
@@ -263,7 +263,7 @@ async fn relay_chat(
                 let message = error.to_string();
                 finish.error = Some(message.clone());
                 finish.record().await;
-                status.error("Connection lost", message.clone(), Activity::Gateway);
+                status.error("Connection lost", message.clone(), Activity::General);
                 send_error(out, id.as_ref(), message).await;
                 return;
             }
@@ -318,7 +318,7 @@ async fn declined_stream(
     state.status().error(
         format!("Gateway error: {}", upstream.status),
         message.clone(),
-        Activity::Gateway,
+        Activity::General,
     );
     send_error(out, id, message).await;
 }
@@ -835,7 +835,7 @@ mod tests {
                 total: 2,
             }),
             severity: Severity::Info,
-            activity: Activity::Gateway,
+            activity: Activity::Generating,
         });
 
         let frame = read_frame(&mut socket).await;
@@ -847,7 +847,7 @@ mod tests {
                 "description": "ggml-large-v3.bin",
                 "progress": {"current": 1, "total": 2},
                 "severity": "info",
-                "activity": "gateway",
+                "activity": "generating",
             }),
             "the update arrives as one status frame"
         );

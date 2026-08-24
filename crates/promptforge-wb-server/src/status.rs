@@ -76,12 +76,12 @@ pub(crate) enum Severity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Activity {
-    /// No specific subsystem.
+    /// No specific subsystem; the activity LED stays dark.
     General,
-    /// Gateway traffic: requests, responses, streamed chunks.
-    Gateway,
-    /// Voice capture and transcription.
-    Voice,
+    /// A model turn in flight: amber on the activity LED.
+    Thinking,
+    /// Output tokens arriving: green on the activity LED.
+    Generating,
 }
 
 /// The serialized shape of one update on the socket: the update's fields
@@ -243,7 +243,7 @@ mod tests {
                 total: 2,
             }),
             severity: Severity::Error,
-            activity: Activity::Voice,
+            activity: Activity::Thinking,
             ..stub("Working")
         };
         let frame = serde_json::to_value(update.frame()).expect("the frame serializes");
@@ -252,19 +252,19 @@ mod tests {
             serde_json::json!({"current": 1, "total": 2})
         );
         assert_eq!(frame["severity"], "error");
-        assert_eq!(frame["activity"], "voice");
+        assert_eq!(frame["activity"], "thinking");
         // Debug serializes too; the UI, not the bus, ignores it.
         let debug = serde_json::to_value(
             StatusBarUpdate {
                 severity: Severity::Debug,
-                activity: Activity::Gateway,
+                activity: Activity::Generating,
                 ..stub("x")
             }
             .frame(),
         )
         .expect("the frame serializes");
         assert_eq!(debug["severity"], "debug");
-        assert_eq!(debug["activity"], "gateway");
+        assert_eq!(debug["activity"], "generating");
     }
 
     #[tokio::test]

@@ -156,7 +156,7 @@ fn serve_thread(
                 return Ok(());
             }
         };
-        let listener = match tokio::net::TcpListener::bind(&config.server.bind).await {
+        let listener = match reuse_bind(&config.server.bind) {
             Ok(listener) => listener,
             Err(error) => {
                 let _ = ready.send(Err(SpawnError::Io(error)));
@@ -190,6 +190,24 @@ fn serve_thread(
             })
             .await
     })
+}
+
+/// Binds a TCP listener with `SO_REUSEADDR` so a restart doesn't fail on
+/// TIME_WAIT sockets from the previous instance.
+fn reuse_bind(address: &str) -> std::io::Result<tokio::net::TcpListener> {
+    let addr: std::net::SocketAddr = address
+        .parse()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    let socket = socket2::Socket::new(
+        socket2::Domain::for_address(addr),
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    socket.set_reuse_address(true)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?;
+    tokio::net::TcpListener::from_std(socket.into())
 }
 
 #[cfg(test)]

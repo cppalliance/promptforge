@@ -81,10 +81,11 @@ tar = { version = "0.4.46", default-features = false }
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
 indicatif = "0.18"
 # Safe bindings to whisper.cpp; the C++ core is built from source by
-# whisper-rs-sys (cmake + MSVC required).
-whisper-rs = "0.16"
+# whisper-rs-sys (cmake + MSVC + CUDA Toolkit required).
+whisper-rs = { version = "0.16", features = ["cuda"] }
 # WAV parsing for the voice test fixtures; dev-dependency of the wb-server.
 hound = "3.5"
+socket2 = { version = "0.6", features = ["all"] }
 # wry 0.56 pairs with tao 0.36 (wry's own dev-dependency constraint); tao 0.37
 # is newer but untested against this wry.
 wry = "0.56"
