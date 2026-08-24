@@ -126,6 +126,11 @@ pub(crate) enum GatewayError {
     #[non_exhaustive]
     #[error("cache operation failed")]
     Cache(#[source] Box<dyn std::error::Error + Send + Sync>),
+
+    /// `DELETE /v1/cache/{sha256}` named a digest no cache entry carries.
+    #[non_exhaustive]
+    #[error("cache entry not found: {0}")]
+    CacheEntryNotFound(String),
 }
 
 impl From<crate::queue::AdmitError> for GatewayError {
@@ -265,6 +270,11 @@ impl GatewayError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
                 "cache_error",
+            ),
+            GatewayError::CacheEntryNotFound(_) => (
+                StatusCode::NOT_FOUND,
+                "invalid_request_error",
+                "cache_entry_not_found",
             ),
         }
     }

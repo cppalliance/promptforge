@@ -14,7 +14,7 @@ use std::sync::{Mutex, PoisonError};
 
 use axum::Json;
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::response::{IntoResponse, Response};
@@ -132,6 +132,35 @@ pub(crate) async fn post_cache(
         cache.download_to_cache(&source, expected.as_deref(), &progress)
     });
     Ok(sse_response(rx, join))
+}
+
+/// `DELETE /v1/cache/{sha256}`: removes the blob and sidecar for a digest.
+///
+/// Answers 200 with `{"status": "deleted", "sha256"}` when an entry was
+/// removed, 404 `cache_entry_not_found` when no sidecar records the digest,
+/// and 400 when the path parameter is not a 64-character hex digest.
+pub(crate) async fn delete_cache(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(sha256): Path<String>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    check_auth(&state, &headers).await?;
+    let wanted = parse_expected_digest(&sha256)
+        .map_err(|error| GatewayError::MalformedRequest(error.to_string()))?;
+    let cache_dir = live_cache_dir(&state).await;
+    let lookup = wanted.clone();
+    let removed =
+        tokio::task::spawn_blocking(move || open_cache(cache_dir.as_deref())?.remove(&lookup))
+            .await
+            .map_err(GatewayError::cache)?
+            .map_err(GatewayError::cache)?;
+    if !removed {
+        return Err(GatewayError::CacheEntryNotFound(wanted));
+    }
+    Ok(Json(serde_json::json!({
+        "status": "deleted",
+        "sha256": wanted,
+    })))
 }
 
 /// One progress sample from a running download.
