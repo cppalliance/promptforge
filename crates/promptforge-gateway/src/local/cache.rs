@@ -46,6 +46,19 @@ struct BlobMeta {
     size_bytes: u64,
 }
 
+/// One entry of the cache listing: a blob plus the source it was fetched from.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct CacheEntry {
+    /// The URL the blob was downloaded from.
+    pub(crate) source: String,
+    /// Absolute path of the blob under the cache root.
+    pub(crate) path: PathBuf,
+    /// Lowercase hex SHA-256 of the blob's bytes.
+    pub(crate) sha256: String,
+    /// Blob length in bytes.
+    pub(crate) size_bytes: u64,
+}
+
 /// The sidecar path for a cached blob: `<blob>.meta.json`.
 fn meta_path(blob: &Path) -> PathBuf {
     let mut name = blob.as_os_str().to_owned();
@@ -247,6 +260,87 @@ impl BlobCache {
             size_bytes,
         })
     }
+
+    /// Lists every cache entry: blobs under `models/` that carry a sidecar.
+    ///
+    /// Reads sidecars only - blob bytes are never hashed (Amendment C), so
+    /// listing stays cheap with multi-gigabyte entries. Blobs without
+    /// sidecars (pre-existing local model files) and sidecars whose blob is
+    /// gone are not listed. Entries sort by source for a stable response.
+    ///
+    /// # Errors
+    /// Returns [`LocalError::Io`] when the cache tree cannot be walked.
+    pub(crate) fn list(&self) -> Result<Vec<CacheEntry>, LocalError> {
+        let models = self.root.join("models");
+        let key_dirs = match fs::read_dir(&models) {
+            Ok(key_dirs) => key_dirs,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(LocalError::Io {
+                    operation: "read cache models directory",
+                    path: models,
+                    source,
+                });
+            }
+        };
+        let mut entries = Vec::new();
+        for key_dir in key_dirs {
+            let key_dir = key_dir.map_err(|source| LocalError::Io {
+                operation: "read cache models entry",
+                path: models.clone(),
+                source,
+            })?;
+            // `file_type` does not follow links, so a planted symlinked key
+            // directory or blob is skipped rather than read through.
+            let Ok(file_type) = key_dir.file_type() else {
+                continue;
+            };
+            if !file_type.is_dir() {
+                continue;
+            }
+            let slot = key_dir.path();
+            let slot_entries = fs::read_dir(&slot).map_err(|source| LocalError::Io {
+                operation: "read cache slot directory",
+                path: slot.clone(),
+                source,
+            })?;
+            for slot_entry in slot_entries {
+                let slot_entry = slot_entry.map_err(|source| LocalError::Io {
+                    operation: "read cache slot entry",
+                    path: slot.clone(),
+                    source,
+                })?;
+                let Ok(file_type) = slot_entry.file_type() else {
+                    continue;
+                };
+                if !file_type.is_file() {
+                    continue;
+                }
+                let sidecar = slot_entry.path();
+                let Some(name) = sidecar.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                let Some(blob_name) = name.strip_suffix(META_SUFFIX) else {
+                    continue;
+                };
+                let blob = sidecar.with_file_name(blob_name);
+                if !blob.is_file() {
+                    continue;
+                }
+                let Some(meta) = read_meta(&blob)? else {
+                    continue;
+                };
+                entries.push(CacheEntry {
+                    source: meta.source,
+                    path: blob,
+                    sha256: meta.sha256,
+                    size_bytes: meta.size_bytes,
+                });
+            }
+        }
+        entries.sort_by(|left, right| left.source.cmp(&right.source));
+        Ok(entries)
+    }
 }
 
 #[cfg(test)]
@@ -420,6 +514,49 @@ mod tests {
         assert_eq!(fs::read(&blob.path).expect("read blob"), body);
         assert!(meta_path(&blob.path).is_file(), "sidecar written");
         assert_eq!(server.requests(), 1);
+    }
+
+    #[test]
+    fn list_returns_sidecar_bearing_blobs_with_metadata() {
+        let body_a = b"listing-fixture-a";
+        let body_b = b"listing-fixture-bb";
+        let server_a = FakeServer::new(body_a);
+        let server_b = FakeServer::new(body_b);
+        let temp = TempDir::new().expect("tempdir");
+        let cache = BlobCache::new(temp.path()).expect("cache");
+        let url_a = server_a.url("a.gguf");
+        let url_b = server_b.url("b.gguf");
+        let blob_a = cache
+            .download_to_cache(&url_a, None, &RecordingProgress::new())
+            .expect("download a");
+        let blob_b = cache
+            .download_to_cache(&url_b, None, &RecordingProgress::new())
+            .expect("download b");
+
+        // A bare blob without a sidecar (a pre-existing local model file) is
+        // not listed; nor is a stale sidecar whose blob is gone.
+        let bare_dir = temp.path().join("models").join("0123456789abcdef");
+        fs::create_dir_all(&bare_dir).expect("mkdir bare slot");
+        fs::write(bare_dir.join("bare.gguf"), b"bare").expect("write bare blob");
+        let stale_dir = temp.path().join("models").join("fedcba9876543210");
+        fs::create_dir_all(&stale_dir).expect("mkdir stale slot");
+        fs::write(
+            stale_dir.join("gone.gguf.meta.json"),
+            r#"{"source":"http://x/gone.gguf","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":4}"#,
+        )
+        .expect("write stale sidecar");
+
+        let entries = cache.list().expect("list");
+        assert_eq!(entries.len(), 2, "entries: {entries:?}");
+        // Sorted by source for a stable response.
+        assert_eq!(entries[0].source, url_a);
+        assert_eq!(entries[0].path, blob_a.path);
+        assert_eq!(entries[0].sha256, hex_sha256(body_a));
+        assert_eq!(entries[0].size_bytes, body_a.len() as u64);
+        assert_eq!(entries[1].source, url_b);
+        assert_eq!(entries[1].path, blob_b.path);
+        assert_eq!(entries[1].sha256, hex_sha256(body_b));
+        assert_eq!(entries[1].size_bytes, body_b.len() as u64);
     }
 
     #[test]

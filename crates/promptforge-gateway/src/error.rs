@@ -119,6 +119,13 @@ pub(crate) enum GatewayError {
     /// Admin profile routes were reached without a configured profiles directory.
     #[error("profiles directory not configured")]
     ProfilesUnavailable,
+
+    /// A `/v1/cache` route failed at the storage or transport layer before its
+    /// response was committed (mid-stream failures are SSE error events, not
+    /// this variant).
+    #[non_exhaustive]
+    #[error("cache operation failed")]
+    Cache(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl From<crate::queue::AdmitError> for GatewayError {
@@ -171,6 +178,12 @@ impl GatewayError {
             stage,
             source: Box::new(source),
         }
+    }
+
+    /// Wrap a cache-operation failure, preserving the cause.
+    #[must_use]
+    pub(crate) fn cache(source: impl std::error::Error + Send + Sync + 'static) -> GatewayError {
+        GatewayError::Cache(Box::new(source))
     }
 
     /// The `(status, type, code)` triple for the OpenAI error envelope.
@@ -247,6 +260,11 @@ impl GatewayError {
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
                 "profiles_unavailable",
+            ),
+            GatewayError::Cache(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "cache_error",
             ),
         }
     }
