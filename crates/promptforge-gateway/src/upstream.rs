@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use promptforge_gateway_config::Secret;
 
 use crate::error::GatewayError;
-use crate::wire::{ChatRequest, ChatResponse};
+use crate::wire::{ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse};
 
 /// A backend the gateway can forward a chat completion to.
 #[async_trait]
@@ -25,6 +25,26 @@ pub(crate) trait Upstream: Send + Sync {
         req: ChatRequest,
         upstream_model: &str,
     ) -> Result<ChatResponse, GatewayError>;
+
+    /// Forward an embeddings `req` to the backend, substituting
+    /// `upstream_model` for the caller's model name, and return the response.
+    ///
+    /// The default is [`GatewayError::ModelUnavailable`]: upstreams without an
+    /// embeddings implementation (a local chat server, for example) decline
+    /// the workload rather than fabricate a response.
+    ///
+    /// # Errors
+    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure,
+    /// [`GatewayError::UpstreamStatus`] on a non-success backend status, and
+    /// [`GatewayError::ModelUnavailable`] when the upstream cannot serve
+    /// embeddings at all.
+    async fn send_embeddings(
+        &self,
+        req: EmbeddingRequest,
+        _upstream_model: &str,
+    ) -> Result<EmbeddingResponse, GatewayError> {
+        Err(GatewayError::ModelUnavailable(req.model))
+    }
 
     /// Explicitly release any owned resources (for example a child process) and
     /// disable further recovery, surfacing any teardown failure.
@@ -78,21 +98,28 @@ impl OpenAiUpstream {
             http,
         }
     }
-}
 
-#[async_trait]
-impl Upstream for OpenAiUpstream {
-    async fn send(
+    /// POST `body` to `{base_url}/{path}` with the endpoint credential and
+    /// return the success body bytes.
+    ///
+    /// The body read is byte-bounded: a chunk read failure is a transport
+    /// error, while decoding the returned bytes is left to the caller so a
+    /// decode failure surfaces as a protocol error (never a transport death)
+    /// and cannot trigger a spurious recovery upstream (UP-003, UP-004).
+    ///
+    /// # Errors
+    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
+    /// [`GatewayError::UpstreamStatus`] with a truncated body on a non-success
+    /// backend status.
+    async fn post_json(
         &self,
-        mut req: ChatRequest,
-        upstream_model: &str,
-    ) -> Result<ChatResponse, GatewayError> {
-        let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
-
+        path: &str,
+        body: &impl serde::Serialize,
+    ) -> Result<Vec<u8>, GatewayError> {
         let mut builder = self
             .http
-            .post(format!("{}/chat/completions", self.base_url))
-            .json(&req);
+            .post(format!("{}/{path}", self.base_url))
+            .json(body);
         if !self.api_key.is_empty() {
             builder = builder.bearer_auth(self.api_key.expose());
         }
@@ -114,14 +141,36 @@ impl Upstream for OpenAiUpstream {
             });
         }
 
-        // Read a byte-bounded body, then decode. A chunk read failure is a
-        // transport error; a decode failure is a protocol error (never a
-        // transport death) so it cannot trigger a spurious recovery upstream
-        // (UP-003, UP-004).
-        let bytes = crate::http_util::read_bytes_capped(response, crate::http_util::MAX_JSON_BODY)
+        crate::http_util::read_bytes_capped(response, crate::http_util::MAX_JSON_BODY)
             .await
-            .map_err(GatewayError::upstream_transport)?;
+            .map_err(GatewayError::upstream_transport)
+    }
+}
+
+#[async_trait]
+impl Upstream for OpenAiUpstream {
+    async fn send(
+        &self,
+        mut req: ChatRequest,
+        upstream_model: &str,
+    ) -> Result<ChatResponse, GatewayError> {
+        let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
+        let bytes = self.post_json("chat/completions", &req).await?;
         let mut parsed: ChatResponse =
+            serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
+        // Return the caller's model name, never the backend's.
+        parsed.model = requested;
+        Ok(parsed)
+    }
+
+    async fn send_embeddings(
+        &self,
+        mut req: EmbeddingRequest,
+        upstream_model: &str,
+    ) -> Result<EmbeddingResponse, GatewayError> {
+        let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
+        let bytes = self.post_json("embeddings", &req).await?;
+        let mut parsed: EmbeddingResponse =
             serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
         // Return the caller's model name, never the backend's.
         parsed.model = requested;
@@ -175,6 +224,82 @@ mod tests {
             model: model.to_owned(),
             messages: vec![serde_json::json!({ "role": "user", "content": "hi" })],
             rest: Map::new(),
+        }
+    }
+
+    fn embedding_request(model: &str) -> EmbeddingRequest {
+        EmbeddingRequest {
+            model: model.to_owned(),
+            input: crate::wire::EmbeddingInput::One("embed me".to_owned()),
+            encoding_format: None,
+            rest: Map::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn embeddings_rewrites_caller_model_and_posts_to_embeddings() {
+        // UP-008: same contract as chat - the caller's model name is restored
+        // on the response while the upstream model is what the backend sees.
+        let (base, handle) = serve_once(
+            "200 OK",
+            r#"{"object":"list","model":"backend-embed","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],"usage":{"prompt_tokens":2,"total_tokens":2}}"#,
+        );
+        let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
+        let response = upstream
+            .send_embeddings(embedding_request("caller-model"), "backend-embed")
+            .await
+            .expect("send ok");
+        assert_eq!(response.model, "caller-model");
+        assert_eq!(response.data.len(), 1);
+        assert!(response.rest.contains_key("usage"));
+        let sent = handle.join().expect("join");
+        assert!(sent.contains("POST /embeddings"), "{sent}");
+        assert!(sent.contains("backend-embed"), "forwarded body: {sent}");
+        assert!(
+            !sent.contains("caller-model"),
+            "caller model leaked: {sent}"
+        );
+    }
+
+    #[tokio::test]
+    async fn embeddings_non_success_status_is_upstream_status() {
+        let (base, handle) = serve_once("500 Internal Server Error", "backend exploded");
+        let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
+        let err = upstream
+            .send_embeddings(embedding_request("m"), "u")
+            .await
+            .expect_err("should fail");
+        assert!(
+            matches!(err, GatewayError::UpstreamStatus { status: 500, .. }),
+            "expected UpstreamStatus 500, got {err:?}"
+        );
+        let _ = handle.join();
+    }
+
+    #[tokio::test]
+    async fn default_send_embeddings_is_model_unavailable() {
+        // Upstreams without an embeddings implementation (a local chat server)
+        // decline the workload with ModelUnavailable naming the caller's model.
+        struct ChatOnly;
+
+        #[async_trait]
+        impl Upstream for ChatOnly {
+            async fn send(
+                &self,
+                _req: ChatRequest,
+                _upstream_model: &str,
+            ) -> Result<ChatResponse, GatewayError> {
+                unreachable!("not under test")
+            }
+        }
+
+        let err = ChatOnly
+            .send_embeddings(embedding_request("local-chat"), "ignored-alias")
+            .await
+            .expect_err("default must decline");
+        match err {
+            GatewayError::ModelUnavailable(model) => assert_eq!(model, "local-chat"),
+            other => panic!("expected ModelUnavailable, got {other:?}"),
         }
     }
 
