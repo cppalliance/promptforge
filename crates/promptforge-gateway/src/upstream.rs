@@ -52,8 +52,8 @@ pub(crate) trait Upstream: Send + Sync {
     /// for the caller's model name, and return the response.
     ///
     /// The default is [`GatewayError::ModelUnavailable`]: upstreams without a
-    /// rerank implementation (a local `llama-server` child, for example)
-    /// decline the workload rather than fabricate a response.
+    /// rerank implementation (a local chat server, for example) decline the
+    /// workload rather than fabricate a response.
     ///
     /// # Errors
     /// Returns [`GatewayError::UpstreamTransport`] on a transport failure,
@@ -391,9 +391,9 @@ mod tests {
 
     #[tokio::test]
     async fn default_send_rerank_is_model_unavailable() {
-        // Upstreams without a rerank implementation (a local llama-server
-        // child serving a classifier) decline the workload with
-        // ModelUnavailable naming the caller's model.
+        // Upstreams without a rerank implementation (a local chat server, for
+        // example) decline the workload with ModelUnavailable naming the
+        // caller's model.
         struct ChatOnly;
 
         #[async_trait]

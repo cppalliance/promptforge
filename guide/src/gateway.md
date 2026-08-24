@@ -157,7 +157,7 @@ Models configured with `kind = "classifier"` serve rerank requests at `POST /v1/
 }
 ```
 
-The request names a query and the documents to rank against it; `top_n` is optional, and every other field passes through verbatim. The route applies the same bearer auth, model resolution and rewrite, and dominion queue admission as chat completions, and the response restores the caller's model name with `results` and `usage` passed through from the backend. Naming a chat or embedding model here is a 400 `kind_mismatch`. A model whose upstream cannot serve rerank at all - a local `llama-server` child, for example - fails with 400 and `code: "model_unavailable"`.
+The request names a query and the documents to rank against it; `top_n` is optional, and every other field passes through verbatim. The route applies the same bearer auth, model resolution and rewrite, and dominion queue admission as chat completions, and the response restores the caller's model name with `results` and `usage` passed through from the backend. Naming a chat or embedding model here is a 400 `kind_mismatch`. A model whose upstream cannot serve rerank at all - a local chat server, for example - fails with 400 and `code: "model_unavailable"`.
 
 ## Authentication and Errors
 
@@ -452,7 +452,7 @@ gpu_layers = 99
 flash_attention = true
 ```
 
-Each local model becomes a normal catalog entry. Clients reach it through the same `POST /v1/chat/completions` as remote models (`POST /v1/embeddings` for `kind = "embedding"`) - the fact that it runs locally is invisible to callers.
+Each local model becomes a normal catalog entry. Clients reach it through the same `POST /v1/chat/completions` as remote models (`POST /v1/embeddings` for `kind = "embedding"`, `POST /v1/rerank` for `kind = "classifier"`) - the fact that it runs locally is invisible to callers.
 
 ### Configuration Fields
 
@@ -488,6 +488,20 @@ kind = "embedding"
 description = "A compact English embedding model for retrieval and similarity"
 source = "https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q8_0.gguf"
 sha256 = "ec38e8da142596baa913124ae50550de284b6916bf59577ef2f0cb9660c2f514"
+context = 512
+```
+
+### Local Classifiers
+
+A local model with `kind = "classifier"` launches its child as `llama-server --reranking` and serves `POST /v1/rerank` exactly like a remote classifier model. Artifact download, digest pinning, dominion binding, and child supervision (respawn of a dead child) are unchanged from a chat child.
+
+```toml
+[[local_model]]
+name = "jina-local"
+kind = "classifier"
+description = "A tiny English reranker for scoring query-document relevance"
+source = "https://huggingface.co/gpustack/jina-reranker-v1-tiny-en-GGUF/resolve/main/jina-reranker-v1-tiny-en-Q8_0.gguf"
+sha256 = "0defc1f8a1f4dd22183124a2a25a97765603e5a9e42258046c9b2c8a26d1f553"
 context = 512
 ```
 

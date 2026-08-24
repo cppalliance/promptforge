@@ -119,6 +119,17 @@ enum WaitOutcome {
     PortCollision(ExitStatus),
 }
 
+/// The serving mode a child is launched into, derived from the model kind.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ServeMode {
+    /// Chat completions; no extra flag.
+    Chat,
+    /// Pass `--embeddings` so the child serves embedding requests.
+    Embeddings,
+    /// Pass `--reranking` so the child serves rerank requests.
+    Reranking,
+}
+
 /// Launch knobs for one gateway-owned `llama-server` child.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LaunchOptions {
@@ -140,8 +151,8 @@ pub(crate) struct LaunchOptions {
     pub(crate) think: bool,
     /// Optional Jinja override passed as `--chat-template-file`.
     pub(crate) chat_template_file: Option<PathBuf>,
-    /// When `true`, pass `--embeddings` so the child serves embedding requests.
-    pub(crate) embeddings: bool,
+    /// The child's serving mode (`--embeddings` / `--reranking`; chat is default).
+    pub(crate) serve_mode: ServeMode,
 }
 
 /// A running local server that is killed and reaped whenever its owner exits.
