@@ -19,6 +19,7 @@ export class StatusBar {
   private readonly led: HTMLElement;
   private readonly rec: HTMLElement;
   private readonly lit = new Set<PulseActivity>();
+  private sustained: PulseActivity | null = null;
   private ledTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly root: HTMLElement) {
@@ -45,6 +46,10 @@ export class StatusBar {
     if (frame.severity === "debug") {
       return;
     }
+    // Info/error frames set or clear the sustained LED state. Thinking
+    // keeps the amber LED lit until something else takes over; any other
+    // activity clears it so the LED returns to idle after the pulse decays.
+    this.sustained = frame.activity === "thinking" ? "thinking" : null;
     this.text.textContent = frame.label;
     this.root.title = frame.description;
     this.text.classList.toggle("status-bar__text--error", frame.severity === "error");
@@ -86,6 +91,7 @@ export class StatusBar {
     }
     this.ledTimer = setTimeout(() => {
       this.lit.clear();
+      if (this.sustained) this.lit.add(this.sustained);
       this.applyLed();
       this.ledTimer = null;
     }, this.pulseMs());
@@ -102,6 +108,7 @@ export class StatusBar {
    * the slot.
    */
   reset(): void {
+    this.sustained = null;
     this.text.textContent = "Reconnecting...";
     this.root.title = "";
     this.text.classList.remove("status-bar__text--error");
