@@ -1,5 +1,5 @@
 //! Assembles the per-crate user guides into a single `promptforge-user-guide.md`
-//! at the workspace root.
+//! under `guide/`.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -56,7 +56,7 @@ fn main() {
         out.push('\n');
     }
 
-    let dest = workspace.join("promptforge-user-guide.md");
+    let dest = workspace.join("guide").join("promptforge-user-guide.md");
     fs::write(&dest, &out).unwrap_or_else(|e| {
         eprintln!("error: cannot write {}: {e}", dest.display());
         process::exit(1);
