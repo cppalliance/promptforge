@@ -18,7 +18,7 @@ The shell loads the same `workbench.toml` as the server (see the [promptforge-wb
 2. The current directory
 3. `%USERPROFILE%\.promptforge\workbench.toml`
 
-When no file is found at any of these locations, the shell falls through to environment-variable-only configuration (see the server README's env-var table). The only required variable in that mode is `PROMPTFORGE_GATEWAY_API_KEY`.
+On first run - when no file exists at any of these locations - the shell creates `%USERPROFILE%\.promptforge\` if needed, writes a default `workbench.toml` there, logs the path, and loads it. The generated file interpolates the gateway settings from `PROMPTFORGE_GATEWAY_URL` and `PROMPTFORGE_GATEWAY_API_KEY`; unset, they resolve to the built-in defaults (loopback gateway, no `Authorization` header). The app never exits on missing config.
 
 ## Browser fallback
 
