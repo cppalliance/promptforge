@@ -46,6 +46,18 @@ window.IntersectionObserver = class {
 };
 window.Element.prototype.scrollTo = () => {};
 window.HTMLElement.prototype.scrollIntoView = () => {};
+// jsdom has no layout engine, so scrollHeight is always 0 and murm-ui's
+// adjustHeight would pin the composer at 0px. Simulate line-based metrics
+// for textareas so composer auto-growth is observable as inline height.
+Object.defineProperty(window.HTMLElement.prototype, "scrollHeight", {
+  configurable: true,
+  get() {
+    if (this instanceof window.HTMLTextAreaElement) {
+      return 36 + (this.value.split("\n").length - 1) * 21;
+    }
+    return 0;
+  },
+});
 // A scripted WebSocket stands in for the server's persistent /ws route. It
 // must live on globalThis: the bundle calls the global `WebSocket`, not
 // `window.WebSocket`. The app opens one socket on load; each chat frame
@@ -188,6 +200,12 @@ for (const key of [
     globalThis[key] = window[key];
   }
 }
+// Node ships its own Event and CustomEvent globals, so the copy loop skips
+// them - but events the bundle dispatches into the jsdom document must be
+// jsdom-realm instances: jsdom's dispatchEvent rejects Node's Event with
+// "parameter 1 is not of type 'Event'".
+globalThis.Event = window.Event;
+globalThis.CustomEvent = window.CustomEvent;
 globalThis.window = window;
 globalThis.document = window.document;
 
@@ -441,6 +459,43 @@ if (!recEl) {
     if (recEl.classList.contains("status-bar__rec--active")) {
       failures.push("a dropped voice socket did not clear the REC badge");
     }
+  }
+}
+
+// Composer auto-grow: an interim transcript rewrites the textarea
+// programmatically, and the box must grow to fit it. The voice path
+// notifies murm-ui's Input through a dispatched "input" event; in jsdom
+// (no CSS global in Node) murm-ui takes its adjustHeight path, which the
+// scrollHeight shim above turns into an observable inline height.
+if (mic && input) {
+  const voiceSocketCount = chatSockets.filter((socket) => socket.url.endsWith("/voice")).length;
+  mic.click();
+  const openDeadline = Date.now() + 5000;
+  let takeSocket;
+  while (Date.now() < openDeadline) {
+    const voiceSockets = chatSockets.filter((socket) => socket.url.endsWith("/voice"));
+    if (voiceSockets.length > voiceSocketCount && typeof voiceSockets.at(-1).onmessage === "function") {
+      takeSocket = voiceSockets.at(-1);
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (!takeSocket) {
+    failures.push("the second mic click did not open a /voice socket with a message listener");
+  } else {
+    const interimText = "line one\nline two\nline three";
+    const heightBefore = parseFloat(input.style.height) || 0;
+    takeSocket.onmessage({ data: JSON.stringify({ type: "interim", text: interimText }) });
+    const heightAfter = parseFloat(input.style.height) || 0;
+    if (input.value !== interimText) {
+      failures.push("the interim transcript did not land in the composer");
+    }
+    if (!(heightAfter > heightBefore)) {
+      failures.push(
+        `the composer did not grow on a multiline interim (was ${input.style.height || "unset"})`,
+      );
+    }
+    takeSocket.onclose?.();
   }
 }
 
