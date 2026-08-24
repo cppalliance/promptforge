@@ -46,6 +46,12 @@ fn run() -> Result<(), String> {
         "cargo::rerun-if-changed={}",
         ui_dir.join("package.json").display()
     );
+    // esbuild reads tsconfig.json from its working directory, and the
+    // lockfile pins the dependency code that lands in the bundle; both can
+    // change dist/ output without touching ui/src.
+    for file in ["tsconfig.json", "package-lock.json"] {
+        println!("cargo::rerun-if-changed={}", ui_dir.join(file).display());
+    }
 
     // dist/ is rebuilt from scratch so removed assets never linger into the
     // release embed.
@@ -61,19 +67,20 @@ fn run() -> Result<(), String> {
 /// `ui/node_modules` and falling back to `npx esbuild`.
 fn bundle(ui_dir: &Path) -> Result<(), String> {
     let mut command = esbuild_command(ui_dir);
-    let output = command
-        .current_dir(ui_dir)
-        .args([
-            "src/main.ts",
-            "--bundle",
-            "--format=esm",
-            "--target=es2022",
-            "--outfile=dist/app.js",
-        ])
-        .output()
-        .map_err(|error| {
-            format!("esbuild could not be started: {error}; install Node.js so it is on PATH")
-        })?;
+    command.current_dir(ui_dir).args([
+        "src/main.ts",
+        "--bundle",
+        "--format=esm",
+        "--target=es2022",
+        "--outfile=dist/app.js",
+    ]);
+    // Release builds embed the bundle in the binary; minify what we embed.
+    if std::env::var("PROFILE").as_deref() == Ok("release") {
+        command.arg("--minify");
+    }
+    let output = command.output().map_err(|error| {
+        format!("esbuild could not be started: {error}; install Node.js so it is on PATH")
+    })?;
     if output.status.success() {
         return Ok(());
     }

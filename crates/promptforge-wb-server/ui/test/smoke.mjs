@@ -1,8 +1,10 @@
 // Smoke test: loads dist/index.html into jsdom, imports the bundled
-// dist/app.js, and asserts the chat UI mounts without throwing. Guards the
-// DOM contract between index.html and the vendored murm-ui (its components
-// throw when a required class is missing). Run after `npm run build`:
-// `npm test`.
+// dist/app.js, asserts the chat UI mounts without throwing, and drives one
+// chat round-trip through a scripted fetch. Guards the DOM contract between
+// index.html and the vendored murm-ui (its components throw when a required
+// class is missing) and the wire contract of WorkbenchProvider (request
+// shape against POST /chat, SSE deltas rendered into the history). Run
+// after `npm run build`: `npm test`.
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -34,11 +36,48 @@ window.ResizeObserver = class {
   unobserve() {}
   disconnect() {}
 };
+window.IntersectionObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() {
+    return [];
+  }
+};
 window.Element.prototype.scrollTo = () => {};
 window.HTMLElement.prototype.scrollIntoView = () => {};
-// No model catalog answers in the test; loadModels falls into its error
-// path, which only touches the picker.
-window.fetch = () => Promise.reject(new Error("no server in the smoke test"));
+// A scripted fetch stands in for the server. It must live on globalThis:
+// the bundle calls the global `fetch`, not `window.fetch`. The catalog
+// answers with one model so the picker enables and submission is unblocked;
+// /chat answers with an SSE stream so the provider's round-trip runs.
+const chatRequests = [];
+const sseBody =
+  'data: {"id":"c1","choices":[{"delta":{"content":"Hello"}}]}\n\n' +
+  'data: {"id":"c1","choices":[{"delta":{"content":" back"}}]}\n\n' +
+  "data: [DONE]\n\n";
+globalThis.fetch = (url, init) => {
+  if (url === "/v1/models") {
+    return Promise.resolve(
+      new Response(JSON.stringify({ data: [{ id: "test-model", description: "scripted" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  }
+  if (url === "/chat") {
+    chatRequests.push(JSON.parse(init.body));
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(sseBody));
+        controller.close();
+      },
+    });
+    return Promise.resolve(
+      new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } }),
+    );
+  }
+  return Promise.reject(new Error(`unexpected fetch in the smoke test: ${url}`));
+};
 
 for (const key of [
   "document",
@@ -54,6 +93,10 @@ for (const key of [
   "CustomEvent",
   "MutationObserver",
   "Option",
+  "DOMParser",
+  "NodeFilter",
+  "ResizeObserver",
+  "IntersectionObserver",
   "getComputedStyle",
   "requestAnimationFrame",
   "cancelAnimationFrame",
@@ -67,26 +110,72 @@ globalThis.document = window.document;
 
 await import(pathToFileURL(path.join(distDir, "app.js")).href);
 
-// The bundle mounts ChatUI on .mur-app: a successful mount leaves the murm
-// structure intact and renders the empty-chat state.
-const app = window.document.querySelector(".mur-app");
+// The bundle mounts dockview on #dock with one chat panel, and ChatUI on
+// the .mur-app inside it: a successful mount leaves the murm structure
+// intact and renders the empty-chat state.
+const dock = window.document.querySelector("#dock");
+const app = window.document.querySelector("#dock .mur-app");
 const history = window.document.querySelector(".mur-chat-history");
 const input = window.document.querySelector(".mur-chat-input");
 const send = window.document.querySelector(".mur-send-btn");
 const mic = window.document.querySelector(".mic-button");
+const statusBar = window.document.querySelector(".status-bar");
 
 const failures = [];
-if (!app) failures.push(".mur-app missing");
+if (!dock) failures.push("#dock missing");
+if (dock && !dock.querySelector(".dv-dockview")) {
+  failures.push("dockview did not initialize inside #dock");
+}
+if (!window.document.querySelector("#dock .dv-groupview")) {
+  failures.push("dockview rendered no group for the chat panel");
+}
+if (!app) failures.push(".mur-app missing inside the dock");
 if (!history) failures.push(".mur-chat-history missing");
 if (!input) failures.push(".mur-chat-input missing");
 if (!send) failures.push(".mur-send-btn missing");
 if (!mic) failures.push("voice plugin did not insert the mic button");
+if (!statusBar) failures.push("status bar placeholder missing");
 if (app && !app.classList.contains("mur-chat-empty")) {
   failures.push("fresh mount is not in the empty-chat state");
+}
+
+// One chat round-trip: wait for the scripted catalog to enable the picker,
+// submit a message through the form, and assert the provider's request
+// shape and the rendered assistant reply.
+const picker = window.document.getElementById("model-picker");
+const form = window.document.querySelector(".mur-chat-form");
+const deadline = Date.now() + 5000;
+while (picker && picker.disabled && Date.now() < deadline) {
+  await new Promise((resolve) => setTimeout(resolve, 20));
+}
+if (!picker || picker.disabled) {
+  failures.push("scripted model catalog did not enable the picker");
+} else if (input && form && history) {
+  input.value = "Hello?";
+  input.dispatchEvent(new window.Event("input", { bubbles: true }));
+  form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+  const replyDeadline = Date.now() + 5000;
+  while (!history.textContent.includes("Hello back") && Date.now() < replyDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (!history.textContent.includes("Hello back")) {
+    failures.push("assistant reply did not render in the chat history");
+  }
+  const request = chatRequests[0];
+  if (!request) {
+    failures.push("no POST /chat request was made");
+  } else {
+    if (request.model !== "test-model") failures.push("chat request carried the wrong model");
+    if (request.stream !== true) failures.push("chat request did not ask for a stream");
+    const first = request.messages?.[0];
+    if (!first || first.role !== "user" || first.content !== "Hello?") {
+      failures.push("chat request messages are not the OpenAI shape");
+    }
+  }
 }
 
 if (failures.length > 0) {
   console.error(`smoke test failed:\n- ${failures.join("\n- ")}`);
   process.exit(1);
 }
-console.log("smoke test passed: the bundled app mounts the chat UI");
+console.log("smoke test passed: the bundled app mounts the chat UI and answers a message");

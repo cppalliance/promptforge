@@ -4,6 +4,10 @@
 import "./chat/styles/base.css";
 import "./chat/styles/feed.css";
 import "./chat/styles/input.css";
+import "dockview/dist/styles/dockview.css";
+
+import { createDockview, themeDark } from "dockview";
+import type { IContentRenderer } from "dockview";
 
 import type { ChatPlugin } from "./chat/core/types";
 import { ChatUI } from "./chat/main";
@@ -59,8 +63,41 @@ const voicePlugin: ChatPlugin = {
   isSubmitBlocked: () => !selectedModel(),
 };
 
+// The chat lives in dockview's single panel; the panel infrastructure is
+// what later stages hang the file tree and editor panes on. The tab bar is
+// hidden in style.css: with exactly one panel it is chrome, not information.
+class ChatPanel implements IContentRenderer {
+  readonly element = document.createElement("div");
+
+  constructor() {
+    this.element.className = "chat-panel";
+  }
+
+  init(): void {
+    const template = document.getElementById("chat-panel") as HTMLTemplateElement;
+    this.element.appendChild(template.content.cloneNode(true));
+  }
+}
+
+const dockEl = document.getElementById("dock") as HTMLDivElement;
+const dock = createDockview(dockEl, {
+  createComponent: () => new ChatPanel(),
+  theme: themeDark,
+  singleTabMode: "fullwidth",
+  disableFloatingGroups: true,
+  hideBorders: true,
+  locked: true,
+  noPanelsOverlay: "emptyGroup",
+});
+dock.addPanel({ id: "chat", component: "chat", title: "Chat" });
+
+const chatContainer = dockEl.querySelector(".mur-app");
+if (!chatContainer) {
+  throw new Error("DOM Error: the chat panel did not mount its .mur-app container.");
+}
+
 const chat = new ChatUI({
-  container: ".mur-app",
+  container: chatContainer as HTMLElement,
   provider: new WorkbenchProvider(),
   storage: new MemoryStorage(),
   enableSidebar: false,

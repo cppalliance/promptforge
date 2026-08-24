@@ -92,12 +92,34 @@ body {
   color: var(--danger);
 }
 
-/* The vendored murm-ui chat fills the space beside the sidebar. Its own
-   variables (base.css) theme the chat surface; these overrides tie it into
-   the workbench palette until the step-5 skinning pass. */
-.mur-app {
+/* The dockview column beside the sidebar: the dock fills it, the status bar
+   sits below. The status bar is an empty placeholder until step 4 fills it. */
+.dock-column {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+}
+
+.dock {
+  flex: 1;
+  min-height: 0;
+}
+
+/* One panel fills the window; its tab bar is chrome, not information. */
+.dock .dv-tabs-and-actions-container {
+  display: none;
+}
+
+.chat-panel {
+  height: 100%;
+}
+
+.status-bar {
+  flex: none;
+  height: 24px;
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
 }
 
 /* Voice UI: injected into murm-ui's form container by the voice plugin. */
