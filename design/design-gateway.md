@@ -8,7 +8,7 @@ This crate is one always-on service process. It accepts OpenAI-shaped chat compl
 
 Routing is one exact string match with a 404 on a miss - no prefixes, no aliases, no default model - and the request body is passed through with only `model` substituted, so a sampling parameter the gateway has never heard of reaches the backend anyway and the caller's model name comes back rather than the vendor's. Configuration is one TOML file that rejects an unknown key outright and expands `${VAR}` from the environment before it parses, so a deployment that forgot to export a credential fails at startup rather than serving with a blank one.
 
-What is not here is as load-bearing as what is: no streaming, no retries, no token budget, and no knowledge of prompts or runs. Shared concurrency pools with bounded, fair waiting queues (`[[dominion]]`) are implemented; a full queue answers 503, or 429 under a fail-fast `reject` policy. Local generative models are served by a gateway-owned `llama-server` subprocess (not in-process FFI). The one process every LLM consumer depends on is deliberately the simplest one in the system.
+What is not here is as load-bearing as what is: no retries, no token budget, and no knowledge of prompts or runs. Shared concurrency pools with bounded, fair waiting queues (`[[dominion]]`) are implemented; a full queue answers 503, or 429 under a fail-fast `reject` policy. Local generative models are served by a gateway-owned `llama-server` subprocess (not in-process FFI). The one process every LLM consumer depends on is deliberately the simplest one in the system.
 
 ## The key design choices
 
@@ -124,7 +124,7 @@ chat_template_file = "..."  # optional; passed as --chat-template-file when GGUF
 
 On start (and after switch-profile), each local model becomes a catalog entry: `description` appears in `GET /v1/models` so live H1 semantic resolution works the same as for remote models. Each local endpoint uses `LocalUpstream`, which owns the child and respawns it on send after a post-ready death so catalog `upstream_name` and port stay stable. Dropping `LocalRuntime` (process exit or profile replace) drops those upstreams and kills every child.
 
-After a local child is healthy, the gateway GETs llama `/props`, builds `DialectEvidence`, and resolves a `tool_dialect` through `promptforge-core`'s `ToolDialectRegistry` (hard-fail on none or tie). The catalog advertises `tool_dialect` and `tools_mode` (`native` or `emulated`). Remote OpenAI-compat models default to `openai` / `native`. When `/props` omits `chat_template`, a sibling `<stem>.md` beside the GGUF (written at HF provision with frontmatter plus a fenced Jinja `chat_template`) supplies fallback evidence; live props always win over a conflicting sidecar.
+After a local chat child is healthy, the gateway GETs llama `/props` (and `/v1/models` for the native tool-call capability flag), builds dialect evidence, and resolves a `tool_dialect` by scoring the gateway's own dialects against it (hard-fail on none or tie). The catalog advertises `tool_dialect`; remote OpenAI-compat models default to `openai`. When `/props` omits `chat_template`, a sibling `<stem>.md` beside the GGUF (written at HF provision with frontmatter plus a fenced Jinja `chat_template`) supplies fallback evidence; live props always win over a conflicting sidecar.
 
 First-time GGUF (and other blob) downloads show an indicatif progress bar on an interactive stderr TTY - percent, bytes, rate, and ETA. When stderr is not a TTY, the same download emits periodic `tracing` progress lines instead.
 
