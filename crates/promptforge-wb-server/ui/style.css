@@ -36,6 +36,7 @@
   --accent-dim: #5658a0; /* focus borders */
   --danger: #b0606a; /* recording background, non-text danger accents */
   --danger-text: #cf7f88; /* danger lightened past 4.5:1 for text on --bg */
+  --on-danger: #ffffff; /* icon or text on a --danger fill (recording mic) */
 
   /* Type */
   --font-prose: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -437,7 +438,7 @@ body {
 }
 
 .voice-mic--recording {
-  color: #fff;
+  color: var(--on-danger, #ffffff);
   background: var(--danger, #b0606a);
   border-radius: 50%;
   animation: mic-pulse 1.2s ease-in-out infinite;
