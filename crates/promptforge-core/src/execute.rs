@@ -149,7 +149,7 @@ pub(crate) use crate::model::ModelSet;
 /// - [`RunErrorKind::Binding`] - a `tools.bind`/`models.bind` capability could
 ///   not be bound, was absent, or clashed.
 /// - [`RunErrorKind::Completion`] - a model completion failed at the transport,
-///   backend, decode, or dialect layer.
+///   backend, or decode layer.
 /// - [`RunErrorKind::Tool`] - a dispatched tool failed, was out of scope, or the
 ///   tool loop did not converge.
 /// - [`RunErrorKind::Lua`] - a section's Lua phase failed to run or return a

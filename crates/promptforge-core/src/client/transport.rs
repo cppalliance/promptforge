@@ -3,13 +3,11 @@
 
 use std::fmt;
 use std::num::NonZeroU64;
-use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
 
 use super::{Completion, GatewayEndpoint, Message, SecretString, ToolSchema};
-use crate::dialects::{DialectRequest, ToolDialectRegistry};
 use crate::model::{CompletionError, CompletionOptions};
 use crate::{Error, Result};
 
@@ -20,7 +18,6 @@ pub struct GatewayClient {
     transport: GatewayTransport,
     base_url: String,
     key: SecretString,
-    dialect_registry: Arc<ToolDialectRegistry>,
     /// Wall-clock cap applied to each completion request.
     request_timeout: Duration,
     /// Byte ceiling enforced on a response body before it is decoded.
@@ -38,7 +35,7 @@ enum GatewayTransport {
     Disabled,
 }
 
-/// Builds the completion request body before dialect-specific reshaping.
+/// Builds the completion request body.
 fn build_request_body(
     messages: &[Message],
     tools: Option<&[ToolSchema]>,
@@ -94,8 +91,7 @@ impl fmt::Debug for GatewayClient {
 impl GatewayClient {
     /// Build a client from a validated [`GatewayEndpoint`] and a redacted
     /// [`SecretString`] bearer key (used by tests and by
-    /// [`GatewayClient::from_env`]). Responses are parsed through the resolved
-    /// tool dialect.
+    /// [`GatewayClient::from_env`]).
     ///
     /// # Examples
     ///
@@ -103,13 +99,12 @@ impl GatewayClient {
     /// # async fn run() -> Result<(), promptforge_core::model::CompletionError> {
     /// use promptforge_core::client::{GatewayClient, GatewayEndpoint, Message, SecretString};
     /// use promptforge_core::model::CompletionOptions;
-    /// use promptforge_core::dialects::ToolDialectId;
     ///
     /// let client = GatewayClient::new(
     ///     GatewayEndpoint::new("http://127.0.0.1:8081/v1")?,
     ///     SecretString::new("bearer-token")?,
     /// );
-    /// let options = CompletionOptions::new("analyst", ToolDialectId::OpenAi);
+    /// let options = CompletionOptions::new("analyst");
     /// let completion = client
     ///     .complete(&[Message::user("hello")], None, &options)
     ///     .await?;
@@ -123,7 +118,6 @@ impl GatewayClient {
             transport: GatewayTransport::Http(reqwest::Client::new()),
             base_url: endpoint.url,
             key,
-            dialect_registry: Arc::new(ToolDialectRegistry::builtin()),
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
         }
@@ -140,10 +134,9 @@ impl GatewayClient {
     /// # async fn run() {
     /// use promptforge_core::client::{GatewayClient, Message};
     /// use promptforge_core::model::{CompletionErrorKind, CompletionOptions};
-    /// use promptforge_core::dialects::ToolDialectId;
     ///
     /// let client = GatewayClient::disabled();
-    /// let options = CompletionOptions::new("m", ToolDialectId::OpenAi);
+    /// let options = CompletionOptions::new("m");
     /// let error = client
     ///     .complete(&[Message::user("hi")], None, &options)
     ///     .await
@@ -157,7 +150,6 @@ impl GatewayClient {
             transport: GatewayTransport::Disabled,
             base_url: String::new(),
             key: SecretString::disabled_placeholder(),
-            dialect_registry: Arc::new(ToolDialectRegistry::builtin()),
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
         }
@@ -226,8 +218,6 @@ impl GatewayClient {
     /// Returns a [`CompletionError`] whose [`kind`](CompletionError::kind) is
     /// (F11 - the full reachable set):
     /// - `Disabled` when this client was built with [`GatewayClient::disabled`];
-    /// - `Config` when the selected tool dialect is unknown, or dialect request
-    ///   preparation fails;
     /// - `Transport` on a transport-layer failure (connection, timeout);
     /// - `Backend` when the gateway responds with a non-success status;
     /// - `MalformedResponse` when the body exceeds the size cap or its shape is
@@ -243,14 +233,7 @@ impl GatewayClient {
         let GatewayTransport::Http(http) = &self.transport else {
             return Err(CompletionError::from(Error::GatewayDisabled));
         };
-        let mut request_body = build_request_body(messages, tools, options);
-
-        let dialect = self
-            .dialect_registry
-            .get(options.tool_dialect)
-            .ok_or(Error::UnknownDialect(options.tool_dialect))?;
-        let mut dr = DialectRequest::new(&mut request_body);
-        dialect.prepare_request(&mut dr)?;
+        let request_body = build_request_body(messages, tools, options);
 
         let response = http
             .post(format!("{}/chat/completions", self.base_url))
@@ -284,7 +267,7 @@ impl GatewayClient {
                 source: Box::new(error),
             }
         })?;
-        let turn = dialect.parse_turn(&response_body)?;
+        let turn = crate::normalize::normalize(&response_body)?;
         Ok(Completion {
             result: turn.outcome,
             finish_reason: turn.finish_reason,

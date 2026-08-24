@@ -359,9 +359,9 @@ pub(crate) enum LocalError {
     DialectResolution {
         /// The affected model name.
         model: String,
-        /// The underlying resolution error (boxed: the core error is large).
+        /// The underlying resolution error.
         #[source]
-        source: Box<promptforge_core::dialects::DialectError>,
+        source: super::dialect::DialectResolveError,
     },
 }
 

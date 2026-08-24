@@ -192,7 +192,7 @@ async fn backend_error_display_is_body_free_and_body_is_opt_in_and_escaped() {
     }
     let app = Router::new().route("/v1/chat/completions", post(handler));
     let client = client_for(app).await;
-    let options = CompletionOptions::new("m", crate::dialects::ToolDialectId::OpenAi);
+    let options = CompletionOptions::new("m");
     let err = client
         .complete(&[Message::user("hi")], None, &options)
         .await
@@ -297,7 +297,6 @@ async fn complete_sends_completion_options_model_on_the_wire() {
         temperature: Some(crate::model::Temperature::new(0.0).expect("0.0 is valid")),
         max_tokens: Some(std::num::NonZeroU32::new(128).expect("128 is non-zero")),
         thinking: Some(false),
-        tool_dialect: crate::dialects::ToolDialectId::OpenAi,
     };
     client
         .complete(&[Message::user("hi")], None, &options)
@@ -338,7 +337,6 @@ async fn complete_hard_fails_on_empty_model_reply() {
         temperature: None,
         max_tokens: None,
         thinking: None,
-        tool_dialect: crate::dialects::ToolDialectId::OpenAi,
     };
     let err = client
         .complete(&[Message::user("hi")], None, &options)
@@ -354,7 +352,7 @@ async fn complete_hard_fails_on_empty_model_reply() {
 }
 
 fn openai_options() -> CompletionOptions {
-    CompletionOptions::new("m", crate::dialects::ToolDialectId::OpenAi)
+    CompletionOptions::new("m")
 }
 
 /// Spawns a gateway that answers `/v1/chat/completions` with a fixed status

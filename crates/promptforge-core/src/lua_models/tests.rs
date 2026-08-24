@@ -2,23 +2,11 @@ use super::decode::{
     decode_lua_number, parse_bind_args, parse_opts_table, parse_single_alias, validate_alias,
     value_as_bool, value_as_nonzero_u32, value_as_temperature, value_as_u32,
 };
-use super::userdata::{LuaModelHandle, reject_infer_options};
+use super::userdata::reject_infer_options;
 use super::{ModelRuntime, record_default_binding};
-use crate::dialects::ToolDialectId;
-use crate::model::{ModelBindOpts, ModelBinding, ModelId, ModelInvocation, ModelSet};
+use crate::model::{ModelBindOpts, ModelId, ModelInvocation, ModelSet};
 use mlua::Value;
 use mlua::{Lua, MultiValue};
-
-fn test_binding(alias: &str, dialect: ToolDialectId) -> ModelBinding {
-    ModelBinding::new(
-        alias,
-        "a test capability",
-        ModelId::from_validated("gateway", "m1"),
-        ModelInvocation::from(&ModelBindOpts::default()),
-        dialect,
-        std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
-    )
-}
 
 #[test]
 fn temperature_accepts_finite_in_domain_and_rejects_the_rest() {
@@ -57,14 +45,6 @@ fn integer_and_number_temperatures_share_one_decode_and_domain_check() {
 }
 
 #[test]
-fn dialect_getter_returns_the_closed_dialect_id() {
-    // PF-LM-011: the Rust getter returns the closed identity type, not a
-    // freshly allocated String.
-    let handle = LuaModelHandle::from_binding(&test_binding("a", ToolDialectId::OpenAi));
-    assert_eq!(handle.dialect(), ToolDialectId::OpenAi);
-}
-
-#[test]
 fn default_multi_arg_rolls_back_when_already_selected() {
     // PF-LM-003: a second multi-arg `models.default` must be rejected WITHOUT
     // leaving a half-recorded binding behind.
@@ -72,7 +52,6 @@ fn default_multi_arg_rolls_back_when_already_selected() {
         Ok(crate::model::ResolvedModel {
             id: ModelId::from_validated("gateway", "m1"),
             invocation: ModelInvocation::from(&ModelBindOpts::default()),
-            tool_dialect: ToolDialectId::OpenAi,
             context: std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
         })
     };
@@ -327,7 +306,6 @@ fn live_model_apis_label_nested_decoder_errors_by_entry_point() {
             Ok(crate::model::ResolvedModel {
                 id: ModelId::from_validated("gateway", "m1"),
                 invocation: ModelInvocation::from(&ModelBindOpts::default()),
-                tool_dialect: ToolDialectId::OpenAi,
                 context: std::num::NonZeroU32::new(8192).expect("8192 is non-zero"),
             })
         };

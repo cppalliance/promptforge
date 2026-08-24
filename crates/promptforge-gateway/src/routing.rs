@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use promptforge_gateway_config::{
-    Capabilities, Config, ConfigError, ModelKind, Protocol, ThinkingMode, ToolDialect,
+    Capabilities, Config, ConfigError, ModelKind, Protocol, ThinkingMode,
 };
 
 use crate::error::GatewayError;
@@ -50,8 +50,6 @@ pub(crate) struct Model {
     pub capabilities: Capabilities,
     /// The tool-calling dialect used by this model (e.g. `"openai"`, `"gemma3_tool_code"`).
     pub tool_dialect: String,
-    /// Whether tool calls are handled natively or emulated (`"native"`, `"emulated"`).
-    pub tools_mode: String,
     /// The string the backend knows this model by.
     pub upstream_name: String,
     /// The endpoint serving this model (v0 uses the first configured one).
@@ -181,7 +179,6 @@ impl Routing {
                     model.name()
                 ))
             })?;
-            let tool_dialect = model.tool_dialect();
             models.push(Arc::new(Model {
                 name: model.name().to_owned(),
                 kind: model.kind(),
@@ -189,12 +186,7 @@ impl Routing {
                 context: model.context(),
                 thinking: model.thinking(),
                 capabilities: model.capabilities().clone(),
-                tool_dialect: tool_dialect.to_string(),
-                tools_mode: match tool_dialect {
-                    ToolDialect::Gemma3ToolCode => "emulated",
-                    _ => "native",
-                }
-                .to_owned(),
+                tool_dialect: model.tool_dialect().to_string(),
                 upstream_name: model.upstream().to_owned(),
                 endpoint: Arc::clone(endpoint),
             }));
@@ -276,7 +268,6 @@ mod tests {
             thinking: ThinkingMode::Never,
             capabilities: Capabilities::default(),
             tool_dialect: "openai".to_owned(),
-            tools_mode: "native".to_owned(),
             upstream_name: "u".to_owned(),
             endpoint,
         })
@@ -360,7 +351,7 @@ endpoints = ["e"]
     }
 
     #[test]
-    fn from_config_carries_tool_dialect_and_derives_tools_mode() {
+    fn from_config_carries_tool_dialect() {
         let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
@@ -390,10 +381,8 @@ endpoints = ["e"]
         let routing = routing_from(toml);
         let plain = routing.model("plain").unwrap();
         assert_eq!(plain.tool_dialect, "openai");
-        assert_eq!(plain.tools_mode, "native");
         let gemma = routing.model("gemma").unwrap();
         assert_eq!(gemma.tool_dialect, "gemma3_tool_code");
-        assert_eq!(gemma.tools_mode, "emulated");
     }
 
     #[test]

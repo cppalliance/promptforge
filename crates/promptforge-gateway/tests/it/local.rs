@@ -64,10 +64,7 @@ n_predict = 64
         GatewayEndpoint::new(&format!("http://{}/v1", server.addr)).expect("valid test endpoint"),
         SecretString::new("test-token").expect("non-empty test key"),
     );
-    let options = CompletionOptions::new(
-        "qwen-tiny",
-        promptforge_core::dialects::ToolDialectId::OpenAi,
-    );
+    let options = CompletionOptions::new("qwen-tiny");
     let result = tokio::time::timeout(
         PHASE_TIMEOUT,
         client.complete(

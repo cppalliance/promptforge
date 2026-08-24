@@ -6,7 +6,6 @@ use std::sync::atomic::AtomicU32;
 use crate::cancel;
 use crate::client::{CompletionResult, GatewayClient, Message, ToolSchema};
 use crate::debug::{DebugCapture, DebugEvent};
-use crate::dialects::{ToolDialect, ToolDialectRegistry};
 use crate::lua::ToolCallCounts;
 use crate::model::CompletionOptions;
 use crate::observe::{Observer, detail};
@@ -83,11 +82,6 @@ pub(crate) async fn run_prose_inference(
     global_aliases: Option<&BTreeMap<String, ToolId>>,
     local_dispatch: Option<&LocalDispatch<'_>>,
 ) -> Result<ProseInferenceResult> {
-    let dialect_registry = ToolDialectRegistry::builtin();
-    let dialect: &dyn ToolDialect = dialect_registry
-        .get(completion_options.tool_dialect)
-        .ok_or(Error::UnknownDialect(completion_options.tool_dialect))?;
-
     conversation.push(Message::user(prose));
     let tool_arg = if schemas.is_empty() {
         None
@@ -180,9 +174,9 @@ pub(crate) async fn run_prose_inference(
             }
             CompletionResult::ToolCalls(calls) => {
                 let finish_reason = completion.finish_reason.clone();
-                // Dispatch each requested tool and collect already-framed results.
-                let mut results: Vec<crate::dialects::FramedToolResult> =
-                    Vec::with_capacity(calls.len());
+                // Dispatch each requested tool and collect the framed results
+                // as (call id, content) pairs, in call order.
+                let mut results: Vec<(String, String)> = Vec::with_capacity(calls.len());
                 for call in &calls {
                     let Some(target) = dispatch.get(&call.name) else {
                         observer.observe(execution, section, detail::TOOL_CALL_FAILED);
@@ -267,13 +261,34 @@ pub(crate) async fn run_prose_inference(
                         }
                         crate::tools::OutputTrust::Trusted => output.text().to_owned(),
                     };
-                    results.push(crate::dialects::FramedToolResult::new(
-                        call.id.clone(),
-                        result,
-                    ));
+                    results.push((call.id.clone(), result));
                 }
 
-                dialect.echo_tool_results(conversation, &calls, &results)?;
+                // Echo in the OpenAI wire shape: the assistant's tool-call turn
+                // followed by one `role=tool` message per result. The assistant
+                // turn is a canonical, deliberately lossy reconstruction of each
+                // call - exactly `{ "id", "type": "function", "function": {
+                // "name", "arguments" } }` with `arguments` as the compact JSON
+                // string of the parsed object - because `ToolCall` retains only
+                // the validated `id`, `name`, and `arguments`, and this canonical
+                // subset is what backends require to continue a tool loop.
+                let raw_calls: Vec<serde_json::Value> = calls
+                    .iter()
+                    .map(|call| {
+                        serde_json::json!({
+                            "id": call.id,
+                            "type": "function",
+                            "function": {
+                                "name": call.name,
+                                "arguments": call.arguments.to_string(),
+                            },
+                        })
+                    })
+                    .collect();
+                conversation.push(Message::assistant_tool_calls(raw_calls));
+                for (id, content) in results {
+                    conversation.push(Message::tool(id, content));
+                }
                 if matches!(mode, ProseMode::SingleShot) {
                     return Ok(ProseInferenceResult {
                         text: None,

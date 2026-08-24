@@ -28,10 +28,7 @@ async fn happy_path_through_the_real_client() {
         GatewayEndpoint::new(&format!("http://{}/v1", gateway.addr)).expect("valid test endpoint"),
         SecretString::new("test-token").expect("non-empty test key"),
     );
-    let options = CompletionOptions::new(
-        "test-model",
-        promptforge_core::dialects::ToolDialectId::OpenAi,
-    );
+    let options = CompletionOptions::new("test-model");
     let result = tokio::time::timeout(
         PHASE_TIMEOUT,
         client.complete(
@@ -288,14 +285,6 @@ async fn models_catalog_returns_configured_entries() {
     assert_eq!(
         data[0].get("thinking").and_then(Value::as_str),
         Some("never")
-    );
-    assert_eq!(
-        data[0].get("tool_dialect").and_then(Value::as_str),
-        Some("openai")
-    );
-    assert_eq!(
-        data[0].get("tools_mode").and_then(Value::as_str),
-        Some("native")
     );
     gateway.shutdown().await;
 }

@@ -363,8 +363,6 @@ async fn list_models(
             context: model.context,
             thinking: model.thinking,
             capabilities: model.capabilities.clone(),
-            tool_dialect: model.tool_dialect.clone(),
-            tools_mode: model.tools_mode.clone(),
         })
         .collect();
     Ok(Json(ModelsResponse {

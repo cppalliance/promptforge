@@ -31,8 +31,7 @@ pub enum CompletionErrorKind {
     EmptyReply,
     /// Gateway access was explicitly disabled by the host.
     Disabled,
-    /// The client could not be configured (missing environment, bad endpoint,
-    /// or dialect selection).
+    /// The client could not be configured (missing environment, bad endpoint).
     Config,
 }
 
@@ -110,9 +109,6 @@ impl CompletionError {
             | Error::OutOfScopeToolCall { .. }
             | Error::ModelRequired { .. }
             | Error::UnsupportedVersion(_)
-            | Error::DialectNone
-            | Error::DialectTie { .. }
-            | Error::UnknownDialect(_)
             | Error::Tool { .. }
             | Error::FanoutArmJoin(_)
             | Error::Internal(_)

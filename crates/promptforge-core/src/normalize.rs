@@ -1,8 +1,8 @@
 //! Normalize OpenAI-shaped chat-completions JSON into a turn outcome.
 //!
-//! Wire dialects and the empty-response invariant live here so the rest of the
-//! runtime can stay model-agnostic. A normalized turn must yield either
-//! non-empty tool calls or non-empty text; anything else is
+//! The wire canonicalization and the empty-response invariant live here so the
+//! rest of the runtime can stay model-agnostic. A normalized turn must yield
+//! either non-empty tool calls or non-empty text; anything else is
 //! [`Error::EmptyModelReply`], carrying the choice's `finish_reason` so the
 //! tool loop can classify the empty turn. The loop may still accept such a
 //! turn as its clean exit - empty text with `finish_reason == "stop"` after
@@ -37,30 +37,8 @@ pub(crate) struct NormalizedTurn {
     pub(crate) reasoning_content: Option<String>,
 }
 
-/// Turns a chat-completions response body into a [`NormalizedTurn`].
-///
-/// The one implementor is [`OpenAiChatNormalizer`]; the OpenAI dialect delegates
-/// to it. This canonicalization is a crate-private dialect concern.
-pub(crate) trait CompletionNormalizer: Send + Sync {
-    /// Parse `body` into a turn that satisfies the empty-response invariant.
-    ///
-    /// # Errors
-    /// Returns [`Error::MalformedResponse`] when the body has no usable choice
-    /// shape, and [`Error::EmptyModelReply`] when the choice has neither
-    /// non-empty tool calls nor non-empty text.
-    fn normalize(&self, body: &Value) -> Result<NormalizedTurn>;
-}
-
-/// Default normalizer for OpenAI-compatible `/chat/completions` bodies.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct OpenAiChatNormalizer;
-
-/// The shared per-turn context extracted from a chat-completions body.
-///
-/// Crate-private and shared: both [`OpenAiChatNormalizer`] and the Gemma
-/// dialect derive the first choice's `message`, `finish_reason`, and reasoning
-/// side channel through [`turn_context`], so only fence recognition stays
-/// dialect-specific (PF-NORM-006).
+/// The shared per-turn context extracted from a chat-completions body: the
+/// first choice's `message`, `finish_reason`, and reasoning side channel.
 pub(crate) struct TurnContext<'a> {
     /// The first choice's `message` object.
     pub(crate) message: &'a Value,
@@ -134,67 +112,67 @@ pub(crate) fn empty_reply_error(reasoning_present: bool, finish_reason: Option<S
     }
 }
 
-impl CompletionNormalizer for OpenAiChatNormalizer {
-    fn normalize(&self, body: &Value) -> Result<NormalizedTurn> {
-        let TurnContext {
-            message,
+/// Turns a chat-completions response body into a [`NormalizedTurn`].
+///
+/// # Errors
+/// Returns [`Error::MalformedResponse`] when the body has no usable choice
+/// shape, and [`Error::EmptyModelReply`] when the choice has neither
+/// non-empty tool calls nor non-empty text.
+pub(crate) fn normalize(body: &Value) -> Result<NormalizedTurn> {
+    let TurnContext {
+        message,
+        finish_reason,
+        reasoning_content,
+    } = turn_context(body)?;
+
+    // `tool_calls`, when present, must be an array; a present non-array is a
+    // malformed shape, not an absence.
+    let tool_calls = match message.get("tool_calls") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(calls)) => Some(calls),
+        Some(_) => {
+            return Err(Error::MalformedResponse(
+                "`tool_calls` was present but not an array".into(),
+            ));
+        }
+    };
+    if let Some(raw_calls) = tool_calls.filter(|calls| !calls.is_empty()) {
+        let calls = parse_openai_tool_calls(raw_calls)?;
+        return Ok(NormalizedTurn {
+            outcome: CompletionResult::ToolCalls(calls),
             finish_reason,
             reasoning_content,
-        } = turn_context(body)?;
-
-        // `tool_calls`, when present, must be an array; a present non-array is a
-        // malformed shape, not an absence.
-        let tool_calls = match message.get("tool_calls") {
-            None | Some(Value::Null) => None,
-            Some(Value::Array(calls)) => Some(calls),
-            Some(_) => {
-                return Err(Error::MalformedResponse(
-                    "`tool_calls` was present but not an array".into(),
-                ));
-            }
-        };
-        if let Some(raw_calls) = tool_calls.filter(|calls| !calls.is_empty()) {
-            let calls = parse_openai_tool_calls(raw_calls)?;
-            return Ok(NormalizedTurn {
-                outcome: CompletionResult::ToolCalls(calls),
-                finish_reason,
-                reasoning_content,
-            });
-        }
-
-        // `content`, when present, must be a string or JSON null; a present
-        // value of any other type is a malformed shape.
-        let content = match message.get("content") {
-            None | Some(Value::Null) => None,
-            Some(Value::String(text)) => Some(text.as_str()),
-            Some(_) => {
-                return Err(Error::MalformedResponse(
-                    "`content` was present but not a string".into(),
-                ));
-            }
-        };
-        // Whitespace-only content is not a product; classify with `trim`, but
-        // preserve the original nonblank payload verbatim.
-        if let Some(text) = content.filter(|text| !text.trim().is_empty()) {
-            return Ok(NormalizedTurn {
-                outcome: CompletionResult::Text(text.to_string()),
-                finish_reason,
-                reasoning_content,
-            });
-        }
-
-        Err(empty_reply_error(
-            reasoning_content.is_some(),
-            finish_reason,
-        ))
+        });
     }
+
+    // `content`, when present, must be a string or JSON null; a present
+    // value of any other type is a malformed shape.
+    let content = match message.get("content") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(text)) => Some(text.as_str()),
+        Some(_) => {
+            return Err(Error::MalformedResponse(
+                "`content` was present but not a string".into(),
+            ));
+        }
+    };
+    // Whitespace-only content is not a product; classify with `trim`, but
+    // preserve the original nonblank payload verbatim.
+    if let Some(text) = content.filter(|text| !text.trim().is_empty()) {
+        return Ok(NormalizedTurn {
+            outcome: CompletionResult::Text(text.to_string()),
+            finish_reason,
+            reasoning_content,
+        });
+    }
+
+    Err(empty_reply_error(
+        reasoning_content.is_some(),
+        finish_reason,
+    ))
 }
 
 /// Parse the OpenAI `message.tool_calls` array into runtime [`ToolCall`]s.
-///
-/// Crate-private and shared: the OpenAI normalizer and the Gemma dialect's
-/// fenced-OpenAI path both decode the same wire shape through this one function
-/// so validation cannot drift between them.
 ///
 /// Each call must be an object with a nonblank string `id`, an object
 /// `function` carrying a nonblank string `name`, and an `arguments` field that
@@ -292,9 +270,6 @@ pub(crate) fn parse_openai_tool_calls(raw_calls: &[Value]) -> Result<Vec<ToolCal
 /// A reasoning synonym that is present but neither a string nor JSON null is a
 /// malformed shape; whitespace-only strings are treated as absent.
 ///
-/// Crate-private and shared so the OpenAI normalizer and the Gemma dialect
-/// extract reasoning through one implementation (see PF-NORM-006).
-///
 /// # Errors
 /// Returns [`Error::MalformedResponse`] when a present reasoning field is not a
 /// string or null.
@@ -320,10 +295,6 @@ pub(crate) fn extract_reasoning(message: &Value) -> Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn normalize(body: &Value) -> Result<NormalizedTurn> {
-        OpenAiChatNormalizer.normalize(body)
-    }
 
     /// Wraps one assistant message in the gateway's one-choice envelope.
     fn one_choice(message: impl Into<Value>) -> Value {
