@@ -179,7 +179,7 @@ fn serve_thread(
             state.gateway_client().clone(),
             state.status(),
             state.health().clone(),
-            std::sync::Arc::new(std::sync::Mutex::new(None)),
+            state.voice_slot(),
             config.voice.clone(),
         );
         axum::serve(listener, router(state))
@@ -255,6 +255,25 @@ mod tests {
             .await
             .expect("the UI answers");
         assert_eq!(index.status(), reqwest::StatusCode::OK);
+
+        server.shutdown().expect("graceful shutdown succeeds");
+    }
+
+    /// A configured-but-missing voice model with no source URL degrades to
+    /// disabled voice with a status-bar explanation; it must never fail
+    /// startup.
+    #[tokio::test]
+    async fn a_missing_voice_model_without_a_source_still_boots() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let mut config = test_config("127.0.0.1:0", dir.path());
+        config.voice.interim_model = std::path::PathBuf::from("definitely-missing-model.bin");
+        let server = spawn(config).expect("server spawns with voice degraded");
+        let url = server.url().to_string();
+
+        let health = reqwest::get(format!("{url}/health"))
+            .await
+            .expect("the health endpoint answers");
+        assert_eq!(health.status(), reqwest::StatusCode::OK);
 
         server.shutdown().expect("graceful shutdown succeeds");
     }
