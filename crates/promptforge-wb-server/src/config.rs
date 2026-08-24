@@ -32,91 +32,26 @@ impl Config {
     /// Loads and parses the workbench configuration from `path`.
     ///
     /// # Errors
-    /// Returns [`ConfigError::Read`] if `path` cannot be read (including a
-    /// missing file), [`ConfigError::Parse`] if the contents do not match the
-    /// workbench schema, [`ConfigError::UnresolvedVar`] if a `${VAR}`
-    /// references an unset environment variable, and
-    /// [`ConfigError::Interpolation`] if a `${...}` is malformed.
+    /// Returns [`ConfigError::NotFound`] if `path` does not exist,
+    /// [`ConfigError::Read`] if `path` exists but cannot be read,
+    /// [`ConfigError::Parse`] if the contents do not match the workbench
+    /// schema, [`ConfigError::UnresolvedVar`] if a `${VAR}` references an
+    /// unset environment variable, and [`ConfigError::Interpolation`] if a
+    /// `${...}` is malformed.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
-            path: path.to_path_buf(),
-            source,
+        let raw = std::fs::read_to_string(path).map_err(|source| {
+            if source.kind() == std::io::ErrorKind::NotFound {
+                ConfigError::NotFound {
+                    path: path.to_path_buf(),
+                }
+            } else {
+                ConfigError::Read {
+                    path: path.to_path_buf(),
+                    source,
+                }
+            }
         })?;
         Self::parse(&raw, Some(path))
-    }
-
-    /// Builds configuration entirely from environment variables, used when
-    /// no `workbench.toml` is found.
-    ///
-    /// # Environment variables
-    ///
-    /// - `PROMPTFORGE_GATEWAY_BASE_URL` - default `http://127.0.0.1:8081`
-    /// - `PROMPTFORGE_GATEWAY_API_KEY` - **required**
-    /// - `PROMPTFORGE_TAPE_PATH` - default `tape.jsonl`
-    /// - `PROMPTFORGE_SERVER_BIND` - default `127.0.0.1:7910`
-    /// - `PROMPTFORGE_SERVER_OPEN_BROWSER` - default `false`; accepts
-    ///   `true` or `1`
-    /// - `PROMPTFORGE_VOICE_INTERIM_MODEL` - default empty (disabled)
-    /// - `PROMPTFORGE_VOICE_FINAL_MODEL` - default empty
-    /// - `PROMPTFORGE_VOICE_WINDOW_SECONDS` - default `5`
-    /// - `PROMPTFORGE_VOICE_INTERVAL_MS` - default `800`
-    ///
-    /// # Errors
-    /// Returns [`ConfigError::MissingEnvVar`] when a required variable is
-    /// not set, or [`ConfigError::InvalidEnvVar`] when a variable cannot be
-    /// parsed as the expected type.
-    pub fn from_env() -> Result<Self, ConfigError> {
-        Self::from_env_lookup(|name| std::env::var(name).ok())
-    }
-
-    /// Builds configuration from a variable lookup function.
-    ///
-    /// This is the implementation behind [`from_env`](Self::from_env),
-    /// factored out so tests can supply a synthetic environment.
-    fn from_env_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
-        let api_key =
-            lookup("PROMPTFORGE_GATEWAY_API_KEY").ok_or_else(|| ConfigError::MissingEnvVar {
-                name: "PROMPTFORGE_GATEWAY_API_KEY".to_string(),
-            })?;
-        let base_url = lookup("PROMPTFORGE_GATEWAY_BASE_URL")
-            .unwrap_or_else(|| "http://127.0.0.1:8081".to_string());
-        let tape_path = lookup("PROMPTFORGE_TAPE_PATH").unwrap_or_else(|| "tape.jsonl".to_string());
-        let bind =
-            lookup("PROMPTFORGE_SERVER_BIND").unwrap_or_else(|| "127.0.0.1:7910".to_string());
-        let open_browser = match lookup("PROMPTFORGE_SERVER_OPEN_BROWSER") {
-            None => false,
-            Some(v) => v == "true" || v == "1",
-        };
-        let interim_model = lookup("PROMPTFORGE_VOICE_INTERIM_MODEL").unwrap_or_default();
-        let final_model = lookup("PROMPTFORGE_VOICE_FINAL_MODEL").unwrap_or_default();
-        let window_seconds = match lookup("PROMPTFORGE_VOICE_WINDOW_SECONDS") {
-            None => DEFAULT_VOICE_WINDOW_SECONDS,
-            Some(v) => v.parse::<u64>().map_err(|_| ConfigError::InvalidEnvVar {
-                name: "PROMPTFORGE_VOICE_WINDOW_SECONDS".to_string(),
-                reason: format!("expected an integer, got {v:?}"),
-            })?,
-        };
-        let interval_ms = match lookup("PROMPTFORGE_VOICE_INTERVAL_MS") {
-            None => DEFAULT_VOICE_INTERVAL_MS,
-            Some(v) => v.parse::<u64>().map_err(|_| ConfigError::InvalidEnvVar {
-                name: "PROMPTFORGE_VOICE_INTERVAL_MS".to_string(),
-                reason: format!("expected an integer, got {v:?}"),
-            })?,
-        };
-
-        Ok(Self {
-            gateway: GatewayConfig { base_url, api_key },
-            tape: TapeConfig {
-                path: PathBuf::from(tape_path),
-            },
-            server: ServerConfig { bind, open_browser },
-            voice: VoiceConfig {
-                interim_model: PathBuf::from(interim_model),
-                final_model: PathBuf::from(final_model),
-                window_seconds,
-                interval_ms,
-            },
-        })
     }
 
     /// Parses a workbench configuration from a TOML string.
@@ -256,6 +191,14 @@ impl VoiceConfig {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ConfigError {
+    /// The configuration file does not exist.
+    #[non_exhaustive]
+    #[error("config file not found: {}", path.display())]
+    NotFound {
+        /// The path that was expected.
+        path: PathBuf,
+    },
+
     /// The configuration file could not be read.
     #[non_exhaustive]
     #[error("read config {}", path.display())]
@@ -287,24 +230,6 @@ pub enum ConfigError {
     #[non_exhaustive]
     #[error("interpolation: {0}")]
     Interpolation(String),
-
-    /// A required environment variable was not set (env-only config path).
-    #[non_exhaustive]
-    #[error("required environment variable {name} is not set")]
-    MissingEnvVar {
-        /// The variable that was expected.
-        name: String,
-    },
-
-    /// An environment variable could not be parsed as the expected type.
-    #[non_exhaustive]
-    #[error("environment variable {name}: {reason}")]
-    InvalidEnvVar {
-        /// The variable that was malformed.
-        name: String,
-        /// What went wrong.
-        reason: String,
-    },
 }
 
 /// Renders the optional parse-failure path as a ` (path)` suffix or empty.
@@ -528,13 +453,30 @@ interval_ms = 500
         let err = Config::load(Path::new("definitely-missing-workbench.toml"))
             .expect_err("missing file must fail");
         assert!(
-            matches!(err, ConfigError::Read { .. }),
-            "expected Read, got {err:?}"
+            matches!(err, ConfigError::NotFound { .. }),
+            "expected NotFound, got {err:?}"
         );
         assert!(
             err.to_string()
                 .contains("definitely-missing-workbench.toml"),
             "error names the path: {err}"
+        );
+    }
+
+    #[test]
+    fn unreadable_existing_file_is_a_read_error() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path().join("workbench.toml");
+        std::fs::write(&path, "[gateway]\n").expect("write fixture");
+        // A directory-shaped read failure: replace the file with a
+        // directory of the same name so the read fails for a reason other
+        // than NotFound.
+        std::fs::remove_file(&path).expect("remove fixture");
+        std::fs::create_dir(&path).expect("directory in the file's place");
+        let err = Config::load(&path).expect_err("unreadable path must fail");
+        assert!(
+            matches!(err, ConfigError::Read { .. }),
+            "expected Read, got {err:?}"
         );
     }
 
@@ -565,65 +507,5 @@ interval_ms = 500
         .expect("write fixture");
         let config = Config::load(&path).expect("fixture loads");
         assert_eq!(config.gateway.api_key, "k");
-    }
-
-    #[test]
-    fn from_env_produces_valid_config_with_required_vars() {
-        use std::collections::HashMap;
-        let mut env: HashMap<&str, &str> = HashMap::new();
-        env.insert("PROMPTFORGE_GATEWAY_API_KEY", "test-secret");
-
-        let config = Config::from_env_lookup(|name| env.get(name).map(|v| (*v).to_string()))
-            .expect("env config with defaults");
-        assert_eq!(config.gateway.api_key, "test-secret");
-        assert_eq!(config.gateway.base_url, "http://127.0.0.1:8081");
-        assert_eq!(config.tape.path, PathBuf::from("tape.jsonl"));
-        assert_eq!(config.server.bind, "127.0.0.1:7910");
-        assert!(!config.server.open_browser);
-        assert!(!config.voice.enabled());
-        assert_eq!(config.voice.window_seconds, DEFAULT_VOICE_WINDOW_SECONDS);
-        assert_eq!(config.voice.interval_ms, DEFAULT_VOICE_INTERVAL_MS);
-    }
-
-    #[test]
-    fn from_env_errors_when_api_key_missing() {
-        let env: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
-        let err = Config::from_env_lookup(|name| env.get(name).map(|v| (*v).to_string()))
-            .expect_err("missing key must fail");
-        assert!(
-            matches!(err, ConfigError::MissingEnvVar { ref name } if name == "PROMPTFORGE_GATEWAY_API_KEY"),
-            "expected MissingEnvVar, got {err:?}"
-        );
-        assert!(
-            err.to_string().contains("PROMPTFORGE_GATEWAY_API_KEY"),
-            "error names the variable: {err}"
-        );
-    }
-
-    #[test]
-    fn from_env_respects_all_overrides() {
-        use std::collections::HashMap;
-        let mut env: HashMap<&str, &str> = HashMap::new();
-        env.insert("PROMPTFORGE_GATEWAY_API_KEY", "k");
-        env.insert("PROMPTFORGE_GATEWAY_BASE_URL", "http://gw:9999");
-        env.insert("PROMPTFORGE_TAPE_PATH", "custom.jsonl");
-        env.insert("PROMPTFORGE_SERVER_BIND", "0.0.0.0:8080");
-        env.insert("PROMPTFORGE_SERVER_OPEN_BROWSER", "1");
-        env.insert("PROMPTFORGE_VOICE_INTERIM_MODEL", "m1.bin");
-        env.insert("PROMPTFORGE_VOICE_FINAL_MODEL", "m2.bin");
-        env.insert("PROMPTFORGE_VOICE_WINDOW_SECONDS", "10");
-        env.insert("PROMPTFORGE_VOICE_INTERVAL_MS", "400");
-
-        let config = Config::from_env_lookup(|name| env.get(name).map(|v| (*v).to_string()))
-            .expect("env config with all overrides");
-        assert_eq!(config.gateway.base_url, "http://gw:9999");
-        assert_eq!(config.tape.path, PathBuf::from("custom.jsonl"));
-        assert_eq!(config.server.bind, "0.0.0.0:8080");
-        assert!(config.server.open_browser);
-        assert!(config.voice.enabled());
-        assert_eq!(config.voice.interim_model, PathBuf::from("m1.bin"));
-        assert_eq!(config.voice.final_model, PathBuf::from("m2.bin"));
-        assert_eq!(config.voice.window_seconds, 10);
-        assert_eq!(config.voice.interval_ms, 400);
     }
 }
