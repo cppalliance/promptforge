@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-BSL--1.0-blue.svg)](LICENSE)
 
-The PromptForge Workbench HTTP server. It serves a local chat UI and API on loopback: an OpenAI-shaped model catalog and chat relay in front of a PromptForge gateway (with streaming over SSE), a JSONL session tape recording every exchange, and a WebSocket voice endpoint that transcribes push-to-talk microphone audio on-device with whisper.cpp. The desktop shell (`promptforge-wb`) embeds it in-process; run standalone it is the browser-tab frame of the same workbench.
+The PromptForge Workbench HTTP server. It serves a local chat UI and API on loopback: an OpenAI-shaped model catalog and chat relay in front of a PromptForge gateway (with streaming over a WebSocket), a JSONL session tape recording every exchange, and a WebSocket voice endpoint that transcribes push-to-talk microphone audio on-device with whisper.cpp. The desktop shell (`promptforge-wb`) embeds it in-process; run standalone it is the browser-tab frame of the same workbench.
 
 ## Quick start
 
@@ -51,7 +51,8 @@ Every field of `workbench.toml`:
 | `GET /health` | Health probe; answers `{"status":"serving"}` |
 | `GET /` | The chat UI (also `/app.js`, `/app.css`, `/style.css`, `/pcm-worklet.js`, served from `ui/dist/`: read from disk in debug builds, embedded in the binary in release builds) |
 | `GET /v1/models` | Proxies the gateway's model catalog verbatim |
-| `POST /chat` | Chat relay: `{"model", "messages"}` in, gateway response out; `"stream": true` switches to SSE |
+| `POST /chat` | Buffered chat relay: `{"model", "messages"}` in, gateway response out; `"stream": true` is rejected with 400 - streaming lives on `/ws` |
+| `GET /ws` | WebSocket upgrade: `{"type":"chat","model","messages"}` frames in, `{"type":"delta","content"}` / `{"type":"done"}` / `{"type":"error","message"}` frames out |
 | `GET /voice` | WebSocket upgrade: binary f32 PCM at 16 kHz mono in, `start`/`stop` control words, interim and final transcripts out |
 
 ## UI development

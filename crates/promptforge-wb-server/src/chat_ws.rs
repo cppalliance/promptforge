@@ -27,8 +27,9 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use futures_util::{SinkExt, StreamExt};
 
-use crate::app::{AppState, StreamTape, delta_content, tape_round_trip, value_from_bytes};
+use crate::app::{AppState, tape_round_trip, value_from_bytes};
 use crate::gateway::{ChatRequest, ChatStream};
+use crate::tape::Tape;
 
 /// Session ids for log correlation, handed out in connection order.
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
@@ -191,6 +192,61 @@ async fn relay_chat(
     }
 }
 
+/// Extracts the text delta from one gateway SSE payload, if it carries
+/// content.
+///
+/// Role-priming and usage events have no `choices[0].delta.content` and
+/// contribute nothing to the assembled response.
+fn delta_content(payload: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+    let content = value
+        .get("choices")?
+        .as_array()?
+        .first()?
+        .get("delta")?
+        .get("content")?
+        .as_str()?;
+    Some(content.to_string())
+}
+
+/// Tape bookkeeping carried through one streaming chat.
+///
+/// The session consumes this exactly once per chat frame, so a streamed chat
+/// always tapes exactly one event.
+struct StreamTape {
+    tape: Arc<Tape>,
+    model: String,
+    request: serde_json::Value,
+    started: Instant,
+    /// Concatenation of every content delta forwarded so far.
+    assembled: String,
+    /// The mid-stream failure note, when the gateway stream errored.
+    error: Option<String>,
+}
+
+impl StreamTape {
+    /// Writes the stream's single tape event: the assembled content on
+    /// success, or an error note plus the partial content on failure.
+    async fn record(self) {
+        let Self {
+            tape,
+            model,
+            request,
+            started,
+            assembled,
+            error,
+        } = self;
+        let response = match error {
+            Some(message) => serde_json::json!({
+                "error": message,
+                "content": assembled,
+            }),
+            None => serde_json::Value::String(assembled),
+        };
+        tape_round_trip(&tape, model, request, response, started.elapsed()).await;
+    }
+}
+
 /// Sends one JSON text frame; a false return means the client is gone.
 async fn send_frame(out: &tokio::sync::mpsc::Sender<Message>, frame: serde_json::Value) -> bool {
     out.send(Message::Text(frame.to_string().into()))
@@ -265,6 +321,31 @@ mod tests {
                 }
                 _ => None,
             }
+        });
+        (
+            [(header::CONTENT_TYPE, "text/event-stream")],
+            Body::from_stream(chunks),
+        )
+            .into_response()
+    }
+
+    /// Drips one delta every 50ms, giving a client time to disconnect
+    /// mid-stream before the drip runs out.
+    async fn mock_chat_stream_drips(headers: HeaderMap, body: String) -> Response {
+        assert!(authorized(&headers));
+        let body: serde_json::Value = serde_json::from_str(&body).expect("the request is JSON");
+        assert_eq!(body["stream"], true, "the stream flag is forwarded");
+        let chunks = stream::unfold(0u8, |step| async move {
+            if step >= 40 {
+                return None;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let payload =
+                format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"x{step}\"}}}}]}}\n\n");
+            Some((
+                Ok::<_, std::io::Error>(axum::body::Bytes::from(payload)),
+                step + 1,
+            ))
         });
         (
             [(header::CONTENT_TYPE, "text/event-stream")],
@@ -460,6 +541,51 @@ mod tests {
             "the partial content is taped alongside the error"
         );
         socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn a_client_disconnect_mid_stream_is_taped_with_the_partial_content() {
+        let base_url = spawn_gateway(
+            Router::new().route("/v1/chat/completions", post(mock_chat_stream_drips)),
+        )
+        .await;
+        let (url, tape_dir) = spawn_chat_server(&base_url).await;
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        send_chat(&mut socket).await;
+        let first = read_frame(&mut socket).await;
+        assert_eq!(first["type"], "delta");
+        // Drop the socket without a close handshake; the server notices when
+        // a later delta send fails.
+        drop(socket);
+
+        // The tape write follows the failed send, so poll for it.
+        let mut events: Vec<serde_json::Value> = Vec::new();
+        for _ in 0..100 {
+            if let Ok(raw) = std::fs::read_to_string(tape_dir.path().join("tape.jsonl"))
+                && !raw.trim().is_empty()
+            {
+                events = raw
+                    .lines()
+                    .map(|line| serde_json::from_str(line).expect("the tape line is valid JSON"))
+                    .collect();
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(events.len(), 1, "a mid-stream disconnect tapes one event");
+        assert_eq!(
+            events[0]["response"]["error"], "client disconnected mid-stream",
+            "the disconnect is taped as an error note"
+        );
+        let partial = events[0]["response"]["content"]
+            .as_str()
+            .expect("the partial content is a string");
+        assert!(
+            partial.starts_with("x0"),
+            "the partial content is taped alongside: {partial:?}"
+        );
     }
 
     #[tokio::test]
