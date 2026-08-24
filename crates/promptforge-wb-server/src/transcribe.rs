@@ -1,11 +1,15 @@
-//! Whisper transcription on a dedicated worker thread.
+//! Whisper transcription on dedicated worker threads.
 //!
-//! [`VoiceEngine`] owns one worker thread holding the whisper context and
-//! state; callers hand it owned sample buffers through a channel and await
-//! the transcript on a oneshot, so the blocking CPU-bound inference never
-//! touches the tokio executor. The pure helpers ([`rms`], [`is_silence`],
-//! [`tail`]) are the session's silence gate: whisper hallucinates plausible
-//! text on silent input, so quiet windows are never sent to the model.
+//! [`VoiceEngine`] owns two worker threads: the interim worker holds the
+//! streaming model and transcribes sliding windows, and the final-pass
+//! worker ([`FinalTranscriber`], present when `[voice].final_model` is
+//! configured) holds the larger model and transcribes completed speech
+//! segments in the background while the user is still talking. Callers hand
+//! owned sample buffers through channels and await transcripts on oneshots,
+//! so the blocking CPU-bound inference never touches the tokio executor.
+//! The pure helpers ([`rms`], [`is_silence`], [`tail`]) are the session's
+//! silence gate: whisper hallucinates plausible text on silent input, so
+//! quiet windows are never sent to the model.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -27,6 +31,13 @@ pub(crate) const SILENCE_RMS: f64 = 0.001;
 /// decode to garbage often enough that gating them is cheaper than filtering
 /// their output.
 pub(crate) const MIN_WINDOW_SAMPLES: usize = SAMPLE_RATE / 2;
+
+/// Maximum conditioning prompt handed to the final pass, in chars. Whisper
+/// keeps at most half its text context for the prompt (224 tokens), and
+/// four chars per token is a conservative English estimate; the tail of the
+/// accumulated transcript is what matters for continuity, so the cap trims
+/// from the front.
+const MAX_PROMPT_CHARS: usize = 800;
 
 /// Root-mean-square amplitude of a PCM buffer.
 #[expect(
@@ -53,23 +64,25 @@ pub(crate) fn tail(buffer: &[f32], window: usize) -> &[f32] {
     &buffer[buffer.len().saturating_sub(window)..]
 }
 
-/// The per-server voice engine: the whisper worker plus the interim loop's
-/// window and cadence, built once at startup from `[voice]` in
-/// `workbench.toml`.
+/// The per-server voice engine: the interim and final-pass whisper workers
+/// plus the interim loop's window and cadence, built once at startup from
+/// `[voice]` in `workbench.toml`.
 #[derive(Debug)]
 pub(crate) struct VoiceEngine {
     transcriber: Transcriber,
+    final_pass: Option<FinalTranscriber>,
     window_samples: usize,
     interval: Duration,
 }
 
 impl VoiceEngine {
-    /// Loads the interim model onto a fresh worker thread.
+    /// Loads the interim model, and the final model when configured, each
+    /// onto a fresh worker thread.
     ///
     /// # Errors
     /// Returns [`TranscribeError::InvalidConfig`] when the window or interval
-    /// is zero, [`TranscribeError::LoadModel`] when the model file cannot be
-    /// loaded, and [`TranscribeError::SpawnWorker`] when the worker thread
+    /// is zero, [`TranscribeError::LoadModel`] when a model file cannot be
+    /// loaded, and [`TranscribeError::SpawnWorker`] when a worker thread
     /// cannot be started.
     pub(crate) fn new(config: &VoiceConfig) -> Result<Self, TranscribeError> {
         if config.window_seconds == 0 {
@@ -91,8 +104,14 @@ impl VoiceEngine {
             ));
         };
         let transcriber = Transcriber::load(&config.interim_model)?;
+        let final_pass = if config.final_model.as_os_str().is_empty() {
+            None
+        } else {
+            Some(FinalTranscriber::load(&config.final_model)?)
+        };
         Ok(Self {
             transcriber,
+            final_pass,
             window_samples,
             interval: Duration::from_millis(config.interval_ms),
         })
@@ -116,6 +135,41 @@ impl VoiceEngine {
     /// exited.
     pub(crate) async fn transcribe(&self, samples: Vec<f32>) -> Result<String, TranscribeError> {
         self.transcriber.transcribe(samples).await
+    }
+
+    /// Starts a new take on the final-pass worker, discarding the previous
+    /// take's accumulated transcript. A no-op without a final model.
+    pub(crate) fn final_reset(&self) {
+        if let Some(final_pass) = &self.final_pass {
+            final_pass.reset();
+        }
+    }
+
+    /// Queues a completed speech segment for background final-pass
+    /// transcription, conditioned on the take's accumulated transcript. A
+    /// no-op without a final model.
+    pub(crate) fn final_submit(&self, samples: Vec<f32>) {
+        if let Some(final_pass) = &self.final_pass {
+            final_pass.submit(samples);
+        }
+    }
+
+    /// Queues the take's unprocessed tail and awaits the take's full
+    /// assembled transcript, or `None` when no final model is configured and
+    /// the caller should fall back to the interim model.
+    ///
+    /// # Errors
+    /// Returns [`TranscribeError::Inference`] when the model rejects the
+    /// audio and [`TranscribeError::WorkerGone`] when the worker thread has
+    /// exited.
+    pub(crate) async fn final_finish(
+        &self,
+        samples: Vec<f32>,
+    ) -> Option<Result<String, TranscribeError>> {
+        match &self.final_pass {
+            None => None,
+            Some(final_pass) => Some(final_pass.finish(samples).await),
+        }
     }
 }
 
@@ -168,6 +222,25 @@ fn worker_loop(
     job_rx: &std::sync::mpsc::Receiver<Job>,
     init_tx: &std::sync::mpsc::SyncSender<Result<(), TranscribeError>>,
 ) {
+    let Some((_ctx, mut state)) = load_state(path, init_tx) else {
+        return;
+    };
+    while let Ok(job) = job_rx.recv() {
+        // The receiver may be gone (session closed mid-pass); the transcript
+        // is computed anyway and the send failure ignored.
+        let _ = job
+            .reply
+            .send(transcribe_blocking(&mut state, &job.samples, None, true));
+    }
+}
+
+/// Loads a whisper context and state from `path`, reporting the outcome on
+/// `init_tx` (which the spawning `load` blocks on). Returns `None` after
+/// reporting a failure, or when the spawner is already gone.
+fn load_state(
+    path: &Path,
+    init_tx: &std::sync::mpsc::SyncSender<Result<(), TranscribeError>>,
+) -> Option<(WhisperContext, whisper_rs::WhisperState)> {
     let loaded = WhisperContext::new_with_params(path, WhisperContextParameters::default())
         .map_err(|source| TranscribeError::LoadModel {
             path: path.to_path_buf(),
@@ -181,41 +254,48 @@ fn worker_loop(
                     source: Box::new(source),
                 })
         });
-    // `Transcriber::load` blocks on the init channel until this send (or the
-    // worker's exit) completes, so the send can only fail if the spawner is
-    // already gone; either way there is nobody left to report to.
-    let (_ctx, mut state) = match loaded {
+    match loaded {
         Ok(pair) => {
             let _ = init_tx.send(Ok(()));
-            pair
+            Some(pair)
         }
         Err(error) => {
             let _ = init_tx.send(Err(error));
-            return;
+            None
         }
-    };
-    while let Ok(job) = job_rx.recv() {
-        // The receiver may be gone (session closed mid-pass); the transcript
-        // is computed anyway and the send failure ignored.
-        let _ = job
-            .reply
-            .send(transcribe_blocking(&mut state, &job.samples));
     }
 }
 
+/// The trailing `MAX_PROMPT_CHARS` chars of `prompt` with null bytes
+/// stripped: whisper's prompt buffer is bounded, and `set_initial_prompt`
+/// panics on null bytes, which a model transcript could in principle
+/// contain.
+fn sanitize_prompt(prompt: &str) -> String {
+    let cleaned: String = prompt.chars().filter(|&c| c != '\0').collect();
+    let mut start = cleaned.len().saturating_sub(MAX_PROMPT_CHARS);
+    while !cleaned.is_char_boundary(start) {
+        start += 1;
+    }
+    cleaned[start..].to_string()
+}
+
 /// Runs one blocking whisper pass over `samples` and concatenates the
-/// segments.
+/// segments. `prompt`, when non-empty after sanitizing, conditions the
+/// decoder on the take's transcript so far; `single_segment` forces the
+/// whole buffer into one decoding pass (the interim sliding-window case).
 fn transcribe_blocking(
     state: &mut whisper_rs::WhisperState,
     samples: &[f32],
+    prompt: Option<&str>,
+    single_segment: bool,
 ) -> Result<String, TranscribeError> {
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
     params.set_language(Some("en"));
     params.set_translate(false);
-    // Each window stands alone: past output must not prime the decoder, or
-    // the sliding loop compounds its own hallucinations.
+    // Decoder state never carries across passes: conditioning travels only
+    // through the explicit prompt, or a hallucination would compound.
     params.set_no_context(true);
-    params.set_single_segment(true);
+    params.set_single_segment(single_segment);
     params.set_no_timestamps(true);
     params.set_print_special(false);
     params.set_print_progress(false);
@@ -223,6 +303,12 @@ fn transcribe_blocking(
     params.set_print_timestamps(false);
     params.set_suppress_blank(true);
     params.set_suppress_nst(true);
+    if let Some(prompt) = prompt {
+        let prompt = sanitize_prompt(prompt);
+        if !prompt.is_empty() {
+            params.set_initial_prompt(&prompt);
+        }
+    }
     state
         .full(params, samples)
         .map_err(|source| TranscribeError::Inference(Box::new(source)))?;
@@ -234,6 +320,175 @@ fn transcribe_blocking(
         text.push_str(&piece);
     }
     Ok(text.trim().to_string())
+}
+
+/// One take's final-pass state: the large model's whisper state plus the
+/// take's accumulated transcript, which conditions each new segment so
+/// domain vocabulary and phrasing survive segmentation.
+#[derive(Debug)]
+pub(crate) struct FinalPass {
+    state: whisper_rs::WhisperState,
+    /// Every segment transcript so far, joined by single spaces.
+    transcript: String,
+    /// The conditioning prompt used on the most recent segment, kept so
+    /// tests can observe that conditioning actually happened.
+    last_prompt: String,
+}
+
+impl FinalPass {
+    /// Loads the final model from `path`.
+    ///
+    /// # Errors
+    /// Returns [`TranscribeError::LoadModel`] when the model file cannot be
+    /// loaded.
+    fn load(path: &Path) -> Result<Self, TranscribeError> {
+        let (init_tx, init_rx) = std::sync::mpsc::sync_channel(1);
+        let Some((_ctx, state)) = load_state(path, &init_tx) else {
+            return match init_rx.recv() {
+                Ok(Err(error)) => Err(error),
+                // `load_state` reports every outcome on the channel before
+                // returning `None`, so a disconnected or Ok(()) result here
+                // means the invariant broke, not a new failure mode.
+                _ => Err(TranscribeError::WorkerGone),
+            };
+        };
+        Ok(Self {
+            state,
+            transcript: String::new(),
+            last_prompt: String::new(),
+        })
+    }
+
+    /// Forgets the previous take's transcript for a new take.
+    fn reset(&mut self) {
+        self.transcript.clear();
+        self.last_prompt.clear();
+    }
+
+    /// The conditioning prompt the most recent segment was transcribed with.
+    #[cfg(test)]
+    pub(crate) fn last_prompt(&self) -> &str {
+        &self.last_prompt
+    }
+
+    /// Transcribes one segment conditioned on the accumulated transcript,
+    /// appends the result, and returns the full assembled transcript.
+    /// Silent or tiny fragments are skipped (whisper hallucinates on them)
+    /// and the accumulated transcript is returned unchanged.
+    ///
+    /// # Errors
+    /// Returns [`TranscribeError::Inference`] when the model rejects the
+    /// audio; the accumulated transcript is left unchanged.
+    fn transcribe_segment(&mut self, samples: &[f32]) -> Result<String, TranscribeError> {
+        if samples.len() >= MIN_WINDOW_SAMPLES && !is_silence(samples) {
+            let prompt = self.transcript.clone();
+            let text = transcribe_blocking(&mut self.state, samples, Some(&prompt), false)?;
+            if !text.is_empty() {
+                if !self.transcript.is_empty() {
+                    self.transcript.push(' ');
+                }
+                self.transcript.push_str(&text);
+            }
+            self.last_prompt = prompt;
+        }
+        Ok(self.transcript.clone())
+    }
+}
+
+/// A command for the final-pass worker thread.
+enum FinalJob {
+    /// Start a new take, discarding the accumulated transcript.
+    Reset,
+    /// Transcribe a completed segment (or the closing tail) and reply with
+    /// the take's full assembled transcript.
+    Segment {
+        samples: Vec<f32>,
+        reply: tokio::sync::oneshot::Sender<Result<String, TranscribeError>>,
+    },
+}
+
+/// Handle to the final-pass worker thread: the large model transcribing
+/// completed segments in the background while a take records.
+#[derive(Debug)]
+pub(crate) struct FinalTranscriber {
+    job_tx: std::sync::mpsc::Sender<FinalJob>,
+}
+
+impl FinalTranscriber {
+    /// Spawns the worker thread and blocks until the model is loaded or the
+    /// load fails.
+    ///
+    /// # Errors
+    /// Returns [`TranscribeError::LoadModel`] when the model file cannot be
+    /// loaded and [`TranscribeError::SpawnWorker`] when the thread cannot be
+    /// started.
+    fn load(model_path: &Path) -> Result<Self, TranscribeError> {
+        let (job_tx, job_rx) = std::sync::mpsc::channel::<FinalJob>();
+        let (init_tx, init_rx) = std::sync::mpsc::sync_channel(1);
+        let path = model_path.to_path_buf();
+        std::thread::Builder::new()
+            .name("whisper-final".to_string())
+            .spawn(move || final_worker_loop(&path, &job_rx, &init_tx))
+            .map_err(TranscribeError::SpawnWorker)?;
+        init_rx.recv().map_err(|_| TranscribeError::WorkerGone)??;
+        Ok(Self { job_tx })
+    }
+
+    /// Starts a new take. If the worker is gone the next `finish` reports it.
+    fn reset(&self) {
+        let _ = self.job_tx.send(FinalJob::Reset);
+    }
+
+    /// Queues a completed segment for background transcription; the result
+    /// is observed only through the accumulated transcript at `finish`.
+    fn submit(&self, samples: Vec<f32>) {
+        let (reply, _dropped) = tokio::sync::oneshot::channel();
+        let _ = self.job_tx.send(FinalJob::Segment { samples, reply });
+    }
+
+    /// Queues the take's tail and awaits the full assembled transcript.
+    /// Because the channel is FIFO, awaiting this reply also drains every
+    /// segment submitted earlier in the take.
+    async fn finish(&self, samples: Vec<f32>) -> Result<String, TranscribeError> {
+        let (reply, reply_rx) = tokio::sync::oneshot::channel();
+        self.job_tx
+            .send(FinalJob::Segment { samples, reply })
+            .map_err(|_| TranscribeError::WorkerGone)?;
+        reply_rx.await.map_err(|_| TranscribeError::WorkerGone)?
+    }
+}
+
+/// The final-pass worker's body: load the model, then process takes' jobs in
+/// arrival order until every sender is dropped.
+fn final_worker_loop(
+    path: &Path,
+    job_rx: &std::sync::mpsc::Receiver<FinalJob>,
+    init_tx: &std::sync::mpsc::SyncSender<Result<(), TranscribeError>>,
+) {
+    let mut pass = match FinalPass::load(path) {
+        Ok(pass) => {
+            let _ = init_tx.send(Ok(()));
+            pass
+        }
+        Err(error) => {
+            let _ = init_tx.send(Err(error));
+            return;
+        }
+    };
+    while let Ok(job) = job_rx.recv() {
+        match job {
+            FinalJob::Reset => pass.reset(),
+            FinalJob::Segment { samples, reply } => {
+                let result = pass.transcribe_segment(&samples);
+                if let Err(error) = &result {
+                    tracing::warn!(%error, "final-pass segment transcription failed");
+                }
+                // A dropped receiver (a background segment, or a session
+                // closed mid-take) is fine: the transcript was computed.
+                let _ = reply.send(result);
+            }
+        }
+    }
 }
 
 /// A voice-engine construction or transcription failure.
@@ -384,6 +639,129 @@ mod tests {
         assert!(
             matches!(err, TranscribeError::InvalidConfig(_)),
             "expected InvalidConfig, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn sanitize_prompt_strips_nulls_and_caps_length() {
+        assert_eq!(sanitize_prompt("hello"), "hello");
+        assert_eq!(sanitize_prompt("a\0b"), "ab");
+        let long = "x".repeat(MAX_PROMPT_CHARS + 100);
+        assert_eq!(sanitize_prompt(&long).len(), MAX_PROMPT_CHARS);
+        // Multibyte input is capped at a char boundary, never mid-codepoint.
+        let multibyte = "é".repeat(MAX_PROMPT_CHARS + 10);
+        let capped = sanitize_prompt(&multibyte);
+        assert!(capped.len() <= MAX_PROMPT_CHARS);
+        assert!(capped.chars().all(|c| c == 'é'));
+    }
+
+    #[test]
+    fn missing_final_model_fails_engine_construction() {
+        let config = VoiceConfig {
+            interim_model: fixtures::require_model(),
+            final_model: PathBuf::from("definitely-missing-final-model.bin"),
+            ..VoiceConfig::default()
+        };
+        let err = VoiceEngine::new(&config).expect_err("a missing final model must fail");
+        assert!(
+            matches!(err, TranscribeError::LoadModel { .. }),
+            "expected LoadModel, got {err:?}"
+        );
+        assert!(
+            err.to_string()
+                .contains("definitely-missing-final-model.bin"),
+            "error names the path: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn final_pass_entry_points_are_no_ops_without_a_final_model() {
+        let config = VoiceConfig {
+            interim_model: fixtures::require_model(),
+            ..VoiceConfig::default()
+        };
+        let engine = VoiceEngine::new(&config).expect("engine loads the fixture model");
+        engine.final_reset();
+        engine.final_submit(fixtures::jfk_samples());
+        assert!(
+            engine.final_finish(fixtures::jfk_samples()).await.is_none(),
+            "no final model means the caller falls back"
+        );
+    }
+
+    #[test]
+    fn final_pass_conditions_each_segment_on_the_accumulated_transcript() {
+        let mut pass = FinalPass::load(&fixtures::require_model())
+            .expect("final pass loads the fixture model");
+        let jfk = fixtures::jfk_samples();
+
+        let first = pass
+            .transcribe_segment(&jfk)
+            .expect("segment one transcribes");
+        assert!(
+            pass.last_prompt().is_empty(),
+            "the first segment has nothing to be conditioned on"
+        );
+        let first_lower = first.to_lowercase();
+        assert!(
+            first_lower.contains("country"),
+            "segment one names the fixture's words: {first:?}"
+        );
+        let first_countries = first_lower.matches("country").count();
+
+        let second = pass
+            .transcribe_segment(&jfk)
+            .expect("segment two transcribes");
+        assert_eq!(
+            pass.last_prompt(),
+            first,
+            "segment two was conditioned on the accumulated transcript"
+        );
+        assert!(
+            second.starts_with(&first),
+            "segment transcripts accumulate in order: {second:?}"
+        );
+        let second_countries = second.to_lowercase().matches("country").count();
+        assert!(
+            second_countries > first_countries,
+            "the second segment added its own text: {first_countries} then {second_countries}"
+        );
+    }
+
+    #[test]
+    fn final_pass_reset_forgets_the_accumulated_transcript() {
+        let mut pass = FinalPass::load(&fixtures::require_model())
+            .expect("final pass loads the fixture model");
+        let jfk = fixtures::jfk_samples();
+
+        let first = pass
+            .transcribe_segment(&jfk)
+            .expect("segment one transcribes");
+        pass.reset();
+        let second = pass
+            .transcribe_segment(&jfk)
+            .expect("segment two transcribes");
+        assert!(
+            pass.last_prompt().is_empty(),
+            "after reset the next segment has nothing to be conditioned on"
+        );
+        assert_eq!(
+            second, first,
+            "a new take's transcript holds only its own segments"
+        );
+    }
+
+    #[test]
+    fn final_pass_skips_silence_without_touching_the_transcript() {
+        let mut pass = FinalPass::load(&fixtures::require_model())
+            .expect("final pass loads the fixture model");
+        let text = pass
+            .transcribe_segment(&vec![0.0; SAMPLE_RATE * 2])
+            .expect("silence is skipped, not an error");
+        assert!(text.is_empty(), "silence transcribes to nothing");
+        assert!(
+            pass.last_prompt().is_empty(),
+            "a skipped segment records no conditioning"
         );
     }
 

@@ -133,16 +133,20 @@ pub const DEFAULT_VOICE_INTERVAL_MS: u64 = 800;
 ///
 /// Transcription is enabled by setting `interim_model`; with no model paths
 /// configured the `/voice` endpoint still captures and counts PCM but emits
-/// empty transcripts. `final_model` is parsed for the upcoming final-pass
-/// step and not loaded yet.
+/// empty transcripts. Setting `final_model` enables the pipelined final
+/// pass: completed speech segments are transcribed with the final model in
+/// the background while the user talks, and on stop only the unprocessed
+/// tail remains. Without it, the final transcript falls back to one last
+/// interim-model window.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(default)]
 pub struct VoiceConfig {
     /// Path to the GGML/GGUF whisper model for interim (streaming)
     /// transcription. Empty disables transcription.
     pub interim_model: PathBuf,
-    /// Path to the whisper model for the final pass over a finished take.
-    /// Reserved for the next step; not loaded yet.
+    /// Path to the whisper model for the pipelined final pass over a take.
+    /// Empty disables the final pass; the final transcript then comes from
+    /// the interim model.
     pub final_model: PathBuf,
     /// Seconds of trailing audio each interim pass transcribes.
     pub window_seconds: u64,
