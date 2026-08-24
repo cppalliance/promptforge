@@ -22,6 +22,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -30,16 +31,23 @@ use futures_util::{SinkExt, StreamExt};
 
 use crate::app::AppState;
 use crate::segment::Segmenter;
+use crate::status::{Activity, StatusBus};
 use crate::transcribe::{self, MIN_WINDOW_SAMPLES, VoiceEngine};
 
 /// Session ids for log correlation, handed out in connection order.
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
 
+/// Floor between microphone activity pulses: the worklet posts chunks far
+/// faster than the status bar can usefully change, so mic activity pulses
+/// at 4 Hz rather than per frame.
+const MIC_PULSE_INTERVAL: Duration = Duration::from_millis(250);
+
 /// Upgrades a `GET /voice` request to a WebSocket voice-capture session.
 pub(crate) async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
     let session = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
     let engine = state.voice_engine();
-    ws.on_upgrade(move |socket| run_session(session, socket, engine))
+    let status = state.status();
+    ws.on_upgrade(move |socket| run_session(session, socket, engine, status))
 }
 
 /// Locks the PCM buffer, recovering from poisoning the way the tape does: a
@@ -69,6 +77,7 @@ fn spawn_interim_loop(
     engine: Arc<VoiceEngine>,
     buffer: Arc<Mutex<Vec<f32>>>,
     out: tokio::sync::mpsc::Sender<Message>,
+    status: StatusBus,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
@@ -77,6 +86,11 @@ fn spawn_interim_loop(
             if window.len() < MIN_WINDOW_SAMPLES || transcribe::is_silence(&window) {
                 continue;
             }
+            status.debug(
+                "Transcribing...",
+                "an interim pass over the trailing window",
+                Activity::Voice,
+            );
             match engine.transcribe(window).await {
                 // `transcribe` returns trimmed text, so empty here means a
                 // whitespace-only hallucination: suppress it.
@@ -88,6 +102,9 @@ fn spawn_interim_loop(
                     }
                 }
                 Err(error) => {
+                    // A failed interim pass is transient - the next tick
+                    // retries - so it pulses at Debug rather than Error.
+                    status.debug("Transcription failed", error.to_string(), Activity::Voice);
                     tracing::warn!(session, %error, "interim transcription failed");
                 }
             }
@@ -103,6 +120,7 @@ async fn final_transcript(
     session: u64,
     engine: Option<&VoiceEngine>,
     buffer: &Mutex<Vec<f32>>,
+    status: &StatusBus,
 ) -> String {
     let Some(engine) = engine else {
         return String::new();
@@ -114,6 +132,7 @@ async fn final_transcript(
     match engine.transcribe(window).await {
         Ok(text) => text,
         Err(error) => {
+            status.error("Transcription failed", error.to_string(), Activity::Voice);
             tracing::warn!(session, %error, "final transcription failed");
             String::new()
         }
@@ -129,6 +148,7 @@ async fn stop_transcript(
     engine: Option<&VoiceEngine>,
     buffer: &Mutex<Vec<f32>>,
     segmenter: &Segmenter,
+    status: &StatusBus,
 ) -> String {
     let Some(engine) = engine else {
         return String::new();
@@ -140,21 +160,77 @@ async fn stop_transcript(
     match engine.final_finish(tail).await {
         Some(Ok(text)) => text,
         Some(Err(error)) => {
+            status.error("Transcription failed", error.to_string(), Activity::Voice);
             tracing::warn!(session, %error, "final-pass transcription failed; falling back to the interim model");
-            final_transcript(session, Some(engine), buffer).await
+            final_transcript(session, Some(engine), buffer, status).await
         }
         None => {
             tracing::info!(
                 session,
                 "no final model configured; the final pass uses the interim model"
             );
-            final_transcript(session, Some(engine), buffer).await
+            final_transcript(session, Some(engine), buffer, status).await
         }
     }
 }
 
+/// Starts a new take: clears the buffer, resets the segmenter and the
+/// final-pass pipeline, and spawns the interim loop when an engine is
+/// configured.
+fn begin_take(
+    session: u64,
+    engine: Option<&Arc<VoiceEngine>>,
+    buffer: &Arc<Mutex<Vec<f32>>>,
+    segmenter: &mut Segmenter,
+    interim: &mut Option<tokio::task::JoinHandle<()>>,
+    out: &tokio::sync::mpsc::Sender<Message>,
+    status: &StatusBus,
+) {
+    lock_buffer(buffer).clear();
+    segmenter.reset();
+    if let Some(engine) = engine {
+        engine.final_reset();
+    }
+    stop_interim(interim);
+    if let Some(engine) = engine {
+        *interim = Some(spawn_interim_loop(
+            session,
+            Arc::clone(engine),
+            Arc::clone(buffer),
+            out.clone(),
+            status.clone(),
+        ));
+    }
+    status.info(
+        "Listening...",
+        "a push-to-talk take is recording",
+        Activity::Voice,
+    );
+    tracing::info!(session, "voice capture started");
+}
+
+/// Sends the take's `final` reply; a false return means the client is gone.
+async fn send_final_reply(
+    out: &tokio::sync::mpsc::Sender<Message>,
+    text: String,
+    frames: u64,
+) -> bool {
+    let reply = serde_json::json!({
+        "type": "final",
+        "text": text,
+        "frames": frames,
+    })
+    .to_string();
+    out.send(Message::Text(reply.into())).await.is_ok()
+}
+
 /// Runs one capture session until the socket closes or fails.
-async fn run_session(session: u64, socket: WebSocket, engine: Option<Arc<VoiceEngine>>) {
+async fn run_session(
+    session: u64,
+    socket: WebSocket,
+    engine: Option<Arc<VoiceEngine>>,
+    status: StatusBus,
+) {
     tracing::info!(session, "voice session opened");
     let (mut sink, mut stream) = socket.split();
     // The receive loop and the interim loop both speak to the client, so
@@ -172,6 +248,7 @@ async fn run_session(session: u64, socket: WebSocket, engine: Option<Arc<VoiceEn
     let mut frames = 0u64;
     let mut interim: Option<tokio::task::JoinHandle<()>> = None;
     let mut segmenter = Segmenter::new();
+    let mut last_mic_pulse: Option<Instant> = None;
 
     while let Some(received) = stream.next().await {
         match received {
@@ -186,6 +263,14 @@ async fn run_session(session: u64, socket: WebSocket, engine: Option<Arc<VoiceEn
                     .collect();
                 frames += samples.len() as u64;
                 lock_buffer(&buffer).extend_from_slice(&samples);
+                if last_mic_pulse.is_none_or(|at| at.elapsed() >= MIC_PULSE_INTERVAL) {
+                    last_mic_pulse = Some(Instant::now());
+                    status.debug(
+                        "Listening...",
+                        "microphone audio is arriving",
+                        Activity::Voice,
+                    );
+                }
                 // Cut any speech segments the new audio completed and hand
                 // them to the background final pass.
                 if let Some(engine) = &engine {
@@ -204,36 +289,32 @@ async fn run_session(session: u64, socket: WebSocket, engine: Option<Arc<VoiceEn
             Ok(Message::Text(text)) => match text.as_str() {
                 "start" => {
                     frames = 0;
-                    lock_buffer(&buffer).clear();
-                    segmenter.reset();
-                    if let Some(engine) = &engine {
-                        engine.final_reset();
-                    }
-                    stop_interim(&mut interim);
-                    if let Some(engine) = &engine {
-                        interim = Some(spawn_interim_loop(
-                            session,
-                            Arc::clone(engine),
-                            Arc::clone(&buffer),
-                            out_tx.clone(),
-                        ));
-                    }
-                    tracing::info!(session, "voice capture started");
+                    last_mic_pulse = None;
+                    begin_take(
+                        session,
+                        engine.as_ref(),
+                        &buffer,
+                        &mut segmenter,
+                        &mut interim,
+                        &out_tx,
+                        &status,
+                    );
                 }
                 "stop" => {
                     stop_interim(&mut interim);
+                    status.info(
+                        "Finalizing transcript...",
+                        "the final pass over the take",
+                        Activity::Voice,
+                    );
                     let text =
-                        stop_transcript(session, engine.as_deref(), &buffer, &segmenter).await;
+                        stop_transcript(session, engine.as_deref(), &buffer, &segmenter, &status)
+                            .await;
                     tracing::info!(session, frames, "voice capture stopped");
-                    let reply = serde_json::json!({
-                        "type": "final",
-                        "text": text,
-                        "frames": frames,
-                    })
-                    .to_string();
-                    if out_tx.send(Message::Text(reply.into())).await.is_err() {
+                    if !send_final_reply(&out_tx, text, frames).await {
                         break;
                     }
+                    status.idle();
                 }
                 _ => {}
             },
