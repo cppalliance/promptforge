@@ -68,3 +68,7 @@ surfaced by the full-workspace clippy Verify after per-crate passes; pre-existin
 
 git checks golden files out as CRLF on Windows while serde_json emits LF; normalize line endings in the comparison since the JSON payload is identical either way. (assistant reasoned)
 
+## 2026-08-24 Remove an unused glob import from debug tests
+
+the conflict resolution deleted a dialect test, orphaning a glob import - a defect in neither parent, purely a merge artifact; committed on top rather than amended because the rebase was done. (user said "fix the rebase", assistant reasoned placement)
+
