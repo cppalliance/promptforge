@@ -1,10 +1,10 @@
 // Smoke test: loads dist/index.html into jsdom, imports the bundled
 // dist/app.js, asserts the chat UI mounts without throwing, and drives one
-// chat round-trip through a scripted fetch. Guards the DOM contract between
-// index.html and the vendored murm-ui (its components throw when a required
-// class is missing) and the wire contract of WorkbenchProvider (request
-// shape against POST /chat, SSE deltas rendered into the history). Run
-// after `npm run build`: `npm test`.
+// chat round-trip through a scripted WebSocket. Guards the DOM contract
+// between index.html and the vendored murm-ui (its components throw when a
+// required class is missing) and the wire contract of WorkbenchProvider
+// (chat frame shape against /ws, delta frames rendered into the history).
+// Run after `npm run build`: `npm test`.
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -46,34 +46,42 @@ window.IntersectionObserver = class {
 };
 window.Element.prototype.scrollTo = () => {};
 window.HTMLElement.prototype.scrollIntoView = () => {};
-// A scripted fetch stands in for the server. It must live on globalThis:
-// the bundle calls the global `fetch`, not `window.fetch`. The catalog
-// answers with one model so the picker enables and submission is unblocked;
-// /chat answers with an SSE stream so the provider's round-trip runs.
-const chatRequests = [];
-const sseBody =
-  'data: {"id":"c1","choices":[{"delta":{"content":"Hello"}}]}\n\n' +
-  'data: {"id":"c1","choices":[{"delta":{"content":" back"}}]}\n\n' +
-  "data: [DONE]\n\n";
-globalThis.fetch = (url, init) => {
+// A scripted WebSocket stands in for the server's /ws route. It must live on
+// globalThis: the bundle calls the global `WebSocket`, not `window.WebSocket`.
+// Each chat frame sent to the socket is captured and answered with two delta
+// frames and a done frame, scheduled in order so the provider's round-trip
+// runs.
+const chatSockets = [];
+class FakeWebSocket {
+  constructor(url) {
+    this.url = url;
+    chatSockets.push(this);
+    queueMicrotask(() => this.onopen?.());
+  }
+  send(data) {
+    this.chatFrame = JSON.parse(data);
+    const frames = [
+      { type: "delta", content: "Hello" },
+      { type: "delta", content: " back" },
+      { type: "done" },
+    ];
+    for (const frame of frames) {
+      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify(frame) }));
+    }
+  }
+  close() {}
+}
+globalThis.WebSocket = FakeWebSocket;
+// A scripted fetch stands in for the model catalog. The catalog answers with
+// one model so the picker enables and submission is unblocked; any other
+// fetch - including the retired POST /chat SSE path - rejects the test.
+globalThis.fetch = (url) => {
   if (url === "/v1/models") {
     return Promise.resolve(
       new Response(JSON.stringify({ data: [{ id: "test-model", description: "scripted" }] }), {
         status: 200,
         headers: { "content-type": "application/json" },
       }),
-    );
-  }
-  if (url === "/chat") {
-    chatRequests.push(JSON.parse(init.body));
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode(sseBody));
-        controller.close();
-      },
-    });
-    return Promise.resolve(
-      new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } }),
     );
   }
   return Promise.reject(new Error(`unexpected fetch in the smoke test: ${url}`));
@@ -140,7 +148,7 @@ if (app && !app.classList.contains("mur-chat-empty")) {
 }
 
 // One chat round-trip: wait for the scripted catalog to enable the picker,
-// submit a message through the form, and assert the provider's request
+// submit a message through the form, and assert the provider's chat frame
 // shape and the rendered assistant reply.
 const picker = window.document.getElementById("model-picker");
 const form = window.document.querySelector(".mur-chat-form");
@@ -161,15 +169,22 @@ if (!picker || picker.disabled) {
   if (!history.textContent.includes("Hello back")) {
     failures.push("assistant reply did not render in the chat history");
   }
-  const request = chatRequests[0];
-  if (!request) {
-    failures.push("no POST /chat request was made");
+  const socket = chatSockets[0];
+  if (!socket) {
+    failures.push("no /ws socket was opened");
   } else {
-    if (request.model !== "test-model") failures.push("chat request carried the wrong model");
-    if (request.stream !== true) failures.push("chat request did not ask for a stream");
-    const first = request.messages?.[0];
-    if (!first || first.role !== "user" || first.content !== "Hello?") {
-      failures.push("chat request messages are not the OpenAI shape");
+    if (!socket.url.endsWith("/ws")) failures.push(`chat socket opened the wrong URL: ${socket.url}`);
+    const request = socket.chatFrame;
+    if (!request) {
+      failures.push("no chat frame was sent on the socket");
+    } else {
+      if (request.type !== "chat") failures.push("the frame is not a chat frame");
+      if (request.model !== "test-model") failures.push("chat frame carried the wrong model");
+      if ("stream" in request) failures.push("chat frame must not carry a stream flag");
+      const first = request.messages?.[0];
+      if (!first || first.role !== "user" || first.content !== "Hello?") {
+        failures.push("chat frame messages are not the OpenAI shape");
+      }
     }
   }
 }
