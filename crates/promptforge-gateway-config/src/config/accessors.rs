@@ -8,11 +8,10 @@
 use std::net::SocketAddr;
 
 use super::{
-    Config, DeviceConfig, DeviceKind, DominionConfig, DominionKind, EndpointConfig, LaneConfig,
-    LocalConfig, LocalModelConfig, ModelConfig, Protocol, QueuePolicy, SearchProvider, Secret,
-    ServerConfig, ThinkingMode, ToolsConfig, WebSearchConfig,
+    Config, DominionConfig, DominionKind, EndpointConfig, LocalConfig, LocalModelConfig,
+    ModelConfig, Protocol, QueuePolicy, SearchProvider, Secret, ServerConfig, ThinkingMode,
+    ToolsConfig, WebSearchConfig,
 };
-use crate::queue::QueueConfig;
 
 impl Config {
     /// Returns the `[server]` section: bind address and shared bearer key.
@@ -32,28 +31,6 @@ impl Config {
     #[must_use]
     pub fn server(&self) -> &ServerConfig {
         &self.server
-    }
-
-    /// Returns the `[queue]` waiting-queue settings.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [queue]
-    /// # max_depth = 50
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.queue().max_depth(), 50);
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn queue(&self) -> &QueueConfig {
-        &self.queue
     }
 
     /// Returns the `[local]` section: cache settings for gateway-owned local
@@ -77,29 +54,6 @@ impl Config {
     #[must_use]
     pub fn local(&self) -> &LocalConfig {
         &self.local
-    }
-
-    /// Returns the configured `[[device]]` compute resources.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[device]]
-    /// # id = "gpu0"
-    /// # type = "local"
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.devices()[0].id(), "gpu0");
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn devices(&self) -> &[DeviceConfig] {
-        &self.devices
     }
 
     /// Returns the configured `[[dominion]]` compute pools.
@@ -335,191 +289,6 @@ impl LocalConfig {
         self.cache_dir.as_deref()
     }
 }
-impl DeviceConfig {
-    /// Returns the operator-chosen device id referenced by endpoints and
-    /// local models.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[device]]
-    /// # id = "gpu0"
-    /// # type = "local"
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.devices()[0].id(), "gpu0");
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    /// Returns whether the device is a remote provider or a local GPU.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::{Config, DeviceKind};
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[device]]
-    /// # id = "gpu0"
-    /// # type = "local"
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.devices()[0].kind(), DeviceKind::Local);
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn kind(&self) -> DeviceKind {
-        self.kind
-    }
-
-    /// Returns the max concurrent requests for a remote device, or `None`
-    /// for a local device (which uses lanes).
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[device]]
-    /// # id = "runpod"
-    /// # type = "remote"
-    /// # concurrency = 4
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.devices()[0].concurrency(), Some(4));
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn concurrency(&self) -> Option<usize> {
-        self.concurrency
-    }
-
-    /// Returns the device's `[[device.lane]]` concurrency lanes.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[device]]
-    /// # id = "gpu0"
-    /// # type = "local"
-    /// #
-    /// # [[device.lane]]
-    /// # id = "generative"
-    /// # concurrency = 2
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.devices()[0].lanes()[0].id(), "generative");
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn lanes(&self) -> &[LaneConfig] {
-        &self.lanes
-    }
-}
-
-impl LaneConfig {
-    /// Returns the lane id referenced by `[[local_model]].lane`.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[device]]
-    /// # id = "gpu0"
-    /// # type = "local"
-    /// #
-    /// # [[device.lane]]
-    /// # id = "generative"
-    /// # concurrency = 2
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.devices()[0].lanes()[0].id(), "generative");
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    /// Returns the max concurrent inferences on this lane.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[device]]
-    /// # id = "gpu0"
-    /// # type = "local"
-    /// #
-    /// # [[device.lane]]
-    /// # id = "generative"
-    /// # concurrency = 2
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.devices()[0].lanes()[0].concurrency(), 2);
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn concurrency(&self) -> usize {
-        self.concurrency
-    }
-
-    /// Returns the explicit device id, when the lane was declared outside its
-    /// parent's `[[device]]` table.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[device]]
-    /// # id = "gpu0"
-    /// # type = "local"
-    /// #
-    /// # [[device.lane]]
-    /// # id = "generative"
-    /// # concurrency = 2
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.devices()[0].lanes()[0].device(), None);
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn device(&self) -> Option<&str> {
-        self.device.as_deref()
-    }
-}
-
 impl DominionConfig {
     /// Returns the operator-chosen dominion id referenced by endpoints and
     /// local models.
@@ -791,65 +560,6 @@ impl EndpointConfig {
     #[must_use]
     pub fn api_key(&self) -> &Secret {
         &self.api_key
-    }
-
-    /// Returns the maximum in-flight requests to this endpoint, or `None`
-    /// for unlimited.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[endpoint]]
-    /// # id = "e"
-    /// # protocol = "openai"
-    /// # base_url = "http://127.0.0.1:9"
-    /// # api_key = ""
-    /// # concurrency = 4
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.endpoints()[0].concurrency(), Some(4));
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn concurrency(&self) -> Option<usize> {
-        self.concurrency
-    }
-
-    /// Returns the remote device id whose concurrency governs this endpoint,
-    /// when set.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[device]]
-    /// # id = "runpod"
-    /// # type = "remote"
-    /// # concurrency = 4
-    /// #
-    /// # [[endpoint]]
-    /// # id = "e"
-    /// # protocol = "openai"
-    /// # base_url = "http://127.0.0.1:9"
-    /// # api_key = ""
-    /// # device = "runpod"
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.endpoints()[0].device(), Some("runpod"));
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn device(&self) -> Option<&str> {
-        self.device.as_deref()
     }
 
     /// Returns the remote dominion id (`[[dominion]]`) whose shared limit
@@ -1220,76 +930,6 @@ impl LocalModelConfig {
         self.sha256.as_deref()
     }
 
-    /// Returns the device id (`[[device]]`) binding this model, when set.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[device]]
-    /// # id = "gpu0"
-    /// # type = "local"
-    /// #
-    /// # [[device.lane]]
-    /// # id = "generative"
-    /// # concurrency = 2
-    /// #
-    /// # [[local_model]]
-    /// # name = "q"
-    /// # description = "a local model"
-    /// # source = "/models/q.gguf"
-    /// # context = 4096
-    /// # device = "gpu0"
-    /// # lane = "generative"
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.local_models()[0].device(), Some("gpu0"));
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn device(&self) -> Option<&str> {
-        self.device.as_deref()
-    }
-
-    /// Returns the lane id under the device (`[[device.lane]]`), when set.
-    ///
-    /// # Examples
-    /// ```
-    /// # use promptforge_gateway_config::Config;
-    /// # let toml = r#"
-    /// # [server]
-    /// # bind = "127.0.0.1:8080"
-    /// # api_key = "secret"
-    /// #
-    /// # [[device]]
-    /// # id = "gpu0"
-    /// # type = "local"
-    /// #
-    /// # [[device.lane]]
-    /// # id = "generative"
-    /// # concurrency = 2
-    /// #
-    /// # [[local_model]]
-    /// # name = "q"
-    /// # description = "a local model"
-    /// # source = "/models/q.gguf"
-    /// # context = 4096
-    /// # device = "gpu0"
-    /// # lane = "generative"
-    /// # "#;
-    /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.local_models()[0].lane(), Some("generative"));
-    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
-    /// ```
-    #[must_use]
-    pub fn lane(&self) -> Option<&str> {
-        self.lane.as_deref()
-    }
-
     /// Returns the local dominion id (`[[dominion]]`) binding this model,
     /// when set.
     ///
@@ -1321,11 +961,9 @@ impl LocalModelConfig {
         self.dominion.as_deref()
     }
 
-    /// Returns the max concurrent inferences (`--parallel` and the gateway
-    /// queue limit), when set.
-    ///
-    /// Stays `Option` during the dominion transition: an unset field must not
-    /// override a legacy lane's concurrency with the default.
+    /// Returns the max concurrent inferences: the child's `--parallel` value
+    /// and, when no dominion is bound, the model's gateway queue limit.
+    /// Defaults to 1.
     ///
     /// # Examples
     /// ```
@@ -1343,11 +981,11 @@ impl LocalModelConfig {
     /// # parallel = 4
     /// # "#;
     /// let config = Config::from_toml_str(toml)?;
-    /// assert_eq!(config.local_models()[0].parallel(), Some(4));
+    /// assert_eq!(config.local_models()[0].parallel(), 4);
     /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
     /// ```
     #[must_use]
-    pub fn parallel(&self) -> Option<u32> {
+    pub fn parallel(&self) -> u32 {
         self.parallel
     }
 

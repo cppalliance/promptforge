@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use crate::queue::DominionQueue;
 use crate::routing::{Endpoint, Model, dominion_queues};
-use promptforge_gateway_config::{Config, LocalModelConfig, ThinkingMode};
+use promptforge_gateway_config::{Config, LocalModelConfig, QueuePolicy, ThinkingMode};
 
 pub(crate) use error::LocalError;
 
@@ -80,7 +80,7 @@ impl LocalRuntime {
 
             maybe_write_sidecar(&store, local_model.source(), &model_path);
 
-            let admission = resolve_admission(config, &dominion_queues, local_model)?;
+            let admission = resolve_admission(&dominion_queues, local_model)?;
             let options = launch_options(local_model, admission.parallel);
             let guard =
                 ServerGuard::start(&llama_server, &model_path, &options, interrupted.as_ref())?;
@@ -191,29 +191,17 @@ struct LocalAdmission {
 
 /// Resolve a local model's admission wiring.
 ///
-/// The `--parallel` value comes from `LocalModelConfig::parallel` when set,
-/// falling back to the legacy device/lane lookup (default 1) when unset. A
-/// model without a `dominion` keeps today's per-model queue limited to that
-/// same number, preserving the invariant that the child's `--parallel` and
-/// the queue limit are one value. A model bound to a dominion instead admits
+/// The `--parallel` value is `LocalModelConfig::parallel` (default 1). A
+/// model without a `dominion` gets a per-model queue limited to that same
+/// number, preserving the invariant that the child's `--parallel` and the
+/// queue limit are one value. A model bound to a dominion instead admits
 /// through that dominion's shared queue - one `Arc` shared with every other
 /// bound local model - and the dominion's own limit governs admission.
 fn resolve_admission(
-    config: &Config,
     dominion_queues: &HashMap<&str, DominionQueue>,
     model: &LocalModelConfig,
 ) -> Result<LocalAdmission, LocalError> {
-    let parallel = if let Some(parallel) = model.parallel() {
-        parallel
-    } else {
-        let concurrency = config.local_model_concurrency(model).map_err(|source| {
-            LocalError::LaneConcurrency {
-                model: model.name().to_owned(),
-                source,
-            }
-        })?;
-        u32::try_from(concurrency).map_err(|_| LocalError::LaneTooLarge { concurrency })?
-    };
+    let parallel = model.parallel();
     let queue = match model.dominion() {
         Some(dominion_id) => dominion_queues.get(dominion_id).cloned().ok_or_else(|| {
             LocalError::UnknownDominion {
@@ -221,7 +209,9 @@ fn resolve_admission(
                 dominion: dominion_id.to_owned(),
             }
         })?,
-        None => DominionQueue::from_queue_config(parallel as usize, config.queue()),
+        // The unbound per-model queue uses the dominion defaults for depth
+        // and fairness; the reject policy only exists on dominions.
+        None => DominionQueue::new(parallel as usize, 100, true, QueuePolicy::Queue),
     };
     Ok(LocalAdmission { parallel, queue })
 }
@@ -430,7 +420,7 @@ parallel = 3
         .expect("config");
         let model = &config.local_models()[0];
         let queues = dominion_queues(&config);
-        let admission = resolve_admission(&config, &queues, model).expect("admission");
+        let admission = resolve_admission(&queues, model).expect("admission");
 
         assert_eq!(admission.parallel, 3);
         assert_eq!(launch_options(model, admission.parallel).parallel, 3);
@@ -485,10 +475,10 @@ dominion = "gpu0"
         .expect("config");
         let queues = dominion_queues(&config);
         let admission_a =
-            resolve_admission(&config, &queues, &config.local_models()[0]).expect("admission a");
+            resolve_admission(&queues, &config.local_models()[0]).expect("admission a");
         let admission_b =
-            resolve_admission(&config, &queues, &config.local_models()[1]).expect("admission b");
-        // No `parallel` and no lane: the child `--parallel` defaults to 1.
+            resolve_admission(&queues, &config.local_models()[1]).expect("admission b");
+        // No `parallel` set: the child `--parallel` defaults to 1.
         assert_eq!(admission_a.parallel, 1);
         assert_eq!(admission_b.parallel, 1);
 
@@ -501,84 +491,5 @@ dominion = "gpu0"
 
         drop(held);
         let _permit = blocked.await.unwrap().unwrap();
-    }
-
-    #[tokio::test]
-    async fn legacy_lane_lookup_applies_when_parallel_unset() {
-        // Legacy configs keep working: with no `parallel` field, the lane's
-        // concurrency feeds both the child's `--parallel` and the queue limit.
-        let config = Config::from_toml_str(
-            r#"
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[device]]
-id = "gpu0"
-type = "local"
-
-[[device.lane]]
-id = "generative"
-concurrency = 2
-
-[[local_model]]
-name = "q"
-description = "a local model"
-source = "/models/q.gguf"
-context = 4096
-device = "gpu0"
-lane = "generative"
-"#,
-        )
-        .expect("config");
-        let model = &config.local_models()[0];
-        let queues = dominion_queues(&config);
-        let admission = resolve_admission(&config, &queues, model).expect("admission");
-
-        assert_eq!(admission.parallel, 2);
-        let first = admission.queue.admit("client").await.unwrap();
-        let _second = admission.queue.admit("client").await.unwrap();
-        let queue = admission.queue.clone();
-        let blocked = tokio::spawn(async move { queue.admit("client").await });
-        while admission.queue.waiter_count() != 1 {
-            tokio::task::yield_now().await;
-        }
-        drop(first);
-        let _promoted = blocked.await.unwrap().unwrap();
-    }
-
-    #[test]
-    fn parallel_field_wins_over_legacy_lane() {
-        // When both are set, `parallel` is the concurrency source; the lane
-        // lookup is the fallback for configs that predate the field.
-        let config = Config::from_toml_str(
-            r#"
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[device]]
-id = "gpu0"
-type = "local"
-
-[[device.lane]]
-id = "generative"
-concurrency = 2
-
-[[local_model]]
-name = "q"
-description = "a local model"
-source = "/models/q.gguf"
-context = 4096
-device = "gpu0"
-lane = "generative"
-parallel = 3
-"#,
-        )
-        .expect("config");
-        let model = &config.local_models()[0];
-        let queues = dominion_queues(&config);
-        let admission = resolve_admission(&config, &queues, model).expect("admission");
-        assert_eq!(admission.parallel, 3);
     }
 }

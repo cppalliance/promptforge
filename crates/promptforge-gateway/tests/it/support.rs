@@ -313,8 +313,11 @@ pub(crate) async fn gateway_with_queue(
 bind = "127.0.0.1:0"
 api_key = "test-token"
 
-[queue]
-max_depth = {max_depth}
+[[dominion]]
+id = "pool"
+kind = "remote"
+max_concurrency = {concurrency}
+max_queue = {max_depth}
 fair_scheduling = true
 
 [[endpoint]]
@@ -322,7 +325,7 @@ id = "fake"
 protocol = "openai"
 base_url = "http://{backend}"
 api_key = ""
-concurrency = {concurrency}
+dominion = "pool"
 
 [[model]]
 name = "test-model"

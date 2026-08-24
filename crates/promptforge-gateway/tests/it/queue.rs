@@ -1,4 +1,4 @@
-//! Queue admission: per-endpoint concurrency and queue-full rejection.
+//! Queue admission: dominion concurrency limits and queue-full rejection.
 
 use serde_json::Value;
 use tokio::sync::mpsc;

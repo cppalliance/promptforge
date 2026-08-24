@@ -199,7 +199,9 @@ fn secret_redacts() {
 }
 
 #[test]
-fn parses_queue_and_endpoint_concurrency() {
+fn rejects_legacy_queue_section() {
+    // The legacy `[queue]` section is gone (absorbed into `[[dominion]]`);
+    // `deny_unknown_fields` on the root DTO rejects it at parse time.
     let toml = r#"
 [server]
 bind = "127.0.0.1:8081"
@@ -207,90 +209,73 @@ api_key = "t"
 
 [queue]
 max_depth = 50
-fair_scheduling = false
+"#;
+    assert!(matches!(
+        Config::parse_toml(toml),
+        Err(ConfigError::Parse { .. })
+    ));
+}
 
-[[endpoint]]
-id = "anthropic"
-protocol = "openai"
-base_url = "https://api.anthropic.com/v1"
-api_key = ""
+#[test]
+fn rejects_legacy_device_section() {
+    let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[device]]
+id = "gpu"
+type = "remote"
 concurrency = 4
-
-[[model]]
-name = "m1"
-description = "a small test model"
-context = 8192
-upstream = "u1"
-endpoints = ["anthropic"]
-"#;
-    let config = Config::from_toml_str(toml).unwrap();
-    assert_eq!(config.queue().max_depth(), 50);
-    assert!(!config.queue().fair_scheduling());
-    assert_eq!(config.endpoints[0].concurrency, Some(4));
-}
-
-#[test]
-fn queue_defaults_when_section_absent() {
-    let config = Config::from_toml_str(SAMPLE).unwrap();
-    assert_eq!(config.queue().max_depth(), 100);
-    assert!(config.queue().fair_scheduling());
-    assert_eq!(config.endpoints[0].concurrency, None);
-}
-
-#[test]
-fn rejects_zero_endpoint_concurrency() {
-    let toml = r#"
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[endpoint]]
-id = "anthropic"
-protocol = "openai"
-base_url = "http://a"
-api_key = ""
-concurrency = 0
-
-[[model]]
-name = "m"
-description = "prose"
-context = 8192
-upstream = "u"
-endpoints = ["anthropic"]
 "#;
     assert!(matches!(
         Config::parse_toml(toml),
-        Err(ConfigError::Validation(_))
+        Err(ConfigError::Parse { .. })
     ));
 }
 
 #[test]
-fn rejects_zero_queue_max_depth() {
-    let toml = r#"
+fn rejects_legacy_endpoint_concurrency_and_device() {
+    // `endpoint.concurrency`/`device` are gone: one way to cap is a dominion
+    // binding, so the legacy keys fail `deny_unknown_fields` at parse time.
+    for legacy_key in ["concurrency = 4", "device = \"runpod\""] {
+        let toml = config_with_endpoint(&format!(
+            r#"[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+{legacy_key}"#
+        ));
+        assert!(
+            matches!(Config::parse_toml(&toml), Err(ConfigError::Parse { .. })),
+            "expected legacy endpoint key {legacy_key:?} to be rejected"
+        );
+    }
+}
+
+#[test]
+fn rejects_legacy_local_model_device_and_lane() {
+    for legacy_key in ["device = \"gpu0\"", "lane = \"generative\""] {
+        let toml = format!(
+            r#"
 [server]
 bind = "127.0.0.1:8081"
 api_key = "t"
 
-[queue]
-max_depth = 0
-
-[[endpoint]]
-id = "anthropic"
-protocol = "openai"
-base_url = "http://a"
-api_key = ""
-
-[[model]]
-name = "m"
+[[local_model]]
+name = "q"
 description = "prose"
-context = 8192
-upstream = "u"
-endpoints = ["anthropic"]
-"#;
-    assert!(matches!(
-        Config::parse_toml(toml),
-        Err(ConfigError::Validation(_))
-    ));
+source = "/models/q.gguf"
+context = 4096
+{legacy_key}
+"#
+        );
+        assert!(
+            matches!(Config::parse_toml(&toml), Err(ConfigError::Parse { .. })),
+            "expected legacy local_model key {legacy_key:?} to be rejected"
+        );
+    }
 }
 
 #[test]
@@ -431,91 +416,6 @@ context = 4096
 }
 
 #[test]
-fn parses_devices_lanes_and_endpoint_device() {
-    let toml = r#"
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[device]]
-id = "anthropic"
-type = "remote"
-concurrency = 7
-
-[[device]]
-id = "local-gpu"
-type = "local"
-
-[[device.lane]]
-device = "local-gpu"
-id = "generative"
-concurrency = 1
-
-[[endpoint]]
-id = "anthropic"
-protocol = "openai"
-base_url = "http://a"
-api_key = ""
-device = "anthropic"
-
-[[model]]
-name = "m"
-description = "prose"
-context = 8192
-upstream = "u"
-endpoints = ["anthropic"]
-
-[[local_model]]
-name = "q"
-description = "prose"
-source = "/models/m.gguf"
-device = "local-gpu"
-lane = "generative"
-context = 4096
-"#;
-    let config = Config::from_toml_str(toml).unwrap();
-    assert_eq!(config.devices.len(), 2);
-    assert_eq!(config.devices[0].kind, DeviceKind::Remote);
-    assert_eq!(config.devices[0].concurrency, Some(7));
-    assert_eq!(config.devices[1].lanes.len(), 1);
-    assert_eq!(config.devices[1].lanes[0].id, "generative");
-    assert_eq!(config.endpoint_concurrency(&config.endpoints[0]), Some(7));
-    assert_eq!(
-        config
-            .local_model_concurrency(&config.local_models[0])
-            .unwrap(),
-        1
-    );
-}
-
-#[test]
-fn rejects_endpoint_naming_undefined_device() {
-    let toml = r#"
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[endpoint]]
-id = "e"
-protocol = "openai"
-base_url = "http://a"
-api_key = ""
-device = "missing"
-
-[[model]]
-name = "m"
-description = "prose"
-context = 8192
-upstream = "u"
-endpoints = ["e"]
-"#;
-    assert!(matches!(
-        Config::parse_toml(toml),
-        Err(ConfigError::Validation(_))
-    ));
-}
-
-#[test]
 fn parses_dominions_and_bindings() {
     let toml = r#"
 [server]
@@ -574,7 +474,7 @@ vram_gb = 14
     assert_eq!(config.endpoints[0].dominion.as_deref(), Some("runpod-pool"));
     let model = &config.local_models[0];
     assert_eq!(model.dominion.as_deref(), Some("gpu0"));
-    assert_eq!(model.parallel, Some(4));
+    assert_eq!(model.parallel, 4);
     assert_eq!(model.vram_gb, Some(14));
 }
 

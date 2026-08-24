@@ -21,7 +21,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use promptforge_gateway_config::{QueueConfig, QueuePolicy};
+use promptforge_gateway_config::QueuePolicy;
 use tokio::sync::oneshot;
 
 /// A bounded scheduling identity parsed from the client header.
@@ -197,19 +197,6 @@ impl DominionQueue {
                 }),
             })),
         }
-    }
-
-    /// The bounded-wait queue implied by the legacy `[queue]` settings, which
-    /// carry no policy knob: always the `Queue` policy. Removed together with
-    /// `QueueConfig` when the legacy config is deleted.
-    #[must_use]
-    pub(crate) fn from_queue_config(concurrency: usize, queue: &QueueConfig) -> DominionQueue {
-        DominionQueue::new(
-            concurrency,
-            queue.max_depth(),
-            queue.fair_scheduling(),
-            QueuePolicy::Queue,
-        )
     }
 
     /// Number of requests currently waiting for a slot on this queue.
@@ -456,7 +443,6 @@ const _: fn() = || {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<DominionQueue>();
     assert_send_sync::<Permit>();
-    assert_send_sync::<QueueConfig>();
     assert_send_sync::<AdmitError>();
     assert_send_sync::<ClientId>();
 };

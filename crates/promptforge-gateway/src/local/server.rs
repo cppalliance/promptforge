@@ -126,7 +126,7 @@ pub(crate) struct LaunchOptions {
     pub(crate) ctx_size: u32,
     /// Generation ceiling passed as `--n-predict`.
     pub(crate) n_predict: u32,
-    /// Concurrent slots passed as `--parallel` (lane admit limit).
+    /// Concurrent slots passed as `--parallel` (the model's admit limit).
     pub(crate) parallel: u32,
     /// GPU layers passed as `-ngl`.
     pub(crate) gpu_layers: u32,
