@@ -14,9 +14,18 @@ import { ChatUI } from "./chat/main";
 import { MemoryStorage } from "./memory-storage";
 import { setupVoice } from "./voice";
 import { WorkbenchProvider } from "./workbench-provider";
+import { WorkbenchSocket } from "./workbench-socket";
 
 const pickerEl = document.getElementById("model-picker") as HTMLSelectElement;
 const descriptionEl = document.getElementById("model-description") as HTMLDivElement;
+
+// One persistent socket carries chat frames upstream and every downstream
+// JSON frame - chat replies and the observer's status updates. Step 4
+// renders status frames in the status bar; until then the handler drops
+// them.
+const workbenchSocket = new WorkbenchSocket();
+workbenchSocket.onStatus(() => {});
+workbenchSocket.connect();
 
 interface ModelEntry {
   id: string;
@@ -98,7 +107,7 @@ if (!chatContainer) {
 
 const chat = new ChatUI({
   container: chatContainer as HTMLElement,
-  provider: new WorkbenchProvider(),
+  provider: new WorkbenchProvider(workbenchSocket),
   storage: new MemoryStorage(),
   enableSidebar: false,
   routing: false,

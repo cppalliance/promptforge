@@ -63,9 +63,6 @@ pub(crate) struct Progress {
 /// How loudly a status update speaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-// Instrumentation call sites land with the observer wiring commit; `allow`
-// rather than `expect` because the test target does construct these.
-#[allow(dead_code, reason = "constructed by the instrumentation commit")]
 pub(crate) enum Severity {
     /// User-visible status text.
     Info,
@@ -78,9 +75,6 @@ pub(crate) enum Severity {
 /// The subsystem an update belongs to, driving the activity indicator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-// Instrumentation call sites land with the observer wiring commit; `allow`
-// rather than `expect` because the test target does construct these.
-#[allow(dead_code, reason = "constructed by the instrumentation commit")]
 pub(crate) enum Activity {
     /// No specific subsystem.
     General,
@@ -110,9 +104,6 @@ pub(crate) struct StatusBus {
     sender: broadcast::Sender<StatusBarUpdate>,
 }
 
-// The emit helpers beyond `new`/`subscribe` are exercised by the
-// instrumentation commit that wires the subsystems.
-#[expect(dead_code, reason = "called by the instrumentation commit")]
 impl StatusBus {
     /// Creates a bus with no subscribers and an empty ring.
     pub(crate) fn new() -> Self {

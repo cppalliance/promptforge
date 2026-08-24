@@ -39,7 +39,8 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::broadcast;
 
 use crate::app::{AppState, tape_round_trip, value_from_bytes};
-use crate::gateway::{ChatRequest, ChatStream};
+use crate::gateway::{ChatRequest, ChatStream, GatewayResponse};
+use crate::status::Activity;
 use crate::tape::Tape;
 
 /// Session ids for log correlation, handed out in connection order.
@@ -150,6 +151,12 @@ async fn relay_chat(
     out: &tokio::sync::mpsc::Sender<Message>,
 ) {
     let started = Instant::now();
+    let status = state.status();
+    status.info(
+        "Submitting request...",
+        format!("a streaming chat completion from {}", request.model),
+        Activity::Gateway,
+    );
     let chat_stream = match state
         .gateway_client()
         .chat_completion_stream(&request)
@@ -157,38 +164,31 @@ async fn relay_chat(
     {
         Ok(chat_stream) => chat_stream,
         Err(error) => {
+            status.error("Connection lost", error.to_string(), Activity::Gateway);
             send_error(out, id.as_ref(), error.to_string()).await;
             return;
         }
     };
     let mut payloads = match chat_stream {
-        ChatStream::Stream { payloads, .. } => payloads,
+        ChatStream::Stream { payloads, .. } => {
+            status.info(
+                "Streaming response...",
+                "the gateway is streaming the reply",
+                Activity::Gateway,
+            );
+            payloads
+        }
         ChatStream::Relay(upstream) => {
-            // The gateway declined the stream with an ordinary response; it
-            // is taped like a buffered chat and reported as an error frame.
-            let response = value_from_bytes(&upstream.body);
-            tape_round_trip(
-                state.tape(),
+            declined_stream(
+                state,
                 request.model,
                 frame,
-                response.clone(),
-                started.elapsed(),
+                upstream,
+                started,
+                id.as_ref(),
+                out,
             )
             .await;
-            let message = response
-                .get("error")
-                .and_then(|error| error.get("message"))
-                .and_then(serde_json::Value::as_str)
-                .map_or_else(
-                    || {
-                        format!(
-                            "gateway declined the stream with status {}",
-                            upstream.status
-                        )
-                    },
-                    str::to_string,
-                );
-            send_error(out, id.as_ref(), message).await;
             return;
         }
     };
@@ -212,6 +212,13 @@ async fn relay_chat(
                     continue;
                 };
                 finish.assembled.push_str(&text);
+                // A chunk pulse at Debug: the UI ignores the text, but the
+                // activity field keeps the gateway indicator alive.
+                status.debug(
+                    "Streaming response...",
+                    "a gateway response chunk",
+                    Activity::Gateway,
+                );
                 let delta = tagged(
                     id.as_ref(),
                     serde_json::json!({"type": "delta", "content": text}),
@@ -226,11 +233,13 @@ async fn relay_chat(
                 let message = error.to_string();
                 finish.error = Some(message.clone());
                 finish.record().await;
+                status.error("Connection lost", message.clone(), Activity::Gateway);
                 send_error(out, id.as_ref(), message).await;
                 return;
             }
             None => {
                 finish.record().await;
+                status.idle();
                 let _ = send_frame(
                     out,
                     tagged(id.as_ref(), serde_json::json!({"type": "done"})),
@@ -240,6 +249,48 @@ async fn relay_chat(
             }
         }
     }
+}
+
+/// Handles a gateway that declined the stream with an ordinary response:
+/// the envelope is taped like a buffered chat and reported as an `error`
+/// frame and an error status.
+async fn declined_stream(
+    state: &AppState,
+    model: String,
+    frame: serde_json::Value,
+    upstream: GatewayResponse,
+    started: Instant,
+    id: Option<&serde_json::Value>,
+    out: &tokio::sync::mpsc::Sender<Message>,
+) {
+    let response = value_from_bytes(&upstream.body);
+    tape_round_trip(
+        state.tape(),
+        model,
+        frame,
+        response.clone(),
+        started.elapsed(),
+    )
+    .await;
+    let message = response
+        .get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(serde_json::Value::as_str)
+        .map_or_else(
+            || {
+                format!(
+                    "gateway declined the stream with status {}",
+                    upstream.status
+                )
+            },
+            str::to_string,
+        );
+    state.status().error(
+        format!("Gateway error: {}", upstream.status),
+        message.clone(),
+        Activity::Gateway,
+    );
+    send_error(out, id, message).await;
 }
 
 /// Tags a reply frame with the request's `id`, when it carried one.
@@ -494,6 +545,21 @@ mod tests {
         serde_json::from_str(&text).expect("the frame is JSON")
     }
 
+    /// Reads frames until one arrives that is not a status update. Status
+    /// frames are unsolicited and may interleave with a chat's replies at
+    /// any point, so reply assertions skip them.
+    async fn read_non_status_frame<S>(socket: &mut S) -> serde_json::Value
+    where
+        S: futures_util::Stream<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin,
+    {
+        loop {
+            let frame = read_frame(socket).await;
+            if frame["type"] != "status" {
+                return frame;
+            }
+        }
+    }
+
     /// Sends one well-formed chat frame naming the test model.
     async fn send_chat<S>(socket: &mut S)
     where
@@ -532,14 +598,14 @@ mod tests {
         send_chat(&mut socket).await;
 
         // The role-priming event carries no content and yields no frame.
-        let first = read_frame(&mut socket).await;
+        let first = read_non_status_frame(&mut socket).await;
         assert_eq!(first, serde_json::json!({"type": "delta", "content": "po"}));
-        let second = read_frame(&mut socket).await;
+        let second = read_non_status_frame(&mut socket).await;
         assert_eq!(
             second,
             serde_json::json!({"type": "delta", "content": "ng"})
         );
-        let third = read_frame(&mut socket).await;
+        let third = read_non_status_frame(&mut socket).await;
         assert_eq!(third, serde_json::json!({"type": "done"}));
         socket.close(None).await.expect("close the socket");
     }
@@ -557,7 +623,7 @@ mod tests {
         // The terminal frame is sent after the tape write, so holding `done`
         // means the tape is durable.
         loop {
-            let frame = read_frame(&mut socket).await;
+            let frame = read_non_status_frame(&mut socket).await;
             if frame["type"] == "done" {
                 break;
             }
@@ -592,9 +658,9 @@ mod tests {
             .expect("connect to /ws");
         send_chat(&mut socket).await;
 
-        let first = read_frame(&mut socket).await;
+        let first = read_non_status_frame(&mut socket).await;
         assert_eq!(first, serde_json::json!({"type": "delta", "content": "po"}));
-        let second = read_frame(&mut socket).await;
+        let second = read_non_status_frame(&mut socket).await;
         assert_eq!(second["type"], "error");
         let message = second["message"].as_str().expect("the error is a string");
         assert!(!message.is_empty(), "the error frame names the failure");
@@ -623,7 +689,7 @@ mod tests {
             .await
             .expect("connect to /ws");
         send_chat(&mut socket).await;
-        let first = read_frame(&mut socket).await;
+        let first = read_non_status_frame(&mut socket).await;
         assert_eq!(first["type"], "delta");
         // Drop the socket without a close handshake; the server notices when
         // a later delta send fails.
@@ -669,7 +735,7 @@ mod tests {
             .expect("connect to /ws");
         send_chat(&mut socket).await;
 
-        let frame = read_frame(&mut socket).await;
+        let frame = read_non_status_frame(&mut socket).await;
         assert_eq!(frame["type"], "error");
         assert_eq!(frame["message"], "model unloaded");
 
@@ -698,7 +764,7 @@ mod tests {
                 .send(tungstenite::Message::Text(bad.into()))
                 .await
                 .expect("the frame is sent");
-            let frame = read_frame(&mut socket).await;
+            let frame = read_non_status_frame(&mut socket).await;
             assert_eq!(
                 frame["type"], "error",
                 "a malformed frame is answered, not fatal: {bad}"
@@ -707,7 +773,7 @@ mod tests {
         // The session survives: a well-formed frame still gets through to
         // the (unreachable) gateway and answers with its own error.
         send_chat(&mut socket).await;
-        let frame = read_frame(&mut socket).await;
+        let frame = read_non_status_frame(&mut socket).await;
         assert_eq!(frame["type"], "error");
         socket.close(None).await.expect("close the socket");
     }
@@ -776,18 +842,18 @@ mod tests {
                 .send(tungstenite::Message::Text(frame.into()))
                 .await
                 .expect("the chat frame is sent");
-            let first = read_frame(&mut socket).await;
+            let first = read_non_status_frame(&mut socket).await;
             assert_eq!(
                 first,
                 serde_json::json!({"type": "delta", "content": "po", "id": round}),
                 "round {round}: the first delta carries the request id"
             );
-            let second = read_frame(&mut socket).await;
+            let second = read_non_status_frame(&mut socket).await;
             assert_eq!(
                 second,
                 serde_json::json!({"type": "delta", "content": "ng", "id": round})
             );
-            let third = read_frame(&mut socket).await;
+            let third = read_non_status_frame(&mut socket).await;
             assert_eq!(third, serde_json::json!({"type": "done", "id": round}));
         }
 
@@ -796,6 +862,42 @@ mod tests {
         assert!(
             events.iter().all(|event| event["response"] == "pong"),
             "both rounds taped the assembled response"
+        );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn a_chat_reports_submitting_then_streaming() {
+        let base_url =
+            spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_stream)))
+                .await;
+        let (url, _tape_dir, _state) = spawn_chat_server(&base_url).await;
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        send_chat(&mut socket).await;
+
+        let mut labels: Vec<String> = Vec::new();
+        loop {
+            let frame = read_frame(&mut socket).await;
+            match frame["type"].as_str() {
+                Some("status") => labels.push(
+                    frame["label"]
+                        .as_str()
+                        .expect("a status frame carries a label")
+                        .to_string(),
+                ),
+                Some("done") => break,
+                _ => {}
+            }
+        }
+        assert!(
+            labels.iter().any(|label| label.contains("Submitting")),
+            "a Submitting status frame arrived: {labels:?}"
+        );
+        assert!(
+            labels.iter().any(|label| label.contains("Streaming")),
+            "a Streaming status frame arrived: {labels:?}"
         );
         socket.close(None).await.expect("close the socket");
     }
