@@ -6,6 +6,8 @@ promptforge: 1
 
 # Echo
 
+---
+
 Returns the single input argument verbatim, entirely in Lua, with no model call.
 
 ## Main

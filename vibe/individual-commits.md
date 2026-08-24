@@ -94,3 +94,5 @@ live transcription felt volatile against Cursor's crystallization behavior; the 
 
 on stopping dictation the edit box emptied for ~400ms before text returned, feeling unstable; the user proposed the latch shape ("would keeping 2 strings help?") and approved it once concurrent final passes were proven structurally impossible. (user said, assistant implemented)
 
+## 2026-08-24 Add separator markers to the example prompts
+
