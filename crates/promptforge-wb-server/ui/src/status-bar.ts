@@ -3,14 +3,22 @@
 // the text (the description rides as the tooltip) and drive the right slot,
 // which holds the progress bar or the activity LED - never both. Debug
 // frames are internal instrumentation: they never touch the text or the
-// slot.
+// slot, but they do pulse the LED.
 
 import type { StatusFrame } from "./workbench-socket";
+
+type PulseActivity = "gateway" | "voice";
+
+// Used when the stylesheet's --led-pulse-ms cannot be read (jsdom, or a
+// skin that dropped the variable).
+const DEFAULT_LED_PULSE_MS = 250;
 
 export class StatusBar {
   private readonly text: HTMLElement;
   private readonly progress: HTMLProgressElement;
   private readonly led: HTMLElement;
+  private readonly lit = new Set<PulseActivity>();
+  private ledTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly root: HTMLElement) {
     const text = root.querySelector<HTMLElement>(".status-bar__text");
@@ -26,8 +34,11 @@ export class StatusBar {
     this.led = led;
   }
 
-  /** Paints one observer update. Debug frames are dropped by the UI. */
+  /** Paints one observer update. Debug frames pulse the LED only. */
   render(frame: StatusFrame): void {
+    if (frame.activity === "gateway" || frame.activity === "voice") {
+      this.pulse(frame.activity);
+    }
     if (frame.severity === "debug") {
       return;
     }
@@ -54,5 +65,44 @@ export class StatusBar {
       this.progress.hidden = true;
       this.led.hidden = false;
     }
+  }
+
+  /**
+   * Lights the LED for one pulse window. JS only toggles a modifier class;
+   * the glow and its fades are pure CSS (the modifier's transition is a
+   * fast fade-in, the idle rule's transition is the ~--led-pulse-ms
+   * ease-out decay). One shared hold timer: any pulse re-arms the window,
+   * so a stream of pulses reads as one continuous glow that fades when the
+   * activity stops.
+   */
+  private pulse(activity: PulseActivity): void {
+    this.lit.add(activity);
+    this.applyLed();
+    if (this.ledTimer !== null) {
+      clearTimeout(this.ledTimer);
+    }
+    this.ledTimer = setTimeout(() => {
+      this.lit.clear();
+      this.applyLed();
+      this.ledTimer = null;
+    }, this.pulseMs());
+  }
+
+  /** Applies the lit set: green wins while gateway and voice coincide. */
+  private applyLed(): void {
+    const gateway = this.lit.has("gateway");
+    this.led.classList.toggle("status-bar__led--gateway", gateway);
+    this.led.classList.toggle("status-bar__led--voice", !gateway && this.lit.has("voice"));
+  }
+
+  /** The hold window, tunable from the stylesheet as --led-pulse-ms. */
+  private pulseMs(): number {
+    const raw = getComputedStyle(this.led).getPropertyValue("--led-pulse-ms").trim();
+    const match = /^(\d+(?:\.\d+)?)(ms|s)$/.exec(raw);
+    if (!match) {
+      return DEFAULT_LED_PULSE_MS;
+    }
+    const value = Number.parseFloat(match[1]);
+    return match[2] === "s" ? value * 1000 : value;
   }
 }
