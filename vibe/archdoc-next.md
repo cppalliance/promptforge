@@ -73,3 +73,4 @@
 - [2026-08-24-2-autogen-config-first-run] observable graceful degradation: One threaded observer reports subsystem state, and gateway loss disables dependent features without stopping local Workbench functions.
 - [2026-08-24-3-voice-ux-fixes] semantic activity signals: Status activity describes model state, not transport identity - thinking, generating, recording, and general are distinct user meanings.
 - [2026-08-24-3-voice-ux-fixes] editable voice result: Final transcription replaces interim text in the normal auto-growing composer so the user can inspect and edit it before sending.
+- [2026-08-24-4-progressive-transcription] capped vocabulary bias: Domain vocabulary is a soft glossary prompt shared by interim and final decoding and truncated to the model prompt budget.
