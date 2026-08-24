@@ -30,7 +30,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A30. Fan-out arms run with bounded concurrency, return in input order, and abort siblings on the first error.
 
 
-- A42. External file I/O ends at the trusted host; prompts see only validated store paths.
 
 
 
@@ -54,6 +53,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A69. Missing Workbench configuration creates an editable user-directory TOML with defaults; environment interpolation is only an input within that file.
 - A70. The gateway alone downloads, verifies, lists, and deletes model artifacts while streaming progress to clients.
+
+- A71. Unexpected Workbench socket closure resets transient status and reconnects with capped exponential backoff; intentional reopen does neither.
 
 ## Principles
 

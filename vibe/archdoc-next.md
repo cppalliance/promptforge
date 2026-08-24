@@ -71,3 +71,5 @@
 - [2026-08-23-2-gateway-phases-4-5] transport causality: Distinguish never-connected failures from mid-flight failures that may already have reached or billed the provider.
 - [2026-08-24-1-stage-1-the-window] unsettled presentation transport: SSE and vanilla DOM were stage-one choices later challenged by WebSockets and TypeScript, so retain no architecture claim yet.
 - [2026-08-24-2-autogen-config-first-run] observable graceful degradation: One threaded observer reports subsystem state, and gateway loss disables dependent features without stopping local Workbench functions.
+- [2026-08-24-3-voice-ux-fixes] semantic activity signals: Status activity describes model state, not transport identity - thinking, generating, recording, and general are distinct user meanings.
+- [2026-08-24-3-voice-ux-fixes] editable voice result: Final transcription replaces interim text in the normal auto-growing composer so the user can inspect and edit it before sending.
