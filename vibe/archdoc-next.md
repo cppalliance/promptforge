@@ -70,3 +70,4 @@
 - [2026-08-23-1-dominion-refactor] canonical gateway protocol: Clients speak one OpenAI-shaped protocol while backend dialect and thinking translation remain gateway-internal and incremental.
 - [2026-08-23-2-gateway-phases-4-5] transport causality: Distinguish never-connected failures from mid-flight failures that may already have reached or billed the provider.
 - [2026-08-24-1-stage-1-the-window] unsettled presentation transport: SSE and vanilla DOM were stage-one choices later challenged by WebSockets and TypeScript, so retain no architecture claim yet.
+- [2026-08-24-2-autogen-config-first-run] observable graceful degradation: One threaded observer reports subsystem state, and gateway loss disables dependent features without stopping local Workbench functions.

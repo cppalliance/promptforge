@@ -25,7 +25,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A11. Every potentially unbounded model or tool loop has a finite explicit budget and fails visibly when exhausted.
 - A12. Each section receives only capabilities it explicitly names; unknown names fail before the model turn.
 - A15. Every section and fan-out arm gets a fresh model context; durable cross-run state crosses through the store or named payloads.
-- A19. Runtime metadata is sealed: unknown reads and all author writes fail, and every field has an explicit refresh boundary.
 - A25. Every model-facing section uses a prompt-declared model binding; hosts never choose a model implicitly.
 - A26. Artifact credentials are read from process secrets at request time and are never persisted or logged.
 - A30. Fan-out arms run with bounded concurrency, return in input order, and abort siblings on the first error.
@@ -43,7 +42,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 
 
-- A61. Immutable run state is shared across the execute subtree; each section entry owns a fresh frame with explicit construction and teardown.
 
 - A63. The boot catalog defines available models; a required named profile selects the loaded subset while server identity stays fixed.
 - A64. Endpoints bind by id to one shared dominion admission queue; local dominions also enforce complete VRAM co-residency budgets.
@@ -53,6 +51,9 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A67. Workbench logic lives in a local Rust server; the native executable is a thin webview shell so the server can embed elsewhere.
 - A68. Workbench appends every chat request and response to ordered raw JSONL; the tape preserves history but promises no deterministic replay.
+
+- A69. Missing Workbench configuration creates an editable user-directory TOML with defaults; environment interpolation is only an input within that file.
+- A70. The gateway alone downloads, verifies, lists, and deletes model artifacts while streaming progress to clients.
 
 ## Principles
 
