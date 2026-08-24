@@ -76,3 +76,5 @@ the conflict resolution deleted a dialect test, orphaning a glob import - a defe
 
 post-rebase cargo doc failed on private intra-doc links introduced by upstream's refactor; demote to plain text as a rule-7 fix. (assistant reasoned)
 
+## 2026-08-24 Add workbench design doc, archive prior designs
+
