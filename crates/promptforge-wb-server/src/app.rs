@@ -1,5 +1,8 @@
 //! The axum router, handlers, and serving loop for the workbench server.
 
+use std::sync::Arc;
+use std::time::Instant;
+
 use axum::Router;
 use axum::extract::State;
 use axum::http::header;
@@ -8,25 +11,49 @@ use axum::routing::{get, post};
 
 use crate::config::Config;
 use crate::gateway::{ChatRequest, GatewayClient, GatewayError, GatewayResponse};
+use crate::tape::{Tape, TapeError, TapeEvent};
 
 /// Address the server binds to when no override is given.
 pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
 
-/// Shared handler state: the authenticated gateway client.
+/// Shared handler state: the authenticated gateway client and the session
+/// tape.
 #[derive(Debug, Clone)]
 pub struct AppState {
     gateway: GatewayClient,
+    tape: Arc<Tape>,
 }
 
 impl AppState {
     /// Builds shared state from the loaded configuration.
     ///
     /// # Errors
-    /// Returns [`GatewayError::Build`] if the HTTP client cannot be built.
-    pub fn new(config: &Config) -> Result<Self, GatewayError> {
-        let gateway = GatewayClient::new(&config.gateway.base_url, &config.gateway.api_key)?;
-        Ok(Self { gateway })
+    /// Returns [`AppError::Gateway`] if the HTTP client cannot be built and
+    /// [`AppError::Tape`] if the session tape cannot be opened.
+    pub fn new(config: &Config) -> Result<Self, AppError> {
+        let gateway = GatewayClient::new(&config.gateway.base_url, &config.gateway.api_key)
+            .map_err(AppError::Gateway)?;
+        let tape = Tape::open(&config.tape.path).map_err(AppError::Tape)?;
+        Ok(Self {
+            gateway,
+            tape: Arc::new(tape),
+        })
     }
+}
+
+/// A shared-state construction failure.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum AppError {
+    /// The gateway HTTP client could not be built.
+    #[non_exhaustive]
+    #[error("build gateway client")]
+    Gateway(#[source] GatewayError),
+
+    /// The session tape could not be opened.
+    #[non_exhaustive]
+    #[error("open session tape")]
+    Tape(#[source] TapeError),
 }
 
 /// Returns the workbench server router with every route mounted.
@@ -61,26 +88,57 @@ async fn models(State(state): State<AppState>) -> Response {
     relay(state.gateway.list_models().await)
 }
 
-/// Forwards a chat completion to the gateway and relays the reply verbatim.
+/// Forwards a chat completion to the gateway, tapes the round-trip, and
+/// relays the reply verbatim.
+///
+/// A completed round-trip is recorded on the session tape; a tape failure is
+/// logged and never changes the response.
 async fn chat(State(state): State<AppState>, body: String) -> Response {
-    let request: ChatRequest = match serde_json::from_str(&body) {
-        Ok(request) => request,
-        Err(error) => {
-            return (
-                axum::http::StatusCode::BAD_REQUEST,
-                [(header::CONTENT_TYPE, "application/json")],
-                serde_json::json!({
-                    "error": {
-                        "message": format!("invalid chat request: {error}"),
-                        "code": "bad_request",
-                    }
-                })
-                .to_string(),
-            )
-                .into_response();
-        }
+    let request_value: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(value) => value,
+        Err(error) => return bad_request(&error),
     };
-    relay(state.gateway.chat_completion(&request).await)
+    let request: ChatRequest = match serde_json::from_value(request_value.clone()) {
+        Ok(request) => request,
+        Err(error) => return bad_request(&error),
+    };
+    let started = Instant::now();
+    let result = state.gateway.chat_completion(&request).await;
+    let latency = started.elapsed();
+    if let Ok(upstream) = &result {
+        let response_value = serde_json::from_slice(&upstream.body).unwrap_or_else(|_| {
+            serde_json::Value::String(String::from_utf8_lossy(&upstream.body).into_owned())
+        });
+        let ChatRequest { model, .. } = request;
+        let tape = Arc::clone(&state.tape);
+        let written = tokio::task::spawn_blocking(move || {
+            let event = TapeEvent::chat(model, request_value, response_value, latency)?;
+            tape.record(&event)
+        })
+        .await;
+        match written {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::error!(%error, "session tape event was not recorded"),
+            Err(error) => tracing::error!(%error, "session tape writer did not finish"),
+        }
+    }
+    relay(result)
+}
+
+/// Renders the 400 envelope for an unparseable chat body.
+fn bad_request(error: &serde_json::Error) -> Response {
+    (
+        axum::http::StatusCode::BAD_REQUEST,
+        [(header::CONTENT_TYPE, "application/json")],
+        serde_json::json!({
+            "error": {
+                "message": format!("invalid chat request: {error}"),
+                "code": "bad_request",
+            }
+        })
+        .to_string(),
+    )
+        .into_response()
 }
 
 /// Turns a gateway call outcome into the workbench's HTTP response.
@@ -114,6 +172,8 @@ fn relay(result: Result<GatewayResponse, GatewayError>) -> Response {
 mod tests {
     use super::*;
 
+    use std::path::Path;
+
     use axum::Json;
     use axum::body::{Body, to_bytes};
     use axum::http::{HeaderMap, Request, StatusCode};
@@ -123,21 +183,31 @@ mod tests {
 
     const CATALOG: &str = r#"{"object":"list","data":[{"id":"test-model","object":"model","created":1,"owned_by":"promptforge"}]}"#;
     const COMPLETION: &str = r#"{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
-    const UPSTREAM_ERROR: &str = r#"{"error":{"message":"model unloaded","code":"upstream_unavailable"}}"#;
+    const UPSTREAM_ERROR: &str =
+        r#"{"error":{"message":"model unloaded","code":"upstream_unavailable"}}"#;
+    const CHAT_BODY: &str =
+        r#"{"model":"test-model","messages":[{"role":"user","content":"ping"}]}"#;
 
-    fn config_for(base_url: &str) -> Config {
+    fn config_for(base_url: &str, tape_path: &Path) -> Config {
         Config {
             gateway: GatewayConfig {
                 base_url: base_url.to_string(),
                 api_key: "test-key".to_string(),
             },
-            tape: TapeConfig::default(),
+            tape: TapeConfig {
+                path: tape_path.to_path_buf(),
+            },
             server: ServerConfig::default(),
         }
     }
 
-    fn state_for(base_url: &str) -> AppState {
-        AppState::new(&config_for(base_url)).expect("client builds in tests")
+    /// Builds state whose tape lives in a fresh tempdir, returned alongside
+    /// so the directory outlives the test.
+    fn state_for(base_url: &str) -> (AppState, tempfile::TempDir) {
+        let tape_dir = tempfile::TempDir::new().expect("tempdir");
+        let config = config_for(base_url, &tape_dir.path().join("tape.jsonl"));
+        let state = AppState::new(&config).expect("state builds in tests");
+        (state, tape_dir)
     }
 
     fn authorized(headers: &HeaderMap) -> bool {
@@ -168,6 +238,17 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE,
             [(header::CONTENT_TYPE, "application/json")],
             UPSTREAM_ERROR,
+        )
+            .into_response()
+    }
+
+    async fn mock_chat_not_json(headers: HeaderMap) -> Response {
+        if !authorized(&headers) {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+        (
+            [(header::CONTENT_TYPE, "text/plain")],
+            "gateway replied in plain text",
         )
             .into_response()
     }
@@ -206,6 +287,15 @@ mod tests {
             .expect("the body is in memory already")
     }
 
+    fn chat_request() -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("/chat")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(CHAT_BODY))
+            .expect("static request parts are valid")
+    }
+
     #[test]
     fn default_bind_is_loopback_port_7910() {
         assert_eq!(DEFAULT_ADDR, "127.0.0.1:7910");
@@ -213,11 +303,12 @@ mod tests {
 
     #[tokio::test]
     async fn health_returns_serving() {
+        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
         let request = Request::builder()
             .uri("/health")
             .body(Body::empty())
             .expect("static request parts are valid");
-        let response = router(state_for("http://127.0.0.1:1"))
+        let response = router(state)
             .oneshot(request)
             .await
             .expect("the router is infallible");
@@ -233,11 +324,12 @@ mod tests {
     #[tokio::test]
     async fn models_are_relayed_byte_for_byte() {
         let base_url = spawn_mock_gateway().await;
+        let (state, _tape_dir) = state_for(&base_url);
         let request = Request::builder()
             .uri("/v1/models")
             .body(Body::empty())
             .expect("static request parts are valid");
-        let response = router(state_for(&base_url))
+        let response = router(state)
             .oneshot(request)
             .await
             .expect("the router is infallible");
@@ -248,16 +340,9 @@ mod tests {
     #[tokio::test]
     async fn chat_completions_are_relayed_byte_for_byte() {
         let base_url = spawn_mock_gateway().await;
-        let request = Request::builder()
-            .method("POST")
-            .uri("/chat")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(
-                r#"{"model":"test-model","messages":[{"role":"user","content":"ping"}]}"#,
-            ))
-            .expect("static request parts are valid");
-        let response = router(state_for(&base_url))
-            .oneshot(request)
+        let (state, _tape_dir) = state_for(&base_url);
+        let response = router(state)
+            .oneshot(chat_request())
             .await
             .expect("the router is infallible");
         assert_eq!(response.status(), StatusCode::OK);
@@ -267,11 +352,12 @@ mod tests {
     #[tokio::test]
     async fn gateway_error_status_is_relayed_byte_for_byte() {
         let base_url = spawn_broken_mock_gateway().await;
+        let (state, _tape_dir) = state_for(&base_url);
         let request = Request::builder()
             .uri("/v1/models")
             .body(Body::empty())
             .expect("static request parts are valid");
-        let response = router(state_for(&base_url))
+        let response = router(state)
             .oneshot(request)
             .await
             .expect("the router is infallible");
@@ -282,11 +368,12 @@ mod tests {
     #[tokio::test]
     async fn unreachable_gateway_becomes_bad_gateway() {
         // Port 1 is never listening, so the connect fails deterministically.
+        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
         let request = Request::builder()
             .uri("/v1/models")
             .body(Body::empty())
             .expect("static request parts are valid");
-        let response = router(state_for("http://127.0.0.1:1"))
+        let response = router(state)
             .oneshot(request)
             .await
             .expect("the router is infallible");
@@ -298,16 +385,104 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_chat_body_is_a_bad_request() {
+        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
         let request = Request::builder()
             .method("POST")
             .uri("/chat")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(r#"{"not_model":true}"#))
             .expect("static request parts are valid");
-        let response = router(state_for("http://127.0.0.1:1"))
+        let response = router(state)
             .oneshot(request)
             .await
             .expect("the router is infallible");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn chat_round_trip_writes_exactly_one_tape_event() {
+        let base_url = spawn_mock_gateway().await;
+        let (state, tape_dir) = state_for(&base_url);
+        let response = router(state)
+            .oneshot(chat_request())
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let raw =
+            std::fs::read_to_string(tape_dir.path().join("tape.jsonl")).expect("the tape exists");
+        assert!(raw.ends_with('\n'), "the tape line is complete: {raw:?}");
+        let lines: Vec<&str> = raw.lines().collect();
+        assert_eq!(lines.len(), 1, "exactly one event per round-trip");
+        let event: serde_json::Value =
+            serde_json::from_str(lines[0]).expect("the tape line is valid JSON");
+        assert_eq!(event["kind"], "chat");
+        assert_eq!(event["model"], "test-model");
+        assert_eq!(event["request"]["messages"][0]["content"], "ping");
+        assert_eq!(event["response"]["id"], "chatcmpl-1");
+        assert!(event["latency_ms"].is_u64(), "latency_ms is an integer");
+        let ts = event["ts"].as_str().expect("ts is a string");
+        time::OffsetDateTime::parse(ts, &time::format_description::well_known::Rfc3339)
+            .expect("ts is RFC 3339");
+    }
+
+    #[test]
+    fn unopenable_tape_path_fails_state_construction() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let config = config_for(
+            "http://127.0.0.1:1",
+            &dir.path().join("missing").join("tape.jsonl"),
+        );
+        let err = AppState::new(&config).expect_err("an unopenable tape must fail");
+        assert!(
+            matches!(err, AppError::Tape(_)),
+            "expected Tape, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_json_gateway_body_is_taped_as_a_string() {
+        let base_url =
+            spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_not_json)))
+                .await;
+        let (state, tape_dir) = state_for(&base_url);
+        let response = router(state)
+            .oneshot(chat_request())
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let raw =
+            std::fs::read_to_string(tape_dir.path().join("tape.jsonl")).expect("the tape exists");
+        let event: serde_json::Value =
+            serde_json::from_str(raw.lines().next().expect("one event per round-trip"))
+                .expect("the tape line is valid JSON");
+        assert_eq!(event["response"], "gateway replied in plain text");
+    }
+
+    #[tokio::test]
+    async fn tape_write_failure_does_not_fail_the_chat_response() {
+        struct FailingWriter;
+        impl std::io::Write for FailingWriter {
+            fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("injected tape failure"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let base_url = spawn_mock_gateway().await;
+        let gateway = GatewayClient::new(&base_url, "test-key").expect("client builds in tests");
+        let state = AppState {
+            gateway,
+            tape: Arc::new(Tape::with_writer_for_test(FailingWriter)),
+        };
+        let response = router(state)
+            .oneshot(chat_request())
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(&body_bytes(response).await[..], COMPLETION.as_bytes());
     }
 }
