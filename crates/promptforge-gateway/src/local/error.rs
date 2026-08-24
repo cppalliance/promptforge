@@ -310,6 +310,18 @@ pub(crate) enum LocalError {
         concurrency: usize,
     },
 
+    /// A local model named a dominion that is not defined.
+    ///
+    /// Configuration validation rejects an unknown or wrong-kind dominion
+    /// first; this is the defensive second check at runtime wiring.
+    #[error("local model {model} names undefined dominion {dominion}")]
+    UnknownDominion {
+        /// The affected model name.
+        model: String,
+        /// The offending dominion id.
+        dominion: String,
+    },
+
     /// A downloaded artifact exceeded the size ceiling.
     #[error("artifact at `{url}` exceeds the {limit}-byte limit")]
     ArtifactTooLarge {

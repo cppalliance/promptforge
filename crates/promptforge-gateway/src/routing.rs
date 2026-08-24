@@ -61,6 +61,32 @@ pub(crate) struct Routing {
     models: Vec<Arc<Model>>,
 }
 
+/// Build one shared [`DominionQueue`] per configured dominion.
+///
+/// Cloning a returned queue clones the Arc-backed limit, so everything bound
+/// to the same dominion competes for one pool of slots. Remote endpoints
+/// (routing) and local models ([`crate::local`]) both build their bindings
+/// from this map; validation keeps the two on disjoint dominion kinds, so
+/// each side only ever looks up its own kind's queues.
+pub(crate) fn dominion_queues(config: &Config) -> HashMap<&str, DominionQueue> {
+    let mut queues = HashMap::with_capacity(config.dominions().len());
+    for dominion in config.dominions() {
+        let queue = match dominion.max_concurrency() {
+            Some(n) => DominionQueue::new(
+                n,
+                dominion.max_queue(),
+                dominion.fair_scheduling(),
+                dominion.policy(),
+            ),
+            // Unlimited concurrency never parks a caller, so `max_queue`
+            // and `policy` have no wait to bound.
+            None => DominionQueue::unlimited(),
+        };
+        queues.insert(dominion.id(), queue);
+    }
+    queues
+}
+
 impl Routing {
     /// Build a routing table directly from resolved models. Intended for tests
     /// and for [`Routing::from_config`]. Order of `models` is the catalog order.
@@ -107,22 +133,7 @@ impl Routing {
     pub(crate) fn from_config(config: &Config) -> Result<Routing, ConfigError> {
         // One queue instance per dominion. Cloning a DominionQueue clones the
         // Arc-backed limit, so every bound endpoint shares the same slots.
-        let mut dominion_queues: HashMap<&str, DominionQueue> =
-            HashMap::with_capacity(config.dominions().len());
-        for dominion in config.dominions() {
-            let queue = match dominion.max_concurrency() {
-                Some(n) => DominionQueue::new(
-                    n,
-                    dominion.max_queue(),
-                    dominion.fair_scheduling(),
-                    dominion.policy(),
-                ),
-                // Unlimited concurrency never parks a caller, so `max_queue`
-                // and `policy` have no wait to bound.
-                None => DominionQueue::unlimited(),
-            };
-            dominion_queues.insert(dominion.id(), queue);
-        }
+        let dominion_queues = dominion_queues(config);
 
         let mut endpoints: HashMap<&str, Arc<Endpoint>> = HashMap::new();
         for endpoint in config.endpoints() {

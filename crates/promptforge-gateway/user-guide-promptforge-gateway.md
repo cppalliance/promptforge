@@ -228,7 +228,7 @@ vram_gb = 14              # footprint estimate for the co-residency check
 
 Binding is by explicit id and is kind-checked: an endpoint's `dominion` must name a remote dominion, a local model's `dominion` must name a local one, and an unknown id is a boot failure. `vram_gb` on a remote dominion is rejected. Dominion ids must be unique and non-empty, and `max_concurrency` and `max_queue` must be at least 1 when set.
 
-Dominions are being introduced alongside the legacy knobs: `concurrency`, `device`, `lane`, and `[queue]` still parse during the transition, and an endpoint with only those fields keeps its own per-endpoint queue. An endpoint bound to a remote dominion shares that dominion's queue with every other bound endpoint - the shared limit is enforced now. Local-model dominion binding and the VRAM co-residency check land as the queue rework completes.
+Dominions are being introduced alongside the legacy knobs: `concurrency`, `device`, `lane`, and `[queue]` still parse during the transition, and an endpoint with only those fields keeps its own per-endpoint queue. An endpoint bound to a remote dominion shares that dominion's queue with every other bound endpoint, and a local model bound to a local dominion shares that dominion's queue with every other bound local model - the shared limit is enforced now. The VRAM co-residency check lands as the queue rework completes.
 
 ## Web Search Tool
 
@@ -460,5 +460,7 @@ lane = "generative"
 ```
 
 The lane's `concurrency` is both the gateway's admit limit and `llama-server --parallel`. A local model without a device/lane defaults to concurrency 1.
+
+The newer `parallel` field on `[[local_model]]` is the direct spelling of the same number: it feeds the child's `--parallel` argument and, when the model has no `dominion`, its queue limit. When both `parallel` and a device/lane are set, `parallel` wins. When the model sets `dominion`, admission is governed by that dominion's shared queue instead of a per-model limit.
 
 Dropping the `LocalRuntime` (on process exit or profile switch) kills all `llama-server` children.
