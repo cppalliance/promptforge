@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use tokio::sync::{oneshot, watch};
 
+use crate::catalog::CatalogBus;
 use crate::gateway::GatewayClient;
 use crate::status::{Activity, StatusBus};
 
@@ -93,17 +94,20 @@ impl Heartbeat {
 }
 
 /// Spawns the heartbeat loop against `client`, reporting transitions
-/// through `status` and publishing reachability to `health`. The first
-/// probe runs immediately, before the first interval elapses.
+/// through `status` and publishing reachability to `health`. A transition
+/// back to reachable also re-fetches the model catalog and pushes it on
+/// `catalog`. The first probe runs immediately, before the first interval
+/// elapses.
 pub(crate) fn spawn(
     client: GatewayClient,
     status: StatusBus,
     health: GatewayHealth,
+    catalog: CatalogBus,
     interval: Duration,
 ) -> Heartbeat {
     let (stop, mut stopped) = oneshot::channel();
     let task = tokio::spawn(async move {
-        run(&client, &status, &health, interval, &mut stopped).await;
+        run(&client, &status, &health, &catalog, interval, &mut stopped).await;
     });
     Heartbeat {
         stop: Some(stop),
@@ -112,11 +116,13 @@ pub(crate) fn spawn(
 }
 
 /// The probe loop: one probe per interval, a status update per transition,
-/// and the stop signal wins over both the tick and an in-flight probe.
+/// and the stop signal wins over the tick, an in-flight probe, and an
+/// in-flight catalog refresh.
 async fn run(
     client: &GatewayClient,
     status: &StatusBus,
     health: &GatewayHealth,
+    catalog: &CatalogBus,
     interval: Duration,
     stop: &mut oneshot::Receiver<()>,
 ) {
@@ -138,13 +144,23 @@ async fn run(
         if last == Some(reachable) {
             continue;
         }
-        last = Some(reachable);
+        let previous = last.replace(reachable);
         if reachable {
             status.info(
                 "Connected to gateway",
                 "the gateway answers its health probe",
                 Activity::Gateway,
             );
+            // A gateway that was down and answers again may serve a
+            // different catalog than before the outage. The initial
+            // connect pushes nothing: a fresh UI fetches the catalog
+            // itself on boot.
+            if previous == Some(false) {
+                tokio::select! {
+                    _ = &mut *stop => break,
+                    () = refresh_catalog(client, catalog) => {}
+                }
+            }
         } else {
             status.info(
                 "Gateway unreachable",
@@ -153,6 +169,37 @@ async fn run(
             );
         }
     }
+}
+
+/// Re-fetches the gateway's model catalog and pushes it to every session.
+///
+/// A failed, declined, or malformed catalog is logged and skipped rather
+/// than pushed: pushing a bad snapshot would clear pickers that still hold
+/// a usable list.
+async fn refresh_catalog(client: &GatewayClient, catalog: &CatalogBus) {
+    let response = match client.list_models().await {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::warn!(%error, "catalog refresh after reconnect failed");
+            return;
+        }
+    };
+    if !response.status.is_success() {
+        tracing::warn!(status = %response.status, "catalog refresh after reconnect was declined");
+        return;
+    }
+    let body: serde_json::Value = match serde_json::from_slice(&response.body) {
+        Ok(body) => body,
+        Err(error) => {
+            tracing::warn!(%error, "catalog refresh after reconnect was not JSON");
+            return;
+        }
+    };
+    let Some(models) = body.get("data").and_then(serde_json::Value::as_array) else {
+        tracing::warn!("catalog refresh after reconnect carried no data array");
+        return;
+    };
+    catalog.publish(models.clone());
 }
 
 #[cfg(test)]
@@ -169,12 +216,15 @@ mod tests {
     use axum::routing::get;
     use tokio::sync::broadcast;
 
+    use crate::catalog::CatalogPush;
     use crate::status::{Severity, StatusBarUpdate};
 
     /// Fast enough to observe transitions without real waiting, slow
     /// enough that a 200 ms quiet window spans several ticks and so proves
     /// the loop does not re-emit a steady state.
     const TEST_INTERVAL: Duration = Duration::from_millis(25);
+
+    const CATALOG: &str = r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"promptforge"}]}"#;
 
     /// A mock `/health` whose answer flips under test control.
     async fn flippable_health(State(healthy): State<Arc<AtomicBool>>) -> Response {
@@ -185,10 +235,21 @@ mod tests {
         }
     }
 
-    /// Binds a mock gateway whose `/health` flips with `healthy`.
+    /// A static mock catalog for the refresh-on-reconnect tests.
+    async fn mock_models() -> Response {
+        (
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            CATALOG,
+        )
+            .into_response()
+    }
+
+    /// Binds a mock gateway whose `/health` flips with `healthy`, with a
+    /// static `/v1/models` beside it.
     async fn spawn_gateway(healthy: Arc<AtomicBool>) -> String {
         let app = Router::new()
             .route("/health", get(flippable_health))
+            .route("/v1/models", get(mock_models))
             .with_state(healthy);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -203,11 +264,22 @@ mod tests {
     }
 
     /// Starts a heartbeat against `base_url` on the fast interval, wired to
-    /// `status`; returns the handle and the shared health flag.
-    fn heartbeat_on(base_url: &str, status: &StatusBus) -> (Heartbeat, GatewayHealth) {
+    /// `status` and `catalog`; returns the handle and the shared health
+    /// flag.
+    fn heartbeat_on(
+        base_url: &str,
+        status: &StatusBus,
+        catalog: &CatalogBus,
+    ) -> (Heartbeat, GatewayHealth) {
         let client = GatewayClient::new(base_url, "").expect("client builds in tests");
         let health = GatewayHealth::new();
-        let heartbeat = spawn(client, status.clone(), health.clone(), TEST_INTERVAL);
+        let heartbeat = spawn(
+            client,
+            status.clone(),
+            health.clone(),
+            catalog.clone(),
+            TEST_INTERVAL,
+        );
         (heartbeat, health)
     }
 
@@ -233,8 +305,9 @@ mod tests {
         let healthy = Arc::new(AtomicBool::new(true));
         let base_url = spawn_gateway(Arc::clone(&healthy)).await;
         let status = StatusBus::new();
+        let catalog = CatalogBus::new();
         let mut rx = status.subscribe();
-        let (heartbeat, health) = heartbeat_on(&base_url, &status);
+        let (heartbeat, health) = heartbeat_on(&base_url, &status, &catalog);
 
         let update = next_update(&mut rx).await;
         assert_eq!(update.label, "Connected to gateway");
@@ -249,8 +322,9 @@ mod tests {
     async fn an_unreachable_gateway_fires_unreachable_once_and_stays_quiet() {
         // Nothing listens on port 1, so the connect fails deterministically.
         let status = StatusBus::new();
+        let catalog = CatalogBus::new();
         let mut rx = status.subscribe();
-        let (heartbeat, health) = heartbeat_on("http://127.0.0.1:1", &status);
+        let (heartbeat, health) = heartbeat_on("http://127.0.0.1:1", &status, &catalog);
 
         let update = next_update(&mut rx).await;
         assert_eq!(update.label, "Gateway unreachable");
@@ -266,8 +340,9 @@ mod tests {
         let healthy = Arc::new(AtomicBool::new(true));
         let base_url = spawn_gateway(Arc::clone(&healthy)).await;
         let status = StatusBus::new();
+        let catalog = CatalogBus::new();
         let mut rx = status.subscribe();
-        let (heartbeat, health) = heartbeat_on(&base_url, &status);
+        let (heartbeat, health) = heartbeat_on(&base_url, &status, &catalog);
 
         assert_eq!(next_update(&mut rx).await.label, "Connected to gateway");
         healthy.store(false, Ordering::Relaxed);
@@ -281,6 +356,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_reconnect_pushes_the_refreshed_catalog() {
+        let healthy = Arc::new(AtomicBool::new(false));
+        let base_url = spawn_gateway(Arc::clone(&healthy)).await;
+        let status = StatusBus::new();
+        let catalog = CatalogBus::new();
+        let mut status_rx = status.subscribe();
+        let mut catalog_rx = catalog.subscribe();
+        let (heartbeat, _health) = heartbeat_on(&base_url, &status, &catalog);
+
+        assert_eq!(
+            next_update(&mut status_rx).await.label,
+            "Gateway unreachable"
+        );
+        healthy.store(true, Ordering::Relaxed);
+        assert_eq!(
+            next_update(&mut status_rx).await.label,
+            "Connected to gateway"
+        );
+        let push: CatalogPush = tokio::time::timeout(Duration::from_secs(5), catalog_rx.recv())
+            .await
+            .expect("the refreshed catalog arrives within the deadline")
+            .expect("the catalog bus is open");
+        assert_eq!(
+            push.models,
+            serde_json::json!([{"id": "test-model", "object": "model", "owned_by": "promptforge"}])
+                .as_array()
+                .expect("the fixture is an array")
+                .clone(),
+            "the push carries the gateway's data array verbatim"
+        );
+        heartbeat.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn the_initial_connect_pushes_no_catalog() {
+        // A fresh UI fetches the catalog itself on boot; the push exists
+        // for reconnects only.
+        let healthy = Arc::new(AtomicBool::new(true));
+        let base_url = spawn_gateway(Arc::clone(&healthy)).await;
+        let status = StatusBus::new();
+        let catalog = CatalogBus::new();
+        let mut status_rx = status.subscribe();
+        let mut catalog_rx = catalog.subscribe();
+        let (heartbeat, _health) = heartbeat_on(&base_url, &status, &catalog);
+
+        assert_eq!(
+            next_update(&mut status_rx).await.label,
+            "Connected to gateway"
+        );
+        let quiet = tokio::time::timeout(Duration::from_millis(200), catalog_rx.recv()).await;
+        assert!(quiet.is_err(), "no catalog push on the initial connect");
+        heartbeat.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn shutdown_stops_the_task_without_waiting_out_the_interval() {
         // A long interval: if the stop signal did not win the select, the
         // shutdown would block for the whole minute.
@@ -290,6 +420,7 @@ mod tests {
             client,
             status,
             GatewayHealth::new(),
+            CatalogBus::new(),
             Duration::from_secs(60),
         );
         tokio::time::timeout(Duration::from_secs(5), heartbeat.shutdown())

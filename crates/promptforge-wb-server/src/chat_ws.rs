@@ -17,10 +17,11 @@
 //! Chat frames are answered strictly in order: while one streams, later
 //! frames wait.
 //!
-//! Status updates from [`crate::status`] are forwarded to the socket as
-//! `{"type":"status",...}` frames by a dedicated task, so they flow at any
-//! time - including while a chat is streaming, when the inbound loop is
-//! parked inside the relay.
+//! Status updates from [`crate::status`] and model catalog pushes from
+//! [`crate::catalog`] are forwarded to the socket as unsolicited
+//! `{"type":"status",...}` and `{"type":"models",...}` frames by a
+//! dedicated task, so they flow at any time - including while a chat is
+//! streaming, when the inbound loop is parked inside the relay.
 //!
 //! Exactly one tape event is written per chat frame, after the stream
 //! settles and before the terminal frame is sent, so a client holding
@@ -68,28 +69,48 @@ async fn run_session(session: u64, socket: WebSocket, state: AppState) {
         }
     });
 
-    // Status frames are unsolicited and must flow while a chat relay has
-    // the inbound loop parked, so they get their own task off the broadcast
-    // bus rather than a branch in that loop. A client too slow to keep up
-    // lags the ring and skips ahead; the bus never blocks for it.
+    // Status frames and catalog pushes are unsolicited and must flow while
+    // a chat relay has the inbound loop parked, so they get their own task
+    // off the broadcast buses rather than a branch in that loop. A client
+    // too slow to keep up lags the rings and skips ahead; the buses never
+    // block for it.
     let mut status_rx = state.status().subscribe();
+    let mut catalog_rx = state.catalog().subscribe();
     let status_out = out_tx.clone();
     let forwarder = tokio::spawn(async move {
         loop {
-            match status_rx.recv().await {
-                Ok(update) => {
-                    // Serializing strings and integers cannot fail.
-                    let Ok(text) = serde_json::to_string(&update.frame()) else {
-                        continue;
-                    };
-                    if status_out.send(Message::Text(text.into())).await.is_err() {
-                        break;
+            let text = tokio::select! {
+                received = status_rx.recv() => match received {
+                    Ok(update) => {
+                        // Serializing strings and integers cannot fail.
+                        let Ok(text) = serde_json::to_string(&update.frame()) else {
+                            continue;
+                        };
+                        text
                     }
-                }
-                Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    tracing::debug!(session, skipped, "status receiver lagged; skipped updates");
-                }
-                Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::debug!(session, skipped, "status receiver lagged; skipped updates");
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+                received = catalog_rx.recv() => match received {
+                    Ok(push) => {
+                        // Serializing a JSON value cannot fail.
+                        let Ok(text) = serde_json::to_string(&push.frame()) else {
+                            continue;
+                        };
+                        text
+                    }
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::debug!(session, skipped, "catalog receiver lagged; skipped pushes");
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+            };
+            if status_out.send(Message::Text(text.into())).await.is_err() {
+                break;
             }
         }
     });
@@ -381,11 +402,15 @@ async fn send_error(
 mod tests {
     use super::*;
 
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
     use axum::Router;
     use axum::body::Body;
+    use axum::extract::State;
     use axum::http::{HeaderMap, StatusCode, header};
     use axum::response::IntoResponse;
-    use axum::routing::post;
+    use axum::routing::{get, post};
     use futures_util::stream;
     use tokio_tungstenite::tungstenite;
 
@@ -864,6 +889,75 @@ mod tests {
             "both rounds taped the assembled response"
         );
         socket.close(None).await.expect("close the socket");
+    }
+
+    const CATALOG: &str = r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"promptforge"}]}"#;
+
+    /// A mock `/health` whose answer flips under test control.
+    async fn flippable_health(State(healthy): State<Arc<AtomicBool>>) -> Response {
+        if healthy.load(Ordering::Relaxed) {
+            StatusCode::OK.into_response()
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE.into_response()
+        }
+    }
+
+    /// A static mock catalog for the reconnect push test.
+    async fn mock_models() -> Response {
+        ([(header::CONTENT_TYPE, "application/json")], CATALOG).into_response()
+    }
+
+    #[tokio::test]
+    async fn a_gateway_reconnect_pushes_the_refreshed_catalog_to_sessions() {
+        let healthy = Arc::new(AtomicBool::new(false));
+        let base_url = spawn_gateway(
+            Router::new()
+                .route("/health", get(flippable_health))
+                .route("/v1/models", get(mock_models))
+                .with_state(Arc::clone(&healthy)),
+        )
+        .await;
+        let (url, _tape_dir, state) = spawn_chat_server(&base_url).await;
+        let heartbeat = crate::heartbeat::spawn(
+            state.gateway_client().clone(),
+            state.status(),
+            state.health().clone(),
+            state.catalog(),
+            Duration::from_millis(25),
+        );
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        // A malformed frame's error reply proves the session's tasks -
+        // including its catalog subscription - are live before the flip.
+        socket
+            .send(tungstenite::Message::Text("not json".into()))
+            .await
+            .expect("the frame is sent");
+        let reply = read_frame(&mut socket).await;
+        assert_eq!(reply["type"], "error");
+
+        healthy.store(true, Ordering::Relaxed);
+        // Status frames (the "Connected to gateway" transition) interleave
+        // with the push; read until the models frame arrives.
+        let frame = loop {
+            let frame = tokio::time::timeout(Duration::from_secs(5), read_frame(&mut socket))
+                .await
+                .expect("frames keep arriving within the deadline");
+            if frame["type"] == "models" {
+                break frame;
+            }
+        };
+        assert_eq!(
+            frame,
+            serde_json::json!({
+                "type": "models",
+                "models": [{"id": "test-model", "object": "model", "owned_by": "promptforge"}],
+            }),
+            "the refreshed catalog arrives as one models frame"
+        );
+        socket.close(None).await.expect("close the socket");
+        heartbeat.shutdown().await;
     }
 
     #[tokio::test]

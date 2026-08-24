@@ -242,6 +242,32 @@ if (!picker || picker.disabled) {
   }
 }
 
+// Models frames: a pushed catalog (sent when the gateway comes back after
+// an outage) refreshes the picker without a fetch. A selection that
+// survives the new catalog is kept; one that vanished falls back to the
+// first entry.
+function emitModels(models) {
+  const socket = chatSockets[0];
+  socket?.onmessage?.({ data: JSON.stringify({ type: "models", models }) });
+}
+if (picker && !picker.disabled) {
+  emitModels([
+    { id: "test-model", description: "scripted" },
+    { id: "fresh-model", description: "pushed" },
+  ]);
+  const ids = [...picker.options].map((option) => option.value);
+  if (ids.join(",") !== "test-model,fresh-model") {
+    failures.push(`a models frame did not rebuild the picker: ${ids.join(",")}`);
+  }
+  if (picker.value !== "test-model") {
+    failures.push(`a surviving selection was not kept across the refresh: ${picker.value}`);
+  }
+  emitModels([{ id: "fresh-model", description: "pushed" }]);
+  if (picker.value !== "fresh-model") {
+    failures.push(`a vanished selection did not fall back to the first entry: ${picker.value}`);
+  }
+}
+
 // Status frames: the observer's updates render into the status bar. Info
 // and error frames set the text and tooltip; debug frames are internal
 // instrumentation and must not touch either.

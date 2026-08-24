@@ -9,6 +9,7 @@ use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 
+use crate::catalog::CatalogBus;
 use crate::chat_ws;
 use crate::config::Config;
 use crate::gateway::{ChatRequest, GatewayClient, GatewayError, GatewayResponse};
@@ -31,6 +32,7 @@ pub struct AppState {
     voice: Option<Arc<VoiceEngine>>,
     status: StatusBus,
     health: GatewayHealth,
+    catalog: CatalogBus,
 }
 
 impl AppState {
@@ -74,6 +76,7 @@ impl AppState {
             voice,
             status,
             health: GatewayHealth::new(),
+            catalog: CatalogBus::new(),
         })
     }
 
@@ -103,6 +106,13 @@ impl AppState {
     /// is down.
     pub(crate) fn health(&self) -> &GatewayHealth {
         &self.health
+    }
+
+    /// The catalog bus, which the heartbeat publishes the refreshed model
+    /// catalog to on a gateway reconnect and every `/ws` session forwards
+    /// from.
+    pub(crate) fn catalog(&self) -> CatalogBus {
+        self.catalog.clone()
     }
 }
 
@@ -816,6 +826,7 @@ mod tests {
             voice: None,
             status: StatusBus::new(),
             health: GatewayHealth::new(),
+            catalog: CatalogBus::new(),
         };
         let response = router(state)
             .oneshot(chat_request())

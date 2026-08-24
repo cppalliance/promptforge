@@ -7,6 +7,7 @@
 //! in-process on its own thread for embedding binaries.
 
 mod app;
+mod catalog;
 mod chat_ws;
 mod config;
 mod gateway;
