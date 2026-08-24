@@ -59,10 +59,12 @@ fn run() -> anyhow::Result<()> {
 /// writes the default `workbench.toml` into it.
 fn generate_in_profile() -> anyhow::Result<PathBuf> {
     let home = std::env::home_dir().context("locate the user profile directory")?;
-    let dir = home.join(".promptforge");
-    std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
-    let path = discover::generate_default(&dir.join("workbench.toml"))
-        .context("write the default configuration")?;
+    let path = discover::profile_config_path(&home);
+    let dir = path
+        .parent()
+        .context("the profile config path has no parent")?;
+    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+    let path = discover::generate_default(&path).context("write the default configuration")?;
     eprintln!(
         "no workbench.toml found; wrote default config to {}",
         path.display()
