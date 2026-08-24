@@ -28,6 +28,19 @@ pub(crate) fn bounded_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
+/// Build a reqwest client with only a connect timeout for long-lived streams.
+///
+/// reqwest's whole-request `.timeout()` covers the entire body read, so it
+/// would kill any SSE stream that outlives it. The streaming path therefore
+/// bounds only the connect; once the stream is open, chunk flow is the
+/// liveness signal.
+pub(crate) fn streaming_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 /// Read at most `cap` bytes from `response`, stopping early once the cap is hit.
 ///
 /// The body is streamed chunk by chunk so an oversized or stalled response never

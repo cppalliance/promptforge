@@ -7,7 +7,8 @@
 //! holds a vendor key.
 //!
 //! What ships: one OpenAI passthrough at `POST /v1/chat/completions` with
-//! bearer auth and model routing, an embeddings passthrough at
+//! bearer auth, model routing, and a typed SSE relay for `stream: true`, an
+//! embeddings passthrough at
 //! `POST /v1/embeddings` for `kind = "embedding"` models, a rerank
 //! passthrough at `POST /v1/rerank` for `kind = "classifier"` models, shared
 //! concurrency pools with bounded, fair waiting queues (`[[dominion]]`),
@@ -16,7 +17,7 @@
 //! and immediate `POST /admin/switch-profile`, a bearer-authed
 //! `GET /v1/models` catalog, a Brave-backed `POST /v1/tools/web_search`
 //! configured by `[tools.web_search]`, and `GET /health`. In-process
-//! llama.cpp FFI, endpoint pinning, streaming, and the Anthropic protocol
+//! llama.cpp FFI, endpoint pinning, and the Anthropic protocol
 //! shim are deferred.
 
 mod api_error;
@@ -41,9 +42,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Json;
+use axum::body::Body;
 use axum::extract::State;
-use axum::http::HeaderMap;
-use axum::http::header::AUTHORIZATION;
+use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
+use axum::http::{HeaderMap, HeaderValue};
+use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Router, response::IntoResponse};
 use serde::Deserialize;
@@ -54,8 +57,8 @@ use crate::local::LocalRuntime;
 use crate::routing::Routing;
 use crate::tools::WebSearchState;
 use crate::wire::{
-    ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, ModelInfo, ModelsResponse,
-    RerankRequest, RerankResponse,
+    ChatRequest, EmbeddingRequest, EmbeddingResponse, ModelInfo, ModelsResponse, RerankRequest,
+    RerankResponse,
 };
 use promptforge_gateway_config::{ModelKind, ServerConfig, WebSearchConfig};
 
@@ -164,7 +167,7 @@ async fn chat_completions(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<ChatRequest>,
-) -> Result<Json<ChatResponse>, GatewayError> {
+) -> Result<Response, GatewayError> {
     check_auth(&state, &headers).await?;
     request
         .validate()
@@ -179,7 +182,18 @@ async fn chat_completions(
             .get(CLIENT_HEADER)
             .and_then(|value| value.to_str().ok()),
     );
-    let _permit = model.endpoint.queue.admit(client_id.as_str()).await?;
+    let permit = model.endpoint.queue.admit(client_id.as_str()).await?;
+    if request.stream {
+        // A failure here is before the SSE response starts, so it is
+        // consumed as a normal JSON error, never a stream that dies
+        // mid-flight.
+        let streamed = model
+            .endpoint
+            .upstream
+            .stream(request, &model.upstream_name)
+            .await?;
+        return Ok(relay_sse(streamed, permit));
+    }
     let response = model
         .endpoint
         .upstream
@@ -188,7 +202,59 @@ async fn chat_completions(
     response
         .validate()
         .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
-    Ok(Json(response))
+    Ok(Json(response).into_response())
+}
+
+/// Re-emit a validated upstream chunk stream as an SSE response, holding the
+/// dominion queue permit for the stream's lifetime.
+///
+/// The relay is typed: each upstream chunk is validated and re-serialized per
+/// chunk rather than splicing upstream bytes through. A mid-stream failure is
+/// emitted as an error-envelope `data:` event before the stream ends, and a
+/// clean end is marked with the `data: [DONE]` sentinel. The response
+/// forwards the upstream `Content-Type`/`Cache-Control` when present,
+/// defaulting to `text/event-stream`/`no-cache`.
+fn relay_sse(streamed: crate::upstream::StreamedChunks, permit: crate::queue::Permit) -> Response {
+    use futures_util::StreamExt as _;
+
+    let relayed = streamed
+        .chunks
+        .scan((false, permit), |(failed, _permit), item| {
+            if *failed {
+                return std::future::ready(None);
+            }
+            let line = match item {
+                Ok(chunk) => match serde_json::to_string(&chunk) {
+                    Ok(json) => format!("data: {json}\n\n"),
+                    Err(error) => {
+                        *failed = true;
+                        format!(
+                            "data: {}\n\n",
+                            GatewayError::upstream_protocol(error).envelope()
+                        )
+                    }
+                },
+                Err(error) => {
+                    *failed = true;
+                    format!("data: {}\n\n", error.envelope())
+                }
+            };
+            std::future::ready(Some(Ok::<String, std::convert::Infallible>(line)))
+        });
+    let done = futures_util::stream::once(async { Ok("data: [DONE]\n\n".to_owned()) });
+    let mut response = Response::new(Body::from_stream(relayed.chain(done)));
+    let headers = response.headers_mut();
+    let content_type = streamed
+        .content_type
+        .and_then(|value| HeaderValue::from_str(&value).ok())
+        .unwrap_or_else(|| HeaderValue::from_static("text/event-stream"));
+    headers.insert(CONTENT_TYPE, content_type);
+    let cache_control = streamed
+        .cache_control
+        .and_then(|value| HeaderValue::from_str(&value).ok())
+        .unwrap_or_else(|| HeaderValue::from_static("no-cache"));
+    headers.insert(CACHE_CONTROL, cache_control);
+    response
 }
 
 /// The embeddings route to a backend: the same auth, routing, kind guard, and

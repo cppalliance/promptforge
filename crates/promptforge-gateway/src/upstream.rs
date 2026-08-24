@@ -6,6 +6,7 @@
 //! behind this same trait, with no change to routing or the request handler.
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use promptforge_gateway_config::Secret;
 
@@ -14,6 +15,28 @@ use crate::wire::{
     ChatChunk, ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, RerankRequest,
     RerankResponse,
 };
+
+/// An opened streaming chat completion: the upstream response headers worth
+/// forwarding to the client, plus the validated chunk stream.
+pub(crate) struct StreamedChunks {
+    /// The upstream `Content-Type`, forwarded when present; the relay
+    /// defaults to `text/event-stream` otherwise.
+    pub(crate) content_type: Option<String>,
+    /// The upstream `Cache-Control`, forwarded when present.
+    pub(crate) cache_control: Option<String>,
+    /// The validated chunk stream. The upstream's terminal `[DONE]` sentinel
+    /// is consumed here, never yielded; the relay emits its own.
+    pub(crate) chunks: BoxStream<'static, Result<ChatChunk, GatewayError>>,
+}
+
+impl std::fmt::Debug for StreamedChunks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamedChunks")
+            .field("content_type", &self.content_type)
+            .field("cache_control", &self.cache_control)
+            .finish_non_exhaustive()
+    }
+}
 
 /// A backend the gateway can forward a chat completion to.
 #[async_trait]
@@ -88,15 +111,11 @@ pub(crate) trait Upstream: Send + Sync {
     /// before the stream starts, [`GatewayError::UpstreamStatus`] on a
     /// non-success backend status, and [`GatewayError::ModelUnavailable`]
     /// when the upstream cannot stream at all.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired up by the stream:true SSE relay step")
-    )]
     async fn stream(
         &self,
         req: ChatRequest,
         _upstream_model: &str,
-    ) -> Result<BoxStream<'static, Result<ChatChunk, GatewayError>>, GatewayError> {
+    ) -> Result<StreamedChunks, GatewayError> {
         Err(GatewayError::ModelUnavailable(req.model))
     }
 
@@ -125,6 +144,10 @@ pub(crate) struct OpenAiUpstream {
     base_url: String,
     api_key: Secret,
     http: reqwest::Client,
+    /// Connect-timeout-only client for the streaming path: reqwest's
+    /// whole-request timeout covers the body read and would kill any
+    /// long-lived SSE stream, so streams never use `http`.
+    http_stream: reqwest::Client,
 }
 
 impl OpenAiUpstream {
@@ -135,6 +158,7 @@ impl OpenAiUpstream {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key,
             http: crate::http_util::bounded_client(),
+            http_stream: crate::http_util::streaming_client(),
         }
     }
 
@@ -149,31 +173,29 @@ impl OpenAiUpstream {
         OpenAiUpstream {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key,
-            http,
+            http: http.clone(),
+            http_stream: http,
         }
     }
 
     /// POST `body` to `{base_url}/{path}` with the endpoint credential and
-    /// return the success body bytes.
+    /// return the success response.
     ///
-    /// The body read is byte-bounded: a chunk read failure is a transport
-    /// error, while decoding the returned bytes is left to the caller so a
-    /// decode failure surfaces as a protocol error (never a transport death)
-    /// and cannot trigger a spurious recovery upstream (UP-003, UP-004).
+    /// A non-success status fails before the body is consumed as anything
+    /// but diagnostics, so a streaming caller never sees an error response
+    /// as the start of a chunk stream.
     ///
     /// # Errors
     /// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
     /// [`GatewayError::UpstreamStatus`] with a truncated body on a non-success
     /// backend status.
-    async fn post_json(
+    async fn post(
         &self,
+        client: &reqwest::Client,
         path: &str,
         body: &impl serde::Serialize,
-    ) -> Result<Vec<u8>, GatewayError> {
-        let mut builder = self
-            .http
-            .post(format!("{}/{path}", self.base_url))
-            .json(body);
+    ) -> Result<reqwest::Response, GatewayError> {
+        let mut builder = client.post(format!("{}/{path}", self.base_url)).json(body);
         if !self.api_key.is_empty() {
             builder = builder.bearer_auth(self.api_key.expose());
         }
@@ -194,10 +216,107 @@ impl OpenAiUpstream {
                 body,
             });
         }
+        Ok(response)
+    }
 
+    /// POST `body` to `{base_url}/{path}` and return the success body bytes.
+    ///
+    /// The body read is byte-bounded: a chunk read failure is a transport
+    /// error, while decoding the returned bytes is left to the caller so a
+    /// decode failure surfaces as a protocol error (never a transport death)
+    /// and cannot trigger a spurious recovery upstream (UP-003, UP-004).
+    ///
+    /// # Errors
+    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
+    /// [`GatewayError::UpstreamStatus`] with a truncated body on a non-success
+    /// backend status.
+    async fn post_json(
+        &self,
+        path: &str,
+        body: &impl serde::Serialize,
+    ) -> Result<Vec<u8>, GatewayError> {
+        let response = self.post(&self.http, path, body).await?;
         crate::http_util::read_bytes_capped(response, crate::http_util::MAX_JSON_BODY)
             .await
             .map_err(GatewayError::upstream_transport)
+    }
+}
+
+/// Parse an upstream SSE byte stream into validated [`ChatChunk`]s.
+///
+/// Each `data:` line carries one JSON chunk; blank lines, comments, and the
+/// `event:`/`id:`/`retry:` fields are skipped, and the terminal `[DONE]`
+/// sentinel ends the stream without being yielded. Every chunk's model is
+/// rewritten to `requested` (the caller's model name, never the backend's).
+/// A transport failure mid-stream or an undecodable chunk surfaces as an
+/// `Err` item and ends the stream, so a caller never mistakes a truncated
+/// stream for a complete one.
+pub(crate) fn sse_chunks(response: reqwest::Response, requested: String) -> StreamedChunks {
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let cache_control = response
+        .headers()
+        .get(reqwest::header::CACHE_CONTROL)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let chunks = futures_util::stream::unfold(
+        (
+            response.bytes_stream().boxed(),
+            Vec::new(),
+            requested,
+            false,
+        ),
+        |(mut bytes, mut buffer, requested, terminated)| async move {
+            if terminated {
+                return None;
+            }
+            loop {
+                if let Some(end) = buffer.iter().position(|byte| *byte == b'\n') {
+                    let line: Vec<u8> = buffer.drain(..=end).collect();
+                    let line = String::from_utf8_lossy(&line);
+                    let line = line.trim_end_matches(['\r', '\n']);
+                    if line.is_empty() || line.starts_with(':') {
+                        continue;
+                    }
+                    let Some(data) = line.strip_prefix("data:") else {
+                        continue;
+                    };
+                    let data = data.trim_start();
+                    if data == "[DONE]" {
+                        return None;
+                    }
+                    return match serde_json::from_str::<ChatChunk>(data) {
+                        Ok(mut chunk) => {
+                            chunk.model.clone_from(&requested);
+                            Some((Ok(chunk), (bytes, buffer, requested, false)))
+                        }
+                        Err(error) => Some((
+                            Err(GatewayError::upstream_protocol(error)),
+                            (bytes, buffer, requested, true),
+                        )),
+                    };
+                }
+                match bytes.next().await {
+                    Some(Ok(chunk)) => buffer.extend_from_slice(&chunk),
+                    Some(Err(error)) => {
+                        return Some((
+                            Err(GatewayError::upstream_transport(error)),
+                            (bytes, buffer, requested, true),
+                        ));
+                    }
+                    None => return None,
+                }
+            }
+        },
+    )
+    .boxed();
+    StreamedChunks {
+        content_type,
+        cache_control,
+        chunks,
     }
 }
 
@@ -243,6 +362,19 @@ impl Upstream for OpenAiUpstream {
         // Return the caller's model name, never the backend's.
         parsed.model = requested;
         Ok(parsed)
+    }
+
+    async fn stream(
+        &self,
+        mut req: ChatRequest,
+        upstream_model: &str,
+    ) -> Result<StreamedChunks, GatewayError> {
+        let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
+        req.stream = true;
+        let response = self
+            .post(&self.http_stream, "chat/completions", &req)
+            .await?;
+        Ok(sse_chunks(response, requested))
     }
 }
 
@@ -291,6 +423,7 @@ mod tests {
         ChatRequest {
             model: model.to_owned(),
             messages: vec![serde_json::json!({ "role": "user", "content": "hi" })],
+            stream: false,
             rest: Map::new(),
         }
     }
@@ -477,6 +610,92 @@ mod tests {
             Err(other) => panic!("expected ModelUnavailable, got {other:?}"),
             Ok(_) => panic!("default must decline"),
         }
+    }
+
+    fn chunk_line(model: &str, content: &str) -> String {
+        format!(
+            "data: {{\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"{model}\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"{content}\"}},\"finish_reason\":null}}]}}\n\n"
+        )
+    }
+
+    #[tokio::test]
+    async fn stream_parses_chunks_rewrites_model_and_stops_at_done() {
+        // UP-008: same contract as `send` - the caller's model name is restored
+        // on every chunk while the backend sees the upstream model, and the
+        // upstream's [DONE] sentinel ends the stream without being yielded.
+        let body = format!(
+            "{}{}{}data: [DONE]\n\n",
+            chunk_line("backend-model", "Hel"),
+            chunk_line("backend-model", "lo"),
+            chunk_line("backend-model", "!"),
+        );
+        let (base, handle) = serve_once("200 OK", &body);
+        let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
+        let mut streamed = upstream
+            .stream(request("caller-model"), "backend-model")
+            .await
+            .expect("stream opens");
+        let mut chunks = Vec::new();
+        while let Some(item) = streamed.chunks.next().await {
+            chunks.push(item.expect("chunk ok"));
+        }
+        assert_eq!(chunks.len(), 3);
+        assert!(chunks.iter().all(|chunk| chunk.model == "caller-model"));
+        let text: String = chunks
+            .iter()
+            .filter_map(|chunk| chunk.choices[0].delta.get("content"))
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        assert_eq!(text, "Hello!");
+        let sent = handle.join().expect("join");
+        assert!(
+            sent.contains("\"stream\":true"),
+            "stream flag forwarded: {sent}"
+        );
+        assert!(sent.contains("backend-model"), "forwarded body: {sent}");
+        assert!(
+            !sent.contains("caller-model"),
+            "caller model leaked: {sent}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_non_success_status_is_upstream_status_before_any_chunk() {
+        // A non-2xx is consumed as a normal error before the stream starts;
+        // the caller never sees a chunk stream that dies mid-flight.
+        let (base, handle) = serve_once("500 Internal Server Error", "backend exploded");
+        let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
+        let err = upstream
+            .stream(request("m"), "u")
+            .await
+            .expect_err("should fail");
+        assert!(
+            matches!(err, GatewayError::UpstreamStatus { status: 500, .. }),
+            "expected UpstreamStatus 500, got {err:?}"
+        );
+        let _ = handle.join();
+    }
+
+    #[tokio::test]
+    async fn stream_undecodable_chunk_is_a_protocol_error_item() {
+        // A mid-stream garbage line surfaces as an Err item and ends the
+        // stream, never a silent truncation.
+        let body = format!("{}data: not json\n\ndata: [DONE]\n\n", chunk_line("m", "a"));
+        let (base, handle) = serve_once("200 OK", &body);
+        let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
+        let mut streamed = upstream
+            .stream(request("m"), "u")
+            .await
+            .expect("stream opens");
+        let first = streamed.chunks.next().await.expect("first item");
+        assert!(first.is_ok(), "first chunk parses: {first:?}");
+        let second = streamed.chunks.next().await.expect("second item");
+        assert!(
+            matches!(second, Err(GatewayError::UpstreamProtocol(_))),
+            "expected UpstreamProtocol item, got {second:?}"
+        );
+        assert!(streamed.chunks.next().await.is_none(), "stream ends");
+        let _ = handle.join();
     }
 
     #[test]
