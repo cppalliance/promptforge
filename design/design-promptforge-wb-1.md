@@ -67,3 +67,27 @@ Running log of design choices for the PromptForge Workbench stage 1 build. Each 
 - Choice: `Tape::record` returns `Result<(), TapeError>`; the chat handler logs a failure with `tracing::error!` and still relays the gateway response, while `AppState::new` refuses to build if the tape cannot be opened; `main` initializes `tracing-subscriber` so the log line actually lands somewhere.
 - Evidence: the step requires write errors to be visible yet never fail the user's chat - the `Result` makes the error visible to the caller (the handler) and the tracing log makes it visible to the operator, matching the gateway crate's own `%error` logging style; an unopenable tape at startup means every event would be lost, a configuration error worth failing fast over rather than serving a silently dead tape.
 - Cost: a runtime write failure has no user-facing signal, only the log; if the disk fails mid-session the workbench serves untaped chats until restart.
+
+## 12. SSE parsing: hand-rolled incremental decoder, no eventsource-stream
+
+- Choice: the gateway client decodes SSE itself - a private `SseDecoder` (buffer partial bytes, split on `\n`, collect `data:` lines, dispatch on the blank line) layered over reqwest's `bytes_stream` via `stream::try_unfold`, exposed as `SsePayloadStream = Pin<Box<dyn Stream<Item = Result<String, GatewayError>> + Send>>` of verbatim `data:` payloads. The `eventsource-stream` crate was evaluated and not added; reqwest gained its `stream` feature and futures-util entered the crate from the existing workspace tree.
+- Evidence: the rust rulebook adds a dependency only when the code exceeds roughly 100 lines and earns its tree; this decoder is about 60 lines, and an OpenAI-compatible stream needs only `data:` fields - no `event:` dispatch, no `id:` or Last-Event-ID reconnection, no `retry:` handling - so most of eventsource-stream's surface would be dead weight. The decoder is a pure synchronous core, so chunk-boundary, CRLF, multi-line `data:`, and EOF-flush behavior are unit-tested without a socket.
+- Cost: the SSE spec's edge cases are ours to maintain; a gateway emitting exotic framing exercises code no third party has battle-tested, and the boxed `dyn Stream` return type costs `Clone` and a nameable type (accepted: callers only ever poll it).
+
+## 13. Stream dispatch and the declined-stream relay
+
+- Choice: `POST /chat` reads `"stream": true` from the raw request JSON before dispatching; streaming requests go to `GatewayClient::chat_completion_stream`, which serializes the typed `ChatRequest` and inserts `"stream": true`. A non-success gateway status on a streaming request is buffered and relayed verbatim with its status, and taped, exactly like a buffered chat.
+- Evidence: the step fixes `"stream": true` as the trigger; reading it from the raw `Value` keeps the typed contract (model plus messages) unchanged; relaying error envelopes keeps failure semantics at the gateway, matching design entry 6; reusing the buffered tape path for declined streams keeps one taping convention.
+- Cost: `"stream": false` or a non-boolean `stream` silently takes the buffered path; the streaming gateway call serializes a slightly different body than the buffered one (the extra field), and extra client fields are still dropped on both paths (design entry 7).
+
+## 14. Assembled-response tape policy for streams
+
+- Choice: a streamed chat tapes exactly one event after the terminal `[DONE]` (or a clean EOF), with `response` set to the concatenation of every event's `choices[0].delta.content` as a plain JSON string; role-priming and usage events contribute nothing. `latency_ms` spans the whole stream, from request to terminal event. The write runs inside the response body stream's own finalizer (an `unfold` state consumed exactly once), so the tape event cannot precede the last byte sent to the client.
+- Evidence: the step fixes the one-event-with-assembled-response requirement; the tape schema already admits a plain-string `response` (design entry 9); folding the write into the body stream guarantees the exactly-once ordering without a background task racing the client.
+- Cost: streamed tape events are shape-inconsistent with buffered ones (a string versus the gateway's JSON object), so tape readers must branch on shape; a client that disconnects before the stream ends leaves no tape event at all, because hyper drops the body stream without running the finalizer.
+
+## 15. Mid-stream error taping
+
+- Choice: a transport error mid-stream ends the workbench's SSE response after the last good event - no fabricated terminal frame - and tapes one event whose `response` is `{"error": <message>, "content": <partial assembly>}`.
+- Evidence: the step requires an error note and never a silent gap; the 200 status and SSE headers are already committed when a mid-stream failure surfaces, so the only honest client signal is a truncated stream without `[DONE]`, while the tape carries the failure for the operator.
+- Cost: the client must infer failure from the missing `[DONE]` rather than an explicit error frame, and the taped message is reqwest's transport wording, not a gateway error envelope.

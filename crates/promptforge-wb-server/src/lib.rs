@@ -15,5 +15,7 @@ pub use app::{AppError, AppState, DEFAULT_ADDR, router, run};
 pub use config::{
     Config, ConfigError, DEFAULT_CONFIG_PATH, GatewayConfig, ServerConfig, TapeConfig,
 };
-pub use gateway::{ChatRequest, GatewayClient, GatewayError, GatewayResponse};
+pub use gateway::{
+    ChatRequest, ChatStream, GatewayClient, GatewayError, GatewayResponse, SsePayloadStream,
+};
 pub use tape::{Tape, TapeError, TapeEvent};
