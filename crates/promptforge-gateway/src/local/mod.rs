@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use crate::queue::DominionQueue;
 use crate::routing::{Endpoint, Model, dominion_queues};
-use promptforge_gateway_config::{Config, LocalModelConfig, QueuePolicy, ThinkingMode};
+use promptforge_gateway_config::{Config, LocalModelConfig, ModelKind, QueuePolicy, ThinkingMode};
 
 pub(crate) use error::LocalError;
 
@@ -85,8 +85,13 @@ impl LocalRuntime {
             let guard =
                 ServerGuard::start(&llama_server, &model_path, &options, interrupted.as_ref())?;
             let endpoint_id = format!("local-{}", local_model.name());
-            let (tool_dialect, tools_mode) =
-                resolve_local_dialect(&guard, local_model.name(), &model_path)?;
+            // A non-chat child has no chat completions to dialect-match: like a
+            // remote model, it carries the OpenAI default rather than hard-failing
+            // on template-less `/props` evidence.
+            let (tool_dialect, tools_mode) = match local_model.kind() {
+                ModelKind::Chat => resolve_local_dialect(&guard, local_model.name(), &model_path)?,
+                _ => ("openai".to_owned(), "native".to_owned()),
+            };
             let upstream_name = guard.model_alias().to_owned();
             let base_url = guard.base_url();
             let upstream = Arc::new(LocalUpstream::new(
@@ -228,6 +233,7 @@ fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
         cache_type_v: model.cache_type_v().to_owned(),
         think: !matches!(model.thinking(), ThinkingMode::Never),
         chat_template_file: model.chat_template_file().map(PathBuf::from),
+        embeddings: matches!(model.kind(), ModelKind::Embedding),
     }
 }
 
@@ -492,5 +498,37 @@ dominion = "gpu0"
 
         drop(held);
         let _permit = blocked.await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn embedding_kind_sets_the_embeddings_launch_flag() {
+        // `kind = "embedding"` maps to the child's `--embeddings` flag
+        // (launch_options carries it; the server tests prove it renders into
+        // the argv); a chat child launches without it.
+        let config = Config::from_toml_str(
+            r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[local_model]]
+name = "embed"
+kind = "embedding"
+description = "a local embedding model"
+source = "/models/embed.gguf"
+context = 512
+
+[[local_model]]
+name = "chatty"
+description = "a local chat model"
+source = "/models/chat.gguf"
+context = 4096
+"#,
+        )
+        .expect("config");
+        let embed = &config.local_models()[0];
+        let chat = &config.local_models()[1];
+        assert!(launch_options(embed, 1).embeddings);
+        assert!(!launch_options(chat, 1).embeddings);
     }
 }

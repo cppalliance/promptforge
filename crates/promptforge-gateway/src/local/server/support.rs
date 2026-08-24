@@ -242,6 +242,9 @@ pub(super) fn server_args(
         OsString::from(options.gpu_layers.to_string()),
         OsString::from("--jinja"),
     ];
+    if options.embeddings {
+        args.push(OsString::from("--embeddings"));
+    }
     if let Some(template) = &options.chat_template_file {
         args.extend([
             OsString::from("--chat-template-file"),

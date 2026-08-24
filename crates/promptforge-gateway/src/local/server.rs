@@ -140,6 +140,8 @@ pub(crate) struct LaunchOptions {
     pub(crate) think: bool,
     /// Optional Jinja override passed as `--chat-template-file`.
     pub(crate) chat_template_file: Option<PathBuf>,
+    /// When `true`, pass `--embeddings` so the child serves embedding requests.
+    pub(crate) embeddings: bool,
 }
 
 /// A running local server that is killed and reaped whenever its owner exits.
