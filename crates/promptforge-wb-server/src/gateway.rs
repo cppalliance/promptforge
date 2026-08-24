@@ -8,9 +8,15 @@
 
 use std::collections::VecDeque;
 use std::pin::Pin;
+use std::time::Duration;
 
 use futures_util::stream::{self, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
+
+/// Bound on a single `GET /health` probe: a gateway that accepts the
+/// connection but never answers must still read as unreachable, and two
+/// seconds keeps the probe well under the heartbeat interval it serves.
+const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// A non-streaming chat completion request forwarded to the gateway.
 ///
@@ -146,6 +152,24 @@ impl GatewayClient {
             request
         } else {
             request.bearer_auth(&self.api_key)
+        }
+    }
+
+    /// Probes the gateway's liveness endpoint, `GET /health`.
+    ///
+    /// Returns `true` only when the gateway answers with a success status:
+    /// a transport failure, a probe timeout, or a non-success answer all
+    /// read as unreachable. The request never carries the client's API key
+    /// (the endpoint is unauthenticated by design) and is capped at
+    /// [`HEALTH_PROBE_TIMEOUT`].
+    pub async fn health(&self) -> bool {
+        let probe = self
+            .http
+            .get(format!("{}/health", self.base_url))
+            .timeout(HEALTH_PROBE_TIMEOUT);
+        match probe.send().await {
+            Ok(response) => response.status().is_success(),
+            Err(_) => false,
         }
     }
 

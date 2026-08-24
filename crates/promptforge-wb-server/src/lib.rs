@@ -10,6 +10,7 @@ mod app;
 mod chat_ws;
 mod config;
 mod gateway;
+mod heartbeat;
 mod segment;
 mod serve;
 mod status;
