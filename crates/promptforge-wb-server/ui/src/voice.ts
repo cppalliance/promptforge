@@ -5,8 +5,6 @@
 
 import type { StatusBar } from "./status-bar";
 
-const MAX_TEXTAREA_HEIGHT_VH = 40;
-
 export interface VoiceElements {
   mic: HTMLButtonElement;
   status: HTMLDivElement;
@@ -42,20 +40,23 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
     mic.title = next ? "Stop recording" : "Push to talk";
   }
 
-  function resizeInput(): void {
-    const maxPx = window.innerHeight * (MAX_TEXTAREA_HEIGHT_VH / 100);
-    input.style.height = "auto";
-    input.style.height = Math.min(input.scrollHeight, maxPx) + "px";
+  // Programmatic value sets don't fire the textarea's "input" event, which
+  // is what murm-ui's Input listens to for growing the composer and
+  // re-enabling submit. Every voice-driven rewrite goes through it so the
+  // canonical resizer runs; a local inline-height resizer would pin an
+  // explicit height and disable the CSS field-sizing the app relies on.
+  function notifyInput(): void {
+    input.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
   function showInterim(text: string): void {
     input.value = text;
-    resizeInput();
+    notifyInput();
   }
 
   function clearInterim(): void {
     input.value = "";
-    resizeInput();
+    notifyInput();
   }
 
   // Tears down a session's audio half. The socket half is closed by the
@@ -92,9 +93,7 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
       const text = typeof msg.text === "string" ? msg.text.trim() : "";
       if (text !== "") {
         input.value = text;
-        // murm-ui's Input listens for "input" to re-enable submit.
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        resizeInput();
+        notifyInput();
         input.focus();
         showVoiceStatus("Transcript ready - edit, then send.", false);
       } else {

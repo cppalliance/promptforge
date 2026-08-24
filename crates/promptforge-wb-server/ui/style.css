@@ -137,6 +137,12 @@
   --mur-font: var(--font-prose, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
   --mur-header-button-bg: color-mix(in oklab, var(--bg-raised, #14161c) 82%, transparent);
   --mur-header-title-bg: color-mix(in oklab, var(--bg-raised, #14161c) 62%, transparent);
+
+  /* Composer growth cap: murm-ui defaults --mur-input-max-height to 200px,
+     which clips long voice transcripts; 40vh keeps them visible. It must be
+     declared on .mur-app, not :root, because murm-ui sets the variable on
+     .mur-app itself and an element-local declaration beats inheritance. */
+  --mur-input-max-height: 40vh;
 }
 
 /* murm-ui hardcodes `font-family: monospace` for code and tool chrome;
