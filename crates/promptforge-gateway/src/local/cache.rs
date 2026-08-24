@@ -341,6 +341,28 @@ impl BlobCache {
         entries.sort_by(|left, right| left.source.cmp(&right.source));
         Ok(entries)
     }
+
+    /// Removes the cache entry whose sidecar records `sha256`, returning
+    /// whether one was found.
+    ///
+    /// Matches on the sidecar digest (never a re-hash, Amendment C) and
+    /// removes the blob and its sidecar through the confinement-checked
+    /// removal path.
+    ///
+    /// # Errors
+    /// Returns [`LocalError::InvalidDigest`] for a malformed digest, or
+    /// [`LocalError`] on filesystem failure.
+    pub(crate) fn remove(&self, sha256: &str) -> Result<bool, LocalError> {
+        let wanted = parse_expected_digest(sha256)?;
+        for entry in self.list()? {
+            if entry.sha256 == wanted {
+                remove_cache_entry(&self.root, &entry.path)?;
+                remove_cache_entry(&self.root, &meta_path(&entry.path))?;
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
 }
 
 #[cfg(test)]
@@ -547,16 +569,104 @@ mod tests {
         .expect("write stale sidecar");
 
         let entries = cache.list().expect("list");
-        assert_eq!(entries.len(), 2, "entries: {entries:?}");
-        // Sorted by source for a stable response.
-        assert_eq!(entries[0].source, url_a);
-        assert_eq!(entries[0].path, blob_a.path);
-        assert_eq!(entries[0].sha256, hex_sha256(body_a));
-        assert_eq!(entries[0].size_bytes, body_a.len() as u64);
-        assert_eq!(entries[1].source, url_b);
-        assert_eq!(entries[1].path, blob_b.path);
-        assert_eq!(entries[1].sha256, hex_sha256(body_b));
-        assert_eq!(entries[1].size_bytes, body_b.len() as u64);
+        // Sorted by source for a stable response. The fake servers bind
+        // ephemeral ports, so which of the two sources sorts first is not
+        // fixed; build the expectation and sort it the same way.
+        let mut expected = vec![
+            CacheEntry {
+                source: url_a,
+                path: blob_a.path,
+                sha256: hex_sha256(body_a),
+                size_bytes: body_a.len() as u64,
+            },
+            CacheEntry {
+                source: url_b,
+                path: blob_b.path,
+                sha256: hex_sha256(body_b),
+                size_bytes: body_b.len() as u64,
+            },
+        ];
+        expected.sort_by(|left, right| left.source.cmp(&right.source));
+        assert_eq!(entries, expected);
+    }
+
+    #[test]
+    fn remove_deletes_blob_and_sidecar_by_digest() {
+        let body = b"delete-me-fixture";
+        let server = FakeServer::new(body);
+        let temp = TempDir::new().expect("tempdir");
+        let cache = BlobCache::new(temp.path()).expect("cache");
+        let url = server.url("gone.gguf");
+        let blob = cache
+            .download_to_cache(&url, None, &RecordingProgress::new())
+            .expect("download");
+        let sidecar = meta_path(&blob.path);
+        assert!(blob.path.is_file() && sidecar.is_file());
+
+        assert!(cache.remove(&blob.sha256).expect("remove"));
+        assert!(!blob.path.exists(), "blob removed");
+        assert!(!sidecar.exists(), "sidecar removed");
+        assert!(cache.list().expect("list").is_empty());
+
+        // A second removal of the same digest reports not-found.
+        assert!(!cache.remove(&blob.sha256).expect("remove again"));
+        // A malformed digest is rejected at the boundary.
+        assert!(matches!(
+            cache.remove("not-hex"),
+            Err(LocalError::InvalidDigest { .. })
+        ));
+    }
+
+    #[test]
+    fn concurrent_publishers_converge_on_one_download() {
+        // Two racing publishers of one source serialize on the artifact lock,
+        // and the hit test repeated under the lock means exactly one of them
+        // downloads (design entry 54).
+        let body = b"racing-publishers-fixture";
+        let digest = hex_sha256(body);
+        let server = FakeServer::new(body);
+        let temp = TempDir::new().expect("tempdir");
+        let cache = BlobCache::new(temp.path()).expect("cache");
+        let url = server.url("raced.gguf");
+
+        let (first, second) = std::thread::scope(|scope| {
+            let first = scope
+                .spawn(|| cache.download_to_cache(&url, Some(&digest), &RecordingProgress::new()));
+            let second = scope
+                .spawn(|| cache.download_to_cache(&url, Some(&digest), &RecordingProgress::new()));
+            (
+                first.join().expect("first publisher panicked"),
+                second.join().expect("second publisher panicked"),
+            )
+        });
+        let first = first.expect("first download");
+        let second = second.expect("second download");
+        assert_eq!(first, second);
+        assert_eq!(server.requests(), 1, "exactly one publisher downloads");
+    }
+
+    #[test]
+    fn corrupt_sidecar_is_skipped_and_not_a_hit() {
+        // A sidecar that does not parse is treated as absent (design entry
+        // 55): the blob is neither a hit nor listed, and neither read fails.
+        let body = b"corrupt-sidecar-fixture";
+        let server = FakeServer::new(body);
+        let temp = TempDir::new().expect("tempdir");
+        let cache = BlobCache::new(temp.path()).expect("cache");
+        let url = server.url("corrupt.gguf");
+        let blob = cache
+            .download_to_cache(&url, None, &RecordingProgress::new())
+            .expect("download");
+        fs::write(meta_path(&blob.path), b"not json").expect("corrupt sidecar");
+
+        assert!(
+            cache.lookup(&url, None).expect("lookup").is_none(),
+            "a corrupt sidecar is not a cache hit"
+        );
+        assert!(
+            cache.list().expect("list").is_empty(),
+            "a corrupt sidecar is skipped, not listed"
+        );
     }
 
     #[test]
