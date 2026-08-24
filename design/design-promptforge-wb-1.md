@@ -91,3 +91,33 @@ Running log of design choices for the PromptForge Workbench stage 1 build. Each 
 - Choice: a transport error mid-stream ends the workbench's SSE response after the last good event - no fabricated terminal frame - and tapes one event whose `response` is `{"error": <message>, "content": <partial assembly>}`.
 - Evidence: the step requires an error note and never a silent gap; the 200 status and SSE headers are already committed when a mid-stream failure surfaces, so the only honest client signal is a truncated stream without `[DONE]`, while the tape carries the failure for the operator.
 - Cost: the client must infer failure from the missing `[DONE]` rather than an explicit error frame, and the taped message is reqwest's transport wording, not a gateway error envelope.
+
+## 16. UI assets embedded with include_str!, not served from a directory
+
+- Choice: `index.html`, `app.js`, `style.css`, and the vendored `markdown-it.min.js` live in `crates/promptforge-wb-server/ui/` and are compiled into the binary with `include_str!`; routes `GET /`, `/app.js`, `/style.css`, and `/markdown-it.min.js` serve the embedded strings with explicit content types.
+- Evidence: the workbench is a local companion app where single-binary deployment matters - the server can be launched from any working directory without locating its asset tree, and there is no runtime path resolution to fail; the UI is four small files, so the dev-iteration cost of a recompile per edit is seconds, and `include_str!` gives the compiler a rebuild dependency on the assets for free.
+- Cost: editing the UI requires a recompile rather than a browser refresh against a live directory, and the binary grows by the asset size (about 130 KB, dominated by markdown-it); cache headers are not set, so the browser revalidates every load, which is fine on loopback.
+
+## 17. markdown-it vendored into ui/, no CDN
+
+- Choice: markdown-it 14.1.0 (minified, MIT) is checked into `crates/promptforge-wb-server/ui/markdown-it.min.js` and served as a static asset; assistant bubbles re-render the assembled markdown through it on every delta.
+- Evidence: the step forbids CDN dependencies, and the workbench is a local tool that must work offline and must not depend on a third-party host's availability or integrity; markdown-it is the reference CommonMark renderer for the browser and rendering the full accumulated string per delta is cheap at chat-message sizes, so no incremental-parse machinery is needed.
+- Cost: the vendored copy is a manual upgrade point - security or bug fixes land only when someone re-downloads the file; re-rendering the whole message per delta is O(n^2) in message length, acceptable for chat replies but a known ceiling.
+
+## 18. fetch plus ReadableStream for the POST SSE stream, not EventSource
+
+- Choice: the UI streams chat with `fetch("/chat", {method: "POST"})` and reads `response.body` through a `TextDecoderStream`, splitting on blank lines and joining `data:` lines by hand; EventSource is not used.
+- Evidence: EventSource only issues GET requests and cannot carry the `{"model", "messages"}` JSON body, so the POST contract of `/chat` rules it out outright; the manual SSE framing parser is about fifteen lines because the stream carries only `data:` fields, mirroring the server's own decoder rationale (design entry 12).
+- Cost: no automatic reconnection or Last-Event-ID, neither of which a chat round-trip wants anyway; the hand-rolled parser inherits the same spec edge-case maintenance burden as the server-side decoder.
+
+## 19. Dark-only palette: near-black neutrals, one muted blue-violet accent
+
+- Choice: the UI is dark-mode only - near-black backgrounds (`#0d0e12` base, `#14161c` raised), 1px `#262a33` borders, a single muted blue-violet accent (`#7c7fd4`), system font stack for prose, and a monospace stack for code. User messages are right-aligned in bordered bubbles; assistant messages render full-width markdown; a blinking accent cursor marks the streaming bubble.
+- Evidence: the step fixes the Cursor-like layout and dark palette; a single accent keeps the chrome quiet so the prose dominates, and the system font stack avoids shipping font files while matching the host OS; no light theme halves the palette surface to maintain.
+- Cost: users who prefer light mode have no option; the palette is hardcoded in CSS custom properties rather than derived from OS preferences, so it cannot follow a system accent color.
+
+## 20. UI behavior verified by hand, server behavior by tests
+
+- Choice: the static-asset routes are covered by server tests (200, content type, non-empty body), while the JavaScript behavior - Enter to send, live delta append, markdown re-render, model picker population, error bubbles - is verified manually in a browser against a running server.
+- Evidence: the workspace has no browser automation stack (no headless Chromium, no JS test runner), and adding one for four behaviors would dwarf the code under test; the Rust-side contract the JS depends on (SSE framing, `[DONE]`, catalog shape) is already pinned by the server tests.
+- Cost: a regression in `app.js` is caught only by a human clicking through the UI; the manual verification step has to be repeated whenever the SSE contract or the asset markup changes.

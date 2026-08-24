@@ -61,6 +61,10 @@ pub enum AppError {
 /// Returns the workbench server router with every route mounted.
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route("/", get(ui_index))
+        .route("/app.js", get(ui_app_js))
+        .route("/style.css", get(ui_style_css))
+        .route("/markdown-it.min.js", get(ui_markdown_it))
         .route("/health", get(health))
         .route("/v1/models", get(models))
         .route("/chat", post(chat))
@@ -82,6 +86,39 @@ async fn health() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "application/json")],
         r#"{"status":"serving"}"#,
+    )
+}
+
+/// Serves the chat UI's `index.html`, embedded into the binary.
+async fn ui_index() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        include_str!("../ui/index.html"),
+    )
+}
+
+/// Serves the chat UI's application script, embedded into the binary.
+async fn ui_app_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../ui/app.js"),
+    )
+}
+
+/// Serves the chat UI's stylesheet, embedded into the binary.
+async fn ui_style_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../ui/style.css"),
+    )
+}
+
+/// Serves the vendored markdown-it 14.1.0 renderer, embedded into the
+/// binary.
+async fn ui_markdown_it() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../ui/markdown-it.min.js"),
     )
 }
 
@@ -539,6 +576,50 @@ mod tests {
     #[test]
     fn default_bind_is_loopback_port_7910() {
         assert_eq!(DEFAULT_ADDR, "127.0.0.1:7910");
+    }
+
+    /// Asserts a static UI route answers 200 with the expected content type
+    /// and a non-empty body.
+    async fn assert_ui_asset(uri: &str, expected_content_type: &str) {
+        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let request = Request::builder()
+            .uri(uri)
+            .body(Body::empty())
+            .expect("static request parts are valid");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::OK, "{uri} serves");
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .unwrap_or_else(|| panic!("{uri} sets content-type"));
+        assert_eq!(content_type, expected_content_type, "{uri} content type");
+        assert!(
+            !body_bytes(response).await.is_empty(),
+            "{uri} body is non-empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn index_is_served_at_the_root() {
+        assert_ui_asset("/", "text/html; charset=utf-8").await;
+    }
+
+    #[tokio::test]
+    async fn app_js_is_served_as_javascript() {
+        assert_ui_asset("/app.js", "text/javascript; charset=utf-8").await;
+    }
+
+    #[tokio::test]
+    async fn style_css_is_served_as_css() {
+        assert_ui_asset("/style.css", "text/css; charset=utf-8").await;
+    }
+
+    #[tokio::test]
+    async fn vendored_markdown_it_is_served_as_javascript() {
+        assert_ui_asset("/markdown-it.min.js", "text/javascript; charset=utf-8").await;
     }
 
     #[tokio::test]
