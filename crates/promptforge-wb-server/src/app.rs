@@ -14,6 +14,7 @@ use futures_util::stream::{self, StreamExt};
 use crate::config::Config;
 use crate::gateway::{ChatRequest, ChatStream, GatewayClient, GatewayError, GatewayResponse};
 use crate::tape::{Tape, TapeError, TapeEvent};
+use crate::voice;
 
 /// Address the server binds to when no override is given.
 pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
@@ -65,9 +66,11 @@ pub fn router(state: AppState) -> Router {
         .route("/app.js", get(ui_app_js))
         .route("/style.css", get(ui_style_css))
         .route("/markdown-it.min.js", get(ui_markdown_it))
+        .route("/pcm-worklet.js", get(ui_pcm_worklet))
         .route("/health", get(health))
         .route("/v1/models", get(models))
         .route("/chat", post(chat))
+        .route("/voice", get(voice::upgrade))
         .with_state(state)
 }
 
@@ -119,6 +122,14 @@ async fn ui_markdown_it() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("../ui/markdown-it.min.js"),
+    )
+}
+
+/// Serves the AudioWorklet PCM capture processor, embedded into the binary.
+async fn ui_pcm_worklet() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../ui/pcm-worklet.js"),
     )
 }
 
@@ -620,6 +631,28 @@ mod tests {
     #[tokio::test]
     async fn vendored_markdown_it_is_served_as_javascript() {
         assert_ui_asset("/markdown-it.min.js", "text/javascript; charset=utf-8").await;
+    }
+
+    #[tokio::test]
+    async fn pcm_worklet_is_served_as_javascript() {
+        assert_ui_asset("/pcm-worklet.js", "text/javascript; charset=utf-8").await;
+    }
+
+    /// A plain GET to `/voice` without upgrade headers is rejected with 400,
+    /// which proves the route is mounted; the full WebSocket session flow is
+    /// covered by the `voice` module's own tests over a live socket.
+    #[tokio::test]
+    async fn voice_route_rejects_a_non_upgrade_get() {
+        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let request = Request::builder()
+            .uri("/voice")
+            .body(Body::empty())
+            .expect("static request parts are valid");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

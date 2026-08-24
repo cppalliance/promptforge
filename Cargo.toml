@@ -30,7 +30,10 @@ ipnet = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
 thiserror = "2"
 anyhow = "1"
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
+# 0.29 rather than the newer 0.30 so the resolver unifies with the copy axum's
+# `ws` feature already pulls in, instead of compiling two.
+tokio-tungstenite = "0.29"
 async-trait = "0.1"
 flate2 = "1"
 futures-util = "0.3"
