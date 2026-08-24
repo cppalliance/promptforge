@@ -8,9 +8,9 @@
 use std::net::SocketAddr;
 
 use super::{
-    Config, DominionConfig, DominionKind, EndpointConfig, LocalConfig, LocalModelConfig,
-    ModelConfig, ModelKind, Protocol, QueuePolicy, SearchProvider, Secret, ServerConfig,
-    ThinkingMode, ToolsConfig, WebSearchConfig,
+    Capabilities, Config, DominionConfig, DominionKind, EndpointConfig, LocalConfig,
+    LocalModelConfig, ModelConfig, ModelKind, Protocol, QueuePolicy, SearchProvider, Secret,
+    ServerConfig, ThinkingMode, ToolsConfig, WebSearchConfig,
 };
 
 impl Config {
@@ -856,6 +856,45 @@ impl ModelConfig {
     pub fn default_max_tokens(&self) -> Option<u32> {
         self.default_max_tokens
     }
+
+    /// Returns the capability metadata advertised on the catalog.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// #
+    /// # [[model]]
+    /// # name = "m"
+    /// # description = "a model"
+    /// # context = 8192
+    /// # thinking = "switchable"
+    /// # upstream = "u"
+    /// # endpoints = ["e"]
+    /// # max_output = 4096
+    /// # effort_levels = ["low", "high"]
+    /// # default_effort = "low"
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// let capabilities = config.models()[0].capabilities();
+    /// assert_eq!(capabilities.max_output(), Some(4096));
+    /// assert_eq!(capabilities.effort_levels(), ["low", "high"]);
+    /// assert_eq!(capabilities.default_effort(), Some("low"));
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn capabilities(&self) -> &Capabilities {
+        &self.capabilities
+    }
 }
 impl LocalModelConfig {
     /// Returns the caller-facing model name in `/v1/models` and chat
@@ -1284,6 +1323,284 @@ impl LocalModelConfig {
     #[must_use]
     pub fn chat_template_file(&self) -> Option<&str> {
         self.chat_template_file.as_deref()
+    }
+
+    /// Returns the capability metadata advertised on the catalog.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[local_model]]
+    /// # name = "q"
+    /// # description = "a local model"
+    /// # source = "/models/q.gguf"
+    /// # context = 4096
+    /// # images = true
+    /// # parallel_tool_calls = true
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// let capabilities = config.local_models()[0].capabilities();
+    /// assert!(capabilities.images());
+    /// assert!(capabilities.parallel_tool_calls());
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn capabilities(&self) -> &Capabilities {
+        &self.capabilities
+    }
+}
+
+impl Capabilities {
+    /// Returns the max output tokens the model can emit per completion, when
+    /// set.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// #
+    /// # [[model]]
+    /// # name = "m"
+    /// # description = "a model"
+    /// # context = 8192
+    /// # upstream = "u"
+    /// # endpoints = ["e"]
+    /// # max_output = 4096
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.models()[0].capabilities().max_output(), Some(4096));
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn max_output(&self) -> Option<u32> {
+        self.max_output
+    }
+
+    /// Returns the sampling temperature applied when the caller omits one,
+    /// when set.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// #
+    /// # [[model]]
+    /// # name = "m"
+    /// # description = "a model"
+    /// # context = 8192
+    /// # upstream = "u"
+    /// # endpoints = ["e"]
+    /// # default_temperature = 0.7
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(
+    ///     config.models()[0].capabilities().default_temperature(),
+    ///     Some(0.7)
+    /// );
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn default_temperature(&self) -> Option<f32> {
+        self.default_temperature
+    }
+
+    /// Returns whether the model accepts image inputs.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// #
+    /// # [[model]]
+    /// # name = "m"
+    /// # description = "a model"
+    /// # context = 8192
+    /// # upstream = "u"
+    /// # endpoints = ["e"]
+    /// # images = true
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert!(config.models()[0].capabilities().images());
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn images(&self) -> bool {
+        self.images
+    }
+
+    /// Returns whether the model can emit parallel tool calls.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// #
+    /// # [[model]]
+    /// # name = "m"
+    /// # description = "a model"
+    /// # context = 8192
+    /// # upstream = "u"
+    /// # endpoints = ["e"]
+    /// # parallel_tool_calls = true
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert!(config.models()[0].capabilities().parallel_tool_calls());
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn parallel_tool_calls(&self) -> bool {
+        self.parallel_tool_calls
+    }
+
+    /// Returns the reasoning-effort levels the model accepts (empty when the
+    /// model has no effort knob).
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// #
+    /// # [[model]]
+    /// # name = "m"
+    /// # description = "a model"
+    /// # context = 8192
+    /// # thinking = "switchable"
+    /// # upstream = "u"
+    /// # endpoints = ["e"]
+    /// # effort_levels = ["low", "high"]
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(
+    ///     config.models()[0].capabilities().effort_levels(),
+    ///     ["low", "high"]
+    /// );
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn effort_levels(&self) -> &[String] {
+        &self.effort_levels
+    }
+
+    /// Returns the effort level applied when the caller omits one, when set.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// #
+    /// # [[model]]
+    /// # name = "m"
+    /// # description = "a model"
+    /// # context = 8192
+    /// # thinking = "switchable"
+    /// # upstream = "u"
+    /// # endpoints = ["e"]
+    /// # effort_levels = ["low", "high"]
+    /// # default_effort = "low"
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(
+    ///     config.models()[0].capabilities().default_effort(),
+    ///     Some("low")
+    /// );
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn default_effort(&self) -> Option<&str> {
+        self.default_effort.as_deref()
+    }
+
+    /// Returns whether the model adaptively chooses how much to think per
+    /// request.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// #
+    /// # [[model]]
+    /// # name = "m"
+    /// # description = "a model"
+    /// # context = 8192
+    /// # upstream = "u"
+    /// # endpoints = ["e"]
+    /// # adaptive_thinking = true
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert!(config.models()[0].capabilities().adaptive_thinking());
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn adaptive_thinking(&self) -> bool {
+        self.adaptive_thinking
     }
 }
 impl ToolsConfig {

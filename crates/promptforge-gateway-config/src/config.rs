@@ -307,6 +307,9 @@ pub struct LocalModelConfig {
     /// for Mistral Small Instruct quants) and a tools-capable override is needed.
     #[serde(default)]
     chat_template_file: Option<String>,
+    /// Capability metadata advertised on the catalog.
+    #[serde(default, flatten)]
+    capabilities: Capabilities,
 }
 
 /// Server-level settings.
@@ -393,6 +396,43 @@ impl fmt::Display for ModelKind {
     }
 }
 
+/// Capability metadata advertised on the model catalog.
+///
+/// These fields describe what a model can do rather than how the gateway
+/// reaches it. They are flattened into `[[model]]` and `[[local_model]]`,
+/// validated at load, and surfaced verbatim on `GET /v1/models` so clients
+/// can shape requests before sending them. The effort knobs are chat-only
+/// and require a `thinking` mode other than `never`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Capabilities {
+    /// Max output tokens the model can emit per completion. Must not exceed
+    /// `context` when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_output: Option<u32>,
+    /// Sampling temperature applied when the caller omits one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_temperature: Option<f32>,
+    /// Whether the model accepts image inputs. Defaults to false.
+    #[serde(default)]
+    images: bool,
+    /// Whether the model can emit parallel tool calls. Defaults to false.
+    #[serde(default)]
+    parallel_tool_calls: bool,
+    /// The reasoning-effort levels the model accepts. Empty means the model
+    /// has no effort knob.
+    #[serde(default)]
+    effort_levels: Vec<String>,
+    /// The effort level applied when the caller omits one; requires a
+    /// non-empty `effort_levels` and must name a listed level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_effort: Option<String>,
+    /// Whether the model adaptively chooses how much to think per request;
+    /// chat kind only. Defaults to false.
+    #[serde(default)]
+    adaptive_thinking: bool,
+}
+
 /// One model name and the backend it resolves to.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -417,6 +457,9 @@ pub struct ModelConfig {
     /// A `max_tokens` default supplied when the caller omits one.
     #[serde(default)]
     default_max_tokens: Option<u32>,
+    /// Capability metadata advertised on the catalog.
+    #[serde(default, flatten)]
+    capabilities: Capabilities,
 }
 
 /// Built-in tool configuration under the `[tools]` section.

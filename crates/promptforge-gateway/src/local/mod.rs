@@ -112,6 +112,7 @@ impl LocalRuntime {
                 description: local_model.description().to_owned(),
                 context: local_model.context(),
                 thinking: local_model.thinking(),
+                capabilities: local_model.capabilities().clone(),
                 tool_dialect,
                 tools_mode,
                 upstream_name,
