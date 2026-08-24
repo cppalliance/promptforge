@@ -67,8 +67,20 @@ class FakeWebSocket {
       this.onopen?.();
     });
   }
+  // The voice path attaches with addEventListener; chain listeners onto the
+  // on* properties the chat path assigns directly.
+  addEventListener(type, listener) {
+    const prop = `on${type}`;
+    const previous = this[prop];
+    this[prop] = previous ? (event) => (previous(event), listener(event)) : listener;
+  }
   send(data) {
-    const frame = JSON.parse(data);
+    let frame;
+    try {
+      frame = JSON.parse(data);
+    } catch {
+      return; // voice control words ("start"/"stop") are not JSON
+    }
     if (frame.type !== "chat") return;
     this.chatFrame = frame;
     const frames = [
@@ -85,6 +97,39 @@ class FakeWebSocket {
   }
 }
 globalThis.WebSocket = FakeWebSocket;
+
+// Voice capture stubs: jsdom has no audio stack, so the mic button's
+// getUserMedia/AudioContext path is scripted to succeed. The bundle reads
+// the globals, so they land on both window and globalThis; `navigator` is
+// Node's own global (the key-copy loop below skips keys already present),
+// so mediaDevices goes on it directly.
+const fakeAudioStream = { getTracks: () => [{ stop() {} }] };
+const fakeMediaDevices = { getUserMedia: () => Promise.resolve(fakeAudioStream) };
+window.navigator.mediaDevices = fakeMediaDevices;
+globalThis.navigator.mediaDevices = fakeMediaDevices;
+class FakeAudioContext {
+  constructor() {
+    this.destination = {};
+    this.audioWorklet = { addModule: () => Promise.resolve() };
+  }
+  createMediaStreamSource() {
+    return { connect() {}, disconnect() {} };
+  }
+  close() {
+    return Promise.resolve();
+  }
+}
+class FakeAudioWorkletNode {
+  constructor() {
+    this.port = { onmessage: null };
+  }
+  connect() {}
+  disconnect() {}
+}
+window.AudioContext = FakeAudioContext;
+globalThis.AudioContext = FakeAudioContext;
+window.AudioWorkletNode = FakeAudioWorkletNode;
+globalThis.AudioWorkletNode = FakeAudioWorkletNode;
 
 // Pushes one observer status frame down the persistent socket, as the
 // server's /ws route would. Fields default to a plain idle update.
@@ -275,7 +320,7 @@ if (statusText && statusBar) {
   emitStatus({
     label: "Streaming response...",
     description: "gateway stream open",
-    activity: "gateway",
+    activity: "thinking",
   });
   if (statusText.textContent !== "Streaming response...") {
     failures.push("a status frame did not update the bar text");
@@ -283,7 +328,7 @@ if (statusText && statusBar) {
   if (statusBar.title !== "gateway stream open") {
     failures.push("the status description did not land on the bar tooltip");
   }
-  emitStatus({ label: "per-delta pulse", description: "debug", severity: "debug", activity: "gateway" });
+  emitStatus({ label: "per-delta pulse", description: "debug", severity: "debug", activity: "generating" });
   if (statusText.textContent !== "Streaming response...") {
     failures.push("a debug status frame changed the bar text");
   }
@@ -294,7 +339,7 @@ if (statusText && statusBar) {
     label: "Gateway error: 500",
     description: "upstream declined",
     severity: "error",
-    activity: "gateway",
+    activity: "general",
   });
   if (statusText.textContent !== "Gateway error: 500") {
     failures.push("an error frame did not update the bar text");
@@ -315,7 +360,7 @@ if (progressEl && ledEl) {
   emitStatus({
     label: "Downloading model",
     description: "1 of 4",
-    activity: "gateway",
+    activity: "general",
     progress: { current: 1, total: 4 },
   });
   if (progressEl.hidden) failures.push("a progress frame did not reveal the progress bar");
@@ -326,10 +371,10 @@ if (progressEl && ledEl) {
   emitStatus({
     label: "Downloading model",
     description: "2 of 4",
-    activity: "gateway",
+    activity: "general",
     progress: { current: 2, total: 4 },
   });
-  emitStatus({ label: "per-delta pulse", severity: "debug", activity: "gateway" });
+  emitStatus({ label: "per-delta pulse", severity: "debug", activity: "generating" });
   if (progressEl.hidden || progressEl.value !== 2) {
     failures.push("a debug frame disturbed the progress bar");
   }
@@ -338,37 +383,86 @@ if (progressEl && ledEl) {
   if (ledEl.hidden) failures.push("the LED did not return when progress cleared");
 }
 
-// The activity LED: gateway pulses light it green, voice pulses amber, and
-// green wins while both are lit inside one pulse window. Debug frames pulse
-// it too. After the window the LED returns to its idle lens. The pulse
-// window defaults to 250ms here (jsdom loads no stylesheet), so 400ms of
-// silence guarantees decay.
+// The activity LED: generating pulses light it green, thinking pulses
+// amber, and green wins while both are lit inside one pulse window. Debug
+// frames pulse it too. After the window the LED returns to its idle lens.
+// The pulse window defaults to 250ms here (jsdom loads no stylesheet), so
+// 400ms of silence guarantees decay.
 if (ledEl) {
   const ledLit = () =>
-    ledEl.classList.contains("status-bar__led--gateway") ||
-    ledEl.classList.contains("status-bar__led--voice");
+    ledEl.classList.contains("status-bar__led--generating") ||
+    ledEl.classList.contains("status-bar__led--thinking");
   // Let any pulse from the earlier sections decay before asserting idle.
   await new Promise((resolve) => setTimeout(resolve, 400));
   if (ledLit()) failures.push("the LED did not return to idle after the pulse window");
-  emitStatus({ label: "delta", severity: "debug", activity: "gateway" });
-  if (!ledEl.classList.contains("status-bar__led--gateway")) {
-    failures.push("gateway activity did not light the LED green");
+  emitStatus({ label: "delta", severity: "debug", activity: "generating" });
+  if (!ledEl.classList.contains("status-bar__led--generating")) {
+    failures.push("generating activity did not light the LED green");
   }
-  emitStatus({ label: "mic", severity: "debug", activity: "voice" });
-  if (!ledEl.classList.contains("status-bar__led--gateway")) {
-    failures.push("green did not win while gateway and voice were both lit");
+  emitStatus({ label: "thinking", severity: "debug", activity: "thinking" });
+  if (!ledEl.classList.contains("status-bar__led--generating")) {
+    failures.push("green did not win while generating and thinking were both lit");
   }
-  if (ledEl.classList.contains("status-bar__led--voice")) {
-    failures.push("the voice modifier applied while gateway was lit");
-  }
-  await new Promise((resolve) => setTimeout(resolve, 400));
-  if (ledLit()) failures.push("the LED stayed lit past the pulse window");
-  emitStatus({ label: "mic", severity: "debug", activity: "voice" });
-  if (!ledEl.classList.contains("status-bar__led--voice")) {
-    failures.push("voice activity did not light the LED amber");
+  if (ledEl.classList.contains("status-bar__led--thinking")) {
+    failures.push("the thinking modifier applied while generating was lit");
   }
   await new Promise((resolve) => setTimeout(resolve, 400));
   if (ledLit()) failures.push("the LED stayed lit past the pulse window");
+  emitStatus({ label: "thinking", severity: "debug", activity: "thinking" });
+  if (!ledEl.classList.contains("status-bar__led--thinking")) {
+    failures.push("thinking activity did not light the LED amber");
+  }
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  if (ledLit()) failures.push("the LED stayed lit past the pulse window");
+}
+
+// The REC badge: present in the status bar, idle at boot, lit while the
+// mic records, and cleared when the voice socket drops.
+const recEl = window.document.querySelector(".status-bar__rec");
+if (!recEl) {
+  failures.push("status bar REC badge missing");
+} else if (mic) {
+  if (recEl.classList.contains("status-bar__rec--active")) {
+    failures.push("the REC badge must start idle");
+  }
+  mic.click();
+  const recDeadline = Date.now() + 5000;
+  while (!recEl.classList.contains("status-bar__rec--active") && Date.now() < recDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (!recEl.classList.contains("status-bar__rec--active")) {
+    failures.push("starting voice capture did not light the REC badge");
+  }
+  const voiceSocket = chatSockets.find((socket) => socket.url.endsWith("/voice"));
+  if (!voiceSocket) {
+    failures.push("no /voice socket was opened");
+  } else {
+    voiceSocket.onclose?.();
+    if (recEl.classList.contains("status-bar__rec--active")) {
+      failures.push("a dropped voice socket did not clear the REC badge");
+    }
+  }
+}
+
+// Disconnect recovery: a dropped /ws socket resets the bar to its
+// reconnecting state, and the backoff opens a replacement socket (the
+// first retry waits one second).
+const persistentSocket = chatSockets.find((socket) => socket.url.endsWith("/ws"));
+if (persistentSocket && statusText) {
+  const socketCount = chatSockets.length;
+  persistentSocket.onclose?.();
+  if (statusText.textContent !== "Reconnecting...") {
+    failures.push("a dropped /ws socket did not reset the status bar");
+  }
+  const reconnectDeadline = Date.now() + 5000;
+  while (chatSockets.length === socketCount && Date.now() < reconnectDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (chatSockets.length === socketCount) {
+    failures.push("no replacement /ws socket opened after the reconnect backoff");
+  } else if (!chatSockets[chatSockets.length - 1].url.endsWith("/ws")) {
+    failures.push("the reconnect opened a socket that is not /ws");
+  }
 }
 
 if (failures.length > 0) {
@@ -376,3 +470,6 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log("smoke test passed: the bundled app mounts the chat UI and answers a message");
+// The voice-status auto-hide timer outlives the assertions; exit rather
+// than wait it out.
+process.exit(0);

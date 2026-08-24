@@ -3,6 +3,8 @@
 // "start"/"stop" control words, and JSON text frames out (`interim` rewrites
 // the live line above the composer, `final` lands in the input box).
 
+import type { StatusBar } from "./status-bar";
+
 export interface VoiceElements {
   mic: HTMLButtonElement;
   interim: HTMLDivElement;
@@ -18,7 +20,7 @@ interface VoiceSession {
   stream: MediaStream;
 }
 
-export function setupVoice(elements: VoiceElements): void {
+export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void {
   const { mic, interim, status, input } = elements;
   let voice: VoiceSession | null = null;
   let voiceStatusTimer = 0;
@@ -85,6 +87,10 @@ export function setupVoice(elements: VoiceElements): void {
         input.value = text;
         // murm-ui's Input listens for "input" to re-enable submit.
         input.dispatchEvent(new Event("input", { bubbles: true }));
+        // Grow the composer to fit the transcript; the reset to auto is
+        // what lets a shorter replacement shrink back down.
+        input.style.height = "auto";
+        input.style.height = `${input.scrollHeight}px`;
         input.focus();
         showVoiceStatus("Transcript ready - edit, then send.", false);
       } else {
@@ -155,6 +161,7 @@ export function setupVoice(elements: VoiceElements): void {
         if (voice === session) {
           voice = null;
           setRecording(false);
+          statusBar.setRecording(false);
           releaseAudio(session);
           showVoiceStatus("The voice connection dropped.", true);
         }
@@ -167,6 +174,7 @@ export function setupVoice(elements: VoiceElements): void {
       clearInterim();
       ws.send("start");
       setRecording(true);
+      statusBar.setRecording(true);
       showVoiceStatus("Recording - press the mic button again to stop.", false);
     } catch (error) {
       for (const track of stream.getTracks()) {
@@ -189,6 +197,7 @@ export function setupVoice(elements: VoiceElements): void {
     const session = voice;
     voice = null;
     setRecording(false);
+    statusBar.setRecording(false);
     if (!session) {
       return;
     }
@@ -196,13 +205,13 @@ export function setupVoice(elements: VoiceElements): void {
     const { ws } = session;
     if (ws.readyState === WebSocket.OPEN) {
       ws.send("stop");
-      // The final reply closes the socket from the message listener; this is
-      // the fallback if the reply never comes.
+      // The final whisper pass can take 30+ seconds on CPU; give it time.
+      // The message listener closes the socket when the final reply arrives.
       setTimeout(() => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.close();
         }
-      }, 2000);
+      }, 120_000);
     }
   }
 

@@ -150,7 +150,7 @@ async fn run(
             status.info(
                 "Connected to gateway",
                 "the gateway answers its health probe",
-                Activity::Gateway,
+                Activity::General,
             );
             // A gateway that was down and answers again may serve a
             // different catalog than before the outage. The initial
@@ -166,7 +166,7 @@ async fn run(
             status.info(
                 "Gateway unreachable",
                 "the gateway does not answer its health probe",
-                Activity::Gateway,
+                Activity::General,
             );
         }
     }
@@ -318,7 +318,7 @@ mod tests {
         let update = next_update(&mut rx).await;
         assert_eq!(update.label, "Connected to gateway");
         assert_eq!(update.severity, Severity::Info);
-        assert_eq!(update.activity, Activity::Gateway);
+        assert_eq!(update.activity, Activity::General);
         assert!(health.is_reachable(), "the probe published reachable");
         assert_quiet(&mut rx).await;
         heartbeat.shutdown().await;
@@ -335,7 +335,7 @@ mod tests {
         let update = next_update(&mut rx).await;
         assert_eq!(update.label, "Gateway unreachable");
         assert_eq!(update.severity, Severity::Info);
-        assert_eq!(update.activity, Activity::Gateway);
+        assert_eq!(update.activity, Activity::General);
         assert!(!health.is_reachable(), "the probe published unreachable");
         assert_quiet(&mut rx).await;
         heartbeat.shutdown().await;

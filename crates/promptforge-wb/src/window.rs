@@ -12,7 +12,7 @@ use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoop};
 use tao::platform::run_return::EventLoopExtRunReturn;
 use tao::window::WindowBuilder;
-use wry::WebViewBuilder;
+use wry::{PermissionKind, PermissionResponse, WebViewBuilder};
 
 /// Runs the window's event loop until the user closes the window, then
 /// returns.
@@ -27,6 +27,10 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
         .context("create the workbench window")?;
     let _webview = WebViewBuilder::new()
         .with_url(url)
+        .with_permission_handler(|kind| match kind {
+            PermissionKind::Microphone => PermissionResponse::Allow,
+            _ => PermissionResponse::Default,
+        })
         .build(&window)
         .context("create the workbench webview")?;
 

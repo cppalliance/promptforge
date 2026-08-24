@@ -7,7 +7,7 @@
 
 import type { StatusFrame } from "./workbench-socket";
 
-type PulseActivity = "gateway" | "voice";
+type PulseActivity = "thinking" | "generating";
 
 // Used when the stylesheet's --led-pulse-ms cannot be read (jsdom, or a
 // skin that dropped the variable).
@@ -17,6 +17,7 @@ export class StatusBar {
   private readonly text: HTMLElement;
   private readonly progress: HTMLProgressElement;
   private readonly led: HTMLElement;
+  private readonly rec: HTMLElement;
   private readonly lit = new Set<PulseActivity>();
   private ledTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -24,19 +25,21 @@ export class StatusBar {
     const text = root.querySelector<HTMLElement>(".status-bar__text");
     const progress = root.querySelector<HTMLProgressElement>(".status-bar__progress");
     const led = root.querySelector<HTMLElement>(".status-bar__led");
-    if (!text || !progress || !led) {
+    const rec = root.querySelector<HTMLElement>(".status-bar__rec");
+    if (!text || !progress || !led || !rec) {
       throw new Error(
-        "DOM Error: the status bar is missing its text, progress, or LED element.",
+        "DOM Error: the status bar is missing its text, progress, LED, or REC element.",
       );
     }
     this.text = text;
     this.progress = progress;
     this.led = led;
+    this.rec = rec;
   }
 
   /** Paints one observer update. Debug frames pulse the LED only. */
   render(frame: StatusFrame): void {
-    if (frame.activity === "gateway" || frame.activity === "voice") {
+    if (frame.activity === "thinking" || frame.activity === "generating") {
       this.pulse(frame.activity);
     }
     if (frame.severity === "debug") {
@@ -88,11 +91,31 @@ export class StatusBar {
     }, this.pulseMs());
   }
 
-  /** Applies the lit set: green wins while gateway and voice coincide. */
+  /** Lights or dims the REC badge with the mic's recording state. */
+  setRecording(on: boolean): void {
+    this.rec.classList.toggle("status-bar__rec--active", on);
+  }
+
+  /**
+   * Returns the bar to its reconnecting state after the persistent socket
+   * drops: neutral text, no tooltip, no error styling, and the LED back in
+   * the slot.
+   */
+  reset(): void {
+    this.text.textContent = "Reconnecting...";
+    this.root.title = "";
+    this.text.classList.remove("status-bar__text--error");
+    this.renderSlot(null);
+  }
+
+  /** Applies the lit set: green wins while generating and thinking coincide. */
   private applyLed(): void {
-    const gateway = this.lit.has("gateway");
-    this.led.classList.toggle("status-bar__led--gateway", gateway);
-    this.led.classList.toggle("status-bar__led--voice", !gateway && this.lit.has("voice"));
+    const generating = this.lit.has("generating");
+    this.led.classList.toggle("status-bar__led--generating", generating);
+    this.led.classList.toggle(
+      "status-bar__led--thinking",
+      !generating && this.lit.has("thinking"),
+    );
   }
 
   /** The hold window, tunable from the stylesheet as --led-pulse-ms. */
