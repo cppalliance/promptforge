@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use promptforge_gateway_config::{Config, ConfigError, Protocol, ThinkingMode};
+use promptforge_gateway_config::{Config, ConfigError, ModelKind, Protocol, ThinkingMode};
 
 use crate::error::GatewayError;
 use crate::queue::DominionQueue;
@@ -36,6 +36,8 @@ impl std::fmt::Debug for Endpoint {
 pub(crate) struct Model {
     /// The caller-facing model name.
     pub name: String,
+    /// The workload this model serves: chat, embedding, or classifier.
+    pub kind: ModelKind,
     /// Prose describing the model for catalog consumers.
     pub description: String,
     /// Context window size in tokens.
@@ -177,6 +179,7 @@ impl Routing {
             })?;
             models.push(Arc::new(Model {
                 name: model.name().to_owned(),
+                kind: model.kind(),
                 description: model.description().to_owned(),
                 context: model.context(),
                 thinking: model.thinking(),
@@ -239,6 +242,7 @@ mod tests {
         });
         Arc::new(Model {
             name: name.to_owned(),
+            kind: ModelKind::Chat,
             description: "d".to_owned(),
             context: 8192,
             thinking: ThinkingMode::Never,
@@ -291,6 +295,39 @@ endpoints = ["e"]
             r.model("nope"),
             Err(GatewayError::UnknownModel(_))
         ));
+    }
+
+    #[test]
+    fn from_config_carries_model_kinds() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+
+[[model]]
+name = "chatty"
+description = "a chat model"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+
+[[model]]
+name = "embed"
+kind = "embedding"
+description = "an embedding model"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+"#;
+        let routing = routing_from(toml);
+        assert_eq!(routing.model("chatty").unwrap().kind, ModelKind::Chat);
+        assert_eq!(routing.model("embed").unwrap().kind, ModelKind::Embedding);
     }
 
     #[test]

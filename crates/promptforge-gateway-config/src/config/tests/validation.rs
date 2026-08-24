@@ -1234,3 +1234,158 @@ base_url = "https://"
         Err(ConfigError::Validation(_))
     ));
 }
+
+/// A catalog with one endpoint and one model of the given kind; `extra`
+/// carries the model's variable field lines.
+fn catalog_with_model_kind(kind: &str, extra: &str) -> String {
+    format!(
+        r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+kind = "{kind}"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+{extra}
+"#
+    )
+}
+
+/// A catalog with one local model of the given kind; `extra` carries the
+/// model's variable field lines.
+fn catalog_with_local_model_kind(kind: &str, extra: &str) -> String {
+    format!(
+        r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[local_model]]
+name = "q"
+kind = "{kind}"
+description = "prose"
+source = "/models/q.gguf"
+context = 4096
+{extra}
+"#
+    )
+}
+
+#[test]
+fn rejects_embedding_model_with_thinking() {
+    for kind in ["embedding", "classifier"] {
+        let toml = catalog_with_model_kind(kind, "thinking = \"always\"");
+        match Config::parse_toml(&toml) {
+            Err(ConfigError::Validation(message)) => {
+                assert!(
+                    message.contains("model m"),
+                    "expected the error to name the model: {message}"
+                );
+                assert!(
+                    message.contains("thinking"),
+                    "expected the error to name the field: {message}"
+                );
+            }
+            other => panic!("expected a validation error for kind {kind}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn rejects_classifier_model_with_default_max_tokens() {
+    for kind in ["embedding", "classifier"] {
+        let toml = catalog_with_model_kind(kind, "default_max_tokens = 1024");
+        match Config::parse_toml(&toml) {
+            Err(ConfigError::Validation(message)) => {
+                assert!(
+                    message.contains("model m"),
+                    "expected the error to name the model: {message}"
+                );
+                assert!(
+                    message.contains("default_max_tokens"),
+                    "expected the error to name the field: {message}"
+                );
+            }
+            other => panic!("expected a validation error for kind {kind}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn rejects_embedding_local_model_with_thinking() {
+    for kind in ["embedding", "classifier"] {
+        let toml = catalog_with_local_model_kind(kind, "thinking = \"switchable\"");
+        match Config::parse_toml(&toml) {
+            Err(ConfigError::Validation(message)) => {
+                assert!(
+                    message.contains("local_model q"),
+                    "expected the error to name the model: {message}"
+                );
+                assert!(
+                    message.contains("thinking"),
+                    "expected the error to name the field: {message}"
+                );
+            }
+            other => panic!("expected a validation error for kind {kind}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn rejects_classifier_local_model_with_chat_template_file() {
+    for kind in ["embedding", "classifier"] {
+        let toml = catalog_with_local_model_kind(kind, "chat_template_file = \"q.jinja\"");
+        match Config::parse_toml(&toml) {
+            Err(ConfigError::Validation(message)) => {
+                assert!(
+                    message.contains("local_model q"),
+                    "expected the error to name the model: {message}"
+                );
+                assert!(
+                    message.contains("chat_template_file"),
+                    "expected the error to name the field: {message}"
+                );
+            }
+            other => panic!("expected a validation error for kind {kind}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn accepts_nonchat_models_with_context_and_inference_knobs() {
+    // `context` applies to every kind, and the llama.cpp launch knobs
+    // (gpu_layers, flash_attention, cache types, parallel, vram_gb) are not
+    // chat-only: only thinking and chat-template/generation defaults are.
+    let toml = catalog_with_model_kind("embedding", "");
+    assert!(Config::parse_toml(&toml).is_ok());
+    let toml = catalog_with_local_model_kind(
+        "classifier",
+        "gpu_layers = 40\nflash_attention = false\nparallel = 2",
+    );
+    assert!(Config::parse_toml(&toml).is_ok());
+}
+
+#[test]
+fn accepts_chat_models_with_chat_only_fields() {
+    let toml = catalog_with_model_kind(
+        "chat",
+        "thinking = \"switchable\"\ndefault_max_tokens = 1024",
+    );
+    assert!(Config::parse_toml(&toml).is_ok());
+    let toml = catalog_with_local_model_kind(
+        "chat",
+        "thinking = \"always\"\nchat_template_file = \"q.jinja\"",
+    );
+    assert!(Config::parse_toml(&toml).is_ok());
+}

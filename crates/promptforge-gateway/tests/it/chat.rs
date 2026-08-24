@@ -2,10 +2,11 @@
 
 use promptforge_core::client::{GatewayClient, GatewayEndpoint, SecretString};
 use promptforge_core::model::CompletionOptions;
+use promptforge_gateway::{Config, Gateway, ProfilesContext};
 use serde_json::Value;
 
 use crate::support::{
-    PHASE_TIMEOUT, canned_reply, chat_body, fake_backend, gateway_for, json_within,
+    PHASE_TIMEOUT, TestServer, canned_reply, chat_body, fake_backend, gateway_for, json_within,
     recording_backend, send_within,
 };
 
@@ -172,6 +173,7 @@ async fn models_catalog_returns_configured_entries() {
         Some("test-model")
     );
     assert_eq!(data[0].get("object").and_then(Value::as_str), Some("model"));
+    assert_eq!(data[0].get("kind").and_then(Value::as_str), Some("chat"));
     assert_eq!(
         data[0].get("description").and_then(Value::as_str),
         Some("a test model for integration")
@@ -188,6 +190,68 @@ async fn models_catalog_returns_configured_entries() {
     assert_eq!(
         data[0].get("tools_mode").and_then(Value::as_str),
         Some("native")
+    );
+    gateway.shutdown().await;
+}
+
+#[tokio::test]
+async fn models_catalog_carries_model_kinds() {
+    let backend = fake_backend().await;
+    let toml = format!(
+        r#"
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+
+[[model]]
+name = "chat-model"
+description = "a chat model"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+
+[[model]]
+name = "embed-model"
+kind = "embedding"
+description = "an embedding model"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+"#
+    );
+    let config = Config::from_toml_str(&toml).unwrap();
+    let gateway = Gateway::from_config(&config, ProfilesContext::default()).unwrap();
+    let gateway = TestServer::start(gateway).await;
+
+    let response = send_within(
+        reqwest::Client::new()
+            .get(format!("http://{}/v1/models", gateway.addr))
+            .bearer_auth("test-token"),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 200);
+
+    let body = json_within(response).await;
+    let data = body.get("data").and_then(Value::as_array).unwrap();
+    assert_eq!(data.len(), 2);
+    assert_eq!(
+        data[0].get("id").and_then(Value::as_str),
+        Some("chat-model")
+    );
+    assert_eq!(data[0].get("kind").and_then(Value::as_str), Some("chat"));
+    assert_eq!(
+        data[1].get("id").and_then(Value::as_str),
+        Some("embed-model")
+    );
+    assert_eq!(
+        data[1].get("kind").and_then(Value::as_str),
+        Some("embedding")
     );
     gateway.shutdown().await;
 }

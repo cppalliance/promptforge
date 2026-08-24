@@ -199,6 +199,7 @@ async fn list_models(
         .map(|model| ModelInfo {
             id: model.name.clone(),
             object: "model",
+            kind: model.kind,
             description: model.description.clone(),
             context: model.context,
             thinking: model.thinking,

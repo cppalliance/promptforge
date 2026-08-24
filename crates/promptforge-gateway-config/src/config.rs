@@ -260,6 +260,9 @@ pub struct LocalConfig {
 pub struct LocalModelConfig {
     /// Caller-facing model name in `/v1/models` and chat completions.
     name: String,
+    /// The workload this model serves. Defaults to `chat`.
+    #[serde(default)]
+    kind: ModelKind,
     /// Prose describing the model for catalog consumers and semantic bind.
     description: String,
     /// Hugging Face (or other) URL, or a local filesystem path to a GGUF.
@@ -358,6 +361,38 @@ pub enum ThinkingMode {
     Switchable,
 }
 
+/// The workload a model serves: chat completions, embeddings, or
+/// classification.
+///
+/// The kind scopes which configuration fields are meaningful: chat-only
+/// fields (for example `thinking`, `default_max_tokens`,
+/// `chat_template_file`) are rejected for non-chat kinds at validation,
+/// while `context` applies to every kind. The catalog carries the kind so
+/// clients can filter before building a request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum ModelKind {
+    /// Chat completions (`POST /v1/chat/completions`). The default.
+    #[default]
+    Chat,
+    /// Text embeddings.
+    Embedding,
+    /// Classification / reranking.
+    Classifier,
+}
+
+impl fmt::Display for ModelKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let spelling = match self {
+            ModelKind::Chat => "chat",
+            ModelKind::Embedding => "embedding",
+            ModelKind::Classifier => "classifier",
+        };
+        f.write_str(spelling)
+    }
+}
+
 /// One model name and the backend it resolves to.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -365,6 +400,9 @@ pub enum ThinkingMode {
 pub struct ModelConfig {
     /// The name callers request and that a slot resolves to.
     name: String,
+    /// The workload this model serves. Defaults to `chat`.
+    #[serde(default)]
+    kind: ModelKind,
     /// Prose describing the model for catalog consumers and semantic bind.
     description: String,
     /// Context window size in tokens.
