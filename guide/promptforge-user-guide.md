@@ -268,6 +268,7 @@ All errors use the OpenAI error envelope:
 |---|---|---|---|
 | Wrong or missing bearer | 401 | `authentication_error` | `unauthorized` |
 | Unknown model | 404 | `invalid_request_error` | `model_not_found` |
+| Model kind does not match the route | 400 | `invalid_request_error` | `kind_mismatch` |
 | Tool not configured | 404 | `invalid_request_error` | `not_found` |
 | Bad request body | 400 | `invalid_request_error` | `malformed_request` |
 | Backend unreachable | 502 | `server_error` | `upstream_transport` |

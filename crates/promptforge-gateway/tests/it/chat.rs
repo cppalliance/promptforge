@@ -125,6 +125,71 @@ async fn invalid_shape_200_is_upstream_protocol_not_upstream_error() {
     gateway.shutdown().await;
 }
 
+/// A model configured for a non-chat kind is rejected on the chat route with
+/// 400 and `kind_mismatch` before any queue admission or upstream call.
+#[tokio::test]
+async fn non_chat_kinds_are_rejected_on_the_chat_route() {
+    let backend = fake_backend().await;
+    let toml = format!(
+        r#"
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+
+[[model]]
+name = "embed-model"
+kind = "embedding"
+description = "an embedding model"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+
+[[model]]
+name = "reranker"
+kind = "classifier"
+description = "a classifier model"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+"#
+    );
+    let config = Config::from_toml_str(&toml).unwrap();
+    let gateway = Gateway::from_config(&config, ProfilesContext::default()).unwrap();
+    let gateway = TestServer::start(gateway).await;
+
+    for model in ["embed-model", "reranker"] {
+        let response = send_within(
+            reqwest::Client::new()
+                .post(format!("http://{}/v1/chat/completions", gateway.addr))
+                .bearer_auth("test-token")
+                .json(&serde_json::json!({
+                    "model": model,
+                    "messages": [{ "role": "user", "content": "hi" }]
+                })),
+        )
+        .await;
+        assert_eq!(response.status().as_u16(), 400, "model {model}");
+        let body = json_within(response).await;
+        assert_eq!(
+            body.pointer("/error/code").and_then(Value::as_str),
+            Some("kind_mismatch"),
+            "model {model}"
+        );
+        assert_eq!(
+            body.pointer("/error/type").and_then(Value::as_str),
+            Some("invalid_request_error"),
+            "model {model}"
+        );
+    }
+    gateway.shutdown().await;
+}
+
 #[tokio::test]
 async fn unknown_model_is_404_with_model_not_found_code() {
     let backend = fake_backend().await;

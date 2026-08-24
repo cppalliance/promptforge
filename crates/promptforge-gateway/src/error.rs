@@ -3,6 +3,7 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use promptforge_gateway_config::ModelKind;
 
 /// A request-time failure, rendered to the client as an OpenAI error envelope.
 #[derive(Debug, thiserror::Error)]
@@ -16,6 +17,19 @@ pub(crate) enum GatewayError {
     #[non_exhaustive]
     #[error("unknown model {0}")]
     UnknownModel(String),
+
+    /// The route's workload does not match the model's configured kind
+    /// (e.g. an embedding model named on the chat route).
+    #[non_exhaustive]
+    #[error("model {model} is {actual}, not {expected}")]
+    KindMismatch {
+        /// The caller-facing model name.
+        model: String,
+        /// The workload the route serves.
+        expected: ModelKind,
+        /// The workload the model is configured for.
+        actual: ModelKind,
+    },
 
     /// A tool endpoint was reached but the tool is not configured.
     #[non_exhaustive]
@@ -141,6 +155,11 @@ impl GatewayError {
                 "invalid_request_error",
                 "model_not_found",
             ),
+            GatewayError::KindMismatch { .. } => (
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                "kind_mismatch",
+            ),
             GatewayError::ToolNotConfigured(_) => {
                 (StatusCode::NOT_FOUND, "invalid_request_error", "not_found")
             }
@@ -226,6 +245,18 @@ mod tests {
                     StatusCode::NOT_FOUND,
                     "invalid_request_error",
                     "model_not_found",
+                ),
+            ),
+            (
+                GatewayError::KindMismatch {
+                    model: "m".to_owned(),
+                    expected: ModelKind::Chat,
+                    actual: ModelKind::Embedding,
+                },
+                (
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request_error",
+                    "kind_mismatch",
                 ),
             ),
             (
