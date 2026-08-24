@@ -62,12 +62,25 @@ struct LiveState {
     web_search: Option<Arc<WebSearchState>>,
     local: LocalRuntime,
     profile_name: Option<String>,
+    /// The active profile's `models` allowlist, when it declared one.
+    model_allowlist: Option<Vec<String>>,
 }
 
 /// Directory used by admin profile routes.
 #[derive(Debug)]
 struct AdminProfiles {
     dir: PathBuf,
+}
+
+/// What the active profile selected: its name and its `models` allowlist.
+/// Both are reported by `GET /admin/status` and swapped together on a
+/// profile switch.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProfileSelection {
+    /// The active profile name.
+    pub(crate) name: Option<String>,
+    /// The active profile's `models` allowlist, when it declared one.
+    pub(crate) model_allowlist: Option<Vec<String>>,
 }
 
 /// Shared handler state: live routing/key/local runtime, the boot-owned
@@ -93,7 +106,7 @@ impl AppState {
         local: LocalRuntime,
         web_search: Option<&WebSearchConfig>,
         profiles_dir: Option<PathBuf>,
-        profile_name: Option<String>,
+        selection: ProfileSelection,
         boot_server: ServerConfig,
     ) -> AppState {
         AppState {
@@ -102,7 +115,8 @@ impl AppState {
                 key,
                 web_search: web_search.map(|cfg| Arc::new(WebSearchState::new(cfg))),
                 local,
-                profile_name,
+                profile_name: selection.name,
+                model_allowlist: selection.model_allowlist,
             })),
             profiles: profiles_dir.map(|dir| Arc::new(AdminProfiles { dir })),
             boot_server: Arc::new(boot_server),
@@ -215,7 +229,8 @@ async fn admin_list_profiles(
     Ok(Json(serde_json::json!({ "profiles": profiles })))
 }
 
-/// Current profile name, loaded model names, and a queue note.
+/// Current profile name, loaded model names, the profile's model allowlist,
+/// and a queue note.
 async fn admin_status(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -231,6 +246,7 @@ async fn admin_status(
     Ok(Json(serde_json::json!({
         "profile": live.profile_name,
         "models": models,
+        "model_allowlist": live.model_allowlist,
         "local_children": live.local.child_count(),
         "queue": "per-endpoint waiting queue; switch-profile is immediate (no drain)",
     })))
@@ -290,6 +306,7 @@ async fn admin_switch_profile(
         .map(WebSearchState::new)
         .map(Arc::new);
     let new_key = config.server_key();
+    let new_allowlist = config.model_allowlist().map(<[String]>::to_vec);
 
     // Stop the previous local children before starting new ones so the two
     // never hold VRAM simultaneously. The bearer key, routing, and web-search
@@ -340,6 +357,7 @@ async fn admin_switch_profile(
         live.web_search = new_web_search;
         live.local = new_local;
         live.profile_name = Some(name.to_string());
+        live.model_allowlist = new_allowlist;
     }
 
     tracing::info!(profile = %name, "switched profile");
