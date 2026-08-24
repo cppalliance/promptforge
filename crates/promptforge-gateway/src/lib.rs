@@ -17,8 +17,7 @@
 //! and immediate `POST /admin/switch-profile`, a bearer-authed
 //! `GET /v1/models` catalog, a Brave-backed `POST /v1/tools/web_search`
 //! configured by `[tools.web_search]`, and `GET /health`. In-process
-//! llama.cpp FFI, endpoint pinning, and the Anthropic protocol
-//! shim are deferred.
+//! llama.cpp FFI and endpoint pinning are deferred.
 
 mod api_error;
 mod dialect;
