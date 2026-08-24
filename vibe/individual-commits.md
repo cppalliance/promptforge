@@ -72,3 +72,7 @@ git checks golden files out as CRLF on Windows while serde_json emits LF; normal
 
 the conflict resolution deleted a dialect test, orphaning a glob import - a defect in neither parent, purely a merge artifact; committed on top rather than amended because the rebase was done. (user said "fix the rebase", assistant reasoned placement)
 
+## 2026-08-24 Demote private doc links in execute module docs
+
+post-rebase cargo doc failed on private intra-doc links introduced by upstream's refactor; demote to plain text as a rule-7 fix. (assistant reasoned)
+
