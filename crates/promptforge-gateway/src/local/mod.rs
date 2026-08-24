@@ -42,6 +42,9 @@ use upstream::LocalUpstream;
 #[derive(Debug)]
 pub(crate) struct LocalRuntime {
     models: Vec<Arc<Model>>,
+    /// The profile's `[local].cache_dir`, retained so the `/v1/cache` routes
+    /// resolve the same root provisioning does, even with no local models.
+    cache_dir: Option<String>,
 }
 
 impl LocalRuntime {
@@ -49,7 +52,10 @@ impl LocalRuntime {
     /// and as the placeholder before the first profile switch.
     #[must_use]
     pub(crate) fn empty() -> LocalRuntime {
-        LocalRuntime { models: Vec::new() }
+        LocalRuntime {
+            models: Vec::new(),
+            cache_dir: None,
+        }
     }
 
     /// Provisions binaries/models and starts one `llama-server` per local model.
@@ -60,8 +66,12 @@ impl LocalRuntime {
     /// # Errors
     /// Returns [`LocalError`] when download, verification, spawn, or readiness fails.
     pub(crate) fn start(config: &Config) -> Result<LocalRuntime, LocalError> {
+        let cache_dir = config.local().cache_dir().map(str::to_owned);
         if config.local_models().is_empty() {
-            return Ok(LocalRuntime::empty());
+            return Ok(LocalRuntime {
+                models: Vec::new(),
+                cache_dir,
+            });
         }
 
         let cache_root = resolve_cache_root(config.local().cache_dir())?;
@@ -128,13 +138,19 @@ impl LocalRuntime {
             );
         }
 
-        Ok(LocalRuntime { models })
+        Ok(LocalRuntime { models, cache_dir })
     }
 
     /// Models registered for local inference, in `[[local_model]]` order.
     #[must_use]
     pub(crate) fn models(&self) -> &[Arc<Model>] {
         &self.models
+    }
+
+    /// The profile's configured `[local].cache_dir`, when set.
+    #[must_use]
+    pub(crate) fn cache_dir(&self) -> Option<&str> {
+        self.cache_dir.as_deref()
     }
 
     /// Number of local model endpoints (each owns one `llama-server` child).
