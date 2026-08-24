@@ -282,6 +282,36 @@ if (statusText && statusBar) {
   }
 }
 
+// Progress frames: a non-null progress renders the bar in the slot at the
+// frame's fraction and hides the LED; a null progress removes the bar and
+// restores the LED. Debug frames never touch the slot.
+if (progressEl && ledEl) {
+  emitStatus({
+    label: "Downloading model",
+    description: "1 of 4",
+    activity: "gateway",
+    progress: { current: 1, total: 4 },
+  });
+  if (progressEl.hidden) failures.push("a progress frame did not reveal the progress bar");
+  if (progressEl.value !== 1 || progressEl.max !== 4) {
+    failures.push(`progress bar shows ${progressEl.value}/${progressEl.max}, expected 1/4`);
+  }
+  if (!ledEl.hidden) failures.push("the LED did not hide while progress is showing");
+  emitStatus({
+    label: "Downloading model",
+    description: "2 of 4",
+    activity: "gateway",
+    progress: { current: 2, total: 4 },
+  });
+  emitStatus({ label: "per-delta pulse", severity: "debug", activity: "gateway" });
+  if (progressEl.hidden || progressEl.value !== 2) {
+    failures.push("a debug frame disturbed the progress bar");
+  }
+  emitStatus({ label: "Download complete", description: "ready" });
+  if (!progressEl.hidden) failures.push("a null-progress frame did not hide the progress bar");
+  if (ledEl.hidden) failures.push("the LED did not return when progress cleared");
+}
+
 if (failures.length > 0) {
   console.error(`smoke test failed:\n- ${failures.join("\n- ")}`);
   process.exit(1);
