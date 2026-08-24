@@ -12,6 +12,7 @@ mod config;
 mod gateway;
 mod segment;
 mod serve;
+mod status;
 mod tape;
 mod transcribe;
 mod voice;

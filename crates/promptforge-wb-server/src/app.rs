@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use crate::chat_ws;
 use crate::config::Config;
 use crate::gateway::{ChatRequest, GatewayClient, GatewayError, GatewayResponse};
+use crate::status::StatusBus;
 use crate::tape::{Tape, TapeError, TapeEvent};
 use crate::transcribe::{TranscribeError, VoiceEngine};
 use crate::voice;
@@ -20,12 +21,14 @@ use crate::voice;
 pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
 
 /// Shared handler state: the authenticated gateway client, the session
-/// tape, and the voice transcription engine when one is configured.
+/// tape, the status bus, and the voice transcription engine when one is
+/// configured.
 #[derive(Debug, Clone)]
 pub struct AppState {
     gateway: GatewayClient,
     tape: Arc<Tape>,
     voice: Option<Arc<VoiceEngine>>,
+    status: StatusBus,
 }
 
 impl AppState {
@@ -53,12 +56,19 @@ impl AppState {
             gateway,
             tape: Arc::new(tape),
             voice,
+            status: StatusBus::new(),
         })
     }
 
     /// The voice transcription engine, when `[voice]` configured one.
     pub(crate) fn voice_engine(&self) -> Option<Arc<VoiceEngine>> {
         self.voice.clone()
+    }
+
+    /// The status bus, shared with every subsystem that reports what it is
+    /// doing.
+    pub(crate) fn status(&self) -> StatusBus {
+        self.status.clone()
     }
 
     /// The gateway client, shared with the chat WebSocket sessions.
@@ -742,6 +752,7 @@ mod tests {
             gateway,
             tape: Arc::new(Tape::with_writer_for_test(FailingWriter)),
             voice: None,
+            status: StatusBus::new(),
         };
         let response = router(state)
             .oneshot(chat_request())

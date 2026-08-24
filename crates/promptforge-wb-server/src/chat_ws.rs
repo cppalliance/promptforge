@@ -1,22 +1,32 @@
-//! The `/ws` WebSocket endpoint: browser chat over bidirectional JSON text
-//! frames, relayed through the gateway's streaming chat completion.
+//! The `/ws` WebSocket endpoint: one persistent socket carrying all
+//! downstream JSON - browser chat over bidirectional text frames, relayed
+//! through the gateway's streaming chat completion, plus unsolicited status
+//! updates from the observer.
 //!
-//! A client upgrades `GET /ws` and sends chat requests as text frames:
-//! `{"type":"chat","model":"...","messages":[...]}`. Each chat frame runs one
-//! streaming gateway completion; the session answers with
-//! `{"type":"delta","content":"..."}` frames as content arrives, a terminal
-//! `{"type":"done"}` when the stream completes, or
-//! `{"type":"error","message":"..."}` on any failure - transport, mid-stream,
-//! or a gateway that declines the stream with a non-success status. A frame
-//! that is not a well-formed chat request is answered with an `error` frame
-//! and the session continues. Chat frames are answered strictly in order:
-//! while one streams, later frames wait.
+//! A client upgrades `GET /ws` once and sends chat requests as text frames:
+//! `{"type":"chat","id":N,"model":"...","messages":[...]}`. Each chat frame
+//! runs one streaming gateway completion; the session answers with
+//! `{"type":"delta","content":"...","id":N}` frames as content arrives, a
+//! terminal `{"type":"done","id":N}` when the stream completes, or
+//! `{"type":"error","message":"...","id":N}` on any failure - transport,
+//! mid-stream, or a gateway that declines the stream with a non-success
+//! status. The `id` is optional and echoed verbatim on every frame of that
+//! chat's reply, so one socket can multiplex requests; a frame without an
+//! `id` is answered untagged. A frame that is not a well-formed chat
+//! request is answered with an `error` frame and the session continues.
+//! Chat frames are answered strictly in order: while one streams, later
+//! frames wait.
+//!
+//! Status updates from [`crate::status`] are forwarded to the socket as
+//! `{"type":"status",...}` frames by a dedicated task, so they flow at any
+//! time - including while a chat is streaming, when the inbound loop is
+//! parked inside the relay.
 //!
 //! Exactly one tape event is written per chat frame, after the stream
-//! settles and before the terminal frame is sent, so a client holding `done`
-//! or `error` can trust the tape to hold the exchange. A client that
-//! disconnects mid-stream is taped with a `client disconnected` note beside
-//! the partial content.
+//! settles and before the terminal frame is sent, so a client holding
+//! `done` or `error` can trust the tape to hold the exchange. A client
+//! that disconnects mid-stream is taped with a `client disconnected` note
+//! beside the partial content.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -26,6 +36,7 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use futures_util::{SinkExt, StreamExt};
+use tokio::sync::broadcast;
 
 use crate::app::{AppState, tape_round_trip, value_from_bytes};
 use crate::gateway::{ChatRequest, ChatStream};
@@ -44,14 +55,40 @@ pub(crate) async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade)
 async fn run_session(session: u64, socket: WebSocket, state: AppState) {
     tracing::info!(session, "chat session opened");
     let (mut sink, mut stream) = socket.split();
-    // The receive loop and any future server-pushed frames both speak to the
-    // client, so outbound messages funnel through one channel into the
-    // writer task, mirroring the voice session.
+    // The receive loop and the status forwarder both speak to the client,
+    // so outbound messages funnel through one channel into the writer task,
+    // mirroring the voice session.
     let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<Message>(32);
     let writer = tokio::spawn(async move {
         while let Some(message) = out_rx.recv().await {
             if sink.send(message).await.is_err() {
                 break;
+            }
+        }
+    });
+
+    // Status frames are unsolicited and must flow while a chat relay has
+    // the inbound loop parked, so they get their own task off the broadcast
+    // bus rather than a branch in that loop. A client too slow to keep up
+    // lags the ring and skips ahead; the bus never blocks for it.
+    let mut status_rx = state.status().subscribe();
+    let status_out = out_tx.clone();
+    let forwarder = tokio::spawn(async move {
+        loop {
+            match status_rx.recv().await {
+                Ok(update) => {
+                    // Serializing strings and integers cannot fail.
+                    let Ok(text) = serde_json::to_string(&update.frame()) else {
+                        continue;
+                    };
+                    if status_out.send(Message::Text(text.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::debug!(session, skipped, "status receiver lagged; skipped updates");
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
             }
         }
     });
@@ -71,6 +108,7 @@ async fn run_session(session: u64, socket: WebSocket, state: AppState) {
     }
     drop(out_tx);
     writer.abort();
+    forwarder.abort();
     tracing::info!(session, "chat session closed");
 }
 
@@ -80,22 +118,26 @@ async fn handle_frame(state: &AppState, text: &str, out: &tokio::sync::mpsc::Sen
     let frame: serde_json::Value = match serde_json::from_str(text) {
         Ok(frame) => frame,
         Err(error) => {
-            send_error(out, format!("invalid JSON frame: {error}")).await;
+            send_error(out, None, format!("invalid JSON frame: {error}")).await;
             return;
         }
     };
+    // The request id, echoed on every frame of this chat's reply so one
+    // persistent socket can multiplex requests. Absent and null both mean
+    // untagged.
+    let id = frame.get("id").cloned().filter(|id| !id.is_null());
     if frame.get("type").and_then(serde_json::Value::as_str) != Some("chat") {
-        send_error(out, "unknown frame type; expected \"chat\"").await;
+        send_error(out, id.as_ref(), "unknown frame type; expected \"chat\"").await;
         return;
     }
     let request: ChatRequest = match serde_json::from_value(frame.clone()) {
         Ok(request) => request,
         Err(error) => {
-            send_error(out, format!("invalid chat request: {error}")).await;
+            send_error(out, id.as_ref(), format!("invalid chat request: {error}")).await;
             return;
         }
     };
-    relay_chat(state, request, frame, out).await;
+    relay_chat(state, request, frame, id, out).await;
 }
 
 /// Runs one streaming chat completion against the gateway, forwarding
@@ -104,6 +146,7 @@ async fn relay_chat(
     state: &AppState,
     request: ChatRequest,
     frame: serde_json::Value,
+    id: Option<serde_json::Value>,
     out: &tokio::sync::mpsc::Sender<Message>,
 ) {
     let started = Instant::now();
@@ -114,7 +157,7 @@ async fn relay_chat(
     {
         Ok(chat_stream) => chat_stream,
         Err(error) => {
-            send_error(out, error.to_string()).await;
+            send_error(out, id.as_ref(), error.to_string()).await;
             return;
         }
     };
@@ -145,7 +188,7 @@ async fn relay_chat(
                     },
                     str::to_string,
                 );
-            send_error(out, message).await;
+            send_error(out, id.as_ref(), message).await;
             return;
         }
     };
@@ -169,7 +212,10 @@ async fn relay_chat(
                     continue;
                 };
                 finish.assembled.push_str(&text);
-                let delta = serde_json::json!({"type": "delta", "content": text});
+                let delta = tagged(
+                    id.as_ref(),
+                    serde_json::json!({"type": "delta", "content": text}),
+                );
                 if !send_frame(out, delta).await {
                     finish.error = Some("client disconnected mid-stream".to_string());
                     finish.record().await;
@@ -180,16 +226,28 @@ async fn relay_chat(
                 let message = error.to_string();
                 finish.error = Some(message.clone());
                 finish.record().await;
-                send_error(out, message).await;
+                send_error(out, id.as_ref(), message).await;
                 return;
             }
             None => {
                 finish.record().await;
-                let _ = send_frame(out, serde_json::json!({"type": "done"})).await;
+                let _ = send_frame(
+                    out,
+                    tagged(id.as_ref(), serde_json::json!({"type": "done"})),
+                )
+                .await;
                 return;
             }
         }
     }
+}
+
+/// Tags a reply frame with the request's `id`, when it carried one.
+fn tagged(id: Option<&serde_json::Value>, mut frame: serde_json::Value) -> serde_json::Value {
+    if let (Some(id), Some(object)) = (id, frame.as_object_mut()) {
+        object.insert("id".to_string(), id.clone());
+    }
+    frame
 }
 
 /// Extracts the text delta from one gateway SSE payload, if it carries
@@ -254,9 +312,17 @@ async fn send_frame(out: &tokio::sync::mpsc::Sender<Message>, frame: serde_json:
         .is_ok()
 }
 
-/// Sends one `error` frame carrying `message`, ignoring a dead client.
-async fn send_error(out: &tokio::sync::mpsc::Sender<Message>, message: impl Into<String>) {
-    let frame = serde_json::json!({"type": "error", "message": message.into()});
+/// Sends one `error` frame carrying `message`, tagged with the request's
+/// `id` when there is one, ignoring a dead client.
+async fn send_error(
+    out: &tokio::sync::mpsc::Sender<Message>,
+    id: Option<&serde_json::Value>,
+    message: impl Into<String>,
+) {
+    let frame = tagged(
+        id,
+        serde_json::json!({"type": "error", "message": message.into()}),
+    );
     let _ = send_frame(out, frame).await;
 }
 
@@ -274,6 +340,7 @@ mod tests {
 
     use crate::app::router;
     use crate::config::{Config, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig};
+    use crate::status::{Activity, Progress, Severity, StatusBarUpdate};
 
     const STREAM_BODY: &str = concat!(
         "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n",
@@ -383,9 +450,10 @@ mod tests {
     }
 
     /// Binds the workbench router against the gateway at `base_url` on a
-    /// free loopback port and returns the `/ws` URL plus the tempdir keeping
-    /// the tape alive.
-    async fn spawn_chat_server(base_url: &str) -> (String, tempfile::TempDir) {
+    /// free loopback port and returns the `/ws` URL, the tempdir keeping
+    /// the tape alive, and a handle on the shared state (for poking the
+    /// status bus directly).
+    async fn spawn_chat_server(base_url: &str) -> (String, tempfile::TempDir, AppState) {
         let tape_dir = tempfile::TempDir::new().expect("tempdir");
         let config = Config {
             gateway: GatewayConfig {
@@ -403,12 +471,13 @@ mod tests {
             .await
             .expect("bind the chat test server");
         let addr = listener.local_addr().expect("chat test server address");
+        let served = state.clone();
         tokio::spawn(async move {
-            axum::serve(listener, router(state))
+            axum::serve(listener, router(served))
                 .await
                 .expect("chat test server serves");
         });
-        (format!("ws://{addr}/ws"), tape_dir)
+        (format!("ws://{addr}/ws"), tape_dir, state)
     }
 
     /// Reads one text frame from the client socket and parses it as JSON.
@@ -456,7 +525,7 @@ mod tests {
         let base_url =
             spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_stream)))
                 .await;
-        let (url, _tape_dir) = spawn_chat_server(&base_url).await;
+        let (url, _tape_dir, _state) = spawn_chat_server(&base_url).await;
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("connect to /ws");
@@ -480,7 +549,7 @@ mod tests {
         let base_url =
             spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_stream)))
                 .await;
-        let (url, tape_dir) = spawn_chat_server(&base_url).await;
+        let (url, tape_dir, _state) = spawn_chat_server(&base_url).await;
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("connect to /ws");
@@ -517,7 +586,7 @@ mod tests {
         let base_url =
             spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_stream_dies)))
                 .await;
-        let (url, tape_dir) = spawn_chat_server(&base_url).await;
+        let (url, tape_dir, _state) = spawn_chat_server(&base_url).await;
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("connect to /ws");
@@ -549,7 +618,7 @@ mod tests {
             Router::new().route("/v1/chat/completions", post(mock_chat_stream_drips)),
         )
         .await;
-        let (url, tape_dir) = spawn_chat_server(&base_url).await;
+        let (url, tape_dir, _state) = spawn_chat_server(&base_url).await;
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("connect to /ws");
@@ -594,7 +663,7 @@ mod tests {
             Router::new().route("/v1/chat/completions", post(mock_chat_declines_stream)),
         )
         .await;
-        let (url, tape_dir) = spawn_chat_server(&base_url).await;
+        let (url, tape_dir, _state) = spawn_chat_server(&base_url).await;
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("connect to /ws");
@@ -615,7 +684,7 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_frames_are_answered_with_error_frames() {
-        let (url, _tape_dir) = spawn_chat_server("http://127.0.0.1:1").await;
+        let (url, _tape_dir, _state) = spawn_chat_server("http://127.0.0.1:1").await;
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("connect to /ws");
@@ -640,6 +709,94 @@ mod tests {
         send_chat(&mut socket).await;
         let frame = read_frame(&mut socket).await;
         assert_eq!(frame["type"], "error");
+        socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn status_updates_reach_connected_sessions_as_status_frames() {
+        let (url, _tape_dir, state) = spawn_chat_server("http://127.0.0.1:1").await;
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        // A malformed frame's error reply proves the session's inbound loop
+        // is running, which means the status subscription before it is live.
+        socket
+            .send(tungstenite::Message::Text("not json".into()))
+            .await
+            .expect("the frame is sent");
+        let reply = read_frame(&mut socket).await;
+        assert_eq!(reply["type"], "error");
+
+        state.status().emit(StatusBarUpdate {
+            label: "Downloading model".to_string(),
+            description: "ggml-large-v3.bin".to_string(),
+            progress: Some(Progress {
+                current: 1,
+                total: 2,
+            }),
+            severity: Severity::Info,
+            activity: Activity::Gateway,
+        });
+
+        let frame = read_frame(&mut socket).await;
+        assert_eq!(
+            frame,
+            serde_json::json!({
+                "type": "status",
+                "label": "Downloading model",
+                "description": "ggml-large-v3.bin",
+                "progress": {"current": 1, "total": 2},
+                "severity": "info",
+                "activity": "gateway",
+            }),
+            "the update arrives as one status frame"
+        );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn sequential_chats_on_one_socket_both_complete() {
+        let base_url =
+            spawn_gateway(Router::new().route("/v1/chat/completions", post(mock_chat_stream)))
+                .await;
+        let (url, tape_dir, _state) = spawn_chat_server(&base_url).await;
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+
+        for round in 1..=2 {
+            let frame = serde_json::json!({
+                "type": "chat",
+                "id": round,
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "ping"}],
+            })
+            .to_string();
+            socket
+                .send(tungstenite::Message::Text(frame.into()))
+                .await
+                .expect("the chat frame is sent");
+            let first = read_frame(&mut socket).await;
+            assert_eq!(
+                first,
+                serde_json::json!({"type": "delta", "content": "po", "id": round}),
+                "round {round}: the first delta carries the request id"
+            );
+            let second = read_frame(&mut socket).await;
+            assert_eq!(
+                second,
+                serde_json::json!({"type": "delta", "content": "ng", "id": round})
+            );
+            let third = read_frame(&mut socket).await;
+            assert_eq!(third, serde_json::json!({"type": "done", "id": round}));
+        }
+
+        let events = tape_events(&tape_dir);
+        assert_eq!(events.len(), 2, "one tape event per chat frame");
+        assert!(
+            events.iter().all(|event| event["response"] == "pong"),
+            "both rounds taped the assembled response"
+        );
         socket.close(None).await.expect("close the socket");
     }
 }
