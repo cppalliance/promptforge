@@ -7,11 +7,7 @@
 //! the gateway does not route passes through untouched.
 //!
 //! WIRE-005: the `object` discriminators are fixed `&'static str` literals
-//! (`"list"`, `"model"`), so they are already closed. The `tool_dialect` and
-//! `tools_mode` catalog fields stay `String`: they are registry-assigned open
-//! identifiers owned by `promptforge-core` (see the ROUTING-005 disposition),
-//! stringified only at this catalog boundary rather than re-modeled as a closed
-//! gateway enum that would fight core's vocabulary.
+//! (`"list"`, `"model"`), so they are already closed.
 //!
 //! `gateway_warning` is a gateway-specific extension on the OpenAI response
 //! shape: when an emulated tool dialect recovers from a malformed tool fence,
@@ -478,10 +474,6 @@ pub(crate) struct ModelInfo {
     /// on), flattened into the catalog entry.
     #[serde(flatten)]
     pub capabilities: Capabilities,
-    /// The tool-calling dialect used by this model (`"openai"`, `"gemma3_tool_code"`).
-    pub tool_dialect: String,
-    /// Whether tool calls are handled natively or emulated (`"native"`, `"emulated"`).
-    pub tools_mode: String,
 }
 
 #[cfg(test)]
@@ -1033,8 +1025,6 @@ mod tests {
             context: 8192,
             thinking: ThinkingMode::Never,
             capabilities: Capabilities::default(),
-            tool_dialect: "openai".to_owned(),
-            tools_mode: "native".to_owned(),
         };
         for (kind, spelling) in [
             (ModelKind::Chat, "chat"),

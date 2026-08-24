@@ -2,7 +2,7 @@
 //!
 //! [`Error`] is a `pub(crate)` substrate: it is never part of the public API.
 //! Every public boundary returns its own typed error ([`crate::RunError`],
-//! [`crate::ParseError`], [`crate::CompletionError`], [`crate::DialectError`],
+//! [`crate::ParseError`], [`crate::CompletionError`],
 //! [`crate::tools::ToolError`], [`crate::store::StoreError`]); those wrappers
 //! classify this substrate and preserve its source. See the module wrappers for
 //! the `From` bridges that let internal `?` keep flowing through the substrate.
@@ -462,22 +462,6 @@ pub(crate) enum Error {
     /// so it is refused rather than run under mismatched rules.
     #[error("unsupported promptforge version: {0} (this build supports major 1)")]
     UnsupportedVersion(u32),
-
-    /// No registered dialect matched the provided evidence.
-    #[error("no tool dialect matched the provided evidence")]
-    DialectNone,
-
-    /// Two or more dialects tied for the highest detection score.
-    #[error("tool dialect detection tied among: {candidates:?}")]
-    #[non_exhaustive]
-    DialectTie {
-        /// The dialect identifiers that shared the top score.
-        candidates: Vec<crate::dialects::ToolDialectId>,
-    },
-
-    /// `CompletionOptions.tool_dialect` named a dialect not in the registry.
-    #[error("unknown tool dialect: {0}")]
-    UnknownDialect(crate::dialects::ToolDialectId),
 
     /// A dispatched [`crate::tools::Tool`] returned a model-safe failure.
     ///

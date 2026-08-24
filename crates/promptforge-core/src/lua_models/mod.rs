@@ -118,7 +118,6 @@ fn record_bind_binding(
         description,
         selection.id,
         selection.invocation,
-        selection.tool_dialect,
         selection.context,
     );
     set.bindings.push(binding.clone());

@@ -88,9 +88,9 @@ impl LocalRuntime {
             // A non-chat child has no chat completions to dialect-match: like a
             // remote model, it carries the OpenAI default rather than hard-failing
             // on template-less `/props` evidence.
-            let (tool_dialect, tools_mode) = match local_model.kind() {
+            let tool_dialect = match local_model.kind() {
                 ModelKind::Chat => resolve_local_dialect(&guard, local_model.name(), &model_path)?,
-                _ => ("openai".to_owned(), "native".to_owned()),
+                _ => "openai",
             };
             let upstream_name = guard.model_alias().to_owned();
             let base_url = guard.base_url();
@@ -113,8 +113,7 @@ impl LocalRuntime {
                 context: local_model.context(),
                 thinking: local_model.thinking(),
                 capabilities: local_model.capabilities().clone(),
-                tool_dialect,
-                tools_mode,
+                tool_dialect: tool_dialect.to_owned(),
                 upstream_name,
                 endpoint,
             }));
@@ -382,7 +381,7 @@ endpoints = ["e"]
     }
 
     #[test]
-    fn remote_model_defaults_to_openai_native() {
+    fn remote_model_defaults_to_openai_dialect() {
         let config = Config::from_toml_str(
             r#"
 [server]
@@ -407,7 +406,6 @@ endpoints = ["e"]
         let routing = crate::routing::Routing::from_config(&config).unwrap();
         let model = routing.model("remote").unwrap();
         assert_eq!(model.tool_dialect, "openai");
-        assert_eq!(model.tools_mode, "native");
     }
 
     #[tokio::test]

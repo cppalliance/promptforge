@@ -72,7 +72,6 @@
 pub(crate) mod cancel;
 pub mod client;
 pub mod debug;
-pub mod dialects;
 mod error;
 pub mod execute;
 pub(crate) mod fanout;
@@ -94,7 +93,6 @@ pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::tools::NearDuplicateDiagnostic;
 
 pub use crate::cancel::CancelHandle;
-pub use crate::dialects::{DialectError, DialectErrorKind};
 pub use crate::execute::{ResolutionContext, RunConfig, RunError, RunErrorKind, RunLimits, run};
 pub use crate::model::{CompletionError, CompletionErrorKind};
 pub use crate::parser::{ParseError, ParseErrorKind, Prompt, promptforge_version};

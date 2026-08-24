@@ -99,7 +99,6 @@ fn test_completion_options() -> CompletionOptions {
         temperature: None,
         max_tokens: None,
         thinking: None,
-        tool_dialect: crate::dialects::ToolDialectId::OpenAi,
     }
 }
 
@@ -1561,85 +1560,6 @@ async fn trusted_tool_result_is_appended_verbatim_in_the_loop() {
     assert!(
         !content.contains("untrusted_input_"),
         "a trusted tool's result must carry no guard tags, got: {content}"
-    );
-}
-
-#[tokio::test]
-async fn content_fence_tool_loop_echoes_user_tool_result() {
-    let gateway = ScriptedGateway::start(vec![
-        resp_text("```tool_code\necho(value=\"hi\")\n```"),
-        resp_text("final answer"),
-    ])
-    .await;
-    let addr = gateway.addr();
-    let client = gateway_client(addr);
-
-    let echo: Arc<dyn Tool> = Arc::new(EchoTool);
-    let tools: Vec<Arc<dyn Tool>> = vec![echo];
-    let schemas = schemas_for(&tools);
-    let dispatch = dispatch_for(&tools);
-
-    let turns = AtomicU32::new(0);
-    let options = CompletionOptions {
-        model: "gemma-3-27b-it".to_owned(),
-        temperature: None,
-        max_tokens: None,
-        thinking: None,
-        tool_dialect: crate::dialects::ToolDialectId::Gemma3ToolCode,
-    };
-    let nonce = GuardNonce::fresh();
-    let (out, _) = run_tool_loop(
-        &client,
-        &schemas,
-        &dispatch,
-        "ask".to_string(),
-        DEFAULT_MAX_TOOL_ITERATIONS,
-        &NullObserver,
-        "Only",
-        &turns,
-        &options,
-        &nonce,
-        None,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-    assert_eq!(out, "final answer");
-
-    let bodies = gateway.requests();
-    let last = bodies.last().expect("the loop must send a second request");
-    let messages = last["messages"]
-        .as_array()
-        .expect("a request body must carry a messages array");
-    assert!(
-        messages.iter().all(|m| m["role"] != "tool"),
-        "content-fence history must not use role=tool: {messages:?}"
-    );
-    let assistant = messages
-        .iter()
-        .rev()
-        .find(|m| m["role"] == "assistant")
-        .expect("re-sent conversation must include the assistant tool_code turn");
-    let assistant_content = assistant["content"]
-        .as_str()
-        .expect("assistant content must be a string");
-    assert!(
-        assistant_content.contains("```tool_code") && assistant_content.contains("echo("),
-        "assistant turn must re-render the tool_code fence, got: {assistant_content}"
-    );
-    let user = messages
-        .iter()
-        .rev()
-        .find(|m| m["role"] == "user")
-        .expect("re-sent conversation must include the user TOOL RESULT turn");
-    let user_content = user["content"]
-        .as_str()
-        .expect("user content must be a string");
-    assert!(
-        user_content.contains("TOOL RESULT echo (call_tool_code_0):")
-            && user_content.contains("echoed: hi"),
-        "user turn must carry TOOL RESULT with the tool body, got: {user_content}"
     );
 }
 

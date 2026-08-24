@@ -62,7 +62,6 @@ fn fixture_resolver(description: &str, opts: &ModelBindOpts) -> Result<ResolvedM
     Ok(ResolvedModel {
         id: hit.id().clone(),
         invocation: ModelInvocation::from(opts),
-        tool_dialect: hit.tool_dialect(),
         context: hit.context(),
     })
 }
@@ -165,7 +164,6 @@ fn same_weights_different_invocation_compare_unequal() {
             max_tokens: None,
             thinking: Some(false),
         },
-        ToolDialectId::OpenAi,
         ctx(131_072),
     );
     let b = ModelBinding::new(
@@ -177,7 +175,6 @@ fn same_weights_different_invocation_compare_unequal() {
             max_tokens: None,
             thinking: Some(false),
         },
-        ToolDialectId::OpenAi,
         ctx(131_072),
     );
     assert_eq!(a.id(), b.id());
@@ -186,34 +183,6 @@ fn same_weights_different_invocation_compare_unequal() {
 
 mod always;
 mod integration;
-
-#[test]
-fn descriptor_with_dialect_sets_tools_mode() {
-    let descriptor = ModelDescriptor::new(
-        gateway_id("gemma-local"),
-        "A Gemma model",
-        ctx(32_768),
-        ThinkingMode::Never,
-    )
-    .with_dialect(ToolDialectId::Gemma3ToolCode);
-    assert_eq!(descriptor.tool_dialect(), ToolDialectId::Gemma3ToolCode);
-    assert_eq!(
-        descriptor.tools_mode(),
-        crate::dialects::ToolsMode::Emulated
-    );
-}
-
-#[test]
-fn descriptor_default_dialect_is_openai_native() {
-    let descriptor = ModelDescriptor::new(
-        gateway_id("remote"),
-        "A remote model",
-        ctx(8_192),
-        ThinkingMode::Never,
-    );
-    assert_eq!(descriptor.tool_dialect(), ToolDialectId::OpenAi);
-    assert_eq!(descriptor.tools_mode(), crate::dialects::ToolsMode::Native);
-}
 
 #[test]
 fn model_id_rejects_empty_and_control_characters() {
@@ -235,25 +204,7 @@ fn model_catalog_rejects_duplicate_ids() {
 }
 
 #[test]
-fn binding_dialect_propagates_to_completion_options() {
-    let binding = ModelBinding::new(
-        "gemma",
-        "a local gemma model",
-        gateway_id("gemma-local"),
-        ModelInvocation {
-            temperature: None,
-            max_tokens: None,
-            thinking: None,
-        },
-        ToolDialectId::Gemma3ToolCode,
-        ctx(8_192),
-    );
-    let opts = binding.completion_options();
-    assert_eq!(opts.tool_dialect, ToolDialectId::Gemma3ToolCode);
-}
-
-#[test]
-fn binding_construction_is_atomic_with_dialect_and_context() {
+fn binding_construction_is_atomic_with_context() {
     let binding = ModelBinding::new(
         "remote",
         "a remote model",
@@ -263,10 +214,9 @@ fn binding_construction_is_atomic_with_dialect_and_context() {
             max_tokens: None,
             thinking: None,
         },
-        ToolDialectId::OpenAi,
         ctx(64_000),
     );
     let opts = binding.completion_options();
-    assert_eq!(opts.tool_dialect, ToolDialectId::OpenAi);
+    assert_eq!(opts.model, "remote");
     assert_eq!(binding.context().get(), 64_000);
 }

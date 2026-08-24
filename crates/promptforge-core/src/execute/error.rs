@@ -71,10 +71,7 @@ impl RunError {
             | Error::BackendBodyRead { .. }
             | Error::MalformedResponse(_)
             | Error::MalformedResponseSource { .. }
-            | Error::EmptyModelReply { .. }
-            | Error::DialectNone
-            | Error::DialectTie { .. }
-            | Error::UnknownDialect(_) => RunErrorKind::Completion,
+            | Error::EmptyModelReply { .. } => RunErrorKind::Completion,
             Error::Interrupted => RunErrorKind::Cancelled,
             Error::Substitution(_) => RunErrorKind::Substitution,
             Error::ToolLoopExhausted | Error::OutOfScopeToolCall { .. } | Error::Tool { .. } => {

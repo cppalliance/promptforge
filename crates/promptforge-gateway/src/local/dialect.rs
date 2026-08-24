@@ -2,15 +2,14 @@
 //!
 //! Fetches `/props` (and `/v1/models` for the native tool-call capability flag)
 //! from a started child, supplements a missing chat template from the sidecar,
-//! and resolves the routing model's `(tool_dialect, tools_mode)` via the core
-//! [`ToolDialectRegistry`]. Resolution hard-fails on ambiguous or absent
-//! evidence so a local model never silently defaults to an incorrect dialect.
+//! and resolves the routing model's tool dialect from that evidence.
+//! Resolution hard-fails on ambiguous or absent evidence so a local model
+//! never silently defaults to an incorrect dialect.
 
 use std::io::Read as _;
 use std::path::Path;
 use std::time::Duration;
 
-use promptforge_core::dialects::{DialectEvidence, ToolDialectRegistry};
 use serde_json::Value;
 
 use super::server::ServerGuard;
@@ -21,6 +20,125 @@ const PROPS_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Byte ceiling for a dialect-probe JSON body (HYGIENE-BOUNDS-001).
 const MAX_PROBE_BODY: u64 = crate::http_util::MAX_JSON_BODY as u64;
+
+/// Evidence from a local child's `/props`, `/v1/models`, and sidecar metadata
+/// used to select a tool-calling dialect.
+///
+/// Fields are `Option` so only what the probes actually reported is supplied.
+#[derive(Debug, Clone, Default)]
+struct DialectEvidence {
+    /// Whether the endpoint advertises native tool-call support.
+    supports_tool_calls: Option<bool>,
+    /// The raw Jinja chat template string, when available.
+    chat_template: Option<String>,
+    /// The model identifier from the endpoint metadata.
+    model_id: Option<String>,
+}
+
+/// Why dialect resolution failed for a local model.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DialectResolveError {
+    /// No dialect scored on the provided evidence.
+    #[error("no tool dialect matched the provided evidence")]
+    NoMatch,
+    /// The dialects tied for the highest detection score.
+    #[error("tool dialect detection tied among: {candidates:?}")]
+    Tie {
+        /// The dialect identifiers that shared the top score.
+        candidates: Vec<&'static str>,
+    },
+}
+
+/// Scores the OpenAI native-tool dialect against the evidence.
+///
+/// F6: a template match requires a *conjunction* of a request-side and a
+/// response/result marker for each template family, not a single broad
+/// substring that a mere mention of "tool_call" would satisfy.
+fn openai_score(evidence: &DialectEvidence) -> Option<u8> {
+    // Positive support authoritatively selects the native dialect.
+    if evidence.supports_tool_calls == Some(true) {
+        return Some(80);
+    }
+    // Unknown, or an unreliable negative (e.g. llama.cpp `/props`, which can
+    // deny tool support a GGUF template actually provides): fall through to
+    // structured template evidence.
+    let template = evidence.chat_template.as_deref().unwrap_or("");
+    // Qwen/ChatML: the `<|im_start|>` turn framing plus the `<tool_call>`
+    // request tag together indicate a genuine tool-calling template.
+    let chatml_tools = template.contains("<|im_start|>") && template.contains("<tool_call>");
+    // Mistral Tekken / Small Instruct: the `[AVAILABLE_TOOLS]` declaration
+    // plus a call or result marker.
+    let mistral_tools = template.contains("[AVAILABLE_TOOLS]")
+        && (template.contains("[TOOL_CALLS]") || template.contains("[TOOL_RESULTS]"));
+    (chatml_tools || mistral_tools).then_some(70)
+}
+
+/// Scores the Gemma3 `tool_code` fence dialect against the evidence.
+///
+/// Never matches an endpoint with explicit native tool-call support;
+/// otherwise requires a Gemma fingerprint (template turn marker or model id),
+/// so other tools-unsupported models (e.g. some Qwen GGUFs) do not resolve
+/// here from caps alone.
+fn gemma3_tool_code_score(evidence: &DialectEvidence) -> Option<u8> {
+    if evidence.supports_tool_calls == Some(true) {
+        return None;
+    }
+    // `<bos>` alone is too common; require the Gemma turn marker.
+    let gemma_template = evidence
+        .chat_template
+        .as_deref()
+        .is_some_and(|template| template.contains("<start_of_turn>"));
+    let gemma_model = evidence
+        .model_id
+        .as_deref()
+        .is_some_and(|id| id.to_ascii_lowercase().contains("gemma"));
+    if !gemma_template && !gemma_model {
+        return None;
+    }
+    let mut score = 0;
+    if evidence.supports_tool_calls == Some(false) {
+        score += 40;
+    }
+    if gemma_template {
+        score += 30;
+    }
+    if gemma_model {
+        score += 20;
+    }
+    Some(score)
+}
+
+/// Resolves evidence into a single dialect id, failing on a tie or no match.
+fn resolve_dialect(evidence: &DialectEvidence) -> Result<&'static str, DialectResolveError> {
+    // Single scan tracking the best score and every id tied at it.
+    let mut best: Option<u8> = None;
+    let mut tied: Vec<&'static str> = Vec::new();
+    for (id, score) in [
+        ("openai", openai_score(evidence)),
+        (
+            crate::dialect::GEMMA3_TOOL_CODE,
+            gemma3_tool_code_score(evidence),
+        ),
+    ] {
+        let Some(score) = score else { continue };
+        match best {
+            Some(current) if score < current => {}
+            Some(current) if score == current => tied.push(id),
+            _ => {
+                best = Some(score);
+                tied.clear();
+                tied.push(id);
+            }
+        }
+    }
+    if best.is_none() {
+        return Err(DialectResolveError::NoMatch);
+    }
+    if tied.len() > 1 {
+        return Err(DialectResolveError::Tie { candidates: tied });
+    }
+    Ok(tied[0])
+}
 
 /// Reads a blocking probe response with a byte cap, rejecting oversize rather
 /// than truncating, then decodes it as JSON (HYGIENE-BOUNDS-001).
@@ -56,14 +174,14 @@ fn decode_probe_json(operation: &'static str, bytes: &[u8]) -> Result<Value, Loc
 /// the GGUF is consulted as a fallback. Props always wins over conflicting
 /// sidecar data.
 ///
-/// Returns `(tool_dialect, tools_mode)` strings for the routing model.
-/// Hard-fails on `DialectNone` or `DialectTie` so local models never silently
-/// default to an incorrect dialect.
+/// Returns the tool-dialect id for the routing model. Hard-fails when no
+/// dialect matches or two tie, so local models never silently default to an
+/// incorrect dialect.
 pub(crate) fn resolve_local_dialect(
     guard: &ServerGuard,
     model_name: &str,
     model_path: &Path,
-) -> Result<(String, String), LocalError> {
+) -> Result<&'static str, LocalError> {
     let evidence = fetch_props_evidence(guard)?;
     let had_props_template = evidence.chat_template.is_some();
     let evidence = supplement_evidence(evidence, read_sidecar_quietly(model_path).as_ref());
@@ -81,16 +199,10 @@ pub(crate) fn resolve_local_dialect(
         model_id = ?evidence.model_id,
         "dialect evidence from /props + sidecar"
     );
-    let registry = ToolDialectRegistry::builtin();
-    let dialect_id =
-        registry
-            .resolve(&evidence)
-            .map_err(|source| LocalError::DialectResolution {
-                model: model_name.to_owned(),
-                source: Box::new(source),
-            })?;
-    let tools_mode = dialect_id.tools_mode();
-    Ok((dialect_id.to_string(), tools_mode.to_string()))
+    resolve_dialect(&evidence).map_err(|source| LocalError::DialectResolution {
+        model: model_name.to_owned(),
+        source,
+    })
 }
 
 /// Resolves the final tool-dialect evidence from props plus optional sidecar
@@ -177,12 +289,11 @@ fn fetch_props_evidence(guard: &ServerGuard) -> Result<DialectEvidence, LocalErr
     // rather than a bogus definitive `false`. (MOD-003)
     let supports_tool_calls = fetch_tool_call_capability(&client, &base, guard.api_key())?;
 
-    Ok(DialectEvidence::new(
+    Ok(DialectEvidence {
         supports_tool_calls,
         chat_template,
         model_id,
-        None,
-    ))
+    })
 }
 
 /// Reads native tool-call capability from `/v1/models`.
@@ -256,46 +367,47 @@ mod tests {
     fn supplement_evidence_fills_absent_props_template_from_sidecar() {
         // MOD-009: the production merge seam supplies a template only when props
         // lacked one; resolution then succeeds through it.
-        let props =
-            DialectEvidence::new(Some(false), None, Some("gemma-3-27b-it".to_owned()), None);
+        let props = DialectEvidence {
+            supports_tool_calls: Some(false),
+            model_id: Some("gemma-3-27b-it".to_owned()),
+            ..DialectEvidence::default()
+        };
         let sidecar = sidecar_with_template("<start_of_turn>user\n{{ content }}");
         let merged = supplement_evidence(props, Some(&sidecar));
         assert_eq!(
             merged.chat_template.as_deref(),
             Some("<start_of_turn>user\n{{ content }}")
         );
-        let registry = ToolDialectRegistry::builtin();
-        let id = registry
-            .resolve(&merged)
-            .expect("should resolve with sidecar");
-        assert_eq!(id.to_string(), "gemma3_tool_code");
+        let id = resolve_dialect(&merged).expect("should resolve with sidecar");
+        assert_eq!(id, "gemma3_tool_code");
     }
 
     #[test]
     fn supplement_evidence_prefers_props_template_over_sidecar() {
         // MOD-009: props always wins; a conflicting sidecar template is ignored.
-        let props = DialectEvidence::new(
-            Some(true),
-            Some("props-template-wins".to_owned()),
-            None,
-            None,
-        );
+        let props = DialectEvidence {
+            supports_tool_calls: Some(true),
+            chat_template: Some("props-template-wins".to_owned()),
+            ..DialectEvidence::default()
+        };
         let sidecar = sidecar_with_template("sidecar-template-should-lose");
         let merged = supplement_evidence(props, Some(&sidecar));
         assert_eq!(merged.chat_template.as_deref(), Some("props-template-wins"));
-        let registry = ToolDialectRegistry::builtin();
-        assert_eq!(
-            registry.resolve(&merged).expect("resolve").to_string(),
-            "openai"
-        );
+        assert_eq!(resolve_dialect(&merged).expect("resolve"), "openai");
     }
 
     #[test]
     fn supplement_evidence_leaves_template_absent_when_neither_has_one() {
         // MOD-009: no props template and no sidecar leaves the field unresolved.
-        let props = DialectEvidence::new(Some(false), None, None, None);
+        let props = DialectEvidence {
+            supports_tool_calls: Some(false),
+            ..DialectEvidence::default()
+        };
         assert!(supplement_evidence(props, None).chat_template.is_none());
-        let props = DialectEvidence::new(Some(false), None, None, None);
+        let props = DialectEvidence {
+            supports_tool_calls: Some(false),
+            ..DialectEvidence::default()
+        };
         let empty = sidecar::SidecarMeta::default();
         assert!(
             supplement_evidence(props, Some(&empty))
@@ -316,8 +428,11 @@ mod tests {
         )
         .expect("write sidecar");
 
-        let props =
-            DialectEvidence::new(Some(false), None, Some("gemma-3-27b-it".to_owned()), None);
+        let props = DialectEvidence {
+            supports_tool_calls: Some(false),
+            model_id: Some("gemma-3-27b-it".to_owned()),
+            ..DialectEvidence::default()
+        };
         let merged = supplement_evidence(props, read_sidecar_quietly(&gguf).as_ref());
         assert!(merged.chat_template.is_some());
     }
@@ -332,25 +447,25 @@ mod tests {
 
     #[test]
     fn gemma_props_resolve_to_gemma3_tool_code() {
-        let evidence = DialectEvidence::new(
-            Some(false),
-            Some("<start_of_turn>user\n".to_string()),
-            Some("gemma-3-27b-it".to_string()),
-            None,
-        );
-        let registry = ToolDialectRegistry::builtin();
-        let id = registry.resolve(&evidence).expect("should resolve");
-        assert_eq!(id.to_string(), "gemma3_tool_code");
-        assert_eq!(id.tools_mode().to_string(), "emulated");
+        let evidence = DialectEvidence {
+            supports_tool_calls: Some(false),
+            chat_template: Some("<start_of_turn>user\n".to_string()),
+            model_id: Some("gemma-3-27b-it".to_string()),
+        };
+        let id = resolve_dialect(&evidence).expect("should resolve");
+        assert_eq!(id, "gemma3_tool_code");
     }
 
     #[test]
     fn tools_true_resolves_to_openai() {
-        let evidence = DialectEvidence::new(Some(true), None, None, None);
-        let registry = ToolDialectRegistry::builtin();
-        let id = registry.resolve(&evidence).expect("should resolve");
-        assert_eq!(id.to_string(), "openai");
-        assert_eq!(id.tools_mode().to_string(), "native");
+        let evidence = DialectEvidence {
+            supports_tool_calls: Some(true),
+            ..DialectEvidence::default()
+        };
+        assert_eq!(
+            resolve_dialect(&evidence).expect("should resolve"),
+            "openai"
+        );
     }
 
     #[test]
@@ -371,9 +486,7 @@ mod tests {
 
     #[test]
     fn dialect_none_is_hard_fail() {
-        let evidence = DialectEvidence::default();
-        let registry = ToolDialectRegistry::builtin();
-        let result = registry.resolve(&evidence);
+        let result = resolve_dialect(&DialectEvidence::default());
         assert!(result.is_err(), "empty evidence must hard-fail");
     }
 }

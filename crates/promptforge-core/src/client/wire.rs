@@ -237,7 +237,7 @@ impl ToolCall {
 ///
 /// Tool-call arguments arrive as arbitrary wire JSON; this view exposes them
 /// without leaking a [`serde_json::Value`] into the public API (F8). The raw
-/// `Value` is confined to crate-private dialect/wire code.
+/// `Value` is confined to crate-private wire code.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct ToolArguments<'a> {

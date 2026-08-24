@@ -21,7 +21,6 @@ opt-in accessors but never leak into `Display` output.
 | `StoreError` | NotFound, Anchor, InvalidAnchor, InvalidPath, InvalidPattern, Backend | `is_not_found()`, `path()` |
 | `ToolError` | InvalidArguments, Backend, Transport, Cancelled, Other | `is_retryable()`, `is_cancelled()` |
 | `ParseError` | (by kind) | `kind()`, `span()` |
-| `DialectError` | NoMatch, Tie, Unknown | `kind()` |
 
 ### RunError
 
@@ -76,14 +75,6 @@ arguments, backend errors, transport problems, or cancellation. The
 carries a stable `kind()` discriminant and an optional byte `span()` for editor
 diagnostics. Lua compilation errors include absolute source-line numbers that
 map back to the original prompt file.
-
-### DialectError
-
-`DialectError` fires when tool-calling dialect resolution fails:
-
-- **NoMatch** - no dialect matched the model's evidence.
-- **Tie** - multiple dialects matched equally.
-- **Unknown** - the dialect name was not recognized.
 
 ### Version Detection
 

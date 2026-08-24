@@ -275,13 +275,11 @@ local review = critic:infer("Critique this draft: " .. reply)
 
 ### Inspecting Model Properties
 
-After binding, a model handle's frozen properties are accessible from Lua: `name`, `model_id`, `description`, `context`, `thinking`, `temperature`, `max_tokens`, and `dialect`.
+After binding, a model handle's frozen properties are accessible from Lua: `name`, `model_id`, `description`, `context`, `thinking`, `temperature`, and `max_tokens`.
 
-### Catalog and Dialects
+### Model Catalog
 
 The library fetches a live model catalog from a gateway's `GET /v1/models` endpoint with bearer authentication. The caller provides a model catalog built from descriptors with identity, description, context window, and thinking mode (Always, Switchable, or Never).
-
-Two tool-calling dialects ship: OpenAI (native tool calls) and Gemma-3 tool_code (emulated via content fences). Dialect resolution is automatic from model catalog evidence - endpoint capabilities, chat template markers, model id, and source provenance.
 
 ---
 
@@ -550,7 +548,6 @@ Every public boundary returns its own typed error rather than one crate-wide err
 | `StoreError` | NotFound, Anchor, InvalidAnchor, InvalidPath, InvalidPattern, Backend | `is_not_found()`, `path()` |
 | `ToolError` | InvalidArguments, Backend, Transport, Cancelled, Other | `is_retryable()`, `is_cancelled()` |
 | `ParseError` | (by kind) | `kind()`, `span()` |
-| `DialectError` | NoMatch, Tie, Unknown | `kind()` |
 
 Backend error bodies are accessible through opt-in accessors but never leak into Display output.
 
