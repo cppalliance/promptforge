@@ -1,7 +1,8 @@
-// Push-to-talk voice capture over the /voice WebSocket. The wire protocol is
-// unchanged from the pre-migration UI: binary f32 PCM at 16 kHz mono in,
-// "start"/"stop" control words, and JSON text frames out (`interim` updates
-// the textarea live, `final` replaces it with the polished transcript).
+// Push-to-talk voice capture over the /voice WebSocket: binary f32 PCM at
+// 16 kHz mono in, "start"/"stop" control words, and JSON text frames out.
+// An `interim` frame carries the append-only `committed` prefix and the
+// volatile `tentative` suffix; the textarea shows their concatenation live.
+// A `final` frame replaces it with the polished transcript.
 
 import type { StatusBar } from "./status-bar";
 
@@ -78,14 +79,27 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
     if (typeof data !== "string") {
       return true;
     }
-    let msg: { type?: unknown; text?: unknown; frames?: unknown } | null;
+    let msg: {
+      type?: unknown;
+      text?: unknown;
+      committed?: unknown;
+      tentative?: unknown;
+      frames?: unknown;
+    } | null;
     try {
       msg = JSON.parse(data) as typeof msg;
     } catch {
       msg = null;
     }
-    if (msg && msg.type === "interim" && typeof msg.text === "string") {
-      showInterim(msg.text);
+    if (msg && msg.type === "interim") {
+      // Committed is append-only within a take; tentative is the volatile
+      // suffix and legitimately shrinks as audio crystallizes, so the
+      // display follows the server unconditionally. A space joins the two
+      // only when the committed prefix does not already end in whitespace.
+      const committed = typeof msg.committed === "string" ? msg.committed : "";
+      const tentative = typeof msg.tentative === "string" ? msg.tentative : "";
+      const gap = committed !== "" && tentative !== "" && !/\s$/.test(committed) ? " " : "";
+      showInterim(committed + gap + tentative);
       return false;
     }
     if (msg && msg.type === "final") {
