@@ -22,7 +22,7 @@ pub(super) fn merge_docs(base: &mut Value, overlay: Value, path: &Path) -> Resul
 
     for (key, overlay_val) in overlay_table {
         match key.as_str() {
-            "endpoint" | "model" | "local_model" => {
+            "endpoint" | "model" | "local_model" | "dominion" => {
                 let entry = base_table
                     .entry(key.clone())
                     .or_insert_with(|| Value::Array(Vec::new()));
@@ -52,7 +52,7 @@ pub(super) fn merge_docs(base: &mut Value, overlay: Value, path: &Path) -> Resul
 
 fn identity_key(array_name: &str) -> Result<&'static str, ConfigError> {
     match array_name {
-        "endpoint" | "device" => Ok("id"),
+        "endpoint" | "device" | "dominion" => Ok("id"),
         "model" | "local_model" => Ok("name"),
         other => Err(ConfigError::Validation(format!(
             "internal: unknown keyed array {other}"
@@ -394,6 +394,42 @@ mod tests {
             .expect_err("non-array inherited devices must error");
         assert!(matches!(err, ConfigError::Validation(_)));
         assert!(err.to_string().contains("device"), "{err}");
+    }
+
+    #[test]
+    fn dominion_is_a_plain_keyed_array() {
+        // `[[dominion]]` merges by `id` exactly like `[[endpoint]]` and
+        // `[[model]]`: a same-id overlay replaces the earlier definition, and
+        // a new id appends without disturbing the inherited entries.
+        let mut base: Value = toml::from_str(
+            "[[dominion]]\nid = 'pool'\nkind = 'remote'\nmax_concurrency = 2\n\
+             [[dominion]]\nid = 'gpu0'\nkind = 'local'\n",
+        )
+        .expect("parse base");
+        let overlay: Value =
+            toml::from_str("[[dominion]]\nid = 'pool'\nkind = 'remote'\nmax_concurrency = 8\n")
+                .expect("parse overlay");
+        merge_docs(&mut base, overlay, Path::new("p.toml")).expect("merge dominions");
+        let dominions = base
+            .get("dominion")
+            .and_then(Value::as_array)
+            .expect("dominion array");
+        assert_eq!(dominions.len(), 2, "same id replaces, no duplicate");
+        let pool = dominions
+            .iter()
+            .find(|d| d.get("id").and_then(Value::as_str) == Some("pool"))
+            .expect("pool present");
+        assert_eq!(
+            pool.get("max_concurrency").and_then(Value::as_integer),
+            Some(8),
+            "later definition wins"
+        );
+        assert!(
+            dominions
+                .iter()
+                .any(|d| d.get("id").and_then(Value::as_str) == Some("gpu0")),
+            "inherited dominion survives"
+        );
     }
 
     #[test]

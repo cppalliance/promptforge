@@ -16,7 +16,10 @@ pub(crate) struct Endpoint {
     /// The upstream implementation forwarding to this backend.
     pub upstream: Arc<dyn Upstream>,
     /// Admission control: concurrency limit plus bounded waiting queue.
-    /// Per-endpoint until step 8 shares one queue per dominion.
+    /// Endpoints bound to the same dominion hold clones of one shared queue
+    /// and compete for a single pool of slots; an endpoint with only legacy
+    /// `concurrency`/`device` fields keeps its own per-endpoint queue, and
+    /// one with neither is unlimited.
     pub queue: DominionQueue,
 }
 
@@ -89,13 +92,38 @@ impl Routing {
     }
 
     /// Build a routing table from a validated [`Config`], constructing one
-    /// upstream per endpoint.
+    /// upstream per endpoint and one shared [`DominionQueue`] per dominion.
+    ///
+    /// Every endpoint bound to a dominion clones that dominion's queue, so
+    /// all of them compete for one pool of concurrency slots. An endpoint
+    /// without a `dominion` keeps the legacy behavior: its own queue from
+    /// `concurrency`/`device`, or an unlimited pass-through.
     ///
     /// # Errors
     /// Returns [`ConfigError::Validation`] if a model references an endpoint
-    /// that is not defined (which [`Config::validate`] already rejects, so this
-    /// is a defensive second check).
+    /// or an endpoint references a dominion that is not defined (which
+    /// [`Config::validate`] already rejects, so these are defensive second
+    /// checks).
     pub(crate) fn from_config(config: &Config) -> Result<Routing, ConfigError> {
+        // One queue instance per dominion. Cloning a DominionQueue clones the
+        // Arc-backed limit, so every bound endpoint shares the same slots.
+        let mut dominion_queues: HashMap<&str, DominionQueue> =
+            HashMap::with_capacity(config.dominions().len());
+        for dominion in config.dominions() {
+            let queue = match dominion.max_concurrency() {
+                Some(n) => DominionQueue::new(
+                    n,
+                    dominion.max_queue(),
+                    dominion.fair_scheduling(),
+                    dominion.policy(),
+                ),
+                // Unlimited concurrency never parks a caller, so `max_queue`
+                // and `policy` have no wait to bound.
+                None => DominionQueue::unlimited(),
+            };
+            dominion_queues.insert(dominion.id(), queue);
+        }
+
         let mut endpoints: HashMap<&str, Arc<Endpoint>> = HashMap::new();
         for endpoint in config.endpoints() {
             let upstream: Arc<dyn Upstream> = match endpoint.protocol() {
@@ -105,9 +133,20 @@ impl Routing {
                 )),
                 _ => unreachable!("Protocol is non_exhaustive; wire up new protocols here"),
             };
-            let queue = match config.endpoint_concurrency(endpoint) {
-                Some(n) => DominionQueue::from_queue_config(n, config.queue()),
-                None => DominionQueue::unlimited(),
+            let queue = match endpoint.dominion() {
+                Some(dominion_id) => dominion_queues
+                    .get(dominion_id)
+                    .ok_or_else(|| {
+                        ConfigError::validation(format!(
+                            "endpoint {} names undefined dominion {dominion_id}",
+                            endpoint.id()
+                        ))
+                    })?
+                    .clone(),
+                None => match config.endpoint_concurrency(endpoint) {
+                    Some(n) => DominionQueue::from_queue_config(n, config.queue()),
+                    None => DominionQueue::unlimited(),
+                },
             };
             endpoints.insert(
                 endpoint.id(),
@@ -204,6 +243,11 @@ mod tests {
         })
     }
 
+    fn routing_from(toml: &str) -> Routing {
+        let config = Config::from_toml_str(toml).unwrap();
+        Routing::from_config(&config).unwrap()
+    }
+
     fn routing() -> Routing {
         let toml = r#"
 [server]
@@ -223,8 +267,7 @@ context = 8192
 upstream = "backend-name"
 endpoints = ["e"]
 "#;
-        let config = Config::from_toml_str(toml).unwrap();
-        Routing::from_config(&config).unwrap()
+        routing_from(toml)
     }
 
     #[test]
@@ -277,5 +320,154 @@ endpoints = ["e"]
         let merged = base.merge([model_named("b")]).expect("distinct extra");
         let names: Vec<&str> = merged.models().iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names, ["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn endpoints_on_one_dominion_share_one_limit() {
+        // The new behavior dominions introduce: two endpoints bound to one
+        // dominion compete for a single pool of slots. Filling the queue
+        // through one endpoint blocks the other.
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[dominion]]
+id = "pool"
+kind = "remote"
+max_concurrency = 1
+
+[[endpoint]]
+id = "a"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+dominion = "pool"
+
+[[endpoint]]
+id = "b"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+dominion = "pool"
+
+[[model]]
+name = "ma"
+description = "model on endpoint a"
+context = 8192
+upstream = "ua"
+endpoints = ["a"]
+
+[[model]]
+name = "mb"
+description = "model on endpoint b"
+context = 8192
+upstream = "ub"
+endpoints = ["b"]
+"#;
+        let routing = routing_from(toml);
+        let queue_a = routing.model("ma").unwrap().endpoint.queue.clone();
+        let queue_b = routing.model("mb").unwrap().endpoint.queue.clone();
+
+        // Fill the dominion's only slot through endpoint A.
+        let held = queue_a.admit("client").await.unwrap();
+
+        // Endpoint B's admit cannot proceed: it parks as a waiter on the SAME
+        // shared queue instead of getting a slot of its own.
+        let queue_b_spawn = queue_b.clone();
+        let blocked = tokio::spawn(async move { queue_b_spawn.admit("client").await });
+        while queue_a.waiter_count() != 1 {
+            tokio::task::yield_now().await;
+        }
+
+        // Releasing A's permit hands the shared slot to B's waiter.
+        drop(held);
+        let _permit = blocked.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_concurrency_stays_per_endpoint() {
+        // During the transition, endpoints with only legacy `concurrency`
+        // keep today's behavior: each gets its own independent queue.
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "a"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+concurrency = 1
+
+[[endpoint]]
+id = "b"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+concurrency = 1
+
+[[model]]
+name = "ma"
+description = "model on endpoint a"
+context = 8192
+upstream = "ua"
+endpoints = ["a"]
+
+[[model]]
+name = "mb"
+description = "model on endpoint b"
+context = 8192
+upstream = "ub"
+endpoints = ["b"]
+"#;
+        let routing = routing_from(toml);
+        let queue_a = routing.model("ma").unwrap().endpoint.queue.clone();
+        let queue_b = routing.model("mb").unwrap().endpoint.queue.clone();
+
+        // A's only slot is held; B still admits immediately on its own limit.
+        let _held = queue_a.admit("client").await.unwrap();
+        let permit_b = queue_b.admit("client").await.unwrap();
+        assert_eq!(queue_a.waiter_count(), 0);
+        assert_eq!(queue_b.waiter_count(), 0);
+        drop(permit_b);
+    }
+
+    #[tokio::test]
+    async fn dominion_without_max_concurrency_is_unlimited() {
+        // Absent max_concurrency means unlimited: admits never wait, so a
+        // bound max_queue and reject policy have no full in-flight set to
+        // act on.
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[dominion]]
+id = "pool"
+kind = "remote"
+max_queue = 1
+policy = "reject"
+
+[[endpoint]]
+id = "a"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+dominion = "pool"
+
+[[model]]
+name = "ma"
+description = "model on endpoint a"
+context = 8192
+upstream = "ua"
+endpoints = ["a"]
+"#;
+        let routing = routing_from(toml);
+        let queue = routing.model("ma").unwrap().endpoint.queue.clone();
+        let _first = queue.admit("client").await.unwrap();
+        let _second = queue.admit("client").await.unwrap();
+        let _third = queue.admit("client").await.unwrap();
     }
 }
