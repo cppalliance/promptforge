@@ -1,8 +1,16 @@
 //! PromptForge Workbench HTTP server.
 //!
-//! Holds the axum router and the serving loop so `src/main.rs` stays a thin
-//! shell. Start at [`router`]; [`run`] binds and serves with the defaults.
+//! Holds the `workbench.toml` configuration, the PromptForge gateway client,
+//! and the axum router so `src/main.rs` stays a thin shell. Start at
+//! [`Config::load`] for configuration and [`router`] for the HTTP API;
+//! [`run`] binds and serves a built [`AppState`].
 
 mod app;
+mod config;
+mod gateway;
 
-pub use app::{DEFAULT_ADDR, router, run};
+pub use app::{AppState, DEFAULT_ADDR, router, run};
+pub use config::{
+    Config, ConfigError, DEFAULT_CONFIG_PATH, GatewayConfig, ServerConfig, TapeConfig,
+};
+pub use gateway::{ChatRequest, GatewayClient, GatewayError, GatewayResponse};

@@ -1,0 +1,355 @@
+//! `workbench.toml` loading: TOML parsing, `${VAR}` environment
+//! interpolation, and defaults.
+//!
+//! Interpolation follows the promptforge convention (gateway-config CFG-007):
+//! the TOML is parsed first and only string *values* are interpolated, so
+//! `${VAR}` inside comments or keys is never expanded and an interpolated
+//! value containing a quote, backslash, or newline cannot corrupt the
+//! document. `$$` is a literal `$`.
+
+use std::path::{Path, PathBuf};
+
+/// Path [`Config::load`] reads when no override is given.
+pub const DEFAULT_CONFIG_PATH: &str = "workbench.toml";
+
+/// Workbench server configuration loaded from `workbench.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct Config {
+    /// Connection settings for the PromptForge gateway.
+    pub gateway: GatewayConfig,
+    /// Session tape settings.
+    #[serde(default)]
+    pub tape: TapeConfig,
+    /// HTTP server settings.
+    #[serde(default)]
+    pub server: ServerConfig,
+}
+
+impl Config {
+    /// Loads and parses the workbench configuration from `path`.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError::Read`] if `path` cannot be read (including a
+    /// missing file), [`ConfigError::Parse`] if the contents do not match the
+    /// workbench schema, [`ConfigError::UnresolvedVar`] if a `${VAR}`
+    /// references an unset environment variable, and
+    /// [`ConfigError::Interpolation`] if a `${...}` is malformed.
+    pub fn load(path: &Path) -> Result<Self, ConfigError> {
+        let raw = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        Self::parse(&raw, Some(path))
+    }
+
+    /// Parses a workbench configuration from a TOML string.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError::Parse`] if `raw` is not valid TOML or does not
+    /// match the workbench schema, [`ConfigError::UnresolvedVar`] if a
+    /// `${VAR}` references an unset environment variable, and
+    /// [`ConfigError::Interpolation`] if a `${...}` is malformed.
+    ///
+    /// # Examples
+    /// ```
+    /// let config = promptforge_wb_server::Config::from_toml_str(
+    ///     "[gateway]\nbase_url = \"http://127.0.0.1:8081\"\napi_key = \"k\"\n",
+    /// )?;
+    /// assert_eq!(config.server.bind, "127.0.0.1:7910");
+    /// # Ok::<(), promptforge_wb_server::ConfigError>(())
+    /// ```
+    pub fn from_toml_str(raw: &str) -> Result<Self, ConfigError> {
+        Self::parse(raw, None)
+    }
+
+    fn parse(raw: &str, path: Option<&Path>) -> Result<Self, ConfigError> {
+        let mut document: toml::Value =
+            toml::from_str(raw).map_err(|source| ConfigError::Parse {
+                path: path.map(Path::to_path_buf),
+                source: Box::new(source),
+            })?;
+        interpolate_value(&mut document)?;
+        let config: Self = document.try_into().map_err(|source| ConfigError::Parse {
+            path: path.map(Path::to_path_buf),
+            source: Box::new(source),
+        })?;
+        Ok(config)
+    }
+}
+
+/// Gateway connection settings: where the gateway listens and how to
+/// authenticate to it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct GatewayConfig {
+    /// Base URL of the gateway, for example `http://127.0.0.1:8081`.
+    pub base_url: String,
+    /// Bearer key for the gateway API; supports `${VAR}` interpolation.
+    pub api_key: String,
+}
+
+/// Session tape settings.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(default)]
+pub struct TapeConfig {
+    /// Path of the JSONL tape file.
+    pub path: PathBuf,
+}
+
+impl Default for TapeConfig {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::from("tape.jsonl"),
+        }
+    }
+}
+
+/// HTTP server settings.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(default)]
+pub struct ServerConfig {
+    /// Address the workbench server binds to.
+    pub bind: String,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            bind: crate::DEFAULT_ADDR.to_string(),
+        }
+    }
+}
+
+/// A workbench configuration load or parse failure.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ConfigError {
+    /// The configuration file could not be read.
+    #[non_exhaustive]
+    #[error("read config {}", path.display())]
+    Read {
+        /// The path that could not be read.
+        path: PathBuf,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The configuration was not valid TOML or did not match the schema.
+    #[non_exhaustive]
+    #[error("parse config{}", parse_location(path.as_deref()))]
+    Parse {
+        /// The file the parse failure came from, when known.
+        path: Option<PathBuf>,
+        /// The underlying TOML error, boxed to hide the dependency type.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// A `${VAR}` referenced an environment variable that was not set.
+    #[non_exhaustive]
+    #[error("unresolved environment variable {0}")]
+    UnresolvedVar(String),
+
+    /// A `${...}` interpolation was malformed (for example, unclosed).
+    #[non_exhaustive]
+    #[error("interpolation: {0}")]
+    Interpolation(String),
+}
+
+/// Renders the optional parse-failure path as a ` (path)` suffix or empty.
+fn parse_location(path: Option<&Path>) -> String {
+    path.map(|p| format!(" ({})", p.display()))
+        .unwrap_or_default()
+}
+
+/// Expands `${VAR}` from the environment; `$$` is a literal `$`.
+fn interpolate(input: &str) -> Result<String, ConfigError> {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '$' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('$') => {
+                chars.next();
+                out.push('$');
+            }
+            Some('{') => {
+                chars.next();
+                let mut name = String::new();
+                let mut closed = false;
+                for nc in chars.by_ref() {
+                    if nc == '}' {
+                        closed = true;
+                        break;
+                    }
+                    name.push(nc);
+                }
+                if !closed {
+                    return Err(ConfigError::Interpolation(
+                        "unclosed ${...} interpolation".to_string(),
+                    ));
+                }
+                let value =
+                    std::env::var(&name).map_err(|_| ConfigError::UnresolvedVar(name.clone()))?;
+                out.push_str(&value);
+            }
+            _ => out.push('$'),
+        }
+    }
+    Ok(out)
+}
+
+/// Recursively interpolates `${VAR}` in every string leaf of a TOML value,
+/// leaving keys and non-string scalars untouched.
+fn interpolate_value(value: &mut toml::Value) -> Result<(), ConfigError> {
+    match value {
+        toml::Value::String(text) => {
+            *text = interpolate(text)?;
+        }
+        toml::Value::Array(items) => {
+            for item in items {
+                interpolate_value(item)?;
+            }
+        }
+        toml::Value::Table(table) => {
+            for (_, entry) in table.iter_mut() {
+                interpolate_value(entry)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_fixture_and_interpolates_from_environment() {
+        let path_value = std::env::var("PATH").expect("PATH is set on every supported platform");
+        let raw = r#"
+[gateway]
+base_url = "http://127.0.0.1:8081"
+api_key = "${PATH}"
+"#;
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert_eq!(config.gateway.base_url, "http://127.0.0.1:8081");
+        assert_eq!(config.gateway.api_key, path_value);
+    }
+
+    #[test]
+    fn defaults_fill_tape_and_server() {
+        let raw = r#"
+[gateway]
+base_url = "http://127.0.0.1:8081"
+api_key = "k"
+"#;
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert_eq!(config.tape.path, PathBuf::from("tape.jsonl"));
+        assert_eq!(config.server.bind, "127.0.0.1:7910");
+    }
+
+    #[test]
+    fn explicit_sections_override_defaults() {
+        let raw = r#"
+[gateway]
+base_url = "http://127.0.0.1:8081"
+api_key = "k"
+
+[tape]
+path = "session.jsonl"
+
+[server]
+bind = "127.0.0.1:9000"
+"#;
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert_eq!(config.tape.path, PathBuf::from("session.jsonl"));
+        assert_eq!(config.server.bind, "127.0.0.1:9000");
+    }
+
+    #[test]
+    fn double_dollar_is_literal() {
+        let raw = "[gateway]\nbase_url = \"http://x\"\napi_key = \"cost $$5\"\n";
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert_eq!(config.gateway.api_key, "cost $5");
+    }
+
+    #[test]
+    fn unset_variable_is_an_error() {
+        let raw =
+            "[gateway]\nbase_url = \"http://x\"\napi_key = \"${PFG_WB_DEFINITELY_UNSET_XYZ}\"\n";
+        let err = Config::from_toml_str(raw).expect_err("unset variable must fail");
+        assert!(
+            matches!(err, ConfigError::UnresolvedVar(ref name) if name == "PFG_WB_DEFINITELY_UNSET_XYZ"),
+            "expected UnresolvedVar, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn unclosed_interpolation_is_an_error() {
+        let raw = "[gateway]\nbase_url = \"http://x\"\napi_key = \"${UNCLOSED\"\n";
+        let err = Config::from_toml_str(raw).expect_err("unclosed interpolation must fail");
+        assert!(
+            matches!(err, ConfigError::Interpolation(_)),
+            "expected Interpolation, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_gateway_section_is_an_error() {
+        let err = Config::from_toml_str("[server]\nbind = \"127.0.0.1:9000\"\n")
+            .expect_err("gateway section is required");
+        assert!(
+            matches!(err, ConfigError::Parse { .. }),
+            "expected Parse, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn missing_file_names_the_expected_path() {
+        let err = Config::load(Path::new("definitely-missing-workbench.toml"))
+            .expect_err("missing file must fail");
+        assert!(
+            matches!(err, ConfigError::Read { .. }),
+            "expected Read, got {err:?}"
+        );
+        assert!(
+            err.to_string()
+                .contains("definitely-missing-workbench.toml"),
+            "error names the path: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_error_names_the_file() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path().join("broken-workbench.toml");
+        std::fs::write(&path, "[gateway\n").expect("write fixture");
+        let err = Config::load(&path).expect_err("malformed TOML must fail");
+        assert!(
+            matches!(err, ConfigError::Parse { .. }),
+            "expected Parse, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("broken-workbench.toml"),
+            "error names the path: {err}"
+        );
+    }
+
+    #[test]
+    fn load_reads_and_parses_a_file() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path().join("workbench.toml");
+        std::fs::write(
+            &path,
+            "[gateway]\nbase_url = \"http://127.0.0.1:8081\"\napi_key = \"k\"\n",
+        )
+        .expect("write fixture");
+        let config = Config::load(&path).expect("fixture loads");
+        assert_eq!(config.gateway.api_key, "k");
+    }
+}

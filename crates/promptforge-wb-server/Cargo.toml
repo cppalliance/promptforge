@@ -14,10 +14,17 @@ name = "promptforge-wb-server"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
 axum.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 tower.workspace = true
 
 [lints]
