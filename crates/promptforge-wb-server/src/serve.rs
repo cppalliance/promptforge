@@ -13,6 +13,7 @@ use std::thread::JoinHandle;
 use crate::app::{AppError, AppState, router};
 use crate::config::Config;
 use crate::heartbeat;
+use crate::provision;
 
 /// A running workbench server on its own thread.
 ///
@@ -164,8 +165,9 @@ fn serve_thread(
         };
         let address = listener.local_addr()?;
         let _ = ready.send(Ok(format!("http://{address}")));
-        // The heartbeat starts with serving and stops inside the same
-        // graceful-shutdown signal, so it never outlives the server.
+        // The heartbeat and the voice provisioning task start with serving
+        // and stop inside the same graceful-shutdown signal, so they never
+        // outlive the server.
         let heartbeat = heartbeat::spawn(
             state.gateway_client().clone(),
             state.status(),
@@ -173,10 +175,18 @@ fn serve_thread(
             state.catalog(),
             heartbeat::HEARTBEAT_INTERVAL,
         );
+        let provision = provision::spawn(
+            state.gateway_client().clone(),
+            state.status(),
+            state.health().clone(),
+            std::sync::Arc::new(std::sync::Mutex::new(None)),
+            config.voice.clone(),
+        );
         axum::serve(listener, router(state))
             .with_graceful_shutdown(async move {
                 let _ = shutdown.await;
                 heartbeat.shutdown().await;
+                provision.shutdown().await;
             })
             .await
     })
