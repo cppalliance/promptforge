@@ -1,13 +1,14 @@
 // Push-to-talk voice capture over the /voice WebSocket. The wire protocol is
 // unchanged from the pre-migration UI: binary f32 PCM at 16 kHz mono in,
-// "start"/"stop" control words, and JSON text frames out (`interim` rewrites
-// the live line above the composer, `final` lands in the input box).
+// "start"/"stop" control words, and JSON text frames out (`interim` updates
+// the textarea live, `final` replaces it with the polished transcript).
 
 import type { StatusBar } from "./status-bar";
 
+const MAX_TEXTAREA_HEIGHT_VH = 40;
+
 export interface VoiceElements {
   mic: HTMLButtonElement;
-  interim: HTMLDivElement;
   status: HTMLDivElement;
   input: HTMLTextAreaElement;
 }
@@ -21,7 +22,7 @@ interface VoiceSession {
 }
 
 export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void {
-  const { mic, interim, status, input } = elements;
+  const { mic, status, input } = elements;
   let voice: VoiceSession | null = null;
   let voiceStatusTimer = 0;
 
@@ -41,14 +42,20 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
     mic.title = next ? "Stop recording" : "Push to talk";
   }
 
+  function resizeInput(): void {
+    const maxPx = window.innerHeight * (MAX_TEXTAREA_HEIGHT_VH / 100);
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, maxPx) + "px";
+  }
+
   function showInterim(text: string): void {
-    interim.textContent = text;
-    interim.classList.add("voice-interim--visible");
+    input.value = text;
+    resizeInput();
   }
 
   function clearInterim(): void {
-    interim.textContent = "";
-    interim.classList.remove("voice-interim--visible");
+    input.value = "";
+    resizeInput();
   }
 
   // Tears down a session's audio half. The socket half is closed by the
@@ -87,10 +94,7 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
         input.value = text;
         // murm-ui's Input listens for "input" to re-enable submit.
         input.dispatchEvent(new Event("input", { bubbles: true }));
-        // Grow the composer to fit the transcript; the reset to auto is
-        // what lets a shorter replacement shrink back down.
-        input.style.height = "auto";
-        input.style.height = `${input.scrollHeight}px`;
+        resizeInput();
         input.focus();
         showVoiceStatus("Transcript ready - edit, then send.", false);
       } else {

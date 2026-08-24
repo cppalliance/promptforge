@@ -55,7 +55,7 @@
   --sidebar-width: 220px;
 
   /* Status bar */
-  --status-bar-height: 24px;
+  --status-bar-height: 28px;
   --status-bar-bg: var(--bg-raised, #14161c);
   --status-bar-text: var(--text-muted, #8b90a0);
   --status-bar-text-error: var(--danger-text, #cf7f88);
@@ -82,7 +82,7 @@
   --led-lens-shadow: rgba(0, 0, 0, 0.45);
 
   /* Status bar REC badge */
-  --rec-idle: #800000;
+  --rec-idle: #552222;
   --rec-active: #ff0000;
 
   /* Scrollbars (applied globally below) */
@@ -327,7 +327,7 @@ body {
   padding-inline: var(--status-bar-padding-inline, 12px);
   background: var(--status-bar-bg, #14161c);
   border-top: 1px solid var(--border, #262a33);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
   color: var(--status-bar-text, #8b90a0);
   user-select: none;
@@ -348,27 +348,29 @@ body {
 .status-bar__right {
   display: flex;
   align-items: center;
-  gap: 0.5em;
+  gap: 4px;
 }
 
 /* The REC badge: always visible, a dim dark-red outline while idle and a
    lit bright red while the mic records. */
 .status-bar__rec {
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
   line-height: 1;
-  padding: 1px 4px;
-  border: 1px solid var(--rec-idle, #800000);
+  padding: 2px 5px;
+  border: 1px solid var(--rec-idle, #552222);
   border-radius: 2px;
-  color: var(--rec-idle, #800000);
+  color: var(--rec-idle, #552222);
   transition: color 0.1s, border-color 0.1s, box-shadow 0.15s;
 }
 
 .status-bar__rec--active {
   color: var(--rec-active, #ff0000);
   border-color: var(--rec-active, #ff0000);
-  box-shadow: 0 0 1px var(--rec-active, #ff0000);
+  box-shadow: 0 0 3px var(--rec-active, #ff0000);
 }
 
 .status-bar__slot {
@@ -448,23 +450,6 @@ body {
     0 0 calc(var(--led-glow-radius, 6px) / 2) var(--led-amber, #d9a03f),
     0 0 var(--led-glow-radius, 6px) var(--led-amber, #d9a03f),
     0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, var(--led-amber, #d9a03f) 55%, transparent);
-}
-
-/* Voice UI: injected into murm-ui's form container by the voice plugin. */
-.voice-interim {
-  width: 100%;
-  max-width: var(--mur-chat-form-width, 768px);
-  font-size: 13px;
-  font-style: italic;
-  color: var(--text-muted, #8b90a0);
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.15s ease-out, padding 0.15s ease-out;
-}
-
-.voice-interim--visible {
-  max-height: 60px;
-  padding: 0 var(--space-md, 8px) var(--space-xs, 4px);
 }
 
 .voice-status {

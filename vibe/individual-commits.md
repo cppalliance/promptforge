@@ -78,3 +78,7 @@ post-rebase cargo doc failed on private intra-doc links introduced by upstream's
 
 ## 2026-08-24 Add workbench design doc, archive prior designs
 
+## 2026-08-24 Show interim voice text in textarea; sustain thinking LED
+
+one bundled commit of dictation-UX direction given verbatim by the user: interim text lives in the text box and grows it, the status bar is full-width and top-level, REC is a maroon badge with priority over the LED, and the LED means amber-while-thinking, green-on-output-spurt. (user said)
+

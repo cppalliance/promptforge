@@ -40,7 +40,7 @@ function selectedModel(): string {
 }
 
 // The mic button joins murm-ui's composer through the plugin seam; the
-// interim transcript and voice status sit above the form.
+// voice status message sits below the form.
 const voicePlugin: ChatPlugin = {
   name: "voice",
   onInputMount({ container, form, input }) {
@@ -58,17 +58,13 @@ const voicePlugin: ChatPlugin = {
     if (!formContainer) {
       throw new Error("DOM Error: .mur-chat-form-container not found inside the container.");
     }
-    const interim = document.createElement("div");
-    interim.className = "voice-interim";
-    interim.setAttribute("aria-live", "polite");
     const status = document.createElement("div");
     status.className = "voice-status";
     status.setAttribute("role", "status");
     status.setAttribute("aria-live", "polite");
-    formContainer.insertBefore(interim, form);
     formContainer.appendChild(status);
 
-    setupVoice({ mic, interim, status, input }, statusBar);
+    setupVoice({ mic, status, input }, statusBar);
   },
   // With no model selected there is nothing to send to; the old UI disabled
   // the send button in the same situation.
