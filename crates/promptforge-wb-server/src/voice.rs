@@ -510,6 +510,7 @@ mod tests {
             final_model: fixtures::require_model(),
             window_seconds: 8,
             interval_ms: 400,
+            ..VoiceConfig::default()
         };
         let (url, _tape_dir) = spawn_voice_server(voice).await;
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)

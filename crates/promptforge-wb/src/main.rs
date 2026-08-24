@@ -1,15 +1,17 @@
 //! The `promptforge-wb` binary: the PromptForge Workbench desktop window
 //! shell.
 //!
-//! Loads `workbench.toml` (see [`discover`] for the search order), starts
-//! the workbench server in-process on its own thread, waits for its health
-//! endpoint to answer, and opens a window pointed at it. Closing the window
-//! shuts the server down cleanly.
+//! Loads `workbench.toml` (see [`discover`] for the search order),
+//! generating a default one in the profile's `.promptforge` directory on
+//! first run, starts the workbench server in-process on its own thread,
+//! waits for its health endpoint to answer, and opens a window pointed at
+//! it. Closing the window shuts the server down cleanly.
 
 mod discover;
 mod health;
 mod window;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -31,15 +33,12 @@ fn main() -> ExitCode {
 }
 
 fn run() -> anyhow::Result<()> {
-    let config = match discover::discover_config()? {
-        Some(config_path) => {
-            Config::load(&config_path).with_context(|| format!("load {}", config_path.display()))?
-        }
-        None => anyhow::bail!(
-            "no workbench.toml found beside the executable, in the current directory, \
-             or in the profile's .promptforge directory"
-        ),
+    let config_path = match discover::discover_config()? {
+        Some(config_path) => config_path,
+        None => generate_in_profile()?,
     };
+    let config =
+        Config::load(&config_path).with_context(|| format!("load {}", config_path.display()))?;
     let server = promptforge_wb_server::spawn(config).context("start workbench server")?;
     let url = server.url().to_string();
 
@@ -54,6 +53,21 @@ fn run() -> anyhow::Result<()> {
         eprintln!("{shutdown_error:?}");
     }
     window_result.and(shutdown_result)
+}
+
+/// First run: creates the profile's `.promptforge` directory if needed and
+/// writes the default `workbench.toml` into it.
+fn generate_in_profile() -> anyhow::Result<PathBuf> {
+    let home = std::env::home_dir().context("locate the user profile directory")?;
+    let dir = home.join(".promptforge");
+    std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    let path = discover::generate_default(&dir.join("workbench.toml"))
+        .context("write the default configuration")?;
+    eprintln!(
+        "no workbench.toml found; wrote default config to {}",
+        path.display()
+    );
+    Ok(path)
 }
 
 #[cfg(test)]
