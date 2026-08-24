@@ -49,3 +49,21 @@ Running log of design choices for the PromptForge Workbench stage 1 build. Each 
 - Choice: `ConfigError` (Read / Parse / UnresolvedVar / Interpolation) and `GatewayError` (Build / Transport / ReadBody), both `#[non_exhaustive]`, with dependency errors boxed as `Box<dyn Error + Send + Sync>` behind `#[source]`; handlers collapse any `GatewayError` to `502 Bad Gateway` with a JSON envelope.
 - Evidence: matches the rust rulebook's one-enum-per-unit-of-fallibility and the gateway crate's own convention of boxing reqwest errors so dependency types stay out of the public API; a missing `workbench.toml` surfaces as `Read` naming the expected path.
 - Cost: boxing erases the concrete source type for any caller that wanted to downcast, and the 502 mapping loses the distinction between connect, transport, and body-read failures at the HTTP boundary.
+
+## 9. Tape event schema: six fields with full request and response JSON
+
+- Choice: each tape line is one JSON object: `ts` (RFC 3339 UTC string), `kind` (`"chat"`), `model`, `request` (the request body exactly as received), `response` (the gateway body parsed to JSON, or a plain string if it was not JSON), `latency_ms` (u64, measured with `Instant` around the gateway call only). Timestamp rendering follows the promptforge-core `now_rfc3339_checked` convention: the `time` crate with a checked format error, never an empty string.
+- Evidence: the step fixes the field list; storing full `Value`s keeps the tape replayable without the workbench understanding message shapes; recording the body as received (not the re-serialized `ChatRequest`) preserves extra client fields the relay drops; `Instant` around `chat_completion` keeps tape and relay overhead out of the number.
+- Cost: prompts and completions land on disk verbatim, so the tape file is sensitive data; a non-JSON gateway body is stored as a string rather than dropped; transport failures produce no event, since there is no response to record.
+
+## 10. Tape writer: std mutex around a boxed writer, not a channel
+
+- Choice: `Tape` is `Arc`-shared state holding `std::sync::Mutex<Box<dyn Write + Send>>`; `record` is a sync method the chat handler calls through `tokio::task::spawn_blocking`; the file is opened append-plus-create with no `BufWriter`, one `write_all` per event.
+- Evidence: the rust rulebook puts a short critical section with no `.await` on `std::sync::Mutex` and reserves an owner task for contended resources, and chat concurrency here is a handful of requests; `spawn_blocking` keeps disk stalls (antivirus, network drives) off the executor; the boxed `dyn Write` is what lets tests inject a failing writer; a `BufWriter` would need a flush per event anyway at one line per chat.
+- Cost: a poisoned mutex is recovered with `into_inner`, so a panic mid-write could leave one partial line that later events do not repair; `spawn_blocking` adds a thread hop per event; under concurrent chats, event order is lock-acquisition order, not completion order.
+
+## 11. Tape write failures are logged and swallowed; open failure is fatal
+
+- Choice: `Tape::record` returns `Result<(), TapeError>`; the chat handler logs a failure with `tracing::error!` and still relays the gateway response, while `AppState::new` refuses to build if the tape cannot be opened; `main` initializes `tracing-subscriber` so the log line actually lands somewhere.
+- Evidence: the step requires write errors to be visible yet never fail the user's chat - the `Result` makes the error visible to the caller (the handler) and the tracing log makes it visible to the operator, matching the gateway crate's own `%error` logging style; an unopenable tape at startup means every event would be lost, a configuration error worth failing fast over rather than serving a silently dead tape.
+- Cost: a runtime write failure has no user-facing signal, only the log; if the disk fails mid-session the workbench serves untaped chats until restart.
