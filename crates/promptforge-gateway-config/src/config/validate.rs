@@ -11,7 +11,7 @@ use std::collections::HashSet;
 
 use url::Url;
 
-use super::{Config, DominionKind, ModelKind, ThinkingMode, is_sha256_hex};
+use super::{Capabilities, Config, DominionKind, ModelKind, ThinkingMode, is_sha256_hex};
 use crate::error::ConfigError;
 
 impl Config {
@@ -310,7 +310,15 @@ impl Config {
                 &model.name,
                 model.kind,
                 model.thinking,
+                &model.capabilities,
                 &[("default_max_tokens", model.default_max_tokens.is_some())],
+            )?;
+            validate_capabilities(
+                "model",
+                &model.name,
+                model.context,
+                model.thinking,
+                &model.capabilities,
             )?;
         }
 
@@ -404,10 +412,18 @@ impl Config {
                 &local_model.name,
                 local_model.kind,
                 local_model.thinking,
+                &local_model.capabilities,
                 &[(
                     "chat_template_file",
                     local_model.chat_template_file.is_some(),
                 )],
+            )?;
+            validate_capabilities(
+                "local_model",
+                &local_model.name,
+                local_model.context,
+                local_model.thinking,
+                &local_model.capabilities,
             )?;
         }
         Ok(())
@@ -438,17 +454,60 @@ impl Config {
     }
 }
 
+/// Validate the capability metadata of one model entry.
+///
+/// `default_effort` requires a non-empty `effort_levels` and must name a
+/// listed level; the effort knobs are meaningless on a model that never
+/// thinks; and `max_output` must fit the context window.
+fn validate_capabilities(
+    label: &str,
+    name: &str,
+    context: u32,
+    thinking: ThinkingMode,
+    capabilities: &Capabilities,
+) -> Result<(), ConfigError> {
+    if let Some(default_effort) = &capabilities.default_effort {
+        if capabilities.effort_levels.is_empty() {
+            return Err(ConfigError::Validation(format!(
+                "{label} {name} default_effort requires a non-empty effort_levels"
+            )));
+        }
+        if !capabilities.effort_levels.contains(default_effort) {
+            return Err(ConfigError::Validation(format!(
+                "{label} {name} default_effort {default_effort:?} is not in effort_levels"
+            )));
+        }
+    }
+    if thinking == ThinkingMode::Never
+        && (!capabilities.effort_levels.is_empty() || capabilities.default_effort.is_some())
+    {
+        return Err(ConfigError::Validation(format!(
+            "{label} {name} must not set effort fields when thinking is never"
+        )));
+    }
+    if let Some(max_output) = capabilities.max_output
+        && max_output > context
+    {
+        return Err(ConfigError::Validation(format!(
+            "{label} {name} max_output {max_output} exceeds context {context}"
+        )));
+    }
+    Ok(())
+}
+
 /// Reject chat-only fields on a non-chat model kind.
 ///
-/// `thinking` is chat-only on every model type; `extra` carries each model
-/// type's remaining chat-only fields as `(field, is_set)` pairs. `context`
-/// applies to every kind and is never rejected here. A chat model carries
-/// the default kind and passes unconditionally.
+/// `thinking` and the capability effort knobs (`effort_levels`,
+/// `default_effort`, `adaptive_thinking`) are chat-only on every model type;
+/// `extra` carries each model type's remaining chat-only fields as `(field,
+/// is_set)` pairs. `context` applies to every kind and is never rejected
+/// here. A chat model carries the default kind and passes unconditionally.
 fn validate_kind_scope(
     label: &str,
     name: &str,
     kind: ModelKind,
     thinking: ThinkingMode,
+    capabilities: &Capabilities,
     extra: &[(&str, bool)],
 ) -> Result<(), ConfigError> {
     if kind == ModelKind::Chat {
@@ -459,8 +518,15 @@ fn validate_kind_scope(
             "{kind} {label} {name} must not set thinking (chat-only)"
         )));
     }
-    for (field, is_set) in extra {
-        if *is_set {
+    for (field, is_set) in [
+        ("effort_levels", !capabilities.effort_levels.is_empty()),
+        ("default_effort", capabilities.default_effort.is_some()),
+        ("adaptive_thinking", capabilities.adaptive_thinking),
+    ]
+    .into_iter()
+    .chain(extra.iter().copied())
+    {
+        if is_set {
             return Err(ConfigError::Validation(format!(
                 "{kind} {label} {name} must not set {field} (chat-only)"
             )));

@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use promptforge_gateway_config::{Config, ConfigError, ModelKind, Protocol, ThinkingMode};
+use promptforge_gateway_config::{
+    Capabilities, Config, ConfigError, ModelKind, Protocol, ThinkingMode,
+};
 
 use crate::error::GatewayError;
 use crate::queue::DominionQueue;
@@ -44,6 +46,8 @@ pub(crate) struct Model {
     pub context: u32,
     /// Whether thinking tokens are never, always, or switchably available.
     pub thinking: ThinkingMode,
+    /// Capability metadata advertised on the catalog.
+    pub capabilities: Capabilities,
     /// The tool-calling dialect used by this model (e.g. `"openai"`, `"gemma3_tool_code"`).
     pub tool_dialect: String,
     /// Whether tool calls are handled natively or emulated (`"native"`, `"emulated"`).
@@ -183,6 +187,7 @@ impl Routing {
                 description: model.description().to_owned(),
                 context: model.context(),
                 thinking: model.thinking(),
+                capabilities: model.capabilities().clone(),
                 tool_dialect: "openai".to_owned(),
                 tools_mode: "native".to_owned(),
                 upstream_name: model.upstream().to_owned(),
@@ -264,6 +269,7 @@ mod tests {
             description: "d".to_owned(),
             context: 8192,
             thinking: ThinkingMode::Never,
+            capabilities: Capabilities::default(),
             tool_dialect: "openai".to_owned(),
             tools_mode: "native".to_owned(),
             upstream_name: "u".to_owned(),

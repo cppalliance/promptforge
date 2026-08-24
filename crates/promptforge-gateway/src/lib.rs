@@ -346,6 +346,7 @@ async fn list_models(
             description: model.description.clone(),
             context: model.context,
             thinking: model.thinking,
+            capabilities: model.capabilities.clone(),
             tool_dialect: model.tool_dialect.clone(),
             tools_mode: model.tools_mode.clone(),
         })

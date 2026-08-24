@@ -363,6 +363,117 @@ endpoints = ["fake"]
 }
 
 #[tokio::test]
+async fn models_catalog_includes_capabilities() {
+    let backend = fake_backend().await;
+    let toml = format!(
+        r#"
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+
+[[model]]
+name = "chat-model"
+description = "a chat model"
+context = 8192
+thinking = "switchable"
+upstream = "backend-model"
+endpoints = ["fake"]
+max_output = 4096
+default_temperature = 0.7
+images = true
+parallel_tool_calls = true
+effort_levels = ["low", "high"]
+default_effort = "low"
+adaptive_thinking = true
+"#
+    );
+    let config = Config::from_toml_str(&toml).unwrap();
+    let gateway = Gateway::from_config(&config, ProfilesContext::default()).unwrap();
+    let gateway = TestServer::start(gateway).await;
+
+    let response = send_within(
+        reqwest::Client::new()
+            .get(format!("http://{}/v1/models", gateway.addr))
+            .bearer_auth("test-token"),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 200);
+
+    let body = json_within(response).await;
+    let data = body.get("data").and_then(Value::as_array).unwrap();
+    assert_eq!(data.len(), 1);
+    let entry = &data[0];
+    assert_eq!(entry.get("max_output").and_then(Value::as_u64), Some(4096));
+    assert_eq!(
+        entry.get("default_temperature").and_then(Value::as_f64),
+        Some(0.7)
+    );
+    assert_eq!(entry.get("images").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        entry.get("parallel_tool_calls").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        entry.get("effort_levels").and_then(Value::as_array),
+        Some(&vec![
+            Value::String("low".to_owned()),
+            Value::String("high".to_owned())
+        ])
+    );
+    assert_eq!(
+        entry.get("default_effort").and_then(Value::as_str),
+        Some("low")
+    );
+    assert_eq!(
+        entry.get("adaptive_thinking").and_then(Value::as_bool),
+        Some(true)
+    );
+    gateway.shutdown().await;
+}
+
+#[tokio::test]
+async fn models_catalog_omits_unset_optional_capabilities() {
+    let backend = fake_backend().await;
+    let gateway = gateway_for(backend).await;
+
+    let response = send_within(
+        reqwest::Client::new()
+            .get(format!("http://{}/v1/models", gateway.addr))
+            .bearer_auth("test-token"),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 200);
+
+    let body = json_within(response).await;
+    let data = body.get("data").and_then(Value::as_array).unwrap();
+    let entry = data[0].as_object().unwrap();
+    // Absent options never serialize as null; the flags default to false.
+    assert!(!entry.contains_key("max_output"));
+    assert!(!entry.contains_key("default_temperature"));
+    assert!(!entry.contains_key("default_effort"));
+    assert_eq!(entry.get("images").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+        entry.get("parallel_tool_calls").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        entry.get("adaptive_thinking").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        entry.get("effort_levels").and_then(Value::as_array),
+        Some(&vec![])
+    );
+    gateway.shutdown().await;
+}
+
+#[tokio::test]
 async fn models_catalog_wrong_token_is_401() {
     let backend = fake_backend().await;
     let gateway = gateway_for(backend).await;

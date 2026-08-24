@@ -55,8 +55,15 @@ At boot the process environment is populated from at most two env files: the pro
 | `endpoints` | yes | - | Endpoint ids (first is used) |
 | `thinking` | no | `never` | `never`, `always`, or `switchable`; chat kind only |
 | `default_max_tokens` | no | - | Parsed, not yet consumed; chat kind only |
+| `max_output` | no | - | Max output tokens per completion; must not exceed `context` |
+| `default_temperature` | no | - | Sampling temperature applied when the caller omits one |
+| `images` | no | `false` | Whether the model accepts image inputs |
+| `parallel_tool_calls` | no | `false` | Whether the model can emit parallel tool calls |
+| `effort_levels` | no | - | Reasoning-effort levels the model accepts; chat kind only, requires `thinking` other than `never` |
+| `default_effort` | no | - | Effort level applied when the caller omits one; must name a listed `effort_levels` entry; chat kind only |
+| `adaptive_thinking` | no | `false` | Whether the model adaptively chooses how much to think per request; chat kind only |
 
-`embedding` and `classifier` models reject chat-only fields at load: `thinking` and `default_max_tokens` are chat-only, while `context` applies to every kind. The catalog entry carries the kind so clients can filter before building a request.
+`embedding` and `classifier` models reject chat-only fields at load: `thinking`, `default_max_tokens`, `effort_levels`, `default_effort`, and `adaptive_thinking` are chat-only, while `context` applies to every kind. The catalog entry carries the kind so clients can filter before building a request. The effort knobs (`effort_levels`, `default_effort`) are also rejected when `thinking = "never"`, and `max_output` must not exceed `context`.
 
 ### Endpoint fields
 
@@ -100,7 +107,13 @@ Clients discover available models by calling `GET /v1/models` with a bearer toke
       "kind": "chat",
       "description": "Anthropic's best reasoning model",
       "context": 200000,
-      "thinking": "never",
+      "thinking": "switchable",
+      "max_output": 64000,
+      "images": true,
+      "parallel_tool_calls": true,
+      "effort_levels": ["low", "high"],
+      "default_effort": "low",
+      "adaptive_thinking": false,
       "tool_dialect": "openai",
       "tools_mode": "native"
     }
@@ -108,7 +121,7 @@ Clients discover available models by calling `GET /v1/models` with a bearer toke
 }
 ```
 
-Each entry includes the model's kind, context window, thinking mode, and tool-calling dialect so clients can make binding decisions before sending a request.
+Each entry includes the model's kind, context window, thinking mode, capability metadata, and tool-calling dialect so clients can make binding decisions before sending a request. The flags (`images`, `parallel_tool_calls`, `adaptive_thinking`) and `effort_levels` are always present; the optional knobs (`max_output`, `default_temperature`, `default_effort`) appear only when configured.
 
 A chat completion request names a model and provides messages:
 
@@ -485,8 +498,15 @@ Each local model becomes a normal catalog entry. Clients reach it through the sa
 | `dominion` | no | - | Local dominion id for a shared limit |
 | `parallel` | no | 1 | Max concurrent inferences (`--parallel`; the queue limit when no dominion is bound) |
 | `vram_gb` | no | - | VRAM footprint estimate in GiB |
+| `max_output` | no | - | Max output tokens per completion; must not exceed `context` |
+| `default_temperature` | no | - | Sampling temperature applied when the caller omits one |
+| `images` | no | `false` | Whether the model accepts image inputs |
+| `parallel_tool_calls` | no | `false` | Whether the model can emit parallel tool calls |
+| `effort_levels` | no | - | Reasoning-effort levels the model accepts; chat kind only, requires `thinking` other than `never` |
+| `default_effort` | no | - | Effort level applied when the caller omits one; must name a listed `effort_levels` entry; chat kind only |
+| `adaptive_thinking` | no | `false` | Whether the model adaptively chooses how much to think per request; chat kind only |
 
-A local model with `kind = "embedding"` or `kind = "classifier"` rejects the chat-only fields `thinking` and `chat_template_file` at load; `context` and the launch knobs (`gpu_layers`, `flash_attention`, cache types, `parallel`, `vram_gb`) apply to every kind.
+A local model with `kind = "embedding"` or `kind = "classifier"` rejects the chat-only fields `thinking`, `chat_template_file`, `effort_levels`, `default_effort`, and `adaptive_thinking` at load; `context` and the launch knobs (`gpu_layers`, `flash_attention`, cache types, `parallel`, `vram_gb`) apply to every kind. The effort knobs are also rejected when `thinking = "never"`, and `max_output` must not exceed `context`.
 
 ### Local embeddings
 

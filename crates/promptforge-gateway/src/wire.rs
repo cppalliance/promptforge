@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use promptforge_gateway_config::{ModelKind, ThinkingMode};
+use promptforge_gateway_config::{Capabilities, ModelKind, ThinkingMode};
 
 /// An incoming chat completions request.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -469,6 +469,10 @@ pub(crate) struct ModelInfo {
     pub context: u32,
     /// Whether thinking tokens are never, always, or switchably available.
     pub thinking: ThinkingMode,
+    /// Capability metadata (`max_output`, `images`, effort levels, and so
+    /// on), flattened into the catalog entry.
+    #[serde(flatten)]
+    pub capabilities: Capabilities,
     /// The tool-calling dialect used by this model (`"openai"`, `"gemma3_tool_code"`).
     pub tool_dialect: String,
     /// Whether tool calls are handled natively or emulated (`"native"`, `"emulated"`).
@@ -1023,6 +1027,7 @@ mod tests {
             description: "d".to_owned(),
             context: 8192,
             thinking: ThinkingMode::Never,
+            capabilities: Capabilities::default(),
             tool_dialect: "openai".to_owned(),
             tools_mode: "native".to_owned(),
         };
