@@ -54,7 +54,7 @@ impl AppState {
         status.info(
             "Connecting to gateway",
             format!("base URL {}", config.gateway.base_url),
-            Activity::Gateway,
+            Activity::General,
         );
         let gateway = GatewayClient::new(&config.gateway.base_url, &config.gateway.api_key)
             .map_err(AppError::Gateway)?;
@@ -145,7 +145,7 @@ pub(crate) fn startup_engine(config: &VoiceConfig, status: &StatusBus) -> Option
     status.info(
         "Loading whisper model",
         "the interim transcription model",
-        Activity::Voice,
+        Activity::General,
     );
     match VoiceEngine::new(config) {
         Ok(engine) => Some(engine),
@@ -172,7 +172,7 @@ fn degrade(
             status.info(
                 "Voice models not downloaded",
                 format!("{error}; the gateway cache provides them once connected"),
-                Activity::Voice,
+                Activity::General,
             );
             return None;
         }
@@ -187,20 +187,24 @@ fn degrade(
                     status.info(
                         "Voice final pass unavailable",
                         format!("{error}; takes close with the interim model"),
-                        Activity::Voice,
+                        Activity::General,
                     );
                     Some(engine)
                 }
                 Err(interim_error) => {
                     tracing::warn!(error = %interim_error, "voice disabled at startup");
-                    status.error("Voice disabled", interim_error.to_string(), Activity::Voice);
+                    status.error(
+                        "Voice disabled",
+                        interim_error.to_string(),
+                        Activity::General,
+                    );
                     None
                 }
             };
         }
     }
     tracing::warn!(%error, "voice disabled at startup");
-    status.error("Voice disabled", error.to_string(), Activity::Voice);
+    status.error("Voice disabled", error.to_string(), Activity::General);
     None
 }
 
@@ -291,7 +295,7 @@ async fn models(State(state): State<AppState>) -> Response {
     status.info(
         "Loading models...",
         "fetching the gateway model catalog",
-        Activity::Gateway,
+        Activity::General,
     );
     let result = state.gateway.list_models().await;
     report_gateway_outcome(&status, &result, "GET /v1/models");
@@ -310,9 +314,9 @@ fn report_gateway_outcome(
         Ok(upstream) => status.error(
             format!("Gateway error: {}", upstream.status),
             format!("{route} answered a non-success status"),
-            Activity::Gateway,
+            Activity::General,
         ),
-        Err(error) => status.error("Connection lost", error.to_string(), Activity::Gateway),
+        Err(error) => status.error("Connection lost", error.to_string(), Activity::General),
     }
 }
 
@@ -347,12 +351,12 @@ async fn chat(State(state): State<AppState>, body: String) -> Response {
     status.info(
         "Submitting request...",
         "a buffered chat completion",
-        Activity::Gateway,
+        Activity::General,
     );
     status.info(
         "Waiting for response...",
         "the gateway has the request",
-        Activity::Gateway,
+        Activity::General,
     );
     let started = Instant::now();
     let result = state.gateway.chat_completion(&request).await;
@@ -956,7 +960,7 @@ mod tests {
         let verdict = degradation(&mut rx);
         assert_eq!(verdict.label, "Voice models not downloaded");
         assert_eq!(verdict.severity, Severity::Info);
-        assert_eq!(verdict.activity, Activity::Voice);
+        assert_eq!(verdict.activity, Activity::General);
     }
 
     #[test]

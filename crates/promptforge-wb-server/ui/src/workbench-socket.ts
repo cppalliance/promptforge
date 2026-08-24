@@ -11,7 +11,7 @@ export interface StatusFrame {
   label: string;
   description: string;
   severity: "info" | "debug" | "error";
-  activity: "general" | "gateway" | "voice";
+  activity: "general" | "thinking" | "generating";
   progress: { current: number; total: number } | null;
 }
 
@@ -53,13 +53,21 @@ function defaultUrl(): string {
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 }
 
+// Reconnect backoff: the first retry waits a second, each failure doubles
+// it, and the cap keeps a down server from pushing the wait past 30 s.
+const RECONNECT_INITIAL_MS = 1000;
+const RECONNECT_MAX_MS = 30_000;
+
 export class WorkbenchSocket {
   private socket: WebSocket | null = null;
   private opening: { socket: WebSocket; promise: Promise<void> } | null = null;
   private nextId = 1;
+  private reconnectDelayMs = RECONNECT_INITIAL_MS;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly pending = new Map<number, PendingChat>();
   private readonly statusHandlers = new Set<(frame: StatusFrame) => void>();
   private readonly modelsHandlers = new Set<(models: CatalogModel[]) => void>();
+  private readonly disconnectHandlers = new Set<() => void>();
 
   constructor(private readonly url: string = defaultUrl()) {}
 
@@ -78,6 +86,11 @@ export class WorkbenchSocket {
   /** Registers a handler for pushed model catalogs. */
   onModels(handler: (models: CatalogModel[]) => void): void {
     this.modelsHandlers.add(handler);
+  }
+
+  /** Registers a handler fired when the socket disconnects. */
+  onDisconnect(handler: () => void): void {
+    this.disconnectHandlers.add(handler);
   }
 
   /**
@@ -143,6 +156,11 @@ export class WorkbenchSocket {
     entry.promise = new Promise<void>((resolve, reject) => {
       socket.onopen = () => {
         if (this.opening === entry) this.opening = null;
+        if (this.reconnectTimer !== null) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+        this.reconnectDelayMs = RECONNECT_INITIAL_MS;
         resolve();
       };
       // A failure while opening rejects the waiters; a failure on an
@@ -159,14 +177,39 @@ export class WorkbenchSocket {
       if (this.socket === socket) this.socket = null;
       if (this.opening === entry) this.opening = null;
       this.settleAll();
+      for (const handler of this.disconnectHandlers) {
+        handler();
+      }
+      this.scheduleReconnect();
     };
     return entry.promise;
+  }
+
+  /**
+   * Schedules the next reconnect attempt with exponential backoff. One
+   * timer at a time: a close while an attempt is already waiting does not
+   * stack a second.
+   */
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer !== null) {
+      return;
+    }
+    const delay = this.reconnectDelayMs;
+    this.reconnectDelayMs = Math.min(delay * 2, RECONNECT_MAX_MS);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      // A failed attempt ends in onclose, which schedules the next one.
+      void this.ensureOpen().catch(() => {});
+    }, delay);
   }
 
   /** Closes the current socket and opens a fresh one. */
   private reopen(): void {
     const socket = this.socket;
     if (socket) {
+      // An intentional recycle, not a dropout: skip the disconnect
+      // handlers and the reconnect backoff for this close.
+      socket.onclose = null;
       socket.close();
     }
     // Same contract as `connect`: a failed reopen is retried by the next

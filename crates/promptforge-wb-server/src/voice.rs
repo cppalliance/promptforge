@@ -89,7 +89,7 @@ fn spawn_interim_loop(
             status.debug(
                 "Transcribing...",
                 "an interim pass over the trailing window",
-                Activity::Voice,
+                Activity::General,
             );
             match engine.transcribe(window).await {
                 // `transcribe` returns trimmed text, so empty here means a
@@ -104,7 +104,7 @@ fn spawn_interim_loop(
                 Err(error) => {
                     // A failed interim pass is transient - the next tick
                     // retries - so it pulses at Debug rather than Error.
-                    status.debug("Transcription failed", error.to_string(), Activity::Voice);
+                    status.debug("Transcription failed", error.to_string(), Activity::General);
                     tracing::warn!(session, %error, "interim transcription failed");
                 }
             }
@@ -132,7 +132,7 @@ async fn final_transcript(
     match engine.transcribe(window).await {
         Ok(text) => text,
         Err(error) => {
-            status.error("Transcription failed", error.to_string(), Activity::Voice);
+            status.error("Transcription failed", error.to_string(), Activity::General);
             tracing::warn!(session, %error, "final transcription failed");
             String::new()
         }
@@ -160,7 +160,7 @@ async fn stop_transcript(
     match engine.final_finish(tail).await {
         Some(Ok(text)) => text,
         Some(Err(error)) => {
-            status.error("Transcription failed", error.to_string(), Activity::Voice);
+            status.error("Transcription failed", error.to_string(), Activity::General);
             tracing::warn!(session, %error, "final-pass transcription failed; falling back to the interim model");
             final_transcript(session, Some(engine), buffer, status).await
         }
@@ -204,7 +204,7 @@ fn begin_take(
     status.info(
         "Listening...",
         "a push-to-talk take is recording",
-        Activity::Voice,
+        Activity::General,
     );
     tracing::info!(session, "voice capture started");
 }
@@ -268,7 +268,7 @@ async fn run_session(
                     status.debug(
                         "Listening...",
                         "microphone audio is arriving",
-                        Activity::Voice,
+                        Activity::General,
                     );
                 }
                 // Cut any speech segments the new audio completed and hand
@@ -305,7 +305,7 @@ async fn run_session(
                     status.info(
                         "Finalizing transcript...",
                         "the final pass over the take",
-                        Activity::Voice,
+                        Activity::General,
                     );
                     let text =
                         stop_transcript(session, engine.as_deref(), &buffer, &segmenter, &status)
@@ -328,6 +328,7 @@ async fn run_session(
         }
     }
     stop_interim(&mut interim);
+    status.idle();
     drop(out_tx);
     writer.abort();
     tracing::info!(session, frames, "voice session closed");

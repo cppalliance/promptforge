@@ -37,6 +37,7 @@
   --danger: #b0606a; /* recording background, non-text danger accents */
   --danger-text: #cf7f88; /* danger lightened past 4.5:1 for text on --bg */
   --on-danger: #ffffff; /* icon or text on a --danger fill (recording mic) */
+  --hover-glow: var(--accent, #5b9cf5); /* ring and bloom on hover */
 
   /* Type */
   --font-prose: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -70,8 +71,8 @@
 
   /* Status bar activity LED */
   --led-size: 10px;
-  --led-green: #4caf7d; /* gateway activity */
-  --led-amber: #d9a03f; /* voice activity */
+  --led-green: #4caf7d; /* generating activity */
+  --led-amber: #d9a03f; /* thinking activity */
   --led-off: rgba(255, 255, 255, 0.08); /* the unlit lens */
   --led-core: #ffffff; /* hot center of the lit gradient */
   --led-glow-radius: 6px; /* base blur of the layered bloom */
@@ -79,6 +80,10 @@
   --led-fade-in-ms: 60ms; /* fast ease-in when a pulse lights the LED */
   --led-lens-highlight: rgba(255, 255, 255, 0.18);
   --led-lens-shadow: rgba(0, 0, 0, 0.45);
+
+  /* Status bar REC badge */
+  --rec-idle: #800000;
+  --rec-active: #ff0000;
 
   /* Scrollbars (applied globally below) */
   --scrollbar-width: 8px; /* thin; also the thumb's rounding diameter */
@@ -149,6 +154,17 @@
   background-color: var(--bg-composer, #0d0e12);
 }
 
+/* Hover glow: icon buttons and the picker trade murm-ui's background wash
+   for a 1px accent ring plus a soft bloom. */
+.mur-form-icon-btn:hover:not(:disabled),
+.sidebar__picker:hover,
+.voice-mic:hover {
+  background-color: transparent;
+  box-shadow:
+    0 0 0 1px var(--hover-glow, #5b9cf5),
+    0 0 4px color-mix(in oklab, var(--hover-glow, #5b9cf5) 40%, transparent);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -199,9 +215,19 @@ body {
   line-height: 1.55;
 }
 
+/* The window is one column: the shell fills it above the full-width
+   status bar. */
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  margin: 0;
+}
+
 .shell {
   display: flex;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
 }
 
 .sidebar {
@@ -264,8 +290,7 @@ body {
   color: var(--danger-text, #cf7f88);
 }
 
-/* The dockview column beside the sidebar: the dock fills it, the status bar
-   sits below. */
+/* The dockview column beside the sidebar: the dock fills it. */
 .dock-column {
   flex: 1;
   display: flex;
@@ -287,13 +312,15 @@ body {
   height: 100%;
 }
 
-/* The status bar: a permanent footer below the dock. The left text carries
-   the observer's current label; the right slot holds the progress bar or
-   the activity LED (never both - the slot's children are mutually
-   exclusive, driven by the hidden attribute). */
+/* The status bar: a permanent full-width footer below the shell. The left
+   text carries the observer's current label; the right group holds the REC
+   badge and the slot, which holds the progress bar or the activity LED
+   (never both - the slot's children are mutually exclusive, driven by the
+   hidden attribute). min-height rather than height so a descender never
+   clips against a fixed box. */
 .status-bar {
   flex: none;
-  height: var(--status-bar-height, 24px);
+  min-height: var(--status-bar-height, 24px);
   display: flex;
   align-items: center;
   gap: var(--status-bar-gap, 12px);
@@ -301,7 +328,7 @@ body {
   background: var(--status-bar-bg, #14161c);
   border-top: 1px solid var(--border, #262a33);
   font-size: 12px;
-  line-height: 1;
+  line-height: 1.4;
   color: var(--status-bar-text, #8b90a0);
   user-select: none;
 }
@@ -316,6 +343,32 @@ body {
 
 .status-bar__text--error {
   color: var(--status-bar-text-error, #cf7f88);
+}
+
+.status-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+/* The REC badge: always visible, a dim dark-red outline while idle and a
+   lit bright red while the mic records. */
+.status-bar__rec {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  padding: 1px 4px;
+  border: 1px solid var(--rec-idle, #800000);
+  border-radius: 2px;
+  color: var(--rec-idle, #800000);
+  transition: color 0.1s, border-color 0.1s, box-shadow 0.15s;
+}
+
+.status-bar__rec--active {
+  color: var(--rec-active, #ff0000);
+  border-color: var(--rec-active, #ff0000);
+  box-shadow: 0 0 1px var(--rec-active, #ff0000);
 }
 
 .status-bar__slot {
@@ -357,10 +410,10 @@ body {
 
 /* The activity LED: a small circle standing in the slot whenever no frame
    carries progress. Idle is an unlit lens - a dark translucent disc with a
-   subtle inner highlight. A pulse adds the --gateway or --voice modifier: a
-   bright radial-gradient core with a layered box-shadow bloom. The idle
-   rule's transition is the slow ease-out decay; the modifier's own
-   transition makes the fade-in fast. */
+   subtle inner highlight. A pulse adds the --generating or --thinking
+   modifier: a bright radial-gradient core with a layered box-shadow bloom.
+   The idle rule's transition is the slow ease-out decay; the modifier's
+   own transition makes the fade-in fast. */
 .status-bar__led {
   width: var(--led-size, 10px);
   height: var(--led-size, 10px);
@@ -374,14 +427,14 @@ body {
     box-shadow var(--led-pulse-ms, 250ms) ease-out;
 }
 
-.status-bar__led--gateway,
-.status-bar__led--voice {
+.status-bar__led--generating,
+.status-bar__led--thinking {
   transition:
     background var(--led-fade-in-ms, 60ms) ease-in,
     box-shadow var(--led-fade-in-ms, 60ms) ease-in;
 }
 
-.status-bar__led--gateway {
+.status-bar__led--generating {
   background: radial-gradient(circle, var(--led-core, #ffffff) 0%, var(--led-green, #4caf7d) 60%);
   box-shadow:
     0 0 calc(var(--led-glow-radius, 6px) / 2) var(--led-green, #4caf7d),
@@ -389,7 +442,7 @@ body {
     0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, var(--led-green, #4caf7d) 55%, transparent);
 }
 
-.status-bar__led--voice {
+.status-bar__led--thinking {
   background: radial-gradient(circle, var(--led-core, #ffffff) 0%, var(--led-amber, #d9a03f) 60%);
   box-shadow:
     0 0 calc(var(--led-glow-radius, 6px) / 2) var(--led-amber, #d9a03f),
@@ -437,19 +490,17 @@ body {
   flex: none;
 }
 
-.voice-mic--recording {
+/* Recording mic: a steady danger fill with a matching ring and bloom,
+   held on hover too so the state never flickers under the pointer. The
+   hover form needs :not(:disabled) to match the glow rule's specificity -
+   the mic also carries mur-form-icon-btn, whose hover would otherwise
+   outrank this and strip the fill. */
+.voice-mic--recording,
+.voice-mic--recording:hover:not(:disabled) {
   color: var(--on-danger, #ffffff);
   background: var(--danger, #b0606a);
   border-radius: 50%;
-  animation: mic-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes mic-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in oklab, var(--danger, #b0606a) 55%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 0 6px color-mix(in oklab, var(--danger, #b0606a) 0%, transparent);
-  }
+  box-shadow:
+    0 0 0 1px var(--danger, #b0606a),
+    0 0 6px color-mix(in oklab, var(--danger, #b0606a) 55%, transparent);
 }

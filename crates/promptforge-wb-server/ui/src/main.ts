@@ -30,6 +30,9 @@ if (!statusBarRoot) {
 const statusBar = new StatusBar(statusBarRoot);
 const workbenchSocket = new WorkbenchSocket();
 workbenchSocket.onStatus((frame) => statusBar.render(frame));
+// A dropped socket means every in-flight status is stale; the bar returns
+// to its reconnecting state until the observer speaks again.
+workbenchSocket.onDisconnect(() => statusBar.reset());
 workbenchSocket.connect();
 
 function selectedModel(): string {
@@ -65,7 +68,7 @@ const voicePlugin: ChatPlugin = {
     formContainer.insertBefore(interim, form);
     formContainer.appendChild(status);
 
-    setupVoice({ mic, interim, status, input });
+    setupVoice({ mic, interim, status, input }, statusBar);
   },
   // With no model selected there is nothing to send to; the old UI disabled
   // the send button in the same situation.

@@ -164,7 +164,7 @@ async fn provision_once(
     status.info(
         "Voice ready",
         "the whisper models are loaded; push-to-talk transcription is available",
-        Activity::Voice,
+        Activity::General,
     );
     Ok(())
 }
@@ -208,7 +208,7 @@ async fn resolve_final(
                     "{} is missing and no final_source is configured; takes close with the interim model",
                     config.final_model.display()
                 ),
-                Activity::Voice,
+                Activity::General,
             );
         }
         return Ok(None);
@@ -275,14 +275,14 @@ async fn cache_fetch(
                             current: bytes,
                             total: total.unwrap_or(0),
                         },
-                        Activity::Voice,
+                        Activity::General,
                     );
                 }
                 CacheEvent::Ready { path } => {
                     status.info(
                         "Download complete",
                         format!("{filename} is cached at {}", path.display()),
-                        Activity::Voice,
+                        Activity::General,
                     );
                     return Ok(path);
                 }
@@ -300,12 +300,12 @@ fn report_failure(status: &StatusBus, error: &ProvisionError) {
         ProvisionError::Transport(_) => status.info(
             "Voice models wait on the gateway",
             format!("{error}; provisioning retries when the gateway reconnects"),
-            Activity::Voice,
+            Activity::General,
         ),
         _ => status.error(
             "Voice provisioning failed",
             format!("{error}; voice stays disabled; a gateway reconnect retries"),
-            Activity::Voice,
+            Activity::General,
         ),
     }
 }
@@ -506,7 +506,7 @@ mod tests {
         let update = next_update(&mut rx).await;
         assert_eq!(update.label, "Voice ready");
         assert_eq!(update.severity, Severity::Info);
-        assert_eq!(update.activity, Activity::Voice);
+        assert_eq!(update.activity, Activity::General);
         provision.shutdown().await;
     }
 
@@ -830,7 +830,7 @@ mod tests {
             serde_json::json!({"current": 12, "total": 12})
         );
         assert_eq!(frames[0]["severity"], "info");
-        assert_eq!(frames[0]["activity"], "voice");
+        assert_eq!(frames[0]["activity"], "general");
         assert!(
             frames[2]["progress"].is_null(),
             "the terminal download frame clears the progress bar"
