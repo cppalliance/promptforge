@@ -178,10 +178,7 @@ async fn chat_completions(
         .await?;
     response
         .validate()
-        .map_err(|reason| GatewayError::UpstreamStatus {
-            status: 502,
-            body: reason.to_owned(),
-        })?;
+        .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
     Ok(Json(response))
 }
 
