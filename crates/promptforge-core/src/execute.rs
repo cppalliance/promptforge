@@ -47,14 +47,14 @@
 //!
 //! The orchestration boundary ([`run`]) lives here; the rest is split into
 //! focused private children: `error` (the public [`RunError`]), `config`
-//! (`RunConfig`/`RunLimits`), `context` (the ambient [`RunContext`] run
+//! (`RunConfig`/`RunLimits`), `context` (the ambient `RunContext` run
 //! state), `gateway` (client acquisition and [`ResolutionContext`]),
 //! `scope` (tool-scope validation and schema/dispatch preparation),
 //! `tools` (the
 //! nested-inference hook), `tool_loop` (the model tool loop), `h1` (the
 //! live H1 pass), `section_vm` (the section VM setup half shared by the
 //! walk and the fanout arm), `section_context` (the per-section
-//! [`SectionContext`](section_context::SectionContext) frame the walk's
+//! `SectionContext` frame the walk's
 //! driver constructs, runs, and tears down), `block_walk` (the
 //! ordered block loop - the
 //! engine's walk half, shared by the live H1 pass, the walk, and the
