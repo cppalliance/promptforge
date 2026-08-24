@@ -28,7 +28,7 @@ pub(crate) use error::LocalError;
 
 use artifacts::ArtifactStore;
 use dialect::resolve_local_dialect;
-use server::{LaunchOptions, ServerGuard};
+use server::{LaunchOptions, ServeMode, ServerGuard};
 use upstream::LocalUpstream;
 
 /// Running local `llama-server` children and the models they back.
@@ -233,7 +233,12 @@ fn launch_options(model: &LocalModelConfig, parallel: u32) -> LaunchOptions {
         cache_type_v: model.cache_type_v().to_owned(),
         think: !matches!(model.thinking(), ThinkingMode::Never),
         chat_template_file: model.chat_template_file().map(PathBuf::from),
-        embeddings: matches!(model.kind(), ModelKind::Embedding),
+        serve_mode: match model.kind() {
+            ModelKind::Embedding => ServeMode::Embeddings,
+            ModelKind::Classifier => ServeMode::Reranking,
+            // Chat (and any kind added after this mapping) launches with no flag.
+            _ => ServeMode::Chat,
+        },
     }
 }
 
@@ -528,7 +533,42 @@ context = 4096
         .expect("config");
         let embed = &config.local_models()[0];
         let chat = &config.local_models()[1];
-        assert!(launch_options(embed, 1).embeddings);
-        assert!(!launch_options(chat, 1).embeddings);
+        assert_eq!(launch_options(embed, 1).serve_mode, ServeMode::Embeddings);
+        assert_eq!(launch_options(chat, 1).serve_mode, ServeMode::Chat);
+    }
+
+    #[test]
+    fn classifier_kind_sets_the_reranking_launch_flag() {
+        // `kind = "classifier"` maps to the child's `--reranking` flag
+        // (launch_options carries it; the server tests prove it renders into
+        // the argv); a chat child launches without it.
+        let config = Config::from_toml_str(
+            r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[local_model]]
+name = "rerank"
+kind = "classifier"
+description = "a local classifier model"
+source = "/models/rerank.gguf"
+context = 512
+
+[[local_model]]
+name = "chatty"
+description = "a local chat model"
+source = "/models/chat.gguf"
+context = 4096
+"#,
+        )
+        .expect("config");
+        let classifier = &config.local_models()[0];
+        let chat = &config.local_models()[1];
+        assert_eq!(
+            launch_options(classifier, 1).serve_mode,
+            ServeMode::Reranking
+        );
+        assert_eq!(launch_options(chat, 1).serve_mode, ServeMode::Chat);
     }
 }

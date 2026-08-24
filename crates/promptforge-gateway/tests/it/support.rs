@@ -29,6 +29,12 @@ pub(crate) const SCENARIO_EMBED_MODEL_URL: &str = "https://huggingface.co/Compen
 pub(crate) const SCENARIO_EMBED_MODEL_SHA256: &str =
     "ec38e8da142596baa913124ae50550de284b6916bf59577ef2f0cb9660c2f514";
 
+/// Pinned tiny jina-reranker-v1-tiny-en GGUF, used only by the ignored
+/// live-local rerank test.
+pub(crate) const SCENARIO_RERANK_MODEL_URL: &str = "https://huggingface.co/gpustack/jina-reranker-v1-tiny-en-GGUF/resolve/main/jina-reranker-v1-tiny-en-Q8_0.gguf";
+pub(crate) const SCENARIO_RERANK_MODEL_SHA256: &str =
+    "0defc1f8a1f4dd22183124a2a25a97765603e5a9e42258046c9b2c8a26d1f553";
+
 /// Per-phase timeout so a hung rendezvous fails fast instead of hanging CI.
 pub(crate) const PHASE_TIMEOUT: Duration = Duration::from_secs(10);
 

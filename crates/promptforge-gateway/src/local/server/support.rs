@@ -14,7 +14,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use super::{
-    API_KEY_REDACTION, AttemptIdentity, CAPTURE_LIMIT, LOOPBACK, LaunchOptions, Result,
+    API_KEY_REDACTION, AttemptIdentity, CAPTURE_LIMIT, LOOPBACK, LaunchOptions, Result, ServeMode,
     SpawnRequest,
 };
 use crate::http_util::MAX_JSON_BODY;
@@ -242,8 +242,10 @@ pub(super) fn server_args(
         OsString::from(options.gpu_layers.to_string()),
         OsString::from("--jinja"),
     ];
-    if options.embeddings {
-        args.push(OsString::from("--embeddings"));
+    match options.serve_mode {
+        ServeMode::Chat => {}
+        ServeMode::Embeddings => args.push(OsString::from("--embeddings")),
+        ServeMode::Reranking => args.push(OsString::from("--reranking")),
     }
     if let Some(template) = &options.chat_template_file {
         args.extend([
