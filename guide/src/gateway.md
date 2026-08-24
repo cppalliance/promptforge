@@ -437,7 +437,7 @@ gpu_layers = 99
 flash_attention = true
 ```
 
-Each local model becomes a normal catalog entry. Clients reach it through the same `POST /v1/chat/completions` as remote models - the fact that it runs locally is invisible to callers.
+Each local model becomes a normal catalog entry. Clients reach it through the same `POST /v1/chat/completions` as remote models (`POST /v1/embeddings` for `kind = "embedding"`) - the fact that it runs locally is invisible to callers.
 
 ### Configuration Fields
 
@@ -462,6 +462,20 @@ Each local model becomes a normal catalog entry. Clients reach it through the sa
 
 A local model with `kind = "embedding"` or `kind = "classifier"` rejects the chat-only fields `thinking` and `chat_template_file` at load; `context` and the launch knobs (`gpu_layers`, `flash_attention`, cache types, `parallel`, `vram_gb`) apply to every kind.
 
+### Local Embeddings
+
+A local model with `kind = "embedding"` launches its child as `llama-server --embeddings` and serves `POST /v1/embeddings` exactly like a remote embedding model. Artifact download, digest pinning, dominion binding, and child supervision (respawn of a dead child) are unchanged from a chat child.
+
+```toml
+[[local_model]]
+name = "bge-local"
+kind = "embedding"
+description = "A compact English embedding model for retrieval and similarity"
+source = "https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q8_0.gguf"
+sha256 = "ec38e8da142596baa913124ae50550de284b6916bf59577ef2f0cb9660c2f514"
+context = 512
+```
+
 ### Cache and Provisioning
 
 The cache directory defaults to `~/.promptforge` (set `[local].cache_dir` to override). Models land in `<cache>/models/`, the llama.cpp binary in `<cache>/llama.cpp/`.
@@ -472,7 +486,7 @@ When `sha256` is set, the downloaded file is verified against the digest.
 
 ### Tool-Calling Dialect Detection
 
-After a local child reports ready, the gateway queries its `/props` endpoint and resolves a tool-calling dialect through promptforge-core's `ToolDialectRegistry`. The catalog advertises the resolved `tool_dialect` (e.g. `openai`, `gemma3_tool_code`) and `tools_mode` (`native` or `emulated`). A sidecar `.md` file beside the GGUF (with frontmatter and a Jinja chat template) provides fallback evidence when `/props` omits `chat_template`; live props always win.
+After a local child reports ready, the gateway queries its `/props` endpoint and resolves a tool-calling dialect through promptforge-core's `ToolDialectRegistry`. The catalog advertises the resolved `tool_dialect` (e.g. `openai`, `gemma3_tool_code`) and `tools_mode` (`native` or `emulated`). A sidecar `.md` file beside the GGUF (with frontmatter and a Jinja chat template) provides fallback evidence when `/props` omits `chat_template`; live props always win. The probe runs for `kind = "chat"` children only: a non-chat child has no chat template to evidence a dialect, so its catalog entry carries the default `openai` dialect, same as a remote model.
 
 ### Child Supervision
 
