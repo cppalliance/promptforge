@@ -49,10 +49,24 @@ pub(crate) enum GatewayError {
     #[error("malformed request: {0}")]
     MalformedRequest(String),
 
-    /// The upstream backend could not be reached (transport-layer failure).
+    /// The upstream backend could not be reached after the request may
+    /// have left the gateway (a mid-flight read or timeout failure). The
+    /// provider may have received and billed it, so it is not safe to
+    /// retry blindly.
     #[non_exhaustive]
     #[error("upstream transport error")]
     UpstreamTransport(#[source] Box<dyn std::error::Error + Send + Sync>),
+
+    /// The connection to the upstream backend itself failed (refused,
+    /// DNS, TLS handshake): the request never left the gateway, nothing
+    /// was billed, and a retry is safe.
+    ///
+    /// Distinct from [`GatewayError::UpstreamTransport`], where the
+    /// request may have reached the provider. A timeout is never connect:
+    /// it may have reached the provider.
+    #[non_exhaustive]
+    #[error("upstream connect error")]
+    UpstreamConnect(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// The upstream returned a success status but a body that could not be
     /// decoded into the expected shape.
@@ -124,9 +138,18 @@ impl From<crate::queue::AdmitError> for GatewayError {
 
 impl GatewayError {
     /// Wrap a transport error, hiding its concrete type from the public API.
+    ///
+    /// A connect failure (`err.is_connect()`) means the request never left
+    /// the gateway and is classified [`GatewayError::UpstreamConnect`];
+    /// anything else - including every timeout, which may have reached the
+    /// provider - stays [`GatewayError::UpstreamTransport`].
     #[must_use]
     pub(crate) fn upstream_transport(source: reqwest::Error) -> GatewayError {
-        GatewayError::UpstreamTransport(Box::new(source))
+        if source.is_connect() {
+            GatewayError::UpstreamConnect(Box::new(source))
+        } else {
+            GatewayError::UpstreamTransport(Box::new(source))
+        }
     }
 
     /// Wrap a body-decode failure as a protocol error (not a transport error),
@@ -186,6 +209,9 @@ impl GatewayError {
                 "server_error",
                 "upstream_transport",
             ),
+            GatewayError::UpstreamConnect(_) => {
+                (StatusCode::BAD_GATEWAY, "server_error", "upstream_connect")
+            }
             GatewayError::UpstreamProtocol(_) => {
                 (StatusCode::BAD_GATEWAY, "server_error", "upstream_protocol")
             }
@@ -294,6 +320,18 @@ mod tests {
                     StatusCode::SERVICE_UNAVAILABLE,
                     "server_error",
                     "queue_full",
+                ),
+            ),
+            (
+                GatewayError::UpstreamConnect(Box::new(std::io::Error::other("refused"))),
+                (StatusCode::BAD_GATEWAY, "server_error", "upstream_connect"),
+            ),
+            (
+                GatewayError::UpstreamTransport(Box::new(std::io::Error::other("reset"))),
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "server_error",
+                    "upstream_transport",
                 ),
             ),
             (

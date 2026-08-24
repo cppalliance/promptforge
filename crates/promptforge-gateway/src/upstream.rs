@@ -46,8 +46,10 @@ pub(crate) trait Upstream: Send + Sync {
     /// caller's model name, and return the response.
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
-    /// [`GatewayError::UpstreamStatus`] on a non-success backend status.
+    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
+    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
+    /// failure, and [`GatewayError::UpstreamStatus`] on a non-success backend
+    /// status.
     async fn send(
         &self,
         req: ChatRequest,
@@ -62,10 +64,11 @@ pub(crate) trait Upstream: Send + Sync {
     /// the workload rather than fabricate a response.
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure,
-    /// [`GatewayError::UpstreamStatus`] on a non-success backend status, and
-    /// [`GatewayError::ModelUnavailable`] when the upstream cannot serve
-    /// embeddings at all.
+    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
+    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
+    /// failure, [`GatewayError::UpstreamStatus`] on a non-success backend
+    /// status, and [`GatewayError::ModelUnavailable`] when the upstream
+    /// cannot serve embeddings at all.
     async fn send_embeddings(
         &self,
         req: EmbeddingRequest,
@@ -82,10 +85,11 @@ pub(crate) trait Upstream: Send + Sync {
     /// workload rather than fabricate a response.
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure,
-    /// [`GatewayError::UpstreamStatus`] on a non-success backend status, and
-    /// [`GatewayError::ModelUnavailable`] when the upstream cannot serve
-    /// rerank at all.
+    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
+    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
+    /// failure, [`GatewayError::UpstreamStatus`] on a non-success backend
+    /// status, and [`GatewayError::ModelUnavailable`] when the upstream
+    /// cannot serve rerank at all.
     async fn send_rerank(
         &self,
         req: RerankRequest,
@@ -111,9 +115,10 @@ pub(crate) trait Upstream: Send + Sync {
     /// response.
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure
-    /// before the stream starts, [`GatewayError::UpstreamStatus`] on a
-    /// non-success backend status, and [`GatewayError::ModelUnavailable`]
+    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
+    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
+    /// failure before the stream starts, [`GatewayError::UpstreamStatus`] on
+    /// a non-success backend status, and [`GatewayError::ModelUnavailable`]
     /// when the upstream cannot stream at all.
     async fn stream(
         &self,
@@ -190,9 +195,10 @@ impl OpenAiUpstream {
     /// as the start of a chunk stream.
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
-    /// [`GatewayError::UpstreamStatus`] with a truncated body on a non-success
-    /// backend status.
+    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
+    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
+    /// failure, and [`GatewayError::UpstreamStatus`] with a truncated body on
+    /// a non-success backend status.
     async fn post(
         &self,
         client: &reqwest::Client,
@@ -231,9 +237,10 @@ impl OpenAiUpstream {
     /// and cannot trigger a spurious recovery upstream (UP-003, UP-004).
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
-    /// [`GatewayError::UpstreamStatus`] with a truncated body on a non-success
-    /// backend status.
+    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
+    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
+    /// failure, and [`GatewayError::UpstreamStatus`] with a truncated body on
+    /// a non-success backend status.
     async fn post_json(
         &self,
         path: &str,
@@ -940,9 +947,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn connect_refused_is_upstream_connect_not_transport() {
+        // A refused connection means the request never left the gateway:
+        // nothing was billed upstream and a retry is safe, so the error must
+        // classify as `upstream_connect`, distinct from a mid-flight death.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        drop(listener);
+        let upstream = OpenAiUpstream::new(&format!("http://{addr}"), Secret::new(String::new()));
+        let err = upstream
+            .send(request("m"), "u")
+            .await
+            .expect_err("connect refused must fail");
+        assert!(
+            matches!(err, GatewayError::UpstreamConnect(_)),
+            "expected UpstreamConnect, got {err:?}"
+        );
+        assert_eq!(err.envelope()["error"]["code"], "upstream_connect");
+    }
+
+    #[tokio::test]
     async fn send_times_out_on_a_stalled_server() {
         // UP-008: a backend that accepts and then stalls must fail on the
         // request deadline as a transport error, never hang the caller.
+        // A timeout is NEVER connect: the request may have reached the
+        // provider, so it stays `upstream_transport`.
         let (base, handle) = serve_stalled();
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_millis(300))
@@ -957,6 +986,7 @@ mod tests {
             matches!(err, GatewayError::UpstreamTransport(_)),
             "expected UpstreamTransport, got {err:?}"
         );
+        assert_eq!(err.envelope()["error"]["code"], "upstream_transport");
         let _ = handle.join();
     }
 

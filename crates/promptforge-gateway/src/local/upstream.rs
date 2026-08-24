@@ -195,9 +195,10 @@ impl LocalUpstream {
     /// start of a chunk stream.
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
-    /// [`GatewayError::UpstreamStatus`] with a truncated body on a non-success
-    /// child status.
+    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
+    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
+    /// failure, and [`GatewayError::UpstreamStatus`] with a truncated body on
+    /// a non-success child status.
     async fn post(
         &self,
         client: &reqwest::Client,
@@ -247,9 +248,10 @@ impl LocalUpstream {
     /// that would trigger a spurious child respawn (UPSTREAM-003).
     ///
     /// # Errors
-    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
-    /// [`GatewayError::UpstreamStatus`] with a truncated body on a non-success
-    /// child status.
+    /// Returns [`GatewayError::UpstreamConnect`] when the connection itself
+    /// fails, [`GatewayError::UpstreamTransport`] on a mid-flight transport
+    /// failure, and [`GatewayError::UpstreamStatus`] with a truncated body on
+    /// a non-success child status.
     async fn post_json(
         &self,
         path: &str,
@@ -328,6 +330,16 @@ impl LocalUpstream {
     }
 }
 
+/// True when a forward failure is a transport-layer death - connect or
+/// mid-flight - that a child respawn might cure. A protocol or status
+/// failure means the child answered, so respawning would not help.
+fn is_transport_failure(error: &GatewayError) -> bool {
+    matches!(
+        error,
+        GatewayError::UpstreamTransport(_) | GatewayError::UpstreamConnect(_)
+    )
+}
+
 #[async_trait]
 impl Upstream for LocalUpstream {
     async fn send(
@@ -337,7 +349,7 @@ impl Upstream for LocalUpstream {
     ) -> Result<ChatResponse, GatewayError> {
         match self.forward(req.clone(), upstream_model).await {
             Ok(response) => Ok(response),
-            Err(error) if matches!(error, GatewayError::UpstreamTransport(_)) => {
+            Err(error) if is_transport_failure(&error) => {
                 match self.recover_on_transport(error).await {
                     RecoveryOutcome::Retry => self.forward(req, upstream_model).await,
                     RecoveryOutcome::Failed(err) => Err(err),
@@ -354,7 +366,7 @@ impl Upstream for LocalUpstream {
     ) -> Result<EmbeddingResponse, GatewayError> {
         match self.forward_embeddings(req.clone(), upstream_model).await {
             Ok(response) => Ok(response),
-            Err(error) if matches!(error, GatewayError::UpstreamTransport(_)) => {
+            Err(error) if is_transport_failure(&error) => {
                 match self.recover_on_transport(error).await {
                     RecoveryOutcome::Retry => self.forward_embeddings(req, upstream_model).await,
                     RecoveryOutcome::Failed(err) => Err(err),
@@ -371,7 +383,7 @@ impl Upstream for LocalUpstream {
     ) -> Result<RerankResponse, GatewayError> {
         match self.forward_rerank(req.clone(), upstream_model).await {
             Ok(response) => Ok(response),
-            Err(error) if matches!(error, GatewayError::UpstreamTransport(_)) => {
+            Err(error) if is_transport_failure(&error) => {
                 match self.recover_on_transport(error).await {
                     RecoveryOutcome::Retry => self.forward_rerank(req, upstream_model).await,
                     RecoveryOutcome::Failed(err) => Err(err),
@@ -391,7 +403,7 @@ impl Upstream for LocalUpstream {
         // rather than triggering a respawn under a live response.
         match self.forward_stream(req.clone(), upstream_model).await {
             Ok(streamed) => Ok(streamed),
-            Err(error) if matches!(error, GatewayError::UpstreamTransport(_)) => {
+            Err(error) if is_transport_failure(&error) => {
                 match self.recover_on_transport(error).await {
                     RecoveryOutcome::Retry => self.forward_stream(req, upstream_model).await,
                     RecoveryOutcome::Failed(err) => Err(err),
@@ -441,6 +453,18 @@ mod tests {
         GatewayError::UpstreamTransport(Box::new(std::io::Error::other(
             "original transport failure",
         )))
+    }
+
+    #[test]
+    fn recovery_triggers_on_connect_and_transport_but_not_protocol() {
+        // A dead child looks the same whether the connection was refused or
+        // died mid-flight: both transport variants trigger recovery, while a
+        // protocol failure means the child answered and must not respawn.
+        let connect = GatewayError::UpstreamConnect(Box::new(std::io::Error::other("refused")));
+        assert!(is_transport_failure(&connect));
+        assert!(is_transport_failure(&transport_err()));
+        let protocol = GatewayError::upstream_protocol(std::io::Error::other("bad json"));
+        assert!(!is_transport_failure(&protocol));
     }
 
     #[tokio::test]
