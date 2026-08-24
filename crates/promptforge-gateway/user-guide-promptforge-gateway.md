@@ -65,6 +65,7 @@ At boot the process environment is populated from at most two env files: the pro
 | `api_key` | yes | - | Backend credential; empty string skips the `Authorization` header |
 | `concurrency` | no | unlimited | Max in-flight requests |
 | `device` | no | - | Device id for concurrency |
+| `dominion` | no | - | Remote dominion id for a shared limit |
 
 ## Starting the Gateway
 
@@ -179,6 +180,55 @@ fair_scheduling = true  # round-robin by client key; default true
 When `fair_scheduling` is true, callers identify themselves via the `X-PromptForge-Client` header. Each client gets turns in round-robin order, so one fast client cannot monopolize slots. Missing or invalid headers map to the `"default"` bucket. The scheduler tracks up to 32 distinct client labels; additional labels fold into `"default"`.
 
 A full queue returns 503 with `code: "queue_full"`. An endpoint without `concurrency` is unlimited.
+
+## Dominions
+
+A dominion is a named pool of compute - a remote provider pool or a local GPU - carrying one concurrency limit and one bounded waiting queue shared by everything bound to it. Where `concurrency` on an endpoint caps that endpoint alone, a dominion's limit is shared: two endpoints bound to the same dominion compete for the same slots.
+
+```toml
+[[dominion]]
+id = "runpod-pool"
+kind = "remote"
+max_concurrency = 4
+max_queue = 50            # bounded wait, then rejection; default 100
+policy = "queue"          # "queue" | "reject" (fail-fast); default "queue"
+fair_scheduling = true    # per-client round-robin; default true
+
+[[dominion]]
+id = "gpu0"
+kind = "local"
+vram_gb = 24              # local kind only; co-residency budget
+
+[[endpoint]]
+id = "runpod-a"
+protocol = "openai"
+base_url = "https://..."
+api_key = "${RUNPOD_KEY}"
+dominion = "runpod-pool"  # optional; absent = unlimited pass-through
+
+[[local_model]]
+name = "qwen-local"
+description = "..."
+source = "..."
+context = 65536
+dominion = "gpu0"         # optional; must name a local dominion
+parallel = 4              # child --parallel and gateway queue limit
+vram_gb = 14              # footprint estimate for the co-residency check
+```
+
+| Field | Required | Default | Purpose |
+|---|---|---|---|
+| `id` | yes | - | Operator handle referenced by endpoints and local models |
+| `kind` | yes | - | `remote` (bindable by endpoints) or `local` (bindable by local models) |
+| `max_concurrency` | no | unlimited | Max in-flight requests admitted across every binder |
+| `max_queue` | no | 100 | Max waiting requests before new admits are rejected |
+| `policy` | no | `queue` | `queue` waits for a slot; `reject` fails fast at capacity |
+| `fair_scheduling` | no | `true` | Round-robin waiting callers by client key |
+| `vram_gb` | no | - | VRAM budget in GiB; local kind only |
+
+Binding is by explicit id and is kind-checked: an endpoint's `dominion` must name a remote dominion, a local model's `dominion` must name a local one, and an unknown id is a boot failure. `vram_gb` on a remote dominion is rejected. Dominion ids must be unique and non-empty, and `max_concurrency` and `max_queue` must be at least 1 when set.
+
+Dominions are being introduced alongside the legacy knobs: `concurrency`, `device`, `lane`, and `[queue]` still parse and govern runtime limits during the transition. The dominion fields above are parsed and validated now; shared-queue enforcement and the VRAM co-residency check land as the queue rework completes.
 
 ## Web Search Tool
 
@@ -366,6 +416,9 @@ Each local model becomes a normal catalog entry. Clients reach it through the sa
 | `chat_template_file` | no | - | Jinja template override (`--chat-template-file`) |
 | `device` | no | - | Device id for concurrency |
 | `lane` | no | - | Lane id under the device |
+| `dominion` | no | - | Local dominion id for a shared limit |
+| `parallel` | no | - | Max concurrent inferences (`--parallel` and queue limit) |
+| `vram_gb` | no | - | VRAM footprint estimate in GiB |
 
 ### Cache and provisioning
 

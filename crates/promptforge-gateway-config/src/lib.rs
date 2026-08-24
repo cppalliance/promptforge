@@ -41,9 +41,9 @@ mod queue;
 
 pub use crate::api_error::{ConfigError, ConfigErrorKind};
 pub use crate::config::{
-    Config, DeviceConfig, DeviceKind, EndpointConfig, LaneConfig, LocalConfig, LocalModelConfig,
-    ModelConfig, Protocol, SearchProvider, Secret, ServerConfig, ThinkingMode, ToolsConfig,
-    WebSearchConfig,
+    Config, DeviceConfig, DeviceKind, DominionConfig, DominionKind, EndpointConfig, LaneConfig,
+    LocalConfig, LocalModelConfig, ModelConfig, Protocol, QueuePolicy, SearchProvider, Secret,
+    ServerConfig, ThinkingMode, ToolsConfig, WebSearchConfig,
 };
 pub use crate::profile::{ProfileName, ProfileNameError, list_profiles, load_server};
 pub use crate::queue::QueueConfig;

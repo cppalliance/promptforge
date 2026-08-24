@@ -8,9 +8,9 @@
 use std::net::SocketAddr;
 
 use super::{
-    Config, DeviceConfig, DeviceKind, EndpointConfig, LaneConfig, LocalConfig, LocalModelConfig,
-    ModelConfig, Protocol, SearchProvider, Secret, ServerConfig, ThinkingMode, ToolsConfig,
-    WebSearchConfig,
+    Config, DeviceConfig, DeviceKind, DominionConfig, DominionKind, EndpointConfig, LaneConfig,
+    LocalConfig, LocalModelConfig, ModelConfig, Protocol, QueuePolicy, SearchProvider, Secret,
+    ServerConfig, ThinkingMode, ToolsConfig, WebSearchConfig,
 };
 use crate::queue::QueueConfig;
 
@@ -100,6 +100,30 @@ impl Config {
     #[must_use]
     pub fn devices(&self) -> &[DeviceConfig] {
         &self.devices
+    }
+
+    /// Returns the configured `[[dominion]]` compute pools.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[dominion]]
+    /// # id = "runpod-pool"
+    /// # kind = "remote"
+    /// # max_concurrency = 4
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.dominions()[0].id(), "runpod-pool");
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn dominions(&self) -> &[DominionConfig] {
+        &self.dominions
     }
 
     /// Returns the configured `[[endpoint]]` backends.
@@ -460,6 +484,177 @@ impl LaneConfig {
     }
 }
 
+impl DominionConfig {
+    /// Returns the operator-chosen dominion id referenced by endpoints and
+    /// local models.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[dominion]]
+    /// # id = "runpod-pool"
+    /// # kind = "remote"
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.dominions()[0].id(), "runpod-pool");
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns whether the dominion pools remote providers or local GPUs.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::{Config, DominionKind};
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[dominion]]
+    /// # id = "gpu0"
+    /// # kind = "local"
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.dominions()[0].kind(), DominionKind::Local);
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn kind(&self) -> DominionKind {
+        self.kind
+    }
+
+    /// Returns the max concurrent requests admitted across every binder, or
+    /// `None` for unlimited.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[dominion]]
+    /// # id = "runpod-pool"
+    /// # kind = "remote"
+    /// # max_concurrency = 4
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.dominions()[0].max_concurrency(), Some(4));
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn max_concurrency(&self) -> Option<usize> {
+        self.max_concurrency
+    }
+
+    /// Returns the max waiting requests before new admits are rejected.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[dominion]]
+    /// # id = "runpod-pool"
+    /// # kind = "remote"
+    /// # max_queue = 50
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.dominions()[0].max_queue(), 50);
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn max_queue(&self) -> usize {
+        self.max_queue
+    }
+
+    /// Returns whether a full queue waits or rejects.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::{Config, QueuePolicy};
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[dominion]]
+    /// # id = "runpod-pool"
+    /// # kind = "remote"
+    /// # policy = "reject"
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.dominions()[0].policy(), QueuePolicy::Reject);
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn policy(&self) -> QueuePolicy {
+        self.policy
+    }
+
+    /// Returns whether waiting callers are served round-robin by client key.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[dominion]]
+    /// # id = "runpod-pool"
+    /// # kind = "remote"
+    /// # fair_scheduling = false
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert!(!config.dominions()[0].fair_scheduling());
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn fair_scheduling(&self) -> bool {
+        self.fair_scheduling
+    }
+
+    /// Returns the VRAM budget in gibibytes for co-residency checks, when
+    /// set. Local kind only.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[dominion]]
+    /// # id = "gpu0"
+    /// # kind = "local"
+    /// # vram_gb = 24
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.dominions()[0].vram_gb(), Some(24));
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn vram_gb(&self) -> Option<u32> {
+        self.vram_gb
+    }
+}
+
 impl EndpointConfig {
     /// Returns the endpoint's id: the operator-chosen handle referenced by
     /// `[[model]]` entries.
@@ -619,6 +814,38 @@ impl EndpointConfig {
     #[must_use]
     pub fn device(&self) -> Option<&str> {
         self.device.as_deref()
+    }
+
+    /// Returns the remote dominion id (`[[dominion]]`) whose shared limit
+    /// and queue govern this endpoint, when set. Absent means unlimited
+    /// pass-through.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[dominion]]
+    /// # id = "runpod-pool"
+    /// # kind = "remote"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// # dominion = "runpod-pool"
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.endpoints()[0].dominion(), Some("runpod-pool"));
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn dominion(&self) -> Option<&str> {
+        self.dominion.as_deref()
     }
 }
 impl ModelConfig {
@@ -1025,6 +1252,94 @@ impl LocalModelConfig {
     #[must_use]
     pub fn lane(&self) -> Option<&str> {
         self.lane.as_deref()
+    }
+
+    /// Returns the local dominion id (`[[dominion]]`) binding this model,
+    /// when set.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[dominion]]
+    /// # id = "gpu0"
+    /// # kind = "local"
+    /// #
+    /// # [[local_model]]
+    /// # name = "q"
+    /// # description = "a local model"
+    /// # source = "/models/q.gguf"
+    /// # context = 4096
+    /// # dominion = "gpu0"
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.local_models()[0].dominion(), Some("gpu0"));
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn dominion(&self) -> Option<&str> {
+        self.dominion.as_deref()
+    }
+
+    /// Returns the max concurrent inferences (`--parallel` and the gateway
+    /// queue limit), when set.
+    ///
+    /// Stays `Option` during the dominion transition: an unset field must not
+    /// override a legacy lane's concurrency with the default.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[local_model]]
+    /// # name = "q"
+    /// # description = "a local model"
+    /// # source = "/models/q.gguf"
+    /// # context = 4096
+    /// # parallel = 4
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.local_models()[0].parallel(), Some(4));
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn parallel(&self) -> Option<u32> {
+        self.parallel
+    }
+
+    /// Returns the VRAM footprint estimate in gibibytes for the dominion
+    /// co-residency check, when set.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[local_model]]
+    /// # name = "q"
+    /// # description = "a local model"
+    /// # source = "/models/q.gguf"
+    /// # context = 4096
+    /// # vram_gb = 14
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.local_models()[0].vram_gb(), Some(14));
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn vram_gb(&self) -> Option<u32> {
+        self.vram_gb
     }
 
     /// Returns the context window size in tokens (`--ctx-size`).
