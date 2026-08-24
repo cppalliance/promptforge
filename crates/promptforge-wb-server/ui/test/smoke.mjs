@@ -485,7 +485,9 @@ if (mic && input) {
   } else {
     const interimText = "line one\nline two\nline three";
     const heightBefore = parseFloat(input.style.height) || 0;
-    takeSocket.onmessage({ data: JSON.stringify({ type: "interim", text: interimText }) });
+    takeSocket.onmessage({
+      data: JSON.stringify({ type: "interim", committed: interimText, tentative: "" }),
+    });
     const heightAfter = parseFloat(input.style.height) || 0;
     if (input.value !== interimText) {
       failures.push("the interim transcript did not land in the composer");
@@ -494,6 +496,57 @@ if (mic && input) {
       failures.push(
         `the composer did not grow on a multiline interim (was ${input.style.height || "unset"})`,
       );
+    }
+    takeSocket.onclose?.();
+  }
+}
+
+// Committed/tentative interims: the textarea shows committed + tentative,
+// joined with a space only when the committed prefix does not already end
+// in whitespace. Committed is append-only within a take, so the display
+// follows the server unconditionally - a shorter tentative never shrinks
+// the text while committed keeps growing.
+if (mic && input) {
+  const voiceSocketCount = chatSockets.filter((socket) => socket.url.endsWith("/voice")).length;
+  mic.click();
+  const openDeadline = Date.now() + 5000;
+  let takeSocket;
+  while (Date.now() < openDeadline) {
+    const voiceSockets = chatSockets.filter((socket) => socket.url.endsWith("/voice"));
+    if (voiceSockets.length > voiceSocketCount && typeof voiceSockets.at(-1).onmessage === "function") {
+      takeSocket = voiceSockets.at(-1);
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (!takeSocket) {
+    failures.push("the third mic click did not open a /voice socket with a message listener");
+  } else {
+    const sendInterim = (committed, tentative) =>
+      takeSocket.onmessage({ data: JSON.stringify({ type: "interim", committed, tentative }) });
+    sendInterim("One two.", "three");
+    if (input.value !== "One two. three") {
+      failures.push(`committed+tentative did not join with a space: "${input.value}"`);
+    }
+    sendInterim("One two. three four.", "");
+    if (input.value !== "One two. three four.") {
+      failures.push(`a grown committed prefix did not land verbatim: "${input.value}"`);
+    }
+    const grownLength = input.value.length;
+    sendInterim("One two. three four. five six.", "se");
+    if (input.value !== "One two. three four. five six. se") {
+      failures.push(`a shorter tentative with grown committed mis-rendered: "${input.value}"`);
+    }
+    if (input.value.length <= grownLength) {
+      failures.push("the text shrank while committed kept growing");
+    }
+    sendInterim("One two. three four. five six. ", "seven");
+    if (input.value !== "One two. three four. five six. seven") {
+      failures.push(`a trailing-whitespace committed prefix gained a double space: "${input.value}"`);
+    }
+    sendInterim("", "fresh start");
+    if (input.value !== "fresh start") {
+      failures.push(`an empty committed prefix gained a leading space: "${input.value}"`);
     }
     takeSocket.onclose?.();
   }
