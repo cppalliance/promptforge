@@ -146,10 +146,12 @@ impl VoiceEngine {
     }
 
     /// Starts a new take on the final-pass worker, discarding the previous
-    /// take's accumulated transcript. A no-op without a final model.
-    pub(crate) fn final_reset(&self) {
+    /// take's accumulated transcript and installing `on_segment` as the
+    /// take's completion channel: each background segment's text is sent on
+    /// it as the segment finishes. A no-op without a final model.
+    pub(crate) fn final_reset(&self, on_segment: std::sync::mpsc::Sender<String>) {
         if let Some(final_pass) = &self.final_pass {
-            final_pass.reset();
+            final_pass.reset(on_segment);
         }
     }
 
@@ -416,14 +418,16 @@ impl FinalPass {
     }
 
     /// Transcribes one segment conditioned on the accumulated transcript,
-    /// appends the result, and returns the full assembled transcript.
-    /// Silent or tiny fragments are skipped (whisper hallucinates on them)
-    /// and the accumulated transcript is returned unchanged.
+    /// appends the result, and returns the full assembled transcript plus
+    /// the segment's own text. Silent or tiny fragments are skipped
+    /// (whisper hallucinates on them) and the accumulated transcript is
+    /// returned unchanged with no segment text.
     ///
     /// # Errors
     /// Returns [`TranscribeError::Inference`] when the model rejects the
     /// audio; the accumulated transcript is left unchanged.
-    fn transcribe_segment(&mut self, samples: &[f32]) -> Result<String, TranscribeError> {
+    fn transcribe_segment(&mut self, samples: &[f32]) -> Result<SegmentOutcome, TranscribeError> {
+        let mut segment = None;
         if samples.len() >= MIN_WINDOW_SAMPLES && !is_silence(samples) {
             let prompt = self.transcript.clone();
             let text = transcribe_blocking(&mut self.state, samples, Some(&prompt), false)?;
@@ -432,22 +436,43 @@ impl FinalPass {
                     self.transcript.push(' ');
                 }
                 self.transcript.push_str(&text);
+                segment = Some(text);
             }
             self.last_prompt = prompt;
         }
-        Ok(self.transcript.clone())
+        Ok(SegmentOutcome {
+            transcript: self.transcript.clone(),
+            segment,
+        })
     }
+}
+
+/// The outcome of one final-pass segment: the take's full assembled
+/// transcript, plus the segment's own text when the segment appended any.
+#[derive(Debug)]
+struct SegmentOutcome {
+    /// Every segment transcript so far, joined by single spaces.
+    transcript: String,
+    /// The text this segment appended, or `None` when the fragment was
+    /// skipped or transcribed to nothing.
+    segment: Option<String>,
 }
 
 /// A command for the final-pass worker thread.
 enum FinalJob {
-    /// Start a new take, discarding the accumulated transcript.
-    Reset,
+    /// Start a new take, discarding the accumulated transcript and
+    /// installing the take's segment-completion channel.
+    Reset {
+        on_segment: std::sync::mpsc::Sender<String>,
+    },
     /// Transcribe a completed segment (or the closing tail) and reply with
-    /// the take's full assembled transcript.
+    /// the take's full assembled transcript. `notify` marks a background
+    /// submit, whose segment text is also sent on the take's channel; the
+    /// closing tail reports only through its reply.
     Segment {
         samples: Vec<f32>,
         reply: tokio::sync::oneshot::Sender<Result<String, TranscribeError>>,
+        notify: bool,
     },
 }
 
@@ -478,16 +503,23 @@ impl FinalTranscriber {
         Ok(Self { job_tx })
     }
 
-    /// Starts a new take. If the worker is gone the next `finish` reports it.
-    fn reset(&self) {
-        let _ = self.job_tx.send(FinalJob::Reset);
+    /// Starts a new take, installing `on_segment` as the channel each
+    /// background segment's text is reported on. If the worker is gone the
+    /// next `finish` reports it.
+    fn reset(&self, on_segment: std::sync::mpsc::Sender<String>) {
+        let _ = self.job_tx.send(FinalJob::Reset { on_segment });
     }
 
-    /// Queues a completed segment for background transcription; the result
-    /// is observed only through the accumulated transcript at `finish`.
+    /// Queues a completed segment for background transcription; the
+    /// segment's text is reported on the take's channel and the assembled
+    /// transcript is observed at `finish`.
     fn submit(&self, samples: Vec<f32>) {
         let (reply, _dropped) = tokio::sync::oneshot::channel();
-        let _ = self.job_tx.send(FinalJob::Segment { samples, reply });
+        let _ = self.job_tx.send(FinalJob::Segment {
+            samples,
+            reply,
+            notify: true,
+        });
     }
 
     /// Queues the take's tail and awaits the full assembled transcript.
@@ -496,7 +528,11 @@ impl FinalTranscriber {
     async fn finish(&self, samples: Vec<f32>) -> Result<String, TranscribeError> {
         let (reply, reply_rx) = tokio::sync::oneshot::channel();
         self.job_tx
-            .send(FinalJob::Segment { samples, reply })
+            .send(FinalJob::Segment {
+                samples,
+                reply,
+                notify: false,
+            })
             .map_err(|_| TranscribeError::WorkerGone)?;
         reply_rx.await.map_err(|_| TranscribeError::WorkerGone)?
     }
@@ -519,17 +555,43 @@ fn final_worker_loop(
             return;
         }
     };
+    // The current take's completion channel, installed by each `Reset`;
+    // FIFO job order guarantees a take's segments all precede the next
+    // take's `Reset`, so a segment can never land on the wrong channel.
+    let mut on_segment: Option<std::sync::mpsc::Sender<String>> = None;
     while let Ok(job) = job_rx.recv() {
         match job {
-            FinalJob::Reset => pass.reset(),
-            FinalJob::Segment { samples, reply } => {
+            FinalJob::Reset {
+                on_segment: channel,
+            } => {
+                on_segment = Some(channel);
+                pass.reset();
+            }
+            FinalJob::Segment {
+                samples,
+                reply,
+                notify,
+            } => {
                 let result = pass.transcribe_segment(&samples);
-                if let Err(error) = &result {
-                    tracing::warn!(%error, "final-pass segment transcription failed");
+                match &result {
+                    Ok(outcome) => {
+                        if notify
+                            && let (Some(channel), Some(text)) = (&on_segment, &outcome.segment)
+                        {
+                            // A gone session (socket closed mid-take) is
+                            // ordinary; the transcript was computed anyway.
+                            if channel.send(text.clone()).is_err() {
+                                tracing::debug!("segment completion receiver is gone");
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "final-pass segment transcription failed");
+                    }
                 }
                 // A dropped receiver (a background segment, or a session
                 // closed mid-take) is fine: the transcript was computed.
-                let _ = reply.send(result);
+                let _ = reply.send(result.map(|outcome| outcome.transcript));
             }
         }
     }
@@ -725,11 +787,54 @@ mod tests {
             ..VoiceConfig::default()
         };
         let engine = VoiceEngine::new(&config).expect("engine loads the fixture model");
-        engine.final_reset();
+        let (segment_tx, _segment_rx) = std::sync::mpsc::channel();
+        engine.final_reset(segment_tx);
         engine.final_submit(fixtures::jfk_samples());
         assert!(
             engine.final_finish(fixtures::jfk_samples()).await.is_none(),
             "no final model means the caller falls back"
+        );
+    }
+
+    #[tokio::test]
+    async fn final_submit_reports_the_segment_on_the_take_channel() {
+        let config = VoiceConfig {
+            interim_model: fixtures::require_model(),
+            final_model: fixtures::require_model(),
+            ..VoiceConfig::default()
+        };
+        let engine = VoiceEngine::new(&config).expect("engine loads the fixture model");
+        let (segment_tx, segment_rx) = std::sync::mpsc::channel();
+        engine.final_reset(segment_tx);
+        engine.final_submit(fixtures::jfk_samples());
+
+        // The timeout only bounds a broken pipeline; the tiny fixture
+        // model transcribes the clip in seconds.
+        let segment = segment_rx
+            .recv_timeout(Duration::from_secs(120))
+            .expect("the submitted segment's text arrives on the channel");
+        assert!(
+            segment.to_lowercase().contains("country"),
+            "the reported segment names the fixture's words: {segment:?}"
+        );
+
+        let full = engine
+            .final_finish(fixtures::jfk_samples())
+            .await
+            .expect("a final model is configured")
+            .expect("the final pass succeeds");
+        assert!(
+            full.starts_with(&segment),
+            "the assembled transcript opens with the reported segment: {full:?}"
+        );
+        let countries = full.to_lowercase().matches("country").count();
+        assert!(
+            countries >= 3,
+            "the closing tail added its own text ({countries} countries): {full:?}"
+        );
+        assert!(
+            segment_rx.try_recv().is_err(),
+            "the closing tail reports only through its reply, not the channel"
         );
     }
 
@@ -741,7 +846,8 @@ mod tests {
 
         let first = pass
             .transcribe_segment(&jfk)
-            .expect("segment one transcribes");
+            .expect("segment one transcribes")
+            .transcript;
         assert!(
             pass.last_prompt().is_empty(),
             "the first segment has nothing to be conditioned on"
@@ -755,7 +861,8 @@ mod tests {
 
         let second = pass
             .transcribe_segment(&jfk)
-            .expect("segment two transcribes");
+            .expect("segment two transcribes")
+            .transcript;
         assert_eq!(
             pass.last_prompt(),
             first,
@@ -780,11 +887,13 @@ mod tests {
 
         let first = pass
             .transcribe_segment(&jfk)
-            .expect("segment one transcribes");
+            .expect("segment one transcribes")
+            .transcript;
         pass.reset();
         let second = pass
             .transcribe_segment(&jfk)
-            .expect("segment two transcribes");
+            .expect("segment two transcribes")
+            .transcript;
         assert!(
             pass.last_prompt().is_empty(),
             "after reset the next segment has nothing to be conditioned on"
@@ -799,10 +908,17 @@ mod tests {
     fn final_pass_skips_silence_without_touching_the_transcript() {
         let mut pass = FinalPass::load(&fixtures::require_model())
             .expect("final pass loads the fixture model");
-        let text = pass
+        let outcome = pass
             .transcribe_segment(&vec![0.0; SAMPLE_RATE * 2])
             .expect("silence is skipped, not an error");
-        assert!(text.is_empty(), "silence transcribes to nothing");
+        assert!(
+            outcome.transcript.is_empty(),
+            "silence transcribes to nothing"
+        );
+        assert!(
+            outcome.segment.is_none(),
+            "a skipped segment reports no text"
+        );
         assert!(
             pass.last_prompt().is_empty(),
             "a skipped segment records no conditioning"
