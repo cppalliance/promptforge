@@ -11,7 +11,9 @@ use crate::error::GatewayError;
 use crate::local::error::LocalError;
 use crate::local::server::{LaunchOptions, ServerGuard};
 use crate::upstream::Upstream;
-use crate::wire::{ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse};
+use crate::wire::{
+    ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, RerankRequest, RerankResponse,
+};
 
 /// Minimum gap between respawn attempts for one local child.
 const RESPAWN_COOLDOWN: Duration = Duration::from_secs(3);
@@ -261,6 +263,19 @@ impl LocalUpstream {
         Ok(parsed)
     }
 
+    async fn forward_rerank(
+        &self,
+        mut req: RerankRequest,
+        upstream_model: &str,
+    ) -> Result<RerankResponse, GatewayError> {
+        let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
+        let bytes = self.post_json("rerank", &req).await?;
+        let mut parsed: RerankResponse =
+            serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
+        parsed.model = requested;
+        Ok(parsed)
+    }
+
     /// Run the dead-child recovery after a transport failure.
     ///
     /// Recovery runs on a plain OS thread so reqwest::blocking readiness (used
@@ -305,6 +320,23 @@ impl Upstream for LocalUpstream {
             Err(error) if matches!(error, GatewayError::UpstreamTransport(_)) => {
                 match self.recover_on_transport(error).await {
                     RecoveryOutcome::Retry => self.forward_embeddings(req, upstream_model).await,
+                    RecoveryOutcome::Failed(err) => Err(err),
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn send_rerank(
+        &self,
+        req: RerankRequest,
+        upstream_model: &str,
+    ) -> Result<RerankResponse, GatewayError> {
+        match self.forward_rerank(req.clone(), upstream_model).await {
+            Ok(response) => Ok(response),
+            Err(error) if matches!(error, GatewayError::UpstreamTransport(_)) => {
+                match self.recover_on_transport(error).await {
+                    RecoveryOutcome::Retry => self.forward_rerank(req, upstream_model).await,
                     RecoveryOutcome::Failed(err) => Err(err),
                 }
             }
