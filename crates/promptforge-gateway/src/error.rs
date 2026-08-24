@@ -31,6 +31,14 @@ pub(crate) enum GatewayError {
         actual: ModelKind,
     },
 
+    /// The resolved model's upstream cannot serve the route's workload (for
+    /// example a local chat server asked for embeddings). Distinct from
+    /// [`GatewayError::KindMismatch`]: the kind matches, but the backing
+    /// upstream has no implementation for it.
+    #[non_exhaustive]
+    #[error("model {0} is not available for this workload")]
+    ModelUnavailable(String),
+
     /// A tool endpoint was reached but the tool is not configured.
     #[non_exhaustive]
     #[error("tool not configured: {0}")]
@@ -160,6 +168,11 @@ impl GatewayError {
                 "invalid_request_error",
                 "kind_mismatch",
             ),
+            GatewayError::ModelUnavailable(_) => (
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                "model_unavailable",
+            ),
             GatewayError::ToolNotConfigured(_) => {
                 (StatusCode::NOT_FOUND, "invalid_request_error", "not_found")
             }
@@ -257,6 +270,14 @@ mod tests {
                     StatusCode::BAD_REQUEST,
                     "invalid_request_error",
                     "kind_mismatch",
+                ),
+            ),
+            (
+                GatewayError::ModelUnavailable("m".to_owned()),
+                (
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request_error",
+                    "model_unavailable",
                 ),
             ),
             (
