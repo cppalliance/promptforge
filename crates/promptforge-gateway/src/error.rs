@@ -226,13 +226,21 @@ impl GatewayError {
     }
 }
 
+impl GatewayError {
+    /// The OpenAI error envelope body for this error, shared by the JSON
+    /// error response and the mid-stream SSE error event.
+    pub(crate) fn envelope(&self) -> serde_json::Value {
+        let (_, kind, code) = self.classify();
+        serde_json::json!({
+            "error": { "message": self.to_string(), "type": kind, "code": code }
+        })
+    }
+}
+
 impl IntoResponse for GatewayError {
     fn into_response(self) -> Response {
-        let (status, kind, code) = self.classify();
-        let body = Json(serde_json::json!({
-            "error": { "message": self.to_string(), "type": kind, "code": code }
-        }));
-        (status, body).into_response()
+        let (status, ..) = self.classify();
+        (status, Json(self.envelope())).into_response()
     }
 }
 

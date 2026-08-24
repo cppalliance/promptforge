@@ -32,7 +32,7 @@ sha2.workspace = true
 subtle.workspace = true
 tar.workspace = true
 url.workspace = true
-reqwest = { workspace = true, features = ["blocking"] }
+reqwest = { workspace = true, features = ["blocking", "stream"] }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true

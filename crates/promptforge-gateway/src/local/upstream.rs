@@ -39,6 +39,10 @@ struct LocalInner {
 pub(crate) struct LocalUpstream {
     inner: Arc<LocalInner>,
     http: reqwest::Client,
+    /// Connect-timeout-only client for the streaming path: reqwest's
+    /// whole-request timeout covers the body read and would kill any
+    /// long-lived SSE stream, so streams never use `http`.
+    http_stream: reqwest::Client,
 }
 
 impl std::fmt::Debug for LocalUpstream {
@@ -74,6 +78,7 @@ impl LocalUpstream {
                 shut_down: AtomicBool::new(false),
             }),
             http: crate::http_util::bounded_client(),
+            http_stream: crate::http_util::streaming_client(),
         }
     }
 
@@ -183,21 +188,22 @@ impl LocalUpstream {
     }
 
     /// POST `body` to the child's `{base_url}/{path}` with the per-attempt
-    /// loopback credential and return the success body bytes.
+    /// loopback credential and return the success response.
     ///
-    /// The body read is byte-bounded; decoding is left to the caller so a
-    /// decode failure surfaces as a protocol error, never a transport death
-    /// that would trigger a spurious child respawn (UPSTREAM-003).
+    /// A non-success status fails before the body is consumed as anything but
+    /// diagnostics, so a streaming caller never sees an error response as the
+    /// start of a chunk stream.
     ///
     /// # Errors
     /// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
     /// [`GatewayError::UpstreamStatus`] with a truncated body on a non-success
     /// child status.
-    async fn post_json(
+    async fn post(
         &self,
+        client: &reqwest::Client,
         path: &str,
         body: &impl serde::Serialize,
-    ) -> Result<Vec<u8>, GatewayError> {
+    ) -> Result<reqwest::Response, GatewayError> {
         let (base_url, api_key) = {
             let guard = self
                 .inner
@@ -207,8 +213,7 @@ impl LocalUpstream {
             (guard.base_url(), guard.api_key().to_owned())
         };
 
-        let mut builder = self
-            .http
+        let mut builder = client
             .post(format!("{}/{path}", base_url.trim_end_matches('/')))
             .json(body);
         if !api_key.is_empty() {
@@ -231,7 +236,26 @@ impl LocalUpstream {
                 body,
             });
         }
+        Ok(response)
+    }
 
+    /// POST `body` to the child's `{base_url}/{path}` and return the success
+    /// body bytes.
+    ///
+    /// The body read is byte-bounded; decoding is left to the caller so a
+    /// decode failure surfaces as a protocol error, never a transport death
+    /// that would trigger a spurious child respawn (UPSTREAM-003).
+    ///
+    /// # Errors
+    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
+    /// [`GatewayError::UpstreamStatus`] with a truncated body on a non-success
+    /// child status.
+    async fn post_json(
+        &self,
+        path: &str,
+        body: &impl serde::Serialize,
+    ) -> Result<Vec<u8>, GatewayError> {
+        let response = self.post(&self.http, path, body).await?;
         crate::http_util::read_bytes_capped(response, crate::http_util::MAX_JSON_BODY)
             .await
             .map_err(GatewayError::upstream_transport)
@@ -274,6 +298,19 @@ impl LocalUpstream {
             serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
         parsed.model = requested;
         Ok(parsed)
+    }
+
+    async fn forward_stream(
+        &self,
+        mut req: ChatRequest,
+        upstream_model: &str,
+    ) -> Result<crate::upstream::StreamedChunks, GatewayError> {
+        let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
+        req.stream = true;
+        let response = self
+            .post(&self.http_stream, "chat/completions", &req)
+            .await?;
+        Ok(crate::upstream::sse_chunks(response, requested))
     }
 
     /// Run the dead-child recovery after a transport failure.
@@ -337,6 +374,26 @@ impl Upstream for LocalUpstream {
             Err(error) if matches!(error, GatewayError::UpstreamTransport(_)) => {
                 match self.recover_on_transport(error).await {
                     RecoveryOutcome::Retry => self.forward_rerank(req, upstream_model).await,
+                    RecoveryOutcome::Failed(err) => Err(err),
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn stream(
+        &self,
+        req: ChatRequest,
+        upstream_model: &str,
+    ) -> Result<crate::upstream::StreamedChunks, GatewayError> {
+        // Recovery applies only to a pre-stream transport failure: once the
+        // chunk stream is open, a mid-stream death surfaces as an `Err` item
+        // rather than triggering a respawn under a live response.
+        match self.forward_stream(req.clone(), upstream_model).await {
+            Ok(streamed) => Ok(streamed),
+            Err(error) if matches!(error, GatewayError::UpstreamTransport(_)) => {
+                match self.recover_on_transport(error).await {
+                    RecoveryOutcome::Retry => self.forward_stream(req, upstream_model).await,
                     RecoveryOutcome::Failed(err) => Err(err),
                 }
             }
