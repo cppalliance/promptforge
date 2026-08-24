@@ -11,25 +11,25 @@ use axum::routing::{get, post};
 
 use crate::catalog::CatalogBus;
 use crate::chat_ws;
-use crate::config::Config;
+use crate::config::{Config, VoiceConfig};
 use crate::gateway::{ChatRequest, GatewayClient, GatewayError, GatewayResponse};
 use crate::heartbeat::GatewayHealth;
 use crate::status::{Activity, StatusBus};
 use crate::tape::{Tape, TapeError, TapeEvent};
-use crate::transcribe::{TranscribeError, VoiceEngine};
+use crate::transcribe::{TranscribeError, VoiceEngine, VoiceSlot};
 use crate::voice;
 
 /// Address the server binds to when no override is given.
 pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
 
 /// Shared handler state: the authenticated gateway client, the session
-/// tape, the status bus, and the voice transcription engine when one is
-/// configured.
+/// tape, the status bus, and the voice transcription engine slot, filled
+/// at startup from local model files or later by the provisioning task.
 #[derive(Debug, Clone)]
 pub struct AppState {
     gateway: GatewayClient,
     tape: Arc<Tape>,
-    voice: Option<Arc<VoiceEngine>>,
+    voice: VoiceSlot,
     status: StatusBus,
     health: GatewayHealth,
     catalog: CatalogBus,
@@ -38,13 +38,15 @@ pub struct AppState {
 impl AppState {
     /// Builds shared state from the loaded configuration.
     ///
-    /// When `[voice]` names an interim model, the model is loaded here, so a
-    /// bad path fails startup rather than the first voice session.
+    /// When `[voice]` names an interim model whose file exists, the engine
+    /// loads here. A configured model that is missing or unloadable never
+    /// fails startup: when the model has a source URL, activation defers to
+    /// the provisioning task (which fetches it through the gateway cache);
+    /// otherwise voice degrades to disabled with a status-bar explanation.
     ///
     /// # Errors
-    /// Returns [`AppError::Gateway`] if the HTTP client cannot be built,
-    /// [`AppError::Tape`] if the session tape cannot be opened, and
-    /// [`AppError::Voice`] if the configured whisper model cannot be loaded.
+    /// Returns [`AppError::Gateway`] if the HTTP client cannot be built and
+    /// [`AppError::Tape`] if the session tape cannot be opened.
     pub fn new(config: &Config) -> Result<Self, AppError> {
         let status = StatusBus::new();
         // Startup phases are reported as they run; with no client connected
@@ -57,18 +59,10 @@ impl AppState {
         let gateway = GatewayClient::new(&config.gateway.base_url, &config.gateway.api_key)
             .map_err(AppError::Gateway)?;
         let tape = Tape::open(&config.tape.path).map_err(AppError::Tape)?;
-        let voice = if config.voice.enabled() {
-            status.info(
-                "Loading whisper model",
-                "the interim transcription model",
-                Activity::Voice,
-            );
-            Some(Arc::new(
-                VoiceEngine::new(&config.voice).map_err(AppError::Voice)?,
-            ))
-        } else {
-            None
-        };
+        let voice = VoiceSlot::default();
+        if let Some(engine) = startup_engine(&config.voice, &status) {
+            voice.activate(engine);
+        }
         status.idle();
         Ok(Self {
             gateway,
@@ -80,8 +74,14 @@ impl AppState {
         })
     }
 
-    /// The voice transcription engine, when `[voice]` configured one.
+    /// The voice transcription engine, when one has loaded.
     pub(crate) fn voice_engine(&self) -> Option<Arc<VoiceEngine>> {
+        self.voice.engine()
+    }
+
+    /// The voice engine slot, shared with the provisioning task, which
+    /// fills it once the gateway cache has provided the models.
+    pub(crate) fn voice_slot(&self) -> VoiceSlot {
         self.voice.clone()
     }
 
@@ -129,11 +129,79 @@ pub enum AppError {
     #[non_exhaustive]
     #[error("open session tape")]
     Tape(#[source] TapeError),
+}
 
-    /// The configured whisper model could not be loaded.
-    #[non_exhaustive]
-    #[error("load voice engine")]
-    Voice(#[source] TranscribeError),
+/// Builds the startup voice engine from local model files only.
+///
+/// Returns `None` when voice is unconfigured, when a missing model has a
+/// source URL (the provisioning task fetches and activates it once the
+/// gateway answers), or when voice has degraded to disabled with a
+/// status-bar explanation. Never fails: a bad model path or invalid
+/// `[voice]` tuning costs voice, not startup.
+pub(crate) fn startup_engine(config: &VoiceConfig, status: &StatusBus) -> Option<VoiceEngine> {
+    if !config.enabled() {
+        return None;
+    }
+    status.info(
+        "Loading whisper model",
+        "the interim transcription model",
+        Activity::Voice,
+    );
+    match VoiceEngine::new(config) {
+        Ok(engine) => Some(engine),
+        Err(error) => degrade(config, status, &error),
+    }
+}
+
+/// Maps a startup engine-load failure to its degraded outcome: defer to
+/// the provisioning task when the failed model has a source URL, drop an
+/// unsourced final pass and run interim-only, or disable voice with an
+/// explanation when the interim model can neither load nor be fetched.
+fn degrade(
+    config: &VoiceConfig,
+    status: &StatusBus,
+    error: &TranscribeError,
+) -> Option<VoiceEngine> {
+    if let TranscribeError::LoadModel { path, .. } = error {
+        let sourced = (path == &config.interim_model && !config.interim_source.is_empty())
+            || (path == &config.final_model && !config.final_source.is_empty());
+        if sourced {
+            // The bus is empty at startup and idle() follows, so the
+            // verdict also goes to the log, where it survives.
+            tracing::warn!(%error, "voice models not downloaded; deferring to provisioning");
+            status.info(
+                "Voice models not downloaded",
+                format!("{error}; the gateway cache provides them once connected"),
+                Activity::Voice,
+            );
+            return None;
+        }
+        if path == &config.final_model {
+            // The final pass is optional: an unsourced missing final model
+            // drops to interim-only rather than costing voice entirely.
+            let mut interim_only = config.clone();
+            interim_only.final_model = std::path::PathBuf::new();
+            return match VoiceEngine::new(&interim_only) {
+                Ok(engine) => {
+                    tracing::warn!(%error, "voice final pass unavailable; running interim-only");
+                    status.info(
+                        "Voice final pass unavailable",
+                        format!("{error}; takes close with the interim model"),
+                        Activity::Voice,
+                    );
+                    Some(engine)
+                }
+                Err(interim_error) => {
+                    tracing::warn!(error = %interim_error, "voice disabled at startup");
+                    status.error("Voice disabled", interim_error.to_string(), Activity::Voice);
+                    None
+                }
+            };
+        }
+    }
+    tracing::warn!(%error, "voice disabled at startup");
+    status.error("Voice disabled", error.to_string(), Activity::Voice);
+    None
 }
 
 /// Returns the workbench server router with every route mounted.
@@ -415,7 +483,7 @@ fn relay(result: Result<GatewayResponse, GatewayError>) -> Response {
 mod tests {
     use super::*;
 
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     use axum::Json;
     use axum::body::{Body, to_bytes};
@@ -423,6 +491,8 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::config::{GatewayConfig, ServerConfig, TapeConfig, VoiceConfig};
+    use crate::status::{Severity, StatusBarUpdate};
+    use crate::transcribe::fixtures;
 
     const CATALOG: &str = r#"{"object":"list","data":[{"id":"test-model","object":"model","created":1,"owned_by":"promptforge"}]}"#;
     const COMPLETION: &str = r#"{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
@@ -844,6 +914,90 @@ mod tests {
         );
     }
 
+    /// Drains the startup phase frames emitted before the degradation
+    /// verdict and returns the verdict frame.
+    fn degradation(rx: &mut tokio::sync::broadcast::Receiver<StatusBarUpdate>) -> StatusBarUpdate {
+        // The first frame is the "Loading whisper model" phase note; the
+        // verdict follows it.
+        rx.try_recv().expect("the loading phase is reported");
+        rx.try_recv().expect("the degradation verdict is reported")
+    }
+
+    #[test]
+    fn a_missing_interim_model_with_no_source_degrades_to_disabled_voice() {
+        let status = StatusBus::new();
+        let mut rx = status.subscribe();
+        let config = VoiceConfig {
+            interim_model: PathBuf::from("definitely-missing-model.bin"),
+            ..VoiceConfig::default()
+        };
+        let engine = startup_engine(&config, &status);
+        assert!(engine.is_none(), "voice degrades to disabled, not fatal");
+        let verdict = degradation(&mut rx);
+        assert_eq!(verdict.label, "Voice disabled");
+        assert_eq!(verdict.severity, Severity::Error);
+        assert!(
+            verdict.description.contains("definitely-missing-model.bin"),
+            "the explanation names the missing path: {verdict:?}"
+        );
+    }
+
+    #[test]
+    fn a_missing_model_with_a_source_defers_to_provisioning() {
+        let status = StatusBus::new();
+        let mut rx = status.subscribe();
+        let config = VoiceConfig {
+            interim_model: PathBuf::from("definitely-missing-model.bin"),
+            interim_source: "https://example.com/ggml.bin".to_string(),
+            ..VoiceConfig::default()
+        };
+        let engine = startup_engine(&config, &status);
+        assert!(engine.is_none(), "the engine activates later, not now");
+        let verdict = degradation(&mut rx);
+        assert_eq!(verdict.label, "Voice models not downloaded");
+        assert_eq!(verdict.severity, Severity::Info);
+        assert_eq!(verdict.activity, Activity::Voice);
+    }
+
+    #[test]
+    fn a_missing_unsourced_final_model_drops_the_final_pass() {
+        let status = StatusBus::new();
+        let mut rx = status.subscribe();
+        let config = VoiceConfig {
+            interim_model: fixtures::require_model(),
+            final_model: PathBuf::from("definitely-missing-final-model.bin"),
+            ..VoiceConfig::default()
+        };
+        let engine = startup_engine(&config, &status);
+        let engine = engine.expect("the interim model still loads");
+        assert!(
+            engine.final_pass_absent_for_test(),
+            "the final pass was dropped"
+        );
+        let verdict = degradation(&mut rx);
+        assert_eq!(verdict.label, "Voice final pass unavailable");
+        assert_eq!(verdict.severity, Severity::Info);
+    }
+
+    #[test]
+    fn invalid_voice_tuning_degrades_instead_of_failing_startup() {
+        let status = StatusBus::new();
+        let mut rx = status.subscribe();
+        let config = VoiceConfig {
+            interim_model: PathBuf::from("model.bin"),
+            window_seconds: 0,
+            ..VoiceConfig::default()
+        };
+        let engine = startup_engine(&config, &status);
+        assert!(engine.is_none(), "invalid tuning costs voice, not startup");
+        let verdict = degradation(&mut rx);
+        assert_eq!(verdict.label, "Voice disabled");
+        assert!(
+            verdict.description.contains("window_seconds"),
+            "the explanation names the bad field: {verdict:?}"
+        );
+    }
+
     #[tokio::test]
     async fn non_json_gateway_body_is_taped_as_a_string() {
         let base_url =
@@ -894,7 +1048,7 @@ mod tests {
         let state = AppState {
             gateway,
             tape: Arc::new(Tape::with_writer_for_test(FailingWriter)),
-            voice: None,
+            voice: VoiceSlot::default(),
             status: StatusBus::new(),
             health: GatewayHealth::new(),
             catalog: CatalogBus::new(),

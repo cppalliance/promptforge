@@ -12,6 +12,7 @@
 //! quiet windows are never sent to the model.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
@@ -117,6 +118,13 @@ impl VoiceEngine {
         })
     }
 
+    /// Whether the final pass is absent. A test seam for the startup
+    /// degradation policy, which drops an unsourced missing final model.
+    #[cfg(test)]
+    pub(crate) fn final_pass_absent_for_test(&self) -> bool {
+        self.final_pass.is_none()
+    }
+
     /// Samples in the sliding interim window.
     pub(crate) fn window_samples(&self) -> usize {
         self.window_samples
@@ -170,6 +178,42 @@ impl VoiceEngine {
             None => None,
             Some(final_pass) => Some(final_pass.finish(samples).await),
         }
+    }
+}
+
+/// Shared holder for the voice engine: empty until the engine loads, then
+/// filled exactly once - at startup from local model files, or later by the
+/// provisioning task once the gateway cache has provided them.
+///
+/// Reads happen per `/voice` session upgrade and writes are one-shot, so a
+/// std `RwLock` suffices; no guard ever crosses an `.await`. Lock poisoning
+/// recovers the value, matching the tape's posture: a panicking writer
+/// cannot wedge voice for the process's life.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct VoiceSlot {
+    engine: Arc<RwLock<Option<Arc<VoiceEngine>>>>,
+}
+
+impl VoiceSlot {
+    /// The engine, when it has loaded.
+    pub(crate) fn engine(&self) -> Option<Arc<VoiceEngine>> {
+        self.engine
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Whether the engine has loaded.
+    pub(crate) fn is_active(&self) -> bool {
+        self.engine
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+    }
+
+    /// Installs a loaded engine.
+    pub(crate) fn activate(&self, engine: VoiceEngine) {
+        *self.engine.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(engine));
     }
 }
 

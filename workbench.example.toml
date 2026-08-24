@@ -35,18 +35,25 @@ open_browser = false
 
 [voice]
 # Path to the GGML whisper model for streaming interim transcription.
-# Empty disables transcription; the /voice endpoint then captures and
-# counts PCM but emits empty transcripts. Models are downloaded out of
-# band from https://huggingface.co/ggerganov/whisper.cpp (for example
+# Empty disables transcription until a source provides the model; the
+# /voice endpoint then captures and counts PCM but emits empty
+# transcripts. A missing file with interim_source set is downloaded
+# through the gateway cache once the gateway connects; a missing file
+# with no source degrades to voice disabled (with a status-bar note),
+# never a startup failure. Models come from
+# https://huggingface.co/ggerganov/whisper.cpp (for example
 # ggml-large-v3-turbo.bin for interim, ggml-large-v3.bin for final).
 interim_model = "models/ggml-large-v3-turbo.bin"
 # Path to the whisper model for the pipelined final pass over a take.
-# Empty falls back to one last interim-model window.
+# Empty falls back to one last interim-model window; a missing file with
+# no final_source drops just the final pass.
 final_model = "models/ggml-large-v3.bin"
-# URL the interim model can be downloaded from.
+# URL the interim model is downloaded from through the gateway cache when
+# no local file exists.
 # Default: "" (no known source)
 interim_source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
-# URL the final-pass model can be downloaded from.
+# URL the final-pass model is downloaded from through the gateway cache
+# when no local file exists.
 # Default: "" (no known source)
 final_source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
 # Seconds of trailing audio each interim pass transcribes.

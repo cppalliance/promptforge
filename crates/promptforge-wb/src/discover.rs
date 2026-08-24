@@ -18,8 +18,9 @@ const CONFIG_FILE_NAME: &str = "workbench.toml";
 /// The gateway fields interpolate from the environment, so a machine with
 /// `PROMPTFORGE_GATEWAY_URL` / `PROMPTFORGE_GATEWAY_API_KEY` set is
 /// configured from the first launch; unset, they resolve to the built-in
-/// defaults. Voice stays disabled until the whisper models land on disk;
-/// the `*_source` URLs name where they come from.
+/// defaults. Voice provisions itself: the `*_source` URLs let the
+/// workbench download the whisper models through the gateway cache once
+/// the gateway connects, then load them.
 const DEFAULT_CONFIG_TEMPLATE: &str = r#"# PromptForge Workbench configuration
 # Generated on first run. Edit as needed.
 # See: crates/promptforge-wb-server/README.md
@@ -38,8 +39,9 @@ path = "tape.jsonl"
 [voice]
 interim_source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
 final_source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
-# Voice is disabled until the models exist on disk; download the two files
-# above, then uncomment:
+# Voice provisions itself: with the sources above set, the models download
+# through the gateway cache once the gateway connects, then load. Set the
+# paths below only to use local model files instead:
 # interim_model = "~/.promptforge/models/ggml-large-v3-turbo.bin"
 # final_model = "~/.promptforge/models/ggml-large-v3.bin"
 window_seconds = 5
