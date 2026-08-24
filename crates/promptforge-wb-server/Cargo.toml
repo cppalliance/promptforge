@@ -30,6 +30,7 @@ tracing-subscriber.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 time = { workspace = true, features = ["parsing"] }
+tokio-tungstenite.workspace = true
 tower.workspace = true
 
 [lints]
