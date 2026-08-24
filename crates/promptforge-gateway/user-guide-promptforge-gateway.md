@@ -4,7 +4,7 @@ promptforge-gateway is the one process in PromptForge that talks to LLM backends
 
 ## What the Gateway Does
 
-The gateway accepts `POST /v1/chat/completions` requests in the OpenAI chat completions format. It resolves the model name the caller asked for, substitutes the backend's own model string into the outgoing request, forwards it, and restores the caller's model name on the response. Everything else in the request body - sampling parameters, tool definitions, template arguments - passes through untouched in a flattened map, so a parameter the gateway has never heard of reaches the backend without a gateway release. Models configured with `kind = "embedding"` are served instead at `POST /v1/embeddings` in the OpenAI embeddings format, with the same routing and passthrough discipline.
+The gateway accepts `POST /v1/chat/completions` requests in the OpenAI chat completions format. It resolves the model name the caller asked for, substitutes the backend's own model string into the outgoing request, forwards it, and restores the caller's model name on the response. Everything else in the request body - sampling parameters, tool definitions, template arguments - passes through untouched in a flattened map, so a parameter the gateway has never heard of reaches the backend without a gateway release. Models configured with `kind = "embedding"` are served instead at `POST /v1/embeddings` in the OpenAI embeddings format, with the same routing and passthrough discipline. Models configured with `kind = "classifier"` serve rerank requests at `POST /v1/rerank` - a query and a document set in, ranked relevance scores out - under the same discipline.
 
 Credentials live here and nowhere else. Each `[[endpoint]]` carries an `api_key`, each `[tools.web_search]` carries a search provider key, and each `[[local_model]]` is reached over a loopback connection with a generated bearer. The `Secret` type ensures no credential can be serialized, logged, or printed: it redacts in both `Debug` and `Display`, and `expose()` is the single plaintext accessor.
 
@@ -139,6 +139,21 @@ Models configured with `kind = "embedding"` serve OpenAI-shaped embedding reques
 ```
 
 The `input` is a single string or an array of strings; `encoding_format` (`float` or `base64`) is optional, and every other OpenAI embeddings field passes through verbatim. The route applies the same bearer auth, model resolution and rewrite, and dominion queue admission as chat completions, and the response restores the caller's model name with `data` and `usage` passed through from the backend. Naming a chat or classifier model here is a 400 `kind_mismatch`. A model whose upstream cannot serve embeddings at all - a local chat server, for example - fails with 400 and `code: "model_unavailable"`.
+
+## Rerank
+
+Models configured with `kind = "classifier"` serve rerank requests at `POST /v1/rerank`:
+
+```json
+{
+  "model": "rerank-large",
+  "query": "what is rust",
+  "documents": ["a card game", "a systems language"],
+  "top_n": 2
+}
+```
+
+The request names a query and the documents to rank against it; `top_n` is optional, and every other field passes through verbatim. The route applies the same bearer auth, model resolution and rewrite, and dominion queue admission as chat completions, and the response restores the caller's model name with `results` and `usage` passed through from the backend. Naming a chat or embedding model here is a 400 `kind_mismatch`. A model whose upstream cannot serve rerank at all - a local `llama-server` child, for example - fails with 400 and `code: "model_unavailable"`.
 
 ## Authentication and Errors
 
