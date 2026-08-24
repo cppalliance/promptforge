@@ -6,8 +6,6 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::queue::QueueConfig;
-
 mod accessors;
 mod imp;
 mod interpolate;
@@ -41,6 +39,10 @@ fn default_cache_type_v() -> String {
 
 fn default_n_predict() -> u32 {
     8192
+}
+
+fn default_parallel() -> u32 {
+    1
 }
 
 fn default_max_queue() -> usize {
@@ -124,12 +126,8 @@ pub enum Protocol {
 pub struct Config {
     /// Server bind address and shared key.
     server: ServerConfig,
-    /// Waiting-queue settings for limited endpoints.
-    queue: QueueConfig,
     /// Cache and binary settings for gateway-owned local inference.
     local: LocalConfig,
-    /// Physical compute resources with concurrency limits.
-    devices: Vec<DeviceConfig>,
     /// Named pools of compute with a shared concurrency limit and queue.
     dominions: Vec<DominionConfig>,
     /// The configured backends.
@@ -153,11 +151,7 @@ pub struct Config {
 struct RawConfig {
     server: ServerConfig,
     #[serde(default)]
-    queue: QueueConfig,
-    #[serde(default)]
     local: LocalConfig,
-    #[serde(rename = "device", default)]
-    devices: Vec<DeviceConfig>,
     #[serde(rename = "dominion", default)]
     dominions: Vec<DominionConfig>,
     #[serde(rename = "endpoint", default)]
@@ -178,9 +172,7 @@ impl From<RawConfig> for Config {
     fn from(raw: RawConfig) -> Config {
         Config {
             server: raw.server,
-            queue: raw.queue,
             local: raw.local,
-            devices: raw.devices,
             dominions: raw.dominions,
             endpoints: raw.endpoints,
             models: raw.models,
@@ -189,50 +181,6 @@ impl From<RawConfig> for Config {
             tools: raw.tools,
         }
     }
-}
-
-/// Whether a device is a remote provider or a local GPU managed by the gateway.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum DeviceKind {
-    /// A remote HTTP provider; concurrency is flat (no lanes required).
-    Remote,
-    /// A local GPU; concurrency comes from `[[device.lane]]` entries.
-    Local,
-}
-
-/// One compute device declared as `[[device]]`.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-#[non_exhaustive]
-pub struct DeviceConfig {
-    /// Operator-chosen device id, referenced by endpoints and local models.
-    id: String,
-    /// Remote provider or local GPU.
-    #[serde(rename = "type")]
-    kind: DeviceKind,
-    /// Max concurrent requests for a remote device. Ignored for local devices
-    /// (use lanes instead).
-    #[serde(default)]
-    concurrency: Option<usize>,
-    /// Lanes nested via `[[device.lane]]` under this device.
-    #[serde(default, rename = "lane")]
-    lanes: Vec<LaneConfig>,
-}
-
-/// A concurrency lane within a local device (`[[device.lane]]`).
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-#[non_exhaustive]
-pub struct LaneConfig {
-    /// Lane id referenced by `[[local_model]].lane`.
-    id: String,
-    /// Max concurrent inferences on this lane.
-    concurrency: usize,
-    /// Optional explicit device id (redundant when nested under `[[device]]`).
-    #[serde(default)]
-    device: Option<String>,
 }
 
 /// Whether a dominion pools remote providers or local GPUs managed by the
@@ -319,20 +267,13 @@ pub struct LocalModelConfig {
     /// Optional SHA-256 pin (lowercase hex). Verified after download when set.
     #[serde(default)]
     sha256: Option<String>,
-    /// Optional device id (`[[device]]`); used with `lane` for concurrency.
-    #[serde(default)]
-    device: Option<String>,
-    /// Optional lane id under the device (`[[device.lane]]`).
-    #[serde(default)]
-    lane: Option<String>,
     /// Optional local dominion id (`[[dominion]]`) binding this model.
     #[serde(default)]
     dominion: Option<String>,
-    /// Max concurrent inferences: the child's `--parallel` and the gateway
-    /// queue limit. Stays optional during the dominion transition so an unset
-    /// field cannot override a legacy lane's concurrency with the default.
-    #[serde(default)]
-    parallel: Option<u32>,
+    /// Max concurrent inferences: the child's `--parallel` and, when no
+    /// dominion is bound, the model's gateway queue limit. Defaults to 1.
+    #[serde(default = "default_parallel")]
+    parallel: u32,
     /// VRAM footprint estimate in gibibytes for the dominion co-residency
     /// check.
     #[serde(default)]
@@ -392,15 +333,6 @@ pub struct EndpointConfig {
     /// The credential sent to this backend.
     #[serde(deserialize_with = "de_secret")]
     api_key: Secret,
-    /// Maximum in-flight requests to this endpoint. Absent means unlimited
-    /// (the waiting queue is a no-op pass-through for that endpoint).
-    /// When `device` is set and this field is absent, the device's
-    /// concurrency is used instead.
-    #[serde(default)]
-    concurrency: Option<usize>,
-    /// Optional remote device id whose concurrency governs this endpoint.
-    #[serde(default)]
-    device: Option<String>,
     /// Optional remote dominion id (`[[dominion]]`) whose shared limit and
     /// queue govern this endpoint. Absent means unlimited pass-through.
     #[serde(default)]

@@ -41,7 +41,6 @@ id = "anthropic"
 protocol = "openai"
 base_url = "http://base"
 api_key = ""
-concurrency = 2
 
 [[model]]
 name = "m1"
@@ -62,7 +61,6 @@ id = "anthropic"
 protocol = "openai"
 base_url = "http://child"
 api_key = ""
-concurrency = 9
 
 [[model]]
 name = "m1"
@@ -83,7 +81,6 @@ endpoints = ["anthropic"]
     let config = load_path(&tmp.path().join("child.toml")).unwrap();
     assert_eq!(config.endpoints().len(), 1);
     assert_eq!(config.endpoints()[0].base_url(), "http://child");
-    assert_eq!(config.endpoints()[0].concurrency(), Some(9));
     assert_eq!(config.models().len(), 2);
     assert_eq!(config.models()[0].description(), "from child");
     assert_eq!(config.models()[0].context(), 2000);
@@ -170,8 +167,8 @@ fn later_scalar_wins() {
 bind = "127.0.0.1:8081"
 api_key = "base-token"
 
-[queue]
-max_depth = 10
+[local]
+cache_dir = "/base-cache"
 "#,
     );
     write(
@@ -183,13 +180,13 @@ include = ["base.toml"]
 [server]
 api_key = "child-token"
 
-[queue]
-max_depth = 50
+[local]
+cache_dir = "/child-cache"
 "#,
     );
     let config = load_path(&tmp.path().join("child.toml")).unwrap();
     assert_eq!(config.server().api_key().expose(), "child-token");
-    assert_eq!(config.queue().max_depth(), 50);
+    assert_eq!(config.local().cache_dir(), Some("/child-cache"));
     assert_eq!(config.server().bind().to_string(), "127.0.0.1:8081");
 }
 
@@ -315,115 +312,6 @@ context = 2048
 }
 
 #[test]
-fn include_merges_devices_and_nested_lanes() {
-    let tmp = TempDir::new().unwrap();
-    write(
-        tmp.path(),
-        "base.toml",
-        r#"
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[device]]
-id = "anthropic"
-type = "remote"
-concurrency = 10
-
-[[endpoint]]
-id = "anthropic"
-protocol = "openai"
-base_url = "http://a"
-api_key = ""
-device = "anthropic"
-
-[[model]]
-name = "m"
-description = "prose"
-context = 1
-upstream = "u"
-endpoints = ["anthropic"]
-"#,
-    );
-    write(
-        tmp.path(),
-        "child.toml",
-        r#"
-include = ["base.toml"]
-
-[[device]]
-id = "local-gpu"
-type = "local"
-
-[[device.lane]]
-device = "local-gpu"
-id = "generative"
-concurrency = 1
-"#,
-    );
-    let config = load_path(&tmp.path().join("child.toml")).unwrap();
-    assert_eq!(config.devices().len(), 2);
-    let local = config
-        .devices()
-        .iter()
-        .find(|d| d.id() == "local-gpu")
-        .unwrap();
-    assert_eq!(local.lanes().len(), 1);
-    assert_eq!(local.lanes()[0].id(), "generative");
-}
-
-#[test]
-fn include_attaches_orphan_device_lanes_from_child() {
-    // Leaf-only [[device.lane]] parses as a table; attach by lane.device.
-    let tmp = TempDir::new().unwrap();
-    write(
-        tmp.path(),
-        "common.toml",
-        r#"
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[device]]
-id = "local-gpu"
-type = "local"
-"#,
-    );
-    write(
-        tmp.path(),
-        "gemma.toml",
-        r#"
-include = ["common.toml"]
-
-[[device.lane]]
-device = "local-gpu"
-id = "generative"
-concurrency = 3
-
-[[local_model]]
-name = "gemma"
-description = "prose"
-source = "https://example.com/a.gguf"
-sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-context = 1024
-device = "local-gpu"
-lane = "generative"
-"#,
-    );
-    let config = load_path(&tmp.path().join("gemma.toml")).unwrap();
-    assert_eq!(config.devices().len(), 1);
-    assert_eq!(config.devices()[0].lanes().len(), 1);
-    assert_eq!(config.devices()[0].lanes()[0].id(), "generative");
-    assert_eq!(config.devices()[0].lanes()[0].concurrency(), 3);
-    assert_eq!(
-        config
-            .local_model_concurrency(&config.local_models()[0])
-            .unwrap(),
-        3
-    );
-}
-
-#[test]
 fn non_array_inherited_collection_is_a_located_error() {
     // PROFILE-001: a keyed collection (`endpoint`) provided as a table, not an
     // array of tables, is rejected with a path:line diagnostic.
@@ -448,31 +336,6 @@ id = "not-an-array"
 }
 
 #[test]
-fn orphan_device_lane_without_device_field_is_rejected() {
-    // PROFILE-002: a leaf-only [[device.lane]] must name its parent device.
-    let tmp = TempDir::new().unwrap();
-    write(
-        tmp.path(),
-        "common.toml",
-        "[server]\nbind = \"127.0.0.1:8081\"\nkey = \"t\"\n\n[[device]]\nid = \"gpu\"\ntype = \"local\"\n",
-    );
-    write(
-        tmp.path(),
-        "leaf.toml",
-        r#"
-include = ["common.toml"]
-
-[[device.lane]]
-id = "generative"
-concurrency = 1
-"#,
-    );
-    let err = load_path(&tmp.path().join("leaf.toml")).unwrap_err();
-    assert!(matches!(err, ConfigError::Validation(_)));
-    assert!(err.to_string().contains("device"));
-}
-
-#[test]
 fn merge_type_error_includes_path_and_line() {
     let tmp = TempDir::new().unwrap();
     write(
@@ -483,8 +346,8 @@ fn merge_type_error_includes_path_and_line() {
 bind = "127.0.0.1:8081"
 api_key = "t"
 
-[device]
-id = "not-an-array"
+[model]
+name = "not-an-array"
 "#,
     );
     let err = load_path(&tmp.path().join("broken.toml")).unwrap_err();

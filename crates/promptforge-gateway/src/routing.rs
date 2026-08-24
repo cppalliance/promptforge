@@ -17,9 +17,8 @@ pub(crate) struct Endpoint {
     pub upstream: Arc<dyn Upstream>,
     /// Admission control: concurrency limit plus bounded waiting queue.
     /// Endpoints bound to the same dominion hold clones of one shared queue
-    /// and compete for a single pool of slots; an endpoint with only legacy
-    /// `concurrency`/`device` fields keeps its own per-endpoint queue, and
-    /// one with neither is unlimited.
+    /// and compete for a single pool of slots; an endpoint with no dominion
+    /// is unlimited.
     pub queue: DominionQueue,
 }
 
@@ -122,8 +121,7 @@ impl Routing {
     ///
     /// Every endpoint bound to a dominion clones that dominion's queue, so
     /// all of them compete for one pool of concurrency slots. An endpoint
-    /// without a `dominion` keeps the legacy behavior: its own queue from
-    /// `concurrency`/`device`, or an unlimited pass-through.
+    /// without a `dominion` is an unlimited pass-through.
     ///
     /// # Errors
     /// Returns [`ConfigError::Validation`] if a model references an endpoint
@@ -154,10 +152,7 @@ impl Routing {
                         ))
                     })?
                     .clone(),
-                None => match config.endpoint_concurrency(endpoint) {
-                    Some(n) => DominionQueue::from_queue_config(n, config.queue()),
-                    None => DominionQueue::unlimited(),
-                },
+                None => DominionQueue::unlimited(),
             };
             endpoints.insert(
                 endpoint.id(),
@@ -394,55 +389,6 @@ endpoints = ["b"]
         // Releasing A's permit hands the shared slot to B's waiter.
         drop(held);
         let _permit = blocked.await.unwrap().unwrap();
-    }
-
-    #[tokio::test]
-    async fn legacy_concurrency_stays_per_endpoint() {
-        // During the transition, endpoints with only legacy `concurrency`
-        // keep today's behavior: each gets its own independent queue.
-        let toml = r#"
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[endpoint]]
-id = "a"
-protocol = "openai"
-base_url = "http://127.0.0.1:9"
-api_key = ""
-concurrency = 1
-
-[[endpoint]]
-id = "b"
-protocol = "openai"
-base_url = "http://127.0.0.1:9"
-api_key = ""
-concurrency = 1
-
-[[model]]
-name = "ma"
-description = "model on endpoint a"
-context = 8192
-upstream = "ua"
-endpoints = ["a"]
-
-[[model]]
-name = "mb"
-description = "model on endpoint b"
-context = 8192
-upstream = "ub"
-endpoints = ["b"]
-"#;
-        let routing = routing_from(toml);
-        let queue_a = routing.model("ma").unwrap().endpoint.queue.clone();
-        let queue_b = routing.model("mb").unwrap().endpoint.queue.clone();
-
-        // A's only slot is held; B still admits immediately on its own limit.
-        let _held = queue_a.admit("client").await.unwrap();
-        let permit_b = queue_b.admit("client").await.unwrap();
-        assert_eq!(queue_a.waiter_count(), 0);
-        assert_eq!(queue_b.waiter_count(), 0);
-        drop(permit_b);
     }
 
     #[tokio::test]

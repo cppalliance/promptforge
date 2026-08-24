@@ -7,14 +7,14 @@
 //! holds a vendor key.
 //!
 //! What ships: one OpenAI passthrough at `POST /v1/chat/completions` with
-//! bearer auth and model routing, per-endpoint concurrency limits with a fair
-//! waiting queue (`[queue]` / `concurrency`), gateway-owned local generative
-//! inference via a managed `llama-server` subprocess (`[[local_model]]`), named
-//! profiles with recursive `include` and immediate `POST /admin/switch-profile`,
-//! a bearer-authed `GET /v1/models` catalog, a Brave-backed
+//! bearer auth and model routing, shared concurrency pools with bounded, fair
+//! waiting queues (`[[dominion]]`), gateway-owned local generative inference
+//! via a managed `llama-server` subprocess (`[[local_model]]`), named profiles
+//! with recursive `include` and immediate `POST /admin/switch-profile`, a
+//! bearer-authed `GET /v1/models` catalog, a Brave-backed
 //! `POST /v1/tools/web_search` configured by `[tools.web_search]`, and
-//! `GET /health`. In-process llama.cpp FFI, endpoint pinning, model packs,
-//! streaming, and the Anthropic protocol shim are deferred.
+//! `GET /health`. In-process llama.cpp FFI, endpoint pinning, streaming, and
+//! the Anthropic protocol shim are deferred.
 
 mod api_error;
 mod error;
@@ -248,7 +248,7 @@ async fn admin_status(
         "models": models,
         "model_allowlist": live.model_allowlist,
         "local_children": live.local.child_count(),
-        "queue": "per-endpoint waiting queue; switch-profile is immediate (no drain)",
+        "queue": "per-dominion shared waiting queue; switch-profile is immediate (no drain)",
     })))
 }
 
