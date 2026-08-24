@@ -575,6 +575,29 @@ mod tests {
         spawn_gateway(Router::new().route("/v1/models", get(mock_broken_models))).await
     }
 
+    /// Reports whether the request carried an `Authorization` header, so
+    /// the client tests can observe what was sent.
+    async fn mock_auth_probe(headers: HeaderMap) -> Response {
+        let body = if headers.contains_key(header::AUTHORIZATION) {
+            "auth"
+        } else {
+            "no-auth"
+        };
+        ([(header::CONTENT_TYPE, "text/plain")], body).into_response()
+    }
+
+    #[tokio::test]
+    async fn empty_api_key_sends_no_authorization_header() {
+        let base_url = spawn_gateway(Router::new().route("/v1/models", get(mock_auth_probe))).await;
+        let anonymous = GatewayClient::new(&base_url, "").expect("client builds");
+        let response = anonymous.list_models().await.expect("request completes");
+        assert_eq!(response.body, b"no-auth", "empty key sends no header");
+
+        let keyed = GatewayClient::new(&base_url, "test-key").expect("client builds");
+        let response = keyed.list_models().await.expect("request completes");
+        assert_eq!(response.body, b"auth", "a set key still authenticates");
+    }
+
     async fn body_bytes(response: Response) -> axum::body::Bytes {
         to_bytes(response.into_body(), usize::MAX)
             .await
