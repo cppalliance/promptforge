@@ -52,6 +52,14 @@ impl GatewayHealth {
         *self.reachable.borrow()
     }
 
+    /// Subscribes to reachability changes. The current value is visible
+    /// immediately through the receiver; each later publish that flips the
+    /// flag notifies. The provisioning task waits on this to run its cache
+    /// calls only while the gateway answers.
+    pub(crate) fn subscribe(&self) -> watch::Receiver<bool> {
+        self.reachable.subscribe()
+    }
+
     /// Publishes one probe outcome. The heartbeat is the only production
     /// writer; tests publish directly to pin the degraded paths.
     pub(crate) fn publish(&self, reachable: bool) {
