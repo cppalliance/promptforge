@@ -15,7 +15,9 @@
 //! `id` is answered untagged. A frame that is not a well-formed chat
 //! request is answered with an `error` frame and the session continues.
 //! Chat frames are answered strictly in order: while one streams, later
-//! frames wait.
+//! frames wait. A chat received while the heartbeat knows the gateway is
+//! down is answered immediately with a "Gateway unreachable" error frame -
+//! no upstream attempt, no tape event.
 //!
 //! Status updates from [`crate::status`] and model catalog pushes from
 //! [`crate::catalog`] are forwarded to the socket as unsolicited
@@ -159,6 +161,13 @@ async fn handle_frame(state: &AppState, text: &str, out: &tokio::sync::mpsc::Sen
             return;
         }
     };
+    // A gateway the heartbeat knows is down is not attempted: the chat
+    // fails fast with a user-visible error instead of a transport error,
+    // and nothing is taped because no exchange happened.
+    if !state.health().is_reachable() {
+        send_error(out, id.as_ref(), "Gateway unreachable").await;
+        return;
+    }
     relay_chat(state, request, frame, id, out).await;
 }
 
@@ -889,6 +898,40 @@ mod tests {
             "both rounds taped the assembled response"
         );
         socket.close(None).await.expect("close the socket");
+    }
+
+    #[tokio::test]
+    async fn a_gateway_known_down_short_circuits_chat_with_an_error_frame() {
+        let (url, tape_dir, state) = spawn_chat_server("http://127.0.0.1:1").await;
+        state.health().publish(false);
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /ws");
+        let frame = serde_json::json!({
+            "type": "chat",
+            "id": 7,
+            "model": "test-model",
+            "messages": [{"role": "user", "content": "ping"}],
+        })
+        .to_string();
+        socket
+            .send(tungstenite::Message::Text(frame.into()))
+            .await
+            .expect("the chat frame is sent");
+
+        let reply = read_non_status_frame(&mut socket).await;
+        assert_eq!(
+            reply,
+            serde_json::json!({"type": "error", "message": "Gateway unreachable", "id": 7}),
+            "the chat fails fast, with the request id echoed"
+        );
+        socket.close(None).await.expect("close the socket");
+        let raw =
+            std::fs::read_to_string(tape_dir.path().join("tape.jsonl")).expect("the tape exists");
+        assert!(
+            raw.trim().is_empty(),
+            "no upstream attempt means no tape event"
+        );
     }
 
     const CATALOG: &str = r#"{"object":"list","data":[{"id":"test-model","object":"model","owned_by":"promptforge"}]}"#;

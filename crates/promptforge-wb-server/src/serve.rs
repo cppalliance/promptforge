@@ -227,6 +227,28 @@ mod tests {
         server.shutdown().expect("graceful shutdown succeeds");
     }
 
+    /// The test config points the gateway at port 1, which never listens:
+    /// the server must still boot and serve - the UI and its own health
+    /// endpoint do not depend on the gateway, and the heartbeat reports
+    /// the outage instead of failing startup.
+    #[tokio::test]
+    async fn the_server_boots_and_serves_the_ui_with_an_unreachable_gateway() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let server = spawn(test_config("127.0.0.1:0", dir.path())).expect("server spawns");
+        let url = server.url().to_string();
+
+        let health = reqwest::get(format!("{url}/health"))
+            .await
+            .expect("the health endpoint answers");
+        assert_eq!(health.status(), reqwest::StatusCode::OK);
+        let index = reqwest::get(format!("{url}/"))
+            .await
+            .expect("the UI answers");
+        assert_eq!(index.status(), reqwest::StatusCode::OK);
+
+        server.shutdown().expect("graceful shutdown succeeds");
+    }
+
     #[tokio::test]
     async fn shutdown_releases_the_bound_port() {
         let dir = tempfile::TempDir::new().expect("tempdir");
