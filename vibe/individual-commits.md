@@ -82,3 +82,7 @@ post-rebase cargo doc failed on private intra-doc links introduced by upstream's
 
 one bundled commit of dictation-UX direction given verbatim by the user: interim text lives in the text box and grows it, the status bar is full-width and top-level, REC is a maroon badge with priority over the LED, and the LED means amber-while-thinking, green-on-output-spurt. (user said)
 
+## 2026-08-24 Suppress the LIBCMT defaultlib warning on MSVC
+
+whisper-rs-sys builds whisper.cpp with the static CRT while Rust links the dynamic CRT; the linker resolves it but warns, so /NODEFAULTLIB:LIBCMT is scoped to the MSVC target. (assistant reasoned)
+
