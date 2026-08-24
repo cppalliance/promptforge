@@ -364,6 +364,34 @@ pub enum ThinkingMode {
     Switchable,
 }
 
+/// The tool-calling dialect a chat model speaks.
+///
+/// `openai` (the default) forwards tool definitions verbatim and expects
+/// native wire `tool_calls`. `gemma3_tool_code` emulates tool calling for
+/// backends without a native tool array: the gateway injects a tool guide
+/// into the system prompt, strips `tools`/`tool_choice` from the outgoing
+/// request, and parses `tool_code` content fences from the reply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ToolDialect {
+    /// Native OpenAI tool calling. The default.
+    #[default]
+    Openai,
+    /// Emulated Gemma3 `tool_code` content-fence protocol.
+    Gemma3ToolCode,
+}
+
+impl fmt::Display for ToolDialect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let spelling = match self {
+            ToolDialect::Openai => "openai",
+            ToolDialect::Gemma3ToolCode => "gemma3_tool_code",
+        };
+        f.write_str(spelling)
+    }
+}
+
 /// The workload a model serves: chat completions, embeddings, or
 /// classification.
 ///
@@ -457,6 +485,9 @@ pub struct ModelConfig {
     /// A `max_tokens` default supplied when the caller omits one.
     #[serde(default)]
     default_max_tokens: Option<u32>,
+    /// The tool-calling dialect this model speaks. Defaults to `openai`.
+    #[serde(default)]
+    tool_dialect: ToolDialect,
     /// Capability metadata advertised on the catalog.
     #[serde(default, flatten)]
     capabilities: Capabilities,

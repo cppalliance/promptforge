@@ -42,6 +42,6 @@ pub use crate::api_error::{ConfigError, ConfigErrorKind};
 pub use crate::config::{
     Capabilities, Config, DominionConfig, DominionKind, EndpointConfig, LocalConfig,
     LocalModelConfig, ModelConfig, ModelKind, Protocol, QueuePolicy, SearchProvider, Secret,
-    ServerConfig, ThinkingMode, ToolsConfig, WebSearchConfig,
+    ServerConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig,
 };
 pub use crate::profile::{ProfileName, ProfileNameError, list_profiles, load_server};

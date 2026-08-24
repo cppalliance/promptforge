@@ -11,7 +11,9 @@ use std::collections::HashSet;
 
 use url::Url;
 
-use super::{Capabilities, Config, DominionKind, ModelKind, ThinkingMode, is_sha256_hex};
+use super::{
+    Capabilities, Config, DominionKind, ModelKind, ThinkingMode, ToolDialect, is_sha256_hex,
+};
 use crate::error::ConfigError;
 
 impl Config {
@@ -311,7 +313,10 @@ impl Config {
                 model.kind,
                 model.thinking,
                 &model.capabilities,
-                &[("default_max_tokens", model.default_max_tokens.is_some())],
+                &[
+                    ("default_max_tokens", model.default_max_tokens.is_some()),
+                    ("tool_dialect", model.tool_dialect != ToolDialect::Openai),
+                ],
             )?;
             validate_capabilities(
                 "model",

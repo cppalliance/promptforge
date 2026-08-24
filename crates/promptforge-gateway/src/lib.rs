@@ -21,6 +21,7 @@
 //! shim are deferred.
 
 mod api_error;
+mod dialect;
 mod error;
 mod http_util;
 mod local;
@@ -183,6 +184,17 @@ async fn chat_completions(
             .and_then(|value| value.to_str().ok()),
     );
     let permit = model.endpoint.queue.admit(client_id.as_str()).await?;
+    // Emulated dialects rewrite the request (guide injection, tool stripping)
+    // and parse the reply's content fences; the emulated parse applies to
+    // non-streaming completions only.
+    let emulated = model.tool_dialect == crate::dialect::GEMMA3_TOOL_CODE && !request.stream;
+    let request = if emulated {
+        let mut request = request;
+        crate::dialect::prepare_request(&mut request)?;
+        request
+    } else {
+        request
+    };
     if request.stream {
         // A failure here is before the SSE response starts, so it is
         // consumed as a normal JSON error, never a stream that dies
@@ -202,6 +214,10 @@ async fn chat_completions(
     response
         .validate()
         .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
+    let mut response = response;
+    if emulated {
+        crate::dialect::apply_response(&mut response, &model.name);
+    }
     Ok(Json(response).into_response())
 }
 
