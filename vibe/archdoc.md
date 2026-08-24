@@ -28,7 +28,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A19. Runtime metadata is sealed: unknown reads and all author writes fail, and every field has an explicit refresh boundary.
 - A25. Every model-facing section uses a prompt-declared model binding; hosts never choose a model implicitly.
 - A26. Artifact credentials are read from process secrets at request time and are never persisted or logged.
-- A27. Model tool-wire dialects are resolved from runtime evidence and applied at one normalization boundary; prompts remain dialect-agnostic.
 - A30. Fan-out arms run with bounded concurrency, return in input order, and abort siblings on the first error.
 
 
@@ -43,7 +42,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 
 - A58. Variable state rolls through one walk and its jumps; execute chains and fan-out arms receive isolated snapshots whose writes do not escape.
-- A59. Distinct concurrent fan-out arms writing the same store path fail visibly; concurrent append remains legal.
 
 
 - A61. Immutable run state is shared across the execute subtree; each section entry owns a fresh frame with explicit construction and teardown.
@@ -51,6 +49,9 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 - A63. The boot catalog defines available models; a required named profile selects the loaded subset while server identity stays fixed.
 - A64. Endpoints bind by id to one shared dominion admission queue; local dominions also enforce complete VRAM co-residency budgets.
+
+- A65. Clients and core speak one canonical protocol; per-model backend dialect translation exists only inside the gateway and grows by demonstrated need.
+- A66. Streaming holds admission for its full lifetime, cancels upstream work on disconnect, and validates chunks without whole-body buffering.
 
 ## Principles
 
