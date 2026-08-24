@@ -108,6 +108,9 @@ pub(crate) fn prefix_web_search_upstream(err: GatewayError) -> GatewayError {
         GatewayError::UpstreamTransport(source) => {
             GatewayError::UpstreamTransport(Box::new(WebSearchUpstream { source }))
         }
+        GatewayError::UpstreamConnect(source) => {
+            GatewayError::UpstreamConnect(Box::new(WebSearchUpstream { source }))
+        }
         other => other,
     }
 }
@@ -161,8 +164,9 @@ pub(crate) fn brave_search_query(params: &BraveSearchParams<'_>) -> Vec<(&'stati
 /// Always sends `extra_snippets=true`. Optional knobs are omitted when `None`.
 ///
 /// # Errors
-/// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
-/// [`GatewayError::UpstreamStatus`] on a non-success provider status. Both are
+/// Returns [`GatewayError::UpstreamConnect`] when the connection itself fails,
+/// [`GatewayError::UpstreamTransport`] on a mid-flight transport failure, and
+/// [`GatewayError::UpstreamStatus`] on a non-success provider status. All are
 /// prefixed with `web_search: ` on the body or source message.
 pub(crate) async fn brave_search(
     http: &reqwest::Client,
