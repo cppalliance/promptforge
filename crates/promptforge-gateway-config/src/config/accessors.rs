@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use super::{
     Capabilities, Config, DominionConfig, DominionKind, EndpointConfig, LocalConfig,
     LocalModelConfig, ModelConfig, ModelKind, Protocol, QueuePolicy, SearchProvider, Secret,
-    ServerConfig, ThinkingMode, ToolsConfig, WebSearchConfig,
+    ServerConfig, ThinkingMode, ToolDialect, ToolsConfig, WebSearchConfig,
 };
 
 impl Config {
@@ -855,6 +855,41 @@ impl ModelConfig {
     #[must_use]
     pub fn default_max_tokens(&self) -> Option<u32> {
         self.default_max_tokens
+    }
+
+    /// Returns the tool-calling dialect this model speaks: `openai` (the
+    /// default) for native wire tool calls, or `gemma3_tool_code` for
+    /// emulated content-fence tool calling.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::{Config, ToolDialect};
+    /// # let toml = r#"
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// #
+    /// # [[model]]
+    /// # name = "m"
+    /// # description = "a model"
+    /// # context = 8192
+    /// # upstream = "u"
+    /// # endpoints = ["e"]
+    /// # tool_dialect = "gemma3_tool_code"
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.models()[0].tool_dialect(), ToolDialect::Gemma3ToolCode);
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn tool_dialect(&self) -> ToolDialect {
+        self.tool_dialect
     }
 
     /// Returns the capability metadata advertised on the catalog.
