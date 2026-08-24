@@ -83,7 +83,7 @@ pub(super) fn download(client: &Client, url: &str, destination: &Path) -> Result
 ///
 /// # Errors
 /// Returns [`LocalError`] on transport, size-cap, or filesystem failure.
-pub(super) fn download_with_progress(
+pub(crate) fn download_with_progress(
     client: &Client,
     url: &str,
     destination: &Path,

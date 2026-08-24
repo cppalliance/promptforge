@@ -7,6 +7,10 @@
 //! [`LocalRuntime`] kills the children.
 
 pub(crate) mod artifacts;
+// The store is exercised by its unit tests here; the `/v1/cache` route
+// handlers that consume it land with the following commits.
+#[allow(dead_code, reason = "the /v1/cache route handlers land next")]
+pub(crate) mod cache;
 mod dialect;
 mod error;
 mod server;
@@ -166,7 +170,13 @@ impl LocalRuntime {
     }
 }
 
-fn resolve_cache_root(configured: Option<&str>) -> Result<PathBuf, LocalError> {
+/// Resolves the operator cache root from the configured `[local].cache_dir`,
+/// defaulting to `~/.promptforge` (ART-009).
+///
+/// # Errors
+/// Returns [`LocalError::MissingHome`] when no cache dir is configured and the
+/// home variable is unset or empty.
+pub(crate) fn resolve_cache_root(configured: Option<&str>) -> Result<PathBuf, LocalError> {
     match configured {
         Some(path) if !path.is_empty() => expand_configured_path(path),
         // An unset cache_dir defaults to `~/.promptforge`; a missing home is a

@@ -39,7 +39,7 @@ use crate::local::error::LocalError;
 ///
 /// Returns [`LocalError::CacheNotPrivate`] when the root cannot be made private.
 #[cfg(unix)]
-pub(super) fn enforce_private_cache_root(root: &Path) -> Result<()> {
+pub(crate) fn enforce_private_cache_root(root: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
 
     fs::set_permissions(root, fs::Permissions::from_mode(0o700)).map_err(|source| {
@@ -86,7 +86,7 @@ const BROAD_WINDOWS_PRINCIPALS: [&str; 5] = [
 ];
 
 #[cfg(windows)]
-pub(super) fn enforce_private_cache_root(root: &Path) -> Result<()> {
+pub(crate) fn enforce_private_cache_root(root: &Path) -> Result<()> {
     let account = current_windows_account(root)?;
     set_owner_only_windows_dacl(root, &account)?;
     verify_private_windows_dacl(root)
@@ -174,7 +174,7 @@ fn verify_private_windows_dacl(root: &Path) -> Result<()> {
 }
 
 /// Whether `path` is a non-empty relative path of only normal components.
-pub(super) fn safe_relative_path(path: &Path) -> bool {
+pub(crate) fn safe_relative_path(path: &Path) -> bool {
     !path.as_os_str().is_empty()
         && path
             .components()
@@ -182,7 +182,7 @@ pub(super) fn safe_relative_path(path: &Path) -> bool {
 }
 
 /// The sibling `<path>.part` staging name for an atomic publish.
-pub(super) fn part_path(path: &Path) -> PathBuf {
+pub(crate) fn part_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push(".part");
     PathBuf::from(name)
@@ -192,7 +192,7 @@ pub(super) fn part_path(path: &Path) -> PathBuf {
 ///
 /// # Errors
 /// Returns [`LocalError`] when the path escapes `root` or a component is unsafe.
-pub(super) fn ensure_cache_directory(root: &Path, directory: &Path) -> Result<()> {
+pub(crate) fn ensure_cache_directory(root: &Path, directory: &Path) -> Result<()> {
     if directory == root {
         fs::create_dir_all(root).map_err(|source| LocalError::Io {
             operation: "create cache directory",
@@ -240,7 +240,7 @@ pub(super) fn ensure_cache_directory(root: &Path, directory: &Path) -> Result<()
 ///
 /// # Errors
 /// Returns [`LocalError`] when the path is unsafe or removal fails.
-pub(super) fn remove_cache_entry(root: &Path, path: &Path) -> Result<()> {
+pub(crate) fn remove_cache_entry(root: &Path, path: &Path) -> Result<()> {
     validate_tree_path(root, path)?;
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -274,7 +274,7 @@ pub(super) fn remove_cache_entry(root: &Path, path: &Path) -> Result<()> {
 ///
 /// # Errors
 /// Returns [`LocalError`] when either path is unsafe or the rename fails.
-pub(super) fn rename_confined(root: &Path, source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn rename_confined(root: &Path, source: &Path, destination: &Path) -> Result<()> {
     validate_tree_path(root, source)?;
     validate_tree_path(root, destination)?;
     fs::rename(source, destination).map_err(|error| LocalError::Io {
@@ -288,7 +288,7 @@ pub(super) fn rename_confined(root: &Path, source: &Path, destination: &Path) ->
 ///
 /// # Errors
 /// Returns [`LocalError::UnsafeCachePath`] when `path` is not confined.
-pub(super) fn validate_cache_path(root: &Path, path: &Path) -> Result<()> {
+pub(crate) fn validate_cache_path(root: &Path, path: &Path) -> Result<()> {
     validate_tree_path(root, path)
 }
 
@@ -365,7 +365,7 @@ fn is_link_or_reparse(metadata: &fs::Metadata) -> bool {
 ///
 /// # Errors
 /// Returns [`LocalError::Io`] when creating, writing, or syncing fails.
-pub(super) fn write_synced(path: &Path, contents: &[u8]) -> Result<()> {
+pub(crate) fn write_synced(path: &Path, contents: &[u8]) -> Result<()> {
     let mut file = File::create(path).map_err(|source| LocalError::Io {
         operation: "create install marker",
         path: path.to_owned(),
