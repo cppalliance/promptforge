@@ -156,7 +156,7 @@ async fn chat_completions(
             .get(CLIENT_HEADER)
             .and_then(|value| value.to_str().ok()),
     );
-    let _permit = model.endpoint.lane.admit(client_id.as_str()).await?;
+    let _permit = model.endpoint.queue.admit(client_id.as_str()).await?;
     let response = model
         .endpoint
         .upstream

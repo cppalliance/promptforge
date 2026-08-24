@@ -1,13 +1,27 @@
-//! Per-endpoint admission control: concurrency limits and a fair waiting queue.
+//! Dominion admission control: concurrency limits, a bounded waiting queue,
+//! and a reject-vs-queue policy for a full queue.
 //!
 //! `max_depth` is the number of *waiting* requests allowed (not counting
-//! in-flight). When an endpoint omits `concurrency`, the lane is unlimited and
-//! [`EndpointLane::admit`] is a no-op pass-through.
+//! in-flight). When nothing caps a dominion's concurrency, the queue is
+//! unlimited and [`DominionQueue::admit`] is a no-op pass-through.
+//!
+//! The full-queue behavior comes from the dominion's `policy`: `Queue` (the
+//! default) parks callers up to `max_depth` and rejects beyond that, while
+//! `Reject` never parks - it turns the caller away immediately when no
+//! concurrency slot is free (TGI-style fail-fast), which the gateway maps to
+//! a 429 response.
+//!
+//! When `fair_scheduling` is on, waiting callers are served in per-client
+//! round-robin order keyed by the `X-PromptForge-Client` header. That header
+//! is self-asserted: a scheduling hint for trusted-host callers, not an
+//! authenticated identity. There is deliberately no discipline abstraction -
+//! per-client round-robin is the only discipline, and a future cost-based
+//! discipline (DRR, token costs) would be a change contained in this file.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use promptforge_gateway_config::QueueConfig;
+use promptforge_gateway_config::{QueueConfig, QueuePolicy};
 use tokio::sync::oneshot;
 
 /// A bounded scheduling identity parsed from the client header.
@@ -52,64 +66,75 @@ impl ClientId {
     }
 }
 
-/// Failure to admit a request onto an endpoint lane.
+/// Failure to admit a request onto a dominion queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub(crate) enum AdmitError {
-    /// The endpoint's waiting queue is already at `max_depth`.
+    /// The dominion's waiting queue is already at `max_depth`.
     #[error("queue full")]
     QueueFull,
 
+    /// The `Reject` policy found no free concurrency slot and turned the
+    /// request away without enqueueing it (fail-fast).
+    #[error("rejected at capacity")]
+    Rejected,
+
     /// The waiting slot's notification channel closed before a slot was granted
-    /// (the lane was torn down while this caller waited). Distinct from
+    /// (the queue was torn down while this caller waited). Distinct from
     /// [`AdmitError::QueueFull`], which is a live back-pressure signal.
-    #[error("endpoint lane unavailable")]
+    #[error("dominion queue unavailable")]
     Unavailable,
 }
 
 /// A concurrency slot held until dropped.
 ///
 /// Dropping an admitted permit releases the slot (or transfers it to the next
-/// waiter). An unlimited lane returns a no-op permit.
+/// waiter). An unlimited queue returns a no-op permit.
 #[derive(Debug)]
 #[must_use = "dropping the permit releases the concurrency slot"]
 pub(crate) struct Permit {
-    limited: Option<Arc<LimitedLane>>,
+    limited: Option<Arc<LimitedQueue>>,
 }
 
 impl Drop for Permit {
     fn drop(&mut self) {
-        if let Some(lane) = self.limited.take() {
-            lane.release_slot();
+        if let Some(queue) = self.limited.take() {
+            queue.release_slot();
         }
     }
 }
 
-/// Per-endpoint admission controller.
+/// Per-dominion admission controller.
+///
+/// Cloning is cheap and every clone shares one underlying limit, which is
+/// what lets several endpoints bound to the same dominion compete for a
+/// single pool of slots.
 #[derive(Debug, Clone)]
-pub(crate) struct EndpointLane {
-    inner: LaneInner,
+pub(crate) struct DominionQueue {
+    inner: QueueInner,
 }
 
 #[derive(Debug, Clone)]
-enum LaneInner {
+enum QueueInner {
     Unlimited,
-    Limited(Arc<LimitedLane>),
+    Limited(Arc<LimitedQueue>),
 }
 
-struct LimitedLane {
+struct LimitedQueue {
     max_inflight: usize,
     max_depth: usize,
     fair: bool,
+    policy: QueuePolicy,
     state: Mutex<WaitState>,
 }
 
-impl std::fmt::Debug for LimitedLane {
+impl std::fmt::Debug for LimitedQueue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LimitedLane")
+        f.debug_struct("LimitedQueue")
             .field("max_inflight", &self.max_inflight)
             .field("max_depth", &self.max_depth)
             .field("fair", &self.fair)
+            .field("policy", &self.policy)
             .finish_non_exhaustive()
     }
 }
@@ -130,32 +155,38 @@ struct Waiter {
     reply: oneshot::Sender<()>,
 }
 
-impl EndpointLane {
-    /// An unlimited lane: every [`admit`](Self::admit) succeeds immediately.
+impl DominionQueue {
+    /// An unlimited queue: every [`admit`](Self::admit) succeeds immediately.
     #[must_use]
-    pub(crate) fn unlimited() -> EndpointLane {
-        EndpointLane {
-            inner: LaneInner::Unlimited,
+    pub(crate) fn unlimited() -> DominionQueue {
+        DominionQueue {
+            inner: QueueInner::Unlimited,
         }
     }
 
-    /// A lane that admits at most `concurrency` in-flight requests and queues
-    /// up to `queue.max_depth` waiters.
+    /// A queue that admits at most `concurrency` in-flight requests and, under
+    /// the `Queue` policy, parks up to `max_depth` waiters before rejecting.
     ///
-    /// Total and non-panicking (Q-002): a zero `concurrency` yields an unlimited
-    /// lane and a zero `max_depth` is clamped to 1. Configuration validation
-    /// already rejects both zeros, so this is purely defensive - construction
-    /// can never panic on out-of-range runtime settings.
+    /// Total and non-panicking (Q-002): a zero `concurrency` yields an
+    /// unlimited queue and a zero `max_depth` is clamped to 1. Configuration
+    /// validation already rejects both zeros, so this is purely defensive -
+    /// construction can never panic on out-of-range runtime settings.
     #[must_use]
-    pub(crate) fn new(concurrency: usize, queue: &QueueConfig) -> EndpointLane {
+    pub(crate) fn new(
+        concurrency: usize,
+        max_depth: usize,
+        fair_scheduling: bool,
+        policy: QueuePolicy,
+    ) -> DominionQueue {
         let Some(max_inflight) = std::num::NonZeroUsize::new(concurrency) else {
-            return EndpointLane::unlimited();
+            return DominionQueue::unlimited();
         };
-        EndpointLane {
-            inner: LaneInner::Limited(Arc::new(LimitedLane {
+        DominionQueue {
+            inner: QueueInner::Limited(Arc::new(LimitedQueue {
                 max_inflight: max_inflight.get(),
-                max_depth: queue.max_depth().max(1),
-                fair: queue.fair_scheduling(),
+                max_depth: max_depth.max(1),
+                fair: fair_scheduling,
+                policy,
                 state: Mutex::new(WaitState {
                     inflight: 0,
                     waiter_count: 0,
@@ -168,22 +199,30 @@ impl EndpointLane {
         }
     }
 
-    /// Acquire a concurrency permit for `client_key`.
-    ///
-    /// When the lane is unlimited, returns a no-op permit immediately. When
-    /// limited, waits (fairly or FIFO) until a slot is free, or fails if the
-    /// waiting queue is already at `max_depth`.
-    ///
-    /// Number of requests currently waiting for a slot on this lane.
+    /// The bounded-wait queue implied by the legacy `[queue]` settings, which
+    /// carry no policy knob: always the `Queue` policy. Removed together with
+    /// `QueueConfig` when the legacy config is deleted.
+    #[must_use]
+    pub(crate) fn from_queue_config(concurrency: usize, queue: &QueueConfig) -> DominionQueue {
+        DominionQueue::new(
+            concurrency,
+            queue.max_depth(),
+            queue.fair_scheduling(),
+            QueuePolicy::Queue,
+        )
+    }
+
+    /// Number of requests currently waiting for a slot on this queue.
     ///
     /// Test-only observation seam so tests can rendezvous on a waiter being
     /// enqueued instead of sleeping.
     #[cfg(test)]
     pub(crate) fn waiter_count(&self) -> usize {
         match &self.inner {
-            LaneInner::Unlimited => 0,
-            LaneInner::Limited(lane) => {
-                lane.state
+            QueueInner::Unlimited => 0,
+            QueueInner::Limited(queue) => {
+                queue
+                    .state
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .waiter_count
@@ -197,8 +236,8 @@ impl EndpointLane {
     #[cfg(test)]
     pub(crate) fn distinct_clients(&self) -> usize {
         match &self.inner {
-            LaneInner::Unlimited => 0,
-            LaneInner::Limited(lane) => lane
+            QueueInner::Unlimited => 0,
+            QueueInner::Limited(queue) => queue
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -207,24 +246,38 @@ impl EndpointLane {
         }
     }
 
+    /// Acquire a concurrency permit for `client_key`.
+    ///
+    /// When the queue is unlimited, returns a no-op permit immediately. When
+    /// limited, the policy decides what a full in-flight set means: `Queue`
+    /// waits (fairly or FIFO) until a slot is free or the waiting queue
+    /// reaches `max_depth`; `Reject` fails immediately.
+    ///
     /// # Errors
     /// Returns [`AdmitError::QueueFull`] when the waiting queue is at
-    /// `max_depth` and no in-flight slot is free.
+    /// `max_depth` and no in-flight slot is free, [`AdmitError::Rejected`]
+    /// when the `Reject` policy finds no free slot, and
+    /// [`AdmitError::Unavailable`] when the queue is torn down while this
+    /// caller waits.
     pub(crate) async fn admit(&self, client_key: &str) -> Result<Permit, AdmitError> {
-        let LaneInner::Limited(lane) = &self.inner else {
+        let QueueInner::Limited(queue) = &self.inner else {
             return Ok(Permit { limited: None });
         };
 
         let outcome = {
             // Short critical section: never held across `.await`.
-            let mut state = lane
+            let mut state = queue
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if state.inflight < lane.max_inflight {
+            if state.inflight < queue.max_inflight {
                 state.inflight += 1;
                 AdmitOutcome::Ready
-            } else if state.waiter_count >= lane.max_depth {
+            } else if queue.policy == QueuePolicy::Reject {
+                // Fail-fast: the caller is never parked, so `max_depth` and
+                // fairness are irrelevant under this policy.
+                AdmitOutcome::Rejected
+            } else if state.waiter_count >= queue.max_depth {
                 AdmitOutcome::Full
             } else {
                 let (tx, rx) = oneshot::channel();
@@ -235,7 +288,7 @@ impl EndpointLane {
                 // Capture the *effective* bucket key: fair scheduling may fold a
                 // fresh label into `default` once the distinct-client cap is hit
                 // (Q-001), and cancellation must remove from that same bucket.
-                let effective_key = if lane.fair {
+                let effective_key = if queue.fair {
                     enqueue_fair(&mut state, client_key, waiter)
                 } else {
                     state.fifo.push_back(waiter);
@@ -251,12 +304,13 @@ impl EndpointLane {
 
         match outcome {
             AdmitOutcome::Ready => Ok(Permit {
-                limited: Some(Arc::clone(lane)),
+                limited: Some(Arc::clone(queue)),
             }),
             AdmitOutcome::Full => Err(AdmitError::QueueFull),
+            AdmitOutcome::Rejected => Err(AdmitError::Rejected),
             AdmitOutcome::Queued { id, rx, client_key } => {
                 let cancel = CancelOnDrop {
-                    lane: Arc::clone(lane),
+                    queue: Arc::clone(queue),
                     client_key,
                     id,
                     armed: true,
@@ -265,10 +319,10 @@ impl EndpointLane {
                     Ok(()) => {
                         cancel.disarm();
                         Ok(Permit {
-                            limited: Some(Arc::clone(lane)),
+                            limited: Some(Arc::clone(queue)),
                         })
                     }
-                    // The sender was dropped without granting a slot: the lane
+                    // The sender was dropped without granting a slot: the queue
                     // is gone, not merely full. Surface that distinctly.
                     Err(_) => Err(AdmitError::Unavailable),
                 }
@@ -280,6 +334,7 @@ impl EndpointLane {
 enum AdmitOutcome {
     Ready,
     Full,
+    Rejected,
     Queued {
         id: u64,
         rx: oneshot::Receiver<()>,
@@ -290,7 +345,7 @@ enum AdmitOutcome {
 
 /// Removes a still-queued waiter if `admit` is cancelled before admission.
 struct CancelOnDrop {
-    lane: Arc<LimitedLane>,
+    queue: Arc<LimitedQueue>,
     client_key: String,
     id: u64,
     armed: bool,
@@ -309,11 +364,11 @@ impl Drop for CancelOnDrop {
         }
         let removed = {
             let mut state = self
-                .lane
+                .queue
                 .state
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if remove_waiter(&mut state, self.lane.fair, &self.client_key, self.id) {
+            if remove_waiter(&mut state, self.queue.fair, &self.client_key, self.id) {
                 state.waiter_count = state.waiter_count.saturating_sub(1);
                 true
             } else {
@@ -323,12 +378,12 @@ impl Drop for CancelOnDrop {
         // Slot was already transferred via oneshot before we cancelled; free
         // it (or hand it to the next waiter) so inflight does not leak.
         if !removed {
-            self.lane.release_slot();
+            self.queue.release_slot();
         }
     }
 }
 
-impl LimitedLane {
+impl LimitedQueue {
     fn release_slot(&self) {
         let mut state = self
             .state
@@ -399,7 +454,7 @@ fn dequeue_fair(state: &mut WaitState) -> Option<Waiter> {
 /// than silently breaking spawned request handling.
 const _: fn() = || {
     fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<EndpointLane>();
+    assert_send_sync::<DominionQueue>();
     assert_send_sync::<Permit>();
     assert_send_sync::<QueueConfig>();
     assert_send_sync::<AdmitError>();

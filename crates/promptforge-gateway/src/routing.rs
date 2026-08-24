@@ -6,7 +6,7 @@ use std::sync::Arc;
 use promptforge_gateway_config::{Config, ConfigError, Protocol, ThinkingMode};
 
 use crate::error::GatewayError;
-use crate::queue::EndpointLane;
+use crate::queue::DominionQueue;
 use crate::upstream::{OpenAiUpstream, Upstream};
 
 /// One backend endpoint plus the upstream that talks to it.
@@ -15,15 +15,16 @@ pub(crate) struct Endpoint {
     pub id: String,
     /// The upstream implementation forwarding to this backend.
     pub upstream: Arc<dyn Upstream>,
-    /// Per-endpoint admission control (concurrency + waiting queue).
-    pub lane: EndpointLane,
+    /// Admission control: concurrency limit plus bounded waiting queue.
+    /// Per-endpoint until step 8 shares one queue per dominion.
+    pub queue: DominionQueue,
 }
 
 impl std::fmt::Debug for Endpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Endpoint")
             .field("id", &self.id)
-            .field("lane", &self.lane)
+            .field("queue", &self.queue)
             .finish_non_exhaustive()
     }
 }
@@ -104,16 +105,16 @@ impl Routing {
                 )),
                 _ => unreachable!("Protocol is non_exhaustive; wire up new protocols here"),
             };
-            let lane = match config.endpoint_concurrency(endpoint) {
-                Some(n) => EndpointLane::new(n, config.queue()),
-                None => EndpointLane::unlimited(),
+            let queue = match config.endpoint_concurrency(endpoint) {
+                Some(n) => DominionQueue::from_queue_config(n, config.queue()),
+                None => DominionQueue::unlimited(),
             };
             endpoints.insert(
                 endpoint.id(),
                 Arc::new(Endpoint {
                     id: endpoint.id().to_owned(),
                     upstream,
-                    lane,
+                    queue,
                 }),
             );
         }
@@ -189,7 +190,7 @@ mod tests {
                 "http://127.0.0.1:9",
                 Secret::new(String::new()),
             )),
-            lane: EndpointLane::unlimited(),
+            queue: DominionQueue::unlimited(),
         });
         Arc::new(Model {
             name: name.to_owned(),
