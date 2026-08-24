@@ -13,15 +13,18 @@
 //! silence boundaries and hands them to the final-pass worker, which
 //! transcribes them with the `voice.final_model` model in the background,
 //! each conditioned on the take's accumulated transcript. On `stop` the
-//! worker transcribes the unprocessed tail and the server answers with one
-//! `{"type":"final","text":"...","frames":N}` text message holding the
-//! assembled transcript and the total PCM frames received since the most
-//! recent `start`. Without a configured final model the final pass falls
-//! back to one last interim-model window (logged); without any `[voice]`
-//! model the endpoint still captures and counts PCM, and transcripts come
-//! back empty. Silent audio is never transcribed (whisper hallucinates on
-//! silence), and an interim frame is sent only when `committed` or
-//! `tentative` changed since the last one.
+//! worker transcribes the unprocessed tail (its FIFO reply drains every
+//! background segment first) and the server answers with one
+//! `{"type":"final","text":"...","frames":N}` text message: the take's
+//! crystallized committed prefix joined with the tail's own text, plus the
+//! total PCM frames received since the most recent `start`. Without a
+//! configured final model nothing crystallizes, segmentation stays off so
+//! no audio is consumed early, and the final pass falls back to one last
+//! interim-model decode of the uncommitted audio (logged); without any
+//! `[voice]` model the endpoint still captures and counts PCM, and
+//! transcripts come back empty. Silent audio is never transcribed (whisper
+//! hallucinates on silence), and an interim frame is sent only when
+//! `committed` or `tentative` changed since the last one.
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -59,13 +62,25 @@ fn lock_buffer(buffer: &Mutex<Vec<f32>>) -> MutexGuard<'_, Vec<f32>> {
     buffer.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Appends `piece` to `text` with the single-space join the final-pass
+/// worker uses between segments; an empty piece changes nothing.
+fn append_transcript(text: &mut String, piece: &str) {
+    if piece.is_empty() {
+        return;
+    }
+    if !text.is_empty() {
+        text.push(' ');
+    }
+    text.push_str(piece);
+}
+
 /// One take's crystallized transcript: the segment texts the final-pass
 /// worker has reported on the take's channel, joined by single spaces
 /// exactly as the worker assembles its own transcript. Shared between the
-/// receive loop (drained on each binary message) and the interim loop
-/// (drained each tick, since a segment can finish while no audio arrives),
-/// behind the same kind of std mutex as the PCM buffer; no guard ever
-/// crosses an `.await`.
+/// receive loop (drained on each binary message and once at `stop`) and
+/// the interim loop (drained each tick, since a segment can finish while
+/// no audio arrives), behind the same kind of std mutex as the PCM
+/// buffer; no guard ever crosses an `.await`.
 #[derive(Debug, Default)]
 struct Committed {
     text: String,
@@ -78,10 +93,7 @@ impl Committed {
     fn drain(&mut self) {
         if let Some(segments) = &self.segments {
             while let Ok(text) = segments.try_recv() {
-                if !self.text.is_empty() {
-                    self.text.push(' ');
-                }
-                self.text.push_str(&text);
+                append_transcript(&mut self.text, &text);
             }
         }
     }
@@ -93,10 +105,21 @@ fn lock_committed(committed: &Mutex<Committed>) -> MutexGuard<'_, Committed> {
     committed.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Copies the trailing interim window out of the shared PCM buffer.
-fn window_snapshot(buffer: &Mutex<Vec<f32>>, window_samples: usize) -> Vec<f32> {
+/// Copies the take's uncommitted audio - everything past the segmenter's
+/// consumed offset - capped to the trailing interim window. Committed
+/// audio is never re-decoded by the interim model, and the cap keeps a
+/// take whose segments never close (or which has no final pass) from
+/// re-decoding its whole length on every pass.
+fn uncommitted_snapshot(
+    buffer: &Mutex<Vec<f32>>,
+    consumed: usize,
+    window_samples: usize,
+) -> Vec<f32> {
     let guard = lock_buffer(buffer);
-    transcribe::tail(&guard, window_samples).to_vec()
+    // A take reset can clear the buffer behind a stale offset read by a
+    // not-yet-aborted previous interim loop; clamp rather than panic on it.
+    let uncommitted = &guard[consumed.min(guard.len())..];
+    transcribe::tail(uncommitted, window_samples).to_vec()
 }
 
 /// Aborts the interim loop, if one is running.
@@ -131,14 +154,11 @@ fn spawn_interim_loop(
                 guard.drain();
                 guard.text.clone()
             };
-            let window = {
-                let offset = consumed.load(Ordering::Relaxed);
-                let guard = lock_buffer(&buffer);
-                // A take reset can clear the buffer behind a stale offset
-                // read by a not-yet-aborted previous loop; clamp rather
-                // than panic on it.
-                guard[offset.min(guard.len())..].to_vec()
-            };
+            let window = uncommitted_snapshot(
+                &buffer,
+                consumed.load(Ordering::Relaxed),
+                engine.window_samples(),
+            );
             let tentative = if window.len() < MIN_WINDOW_SAMPLES || transcribe::is_silence(&window)
             {
                 String::new()
@@ -181,21 +201,20 @@ fn spawn_interim_loop(
     })
 }
 
-/// The stop-message transcript when the final model is absent or fails: one
-/// last interim-model pass over the trailing window, or an empty string when
-/// there is no engine, the window is silent, or the pass fails (logged; the
-/// client still gets its reply).
+/// The stop-message tail when the final model is absent or fails: one last
+/// interim-model pass over the take's uncommitted audio, or an empty string
+/// when the slice is tiny or silent or the pass fails (logged; the client
+/// still gets its reply). The committed prefix is already final, so it is
+/// never re-transcribed here.
 async fn final_transcript(
     session: u64,
-    engine: Option<&VoiceEngine>,
+    engine: &VoiceEngine,
     buffer: &Mutex<Vec<f32>>,
+    segmenter: &Segmenter,
     status: &StatusBus,
 ) -> String {
-    let Some(engine) = engine else {
-        return String::new();
-    };
-    let window = window_snapshot(buffer, engine.window_samples());
-    if transcribe::is_silence(&window) {
+    let window = uncommitted_snapshot(buffer, segmenter.consumed(), engine.window_samples());
+    if window.len() < MIN_WINDOW_SAMPLES || transcribe::is_silence(&window) {
         return String::new();
     }
     match engine.transcribe(window).await {
@@ -208,14 +227,16 @@ async fn final_transcript(
     }
 }
 
-/// The stop-message transcript: the pipelined final pass over the whole
-/// take when a final model is configured (the tail is queued behind the
-/// take's background segments, so awaiting its reply drains them), falling
-/// back to the interim-model window when it is not or when it fails.
+/// The stop-message transcript: the take's crystallized committed prefix
+/// joined with the closing tail's own text. With a final model configured
+/// the tail is queued behind the take's background segments, so awaiting
+/// its reply drains them; without one (or when it fails) the tail falls
+/// back to the interim-model decode of the uncommitted audio.
 async fn stop_transcript(
     session: u64,
     engine: Option<&VoiceEngine>,
     buffer: &Mutex<Vec<f32>>,
+    committed: &Mutex<Committed>,
     segmenter: &Segmenter,
     status: &StatusBus,
 ) -> String {
@@ -226,21 +247,28 @@ async fn stop_transcript(
         let guard = lock_buffer(buffer);
         guard[segmenter.consumed()..].to_vec()
     };
-    match engine.final_finish(tail).await {
+    let tail = match engine.final_finish(tail).await {
         Some(Ok(text)) => text,
         Some(Err(error)) => {
             status.error("Transcription failed", error.to_string(), Activity::General);
             tracing::warn!(session, %error, "final-pass transcription failed; falling back to the interim model");
-            final_transcript(session, Some(engine), buffer, status).await
+            final_transcript(session, engine, buffer, segmenter, status).await
         }
         None => {
             tracing::info!(
                 session,
                 "no final model configured; the final pass uses the interim model"
             );
-            final_transcript(session, Some(engine), buffer, status).await
+            final_transcript(session, engine, buffer, segmenter, status).await
         }
-    }
+    };
+    // Awaiting the tail's reply drained every segment submitted this take
+    // (the worker's channel is FIFO), so this crystallizes everything the
+    // take reported before the final frame is assembled.
+    let mut guard = lock_committed(committed);
+    guard.drain();
+    append_transcript(&mut guard.text, &tail);
+    guard.text.clone()
 }
 
 /// Starts a new take: clears the buffer and the committed transcript,
@@ -268,11 +296,13 @@ fn begin_take(
     {
         let mut guard = lock_committed(committed);
         guard.text.clear();
-        guard.segments = engine.map(|engine| {
-            let (segment_tx, segment_rx) = std::sync::mpsc::channel();
-            engine.final_reset(segment_tx);
-            segment_rx
-        });
+        guard.segments = engine
+            .filter(|engine| engine.has_final_pass())
+            .map(|engine| {
+                let (segment_tx, segment_rx) = std::sync::mpsc::channel();
+                engine.final_reset(segment_tx);
+                segment_rx
+            });
     }
     stop_interim(interim);
     if let Some(engine) = engine {
@@ -386,8 +416,13 @@ async fn run_session(
                     );
                 }
                 // Cut any speech segments the new audio completed and hand
-                // them to the background final pass.
-                if let Some(engine) = &engine {
+                // them to the background final pass. Without a final pass
+                // nothing can crystallize, so the segmenter stays off and
+                // the interim loop and stop fallback keep seeing the whole
+                // take as uncommitted.
+                if let Some(engine) = &engine
+                    && engine.has_final_pass()
+                {
                     submit_closed_segments(engine, &buffer, &committed, &consumed, &mut segmenter);
                 }
             }
@@ -414,14 +449,15 @@ async fn run_session(
                         "the final pass over the take",
                         Activity::General,
                     );
-                    let text =
-                        stop_transcript(session, engine.as_deref(), &buffer, &segmenter, &status)
-                            .await;
-                    // `stop_transcript` has drained the worker's queue by
-                    // now, so this crystallizes every segment the take
-                    // reported; the final frame still comes from the
-                    // assembled transcript until the tail-only finish lands.
-                    lock_committed(&committed).drain();
+                    let text = stop_transcript(
+                        session,
+                        engine.as_deref(),
+                        &buffer,
+                        &committed,
+                        &segmenter,
+                        &status,
+                    )
+                    .await;
                     tracing::info!(session, frames, "voice capture stopped");
                     if !send_final_reply(&out_tx, text, frames).await {
                         break;
@@ -691,15 +727,58 @@ mod tests {
         socket.close(None).await.expect("close the socket");
     }
 
-    /// The pipelined final pass: two speech segments separated by a silence
-    /// gap (the jfk fixture, a second of zeros, then the fixture again).
-    /// The first segment closes mid-take and is transcribed in the
-    /// background; the second is the unclosed tail transcribed on `stop`,
-    /// conditioned on the first. The assembled final transcript must carry
-    /// both. Both model paths point at the tiny fixture model; production
-    /// config selects large-v3 for the final pass.
+    /// Without a final model the segmenter stays off: the trailing silence
+    /// would close the speech segment if segmentation ran, advancing the
+    /// consumed offset past audio nothing crystallized, and the stop
+    /// fallback's uncommitted slice would come back empty. The final reply
+    /// must still name the fixture's words.
     #[tokio::test]
-    async fn pipelined_final_pass_assembles_both_segments() {
+    async fn stop_without_a_final_model_keeps_audio_past_a_silence_gap() {
+        let (url, _tape_dir) = spawn_voice_server(test_voice_config()).await;
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /voice");
+        socket
+            .send(tungstenite::Message::Text("start".into()))
+            .await
+            .expect("send start");
+        send_samples(&mut socket, &fixtures::jfk_samples()).await;
+        send_pcm(&mut socket, 16000).await;
+        socket
+            .send(tungstenite::Message::Text("stop".into()))
+            .await
+            .expect("send stop");
+        let reply = tokio::time::timeout(Duration::from_secs(180), async {
+            loop {
+                let message = parse_message(&read_text(&mut socket).await);
+                if message["type"] == "final" {
+                    break message;
+                }
+            }
+        })
+        .await
+        .expect("the final reply arrives within 180 s");
+        let text = reply["text"].as_str().expect("final text is a string");
+        assert!(
+            text.to_lowercase().contains("country"),
+            "the fallback decodes the whole take, nothing consumed early: {text:?}"
+        );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    /// The stop path's tail-only finish: two speech segments separated by a
+    /// silence gap (the jfk fixture, a second of zeros, then the fixture
+    /// again). The first segment closes mid-take, crystallizes into the
+    /// committed prefix, and is never transcribed again; the second is the
+    /// unclosed tail, transcribed once on `stop`, conditioned on the first.
+    /// The final frame must be exactly the committed prefix plus the tail's
+    /// text, joined by a single space. One pass over the fixture says
+    /// "country" twice, so the committed prefix holds two and the frame
+    /// adds two more - never a re-transcribed prefix. Both model paths
+    /// point at the tiny fixture model; production config selects large-v3
+    /// for the final pass.
+    #[tokio::test]
+    async fn stop_frame_is_the_committed_prefix_plus_the_tail() {
         let voice = VoiceConfig {
             interim_model: fixtures::require_model(),
             final_model: fixtures::require_model(),
@@ -718,6 +797,33 @@ mod tests {
         let jfk = fixtures::jfk_samples();
         send_samples(&mut socket, &jfk).await;
         send_pcm(&mut socket, 16000).await;
+
+        // Wait for the first segment to crystallize into the committed
+        // prefix; the timeout only bounds a broken pipeline.
+        let committed = tokio::time::timeout(Duration::from_secs(120), async {
+            loop {
+                let message = parse_message(&read_text(&mut socket).await);
+                if message["type"] != "interim" {
+                    continue;
+                }
+                let committed = message["committed"]
+                    .as_str()
+                    .expect("every interim frame carries a committed string")
+                    .to_string();
+                if committed.to_lowercase().contains("country") {
+                    break committed;
+                }
+            }
+        })
+        .await
+        .expect("the first segment crystallizes within 120 s");
+        let committed_countries = committed.to_lowercase().matches("country").count();
+        assert!(
+            committed_countries <= 2,
+            "the committed prefix is one pass over the fixture, reported \
+             once on the channel ({committed_countries} countries): {committed:?}"
+        );
+
         send_samples(&mut socket, &jfk).await;
         socket
             .send(tungstenite::Message::Text("stop".into()))
@@ -736,18 +842,94 @@ mod tests {
         .await
         .expect("the final reply arrives within 180 s");
         let text = reply["text"].as_str().expect("final text is a string");
-        let lower = text.to_lowercase();
         assert!(
-            lower.contains("country"),
-            "the final transcript names the fixture's words: {text:?}"
+            text.starts_with(&committed),
+            "the final frame opens with the committed prefix: {text:?}"
         );
-        // One pass over the fixture says "country" twice ("ask not what your
-        // country can do for you, ask what you can do for your country"), so
-        // three or more occurrences prove both segments contributed.
-        let countries = lower.matches("country").count();
+        let tail = text[committed.len()..]
+            .strip_prefix(' ')
+            .expect("a single space joins the committed prefix and the tail");
+        assert!(
+            tail.to_lowercase().contains("country"),
+            "the tail contributed its own text: {text:?}"
+        );
+        let countries = text.to_lowercase().matches("country").count();
         assert!(
             countries >= 3,
-            "both segments are in the assembled transcript ({countries} countries): {text:?}"
+            "both segments are in the final frame ({countries} countries): {text:?}"
+        );
+        assert!(
+            countries <= committed_countries + 2,
+            "the tail added at most one pass over the fixture - committed \
+             segments were not transcribed again ({committed_countries} \
+             committed, {countries} total): {text:?}"
+        );
+        socket.close(None).await.expect("close the socket");
+    }
+
+    /// Stopping right at a segment boundary: the speech has closed and
+    /// crystallized, and only the closing silence is uncommitted. The stop
+    /// must not transcribe the silent tail (whisper hallucinates on
+    /// silence); the final frame is exactly the committed prefix.
+    #[tokio::test]
+    async fn stop_at_a_segment_boundary_returns_the_committed_prefix() {
+        let voice = VoiceConfig {
+            interim_model: fixtures::require_model(),
+            final_model: fixtures::require_model(),
+            window_seconds: 8,
+            interval_ms: 400,
+            ..VoiceConfig::default()
+        };
+        let (url, _tape_dir) = spawn_voice_server(voice).await;
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect to /voice");
+        socket
+            .send(tungstenite::Message::Text("start".into()))
+            .await
+            .expect("send start");
+        let jfk = fixtures::jfk_samples();
+        send_samples(&mut socket, &jfk).await;
+        send_pcm(&mut socket, 16000).await;
+
+        // Wait for the segment to close and crystallize; the timeout only
+        // bounds a broken pipeline.
+        let committed = tokio::time::timeout(Duration::from_secs(120), async {
+            loop {
+                let message = parse_message(&read_text(&mut socket).await);
+                if message["type"] != "interim" {
+                    continue;
+                }
+                let committed = message["committed"]
+                    .as_str()
+                    .expect("every interim frame carries a committed string")
+                    .to_string();
+                if committed.to_lowercase().contains("country") {
+                    break committed;
+                }
+            }
+        })
+        .await
+        .expect("the segment crystallizes within 120 s");
+
+        socket
+            .send(tungstenite::Message::Text("stop".into()))
+            .await
+            .expect("send stop");
+        let reply = tokio::time::timeout(Duration::from_secs(180), async {
+            loop {
+                let message = parse_message(&read_text(&mut socket).await);
+                if message["type"] == "final" {
+                    break message;
+                }
+            }
+        })
+        .await
+        .expect("the final reply arrives within 180 s");
+        let text = reply["text"].as_str().expect("final text is a string");
+        assert_eq!(
+            text, committed,
+            "no uncommitted speech means no tail text and no whisper call"
         );
         socket.close(None).await.expect("close the socket");
     }
@@ -784,8 +966,8 @@ mod tests {
     /// fixture separated by silence gaps crystallize two segments mid-take.
     /// Every interim frame must carry both `committed` and `tentative`
     /// strings, `committed` must be append-only across the frames that
-    /// arrive, and the final reply - assembled by the worker from the same
-    /// segment texts - must open with the last committed prefix, which a
+    /// arrive, and the final reply - the committed prefix joined with the
+    /// tail's own text - must open with the last committed prefix, which a
     /// replace-instead-of-append regression would break.
     #[tokio::test]
     async fn interim_frames_carry_append_only_committed() {
