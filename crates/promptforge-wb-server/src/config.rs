@@ -23,6 +23,9 @@ pub struct Config {
     /// HTTP server settings.
     #[serde(default)]
     pub server: ServerConfig,
+    /// Voice transcription settings.
+    #[serde(default)]
+    pub voice: VoiceConfig,
 }
 
 impl Config {
@@ -116,6 +119,53 @@ impl Default for ServerConfig {
         Self {
             bind: crate::DEFAULT_ADDR.to_string(),
         }
+    }
+}
+
+/// Default sliding-window length for interim transcription, in seconds.
+pub const DEFAULT_VOICE_WINDOW_SECONDS: u64 = 5;
+
+/// Default interval between interim transcriptions, in milliseconds.
+pub const DEFAULT_VOICE_INTERVAL_MS: u64 = 800;
+
+/// Voice transcription settings: whisper model paths and the interim loop's
+/// window and cadence.
+///
+/// Transcription is enabled by setting `interim_model`; with no model paths
+/// configured the `/voice` endpoint still captures and counts PCM but emits
+/// empty transcripts. `final_model` is parsed for the upcoming final-pass
+/// step and not loaded yet.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(default)]
+pub struct VoiceConfig {
+    /// Path to the GGML/GGUF whisper model for interim (streaming)
+    /// transcription. Empty disables transcription.
+    pub interim_model: PathBuf,
+    /// Path to the whisper model for the final pass over a finished take.
+    /// Reserved for the next step; not loaded yet.
+    pub final_model: PathBuf,
+    /// Seconds of trailing audio each interim pass transcribes.
+    pub window_seconds: u64,
+    /// Milliseconds between interim passes while a take is recording.
+    pub interval_ms: u64,
+}
+
+impl Default for VoiceConfig {
+    fn default() -> Self {
+        Self {
+            interim_model: PathBuf::new(),
+            final_model: PathBuf::new(),
+            window_seconds: DEFAULT_VOICE_WINDOW_SECONDS,
+            interval_ms: DEFAULT_VOICE_INTERVAL_MS,
+        }
+    }
+}
+
+impl VoiceConfig {
+    /// Returns true when an interim model path is configured.
+    #[must_use]
+    pub fn enabled(&self) -> bool {
+        !self.interim_model.as_os_str().is_empty()
     }
 }
 
@@ -269,6 +319,46 @@ bind = "127.0.0.1:9000"
         let config = Config::from_toml_str(raw).expect("fixture parses");
         assert_eq!(config.tape.path, PathBuf::from("session.jsonl"));
         assert_eq!(config.server.bind, "127.0.0.1:9000");
+    }
+
+    #[test]
+    fn voice_defaults_disable_transcription() {
+        let raw = r#"
+[gateway]
+base_url = "http://127.0.0.1:8081"
+api_key = "k"
+"#;
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert!(!config.voice.enabled(), "no model paths means disabled");
+        assert_eq!(config.voice.window_seconds, DEFAULT_VOICE_WINDOW_SECONDS);
+        assert_eq!(config.voice.interval_ms, DEFAULT_VOICE_INTERVAL_MS);
+    }
+
+    #[test]
+    fn voice_section_parses_model_paths_and_tuning() {
+        let raw = r#"
+[gateway]
+base_url = "http://127.0.0.1:8081"
+api_key = "k"
+
+[voice]
+interim_model = "models/ggml-tiny.en.bin"
+final_model = "models/ggml-small.en.bin"
+window_seconds = 8
+interval_ms = 500
+"#;
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert!(config.voice.enabled());
+        assert_eq!(
+            config.voice.interim_model,
+            PathBuf::from("models/ggml-tiny.en.bin")
+        );
+        assert_eq!(
+            config.voice.final_model,
+            PathBuf::from("models/ggml-small.en.bin")
+        );
+        assert_eq!(config.voice.window_seconds, 8);
+        assert_eq!(config.voice.interval_ms, 500);
     }
 
     #[test]

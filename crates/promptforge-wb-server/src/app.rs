@@ -14,33 +14,52 @@ use futures_util::stream::{self, StreamExt};
 use crate::config::Config;
 use crate::gateway::{ChatRequest, ChatStream, GatewayClient, GatewayError, GatewayResponse};
 use crate::tape::{Tape, TapeError, TapeEvent};
+use crate::transcribe::{TranscribeError, VoiceEngine};
 use crate::voice;
 
 /// Address the server binds to when no override is given.
 pub const DEFAULT_ADDR: &str = "127.0.0.1:7910";
 
-/// Shared handler state: the authenticated gateway client and the session
-/// tape.
+/// Shared handler state: the authenticated gateway client, the session
+/// tape, and the voice transcription engine when one is configured.
 #[derive(Debug, Clone)]
 pub struct AppState {
     gateway: GatewayClient,
     tape: Arc<Tape>,
+    voice: Option<Arc<VoiceEngine>>,
 }
 
 impl AppState {
     /// Builds shared state from the loaded configuration.
     ///
+    /// When `[voice]` names an interim model, the model is loaded here, so a
+    /// bad path fails startup rather than the first voice session.
+    ///
     /// # Errors
-    /// Returns [`AppError::Gateway`] if the HTTP client cannot be built and
-    /// [`AppError::Tape`] if the session tape cannot be opened.
+    /// Returns [`AppError::Gateway`] if the HTTP client cannot be built,
+    /// [`AppError::Tape`] if the session tape cannot be opened, and
+    /// [`AppError::Voice`] if the configured whisper model cannot be loaded.
     pub fn new(config: &Config) -> Result<Self, AppError> {
         let gateway = GatewayClient::new(&config.gateway.base_url, &config.gateway.api_key)
             .map_err(AppError::Gateway)?;
         let tape = Tape::open(&config.tape.path).map_err(AppError::Tape)?;
+        let voice = if config.voice.enabled() {
+            Some(Arc::new(
+                VoiceEngine::new(&config.voice).map_err(AppError::Voice)?,
+            ))
+        } else {
+            None
+        };
         Ok(Self {
             gateway,
             tape: Arc::new(tape),
+            voice,
         })
+    }
+
+    /// The voice transcription engine, when `[voice]` configured one.
+    pub(crate) fn voice_engine(&self) -> Option<Arc<VoiceEngine>> {
+        self.voice.clone()
     }
 }
 
@@ -57,6 +76,11 @@ pub enum AppError {
     #[non_exhaustive]
     #[error("open session tape")]
     Tape(#[source] TapeError),
+
+    /// The configured whisper model could not be loaded.
+    #[non_exhaustive]
+    #[error("load voice engine")]
+    Voice(#[source] TranscribeError),
 }
 
 /// Returns the workbench server router with every route mounted.
@@ -390,7 +414,7 @@ mod tests {
     use axum::http::{HeaderMap, Request, StatusCode};
     use tower::ServiceExt;
 
-    use crate::config::{GatewayConfig, ServerConfig, TapeConfig};
+    use crate::config::{GatewayConfig, ServerConfig, TapeConfig, VoiceConfig};
 
     const CATALOG: &str = r#"{"object":"list","data":[{"id":"test-model","object":"model","created":1,"owned_by":"promptforge"}]}"#;
     const COMPLETION: &str = r#"{"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
@@ -417,6 +441,7 @@ mod tests {
                 path: tape_path.to_path_buf(),
             },
             server: ServerConfig::default(),
+            voice: VoiceConfig::default(),
         }
     }
 
@@ -947,6 +972,7 @@ mod tests {
         let state = AppState {
             gateway,
             tape: Arc::new(Tape::with_writer_for_test(FailingWriter)),
+            voice: None,
         };
         let response = router(state)
             .oneshot(chat_request())

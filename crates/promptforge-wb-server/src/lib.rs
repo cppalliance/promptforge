@@ -10,13 +10,16 @@ mod app;
 mod config;
 mod gateway;
 mod tape;
+mod transcribe;
 mod voice;
 
 pub use app::{AppError, AppState, DEFAULT_ADDR, router, run};
 pub use config::{
-    Config, ConfigError, DEFAULT_CONFIG_PATH, GatewayConfig, ServerConfig, TapeConfig,
+    Config, ConfigError, DEFAULT_CONFIG_PATH, DEFAULT_VOICE_INTERVAL_MS,
+    DEFAULT_VOICE_WINDOW_SECONDS, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig,
 };
 pub use gateway::{
     ChatRequest, ChatStream, GatewayClient, GatewayError, GatewayResponse, SsePayloadStream,
 };
 pub use tape::{Tape, TapeError, TapeEvent};
+pub use transcribe::TranscribeError;

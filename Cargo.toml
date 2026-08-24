@@ -27,7 +27,7 @@ mime = "0.3"
 encoding_rs = "0.8"
 url = "2"
 ipnet = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "sync"] }
 thiserror = "2"
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
@@ -76,6 +76,11 @@ tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 tar = { version = "0.4.46", default-features = false }
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
 indicatif = "0.18"
+# Safe bindings to whisper.cpp; the C++ core is built from source by
+# whisper-rs-sys (cmake + MSVC required).
+whisper-rs = "0.16"
+# WAV parsing for the voice test fixtures; dev-dependency of the wb-server.
+hound = "3.5"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
