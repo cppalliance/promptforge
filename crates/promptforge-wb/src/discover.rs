@@ -161,4 +161,25 @@ mod tests {
         let contents = std::fs::read_to_string(&path).expect("read back");
         assert_eq!(contents, DEFAULT_CONFIG_TEMPLATE);
     }
+
+    #[test]
+    fn the_generated_template_loads_with_no_env_vars_set() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = generate_default(&dir.path().join(CONFIG_FILE_NAME)).expect("template writes");
+        let config = promptforge_wb_server::Config::load(&path)
+            .expect("the generated config loads on a bare machine");
+        let expected_url = std::env::var("PROMPTFORGE_GATEWAY_URL")
+            .unwrap_or_else(|_| promptforge_wb_server::DEFAULT_GATEWAY_BASE_URL.to_string());
+        assert_eq!(config.gateway.base_url, expected_url);
+        assert_eq!(
+            config.gateway.api_key,
+            std::env::var("PROMPTFORGE_GATEWAY_API_KEY").unwrap_or_default()
+        );
+        assert!(
+            !config.voice.enabled(),
+            "voice stays off until the models are downloaded"
+        );
+        assert!(config.voice.interim_source.starts_with("https://"));
+        assert!(config.voice.final_source.starts_with("https://"));
+    }
 }

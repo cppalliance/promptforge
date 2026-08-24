@@ -5,12 +5,19 @@
 //! the TOML is parsed first and only string *values* are interpolated, so
 //! `${VAR}` inside comments or keys is never expanded and an interpolated
 //! value containing a quote, backslash, or newline cannot corrupt the
-//! document. `$$` is a literal `$`.
+//! document. `$$` is a literal `$`. An unset variable interpolates to the
+//! empty string, so the generated config's `${PROMPTFORGE_GATEWAY_URL}` and
+//! `${PROMPTFORGE_GATEWAY_API_KEY}` degrade to the built-in defaults instead
+//! of failing startup.
 
 use std::path::{Path, PathBuf};
 
 /// Path [`Config::load`] reads when no override is given.
 pub const DEFAULT_CONFIG_PATH: &str = "workbench.toml";
+
+/// Gateway base URL used when `gateway.base_url` interpolates to an empty
+/// string, for example because `PROMPTFORGE_GATEWAY_URL` is unset.
+pub const DEFAULT_GATEWAY_BASE_URL: &str = "http://127.0.0.1:8081";
 
 /// Workbench server configuration loaded from `workbench.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
@@ -35,9 +42,9 @@ impl Config {
     /// Returns [`ConfigError::NotFound`] if `path` does not exist,
     /// [`ConfigError::Read`] if `path` exists but cannot be read,
     /// [`ConfigError::Parse`] if the contents do not match the workbench
-    /// schema, [`ConfigError::UnresolvedVar`] if a `${VAR}` references an
-    /// unset environment variable, and [`ConfigError::Interpolation`] if a
-    /// `${...}` is malformed.
+    /// schema, [`ConfigError::UnresolvedVar`] if a `${VAR}` names a variable
+    /// whose value is not valid Unicode, and [`ConfigError::Interpolation`]
+    /// if a `${...}` is malformed.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         let raw = std::fs::read_to_string(path).map_err(|source| {
             if source.kind() == std::io::ErrorKind::NotFound {
@@ -59,7 +66,7 @@ impl Config {
     /// # Errors
     /// Returns [`ConfigError::Parse`] if `raw` is not valid TOML or does not
     /// match the workbench schema, [`ConfigError::UnresolvedVar`] if a
-    /// `${VAR}` references an unset environment variable, and
+    /// `${VAR}` names a variable whose value is not valid Unicode, and
     /// [`ConfigError::Interpolation`] if a `${...}` is malformed.
     ///
     /// # Examples
@@ -81,10 +88,13 @@ impl Config {
                 source: Box::new(source),
             })?;
         interpolate_value(&mut document)?;
-        let config: Self = document.try_into().map_err(|source| ConfigError::Parse {
+        let mut config: Self = document.try_into().map_err(|source| ConfigError::Parse {
             path: path.map(Path::to_path_buf),
             source: Box::new(source),
         })?;
+        if config.gateway.base_url.is_empty() {
+            config.gateway.base_url = DEFAULT_GATEWAY_BASE_URL.to_string();
+        }
         Ok(config)
     }
 }
@@ -230,9 +240,11 @@ pub enum ConfigError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
 
-    /// A `${VAR}` referenced an environment variable that was not set.
+    /// A `${VAR}` named an environment variable whose value is not valid
+    /// Unicode. An unset variable is not an error; it interpolates to the
+    /// empty string.
     #[non_exhaustive]
-    #[error("unresolved environment variable {0}")]
+    #[error("environment variable {0} is not valid Unicode")]
     UnresolvedVar(String),
 
     /// A `${...}` interpolation was malformed (for example, unclosed).
@@ -247,7 +259,9 @@ fn parse_location(path: Option<&Path>) -> String {
         .unwrap_or_default()
 }
 
-/// Expands `${VAR}` from the environment; `$$` is a literal `$`.
+/// Expands `${VAR}` from the environment; `$$` is a literal `$`. An unset
+/// variable expands to the empty string; a variable whose value is not
+/// valid Unicode is an error.
 fn interpolate(input: &str) -> Result<String, ConfigError> {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
@@ -277,9 +291,13 @@ fn interpolate(input: &str) -> Result<String, ConfigError> {
                         "unclosed ${...} interpolation".to_string(),
                     ));
                 }
-                let value =
-                    std::env::var(&name).map_err(|_| ConfigError::UnresolvedVar(name.clone()))?;
-                out.push_str(&value);
+                match std::env::var(&name) {
+                    Ok(value) => out.push_str(&value),
+                    Err(std::env::VarError::NotPresent) => {}
+                    Err(std::env::VarError::NotUnicode(_)) => {
+                        return Err(ConfigError::UnresolvedVar(name.clone()));
+                    }
+                }
             }
             _ => out.push('$'),
         }
@@ -452,14 +470,25 @@ interval_ms = 500
     }
 
     #[test]
-    fn unset_variable_is_an_error() {
+    fn unset_variable_interpolates_to_empty() {
         let raw =
             "[gateway]\nbase_url = \"http://x\"\napi_key = \"${PFG_WB_DEFINITELY_UNSET_XYZ}\"\n";
-        let err = Config::from_toml_str(raw).expect_err("unset variable must fail");
-        assert!(
-            matches!(err, ConfigError::UnresolvedVar(ref name) if name == "PFG_WB_DEFINITELY_UNSET_XYZ"),
-            "expected UnresolvedVar, got {err:?}"
-        );
+        let config = Config::from_toml_str(raw).expect("unset variable resolves to empty");
+        assert_eq!(config.gateway.api_key, "");
+    }
+
+    #[test]
+    fn empty_base_url_falls_back_to_the_default() {
+        let raw = "[gateway]\nbase_url = \"${PFG_WB_DEFINITELY_UNSET_XYZ}\"\napi_key = \"k\"\n";
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert_eq!(config.gateway.base_url, DEFAULT_GATEWAY_BASE_URL);
+    }
+
+    #[test]
+    fn explicit_base_url_is_kept() {
+        let raw = "[gateway]\nbase_url = \"http://gw:9999\"\napi_key = \"k\"\n";
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert_eq!(config.gateway.base_url, "http://gw:9999");
     }
 
     #[test]
