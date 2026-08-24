@@ -121,3 +121,39 @@ Running log of design choices for the PromptForge Workbench stage 1 build. Each 
 - Choice: the static-asset routes are covered by server tests (200, content type, non-empty body), while the JavaScript behavior - Enter to send, live delta append, markdown re-render, model picker population, error bubbles - is verified manually in a browser against a running server.
 - Evidence: the workspace has no browser automation stack (no headless Chromium, no JS test runner), and adding one for four behaviors would dwarf the code under test; the Rust-side contract the JS depends on (SSE framing, `[DONE]`, catalog shape) is already pinned by the server tests.
 - Cost: a regression in `app.js` is caught only by a human clicking through the UI; the manual verification step has to be repeated whenever the SSE contract or the asset markup changes.
+
+## 21. Voice transport: binary WebSocket messages of f32 PCM, not base64 text
+
+- Choice: `GET /voice` upgrades to a WebSocket; PCM flows as binary messages, one per AudioWorklet block (typically 128 frames), each frame a little-endian f32 sample at 16 kHz mono; control messages and the server's reply are text.
+- Evidence: the WebSocket protocol has a binary opcode for exactly this; base64 inside text frames would grow the payload by a third and add an encode/decode pair on both ends for no interop gain, since both peers are ours; on the browser side `ws.binaryType = "arraybuffer"` plus `ws.send(buffer)` moves the worklet's block without a copy into a string, and axum's `Message::Binary` delivers `Bytes` with no UTF-8 validation pass.
+- Cost: the stream is opaque to text-based inspection (browser devtools render binary frames poorly), and the 4-byte little-endian framing is convention rather than self-describing - a mismatched client is detected only by the frame count being off.
+
+## 22. Voice control protocol: "start" resets, "stop" reports, one JSON reply
+
+- Choice: control messages are the bare words `start` and `stop`; `start` zeroes the per-session counter so one socket carries multiple takes; on `stop` the server replies with exactly one text message, `{"frames":N}`; unknown text is ignored; the socket closing ends the session. The server counts frames (4-byte samples), not messages.
+- Evidence: the step fixes the start/stop verbs and the single frame-count reply; bare words are the smallest contract both sides can assert on, while JSON on the reply leaves room for the next step's transcription fields without changing the verbs; counting samples rather than messages makes the reply independent of the client's block size, which the test pins by sending two different-sized blocks (128 and 64 frames) and asserting 192.
+- Cost: no message ids or versioning - a richer future protocol must version the verbs or move to envelopes everywhere; frames arriving before `start` are counted rather than rejected, and a trailing partial sample (a payload not divisible by four) is silently dropped from the count.
+
+## 23. Push-to-talk UX: click-to-toggle mic button, transient status notes
+
+- Choice: a mic-icon button sits left of the input box in the composer; clicking toggles capture (click again to stop), the button pulses red while recording, and outcomes land as transient notes in a status line under the composer - the frame-count reply on success, a visible error note on mic-permission denial or socket failure. Notes auto-dismiss after eight seconds.
+- Evidence: the step asks for push-to-talk with a visible state change and a stop path; click-to-toggle works with mouse, touch, and keyboard (a real `<button>`, so Enter and Space toggle it) where hold-to-talk excludes keyboard users and is clumsy on trackpads; a transient note near the composer keeps capture bookkeeping out of the chat transcript, matching the error-bubble convention for chat failures while staying lighter weight.
+- Cost: toggle is not true hold-to-talk - an accidental click starts capture and the mic stays live until clicked again; the auto-dismiss means a missed frame count is gone from the UI (the server's tracing log keeps it).
+
+## 24. Capture pipeline: AudioWorkletNode with context-level resample to 16 kHz
+
+- Choice: capture runs in an `AudioWorkletNode` fed by `getUserMedia({channelCount: 1, sampleRate: 16000})`; the `AudioContext` is constructed with `sampleRate: 16000` so the engine resamples before the worklet sees the data; each block is copied and posted to the page, which forwards it over the socket; the worklet is a served static asset (`/pcm-worklet.js`), embedded with `include_str!` like the other UI files.
+- Evidence: ScriptProcessorNode is deprecated and runs on the main thread, where UI work can starve audio; an AudioWorklet runs on the audio rendering thread; constraining the context rate makes the browser's own resampler (maintained, SIMD-tuned code) guarantee the 16 kHz wire format regardless of the device's native rate, instead of shipping our own resampler; a served worklet file follows the embedded-asset convention (design entry 16) and picks up the same route test as the other assets.
+- Cost: one more embedded asset and route; the worklet copies every block because the engine reuses its input buffers - an allocation per roughly 8 ms that `postMessage` makes unavoidable; `AudioContext({sampleRate})` is unsupported on very old Safari, which the UI surfaces as the generic capture-unavailable error.
+
+## 25. Voice UI verified by hand, voice protocol by a live-socket test
+
+- Choice: the `/voice` contract is pinned by server tests that bind the route on a loopback port and drive it with a real tokio-tungstenite client (start, two binary PCM blocks, stop, assert the `{"frames":N}` reply; plus a start-resets-take test and a route-mounting test), while the browser behavior - permission prompt and denial note, recording state, frame streaming, stop reply note - is verified manually in a browser against a running server, per the design entry 20 split. tokio-tungstenite is pinned to 0.29 so the resolver unifies it with the copy axum's `ws` feature already depends on.
+- Evidence: tower's `oneshot` cannot drive a WebSocket upgrade (no hyper `OnUpgrade` extension exists without a real server), so a bound socket with a real client is the smallest honest harness; the workspace still has no browser automation stack, and the JS-side contract (binary frames out, one JSON text reply in) is exactly what the server tests pin.
+- Cost: the test spins a real server per case (loopback, ephemeral port - milliseconds each); the manual browser pass must be repeated whenever the wire contract or the composer markup changes. Verified this step: server suite green (44 passed), `node --check` on both JS files, asset routes covered by tests; the in-browser mic pass is the human step.
+
+## 26. Voice endpoint size and rate posture: axum defaults accepted, stated for the record
+
+- Choice: `/voice` sets no limits of its own; axum's default `WebSocketConfig` caps a message at 64 MiB and a frame at 16 MiB, and those caps are the whole posture. The frame counter is a per-connection u64; there is no per-session duration cap, no rate limit, and no authentication on the route.
+- Evidence: the server binds loopback by default (design entry 3) and the workbench is a single-user local tool, so the only client is the page the server itself served; the handler never buffers payloads - each binary message is measured by length and dropped - so memory in use is bounded by one capped message, and a hostile process already on the loopback interface has simpler ways to harm the machine than this endpoint.
+- Cost: overriding `server.bind` to a non-loopback address exposes an unauthenticated endpoint that accepts arbitrary binary streams, and any such deployment must revisit this entry; a take of unbounded length accumulates only a counter, but the inbound stream itself is unthrottled below the 64 MiB message cap.

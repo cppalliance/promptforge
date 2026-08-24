@@ -246,3 +246,59 @@ body {
   opacity: 0.45;
   cursor: default;
 }
+
+.composer button.mic-button {
+  width: 40px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-raised);
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
+.composer button.mic-button:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+  border-color: var(--accent-dim);
+}
+
+.composer button.mic-button.recording {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(176, 96, 106, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(176, 96, 106, 0);
+  }
+}
+
+.voice-status {
+  flex: none;
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 24px;
+  font-size: 12px;
+  color: var(--text-dim);
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.15s ease-out, padding 0.15s ease-out;
+}
+
+.voice-status.visible {
+  max-height: 40px;
+  padding: 0 24px 12px;
+}
+
+.voice-status.error {
+  color: var(--danger);
+}

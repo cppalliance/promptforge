@@ -10,6 +10,7 @@ mod app;
 mod config;
 mod gateway;
 mod tape;
+mod voice;
 
 pub use app::{AppError, AppState, DEFAULT_ADDR, router, run};
 pub use config::{
