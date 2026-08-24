@@ -226,6 +226,24 @@ impl Routing {
     }
 }
 
+/// Guard that a resolved model serves the workload its route handles, so a
+/// request never reaches a backend wired for a different kind of work.
+///
+/// # Errors
+/// Returns [`GatewayError::KindMismatch`] when the model's configured kind
+/// differs from the kind the calling route serves.
+pub(crate) fn require_kind(model: &Model, expected: ModelKind) -> Result<(), GatewayError> {
+    if model.kind == expected {
+        Ok(())
+    } else {
+        Err(GatewayError::KindMismatch {
+            model: model.name.clone(),
+            expected,
+            actual: model.kind,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

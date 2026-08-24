@@ -51,7 +51,7 @@ use crate::local::LocalRuntime;
 use crate::routing::Routing;
 use crate::tools::WebSearchState;
 use crate::wire::{ChatRequest, ChatResponse, ModelInfo, ModelsResponse};
-use promptforge_gateway_config::{ServerConfig, WebSearchConfig};
+use promptforge_gateway_config::{ModelKind, ServerConfig, WebSearchConfig};
 
 /// Mutable live configuration held behind a lock so profile switches can swap
 /// routing and local children without rebuilding the axum router.
@@ -165,6 +165,7 @@ async fn chat_completions(
         let live = state.live.read().await;
         live.routing.model(&request.model)?
     };
+    crate::routing::require_kind(&model, ModelKind::Chat)?;
     let client_id = crate::queue::ClientId::from_header(
         headers
             .get(CLIENT_HEADER)
