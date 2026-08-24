@@ -162,6 +162,13 @@ pub struct VoiceConfig {
     /// Empty disables the final pass; the final transcript then comes from
     /// the interim model.
     pub final_model: PathBuf,
+    /// URL the interim model can be downloaded from. Informational until
+    /// the gateway cache integration lands; empty means no known source.
+    pub interim_source: String,
+    /// URL the final-pass model can be downloaded from. Informational
+    /// until the gateway cache integration lands; empty means no known
+    /// source.
+    pub final_source: String,
     /// Seconds of trailing audio each interim pass transcribes.
     pub window_seconds: u64,
     /// Milliseconds between interim passes while a take is recording.
@@ -173,6 +180,8 @@ impl Default for VoiceConfig {
         Self {
             interim_model: PathBuf::new(),
             final_model: PathBuf::new(),
+            interim_source: String::new(),
+            final_source: String::new(),
             window_seconds: DEFAULT_VOICE_WINDOW_SECONDS,
             interval_ms: DEFAULT_VOICE_INTERVAL_MS,
         }
@@ -379,8 +388,33 @@ api_key = "k"
 "#;
         let config = Config::from_toml_str(raw).expect("fixture parses");
         assert!(!config.voice.enabled(), "no model paths means disabled");
+        assert!(config.voice.interim_source.is_empty());
+        assert!(config.voice.final_source.is_empty());
         assert_eq!(config.voice.window_seconds, DEFAULT_VOICE_WINDOW_SECONDS);
         assert_eq!(config.voice.interval_ms, DEFAULT_VOICE_INTERVAL_MS);
+    }
+
+    #[test]
+    fn voice_section_parses_model_source_urls() {
+        let raw = r#"
+[gateway]
+base_url = "http://127.0.0.1:8081"
+api_key = "k"
+
+[voice]
+interim_source = "https://example.com/models/ggml-large-v3-turbo.bin"
+final_source = "https://example.com/models/ggml-large-v3.bin"
+"#;
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert!(!config.voice.enabled(), "sources alone do not enable voice");
+        assert_eq!(
+            config.voice.interim_source,
+            "https://example.com/models/ggml-large-v3-turbo.bin"
+        );
+        assert_eq!(
+            config.voice.final_source,
+            "https://example.com/models/ggml-large-v3.bin"
+        );
     }
 
     #[test]
