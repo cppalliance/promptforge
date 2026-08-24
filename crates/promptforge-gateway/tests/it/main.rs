@@ -9,7 +9,7 @@
 //!
 //! The suite is split into cohesive area modules (IT-007): shared scaffolding
 //! lives in [`support`]; tests are grouped by surface into [`chat`],
-//! [`web_search`], [`queue`], [`profiles`], and [`local`].
+//! [`embeddings`], [`web_search`], [`queue`], [`profiles`], and [`local`].
 #![expect(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -19,6 +19,7 @@
 mod support;
 
 mod chat;
+mod embeddings;
 mod local;
 mod profiles;
 mod queue;

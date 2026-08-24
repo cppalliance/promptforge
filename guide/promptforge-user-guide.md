@@ -124,7 +124,7 @@ promptforge-gateway is the one process in PromptForge that talks to LLM backends
 
 ### What the Gateway Does
 
-The gateway accepts `POST /v1/chat/completions` requests in the OpenAI chat completions format. It resolves the model name the caller asked for, substitutes the backend's own model string into the outgoing request, forwards it, and restores the caller's model name on the response. Everything else in the request body - sampling parameters, tool definitions, template arguments - passes through untouched in a flattened map, so a parameter the gateway has never heard of reaches the backend without a gateway release.
+The gateway accepts `POST /v1/chat/completions` requests in the OpenAI chat completions format. It resolves the model name the caller asked for, substitutes the backend's own model string into the outgoing request, forwards it, and restores the caller's model name on the response. Everything else in the request body - sampling parameters, tool definitions, template arguments - passes through untouched in a flattened map, so a parameter the gateway has never heard of reaches the backend without a gateway release. Models configured with `kind = "embedding"` are served instead at `POST /v1/embeddings` in the OpenAI embeddings format, with the same routing and passthrough discipline.
 
 Credentials live here and nowhere else. Each `[[endpoint]]` carries an `api_key`, each `[tools.web_search]` carries a search provider key, and each `[[local_model]]` is reached over a loopback connection with a generated bearer. The `Secret` type ensures no credential can be serialized, logged, or printed: it redacts in both `Debug` and `Display`, and `expose()` is the single plaintext accessor.
 
@@ -246,6 +246,20 @@ The gateway validates: model must be non-empty, messages must be non-empty, each
 
 The response carries the caller's model name, not the backend's.
 
+### Embeddings
+
+Models configured with `kind = "embedding"` serve OpenAI-shaped embedding requests at `POST /v1/embeddings`:
+
+```json
+{
+  "model": "embed-large",
+  "input": ["first document", "second document"],
+  "encoding_format": "float"
+}
+```
+
+The `input` is a single string or an array of strings; `encoding_format` (`float` or `base64`) is optional, and every other OpenAI embeddings field passes through verbatim. The route applies the same bearer auth, model resolution and rewrite, and dominion queue admission as chat completions, and the response restores the caller's model name with `data` and `usage` passed through from the backend. Naming a chat or classifier model here is a 400 `kind_mismatch`. A model whose upstream cannot serve embeddings at all - a local chat server, for example - fails with 400 and `code: "model_unavailable"`.
+
 ### Authentication and Errors
 
 Every route except `GET /health` checks `Authorization: Bearer <token>` against `server.api_key`. The comparison is constant-time: both values are SHA-256 hashed to fixed-length digests, then compared with the `subtle` crate's `ConstantTimeEq`. A missing or wrong token returns 401 with no detail.
@@ -269,6 +283,7 @@ All errors use the OpenAI error envelope:
 | Wrong or missing bearer | 401 | `authentication_error` | `unauthorized` |
 | Unknown model | 404 | `invalid_request_error` | `model_not_found` |
 | Model kind does not match the route | 400 | `invalid_request_error` | `kind_mismatch` |
+| Model's upstream cannot serve the route's workload | 400 | `invalid_request_error` | `model_unavailable` |
 | Tool not configured | 404 | `invalid_request_error` | `not_found` |
 | Bad request body | 400 | `invalid_request_error` | `malformed_request` |
 | Backend unreachable | 502 | `server_error` | `upstream_transport` |
