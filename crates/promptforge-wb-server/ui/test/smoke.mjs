@@ -85,6 +85,23 @@ class FakeWebSocket {
   }
 }
 globalThis.WebSocket = FakeWebSocket;
+
+// Pushes one observer status frame down the persistent socket, as the
+// server's /ws route would. Fields default to a plain idle update.
+function emitStatus(overrides = {}) {
+  const socket = chatSockets[0];
+  socket?.onmessage?.({
+    data: JSON.stringify({
+      type: "status",
+      label: "Ready",
+      description: "",
+      severity: "info",
+      activity: "general",
+      progress: null,
+      ...overrides,
+    }),
+  });
+}
 // A scripted fetch stands in for the model catalog. The catalog answers with
 // one model so the picker enables and submission is unblocked; any other
 // fetch - including the retired POST /chat SSE path - rejects the test.
@@ -222,6 +239,46 @@ if (!picker || picker.disabled) {
         failures.push("chat frame messages are not the OpenAI shape");
       }
     }
+  }
+}
+
+// Status frames: the observer's updates render into the status bar. Info
+// and error frames set the text and tooltip; debug frames are internal
+// instrumentation and must not touch either.
+if (statusText && statusBar) {
+  emitStatus({
+    label: "Streaming response...",
+    description: "gateway stream open",
+    activity: "gateway",
+  });
+  if (statusText.textContent !== "Streaming response...") {
+    failures.push("a status frame did not update the bar text");
+  }
+  if (statusBar.title !== "gateway stream open") {
+    failures.push("the status description did not land on the bar tooltip");
+  }
+  emitStatus({ label: "per-delta pulse", description: "debug", severity: "debug", activity: "gateway" });
+  if (statusText.textContent !== "Streaming response...") {
+    failures.push("a debug status frame changed the bar text");
+  }
+  if (statusBar.title !== "gateway stream open") {
+    failures.push("a debug status frame changed the tooltip");
+  }
+  emitStatus({
+    label: "Gateway error: 500",
+    description: "upstream declined",
+    severity: "error",
+    activity: "gateway",
+  });
+  if (statusText.textContent !== "Gateway error: 500") {
+    failures.push("an error frame did not update the bar text");
+  }
+  if (!statusText.classList.contains("status-bar__text--error")) {
+    failures.push("an error frame did not style the bar text");
+  }
+  emitStatus({ label: "Ready", description: "idle" });
+  if (statusText.classList.contains("status-bar__text--error")) {
+    failures.push("the error styling did not clear on the next info frame");
   }
 }
 
