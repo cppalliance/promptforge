@@ -312,6 +312,39 @@ if (progressEl && ledEl) {
   if (ledEl.hidden) failures.push("the LED did not return when progress cleared");
 }
 
+// The activity LED: gateway pulses light it green, voice pulses amber, and
+// green wins while both are lit inside one pulse window. Debug frames pulse
+// it too. After the window the LED returns to its idle lens. The pulse
+// window defaults to 250ms here (jsdom loads no stylesheet), so 400ms of
+// silence guarantees decay.
+if (ledEl) {
+  const ledLit = () =>
+    ledEl.classList.contains("status-bar__led--gateway") ||
+    ledEl.classList.contains("status-bar__led--voice");
+  // Let any pulse from the earlier sections decay before asserting idle.
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  if (ledLit()) failures.push("the LED did not return to idle after the pulse window");
+  emitStatus({ label: "delta", severity: "debug", activity: "gateway" });
+  if (!ledEl.classList.contains("status-bar__led--gateway")) {
+    failures.push("gateway activity did not light the LED green");
+  }
+  emitStatus({ label: "mic", severity: "debug", activity: "voice" });
+  if (!ledEl.classList.contains("status-bar__led--gateway")) {
+    failures.push("green did not win while gateway and voice were both lit");
+  }
+  if (ledEl.classList.contains("status-bar__led--voice")) {
+    failures.push("the voice modifier applied while gateway was lit");
+  }
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  if (ledLit()) failures.push("the LED stayed lit past the pulse window");
+  emitStatus({ label: "mic", severity: "debug", activity: "voice" });
+  if (!ledEl.classList.contains("status-bar__led--voice")) {
+    failures.push("voice activity did not light the LED amber");
+  }
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  if (ledLit()) failures.push("the LED stayed lit past the pulse window");
+}
+
 if (failures.length > 0) {
   console.error(`smoke test failed:\n- ${failures.join("\n- ")}`);
   process.exit(1);

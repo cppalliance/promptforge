@@ -200,6 +200,48 @@ body {
   box-shadow: 0 0 var(--progress-glow) var(--progress-fill);
 }
 
+/* The activity LED: a small circle standing in the slot whenever no frame
+   carries progress. Idle is an unlit lens - a dark translucent disc with a
+   subtle inner highlight. A pulse adds the --gateway or --voice modifier: a
+   bright radial-gradient core with a layered box-shadow bloom. The idle
+   rule's transition is the slow ease-out decay; the modifier's own
+   transition makes the fade-in fast. */
+.status-bar__led {
+  width: var(--led-size);
+  height: var(--led-size);
+  border-radius: 50%;
+  background: var(--led-off);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.18),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.45);
+  transition:
+    background var(--led-pulse-ms) ease-out,
+    box-shadow var(--led-pulse-ms) ease-out;
+}
+
+.status-bar__led--gateway,
+.status-bar__led--voice {
+  transition:
+    background 60ms ease-in,
+    box-shadow 60ms ease-in;
+}
+
+.status-bar__led--gateway {
+  background: radial-gradient(circle, #ffffff 0%, var(--led-green) 60%);
+  box-shadow:
+    0 0 calc(var(--led-glow-radius) / 2) var(--led-green),
+    0 0 var(--led-glow-radius) var(--led-green),
+    0 0 calc(var(--led-glow-radius) * 2) color-mix(in oklab, var(--led-green) 55%, transparent);
+}
+
+.status-bar__led--voice {
+  background: radial-gradient(circle, #ffffff 0%, var(--led-amber) 60%);
+  box-shadow:
+    0 0 calc(var(--led-glow-radius) / 2) var(--led-amber),
+    0 0 var(--led-glow-radius) var(--led-amber),
+    0 0 calc(var(--led-glow-radius) * 2) color-mix(in oklab, var(--led-amber) 55%, transparent);
+}
+
 /* Voice UI: injected into murm-ui's form container by the voice plugin. */
 .interim {
   width: 100%;

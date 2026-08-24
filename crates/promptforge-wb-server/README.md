@@ -68,7 +68,7 @@ Two workflows:
 
 The chat UI itself is [murm-ui](https://github.com/levmv/murm-ui) 0.2.0, vendored in `ui/src/chat/` (MIT, see its `PROVENANCE.md`), driven by a WebSocket provider against `GET /ws` (one persistent socket, opened on load; chat frames carry an `id` the server echoes, and unsolicited status frames ride the same connection). Its styles are bundled by esbuild into `dist/app.css`; `ui/style.css` carries the workbench shell (sidebar, picker, voice UI, status bar) and overrides.
 
-The status bar at the bottom of the window renders the observer's `{"type":"status",...}` frames (`ui/src/status-bar.ts`): the label as the bar text, the description as the tooltip, error frames in a distinct color. Debug-severity frames are internal instrumentation and never touch the text.
+The status bar at the bottom of the window renders the observer's `{"type":"status",...}` frames (`ui/src/status-bar.ts`): the label as the bar text, the description as the tooltip, error frames in a distinct color. Debug-severity frames are internal instrumentation and never touch the text. The right slot holds a `<progress>` bar while a frame carries progress, and an activity LED otherwise: a small circle that pulses green on gateway traffic and amber on voice activity (green wins when both coincide), lit for one pulse window per frame and faded by a CSS transition. The bar's colors, glow radii, and pulse window are CSS custom properties (`--led-green`, `--led-amber`, `--led-off`, `--led-glow-radius`, `--led-pulse-ms`, `--progress-fill`, `--progress-glow`, ...) at the top of `ui/style.css`.
 
 ## Whisper models
 
