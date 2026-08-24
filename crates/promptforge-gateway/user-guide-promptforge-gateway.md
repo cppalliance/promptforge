@@ -236,6 +236,8 @@ All errors use the OpenAI error envelope:
 | Backend 5xx | 502 | `server_error` | `upstream_error` |
 | Queue full | 503 | `server_error` | `queue_full` |
 | Rejected at capacity (`policy = "reject"`) | 429 | `rate_limit_error` | `queue_rejected` |
+| Cache entry absent on `DELETE /v1/cache/{sha256}` | 404 | `invalid_request_error` | `cache_entry_not_found` |
+| Cache storage/transport failure before the response commits | 500 | `server_error` | `cache_error` |
 
 An unmodified OpenAI SDK surfaces these as its own error types rather than unparseable blobs.
 
@@ -563,6 +565,16 @@ The cache directory defaults to `~/.promptforge` (set `[local].cache_dir` to ove
 First-time downloads show an indicatif progress bar on interactive TTY stderr - percent, bytes, rate, and ETA. On non-TTY stderr, periodic tracing progress lines are emitted instead.
 
 When `sha256` is set, the downloaded file is verified against the digest.
+
+### The blob cache API
+
+Three bearer-authenticated routes let a client (the workbench, for example) download arbitrary blobs into the same cache on demand:
+
+- `POST /v1/cache` with `{"source": "<http(s) URL>", "sha256": "<optional 64-hex pin>"}` ensures the blob is cached. A cache hit answers immediately with `200` JSON `{"path": "...", "status": "ready"}`. A miss answers with `200` `text/event-stream`: `data: {"status":"downloading","bytes":N,"total":N}` progress events (`total` is `null` when the server sent no Content-Length), terminated by `data: {"status":"ready","path":"..."}` or, on failure, `data: {"status":"error","message":"..."}`. A mid-stream failure is an SSE event, not an HTTP error, because the response is already committed.
+- `GET /v1/cache` returns `200` JSON `[{"source", "path", "sha256", "size_bytes"}, ...]` sorted by source.
+- `DELETE /v1/cache/{sha256}` removes the blob and its metadata, answering `200` `{"status": "deleted", "sha256": "..."}` or 404 `cache_entry_not_found` when no entry carries that digest.
+
+Blobs land in `<cache>/models/<source-key>/<filename>`, the same slot local-model provisioning computes for the URL, so a blob fetched through the API is a provisioning cache hit for the same `source` and vice versa. Each API download writes a `<filename>.meta.json` sidecar holding its source, digest, and size; the listing and delete routes read sidecars only and never re-hash a blob. Only blobs with sidecars are cache entries: a model file that provisioning downloaded on its own is not listed and cannot be deleted through the API, and a `POST` for its URL re-downloads it once to earn the sidecar. Downloads stage to a `<file>.part` sibling and rename into place only after the digest verifies, so a failed or interrupted download never leaves a partial blob at a final path.
 
 ### Tool-calling dialect detection
 

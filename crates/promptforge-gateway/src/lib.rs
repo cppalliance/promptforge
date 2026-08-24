@@ -16,7 +16,10 @@
 //! subprocess (`[[local_model]]`), named profiles with recursive `include`
 //! and immediate `POST /admin/switch-profile`, a bearer-authed
 //! `GET /v1/models` catalog, a Brave-backed `POST /v1/tools/web_search`
-//! configured by `[tools.web_search]`, and `GET /health`. In-process
+//! configured by `[tools.web_search]`, an on-demand blob cache
+//! (`POST /v1/cache` with SSE download progress, `GET /v1/cache`,
+//! `DELETE /v1/cache/{sha256}`) backed by the local artifact store, and
+//! `GET /health`. In-process
 //! llama.cpp FFI and endpoint pinning are deferred.
 
 mod api_error;
@@ -50,7 +53,7 @@ use axum::extract::State;
 use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Router, response::IntoResponse};
 use serde::Deserialize;
 use tokio::sync::RwLock;
@@ -156,6 +159,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/v1/models", get(list_models))
         .route("/v1/tools/web_search", post(tools::web_search))
         .route("/v1/cache", get(cache::list_cache).post(cache::post_cache))
+        .route("/v1/cache/{sha256}", delete(cache::delete_cache))
         .route("/health", get(health))
         .route("/admin/profiles", get(admin_list_profiles))
         .route("/admin/status", get(admin_status))

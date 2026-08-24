@@ -382,3 +382,85 @@ async fn post_cache_requires_auth() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     gateway.shutdown().await;
 }
+
+#[tokio::test]
+async fn delete_cache_removes_the_entry_and_then_404s() {
+    let temp = TempDir::new().unwrap();
+    let body = b"delete-route-fixture";
+    let digest = hex_sha256(body);
+    seed_blob(
+        temp.path(),
+        "dddddddddddddddd",
+        "d.bin",
+        "http://seeded.example/d.bin",
+        body,
+    );
+    let gateway = cache_gateway(temp.path()).await;
+    let http = reqwest::Client::new();
+
+    let response = send_within(
+        http.delete(format!("http://{}/v1/cache/{digest}", gateway.addr))
+            .bearer_auth("test-token"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let deleted = json_within(response).await;
+    assert_eq!(deleted["status"], "deleted");
+    assert_eq!(deleted["sha256"], digest);
+
+    // Blob and sidecar are gone from disk and from the listing.
+    let blob = temp
+        .path()
+        .join("models")
+        .join("dddddddddddddddd")
+        .join("d.bin");
+    assert!(!blob.exists(), "blob removed");
+    assert!(
+        !blob.with_file_name("d.bin.meta.json").exists(),
+        "sidecar removed"
+    );
+    let listing = json_within(
+        send_within(
+            http.get(format!("http://{}/v1/cache", gateway.addr))
+                .bearer_auth("test-token"),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(listing.as_array().expect("array").len(), 0);
+
+    // A second delete of the same digest is a 404.
+    let response = send_within(
+        http.delete(format!("http://{}/v1/cache/{digest}", gateway.addr))
+            .bearer_auth("test-token"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let envelope = json_within(response).await;
+    assert_eq!(envelope["error"]["code"], "cache_entry_not_found");
+
+    // A malformed digest parameter is a 400.
+    let response = send_within(
+        http.delete(format!("http://{}/v1/cache/not-hex", gateway.addr))
+            .bearer_auth("test-token"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let envelope = json_within(response).await;
+    assert_eq!(envelope["error"]["code"], "malformed_request");
+    gateway.shutdown().await;
+}
+
+#[tokio::test]
+async fn delete_cache_requires_auth() {
+    let temp = TempDir::new().unwrap();
+    let gateway = cache_gateway(temp.path()).await;
+    let response = send_within(reqwest::Client::new().delete(format!(
+        "http://{}/v1/cache/{}",
+        gateway.addr,
+        "a".repeat(64)
+    )))
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    gateway.shutdown().await;
+}
