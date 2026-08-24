@@ -25,7 +25,8 @@ pub(crate) struct StreamedChunks {
     /// The upstream `Cache-Control`, forwarded when present.
     pub(crate) cache_control: Option<String>,
     /// The validated chunk stream. The upstream's terminal `[DONE]` sentinel
-    /// is consumed here, never yielded; the relay emits its own.
+    /// is consumed here, never yielded; the relay emits its own. Dropping the
+    /// stream drops the upstream response and aborts the connection.
     pub(crate) chunks: BoxStream<'static, Result<ChatChunk, GatewayError>>,
 }
 
@@ -99,8 +100,11 @@ pub(crate) trait Upstream: Send + Sync {
     ///
     /// The stream is boxed because the trait is used as `Arc<dyn Upstream>`:
     /// an `impl Stream` return would break object safety. Each item is a
-    /// validated [`ChatChunk`]; a mid-stream failure surfaces as an `Err`
-    /// item rather than a silently truncated stream.
+    /// validated [`ChatChunk`]; a malformed chunk is logged and skipped,
+    /// while a mid-stream transport failure surfaces as an `Err` item rather
+    /// than a silently truncated stream. Dropping the stream aborts the
+    /// upstream connection, which is how a client disconnect cancels the
+    /// upstream work.
     ///
     /// The default is [`GatewayError::ModelUnavailable`]: upstreams without a
     /// streaming implementation decline the workload rather than fabricate a
@@ -246,11 +250,16 @@ impl OpenAiUpstream {
 ///
 /// Each `data:` line carries one JSON chunk; blank lines, comments, and the
 /// `event:`/`id:`/`retry:` fields are skipped, and the terminal `[DONE]`
-/// sentinel ends the stream without being yielded. Every chunk's model is
+/// sentinel - which is not JSON - ends the stream without being yielded and
+/// without ever reaching the malformed-chunk log. Every chunk's model is
 /// rewritten to `requested` (the caller's model name, never the backend's).
-/// A transport failure mid-stream or an undecodable chunk surfaces as an
-/// `Err` item and ends the stream, so a caller never mistakes a truncated
-/// stream for a complete one.
+/// A chunk that is undecodable or fails the minimal shape check is logged
+/// and skipped, so one bad chunk never ends an otherwise healthy stream. A
+/// transport failure mid-stream surfaces as an `Err` item and ends the
+/// stream, so a caller never mistakes a truncated stream for a complete one.
+/// Dropping the returned stream drops the upstream response, which aborts
+/// the upstream connection: that Drop chain is the entire client-disconnect
+/// cancellation mechanism.
 pub(crate) fn sse_chunks(response: reqwest::Response, requested: String) -> StreamedChunks {
     let content_type = response
         .headers()
@@ -288,16 +297,19 @@ pub(crate) fn sse_chunks(response: reqwest::Response, requested: String) -> Stre
                     if data == "[DONE]" {
                         return None;
                     }
-                    return match serde_json::from_str::<ChatChunk>(data) {
-                        Ok(mut chunk) => {
-                            chunk.model.clone_from(&requested);
-                            Some((Ok(chunk), (bytes, buffer, requested, false)))
+                    let mut chunk = match serde_json::from_str::<ChatChunk>(data) {
+                        Ok(chunk) => chunk,
+                        Err(error) => {
+                            tracing::warn!(%error, "skipping undecodable upstream chunk");
+                            continue;
                         }
-                        Err(error) => Some((
-                            Err(GatewayError::upstream_protocol(error)),
-                            (bytes, buffer, requested, true),
-                        )),
                     };
+                    if let Err(reason) = chunk.validate() {
+                        tracing::warn!(%reason, "skipping malformed upstream chunk");
+                        continue;
+                    }
+                    chunk.model.clone_from(&requested);
+                    return Some((Ok(chunk), (bytes, buffer, requested, false)));
                 }
                 match bytes.next().await {
                     Some(Ok(chunk)) => buffer.extend_from_slice(&chunk),
@@ -676,12 +688,170 @@ mod tests {
         let _ = handle.join();
     }
 
+    /// A shared buffer that captures what the parser logs, so tests can
+    /// assert on malformed-chunk warnings.
+    #[derive(Clone, Default)]
+    struct LogBuffer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl LogBuffer {
+        fn contents(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().expect("log buffer")).into_owned()
+        }
+    }
+
+    impl std::io::Write for LogBuffer {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().expect("log buffer").extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuffer {
+        type Writer = LogBuffer;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// Install a WARN-level subscriber writing to a fresh capture buffer for
+    /// the current thread (tokio's current-thread test runtime keeps every
+    /// poll on this thread, so the parser's warnings land in the buffer).
+    fn capture_warnings() -> (LogBuffer, tracing::subscriber::DefaultGuard) {
+        let buffer = LogBuffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(buffer.clone())
+            .with_ansi(false)
+            .with_max_level(tracing::Level::WARN)
+            .finish();
+        let guard = tracing::subscriber::set_default(subscriber);
+        (buffer, guard)
+    }
+
     #[tokio::test]
-    async fn stream_undecodable_chunk_is_a_protocol_error_item() {
-        // A mid-stream garbage line surfaces as an Err item and ends the
-        // stream, never a silent truncation.
-        let body = format!("{}data: not json\n\ndata: [DONE]\n\n", chunk_line("m", "a"));
+    async fn stream_malformed_chunks_are_logged_and_skipped() {
+        // An undecodable or shape-invalid chunk is logged and skipped; the
+        // stream continues with the next good chunk instead of ending.
+        let (logs, _guard) = capture_warnings();
+        let body = format!(
+            "{}data: not json\n\ndata: {{\"model\":\"m\",\"choices\":[]}}\n\n{}data: [DONE]\n\n",
+            chunk_line("m", "a"),
+            chunk_line("m", "b"),
+        );
         let (base, handle) = serve_once("200 OK", &body);
+        let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
+        let mut streamed = upstream
+            .stream(request("m"), "u")
+            .await
+            .expect("stream opens");
+        let mut chunks = Vec::new();
+        while let Some(item) = streamed.chunks.next().await {
+            chunks.push(item.expect("malformed chunks never surface as items"));
+        }
+        let text: String = chunks
+            .iter()
+            .filter_map(|chunk| chunk.choices[0].delta.get("content"))
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        assert_eq!(text, "ab", "both good chunks survive the malformed ones");
+        let logs = logs.contents();
+        assert_eq!(
+            logs.matches("skipping").count(),
+            2,
+            "each malformed chunk is logged once: {logs}"
+        );
+        let _ = handle.join();
+    }
+
+    #[tokio::test]
+    async fn stream_done_sentinel_is_never_logged_as_malformed() {
+        // [DONE] is not JSON; it is recognized before parsing, so a healthy
+        // stream ends without a spurious malformed-chunk warning.
+        let (logs, _guard) = capture_warnings();
+        let body = format!("{}data: [DONE]\n\n", chunk_line("m", "a"));
+        let (base, handle) = serve_once("200 OK", &body);
+        let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
+        let mut streamed = upstream
+            .stream(request("m"), "u")
+            .await
+            .expect("stream opens");
+        let mut count = 0;
+        while let Some(item) = streamed.chunks.next().await {
+            item.expect("chunk ok");
+            count += 1;
+        }
+        assert_eq!(count, 1);
+        assert!(
+            logs.contents().is_empty(),
+            "a healthy stream logs no warnings: {}",
+            logs.contents()
+        );
+        let _ = handle.join();
+    }
+
+    /// A mock streaming backend: answers with one chunk and no
+    /// `Content-Length` (so the body stays open until close), then reports
+    /// whether the client hung up.
+    fn serve_one_chunk_then_watch() -> (String, JoinHandle<bool>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock backend");
+        let addr = listener.local_addr().expect("addr");
+        let body = chunk_line("backend-model", "po");
+        let handle = thread::spawn(move || -> bool {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return false;
+            };
+            let mut buf = [0_u8; 4096];
+            // Consume the request head; the read timeout ends the wait once
+            // the client is awaiting a response (same pattern as serve_once).
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+            loop {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n";
+            if stream
+                .write_all(head.as_bytes())
+                .and_then(|()| stream.write_all(body.as_bytes()))
+                .and_then(|()| stream.flush())
+                .is_err()
+            {
+                return false;
+            }
+            // Watch for the client hanging up: a clean EOF or a reset both
+            // mean the connection is gone; a timeout means it is still open.
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            loop {
+                match stream.read(&mut buf) {
+                    Ok(0) => return true,
+                    Ok(_) => {}
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                        ) =>
+                    {
+                        return false;
+                    }
+                    Err(_) => return true,
+                }
+            }
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    #[tokio::test]
+    async fn dropping_the_stream_aborts_the_upstream_connection() {
+        // Client-disconnect cancellation is Drop all the way down: dropping
+        // the chunk stream drops the upstream response, which aborts the
+        // upstream connection. The watch is joined off the runtime thread so
+        // the client connection task can run the close.
+        let (base, handle) = serve_one_chunk_then_watch();
         let upstream = OpenAiUpstream::new(&base, Secret::new(String::new()));
         let mut streamed = upstream
             .stream(request("m"), "u")
@@ -689,13 +859,14 @@ mod tests {
             .expect("stream opens");
         let first = streamed.chunks.next().await.expect("first item");
         assert!(first.is_ok(), "first chunk parses: {first:?}");
-        let second = streamed.chunks.next().await.expect("second item");
+        drop(streamed);
+        let closed = tokio::task::spawn_blocking(move || handle.join().expect("join"))
+            .await
+            .expect("watch task");
         assert!(
-            matches!(second, Err(GatewayError::UpstreamProtocol(_))),
-            "expected UpstreamProtocol item, got {second:?}"
+            closed,
+            "dropping the stream must abort the upstream connection"
         );
-        assert!(streamed.chunks.next().await.is_none(), "stream ends");
-        let _ = handle.join();
     }
 
     #[test]

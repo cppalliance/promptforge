@@ -566,6 +566,73 @@ async fn stream_permit_is_held_until_the_stream_ends() {
     gateway.shutdown().await;
 }
 
+/// A client disconnect mid-stream cancels the upstream stream: dropping the
+/// response body drops the relay, which drops the gateway's upstream
+/// connection, which the backend observes as its own response body being
+/// dropped. Drop is the entire mechanism - there is no explicit cancel path.
+#[tokio::test]
+async fn client_disconnect_aborts_the_upstream_stream() {
+    /// Signals once the backend's response body is dropped mid-stream.
+    struct NotifyOnDrop(UnboundedSender<()>);
+    impl Drop for NotifyOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+
+    let (dropped, mut observed) = mpsc::unbounded_channel::<()>();
+    let backend = spawn_backend(Router::new().route(
+        "/chat/completions",
+        post(move || {
+            let dropped = dropped.clone();
+            async move {
+                let first = futures_util::stream::once(async {
+                    Ok::<_, std::convert::Infallible>(sse_line("backend-model", "po"))
+                });
+                let rest = futures_util::stream::once(async move {
+                    let _notify = NotifyOnDrop(dropped);
+                    futures_util::future::pending::<()>().await;
+                    unreachable!("the stream never yields a second chunk")
+                });
+                let mut response = Response::new(axum::body::Body::from_stream(first.chain(rest)));
+                response.headers_mut().insert(
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::HeaderValue::from_static("text/event-stream"),
+                );
+                response
+            }
+        }),
+    ))
+    .await;
+    let gateway = gateway_for(backend).await;
+
+    let mut response = send_within(
+        reqwest::Client::new()
+            .post(format!("http://{}/v1/chat/completions", gateway.addr))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({
+                "model": "test-model",
+                "messages": [{ "role": "user", "content": "ping" }],
+                "stream": true
+            })),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 200);
+    // Read the first chunk so the stream is genuinely mid-flight, then hang up.
+    let first = tokio::time::timeout(PHASE_TIMEOUT, response.chunk())
+        .await
+        .expect("first chunk read exceeded the phase timeout")
+        .expect("first chunk read failed");
+    assert!(first.is_some(), "first chunk arrived");
+    drop(response);
+
+    tokio::time::timeout(PHASE_TIMEOUT, observed.recv())
+        .await
+        .expect("backend did not observe the disconnect within the phase timeout")
+        .expect("disconnect notification channel closed");
+    gateway.shutdown().await;
+}
+
 /// An upstream 500 before the stream starts is consumed as a normal JSON
 /// error, never an SSE stream that dies mid-flight.
 #[tokio::test]
