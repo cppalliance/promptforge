@@ -14,6 +14,7 @@ promptforge-core = { path = "crates/promptforge-core", version = "0.1.0" }
 promptforge-gateway-config = { path = "crates/promptforge-gateway-config", version = "0.1.0" }
 promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.1.0" }
 promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.1.0" }
+promptforge-wb-server = { path = "crates/promptforge-wb-server", version = "0.1.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"
@@ -81,6 +82,12 @@ indicatif = "0.18"
 whisper-rs = "0.16"
 # WAV parsing for the voice test fixtures; dev-dependency of the wb-server.
 hound = "3.5"
+# wry 0.56 pairs with tao 0.36 (wry's own dev-dependency constraint); tao 0.37
+# is newer but untested against this wry.
+wry = "0.56"
+tao = "0.36"
+# Opens a URL in the system browser for the windowless server frame.
+open = "5"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

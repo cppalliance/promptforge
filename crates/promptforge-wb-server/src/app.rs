@@ -1,4 +1,4 @@
-//! The axum router, handlers, and serving loop for the workbench server.
+//! The axum router, handlers, and shared state for the workbench server.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -96,16 +96,6 @@ pub fn router(state: AppState) -> Router {
         .route("/chat", post(chat))
         .route("/voice", get(voice::upgrade))
         .with_state(state)
-}
-
-/// Binds to `bind` and serves until the process is stopped.
-///
-/// # Errors
-/// Returns `std::io::Error` if the bind fails or the server stops with an
-/// error.
-pub async fn run(state: AppState, bind: &str) -> std::io::Result<()> {
-    let listener = tokio::net::TcpListener::bind(bind).await?;
-    axum::serve(listener, router(state)).await
 }
 
 /// Answers the health probe with a static JSON body.

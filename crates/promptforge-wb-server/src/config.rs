@@ -112,12 +112,17 @@ impl Default for TapeConfig {
 pub struct ServerConfig {
     /// Address the workbench server binds to.
     pub bind: String,
+    /// When true, the server binary opens the system browser at its address
+    /// once it is serving. The desktop shell sets up its own window and
+    /// ignores this flag; it exists for the browser-tab frame.
+    pub open_browser: bool,
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind: crate::DEFAULT_ADDR.to_string(),
+            open_browser: false,
         }
     }
 }
@@ -323,6 +328,29 @@ bind = "127.0.0.1:9000"
         let config = Config::from_toml_str(raw).expect("fixture parses");
         assert_eq!(config.tape.path, PathBuf::from("session.jsonl"));
         assert_eq!(config.server.bind, "127.0.0.1:9000");
+    }
+
+    #[test]
+    fn open_browser_defaults_to_false_and_parses_when_set() {
+        let raw = r#"
+[gateway]
+base_url = "http://127.0.0.1:8081"
+api_key = "k"
+"#;
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert!(!config.server.open_browser, "default is off");
+
+        let raw = r#"
+[gateway]
+base_url = "http://127.0.0.1:8081"
+api_key = "k"
+
+[server]
+open_browser = true
+"#;
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert!(config.server.open_browser);
+        assert_eq!(config.server.bind, "127.0.0.1:7910", "bind still defaults");
     }
 
     #[test]

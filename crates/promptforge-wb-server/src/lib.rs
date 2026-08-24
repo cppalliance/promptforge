@@ -3,18 +3,19 @@
 //! Holds the `workbench.toml` configuration, the PromptForge gateway client,
 //! the session tape, and the axum router so `src/main.rs` stays a thin shell.
 //! Start at [`Config::load`] for configuration, [`Tape`] for the session
-//! tape, and [`router`] for the HTTP API; [`run`] binds and serves a built
-//! [`AppState`].
+//! tape, and [`router`] for the HTTP API; [`spawn`] runs the whole server
+//! in-process on its own thread for embedding binaries.
 
 mod app;
 mod config;
 mod gateway;
 mod segment;
+mod serve;
 mod tape;
 mod transcribe;
 mod voice;
 
-pub use app::{AppError, AppState, DEFAULT_ADDR, router, run};
+pub use app::{AppError, AppState, DEFAULT_ADDR, router};
 pub use config::{
     Config, ConfigError, DEFAULT_CONFIG_PATH, DEFAULT_VOICE_INTERVAL_MS,
     DEFAULT_VOICE_WINDOW_SECONDS, GatewayConfig, ServerConfig, TapeConfig, VoiceConfig,
@@ -22,5 +23,6 @@ pub use config::{
 pub use gateway::{
     ChatRequest, ChatStream, GatewayClient, GatewayError, GatewayResponse, SsePayloadStream,
 };
+pub use serve::{ServerHandle, SpawnError, spawn};
 pub use tape::{Tape, TapeError, TapeEvent};
 pub use transcribe::TranscribeError;
