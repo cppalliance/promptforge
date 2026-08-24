@@ -28,15 +28,19 @@ use crate::local::error::LocalError;
 
 use archive::{extract_archive, find_executable, require_executable};
 use assets::{ArchiveKind, FileAsset, LLAMA_RELEASE, ServerAsset, server_asset};
-use confine::{
-    enforce_private_cache_root, ensure_cache_directory, part_path, remove_cache_entry,
-    rename_confined, safe_relative_path, validate_cache_path, validate_tree_path, write_synced,
-};
-use digest::{file_digest, hex_digest, parse_expected_digest, tree_digest};
+use confine::validate_tree_path;
+use digest::{file_digest, tree_digest};
 
-// Re-export consumed elsewhere in the crate (`local/mod.rs`). Test-only helpers
-// are imported directly from their submodules by `tests.rs`.
-pub(crate) use download::hub_bearer_token_from_env;
+// Re-exports consumed elsewhere in the crate (`local/mod.rs`, `local/cache.rs`,
+// `testsupport.rs`). Test-only helpers are imported directly from their
+// submodules by `tests.rs`.
+pub(crate) use confine::{
+    enforce_private_cache_root, ensure_cache_directory, part_path, remove_cache_entry,
+    rename_confined, safe_relative_path, validate_cache_path, write_synced,
+};
+pub(crate) use digest::{hex_digest, parse_expected_digest};
+pub(crate) use download::{download_with_progress, hub_bearer_token_from_env};
+pub(crate) use progress::DownloadProgress;
 
 const INSTALL_MARKER: &str = ".promptforge-install";
 /// Connect timeout for artifact downloads (bounds a stalled connect).
@@ -70,13 +74,10 @@ impl ArtifactStore {
         // Enforce the private-cache precondition the confinement design relies on
         // (owner-only root) before trusting the tree (ART-006).
         enforce_private_cache_root(&cache)?;
-        let client = Client::builder()
-            .user_agent(concat!("promptforge-gateway/", env!("CARGO_PKG_VERSION")))
-            .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
-            .timeout(DOWNLOAD_REQUEST_TIMEOUT)
-            .build()
-            .map_err(LocalError::HttpClient)?;
-        Ok(Self { cache, client })
+        Ok(Self {
+            cache,
+            client: download_client()?,
+        })
     }
 
     /// Ensures the pinned GPU-capable `llama-server` for this host is installed.
@@ -293,38 +294,64 @@ impl ArtifactStore {
     }
 
     fn lock_artifact(&self, artifact: &Path) -> Result<File> {
-        validate_cache_path(&self.cache, artifact)?;
-        let relative =
-            artifact
-                .strip_prefix(&self.cache)
-                .map_err(|_| LocalError::UnsafeCachePath {
-                    path: artifact.to_owned(),
-                })?;
-        let mut hasher = Sha256::new();
-        hasher.update(relative.to_string_lossy().replace('\\', "/").as_bytes());
-        let lock_directory = self.cache.join(".locks");
-        ensure_cache_directory(&self.cache, &lock_directory)?;
-        let lock_path = lock_directory.join(format!("{}.lock", hex_digest(hasher)));
-        validate_cache_path(&self.cache, &lock_path)?;
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&lock_path)
-            .map_err(|source| LocalError::Io {
-                operation: "open artifact lock",
-                path: lock_path.clone(),
-                source,
-            })?;
-        lock.lock().map_err(|source| LocalError::Io {
-            operation: "lock artifact",
-            path: lock_path,
+        lock_artifact(&self.cache, artifact)
+    }
+}
+
+/// The blocking HTTP client shared by artifact provisioning and the blob
+/// cache: gateway user agent, bounded connect, and a generous whole-request
+/// ceiling (ART-003) in place of a per-read idle timeout.
+///
+/// # Errors
+/// Returns [`LocalError::HttpClient`] when the client cannot be built.
+pub(crate) fn download_client() -> Result<Client> {
+    Client::builder()
+        .user_agent(concat!("promptforge-gateway/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
+        .timeout(DOWNLOAD_REQUEST_TIMEOUT)
+        .build()
+        .map_err(LocalError::HttpClient)
+}
+
+/// Takes the advisory OS lock serializing publishers of `artifact` under
+/// `cache`, keyed by the artifact's cache-relative path.
+///
+/// The returned handle owns the lock; dropping it releases. Both the artifact
+/// and the lock file are confinement-checked before use (ART-006/007).
+///
+/// # Errors
+/// Returns [`LocalError`] when a path is unsafe or the lock cannot be taken.
+pub(crate) fn lock_artifact(cache: &Path, artifact: &Path) -> Result<File> {
+    validate_cache_path(cache, artifact)?;
+    let relative = artifact
+        .strip_prefix(cache)
+        .map_err(|_| LocalError::UnsafeCachePath {
+            path: artifact.to_owned(),
+        })?;
+    let mut hasher = Sha256::new();
+    hasher.update(relative.to_string_lossy().replace('\\', "/").as_bytes());
+    let lock_directory = cache.join(".locks");
+    ensure_cache_directory(cache, &lock_directory)?;
+    let lock_path = lock_directory.join(format!("{}.lock", hex_digest(hasher)));
+    validate_cache_path(cache, &lock_path)?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|source| LocalError::Io {
+            operation: "open artifact lock",
+            path: lock_path.clone(),
             source,
         })?;
-        validate_cache_path(&self.cache, artifact)?;
-        Ok(lock)
-    }
+    lock.lock().map_err(|source| LocalError::Io {
+        operation: "lock artifact",
+        path: lock_path,
+        source,
+    })?;
+    validate_cache_path(cache, artifact)?;
+    Ok(lock)
 }
 
 fn looks_like_url(source: &str) -> bool {
@@ -335,13 +362,18 @@ fn looks_like_url(source: &str) -> bool {
 ///
 /// Two different URLs that share a filename map to different slots (ART-004),
 /// while the same URL always maps to the same slot so a cache hit is stable.
-fn source_cache_key(source: &str) -> String {
+pub(crate) fn source_cache_key(source: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(source.as_bytes());
     hex_digest(hasher).chars().take(16).collect()
 }
 
-fn filename_from_url(url: &str) -> Result<String> {
+/// The URL's final path segment, validated as a safe relative filename.
+///
+/// # Errors
+/// Returns [`LocalError::InvalidSource`] when the URL has no filename segment
+/// or the segment is not a safe relative path.
+pub(crate) fn filename_from_url(url: &str) -> Result<String> {
     let without_query = url.split('?').next().unwrap_or(url);
     let name = without_query
         .rsplit('/')

@@ -8,7 +8,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 const LOG_PROGRESS_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Progress updates for a single HTTP blob download.
-pub(super) trait DownloadProgress: Send {
+pub(crate) trait DownloadProgress: Send {
     fn set_len(&self, total: Option<u64>);
     fn inc(&self, n: u64);
     fn finish(&self);
