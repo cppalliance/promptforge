@@ -121,7 +121,10 @@ impl Gateway {
             local,
             config.web_search_config(),
             profiles.dir,
-            profiles.active.map(|name| name.to_string()),
+            crate::ProfileSelection {
+                name: profiles.active.map(|name| name.to_string()),
+                model_allowlist: config.model_allowlist().map(<[String]>::to_vec),
+            },
             config.server().clone(),
         );
         Ok(Gateway { state })

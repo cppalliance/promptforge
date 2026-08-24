@@ -210,6 +210,42 @@ impl Config {
         &self.local_models
     }
 
+    /// Returns the profile's `models` allowlist - the catalog subset the
+    /// profile selected - or `None` when the merged document declares no
+    /// allowlist and the full catalog is loaded.
+    ///
+    /// # Examples
+    /// ```
+    /// # use promptforge_gateway_config::Config;
+    /// # let toml = r#"
+    /// # models = ["m"]
+    /// #
+    /// # [server]
+    /// # bind = "127.0.0.1:8080"
+    /// # api_key = "secret"
+    /// #
+    /// # [[endpoint]]
+    /// # id = "e"
+    /// # protocol = "openai"
+    /// # base_url = "http://127.0.0.1:9"
+    /// # api_key = ""
+    /// #
+    /// # [[model]]
+    /// # name = "m"
+    /// # description = "a model"
+    /// # context = 8192
+    /// # upstream = "u"
+    /// # endpoints = ["e"]
+    /// # "#;
+    /// let config = Config::from_toml_str(toml)?;
+    /// assert_eq!(config.model_allowlist(), Some(&["m".to_string()][..]));
+    /// # Ok::<(), promptforge_gateway_config::ConfigError>(())
+    /// ```
+    #[must_use]
+    pub fn model_allowlist(&self) -> Option<&[String]> {
+        self.model_allowlist.as_deref()
+    }
+
     /// Returns the `[tools]` configuration, or `None` when the section is
     /// absent.
     ///

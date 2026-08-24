@@ -250,7 +250,8 @@ impl Config {
             path: None,
             source: Box::new(source),
         })?;
-        let config = Config::from(raw);
+        let mut config = Config::from(raw);
+        config.apply_model_allowlist()?;
         config.validate()?;
         Ok(config)
     }

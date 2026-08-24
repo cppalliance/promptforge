@@ -536,6 +536,96 @@ fn load_succeeds_with_no_env_file() {
     assert_eq!(config.models()[0].name(), "m");
 }
 
+// ---- profile models allowlist ----
+
+/// A two-model catalog that needs no `${VAR}` interpolation.
+const TWO_MODEL_CATALOG: &str = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m1"
+description = "prose"
+context = 1
+upstream = "u"
+endpoints = ["e"]
+
+[[model]]
+name = "m2"
+description = "prose"
+context = 1
+upstream = "u"
+endpoints = ["e"]
+"#;
+
+#[test]
+fn profile_allowlist_filters_the_included_catalog() {
+    // The allowlist applies after include-merge: the profile selects a subset
+    // of the catalog the include chain produced.
+    let tmp = TempDir::new().unwrap();
+    write(tmp.path(), "base.toml", TWO_MODEL_CATALOG);
+    write(
+        tmp.path(),
+        "child.toml",
+        "include = [\"base.toml\"]\nmodels = [\"m2\"]\n",
+    );
+    let config = load_path(&tmp.path().join("child.toml")).unwrap();
+    assert_eq!(config.models().len(), 1);
+    assert_eq!(config.models()[0].name(), "m2");
+    assert_eq!(config.model_allowlist(), Some(&["m2".to_string()][..]));
+}
+
+#[test]
+fn profile_allowlist_overrides_an_inherited_allowlist() {
+    // `models` merges like a scalar: the later file's list replaces the
+    // earlier one outright rather than unioning with it.
+    let tmp = TempDir::new().unwrap();
+    write(
+        tmp.path(),
+        "base.toml",
+        &format!("models = [\"m1\"]\n{TWO_MODEL_CATALOG}"),
+    );
+    write(
+        tmp.path(),
+        "child.toml",
+        "include = [\"base.toml\"]\nmodels = [\"m2\"]\n",
+    );
+    let config = load_path(&tmp.path().join("child.toml")).unwrap();
+    let names: Vec<&str> = config
+        .models()
+        .iter()
+        .map(crate::config::ModelConfig::name)
+        .collect();
+    assert_eq!(names, ["m2"]);
+}
+
+#[test]
+fn inherited_allowlist_applies_when_the_profile_declares_none() {
+    // A profile without a `models` key inherits the list its include chain
+    // established.
+    let tmp = TempDir::new().unwrap();
+    write(
+        tmp.path(),
+        "base.toml",
+        &format!("models = [\"m1\"]\n{TWO_MODEL_CATALOG}"),
+    );
+    write(tmp.path(), "child.toml", "include = [\"base.toml\"]\n");
+    let config = load_path(&tmp.path().join("child.toml")).unwrap();
+    let names: Vec<&str> = config
+        .models()
+        .iter()
+        .map(crate::config::ModelConfig::name)
+        .collect();
+    assert_eq!(names, ["m1"]);
+}
+
 // ---- chain-aware profile load and boot [server] extraction ----
 
 #[test]
