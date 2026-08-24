@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use crate::chat_ws;
 use crate::config::Config;
 use crate::gateway::{ChatRequest, GatewayClient, GatewayError, GatewayResponse};
+use crate::heartbeat::GatewayHealth;
 use crate::status::{Activity, StatusBus};
 use crate::tape::{Tape, TapeError, TapeEvent};
 use crate::transcribe::{TranscribeError, VoiceEngine};
@@ -29,6 +30,7 @@ pub struct AppState {
     tape: Arc<Tape>,
     voice: Option<Arc<VoiceEngine>>,
     status: StatusBus,
+    health: GatewayHealth,
 }
 
 impl AppState {
@@ -71,6 +73,7 @@ impl AppState {
             tape: Arc::new(tape),
             voice,
             status,
+            health: GatewayHealth::new(),
         })
     }
 
@@ -93,6 +96,13 @@ impl AppState {
     /// The session tape, shared with the chat WebSocket sessions.
     pub(crate) fn tape(&self) -> &Arc<Tape> {
         &self.tape
+    }
+
+    /// Shared gateway reachability, published by the heartbeat; the
+    /// gateway-dependent routes read it to short-circuit while the gateway
+    /// is down.
+    pub(crate) fn health(&self) -> &GatewayHealth {
+        &self.health
     }
 }
 
@@ -805,6 +815,7 @@ mod tests {
             tape: Arc::new(Tape::with_writer_for_test(FailingWriter)),
             voice: None,
             status: StatusBus::new(),
+            health: GatewayHealth::new(),
         };
         let response = router(state)
             .oneshot(chat_request())
