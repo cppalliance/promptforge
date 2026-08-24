@@ -12,7 +12,7 @@ use axum::routing::{get, post};
 use crate::chat_ws;
 use crate::config::Config;
 use crate::gateway::{ChatRequest, GatewayClient, GatewayError, GatewayResponse};
-use crate::status::StatusBus;
+use crate::status::{Activity, StatusBus};
 use crate::tape::{Tape, TapeError, TapeEvent};
 use crate::transcribe::{TranscribeError, VoiceEngine};
 use crate::voice;
@@ -42,21 +42,35 @@ impl AppState {
     /// [`AppError::Tape`] if the session tape cannot be opened, and
     /// [`AppError::Voice`] if the configured whisper model cannot be loaded.
     pub fn new(config: &Config) -> Result<Self, AppError> {
+        let status = StatusBus::new();
+        // Startup phases are reported as they run; with no client connected
+        // yet these land on an empty bus, ready for the first session.
+        status.info(
+            "Connecting to gateway",
+            format!("base URL {}", config.gateway.base_url),
+            Activity::Gateway,
+        );
         let gateway = GatewayClient::new(&config.gateway.base_url, &config.gateway.api_key)
             .map_err(AppError::Gateway)?;
         let tape = Tape::open(&config.tape.path).map_err(AppError::Tape)?;
         let voice = if config.voice.enabled() {
+            status.info(
+                "Loading whisper model",
+                "the interim transcription model",
+                Activity::Voice,
+            );
             Some(Arc::new(
                 VoiceEngine::new(&config.voice).map_err(AppError::Voice)?,
             ))
         } else {
             None
         };
+        status.idle();
         Ok(Self {
             gateway,
             tape: Arc::new(tape),
             voice,
-            status: StatusBus::new(),
+            status,
         })
     }
 
@@ -179,7 +193,33 @@ async fn ui_pcm_worklet() -> Response {
 
 /// Relays the gateway's model catalog to the caller verbatim.
 async fn models(State(state): State<AppState>) -> Response {
-    relay(state.gateway.list_models().await)
+    let status = state.status();
+    status.info(
+        "Loading models...",
+        "fetching the gateway model catalog",
+        Activity::Gateway,
+    );
+    let result = state.gateway.list_models().await;
+    report_gateway_outcome(&status, &result, "GET /v1/models");
+    relay(result)
+}
+
+/// Reports a gateway call's outcome on the status bus: back to idle on
+/// success, otherwise the error label matching the failure shape.
+fn report_gateway_outcome(
+    status: &StatusBus,
+    result: &Result<GatewayResponse, GatewayError>,
+    route: &str,
+) {
+    match result {
+        Ok(upstream) if upstream.status.is_success() => status.idle(),
+        Ok(upstream) => status.error(
+            format!("Gateway error: {}", upstream.status),
+            format!("{route} answered a non-success status"),
+            Activity::Gateway,
+        ),
+        Err(error) => status.error("Connection lost", error.to_string(), Activity::Gateway),
+    }
 }
 
 /// Forwards a buffered chat completion to the gateway, tapes the
@@ -204,8 +244,20 @@ async fn chat(State(state): State<AppState>, body: String) -> Response {
         Ok(request) => request,
         Err(error) => return bad_request(&error),
     };
+    let status = state.status();
+    status.info(
+        "Submitting request...",
+        "a buffered chat completion",
+        Activity::Gateway,
+    );
+    status.info(
+        "Waiting for response...",
+        "the gateway has the request",
+        Activity::Gateway,
+    );
     let started = Instant::now();
     let result = state.gateway.chat_completion(&request).await;
+    report_gateway_outcome(&status, &result, "POST /v1/chat/completions");
     let latency = started.elapsed();
     if let Ok(upstream) = &result {
         let response_value = value_from_bytes(&upstream.body);

@@ -66,7 +66,7 @@ Two workflows:
 
 `npm run typecheck` runs `tsc --noEmit`; esbuild strips types without checking them, so the typecheck is advisory. `npm test` runs a jsdom smoke test that imports the built `dist/app.js` and asserts the chat UI mounts (run `npm run build` first).
 
-The chat UI itself is [murm-ui](https://github.com/levmv/murm-ui) 0.2.0, vendored in `ui/src/chat/` (MIT, see its `PROVENANCE.md`), driven by a WebSocket provider against `GET /ws` (one socket per generation). Its styles are bundled by esbuild into `dist/app.css`; `ui/style.css` carries the workbench shell (sidebar, picker, voice UI) and overrides.
+The chat UI itself is [murm-ui](https://github.com/levmv/murm-ui) 0.2.0, vendored in `ui/src/chat/` (MIT, see its `PROVENANCE.md`), driven by a WebSocket provider against `GET /ws` (one persistent socket, opened on load; chat frames carry an `id` the server echoes, and unsolicited status frames ride the same connection). Its styles are bundled by esbuild into `dist/app.css`; `ui/style.css` carries the workbench shell (sidebar, picker, voice UI) and overrides.
 
 ## Whisper models
 

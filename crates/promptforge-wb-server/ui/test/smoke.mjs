@@ -46,30 +46,43 @@ window.IntersectionObserver = class {
 };
 window.Element.prototype.scrollTo = () => {};
 window.HTMLElement.prototype.scrollIntoView = () => {};
-// A scripted WebSocket stands in for the server's /ws route. It must live on
-// globalThis: the bundle calls the global `WebSocket`, not `window.WebSocket`.
-// Each chat frame sent to the socket is captured and answered with two delta
-// frames and a done frame, scheduled in order so the provider's round-trip
-// runs.
+// A scripted WebSocket stands in for the server's persistent /ws route. It
+// must live on globalThis: the bundle calls the global `WebSocket`, not
+// `window.WebSocket`. The app opens one socket on load; each chat frame
+// sent on it is captured and answered with two delta frames and a done
+// frame echoing the frame's id, scheduled in order so the provider's
+// round-trip runs. The socket stays open after `done` - it is persistent.
 const chatSockets = [];
 class FakeWebSocket {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
   constructor(url) {
     this.url = url;
+    this.readyState = FakeWebSocket.CONNECTING;
     chatSockets.push(this);
-    queueMicrotask(() => this.onopen?.());
+    queueMicrotask(() => {
+      this.readyState = FakeWebSocket.OPEN;
+      this.onopen?.();
+    });
   }
   send(data) {
-    this.chatFrame = JSON.parse(data);
+    const frame = JSON.parse(data);
+    if (frame.type !== "chat") return;
+    this.chatFrame = frame;
     const frames = [
-      { type: "delta", content: "Hello" },
-      { type: "delta", content: " back" },
-      { type: "done" },
+      { type: "delta", content: "Hello", id: frame.id },
+      { type: "delta", content: " back", id: frame.id },
+      { type: "done", id: frame.id },
     ];
-    for (const frame of frames) {
-      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify(frame) }));
+    for (const reply of frames) {
+      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify(reply) }));
     }
   }
-  close() {}
+  close() {
+    this.readyState = FakeWebSocket.CLOSED;
+  }
 }
 globalThis.WebSocket = FakeWebSocket;
 // A scripted fetch stands in for the model catalog. The catalog answers with
@@ -173,12 +186,16 @@ if (!picker || picker.disabled) {
   if (!socket) {
     failures.push("no /ws socket was opened");
   } else {
+    if (chatSockets.length !== 1) {
+      failures.push(`expected one persistent /ws socket, saw ${chatSockets.length}`);
+    }
     if (!socket.url.endsWith("/ws")) failures.push(`chat socket opened the wrong URL: ${socket.url}`);
     const request = socket.chatFrame;
     if (!request) {
       failures.push("no chat frame was sent on the socket");
     } else {
       if (request.type !== "chat") failures.push("the frame is not a chat frame");
+      if (typeof request.id !== "number") failures.push("chat frame carried no numeric id");
       if (request.model !== "test-model") failures.push("chat frame carried the wrong model");
       if ("stream" in request) failures.push("chat frame must not carry a stream flag");
       const first = request.messages?.[0];
