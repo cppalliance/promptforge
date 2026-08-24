@@ -1,32 +1,146 @@
+/* ==========================================================================
+   PromptForge workbench skin
+
+   Every visual value the workbench owns is a CSS custom property in the
+   :root block below: palette, type, spacing, radius, and the status bar's
+   progress and LED effect. Reskinning the UI means editing this one block
+   (or overriding it from an additional stylesheet loaded after this one);
+   no rule below the block hardcodes a color or a themed length. Every
+   var() use carries a fallback, so deleting a variable degrades to the
+   stock skin instead of breaking the property.
+
+   The murm-ui bridge (the .mur-app block after :root) maps the vendored
+   chat UI's --mur-* variables onto the workbench variables, so the chat
+   panel skins from the same block. It cannot live inside :root: murm-ui
+   declares its dark-theme variables on .mur-app[data-theme="dark"] itself,
+   and a custom property set on the element beats anything inherited from
+   :root. The bridge therefore repeats that selector; style.css loads after
+   the bundled app.css, so these declarations win the tie.
+   ========================================================================== */
+
 :root {
-  --bg: #0d0e12;
-  --bg-raised: #14161c;
-  --bg-hover: #1a1d25;
+  /* Surfaces */
+  --bg: #0d0e12; /* window background, chat background */
+  --bg-raised: #14161c; /* raised surfaces: sidebar, status bar, cards */
+  --bg-hover: #1a1d25; /* hover washes and user message bubbles */
+  --bg-sidebar: var(--bg-raised, #14161c);
+  --bg-composer: var(--bg, #0d0e12); /* the chat composer form */
+
+  /* Text and borders */
+  --text: #d6d9e0; /* 13:1 on --bg */
+  --text-muted: #8b90a0; /* 6.0:1 on --bg, the dimmest legal body text */
   --border: #262a33;
-  --text: #d6d9e0;
-  --text-dim: #8b90a0;
-  --accent: #7c7fd4;
-  --accent-dim: #5658a0;
-  --danger: #b0606a;
+
+  /* Accent and semantics */
+  --accent: #7c7fd4; /* primary action (send button) */
+  --accent-dim: #5658a0; /* focus borders */
+  --danger: #b0606a; /* recording background, non-text danger accents */
+  --danger-text: #cf7f88; /* danger lightened past 4.5:1 for text on --bg */
+
+  /* Type */
   --font-prose: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+  --code-font: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+
+  /* Spacing scale and radius (shell chrome) */
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 8px;
+  --space-lg: 12px;
+  --space-xl: 16px;
+  --radius: 6px;
+
+  /* Sidebar */
+  --sidebar-width: 220px;
+
+  /* Status bar */
   --status-bar-height: 24px;
-  --status-bar-bg: var(--bg-raised);
-  --status-bar-text: var(--text-dim);
-  --status-bar-text-error: #cf7f88;
-  --status-bar-padding-inline: 12px;
-  --status-bar-gap: 12px;
+  --status-bar-bg: var(--bg-raised, #14161c);
+  --status-bar-text: var(--text-muted, #8b90a0);
+  --status-bar-text-error: var(--danger-text, #cf7f88);
+  --status-bar-padding-inline: var(--space-lg, 12px);
+  --status-bar-gap: var(--space-lg, 12px);
+
+  /* Status bar progress bar */
   --progress-width: 96px;
   --progress-height: 6px;
   --progress-fill: #4caf7d;
   --progress-track: rgba(255, 255, 255, 0.08);
-  --progress-glow: 4px;
+  --progress-glow: 4px; /* blur radius of the fill's box-shadow glow */
+
+  /* Status bar activity LED */
   --led-size: 10px;
-  --led-green: #4caf7d;
-  --led-amber: #d9a03f;
-  --led-off: rgba(255, 255, 255, 0.08);
-  --led-glow-radius: 6px;
-  --led-pulse-ms: 250ms;
+  --led-green: #4caf7d; /* gateway activity */
+  --led-amber: #d9a03f; /* voice activity */
+  --led-off: rgba(255, 255, 255, 0.08); /* the unlit lens */
+  --led-core: #ffffff; /* hot center of the lit gradient */
+  --led-glow-radius: 6px; /* base blur of the layered bloom */
+  --led-pulse-ms: 250ms; /* hold window and ease-out decay; read by JS */
+  --led-fade-in-ms: 60ms; /* fast ease-in when a pulse lights the LED */
+  --led-lens-highlight: rgba(255, 255, 255, 0.18);
+  --led-lens-shadow: rgba(0, 0, 0, 0.45);
+}
+
+/* --------------------------------------------------------------------------
+   murm-ui skinning bridge. The vendored chat UI themes itself from --mur-*
+   variables (ui/src/chat/styles/base.css); mapping them here keeps the
+   whole UI skinned from the :root block above. Workbench var on the right,
+   murm-ui var on the left:
+
+     --mur-bg            <- --bg            chat background
+     --mur-surface       <- --bg-raised     code blocks, cards
+     --mur-surface-user  <- --bg-hover      user message bubble
+     --mur-hover-bg      <- --bg-hover      hover washes
+     --mur-text          <- --text
+     --mur-text-secondary <- --text
+     --mur-text-muted    <- --text-muted
+     --mur-inverse-text  <- --bg            icon on the accent send button
+     --mur-border        <- --border
+     --mur-primary       <- --accent        send button background
+     --mur-danger{,-text,-bg,-border,-hover-bg} <- --danger / --danger-text
+     --mur-success       <- --led-green
+     --mur-code-heading-bg <- --bg-hover
+     --mur-font          <- --font-prose
+
+   murm-ui's dark shadows and overlay scrims are palette-neutral black
+   alphas and are left as shipped. Only the dark theme is mapped: the
+   workbench's template always sets data-theme="dark" on .mur-app.
+   -------------------------------------------------------------------------- */
+.mur-app[data-theme="dark"] {
+  --mur-bg: var(--bg, #0d0e12);
+  --mur-surface: var(--bg-raised, #14161c);
+  --mur-surface-user: var(--bg-hover, #1a1d25);
+  --mur-hover-bg: var(--bg-hover, #1a1d25);
+  --mur-text: var(--text, #d6d9e0);
+  --mur-text-secondary: var(--text, #d6d9e0);
+  --mur-text-muted: var(--text-muted, #8b90a0);
+  --mur-inverse-text: var(--bg, #0d0e12);
+  --mur-border: var(--border, #262a33);
+  --mur-primary: var(--accent, #7c7fd4);
+  --mur-danger: var(--danger, #b0606a);
+  --mur-danger-text: var(--danger-text, #cf7f88);
+  --mur-danger-bg: color-mix(in oklab, var(--danger, #b0606a) 20%, transparent);
+  --mur-danger-border: color-mix(in oklab, var(--danger, #b0606a) 38%, transparent);
+  --mur-danger-hover-bg: color-mix(in oklab, var(--danger, #b0606a) 14%, transparent);
+  --mur-success: var(--led-green, #4caf7d);
+  --mur-code-heading-bg: var(--bg-hover, #1a1d25);
+  --mur-font: var(--font-prose, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  --mur-header-button-bg: color-mix(in oklab, var(--bg-raised, #14161c) 82%, transparent);
+  --mur-header-title-bg: color-mix(in oklab, var(--bg-raised, #14161c) 62%, transparent);
+}
+
+/* murm-ui hardcodes `font-family: monospace` for code and tool chrome;
+   route those through --code-font so the skin owns the mono stack. These
+   selectors tie murm-ui's own, and this stylesheet loads later. */
+.mur-message code,
+.mur-code-language,
+.mur-block-tool {
+  font-family: var(--code-font, ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace);
+}
+
+/* The composer form floats over the chat on murm-ui's --mur-bg; give the
+   skin its own hook so the composer can differ from the chat background. */
+.mur-app .mur-chat-form {
+  background-color: var(--bg-composer, #0d0e12);
 }
 
 * {
@@ -37,9 +151,9 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-prose);
+  background: var(--bg, #0d0e12);
+  color: var(--text, #d6d9e0);
+  font-family: var(--font-prose, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
   font-size: 14px;
   line-height: 1.55;
 }
@@ -50,63 +164,63 @@ body {
 }
 
 .sidebar {
-  width: 220px;
+  width: var(--sidebar-width, 220px);
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 16px 12px;
-  background: var(--bg-raised);
-  border-right: 1px solid var(--border);
+  gap: var(--space-md, 8px);
+  padding: var(--space-xl, 16px) var(--space-lg, 12px);
+  background: var(--bg-sidebar, #14161c);
+  border-right: 1px solid var(--border, #262a33);
 }
 
-.brand {
+.sidebar__brand {
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--text);
-  padding: 4px 6px 12px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 8px;
+  color: var(--text, #d6d9e0);
+  padding: var(--space-xs, 4px) var(--space-sm, 6px) var(--space-lg, 12px);
+  border-bottom: 1px solid var(--border, #262a33);
+  margin-bottom: var(--space-md, 8px);
 }
 
-.picker-label {
+.sidebar__picker-label {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--text-dim);
-  padding: 0 6px;
+  color: var(--text-muted, #8b90a0);
+  padding: 0 var(--space-sm, 6px);
 }
 
-.picker {
+.sidebar__picker {
   width: 100%;
-  padding: 6px 8px;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-family: var(--font-prose);
+  padding: var(--space-sm, 6px) var(--space-md, 8px);
+  background: var(--bg, #0d0e12);
+  color: var(--text, #d6d9e0);
+  border: 1px solid var(--border, #262a33);
+  border-radius: var(--radius, 6px);
+  font-family: var(--font-prose, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
   font-size: 13px;
   outline: none;
 }
 
-.picker:focus {
-  border-color: var(--accent-dim);
+.sidebar__picker:focus {
+  border-color: var(--accent-dim, #5658a0);
 }
 
-.picker:disabled {
+.sidebar__picker:disabled {
   opacity: 0.5;
 }
 
-.model-description {
+.sidebar__model-description {
   font-size: 12px;
-  color: var(--text-dim);
-  padding: 2px 6px;
+  color: var(--text-muted, #8b90a0);
+  padding: 2px var(--space-sm, 6px);
   overflow-wrap: anywhere;
 }
 
-.model-description.error {
-  color: var(--danger);
+.sidebar__model-description--error {
+  color: var(--danger-text, #cf7f88);
 }
 
 /* The dockview column beside the sidebar: the dock fills it, the status bar
@@ -138,16 +252,16 @@ body {
    exclusive, driven by the hidden attribute). */
 .status-bar {
   flex: none;
-  height: var(--status-bar-height);
+  height: var(--status-bar-height, 24px);
   display: flex;
   align-items: center;
-  gap: var(--status-bar-gap);
-  padding-inline: var(--status-bar-padding-inline);
-  background: var(--status-bar-bg);
-  border-top: 1px solid var(--border);
+  gap: var(--status-bar-gap, 12px);
+  padding-inline: var(--status-bar-padding-inline, 12px);
+  background: var(--status-bar-bg, #14161c);
+  border-top: 1px solid var(--border, #262a33);
   font-size: 12px;
   line-height: 1;
-  color: var(--status-bar-text);
+  color: var(--status-bar-text, #8b90a0);
   user-select: none;
 }
 
@@ -160,7 +274,7 @@ body {
 }
 
 .status-bar__text--error {
-  color: var(--status-bar-text-error);
+  color: var(--status-bar-text-error, #cf7f88);
 }
 
 .status-bar__slot {
@@ -168,7 +282,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  min-width: var(--progress-width);
+  min-width: var(--progress-width, 96px);
 }
 
 .status-bar__progress[hidden],
@@ -180,24 +294,24 @@ body {
    glow. WebView2 is Chromium, so the webkit progress pseudoelements are the
    styled surface. */
 .status-bar__progress {
-  width: var(--progress-width);
-  height: var(--progress-height);
+  width: var(--progress-width, 96px);
+  height: var(--progress-height, 6px);
   appearance: none;
   border: none;
-  border-radius: calc(var(--progress-height) / 2);
-  background: var(--progress-track);
+  border-radius: calc(var(--progress-height, 6px) / 2);
+  background: var(--progress-track, rgba(255, 255, 255, 0.08));
   overflow: hidden;
 }
 
 .status-bar__progress::-webkit-progress-bar {
-  background: var(--progress-track);
-  border-radius: calc(var(--progress-height) / 2);
+  background: var(--progress-track, rgba(255, 255, 255, 0.08));
+  border-radius: calc(var(--progress-height, 6px) / 2);
 }
 
 .status-bar__progress::-webkit-progress-value {
-  background: var(--progress-fill);
-  border-radius: calc(var(--progress-height) / 2);
-  box-shadow: 0 0 var(--progress-glow) var(--progress-fill);
+  background: var(--progress-fill, #4caf7d);
+  border-radius: calc(var(--progress-height, 6px) / 2);
+  box-shadow: 0 0 var(--progress-glow, 4px) var(--progress-fill, #4caf7d);
 }
 
 /* The activity LED: a small circle standing in the slot whenever no frame
@@ -207,84 +321,84 @@ body {
    rule's transition is the slow ease-out decay; the modifier's own
    transition makes the fade-in fast. */
 .status-bar__led {
-  width: var(--led-size);
-  height: var(--led-size);
+  width: var(--led-size, 10px);
+  height: var(--led-size, 10px);
   border-radius: 50%;
-  background: var(--led-off);
+  background: var(--led-off, rgba(255, 255, 255, 0.08));
   box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.18),
-    inset 0 -1px 2px rgba(0, 0, 0, 0.45);
+    inset 0 1px 1px var(--led-lens-highlight, rgba(255, 255, 255, 0.18)),
+    inset 0 -1px 2px var(--led-lens-shadow, rgba(0, 0, 0, 0.45));
   transition:
-    background var(--led-pulse-ms) ease-out,
-    box-shadow var(--led-pulse-ms) ease-out;
+    background var(--led-pulse-ms, 250ms) ease-out,
+    box-shadow var(--led-pulse-ms, 250ms) ease-out;
 }
 
 .status-bar__led--gateway,
 .status-bar__led--voice {
   transition:
-    background 60ms ease-in,
-    box-shadow 60ms ease-in;
+    background var(--led-fade-in-ms, 60ms) ease-in,
+    box-shadow var(--led-fade-in-ms, 60ms) ease-in;
 }
 
 .status-bar__led--gateway {
-  background: radial-gradient(circle, #ffffff 0%, var(--led-green) 60%);
+  background: radial-gradient(circle, var(--led-core, #ffffff) 0%, var(--led-green, #4caf7d) 60%);
   box-shadow:
-    0 0 calc(var(--led-glow-radius) / 2) var(--led-green),
-    0 0 var(--led-glow-radius) var(--led-green),
-    0 0 calc(var(--led-glow-radius) * 2) color-mix(in oklab, var(--led-green) 55%, transparent);
+    0 0 calc(var(--led-glow-radius, 6px) / 2) var(--led-green, #4caf7d),
+    0 0 var(--led-glow-radius, 6px) var(--led-green, #4caf7d),
+    0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, var(--led-green, #4caf7d) 55%, transparent);
 }
 
 .status-bar__led--voice {
-  background: radial-gradient(circle, #ffffff 0%, var(--led-amber) 60%);
+  background: radial-gradient(circle, var(--led-core, #ffffff) 0%, var(--led-amber, #d9a03f) 60%);
   box-shadow:
-    0 0 calc(var(--led-glow-radius) / 2) var(--led-amber),
-    0 0 var(--led-glow-radius) var(--led-amber),
-    0 0 calc(var(--led-glow-radius) * 2) color-mix(in oklab, var(--led-amber) 55%, transparent);
+    0 0 calc(var(--led-glow-radius, 6px) / 2) var(--led-amber, #d9a03f),
+    0 0 var(--led-glow-radius, 6px) var(--led-amber, #d9a03f),
+    0 0 calc(var(--led-glow-radius, 6px) * 2) color-mix(in oklab, var(--led-amber, #d9a03f) 55%, transparent);
 }
 
 /* Voice UI: injected into murm-ui's form container by the voice plugin. */
-.interim {
+.voice-interim {
   width: 100%;
   max-width: var(--mur-chat-form-width, 768px);
   font-size: 13px;
   font-style: italic;
-  color: var(--mur-text-muted, var(--text-dim));
+  color: var(--text-muted, #8b90a0);
   max-height: 0;
   overflow: hidden;
   transition: max-height 0.15s ease-out, padding 0.15s ease-out;
 }
 
-.interim.visible {
+.voice-interim--visible {
   max-height: 60px;
-  padding: 0 8px 4px;
+  padding: 0 var(--space-md, 8px) var(--space-xs, 4px);
 }
 
 .voice-status {
   width: 100%;
   max-width: var(--mur-chat-form-width, 768px);
   font-size: 12px;
-  color: var(--mur-text-muted, var(--text-dim));
+  color: var(--text-muted, #8b90a0);
   max-height: 0;
   overflow: hidden;
   transition: max-height 0.15s ease-out, padding 0.15s ease-out;
 }
 
-.voice-status.visible {
+.voice-status--visible {
   max-height: 40px;
-  padding: 0 8px;
+  padding: 0 var(--space-md, 8px);
 }
 
-.voice-status.error {
-  color: var(--danger);
+.voice-status--error {
+  color: var(--danger-text, #cf7f88);
 }
 
-.mic-button {
+.voice-mic {
   flex: none;
 }
 
-.mic-button.recording {
+.voice-mic--recording {
   color: #fff;
-  background: var(--danger);
+  background: var(--danger, #b0606a);
   border-radius: 50%;
   animation: mic-pulse 1.2s ease-in-out infinite;
 }
@@ -292,9 +406,9 @@ body {
 @keyframes mic-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(176, 96, 106, 0.55);
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--danger, #b0606a) 55%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(176, 96, 106, 0);
+    box-shadow: 0 0 0 6px color-mix(in oklab, var(--danger, #b0606a) 0%, transparent);
   }
 }

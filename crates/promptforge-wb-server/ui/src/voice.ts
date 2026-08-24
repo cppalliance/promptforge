@@ -25,28 +25,28 @@ export function setupVoice(elements: VoiceElements): void {
 
   function showVoiceStatus(text: string, isError: boolean): void {
     status.textContent = text;
-    status.classList.toggle("error", Boolean(isError));
-    status.classList.add("visible");
+    status.classList.toggle("voice-status--error", Boolean(isError));
+    status.classList.add("voice-status--visible");
     clearTimeout(voiceStatusTimer);
     voiceStatusTimer = window.setTimeout(() => {
-      status.classList.remove("visible");
+      status.classList.remove("voice-status--visible");
     }, 8000);
   }
 
   function setRecording(next: boolean): void {
-    mic.classList.toggle("recording", next);
+    mic.classList.toggle("voice-mic--recording", next);
     mic.setAttribute("aria-pressed", String(next));
     mic.title = next ? "Stop recording" : "Push to talk";
   }
 
   function showInterim(text: string): void {
     interim.textContent = text;
-    interim.classList.add("visible");
+    interim.classList.add("voice-interim--visible");
   }
 
   function clearInterim(): void {
     interim.textContent = "";
-    interim.classList.remove("visible");
+    interim.classList.remove("voice-interim--visible");
   }
 
   // Tears down a session's audio half. The socket half is closed by the

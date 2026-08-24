@@ -48,7 +48,7 @@ const voicePlugin: ChatPlugin = {
   onInputMount({ container, form, input }) {
     const mic = document.createElement("button");
     mic.type = "button";
-    mic.className = "mic-button mur-form-icon-btn";
+    mic.className = "voice-mic mur-form-icon-btn";
     mic.title = "Push to talk";
     mic.setAttribute("aria-label", "Push to talk");
     mic.setAttribute("aria-pressed", "false");
@@ -61,7 +61,7 @@ const voicePlugin: ChatPlugin = {
       throw new Error("DOM Error: .mur-chat-form-container not found inside the container.");
     }
     const interim = document.createElement("div");
-    interim.className = "interim";
+    interim.className = "voice-interim";
     interim.setAttribute("aria-live", "polite");
     const status = document.createElement("div");
     status.className = "voice-status";
@@ -156,7 +156,7 @@ async function loadModels(): Promise<void> {
     pickerEl.appendChild(new Option("Model catalog unavailable", ""));
     pickerEl.disabled = true;
     descriptionEl.textContent = `Could not load the model catalog: ${(error as Error).message}`;
-    descriptionEl.classList.add("error");
+    descriptionEl.classList.add("sidebar__model-description--error");
   }
 }
 
