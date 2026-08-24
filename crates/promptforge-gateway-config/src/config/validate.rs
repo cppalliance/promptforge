@@ -14,6 +14,41 @@ use super::{Config, DeviceKind, DominionKind, is_sha256_hex};
 use crate::error::ConfigError;
 
 impl Config {
+    /// Filter the merged catalog to the profile's `models` allowlist.
+    ///
+    /// Runs after include-merge and before [`Config::validate`], so reference
+    /// validation and the VRAM co-residency check operate on the loaded set
+    /// only: a filtered-out model's own dangling references are never checked,
+    /// and endpoints and dominions referenced only by filtered-out models may
+    /// remain defined. An allowlist entry naming a model the merged catalog
+    /// does not define is a hard validation error.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError::Validation`] when the allowlist names a model
+    /// that neither `[[model]]` nor `[[local_model]]` defines.
+    pub(crate) fn apply_model_allowlist(&mut self) -> Result<(), ConfigError> {
+        let Some(allowlist) = &self.model_allowlist else {
+            return Ok(());
+        };
+        let known: HashSet<&str> = self
+            .models
+            .iter()
+            .map(|model| model.name.as_str())
+            .chain(self.local_models.iter().map(|model| model.name.as_str()))
+            .collect();
+        for name in allowlist {
+            if !known.contains(name.as_str()) {
+                return Err(ConfigError::Validation(format!(
+                    "models allowlist names undefined model {name}"
+                )));
+            }
+        }
+        self.models.retain(|model| allowlist.contains(&model.name));
+        self.local_models
+            .retain(|model| allowlist.contains(&model.name));
+        Ok(())
+    }
+
     /// Check names are unique, references resolve, URLs parse, and closed
     /// vocabularies hold.
     ///

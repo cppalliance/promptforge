@@ -81,7 +81,7 @@ Boot requires two things: a config path and a profile name. The config path come
 
 The profiles directory is always the `profiles/` directory beside the config file - never independently configurable, and there is no `~/.promptforge/profiles` default. Booting with an unknown profile name fails with a startup error listing the available profiles; a missing `profiles/` directory or a missing profile file is likewise a startup error.
 
-The boot file is the catalog and infrastructure; it is not loaded as the runtime config directly. The named profile is loaded with include resolution and becomes the initial config. The single-file setup needs one minimal profile, `profiles/main.toml` beside `gateway.toml`:
+The boot file is the catalog and infrastructure; it is not loaded as the runtime config directly. The named profile is loaded with include resolution and becomes the initial config. A profile may declare a top-level `models = ["name", ...]` allowlist selecting a subset of the catalog's `[[model]]` and `[[local_model]]` entries; the loaded set is exactly the selection, so `GET /v1/models` shows nothing else. An allowlist entry naming a model the catalog does not define is a validation error at load. With no `models` key, the profile loads the full catalog. The single-file setup needs one minimal profile, `profiles/main.toml` beside `gateway.toml`:
 
 ```toml
 include = ["../gateway.toml"]
@@ -332,6 +332,18 @@ promptforge-gateway serve gateway.toml --profile analytical
 
 Every gateway boots into a profile, so the initial loaded set always has a name. A profile typically contains `include = ["../gateway.toml"]` plus its own overrides, keeping the boot file as the shared catalog.
 
+### Selecting a Subset of the Catalog
+
+A profile selects its loaded set with a top-level `models` allowlist:
+
+```toml
+# analytical.toml
+include = ["../gateway.toml"]
+models = ["reasoning-large", "qwen3.8-local"]
+```
+
+After the include chain merges, the catalog's `[[model]]` and `[[local_model]]` arrays filter to the listed names: the loaded set is the selection, and `GET /v1/models` shows exactly it. The filter runs before validation, so reference checks and the VRAM co-residency check apply to the loaded set only - a catalog whose local models over-book a GPU in total still boots a profile whose selection fits the dominion's `vram_gb` budget, and endpoints or dominions referenced only by filtered-out models may stay defined. An allowlist entry naming a model the catalog does not define fails the load. With no `models` key the profile loads the full catalog, and when several files in one include chain declare `models`, the later file's list replaces the earlier one. `GET /admin/status` reports the active selection as `model_allowlist` (`null` when the full catalog is loaded).
+
 ### Profile Inheritance
 
 A profile can include parent files:
@@ -354,6 +366,7 @@ Merge rules:
 
 - Arrays (`[[endpoint]]`, `[[model]]`, `[[local_model]]`, `[[device]]`, `[[dominion]]`): merged by append. An entry with the same `id` or `name` replaces the earlier definition.
 - Scalars (`server.*`, `queue.*`, `[local].cache_dir`): later wins.
+- The `models` allowlist: later wins - one list replaces the other, never unioned.
 
 ### The Boot File Owns `[server]`
 
@@ -368,7 +381,7 @@ All admin routes use the same bearer token as `/v1`:
 | Route | Method | Purpose |
 |---|---|---|
 | `/admin/profiles` | GET | List `*.toml` stems in the profiles directory |
-| `/admin/status` | GET | Current profile name, loaded model names, local child count |
+| `/admin/status` | GET | Current profile name, loaded model names, local child count, and the profile's `models` allowlist |
 | `/admin/switch-profile` | POST | Switch to a named profile immediately |
 
 Switch with:

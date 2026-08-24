@@ -963,6 +963,199 @@ vram_gb = 14
     assert!(Config::parse_toml(toml).is_ok());
 }
 
+#[test]
+fn allowlist_selects_a_subset_of_the_catalog() {
+    // The top-level `models` key coexists with the `[[model]]` definition
+    // array and filters both remote and local models to the listed names.
+    let toml = r#"
+models = ["m1", "q1"]
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m1"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+
+[[model]]
+name = "m2"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+
+[[local_model]]
+name = "q1"
+description = "prose"
+source = "/models/q1.gguf"
+context = 4096
+
+[[local_model]]
+name = "q2"
+description = "prose"
+source = "/models/q2.gguf"
+context = 4096
+"#;
+    let config = Config::from_toml_str(toml).unwrap();
+    assert_eq!(
+        config.model_allowlist(),
+        Some(&["m1".to_string(), "q1".to_string()][..])
+    );
+    let remote: Vec<&str> = config.models().iter().map(ModelConfig::name).collect();
+    let local: Vec<&str> = config
+        .local_models()
+        .iter()
+        .map(LocalModelConfig::name)
+        .collect();
+    assert_eq!(remote, ["m1"]);
+    assert_eq!(local, ["q1"]);
+}
+
+#[test]
+fn allowlist_unknown_name_is_a_validation_error() {
+    let toml = r#"
+models = ["m", "ghost"]
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+"#;
+    match Config::parse_toml(toml) {
+        Err(ConfigError::Validation(message)) => {
+            assert!(
+                message.contains("ghost"),
+                "expected the error to name the unknown model: {message}"
+            );
+        }
+        other => panic!("expected a validation error, got {other:?}"),
+    }
+}
+
+#[test]
+fn absent_allowlist_loads_the_full_catalog() {
+    let config = Config::from_toml_str(SAMPLE).unwrap();
+    assert_eq!(config.model_allowlist(), None);
+    assert_eq!(config.models().len(), 1);
+}
+
+#[test]
+fn allowlist_filter_runs_before_reference_validation() {
+    // The filtered-out model names an undefined endpoint; because the filter
+    // runs before validation, its dangling reference is never checked.
+    let toml = r#"
+models = ["good"]
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "good"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+
+[[model]]
+name = "dangling"
+description = "prose"
+context = 8192
+upstream = "u"
+endpoints = ["ghost"]
+"#;
+    let config = Config::from_toml_str(toml).unwrap();
+    assert_eq!(config.models().len(), 1);
+    assert_eq!(config.models()[0].name(), "good");
+}
+
+/// A catalog whose two local models over-book `gpu0` in total; the variable
+/// part is the top-level `models` allowlist.
+fn overbooked_catalog_with_allowlist(allowlist: &str) -> String {
+    format!(
+        r#"
+models = {allowlist}
+
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[dominion]]
+id = "gpu0"
+kind = "local"
+vram_gb = 24
+
+[[local_model]]
+name = "a"
+description = "prose"
+source = "/models/a.gguf"
+context = 4096
+dominion = "gpu0"
+vram_gb = 14
+
+[[local_model]]
+name = "b"
+description = "prose"
+source = "/models/b.gguf"
+context = 4096
+dominion = "gpu0"
+vram_gb = 14
+"#
+    )
+}
+
+#[test]
+fn allowlist_filter_runs_before_the_vram_check() {
+    // The full catalog over-books gpu0 (14 + 14 > 24), but the profile's
+    // selection fits: the VRAM co-residency check operates on the loaded set.
+    let toml = overbooked_catalog_with_allowlist("[\"a\"]");
+    let config = Config::from_toml_str(&toml).unwrap();
+    assert_eq!(config.local_models().len(), 1);
+    assert_eq!(config.local_models()[0].name(), "a");
+}
+
+#[test]
+fn allowlisted_overbooking_still_fails() {
+    let toml = overbooked_catalog_with_allowlist("[\"a\", \"b\"]");
+    match Config::parse_toml(&toml) {
+        Err(ConfigError::Validation(message)) => {
+            assert!(
+                message.contains("gpu0"),
+                "expected the error to name the dominion: {message}"
+            );
+        }
+        other => panic!("expected a validation error, got {other:?}"),
+    }
+}
+
 /// A config whose only variable part is one `[[endpoint]]` block. Table-driven
 /// endpoint-validation tests substitute the block to exercise one invariant each.
 fn config_with_endpoint(endpoint_block: &str) -> String {

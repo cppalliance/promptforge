@@ -138,6 +138,9 @@ pub struct Config {
     models: Vec<ModelConfig>,
     /// Local generative models served by a managed `llama-server` child.
     local_models: Vec<LocalModelConfig>,
+    /// The profile's top-level `models = [...]` allowlist: the catalog subset
+    /// the profile selected. `None` loads the full catalog.
+    model_allowlist: Option<Vec<String>>,
     /// Optional built-in tool configuration. Absent when no `[tools]` section
     /// is present.
     tools: Option<ToolsConfig>,
@@ -163,6 +166,10 @@ struct RawConfig {
     models: Vec<ModelConfig>,
     #[serde(rename = "local_model", default)]
     local_models: Vec<LocalModelConfig>,
+    /// The top-level `models = [...]` allowlist: an array of model names,
+    /// distinct from the `[[model]]` definition array mapped to `models`.
+    #[serde(rename = "models", default)]
+    model_allowlist: Option<Vec<String>>,
     #[serde(default)]
     tools: Option<ToolsConfig>,
 }
@@ -178,6 +185,7 @@ impl From<RawConfig> for Config {
             endpoints: raw.endpoints,
             models: raw.models,
             local_models: raw.local_models,
+            model_allowlist: raw.model_allowlist,
             tools: raw.tools,
         }
     }

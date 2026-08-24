@@ -208,6 +208,182 @@ endpoints = ["fake"]
     server.shutdown().await;
 }
 
+/// A catalog with two remote models and two local models bound to one
+/// 24 GiB local dominion, over-booked in total (14 + 14 > 24). `{backend}`
+/// is substituted with the fake backend address.
+fn allowlist_catalog(backend: std::net::SocketAddr) -> String {
+    format!(
+        r#"
+[server]
+bind = "127.0.0.1:0"
+api_key = "test-token"
+
+[[dominion]]
+id = "gpu0"
+kind = "local"
+vram_gb = 24
+
+[[endpoint]]
+id = "fake"
+protocol = "openai"
+base_url = "http://{backend}"
+api_key = ""
+
+[[model]]
+name = "remote-a"
+description = "remote a catalog entry"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+
+[[model]]
+name = "remote-b"
+description = "remote b catalog entry"
+context = 8192
+upstream = "backend-model"
+endpoints = ["fake"]
+
+[[local_model]]
+name = "local-a"
+description = "local a catalog entry"
+source = "/models/a.gguf"
+context = 4096
+dominion = "gpu0"
+vram_gb = 14
+
+[[local_model]]
+name = "local-b"
+description = "local b catalog entry"
+source = "/models/b.gguf"
+context = 4096
+dominion = "gpu0"
+vram_gb = 14
+"#
+    )
+}
+
+/// Writes `catalog.toml` plus one profile per `(name, allowlist)` pair into a
+/// tempdir layout: `<tmp>/catalog.toml`, `<tmp>/profiles/<name>.toml`.
+fn allowlist_fixture(catalog: &str, profiles: &[(&str, &str)]) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("catalog.toml"), catalog).unwrap();
+    let dir = tmp.path().join("profiles");
+    fs::create_dir(&dir).unwrap();
+    for (name, allowlist) in profiles {
+        fs::write(
+            dir.join(format!("{name}.toml")),
+            format!("include = [\"../catalog.toml\"]\nmodels = {allowlist}\n"),
+        )
+        .unwrap();
+    }
+    tmp
+}
+
+/// A profile's `models` allowlist selects the loaded set: the catalog shows
+/// exactly the selection, `/admin/status` reports it, and a switch swaps both.
+#[tokio::test]
+async fn switch_profile_changes_the_loaded_set() {
+    let backend = fake_backend().await;
+    let tmp = allowlist_fixture(
+        &allowlist_catalog(backend),
+        &[("alpha", "[\"remote-a\"]"), ("beta", "[\"remote-b\"]")],
+    );
+    let dir = tmp.path().join("profiles");
+
+    let alpha = ProfileName::parse("alpha").unwrap();
+    let config = Config::load_profile(&dir, &alpha).unwrap();
+    let context = ProfilesContext::new(Some(dir.clone()), Some(alpha));
+    let server = TestServer::start(Gateway::from_config(&config, context).unwrap()).await;
+    let http = reqwest::Client::new();
+
+    // The loaded set is the selection, not the full catalog.
+    let ids = catalog_ids(&http, server.addr).await;
+    assert_eq!(ids, vec!["remote-a"]);
+    let status = json_within(
+        send_within(
+            http.get(format!("http://{}/admin/status", server.addr))
+                .bearer_auth("test-token"),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status["profile"], "alpha");
+    assert_eq!(status["model_allowlist"], serde_json::json!(["remote-a"]));
+
+    let switched = send_within(
+        http.post(format!("http://{}/admin/switch-profile", server.addr))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({ "name": "beta" })),
+    )
+    .await;
+    assert_eq!(switched.status().as_u16(), 200);
+
+    let ids = catalog_ids(&http, server.addr).await;
+    assert_eq!(ids, vec!["remote-b"]);
+    let status = json_within(
+        send_within(
+            http.get(format!("http://{}/admin/status", server.addr))
+                .bearer_auth("test-token"),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status["profile"], "beta");
+    assert_eq!(status["model_allowlist"], serde_json::json!(["remote-b"]));
+    server.shutdown().await;
+}
+
+/// The VRAM co-residency check runs on the profile's loaded set at switch: a
+/// selection that over-books the dominion is rejected before any child starts,
+/// leaving the live profile intact.
+#[tokio::test]
+async fn switch_profile_runs_vram_check_on_the_new_loaded_set() {
+    let backend = fake_backend().await;
+    let tmp = allowlist_fixture(
+        &allowlist_catalog(backend),
+        &[
+            ("alpha", "[\"remote-a\"]"),
+            ("gamma", "[\"local-a\", \"local-b\"]"),
+        ],
+    );
+    let dir = tmp.path().join("profiles");
+
+    let alpha = ProfileName::parse("alpha").unwrap();
+    let config = Config::load_profile(&dir, &alpha).unwrap();
+    let context = ProfilesContext::new(Some(dir.clone()), Some(alpha));
+    let server = TestServer::start(Gateway::from_config(&config, context).unwrap()).await;
+    let http = reqwest::Client::new();
+
+    // gamma selects both local models, over-booking gpu0 (14 + 14 > 24): the
+    // switch fails at config load, before any llama-server child starts.
+    let response = send_within(
+        http.post(format!("http://{}/admin/switch-profile", server.addr))
+            .bearer_auth("test-token")
+            .json(&serde_json::json!({ "name": "gamma" })),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 400);
+    let body = json_within(response).await;
+    assert_eq!(
+        body.pointer("/error/code").and_then(Value::as_str),
+        Some("switch_failed")
+    );
+
+    // The live profile is untouched.
+    assert_eq!(catalog_ids(&http, server.addr).await, vec!["remote-a"]);
+    let status = json_within(
+        send_within(
+            http.get(format!("http://{}/admin/status", server.addr))
+                .bearer_auth("test-token"),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status["profile"], "alpha");
+    assert_eq!(status["model_allowlist"], serde_json::json!(["remote-a"]));
+    server.shutdown().await;
+}
+
 /// A traversal profile name is rejected before touching the filesystem.
 #[tokio::test]
 async fn switch_profile_rejects_traversal_name() {
