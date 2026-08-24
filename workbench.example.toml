@@ -1,0 +1,45 @@
+# PromptForge Workbench example configuration.
+#
+# Copy to workbench.toml and edit. The promptforge-wb desktop shell
+# searches beside its executable, then the current directory, then
+# ~/.promptforge/; the promptforge-wb-server binary reads the current
+# directory only.
+# String values support ${VAR} environment interpolation; $$ is a literal $.
+
+[gateway]
+# Base URL of the PromptForge gateway. (required)
+base_url = "http://127.0.0.1:8081"
+# Bearer key for the gateway API. (required)
+api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
+
+[tape]
+# Path of the JSONL session tape; one event per chat exchange.
+# Default: "tape.jsonl"
+path = "tape.jsonl"
+
+[server]
+# Address the workbench server binds to.
+# Default: "127.0.0.1:7910"
+bind = "127.0.0.1:7910"
+# When true, the server binary opens the system browser at its address once
+# serving. The desktop shell ignores this flag; it exists for the
+# browser-tab frame.
+# Default: false
+open_browser = false
+
+[voice]
+# Path to the GGML whisper model for streaming interim transcription.
+# Empty disables transcription; the /voice endpoint then captures and
+# counts PCM but emits empty transcripts. Models are downloaded out of
+# band from https://huggingface.co/ggerganov/whisper.cpp (for example
+# ggml-large-v3-turbo.bin for interim, ggml-large-v3.bin for final).
+interim_model = "models/ggml-large-v3-turbo.bin"
+# Path to the whisper model for the pipelined final pass over a take.
+# Empty falls back to one last interim-model window.
+final_model = "models/ggml-large-v3.bin"
+# Seconds of trailing audio each interim pass transcribes.
+# Default: 5
+window_seconds = 5
+# Milliseconds between interim passes while a take is recording.
+# Default: 800
+interval_ms = 800
