@@ -2,8 +2,9 @@
 //!
 //! A `Config` value cannot hold an invalid state: construction runs [`Config::validate`],
 //! which rejects empty ids, unresolved references, kind-incompatible devices,
-//! malformed HTTP(S) URLs, and out-of-vocabulary web-search knobs. Downstream
-//! code therefore never re-validates or clamps operator input.
+//! malformed HTTP(S) URLs, out-of-vocabulary web-search knobs, and VRAM
+//! over-booking of a local dominion. Downstream code therefore never
+//! re-validates or clamps operator input.
 
 use std::collections::HashSet;
 
@@ -23,8 +24,10 @@ impl Config {
     /// out-of-vocabulary freshness/safesearch default, an invalid
     /// `[[local_model]]`, `queue.max_depth` below 1, a concurrency below 1, or
     /// a `[[dominion]]` violation (duplicate or empty id, `max_concurrency` or
-    /// `max_queue` below 1, `vram_gb` on a remote dominion, or a binding to an
-    /// undefined or wrong-kind dominion).
+    /// `max_queue` below 1, `vram_gb` on a remote dominion, a binding to an
+    /// undefined or wrong-kind dominion, or a VRAM co-residency failure: a
+    /// local dominion's `vram_gb` budget exceeded by the bound models'
+    /// estimates, or a bound model with no estimate).
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
         if self.server.api_key.is_empty() {
             return Err(ConfigError::Validation(
@@ -40,6 +43,7 @@ impl Config {
         self.validate_dominions()?;
         let endpoint_ids = self.validate_endpoints()?;
         self.validate_models(&endpoint_ids)?;
+        self.validate_vram_budgets()?;
         self.validate_tools()?;
         Ok(())
     }
@@ -195,6 +199,47 @@ impl Config {
                 return Err(ConfigError::Validation(format!(
                     "remote dominion {} must not set vram_gb",
                     dominion.id
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Sum the `vram_gb` estimates of the local models bound to each budgeted
+    /// local dominion and reject over-booking. Runs after binding validation,
+    /// so every `local_model.dominion` encountered here names a local
+    /// dominion. A budget is meaningful only when it is complete: a bound
+    /// model without an estimate is an error. A local dominion without a
+    /// budget imposes no co-residency obligation.
+    fn validate_vram_budgets(&self) -> Result<(), ConfigError> {
+        for dominion in &self.dominions {
+            let Some(budget) = dominion.vram_gb else {
+                continue;
+            };
+            let mut total: u64 = 0;
+            for model in &self.local_models {
+                let Some(bound) = &model.dominion else {
+                    continue;
+                };
+                if bound != &dominion.id {
+                    continue;
+                }
+                let Some(estimate) = model.vram_gb else {
+                    return Err(ConfigError::Validation(format!(
+                        "local_model {} must set vram_gb: dominion {} has a vram_gb budget",
+                        model.name, dominion.id
+                    )));
+                };
+                total += u64::from(estimate);
+            }
+            let budget = u64::from(budget);
+            if total > budget {
+                return Err(ConfigError::Validation(format!(
+                    "dominion {} vram_gb budget {} exceeded by {} (bound local models sum to {})",
+                    dominion.id,
+                    budget,
+                    total - budget,
+                    total
                 )));
             }
         }
