@@ -8,14 +8,16 @@
 //!
 //! What ships: one OpenAI passthrough at `POST /v1/chat/completions` with
 //! bearer auth and model routing, an embeddings passthrough at
-//! `POST /v1/embeddings` for `kind = "embedding"` models, shared concurrency
-//! pools with bounded, fair waiting queues (`[[dominion]]`), gateway-owned
-//! local generative inference via a managed `llama-server` subprocess
-//! (`[[local_model]]`), named profiles with recursive `include` and immediate
-//! `POST /admin/switch-profile`, a bearer-authed `GET /v1/models` catalog, a
-//! Brave-backed `POST /v1/tools/web_search` configured by
-//! `[tools.web_search]`, and `GET /health`. In-process llama.cpp FFI, endpoint
-//! pinning, streaming, and the Anthropic protocol shim are deferred.
+//! `POST /v1/embeddings` for `kind = "embedding"` models, a rerank
+//! passthrough at `POST /v1/rerank` for `kind = "classifier"` models, shared
+//! concurrency pools with bounded, fair waiting queues (`[[dominion]]`),
+//! gateway-owned local generative inference via a managed `llama-server`
+//! subprocess (`[[local_model]]`), named profiles with recursive `include`
+//! and immediate `POST /admin/switch-profile`, a bearer-authed
+//! `GET /v1/models` catalog, a Brave-backed `POST /v1/tools/web_search`
+//! configured by `[tools.web_search]`, and `GET /health`. In-process
+//! llama.cpp FFI, endpoint pinning, streaming, and the Anthropic protocol
+//! shim are deferred.
 
 mod api_error;
 mod error;
@@ -53,6 +55,7 @@ use crate::routing::Routing;
 use crate::tools::WebSearchState;
 use crate::wire::{
     ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, ModelInfo, ModelsResponse,
+    RerankRequest, RerankResponse,
 };
 use promptforge_gateway_config::{ModelKind, ServerConfig, WebSearchConfig};
 
@@ -138,6 +141,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/embeddings", post(embeddings))
+        .route("/v1/rerank", post(rerank))
         .route("/v1/models", get(list_models))
         .route("/v1/tools/web_search", post(tools::web_search))
         .route("/health", get(health))
@@ -213,6 +217,39 @@ async fn embeddings(
         .endpoint
         .upstream
         .send_embeddings(request, &model.upstream_name)
+        .await?;
+    response
+        .validate()
+        .map_err(|reason| GatewayError::upstream_protocol(std::io::Error::other(reason)))?;
+    Ok(Json(response))
+}
+
+/// The rerank route to a backend: the same auth, routing, kind guard, and
+/// dominion queue admission as chat, for `kind = "classifier"` models.
+async fn rerank(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<RerankRequest>,
+) -> Result<Json<RerankResponse>, GatewayError> {
+    check_auth(&state, &headers).await?;
+    request
+        .validate()
+        .map_err(|reason| GatewayError::MalformedRequest(reason.to_owned()))?;
+    let model = {
+        let live = state.live.read().await;
+        live.routing.model(&request.model)?
+    };
+    crate::routing::require_kind(&model, ModelKind::Classifier)?;
+    let client_id = crate::queue::ClientId::from_header(
+        headers
+            .get(CLIENT_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    );
+    let _permit = model.endpoint.queue.admit(client_id.as_str()).await?;
+    let response = model
+        .endpoint
+        .upstream
+        .send_rerank(request, &model.upstream_name)
         .await?;
     response
         .validate()

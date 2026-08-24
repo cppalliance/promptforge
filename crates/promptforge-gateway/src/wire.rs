@@ -271,6 +271,109 @@ impl EmbeddingResponse {
     }
 }
 
+/// An incoming rerank request (the llama-server/vLLM/Jina shape: a query and
+/// a document set in, ranked relevance scores out).
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub(crate) struct RerankRequest {
+    /// The model name, resolved against the routing table.
+    pub model: String,
+    /// The query each document is scored against.
+    pub query: String,
+    /// The candidate documents to rank.
+    pub documents: Vec<String>,
+    /// How many top-ranked results to return; absent means the backend's
+    /// default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_n: Option<u32>,
+    /// Every field the gateway does not name, preserved verbatim.
+    #[serde(flatten)]
+    pub rest: Map<String, Value>,
+}
+
+impl RerankRequest {
+    /// Reserved top-level keys that must never appear in the passthrough `rest`.
+    const RESERVED: [&'static str; 4] = ["model", "query", "documents", "top_n"];
+
+    /// Validate the request shape at the trust boundary, without coercion.
+    ///
+    /// Rejects an empty model, an empty query, an empty document set, and any
+    /// reserved key smuggled into the flattened `rest` map (WIRE-001/003).
+    /// Everything else passes through verbatim.
+    ///
+    /// # Errors
+    /// Returns a static reason string when the model or query is empty, the
+    /// document set is empty, or `rest` collides with a named field.
+    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if self.model.trim().is_empty() {
+            return Err("model must not be empty");
+        }
+        if self.query.trim().is_empty() {
+            return Err("query must not be empty");
+        }
+        if self.documents.is_empty() {
+            return Err("documents must not be empty");
+        }
+        if Self::RESERVED
+            .iter()
+            .any(|key| self.rest.contains_key(*key))
+        {
+            return Err("rest must not contain a reserved key (model, query, documents, top_n)");
+        }
+        Ok(())
+    }
+}
+
+/// An outgoing rerank response.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub(crate) struct RerankResponse {
+    /// The model name, rewritten to the caller's requested name.
+    pub model: String,
+    /// The ranked results, passed through from the backend verbatim.
+    pub results: Vec<Value>,
+    /// Every field the gateway does not name (for example `usage`), preserved
+    /// verbatim.
+    #[serde(flatten)]
+    pub rest: Map<String, Value>,
+}
+
+impl RerankResponse {
+    /// Reserved top-level keys that must never appear in the passthrough `rest`.
+    const RESERVED: [&'static str; 2] = ["model", "results"];
+
+    /// Validate the upstream response shape, treating structural failure as an
+    /// upstream-protocol error rather than silently passing it through.
+    ///
+    /// Each result must be a minimally-shaped object carrying an `index` and a
+    /// `relevance_score` (WIRE-002). Every other field (for example a Jina
+    /// `document` echo) passes through untouched.
+    ///
+    /// # Errors
+    /// Returns a static reason string when a result is not a minimally-shaped
+    /// object or a reserved key collides with the flattened `rest` map.
+    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        for result in &self.results {
+            let object = result
+                .as_object()
+                .ok_or("upstream returned a non-object rerank result")?;
+            if !object.contains_key("index") {
+                return Err("upstream rerank result is missing index");
+            }
+            if !object.contains_key("relevance_score") {
+                return Err("upstream rerank result is missing relevance_score");
+            }
+        }
+        if Self::RESERVED
+            .iter()
+            .any(|key| self.rest.contains_key(*key))
+        {
+            return Err("rest must not contain a reserved key (model, results)");
+        }
+        Ok(())
+    }
+}
+
 /// The OpenAI-shaped model list returned by `GET /v1/models`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[non_exhaustive]
@@ -611,6 +714,138 @@ mod tests {
             rest: Map::new(),
         };
         resp.rest.insert("data".to_owned(), serde_json::json!([]));
+        assert!(resp.validate().is_err());
+    }
+
+    fn rerank_request(model: &str) -> RerankRequest {
+        RerankRequest {
+            model: model.to_owned(),
+            query: "what is rust".to_owned(),
+            documents: vec!["a systems language".to_owned(), "a card game".to_owned()],
+            top_n: None,
+            rest: Map::new(),
+        }
+    }
+
+    #[test]
+    fn rerank_request_round_trips_with_top_n() {
+        let json = serde_json::json!({
+            "model": "m",
+            "query": "what is rust",
+            "documents": ["a systems language", "a card game"],
+            "top_n": 1,
+            "truncate": true,
+        });
+        let req: RerankRequest = serde_json::from_value(json).expect("parse request");
+        assert_eq!(req.top_n, Some(1));
+        // Unnamed fields land in `rest`, not on named fields.
+        assert!(req.rest.contains_key("truncate"));
+        assert!(!req.rest.contains_key("model"));
+        assert!(!req.rest.contains_key("query"));
+        assert!(!req.rest.contains_key("documents"));
+        assert!(!req.rest.contains_key("top_n"));
+        let reparsed: RerankRequest =
+            serde_json::from_value(serde_json::to_value(&req).expect("serialize"))
+                .expect("reparse");
+        assert_eq!(req, reparsed);
+    }
+
+    #[test]
+    fn rerank_request_omits_an_absent_top_n() {
+        let req = rerank_request("m");
+        assert_eq!(req.top_n, None);
+        // An absent top_n neither errors nor serializes as null.
+        assert!(
+            !serde_json::to_value(&req)
+                .expect("serialize")
+                .as_object()
+                .expect("object")
+                .contains_key("top_n")
+        );
+        let reparsed: RerankRequest =
+            serde_json::from_value(serde_json::to_value(&req).expect("serialize"))
+                .expect("reparse");
+        assert_eq!(req, reparsed);
+    }
+
+    #[test]
+    fn rerank_request_rejects_empty_model_query_and_documents() {
+        assert!(rerank_request("  ").validate().is_err());
+        let empty_query = RerankRequest {
+            query: "  ".to_owned(),
+            ..rerank_request("m")
+        };
+        assert!(empty_query.validate().is_err());
+        let no_documents = RerankRequest {
+            documents: vec![],
+            ..rerank_request("m")
+        };
+        assert!(no_documents.validate().is_err());
+        assert!(rerank_request("m").validate().is_ok());
+    }
+
+    #[test]
+    fn rerank_request_rejects_reserved_keys_in_rest() {
+        let mut req = rerank_request("m");
+        req.rest
+            .insert("documents".to_owned(), serde_json::json!(["x"]));
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn rerank_response_round_trips_and_preserves_usage() {
+        let json = serde_json::json!({
+            "model": "backend",
+            "results": [
+                { "index": 0, "relevance_score": 0.9, "document": { "text": "a systems language" } },
+                { "index": 1, "relevance_score": 0.1 }
+            ],
+            "usage": { "total_tokens": 12 },
+        });
+        let resp: RerankResponse = serde_json::from_value(json).expect("parse response");
+        assert!(resp.validate().is_ok());
+        assert!(resp.rest.contains_key("usage"));
+        let reparsed: RerankResponse =
+            serde_json::from_value(serde_json::to_value(&resp).expect("serialize"))
+                .expect("reparse");
+        assert_eq!(resp, reparsed);
+    }
+
+    #[test]
+    fn rerank_response_rejects_malformed_results() {
+        // WIRE-002: a structurally broken result is an upstream-protocol failure.
+        let response = |result: Value| RerankResponse {
+            model: "m".to_owned(),
+            results: vec![result],
+            rest: Map::new(),
+        };
+        assert!(response(serde_json::json!(42)).validate().is_err());
+        assert!(
+            response(serde_json::json!({ "index": 0 }))
+                .validate()
+                .is_err()
+        );
+        assert!(
+            response(serde_json::json!({ "relevance_score": 0.9 }))
+                .validate()
+                .is_err()
+        );
+        assert!(
+            response(serde_json::json!({ "index": 0, "relevance_score": 0.9 }))
+                .validate()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn rerank_response_rejects_reserved_keys_in_rest() {
+        let mut resp = RerankResponse {
+            model: "m".to_owned(),
+            results: vec![],
+            rest: Map::new(),
+        };
+        resp.rest
+            .insert("results".to_owned(), serde_json::json!([]));
         assert!(resp.validate().is_err());
     }
 
