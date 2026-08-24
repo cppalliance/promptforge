@@ -26,7 +26,7 @@ use tokio::sync::oneshot;
 use crate::config::VoiceConfig;
 use crate::gateway::{CacheEvent, CacheResponse, GatewayClient, GatewayError};
 use crate::heartbeat::GatewayHealth;
-use crate::status::{Activity, StatusBus};
+use crate::status::{Activity, Progress, StatusBus};
 
 /// The whisper model paths the provisioning task resolved through the
 /// gateway cache.
@@ -120,7 +120,7 @@ async fn run(
         }
         let outcome = tokio::select! {
             _ = &mut *stop => return,
-            outcome = provision_once(client, config) => outcome,
+            outcome = provision_once(client, status, config) => outcome,
         };
         match outcome {
             Ok(paths) => {
@@ -160,10 +160,17 @@ fn can_provision(config: &VoiceConfig) -> bool {
 /// final-pass model when one is configured or sourced.
 async fn provision_once(
     client: &GatewayClient,
+    status: &StatusBus,
     config: &VoiceConfig,
 ) -> Result<ModelPaths, ProvisionError> {
-    let interim = resolve_model(client, &config.interim_model, &config.interim_source).await?;
-    let final_pass = resolve_final(client, config).await?;
+    let interim = resolve_model(
+        client,
+        status,
+        &config.interim_model,
+        &config.interim_source,
+    )
+    .await?;
+    let final_pass = resolve_final(client, status, config).await?;
     Ok(ModelPaths {
         interim,
         final_pass,
@@ -174,6 +181,7 @@ async fn provision_once(
 /// exists, otherwise a cache fetch of its source URL.
 async fn resolve_model(
     client: &GatewayClient,
+    status: &StatusBus,
     path: &Path,
     source: &str,
 ) -> Result<PathBuf, ProvisionError> {
@@ -185,7 +193,7 @@ async fn resolve_model(
             path: path.to_path_buf(),
         });
     }
-    cache_fetch(client, source).await
+    cache_fetch(client, status, source).await
 }
 
 /// Resolves the optional final-pass model. A configured final path that is
@@ -194,6 +202,7 @@ async fn resolve_model(
 /// close with the interim model as they do when no final model is set.
 async fn resolve_final(
     client: &GatewayClient,
+    status: &StatusBus,
     config: &VoiceConfig,
 ) -> Result<Option<PathBuf>, ProvisionError> {
     if config.final_model.is_file() {
@@ -202,13 +211,26 @@ async fn resolve_final(
     if config.final_source.is_empty() {
         return Ok(None);
     }
-    cache_fetch(client, &config.final_source).await.map(Some)
+    cache_fetch(client, status, &config.final_source)
+        .await
+        .map(Some)
+}
+
+/// The label filename for a source URL: its last path segment, or the
+/// whole source when it has none.
+fn source_filename(source: &str) -> &str {
+    source.rsplit('/').next().unwrap_or(source)
 }
 
 /// Ensures the blob at `source` is cached, returning its local path. A
 /// cache hit answers immediately; a miss consumes the download event
-/// stream to its terminal `ready` or `error` event.
-async fn cache_fetch(client: &GatewayClient, source: &str) -> Result<PathBuf, ProvisionError> {
+/// stream, forwarding each progress sample to the status bar, until the
+/// terminal `ready` or `error` event.
+async fn cache_fetch(
+    client: &GatewayClient,
+    status: &StatusBus,
+    source: &str,
+) -> Result<PathBuf, ProvisionError> {
     match client.cache_ensure(source).await? {
         CacheResponse::Buffered(answer) if answer.status.is_success() => {
             match serde_json::from_slice::<CacheEvent>(&answer.body) {
@@ -223,6 +245,7 @@ async fn cache_fetch(client: &GatewayClient, source: &str) -> Result<PathBuf, Pr
         }
         CacheResponse::Buffered(answer) => Err(ProvisionError::Declined(answer.status)),
         CacheResponse::Download { mut payloads, .. } => loop {
+            let filename = source_filename(source);
             let Some(item) = payloads.next().await else {
                 return Err(ProvisionError::Malformed(
                     "the download stream ended without a terminal event".to_string(),
@@ -233,10 +256,28 @@ async fn cache_fetch(client: &GatewayClient, source: &str) -> Result<PathBuf, Pr
                 ProvisionError::Malformed(format!("a download event is not valid JSON: {error}"))
             })?;
             match event {
-                // Progress reporting to the observer lands with the status
-                // wiring commit.
-                CacheEvent::Downloading { .. } => {}
-                CacheEvent::Ready { path } => return Ok(path),
+                CacheEvent::Downloading { bytes, total } => {
+                    // A null total means the upstream sent no
+                    // Content-Length; it crosses the wire as a 0 total,
+                    // which the status bar clamps to a degenerate bar.
+                    status.progress(
+                        format!("Downloading {filename}"),
+                        format!("{source} through the gateway cache"),
+                        Progress {
+                            current: bytes,
+                            total: total.unwrap_or(0),
+                        },
+                        Activity::Voice,
+                    );
+                }
+                CacheEvent::Ready { path } => {
+                    status.info(
+                        "Download complete",
+                        format!("{filename} is cached at {}", path.display()),
+                        Activity::Voice,
+                    );
+                    return Ok(path);
+                }
                 CacheEvent::Error { message } => return Err(ProvisionError::Download(message)),
             }
         },
@@ -580,6 +621,169 @@ mod tests {
             .expect("the stream resolves the interim model");
         assert_eq!(paths.interim, PathBuf::from("/cache/ggml.bin"));
         assert_eq!(paths.final_pass, None, "no final source, no final pass");
+        provision.shutdown().await;
+    }
+
+    /// A `/ws` client socket connected to a live workbench test server,
+    /// plus the state pieces the provision task spawns with.
+    struct Workbench {
+        socket: tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        gateway: GatewayClient,
+        status: StatusBus,
+        health: GatewayHealth,
+        voice: VoiceConfig,
+        _tape_dir: tempfile::TempDir,
+    }
+
+    /// Builds a workbench router with the given voice config and gateway
+    /// URL, binds it on a free loopback port, and connects a `/ws` client.
+    async fn connect_workbench(gateway_url: String, voice: VoiceConfig) -> Workbench {
+        let tape_dir = tempfile::TempDir::new().expect("tempdir");
+        let config = crate::config::Config {
+            gateway: crate::config::GatewayConfig {
+                base_url: gateway_url,
+                api_key: String::new(),
+            },
+            tape: crate::config::TapeConfig {
+                path: tape_dir.path().join("tape.jsonl"),
+            },
+            server: crate::config::ServerConfig::default(),
+            voice,
+        };
+        let state = crate::AppState::new(&config).expect("state builds in tests");
+        let gateway = state.gateway_client().clone();
+        let status = state.status();
+        let health = state.health().clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind the workbench test server");
+        let addr = listener
+            .local_addr()
+            .expect("workbench test server address");
+        tokio::spawn(async move {
+            axum::serve(listener, crate::router(state))
+                .await
+                .expect("workbench test server serves");
+        });
+        let (socket, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
+            .await
+            .expect("connect to /ws");
+        Workbench {
+            socket,
+            gateway,
+            status,
+            health,
+            voice: config.voice.clone(),
+            _tape_dir: tape_dir,
+        }
+    }
+
+    /// Reads one text frame off a `/ws` client socket and parses it as
+    /// JSON.
+    async fn read_frame(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) -> serde_json::Value {
+        let message = socket
+            .next()
+            .await
+            .expect("a frame follows")
+            .expect("the frame is not a socket error");
+        let text = message.into_text().expect("the frame is text");
+        serde_json::from_str(&text).expect("the frame is JSON")
+    }
+
+    #[tokio::test]
+    async fn download_progress_flows_to_the_main_ws_status_feed() {
+        // A mock cache answering with an SSE download stream: the first
+        // sample has a null total (no Content-Length upstream), the second
+        // a known total, then the terminal ready.
+        let base_url = serve(Router::new().route(
+            "/v1/cache",
+            post(|| async {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                    concat!(
+                        "data: {\"status\":\"downloading\",\"bytes\":5,\"total\":null}\n\n",
+                        "data: {\"status\":\"downloading\",\"bytes\":12,\"total\":12}\n\n",
+                        "data: {\"status\":\"ready\",\"path\":\"/cache/ggml-large-v3-turbo.bin\"}\n\n",
+                    ),
+                )
+            }),
+        ))
+        .await;
+
+        let voice = VoiceConfig {
+            interim_source: INTERIM_SOURCE.to_string(),
+            ..VoiceConfig::default()
+        };
+        let mut workbench = connect_workbench(base_url, voice).await;
+
+        // Park the task on an unreachable flag until the session's status
+        // forwarder is subscribed, then flip reachable to fire the attempt.
+        workbench.health.publish(false);
+        let store: ModelPathStore = Arc::new(Mutex::new(None));
+        let provision = spawn(
+            workbench.gateway.clone(),
+            workbench.status.clone(),
+            workbench.health.clone(),
+            Arc::clone(&store),
+            workbench.voice.clone(),
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        workbench.health.publish(true);
+
+        // Collect status frames until the terminal success frame.
+        let mut frames = Vec::new();
+        let collect = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let frame = read_frame(&mut workbench.socket).await;
+                if frame["type"] != "status" {
+                    continue;
+                }
+                let terminal = frame["label"] == "Voice models cached";
+                frames.push(frame);
+                if terminal {
+                    break;
+                }
+            }
+        });
+        collect
+            .await
+            .expect("the download sequence completes within the deadline");
+
+        let labels: Vec<&str> = frames
+            .iter()
+            .map(|frame| frame["label"].as_str().expect("label is a string"))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "Downloading ggml-large-v3-turbo.bin",
+                "Downloading ggml-large-v3-turbo.bin",
+                "Download complete",
+                "Voice models cached",
+            ],
+            "progress samples, then the terminal pair: {labels:?}"
+        );
+        assert_eq!(
+            frames[0]["progress"],
+            serde_json::json!({"current": 5, "total": 0}),
+            "a null total crosses the wire as 0"
+        );
+        assert_eq!(
+            frames[1]["progress"],
+            serde_json::json!({"current": 12, "total": 12})
+        );
+        assert_eq!(frames[0]["severity"], "info");
+        assert_eq!(frames[0]["activity"], "voice");
+        assert!(
+            frames[2]["progress"].is_null(),
+            "the terminal download frame clears the progress bar"
+        );
         provision.shutdown().await;
     }
 
