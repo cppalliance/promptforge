@@ -176,6 +176,30 @@ body {
   display: none;
 }
 
+/* The progress bar: a thin rounded track with a green fill and a subtle
+   glow. WebView2 is Chromium, so the webkit progress pseudoelements are the
+   styled surface. */
+.status-bar__progress {
+  width: var(--progress-width);
+  height: var(--progress-height);
+  appearance: none;
+  border: none;
+  border-radius: calc(var(--progress-height) / 2);
+  background: var(--progress-track);
+  overflow: hidden;
+}
+
+.status-bar__progress::-webkit-progress-bar {
+  background: var(--progress-track);
+  border-radius: calc(var(--progress-height) / 2);
+}
+
+.status-bar__progress::-webkit-progress-value {
+  background: var(--progress-fill);
+  border-radius: calc(var(--progress-height) / 2);
+  box-shadow: 0 0 var(--progress-glow) var(--progress-fill);
+}
+
 /* Voice UI: injected into murm-ui's form container by the voice plugin. */
 .interim {
   width: 100%;
