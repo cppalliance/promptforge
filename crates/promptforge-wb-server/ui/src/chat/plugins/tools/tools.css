@@ -1,0 +1,121 @@
+.mur-tool {
+	margin: 0.18rem 0 0.32rem;
+	color: var(--mur-text-muted);
+}
+
+.mur-tool + .mur-tool {
+	margin-top: 0;
+}
+
+.mur-agent-run-steps .mur-tool {
+	margin: 0;
+}
+
+.mur-tool-summary {
+	display: inline-grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: center;
+	width: auto;
+	max-width: 100%;
+	gap: 0.35rem;
+	padding: 0.18rem 0.28rem;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+	font: inherit;
+	text-align: left;
+}
+
+.mur-tool-chevron {
+	display: inline-flex;
+	color: var(--mur-text-muted);
+	opacity: 0;
+	transition: opacity 0.15s ease;
+}
+
+.mur-tool-summary:hover .mur-tool-chevron,
+.mur-tool-summary:focus-visible .mur-tool-chevron,
+.mur-tool-summary[aria-expanded="true"] .mur-tool-chevron {
+	opacity: 1;
+}
+
+.mur-agent-run-steps .mur-tool-summary {
+	min-height: var(--mur-agent-run-control-height, 1.5rem);
+	padding-top: 0.125rem;
+	padding-bottom: 0.125rem;
+}
+
+.mur-agent-run-steps .mur-tool-chevron {
+	opacity: 0.65;
+}
+
+.mur-tool-chevron svg {
+	transition: transform 0.15s ease;
+}
+
+.mur-tool-summary[aria-expanded="true"] .mur-tool-chevron svg {
+	transform: rotate(90deg);
+}
+
+.mur-tool-title {
+	min-width: 0;
+	overflow: hidden;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 0.8rem;
+	font-weight: 400;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mur-tool-status {
+	width: 1.1em;
+	color: var(--mur-text-muted);
+	font-size: 0.78rem;
+	line-height: 1;
+	text-align: center;
+}
+
+.mur-tool-preview {
+	margin-left: 1.45rem;
+	padding: 0.15rem 0.3rem 0.2rem;
+	color: var(--mur-text-muted);
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 0.76rem;
+	line-height: 1.45;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.mur-tool-details {
+	margin: 0.18rem 0 0.35rem 0.7rem;
+	padding: 0.2rem 0 0.2rem 0.65rem;
+	border-left: 1px solid var(--mur-border);
+}
+
+.mur-tool-section + .mur-tool-section {
+	margin-top: 0.45rem;
+}
+
+.mur-tool-section-title {
+	margin-bottom: 0.22rem;
+	color: var(--mur-text-muted);
+	font-size: 0.68rem;
+	font-weight: 650;
+	text-transform: uppercase;
+}
+
+.mur-tool-pre {
+	max-height: min(360px, 45vh);
+	overflow: auto;
+	border-radius: 6px;
+	background: var(--mur-bg);
+	color: var(--mur-text-secondary);
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 0.76rem;
+	line-height: 1.45;
+	padding: 0.45rem;
+	white-space: pre-wrap;
+	word-break: break-word;
+}

@@ -1,0 +1,419 @@
+.mur-app {
+	--mur-bg: #ffffff;
+	--mur-surface: #f9fafb;
+	--mur-surface-user: #e1e5ec;
+	--mur-hover-bg: rgba(0, 0, 0, 0.05);
+
+	--mur-text: #111827;
+	--mur-text-secondary: #374151;
+	--mur-text-muted: #6b7280;
+	--mur-inverse-text: #ffffff;
+
+	--mur-border: #e5e7eb;
+	--mur-primary: #000000;
+	--mur-danger: #ef4444;
+	--mur-danger-text: #991b1b;
+	--mur-danger-bg: #fef2f2;
+	--mur-danger-border: rgba(239, 68, 68, 0.3);
+	--mur-danger-hover-bg: rgba(239, 68, 68, 0.12);
+	--mur-success: #10b981;
+
+	--mur-header-button-bg: rgba(255, 255, 255, 0.8);
+	--mur-header-title-bg: rgba(255, 255, 255, 0.5);
+	--mur-code-heading-bg: #fdf1e7;
+	--mur-overlay-bg: rgba(0, 0, 0, 0.4);
+	--mur-attachment-drag-ring: rgba(0, 0, 0, 0.12);
+
+	--mur-shadow-popover: 0 12px 30px rgba(17, 24, 39, 0.12);
+	--mur-shadow-button: 0 1px 2px rgba(0, 0, 0, 0.05);
+	--mur-shadow-input: 0 4px 15px rgba(0, 0, 0, 0.05);
+	--mur-shadow-input-focus: 0 4px 12px rgba(0, 0, 0, 0.08);
+	--mur-shadow-sidebar: 4px 0 15px rgba(0, 0, 0, 0.1);
+	--mur-shadow-modal: 0 10px 25px rgba(0, 0, 0, 0.15);
+	--mur-shadow-attachment: 0 2px 4px rgba(0, 0, 0, 0.2);
+
+	--mur-font: system-ui, -apple-system, sans-serif;
+	--mur-header-height: 50px;
+	--mur-input-max-height: 200px;
+	--mur-chat-content-width: 768px;
+	--mur-chat-form-width: 768px;
+	--mur-sidebar-width: 260px;
+	--mur-sidebar-rail-width: 56px;
+	--mur-user-message-max-width: 85%;
+
+	display: flex;
+	height: 100vh;
+	width: 100vw;
+	position: relative;
+	overflow: hidden;
+	font-family: var(--mur-font);
+	background-color: var(--mur-bg);
+	color: var(--mur-text);
+	color-scheme: light;
+}
+
+.mur-app[data-theme="light"] {
+	color-scheme: light;
+}
+
+.mur-app[data-theme="dark"] {
+	--mur-bg: #111827;
+	--mur-surface: #1f2937;
+	--mur-surface-user: #263244;
+	--mur-hover-bg: rgba(255, 255, 255, 0.08);
+
+	--mur-text: #f9fafb;
+	--mur-text-secondary: #e5e7eb;
+	--mur-text-muted: #9ca3af;
+	--mur-inverse-text: #111827;
+
+	--mur-border: #374151;
+	--mur-primary: #f9fafb;
+	--mur-danger: #f87171;
+	--mur-danger-text: #fecaca;
+	--mur-danger-bg: rgba(127, 29, 29, 0.32);
+	--mur-danger-border: rgba(248, 113, 113, 0.38);
+	--mur-danger-hover-bg: rgba(248, 113, 113, 0.14);
+	--mur-success: #34d399;
+
+	--mur-header-button-bg: rgba(17, 24, 39, 0.82);
+	--mur-header-title-bg: rgba(17, 24, 39, 0.62);
+	--mur-code-heading-bg: rgba(251, 146, 60, 0.16);
+	--mur-overlay-bg: rgba(0, 0, 0, 0.58);
+	--mur-attachment-drag-ring: rgba(255, 255, 255, 0.18);
+
+	--mur-shadow-popover: 0 12px 30px rgba(0, 0, 0, 0.34);
+	--mur-shadow-button: 0 1px 2px rgba(0, 0, 0, 0.24);
+	--mur-shadow-input: 0 4px 15px rgba(0, 0, 0, 0.2);
+	--mur-shadow-input-focus: 0 4px 12px rgba(0, 0, 0, 0.28);
+	--mur-shadow-sidebar: 4px 0 15px rgba(0, 0, 0, 0.28);
+	--mur-shadow-modal: 0 10px 25px rgba(0, 0, 0, 0.36);
+	--mur-shadow-attachment: 0 2px 4px rgba(0, 0, 0, 0.36);
+
+	color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+	.mur-app:not([data-theme]) {
+		--mur-bg: #111827;
+		--mur-surface: #1f2937;
+		--mur-surface-user: #263244;
+		--mur-hover-bg: rgba(255, 255, 255, 0.08);
+
+		--mur-text: #f9fafb;
+		--mur-text-secondary: #e5e7eb;
+		--mur-text-muted: #9ca3af;
+		--mur-inverse-text: #111827;
+
+		--mur-border: #374151;
+		--mur-primary: #f9fafb;
+		--mur-danger: #f87171;
+		--mur-danger-text: #fecaca;
+		--mur-danger-bg: rgba(127, 29, 29, 0.32);
+		--mur-danger-border: rgba(248, 113, 113, 0.38);
+		--mur-danger-hover-bg: rgba(248, 113, 113, 0.14);
+		--mur-success: #34d399;
+
+		--mur-header-button-bg: rgba(17, 24, 39, 0.82);
+		--mur-header-title-bg: rgba(17, 24, 39, 0.62);
+		--mur-code-heading-bg: rgba(251, 146, 60, 0.16);
+		--mur-overlay-bg: rgba(0, 0, 0, 0.58);
+		--mur-attachment-drag-ring: rgba(255, 255, 255, 0.18);
+
+		--mur-shadow-popover: 0 12px 30px rgba(0, 0, 0, 0.34);
+		--mur-shadow-button: 0 1px 2px rgba(0, 0, 0, 0.24);
+		--mur-shadow-input: 0 4px 15px rgba(0, 0, 0, 0.2);
+		--mur-shadow-input-focus: 0 4px 12px rgba(0, 0, 0, 0.28);
+		--mur-shadow-sidebar: 4px 0 15px rgba(0, 0, 0, 0.28);
+		--mur-shadow-modal: 0 10px 25px rgba(0, 0, 0, 0.36);
+		--mur-shadow-attachment: 0 2px 4px rgba(0, 0, 0, 0.36);
+
+		color-scheme: dark;
+	}
+}
+
+:where(.mur-app, .mur-app *),
+:where(.mur-app, .mur-app *)::before,
+:where(.mur-app, .mur-app *)::after {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+.mur-app [hidden] {
+	display: none;
+}
+
+.mur-app.mur-app-embedded {
+	height: 100%;
+	width: 100%;
+	min-height: 0;
+	min-width: 0;
+}
+
+@supports (height: 100dvh) {
+	.mur-app:not(.mur-app-embedded) {
+		height: 100dvh;
+		width: 100dvw;
+	}
+}
+
+.mur-main-area {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	position: relative;
+}
+
+.mur-main-header {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: var(--mur-header-height);
+	display: flex;
+	align-items: center;
+	padding: 0 1rem;
+	z-index: 10;
+	background: transparent;
+	pointer-events: none;
+}
+
+.mur-main-header > button {
+	pointer-events: auto;
+	background-color: var(--mur-header-button-bg);
+	backdrop-filter: blur(4px);
+}
+
+.mur-main-header > button:hover {
+	background-color: var(--mur-hover-bg);
+}
+
+.mur-header-title {
+	background-color: var(--mur-header-title-bg);
+	border-radius: 5px;
+	padding: 5px 5px 5px 0;
+	font-size: 1.15rem;
+}
+
+.mur-global-error {
+	position: absolute;
+	top: 72px;
+	left: 50%;
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	max-width: min(520px, calc(100% - 2rem));
+	padding: 0.75rem 0.875rem 0.75rem 1rem;
+	color: var(--mur-danger-text);
+	background-color: var(--mur-danger-bg);
+	border-radius: 8px;
+	box-shadow: var(--mur-shadow-popover);
+	transform: translateX(-50%);
+}
+
+.mur-global-error[hidden] {
+	display: none;
+}
+
+.mur-global-error-text {
+	min-width: 0;
+	overflow-wrap: anywhere;
+	font-size: 0.9rem;
+	line-height: 1.35;
+}
+
+.mur-global-error-close {
+	flex: 0 0 auto;
+	width: 1.5rem;
+	height: 1.5rem;
+	border: none;
+	border-radius: 4px;
+	color: var(--mur-danger-text);
+	background: transparent;
+	font-size: 1rem;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.mur-global-error-close:hover {
+	background: var(--mur-danger-hover-bg);
+}
+
+.mur-global-error-close:focus-visible {
+	outline: 2px solid var(--mur-danger-text);
+	outline-offset: 2px;
+}
+
+.mur-open-sidebar-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--mur-text);
+	display: none;
+	align-items: center;
+	justify-content: center;
+	border-radius: 0.25rem;
+	padding: 0.25rem;
+}
+
+.mur-open-sidebar-btn:hover {
+	background: var(--mur-hover-bg);
+}
+
+.mur-chat-layout-wrapper {
+	flex: 1;
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.mur-chat-scroll-area {
+	flex: 1;
+	min-height: 0;
+	width: 100%;
+	overflow-y: auto;
+	scrollbar-gutter: stable;
+}
+
+.mur-chat-history {
+	width: 100%;
+	max-width: var(--mur-chat-content-width);
+	margin: 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 1.375rem;
+	padding: 4rem 0.5rem 7rem;
+}
+
+.mur-chat-form-container {
+	--mur-chat-form-bottom-space: 1.5rem;
+
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	margin: 0 1rem;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.375rem;
+	padding: 0.25rem 0 var(--mur-chat-form-bottom-space);
+	pointer-events: none;
+	background: linear-gradient(to bottom, transparent 0, var(--mur-bg) 1rem, var(--mur-bg) 100%);
+	transition:
+		bottom 0.4s cubic-bezier(0.1, 0.7, 0.1, 1),
+		transform 0.4s ease;
+}
+
+@media (max-width: 768px) {
+	html.mur-chat-page-scroll,
+	html.mur-chat-page-scroll body {
+		height: auto;
+		min-height: 100%;
+	}
+
+	html.mur-chat-page-scroll body {
+		overflow-y: auto;
+	}
+
+	.mur-app:not(.mur-app-embedded) {
+		min-height: 100vh;
+		height: auto;
+		width: 100%;
+		overflow: visible;
+	}
+
+	@supports (min-height: 100svh) {
+		.mur-app:not(.mur-app-embedded) {
+			min-height: 100svh;
+		}
+	}
+
+	@supports (min-height: 100dvh) {
+		.mur-app:not(.mur-app-embedded) {
+			min-height: 100dvh;
+			height: auto;
+		}
+	}
+
+	.mur-app:not(.mur-app-embedded) .mur-main-area {
+		min-height: 100vh;
+	}
+
+	@supports (min-height: 100svh) {
+		.mur-app:not(.mur-app-embedded) .mur-main-area {
+			min-height: 100svh;
+		}
+	}
+
+	@supports (min-height: 100dvh) {
+		.mur-app:not(.mur-app-embedded) .mur-main-area {
+			min-height: 100dvh;
+		}
+	}
+
+	.mur-app:not(.mur-app-embedded) .mur-main-header {
+		position: sticky;
+		background-color: var(--mur-bg);
+		border-bottom: 1px solid var(--mur-border);
+		pointer-events: auto;
+	}
+
+	.mur-app:not(.mur-app-embedded) .mur-main-header > button {
+		background-color: transparent;
+		backdrop-filter: none;
+	}
+
+	.mur-app:not(.mur-app-embedded) .mur-header-title {
+		display: block;
+		font-size: 1.1rem;
+		flex: 1;
+		text-align: center;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.mur-app:not(.mur-app-embedded) .mur-open-sidebar-btn {
+		display: flex;
+	}
+
+	.mur-app:not(.mur-app-embedded) .mur-chat-layout-wrapper {
+		min-height: calc(100vh - var(--mur-header-height));
+		overflow: visible;
+	}
+
+	@supports (min-height: 100svh) {
+		.mur-app:not(.mur-app-embedded) .mur-chat-layout-wrapper {
+			min-height: calc(100svh - var(--mur-header-height));
+		}
+	}
+
+	@supports (min-height: 100dvh) {
+		.mur-app:not(.mur-app-embedded) .mur-chat-layout-wrapper {
+			min-height: calc(100dvh - var(--mur-header-height));
+		}
+	}
+
+	.mur-app:not(.mur-app-embedded) .mur-chat-scroll-area {
+		flex: 1;
+		min-height: 0;
+		overflow: visible;
+		scrollbar-gutter: auto;
+	}
+
+	.mur-app:not(.mur-app-embedded) .mur-chat-history {
+		padding: 1rem 1rem 7rem;
+	}
+
+	.mur-app:not(.mur-app-embedded) .mur-chat-form-container {
+		--mur-chat-form-bottom-space: max(1rem, env(safe-area-inset-bottom));
+
+		position: sticky;
+		z-index: 12;
+	}
+}

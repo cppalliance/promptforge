@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PromptForge</title>
+<link rel="stylesheet" href="/app.css">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -16,24 +17,33 @@
     </select>
     <div id="model-description" class="model-description"></div>
   </aside>
-  <main class="chat">
-    <div id="messages" class="messages" aria-live="polite"></div>
-    <div id="interim" class="interim" aria-live="polite"></div>
-    <form id="composer" class="composer">
-      <button id="mic" type="button" class="mic-button" title="Push to talk" aria-label="Push to talk" aria-pressed="false">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="9" y="2" width="6" height="12" rx="3"></rect>
-          <path d="M5 10a7 7 0 0 0 14 0"></path>
-          <line x1="12" y1="19" x2="12" y2="22"></line>
-        </svg>
-      </button>
-      <textarea id="input" rows="1" placeholder="Message&hellip;" autocomplete="off"></textarea>
-      <button id="send" type="submit" title="Send (Enter)" disabled>Send</button>
-    </form>
-    <div id="voice-status" class="voice-status" role="status" aria-live="polite"></div>
-  </main>
+  <div class="mur-app mur-app-embedded" data-theme="dark">
+    <main class="mur-main-area">
+      <header class="mur-main-header"></header>
+      <div class="mur-chat-layout-wrapper">
+        <div class="mur-chat-scroll-area">
+          <div class="mur-chat-history" role="log" aria-live="polite" aria-atomic="false"></div>
+        </div>
+        <div class="mur-chat-form-container">
+          <form class="mur-chat-form">
+            <textarea class="mur-chat-input" rows="1" placeholder="Message&hellip;" aria-label="Message"></textarea>
+            <div class="mur-form-footer-right">
+              <button type="submit" class="mur-send-btn mur-form-icon-btn mur-action-btn">
+                <svg class="mur-send-icon" aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 19V5" />
+                  <path d="m5 12 7-7 7 7" />
+                </svg>
+                <svg class="mur-stop-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="4" y="4" width="16" height="16" rx="2" />
+                </svg>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </main>
+  </div>
 </div>
-<script src="/markdown-it.min.js"></script>
-<script src="/app.js"></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>

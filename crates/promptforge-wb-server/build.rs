@@ -14,12 +14,7 @@ use std::process::{Command, ExitCode};
 
 /// Static UI files copied verbatim into `ui/dist/`. Mirrored in
 /// `ui/build.mjs`.
-const STATIC_FILES: &[&str] = &[
-    "index.html",
-    "style.css",
-    "pcm-worklet.js",
-    "markdown-it.min.js",
-];
+const STATIC_FILES: &[&str] = &["index.html", "style.css", "pcm-worklet.js"];
 
 fn main() -> ExitCode {
     match run() {
@@ -52,6 +47,11 @@ fn run() -> Result<(), String> {
         ui_dir.join("package.json").display()
     );
 
+    // dist/ is rebuilt from scratch so removed assets never linger into the
+    // release embed.
+    if dist_dir.exists() {
+        std::fs::remove_dir_all(&dist_dir).map_err(|error| format!("clear ui/dist: {error}"))?;
+    }
     bundle(&ui_dir)?;
     copy_static(&ui_dir, &dist_dir)?;
     Ok(())
