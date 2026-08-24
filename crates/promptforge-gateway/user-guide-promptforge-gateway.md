@@ -48,12 +48,15 @@ At boot the process environment is populated from at most two env files: the pro
 | Field | Required | Default | Purpose |
 |---|---|---|---|
 | `name` | yes | - | Caller-facing model name |
+| `kind` | no | `chat` | Model kind: `chat`, `embedding`, or `classifier` |
 | `description` | yes | - | Prose for catalog consumers |
 | `context` | yes | - | Context window size in tokens |
 | `upstream` | yes | - | The string the backend knows this model by |
 | `endpoints` | yes | - | Endpoint ids (first is used) |
-| `thinking` | no | `never` | `never`, `always`, or `switchable` |
-| `default_max_tokens` | no | - | Parsed, not yet consumed |
+| `thinking` | no | `never` | `never`, `always`, or `switchable`; chat kind only |
+| `default_max_tokens` | no | - | Parsed, not yet consumed; chat kind only |
+
+`embedding` and `classifier` models reject chat-only fields at load: `thinking` and `default_max_tokens` are chat-only, while `context` applies to every kind. The catalog entry carries the kind so clients can filter before building a request.
 
 ### Endpoint fields
 
@@ -94,6 +97,7 @@ Clients discover available models by calling `GET /v1/models` with a bearer toke
     {
       "id": "reasoning-large",
       "object": "model",
+      "kind": "chat",
       "description": "Anthropic's best reasoning model",
       "context": 200000,
       "thinking": "never",
@@ -104,7 +108,7 @@ Clients discover available models by calling `GET /v1/models` with a bearer toke
 }
 ```
 
-Each entry includes the model's context window, thinking mode, and tool-calling dialect so clients can make binding decisions before sending a request.
+Each entry includes the model's kind, context window, thinking mode, and tool-calling dialect so clients can make binding decisions before sending a request.
 
 A chat completion request names a model and provides messages:
 
@@ -419,20 +423,23 @@ Each local model becomes a normal catalog entry. Clients reach it through the sa
 | Field | Required | Default | Purpose |
 |---|---|---|---|
 | `name` | yes | - | Caller-facing model name |
+| `kind` | no | `chat` | Model kind: `chat`, `embedding`, or `classifier` |
 | `description` | yes | - | Prose for catalog and semantic bind |
 | `source` | yes | - | Hugging Face URL or local path to GGUF |
 | `sha256` | no | - | SHA-256 hex pin; verified after download |
 | `context` | yes | - | Context window (`--ctx-size`) |
-| `thinking` | no | `never` | `never`, `always`, or `switchable` |
+| `thinking` | no | `never` | `never`, `always`, or `switchable`; chat kind only |
 | `gpu_layers` | no | 99 | GPU layers offloaded (`-ngl`) |
 | `flash_attention` | no | `true` | Enable flash attention |
 | `cache_type_k` | no | `q8_0` | KV cache type for K |
 | `cache_type_v` | no | `q4_0` | KV cache type for V |
 | `n_predict` | no | 8192 | Generation ceiling (`--n-predict`) |
-| `chat_template_file` | no | - | Jinja template override (`--chat-template-file`) |
+| `chat_template_file` | no | - | Jinja template override (`--chat-template-file`); chat kind only |
 | `dominion` | no | - | Local dominion id for a shared limit |
 | `parallel` | no | 1 | Max concurrent inferences (`--parallel`; the queue limit when no dominion is bound) |
 | `vram_gb` | no | - | VRAM footprint estimate in GiB |
+
+A local model with `kind = "embedding"` or `kind = "classifier"` rejects the chat-only fields `thinking` and `chat_template_file` at load; `context` and the launch knobs (`gpu_layers`, `flash_attention`, cache types, `parallel`, `vram_gb`) apply to every kind.
 
 ### Cache and provisioning
 
