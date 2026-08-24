@@ -20,6 +20,7 @@
 //! llama.cpp FFI and endpoint pinning are deferred.
 
 mod api_error;
+mod cache;
 mod dialect;
 mod error;
 mod http_util;
@@ -139,6 +140,11 @@ impl AppState {
     pub(crate) async fn web_search(&self) -> Option<Arc<WebSearchState>> {
         self.live.read().await.web_search.clone()
     }
+
+    /// The active profile's `[local].cache_dir` setting, for the cache routes.
+    pub(crate) async fn cache_dir(&self) -> Option<String> {
+        self.live.read().await.local.cache_dir().map(str::to_owned)
+    }
 }
 
 /// Build the gateway's axum router.
@@ -149,6 +155,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/v1/rerank", post(rerank))
         .route("/v1/models", get(list_models))
         .route("/v1/tools/web_search", post(tools::web_search))
+        .route("/v1/cache", get(cache::list_cache))
         .route("/health", get(health))
         .route("/admin/profiles", get(admin_list_profiles))
         .route("/admin/status", get(admin_status))

@@ -19,6 +19,7 @@
 
 mod support;
 
+mod cache;
 mod chat;
 mod embeddings;
 mod local;
