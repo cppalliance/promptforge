@@ -6,14 +6,18 @@
 bind = "127.0.0.1:8081"
 api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 
-[queue]
-max_depth = 100
-fair_scheduling = true
-
 # Optional. Defaults to ~/.promptforge (Windows: %USERPROFILE%\.promptforge).
 # GGUFs go in <cache_dir>/models; llama-server installs under <cache_dir>/llama.cpp.
 # [local]
 # cache_dir = "~/.promptforge"
+
+# Optional local dominion: one shared concurrency limit and an optional VRAM
+# budget for every local model bound to it.
+# [[dominion]]
+# id = "gpu0"
+# kind = "local"
+# max_concurrency = 4
+# vram_gb = 24
 
 [[local_model]]
 name = "qwen-local"
@@ -27,14 +31,22 @@ flash_attention = true
 cache_type_k = "q8_0"
 cache_type_v = "q4_0"
 n_predict = 8192
+# parallel = 1        # child --parallel and, without a dominion, the queue limit
+# dominion = "gpu0"   # bind to a local dominion to share its limit and budget
+# vram_gb = 6         # footprint estimate; required when the dominion budgets VRAM
 
 # Remote models can coexist; local models are registered beside them.
+# [[dominion]]
+# id = "anthropic-pool"
+# kind = "remote"
+# max_concurrency = 10
+#
 # [[endpoint]]
 # id = "anthropic"
 # protocol = "openai"
 # base_url = "https://api.anthropic.com/v1"
 # api_key = "${ANTHROPIC_API_KEY}"
-# concurrency = 10
+# dominion = "anthropic-pool"
 #
 # [[model]]
 # name = "claude-sonnet-4-6"

@@ -140,40 +140,6 @@ max_count = 10
 }
 
 #[test]
-fn rejects_remote_device_with_lanes() {
-    let toml = r#"
-[server]
-bind = "127.0.0.1:8081"
-api_key = "t"
-
-[[device]]
-id = "gpu"
-type = "remote"
-
-[[device.lane]]
-id = "l0"
-concurrency = 1
-
-[[endpoint]]
-id = "e"
-protocol = "openai"
-base_url = "http://a"
-api_key = ""
-
-[[model]]
-name = "m"
-description = "prose"
-context = 8192
-upstream = "u"
-endpoints = ["e"]
-"#;
-    assert!(matches!(
-        Config::parse_toml(toml),
-        Err(ConfigError::Validation(_))
-    ));
-}
-
-#[test]
 fn rejects_web_search_non_http_base_url() {
     let toml = r#"
 [server]

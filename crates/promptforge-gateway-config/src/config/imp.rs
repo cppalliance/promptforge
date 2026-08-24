@@ -7,10 +7,7 @@
 use std::net::SocketAddr;
 use std::path::Path;
 
-use super::{
-    Config, DeviceKind, EndpointConfig, LocalModelConfig, RawConfig, Secret, WebSearchConfig,
-    interpolate_value,
-};
+use super::{Config, RawConfig, Secret, WebSearchConfig, interpolate_value};
 use crate::error::ConfigError;
 
 impl Config {
@@ -111,85 +108,6 @@ impl Config {
         self.tools
             .as_ref()
             .and_then(|tools| tools.web_search.as_ref())
-    }
-
-    /// Resolve the concurrency limit for an endpoint: explicit
-    /// `concurrency`, else the referenced remote device's concurrency, else
-    /// unlimited (`None`).
-    #[must_use]
-    pub fn endpoint_concurrency(&self, endpoint: &EndpointConfig) -> Option<usize> {
-        if let Some(n) = endpoint.concurrency {
-            return Some(n);
-        }
-        let device_id = endpoint.device.as_deref()?;
-        self.devices
-            .iter()
-            .find(|d| d.id == device_id)
-            .and_then(|d| d.concurrency)
-    }
-
-    /// Resolve lane concurrency for a local model. Defaults to 1 when no
-    /// device/lane is declared.
-    ///
-    /// # Errors
-    /// Returns a [`ConfigError`](crate::ConfigError) of kind
-    /// [`ConfigErrorKind::Validation`](crate::ConfigErrorKind::Validation) when
-    /// the device or lane is missing.
-    pub fn local_model_concurrency(
-        &self,
-        model: &LocalModelConfig,
-    ) -> Result<usize, crate::api_error::ConfigError> {
-        self.resolve_local_concurrency(model)
-            .map_err(crate::api_error::ConfigError::from)
-    }
-
-    /// The crate-internal form of [`Self::local_model_concurrency`], returning
-    /// the private representation so validation can propagate it directly.
-    pub(crate) fn resolve_local_concurrency(
-        &self,
-        model: &LocalModelConfig,
-    ) -> Result<usize, ConfigError> {
-        match (&model.device, &model.lane) {
-            (None, None) => Ok(1),
-            (Some(device_id), Some(lane_id)) => {
-                let device = self
-                    .devices
-                    .iter()
-                    .find(|d| d.id == *device_id)
-                    .ok_or_else(|| {
-                        ConfigError::Validation(format!(
-                            "local_model {} names undefined device {device_id}",
-                            model.name
-                        ))
-                    })?;
-                if device.kind != DeviceKind::Local {
-                    return Err(ConfigError::Validation(format!(
-                        "local_model {} must reference a local device, but {device_id} is remote",
-                        model.name
-                    )));
-                }
-                let lane = device
-                    .lanes
-                    .iter()
-                    .find(|l| l.id == *lane_id)
-                    .ok_or_else(|| {
-                        ConfigError::Validation(format!(
-                            "local_model {} names undefined lane {lane_id} on device {device_id}",
-                            model.name
-                        ))
-                    })?;
-                if lane.concurrency < 1 {
-                    return Err(ConfigError::Validation(format!(
-                        "device {device_id} lane {lane_id} concurrency must be at least 1"
-                    )));
-                }
-                Ok(lane.concurrency)
-            }
-            _ => Err(ConfigError::Validation(format!(
-                "local_model {} must set both device and lane, or neither",
-                model.name
-            ))),
-        }
     }
 
     /// Interpolate, parse, and validate a configuration from a TOML string.

@@ -293,23 +293,6 @@ pub(crate) enum LocalError {
         model: String,
     },
 
-    /// Resolving lane concurrency for a local model failed.
-    #[error("resolve lane concurrency for local model {model}")]
-    LaneConcurrency {
-        /// The affected model name.
-        model: String,
-        /// The underlying configuration error.
-        #[source]
-        source: promptforge_gateway_config::ConfigError,
-    },
-
-    /// A lane concurrency value did not fit the child's `--parallel` argument.
-    #[error("lane concurrency {concurrency} does not fit in u32")]
-    LaneTooLarge {
-        /// The offending concurrency value.
-        concurrency: usize,
-    },
-
     /// A local model named a dominion that is not defined.
     ///
     /// Configuration validation rejects an unknown or wrong-kind dominion
@@ -448,12 +431,6 @@ mod tests {
                 name: "m".to_owned(),
                 expected: "a".to_owned(),
                 actual: "b".to_owned(),
-            }
-            .is_retryable()
-        );
-        assert!(
-            !LocalError::LaneTooLarge {
-                concurrency: 1 << 40
             }
             .is_retryable()
         );

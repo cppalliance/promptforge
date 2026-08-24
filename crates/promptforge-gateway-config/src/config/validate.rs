@@ -1,16 +1,16 @@
 //! Semantic validation of a parsed [`Config`].
 //!
 //! A `Config` value cannot hold an invalid state: construction runs [`Config::validate`],
-//! which rejects empty ids, unresolved references, kind-incompatible devices,
-//! malformed HTTP(S) URLs, out-of-vocabulary web-search knobs, and VRAM
-//! over-booking of a local dominion. Downstream code therefore never
+//! which rejects empty ids, unresolved references, kind-incompatible dominion
+//! payloads, malformed HTTP(S) URLs, out-of-vocabulary web-search knobs, and
+//! VRAM over-booking of a local dominion. Downstream code therefore never
 //! re-validates or clamps operator input.
 
 use std::collections::HashSet;
 
 use url::Url;
 
-use super::{Config, DeviceKind, DominionKind, is_sha256_hex};
+use super::{Config, DominionKind, is_sha256_hex};
 use crate::error::ConfigError;
 
 impl Config {
@@ -57,24 +57,18 @@ impl Config {
     /// duplicate id, a model with no or duplicate endpoints, a model naming an
     /// undefined endpoint, a malformed endpoint or web-search URL, an
     /// out-of-vocabulary freshness/safesearch default, an invalid
-    /// `[[local_model]]`, `queue.max_depth` below 1, a concurrency below 1, or
-    /// a `[[dominion]]` violation (duplicate or empty id, `max_concurrency` or
-    /// `max_queue` below 1, `vram_gb` on a remote dominion, a binding to an
-    /// undefined or wrong-kind dominion, or a VRAM co-residency failure: a
-    /// local dominion's `vram_gb` budget exceeded by the bound models'
-    /// estimates, or a bound model with no estimate).
+    /// `[[local_model]]`, a `parallel` below 1, or a `[[dominion]]` violation
+    /// (duplicate or empty id, `max_concurrency` or `max_queue` below 1,
+    /// `vram_gb` on a remote dominion, a binding to an undefined or
+    /// wrong-kind dominion, or a VRAM co-residency failure: a local
+    /// dominion's `vram_gb` budget exceeded by the bound models' estimates,
+    /// or a bound model with no estimate).
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
         if self.server.api_key.is_empty() {
             return Err(ConfigError::Validation(
                 "server.key must not be empty".to_string(),
             ));
         }
-        if self.queue.max_depth() < 1 {
-            return Err(ConfigError::Validation(
-                "queue.max_depth must be at least 1".to_string(),
-            ));
-        }
-        self.validate_devices()?;
         self.validate_dominions()?;
         let endpoint_ids = self.validate_endpoints()?;
         self.validate_models(&endpoint_ids)?;
@@ -123,79 +117,6 @@ impl Config {
                 "tools.web_search.default_safesearch {:?} is not off/moderate/strict or empty",
                 web_search.default_safesearch
             )));
-        }
-        Ok(())
-    }
-
-    fn validate_devices(&self) -> Result<(), ConfigError> {
-        let mut device_ids = HashSet::new();
-        for device in &self.devices {
-            if device.id.is_empty() {
-                return Err(ConfigError::Validation(
-                    "device id must not be empty".to_string(),
-                ));
-            }
-            if !device_ids.insert(device.id.as_str()) {
-                return Err(ConfigError::Validation(format!(
-                    "duplicate device id {}",
-                    device.id
-                )));
-            }
-            if let Some(concurrency) = device.concurrency
-                && concurrency < 1
-            {
-                return Err(ConfigError::Validation(format!(
-                    "device {} concurrency must be at least 1",
-                    device.id
-                )));
-            }
-            // Kind-incompatible payloads are rejected: remote devices use flat
-            // concurrency (no lanes); local devices use lanes (no flat
-            // concurrency). (CFG-004)
-            match device.kind {
-                DeviceKind::Remote if !device.lanes.is_empty() => {
-                    return Err(ConfigError::Validation(format!(
-                        "remote device {} must not declare lanes",
-                        device.id
-                    )));
-                }
-                DeviceKind::Local if device.concurrency.is_some() => {
-                    return Err(ConfigError::Validation(format!(
-                        "local device {} uses lanes, not flat concurrency",
-                        device.id
-                    )));
-                }
-                _ => {}
-            }
-            let mut lane_ids = HashSet::new();
-            for lane in &device.lanes {
-                if lane.id.is_empty() {
-                    return Err(ConfigError::Validation(format!(
-                        "device {} lane id must not be empty",
-                        device.id
-                    )));
-                }
-                if !lane_ids.insert(lane.id.as_str()) {
-                    return Err(ConfigError::Validation(format!(
-                        "duplicate lane id {} on device {}",
-                        lane.id, device.id
-                    )));
-                }
-                if lane.concurrency < 1 {
-                    return Err(ConfigError::Validation(format!(
-                        "device {} lane {} concurrency must be at least 1",
-                        device.id, lane.id
-                    )));
-                }
-                if let Some(ref_id) = &lane.device
-                    && ref_id != &device.id
-                {
-                    return Err(ConfigError::Validation(format!(
-                        "lane {} device {ref_id} does not match parent device {}",
-                        lane.id, device.id
-                    )));
-                }
-            }
         }
         Ok(())
     }
@@ -304,29 +225,6 @@ impl Config {
                 &format!("endpoint {} base_url", endpoint.id),
                 endpoint.base_url.trim(),
             )?;
-            if let Some(concurrency) = endpoint.concurrency
-                && concurrency < 1
-            {
-                return Err(ConfigError::Validation(format!(
-                    "endpoint {} concurrency must be at least 1",
-                    endpoint.id
-                )));
-            }
-            if let Some(device_id) = &endpoint.device {
-                let device = self.devices.iter().find(|d| d.id == *device_id);
-                let Some(device) = device else {
-                    return Err(ConfigError::Validation(format!(
-                        "endpoint {} names undefined device {device_id}",
-                        endpoint.id
-                    )));
-                };
-                if device.kind != DeviceKind::Remote {
-                    return Err(ConfigError::Validation(format!(
-                        "endpoint {} references non-remote device {device_id}",
-                        endpoint.id
-                    )));
-                }
-            }
             if let Some(dominion_id) = &endpoint.dominion {
                 let dominion = self.dominions.iter().find(|d| d.id == *dominion_id);
                 let Some(dominion) = dominion else {
@@ -485,9 +383,7 @@ impl Config {
                     local_model.name
                 )));
             }
-            if let Some(parallel) = local_model.parallel
-                && parallel < 1
-            {
+            if local_model.parallel < 1 {
                 return Err(ConfigError::Validation(format!(
                     "local_model {} parallel must be at least 1",
                     local_model.name
@@ -508,7 +404,6 @@ impl Config {
                     )));
                 }
             }
-            self.resolve_local_concurrency(local_model)?;
         }
         Ok(())
     }

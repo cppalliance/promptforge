@@ -104,19 +104,6 @@ async fn reject_policy_admits_up_to_capacity_then_rejects() {
     assert_eq!(queue.admit("c").await.unwrap_err(), AdmitError::Rejected);
 }
 
-#[test]
-fn from_queue_config_preserves_legacy_queue_settings() {
-    // The legacy `[queue]` shim carries depth and fairness and always uses
-    // the Queue policy; the reject policy only arrives via dominions.
-    let queue = DominionQueue::from_queue_config(1, &QueueConfig::new(3, false));
-    let QueueInner::Limited(limited) = &queue.inner else {
-        panic!("expected a limited queue");
-    };
-    assert_eq!(limited.max_depth, 3);
-    assert!(!limited.fair);
-    assert_eq!(limited.policy, QueuePolicy::Queue);
-}
-
 #[tokio::test]
 async fn fair_scheduling_interleaves_clients() {
     // concurrency=1; enqueue A, A, B while one A holds. Fair wake order

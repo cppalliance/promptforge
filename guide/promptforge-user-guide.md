@@ -183,9 +183,7 @@ At boot the process environment is populated from at most two env files: the pro
 | `protocol` | yes | - | Wire protocol; only `openai` |
 | `base_url` | yes | - | Backend URL (trailing slash trimmed) |
 | `api_key` | yes | - | Backend credential; empty string skips the `Authorization` header |
-| `concurrency` | no | unlimited | Max in-flight requests |
-| `device` | no | - | Device id for concurrency |
-| `dominion` | no | - | Remote dominion id for a shared limit |
+| `dominion` | no | - | Remote dominion id for a shared limit and queue |
 
 ### Starting the Gateway
 
@@ -273,37 +271,40 @@ All errors use the OpenAI error envelope:
 | Backend 4xx | upstream's | `invalid_request_error` | `upstream_client_error` |
 | Backend 5xx | 502 | `server_error` | `upstream_error` |
 | Queue full | 503 | `server_error` | `queue_full` |
+| Rejected at capacity (`policy = "reject"`) | 429 | `rate_limit_error` | `queue_rejected` |
 
 An unmodified OpenAI SDK surfaces these as its own error types rather than unparseable blobs.
 
 ### Concurrency and Queuing
 
-Set `concurrency` on an endpoint to limit how many requests are in flight at once:
+Bind an endpoint to a dominion to cap how many requests are in flight at once. The limit lives on the dominion, so everything bound to it shares one pool of slots:
 
 ```toml
+[[dominion]]
+id = "anthropic-pool"
+kind = "remote"
+max_concurrency = 10
+max_queue = 100         # waiting requests (not counting in-flight); default 100
+policy = "queue"        # "queue" | "reject" (fail-fast); default "queue"
+fair_scheduling = true  # round-robin by client key; default true
+
 [[endpoint]]
 id = "anthropic"
 protocol = "openai"
 base_url = "https://api.anthropic.com/v1"
 api_key = "${ANTHROPIC_API_KEY}"
-concurrency = 10
+dominion = "anthropic-pool"
 ```
 
-Requests beyond the limit wait in a queue. Configure the queue globally:
+Requests beyond the limit wait in the dominion's bounded queue. What a full queue does comes from `policy`: with `queue` (the default), up to `max_queue` requests wait and further arrivals are rejected with 503 and `code: "queue_full"`; with `reject`, a request that finds no free concurrency slot is turned away immediately - fail-fast, mapped to 429 with `code: "queue_rejected"`.
 
-```toml
-[queue]
-max_depth = 100         # waiting requests (not counting in-flight); default 100
-fair_scheduling = true  # round-robin by client key; default true
-```
+When `fair_scheduling` is true, callers identify themselves via the `X-PromptForge-Client` header. Each client gets turns in round-robin order, so one fast client cannot monopolize slots. Missing or invalid headers map to the `"default"` bucket. The scheduler tracks up to 32 distinct client labels; additional labels fold into `"default"`. The header is self-asserted: a scheduling hint for trusted-host callers, not an authenticated identity.
 
-When `fair_scheduling` is true, callers identify themselves via the `X-PromptForge-Client` header. Each client gets turns in round-robin order, so one fast client cannot monopolize slots. Missing or invalid headers map to the `"default"` bucket. The scheduler tracks up to 32 distinct client labels; additional labels fold into `"default"`.
-
-A full queue returns 503 with `code: "queue_full"`. An endpoint without `concurrency` is unlimited.
+An endpoint without a `dominion` is unlimited.
 
 ### Dominions
 
-A dominion is a named pool of compute - a remote provider pool or a local GPU - carrying one concurrency limit and one bounded waiting queue shared by everything bound to it. Where `concurrency` on an endpoint caps that endpoint alone, a dominion's limit is shared: two endpoints bound to the same dominion compete for the same slots.
+A dominion is a named pool of compute - a remote provider pool or a local GPU - carrying one concurrency limit and one bounded waiting queue shared by everything bound to it: two endpoints bound to the same dominion compete for the same slots. A dominion binding is the only way to cap concurrency.
 
 ```toml
 [[dominion]]
@@ -332,7 +333,7 @@ description = "..."
 source = "..."
 context = 65536
 dominion = "gpu0"         # optional; must name a local dominion
-parallel = 4              # child --parallel and gateway queue limit
+parallel = 4              # child --parallel; the queue limit when no dominion is bound
 vram_gb = 14              # footprint estimate for the co-residency check
 ```
 
@@ -348,7 +349,7 @@ vram_gb = 14              # footprint estimate for the co-residency check
 
 Binding is by explicit id and is kind-checked: an endpoint's `dominion` must name a remote dominion, a local model's `dominion` must name a local one, and an unknown id is a boot failure. `vram_gb` on a remote dominion is rejected. Dominion ids must be unique and non-empty, and `max_concurrency` and `max_queue` must be at least 1 when set.
 
-Dominions are being introduced alongside the legacy knobs: `concurrency`, `device`, `lane`, and `[queue]` still parse during the transition, and an endpoint with only those fields keeps its own per-endpoint queue. An endpoint bound to a remote dominion shares that dominion's queue with every other bound endpoint, and a local model bound to a local dominion shares that dominion's queue with every other bound local model - the shared limit is enforced now.
+An endpoint bound to a remote dominion shares that dominion's queue with every other bound endpoint, and a local model bound to a local dominion shares that dominion's queue with every other bound local model.
 
 When a local dominion sets `vram_gb`, every local model bound to it must set its own `vram_gb` footprint estimate, and the estimates must sum to no more than the budget: an over-booked or incomplete budget fails validation at boot and at profile switch, before any child process starts and surfaces as an OOM. A local dominion without `vram_gb` imposes no co-residency obligation.
 
@@ -479,8 +480,8 @@ endpoints = ["anthropic"]
 Includes resolve depth-first relative to the including file. Max nesting depth is 16. Cycles are detected and rejected.
 
 Merge rules:
-- Arrays (`[[endpoint]]`, `[[model]]`, `[[local_model]]`, `[[device]]`, `[[dominion]]`): merged by append. An entry with the same `id` or `name` replaces the earlier definition.
-- Scalars (`server.*`, `queue.*`, `[local].cache_dir`): later wins.
+- Arrays (`[[endpoint]]`, `[[model]]`, `[[local_model]]`, `[[dominion]]`): merged by append. An entry with the same `id` or `name` replaces the earlier definition.
+- Scalars (`server.*`, `[local].cache_dir`): later wins.
 - The `models` allowlist: later wins - one list replaces the other, never unioned.
 
 #### The boot file owns `[server]`
@@ -549,10 +550,8 @@ Each local model becomes a normal catalog entry. Clients reach it through the sa
 | `cache_type_v` | no | `q4_0` | KV cache type for V |
 | `n_predict` | no | 8192 | Generation ceiling (`--n-predict`) |
 | `chat_template_file` | no | - | Jinja template override (`--chat-template-file`) |
-| `device` | no | - | Device id for concurrency |
-| `lane` | no | - | Lane id under the device |
 | `dominion` | no | - | Local dominion id for a shared limit |
-| `parallel` | no | - | Max concurrent inferences (`--parallel` and queue limit) |
+| `parallel` | no | 1 | Max concurrent inferences (`--parallel`; the queue limit when no dominion is bound) |
 | `vram_gb` | no | - | VRAM footprint estimate in GiB |
 
 #### Cache and provisioning
@@ -571,32 +570,20 @@ After a local child reports ready, the gateway queries its `/props` endpoint and
 
 If a transport failure occurs against a dead `llama-server` child, the gateway respawns it once on the same port and alias, then retries the request. There is no background watchdog. `GET /health` remains process-level liveness only.
 
-#### Device and lane concurrency
+#### Local concurrency
 
-For structured concurrency control over local GPU resources:
+`parallel` on a `[[local_model]]` (default 1) is both the child's `--parallel` argument and, when the model has no `dominion`, its gateway queue limit:
 
 ```toml
-[[device]]
-id = "local-gpu"
-type = "local"
-
-[[device.lane]]
-device = "local-gpu"
-id = "generative"
-concurrency = 1
-
 [[local_model]]
 name = "qwen-local"
 description = "..."
 source = "..."
 context = 65536
-device = "local-gpu"
-lane = "generative"
+parallel = 4
 ```
 
-The lane's `concurrency` is both the gateway's admit limit and `llama-server --parallel`. A local model without a device/lane defaults to concurrency 1.
-
-The newer `parallel` field on `[[local_model]]` is the direct spelling of the same number: it feeds the child's `--parallel` argument and, when the model has no `dominion`, its queue limit. When both `parallel` and a device/lane are set, `parallel` wins. When the model sets `dominion`, admission is governed by that dominion's shared queue instead of a per-model limit.
+Bind the model to a local dominion to share one concurrency limit and one VRAM budget with every other bound model; admission is then governed by the dominion's shared queue instead of a per-model limit.
 
 Dropping the `LocalRuntime` (on process exit or profile switch) kills all `llama-server` children.
 

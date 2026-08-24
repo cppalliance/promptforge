@@ -5,21 +5,17 @@
 bind = "127.0.0.1:8081"
 api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
 
-[queue]
-max_depth = 100
-fair_scheduling = true
-
-[[device]]
+[[dominion]]
 id = "anthropic"
-type = "remote"
-concurrency = 10
+kind = "remote"
+max_concurrency = 10
 
 [[endpoint]]
 id = "anthropic"
 protocol = "openai"
 base_url = "https://api.anthropic.com/v1"
 api_key = "${ANTHROPIC_API_KEY}"
-device = "anthropic"
+dominion = "anthropic"
 
 [[model]]
 name = "claude-sonnet-4-6"
