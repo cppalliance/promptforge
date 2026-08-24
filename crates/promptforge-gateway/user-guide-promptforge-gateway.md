@@ -140,6 +140,8 @@ Pass `"stream": true` on a chat completion to get a server-sent events stream in
 
 The response is `Content-Type: text/event-stream` with one `data:` line per chunk, terminated by `data: [DONE]`. The relay is typed: the gateway parses and validates each upstream chunk, rewrites the model name back to the caller's, and re-serializes it - it never splices raw upstream bytes through. A failure before the stream starts (an upstream 4xx/5xx, an unreachable backend) comes back as the usual JSON error envelope, never as an SSE stream that dies mid-flight; a failure mid-stream is emitted as an error-envelope `data:` event before the stream ends. The dominion queue slot is held for the stream's whole lifetime, so a long stream counts against concurrency until it ends. Streaming requests use a connect-timeout-only HTTP client: the usual whole-request deadline is not applied, since it would kill any stream that outlived it.
 
+Two caveats. A client that disconnects mid-stream cancels the upstream stream: dropping the response drops the upstream connection and frees the queue slot in the same unwind, so a hung client never holds a backend stream open. And a malformed upstream chunk - one that is not JSON, or that lacks the minimal choice shape (at least one choice with an `index` and a `delta`) - is logged and skipped rather than relayed or fatal, so one bad chunk never ends an otherwise healthy stream. The terminal `data: [DONE]` is a sentinel, not JSON; it is recognized before parsing and never logged as malformed.
+
 ## Embeddings
 
 Models configured with `kind = "embedding"` serve OpenAI-shaped embedding requests at `POST /v1/embeddings`:

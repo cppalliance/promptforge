@@ -214,6 +214,11 @@ async fn chat_completions(
 /// clean end is marked with the `data: [DONE]` sentinel. The response
 /// forwards the upstream `Content-Type`/`Cache-Control` when present,
 /// defaulting to `text/event-stream`/`no-cache`.
+///
+/// Client-disconnect cancellation is Drop all the way down: when the client
+/// goes away the response body is dropped, which drops the chunk stream,
+/// which drops the upstream response and aborts the upstream connection,
+/// releasing the permit in the same unwind. There is no explicit cancel path.
 fn relay_sse(streamed: crate::upstream::StreamedChunks, permit: crate::queue::Permit) -> Response {
     use futures_util::StreamExt as _;
 

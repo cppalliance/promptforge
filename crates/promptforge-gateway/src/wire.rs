@@ -197,6 +197,26 @@ pub(crate) struct ChatChunk {
     pub rest: Map<String, Value>,
 }
 
+impl ChatChunk {
+    /// Validate one upstream chunk's minimal shape before it is relayed.
+    ///
+    /// A chunk must carry at least one choice; each choice's `index` and
+    /// `delta` are required typed fields, so deserialization has already
+    /// proven them present. A chunk that fails this check (for example a
+    /// usage-only summary object a backend appends mid-stream) is malformed:
+    /// the parser logs and skips it rather than relaying it or ending the
+    /// stream.
+    ///
+    /// # Errors
+    /// Returns a static reason string when the chunk carries no choices.
+    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if self.choices.is_empty() {
+            return Err("upstream chunk has no choices");
+        }
+        Ok(())
+    }
+}
+
 /// One partial choice in a [`ChatChunk`]: an `index` plus a `delta` carrying
 /// the incremental payload (`role` on the first chunk, content or tool-call
 /// fragments thereafter).
@@ -689,6 +709,18 @@ mod tests {
             serde_json::from_value(serde_json::to_value(&chunk).expect("serialize"))
                 .expect("reparse");
         assert_eq!(chunk, reparsed);
+    }
+
+    #[test]
+    fn chat_chunk_rejects_empty_choices() {
+        // A chunk with no choices (for example a usage-only summary object)
+        // is malformed: logged and skipped, never relayed.
+        let chunk = ChatChunk {
+            model: "m".to_owned(),
+            choices: vec![],
+            rest: Map::new(),
+        };
+        assert!(chunk.validate().is_err());
     }
 
     #[test]
