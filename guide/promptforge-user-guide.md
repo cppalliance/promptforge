@@ -182,8 +182,9 @@ At boot the process environment is populated from at most two env files: the pro
 | `effort_levels` | no | - | Reasoning-effort levels the model accepts; chat kind only, requires `thinking` other than `never` |
 | `default_effort` | no | - | Effort level applied when the caller omits one; must name a listed `effort_levels` entry; chat kind only |
 | `adaptive_thinking` | no | `false` | Whether the model adaptively chooses how much to think per request; chat kind only |
+| `tool_dialect` | no | `openai` | Tool-calling dialect: `openai` (native) or `gemma3_tool_code` (emulated fences); chat kind only |
 
-`embedding` and `classifier` models reject chat-only fields at load: `thinking`, `default_max_tokens`, `effort_levels`, `default_effort`, and `adaptive_thinking` are chat-only, while `context` applies to every kind. The catalog entry carries the kind so clients can filter before building a request. The effort knobs (`effort_levels`, `default_effort`) are also rejected when `thinking = "never"`, and `max_output` must not exceed `context`.
+`embedding` and `classifier` models reject chat-only fields at load: `thinking`, `default_max_tokens`, `tool_dialect`, `effort_levels`, `default_effort`, and `adaptive_thinking` are chat-only, while `context` applies to every kind. The catalog entry carries the kind so clients can filter before building a request. The effort knobs (`effort_levels`, `default_effort`) are also rejected when `thinking = "never"`, and `max_output` must not exceed `context`.
 
 #### Endpoint fields
 
@@ -258,6 +259,26 @@ Send this as `POST /v1/chat/completions` with `Authorization: Bearer <token>`.
 The gateway validates: model must be non-empty, messages must be non-empty, each message must be a JSON object with a supported role (`system`, `user`, `assistant`, `tool`, `function`, `developer`) and either `content` or a tool/function call. Everything else passes through verbatim.
 
 The response carries the caller's model name, not the backend's.
+
+### Emulated Tool Calling
+
+A chat model whose backend has no native tool array can still serve tool calls by setting `tool_dialect = "gemma3_tool_code"` on its `[[model]]` entry:
+
+```toml
+[[model]]
+name = "gemma-remote"
+description = "A Gemma 3 instruct model behind an OpenAI-shaped server"
+context = 8192
+tool_dialect = "gemma3_tool_code"
+upstream = "gemma3-it"
+endpoints = ["local-llama"]
+```
+
+For a non-streaming chat completion to such a model the gateway emulates the protocol. Outbound, the OpenAI `tools` array is translated into a plain-language system guide teaching the `tool_code` fence protocol (one `name(key=value)` call per line) and prepended as a system message; `tools` and `tool_choice` are stripped from the forwarded request. Inbound, the reply's content is scanned for a leading `tool_code` fence (or an interim `json` fence carrying a `tool_calls` blob); a well-formed fence becomes OpenAI `tool_calls` objects with a null `content` and a `tool_calls` finish reason.
+
+Recovery is warn-and-continue, never silent and never fatal: a recognized-but-malformed fence (unterminated, empty, an invalid call line, or trailing prose after the fence) yields an empty `content` plus a `gateway_warning` field on the message carrying the reason, and the recovery is logged at warn. `gateway_warning` is a gateway-specific extension on the OpenAI response shape; downstream clients should ignore unknown fields. The dialect uses content-fence parsing only - the gateway never sets `response_format: json_object`.
+
+Emulation applies to non-streaming completions only; a `stream: true` request is forwarded unchanged. The catalog entry for an emulated model reports `tool_dialect: "gemma3_tool_code"` and `tools_mode: "emulated"`.
 
 ### Streaming
 

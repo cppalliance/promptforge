@@ -326,6 +326,92 @@ endpoints = ["e"]
 }
 
 #[test]
+fn tool_dialect_defaults_to_openai() {
+    let config = Config::from_toml_str(SAMPLE).unwrap();
+    assert_eq!(config.models[0].tool_dialect, ToolDialect::Openai);
+}
+
+#[test]
+fn parses_gemma3_tool_code_dialect() {
+    let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+tool_dialect = "gemma3_tool_code"
+upstream = "u"
+endpoints = ["e"]
+"#;
+    let config = Config::from_toml_str(toml).unwrap();
+    assert_eq!(config.models[0].tool_dialect, ToolDialect::Gemma3ToolCode);
+}
+
+#[test]
+fn rejects_unknown_tool_dialect() {
+    let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+description = "prose"
+context = 8192
+tool_dialect = "anthropic"
+upstream = "u"
+endpoints = ["e"]
+"#;
+    assert!(matches!(
+        Config::parse_toml(toml),
+        Err(ConfigError::Parse { .. })
+    ));
+}
+
+#[test]
+fn rejects_tool_dialect_on_a_non_chat_model() {
+    let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://a"
+api_key = ""
+
+[[model]]
+name = "m"
+kind = "embedding"
+description = "prose"
+context = 8192
+tool_dialect = "gemma3_tool_code"
+upstream = "u"
+endpoints = ["e"]
+"#;
+    assert!(matches!(
+        Config::parse_toml(toml),
+        Err(ConfigError::Validation(_))
+    ));
+}
+
+#[test]
 fn interpolates_and_escapes() {
     // SAFETY-free: reading is fine; this test sets no env vars.
     assert_eq!(interpolate("a$$b").unwrap(), "a$b");

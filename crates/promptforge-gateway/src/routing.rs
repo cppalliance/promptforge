@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use promptforge_gateway_config::{
-    Capabilities, Config, ConfigError, ModelKind, Protocol, ThinkingMode,
+    Capabilities, Config, ConfigError, ModelKind, Protocol, ThinkingMode, ToolDialect,
 };
 
 use crate::error::GatewayError;
@@ -181,6 +181,7 @@ impl Routing {
                     model.name()
                 ))
             })?;
+            let tool_dialect = model.tool_dialect();
             models.push(Arc::new(Model {
                 name: model.name().to_owned(),
                 kind: model.kind(),
@@ -188,8 +189,12 @@ impl Routing {
                 context: model.context(),
                 thinking: model.thinking(),
                 capabilities: model.capabilities().clone(),
-                tool_dialect: "openai".to_owned(),
-                tools_mode: "native".to_owned(),
+                tool_dialect: tool_dialect.to_string(),
+                tools_mode: match tool_dialect {
+                    ToolDialect::Gemma3ToolCode => "emulated",
+                    _ => "native",
+                }
+                .to_owned(),
                 upstream_name: model.upstream().to_owned(),
                 endpoint: Arc::clone(endpoint),
             }));
@@ -352,6 +357,43 @@ endpoints = ["e"]
         let routing = routing_from(toml);
         assert_eq!(routing.model("chatty").unwrap().kind, ModelKind::Chat);
         assert_eq!(routing.model("embed").unwrap().kind, ModelKind::Embedding);
+    }
+
+    #[test]
+    fn from_config_carries_tool_dialect_and_derives_tools_mode() {
+        let toml = r#"
+[server]
+bind = "127.0.0.1:8081"
+api_key = "t"
+
+[[endpoint]]
+id = "e"
+protocol = "openai"
+base_url = "http://127.0.0.1:9"
+api_key = ""
+
+[[model]]
+name = "plain"
+description = "a native-tools model"
+context = 8192
+upstream = "u"
+endpoints = ["e"]
+
+[[model]]
+name = "gemma"
+description = "an emulated-tools model"
+context = 8192
+tool_dialect = "gemma3_tool_code"
+upstream = "u"
+endpoints = ["e"]
+"#;
+        let routing = routing_from(toml);
+        let plain = routing.model("plain").unwrap();
+        assert_eq!(plain.tool_dialect, "openai");
+        assert_eq!(plain.tools_mode, "native");
+        let gemma = routing.model("gemma").unwrap();
+        assert_eq!(gemma.tool_dialect, "gemma3_tool_code");
+        assert_eq!(gemma.tools_mode, "emulated");
     }
 
     #[test]

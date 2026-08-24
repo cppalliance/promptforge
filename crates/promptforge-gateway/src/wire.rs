@@ -12,6 +12,11 @@
 //! identifiers owned by `promptforge-core` (see the ROUTING-005 disposition),
 //! stringified only at this catalog boundary rather than re-modeled as a closed
 //! gateway enum that would fight core's vocabulary.
+//!
+//! `gateway_warning` is a gateway-specific extension on the OpenAI response
+//! shape: when an emulated tool dialect recovers from a malformed tool fence,
+//! the affected choice's message carries the reason under `gateway_warning`
+//! next to its emptied `content`. Downstream serde ignores the unknown field.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
