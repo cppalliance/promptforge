@@ -349,7 +349,8 @@ All errors use the OpenAI error envelope:
 | Model's upstream cannot serve the route's workload | 400 | `invalid_request_error` | `model_unavailable` |
 | Tool not configured | 404 | `invalid_request_error` | `not_found` |
 | Bad request body | 400 | `invalid_request_error` | `malformed_request` |
-| Backend unreachable | 502 | `server_error` | `upstream_transport` |
+| Backend connection failed before the request was sent | 502 | `server_error` | `upstream_connect` |
+| Backend unreachable mid-flight (read/timeout) | 502 | `server_error` | `upstream_transport` |
 | Backend decode failure | 502 | `server_error` | `upstream_protocol` |
 | Backend 4xx | upstream's | `invalid_request_error` | `upstream_client_error` |
 | Backend 5xx | 502 | `server_error` | `upstream_error` |
