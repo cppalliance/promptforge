@@ -27,6 +27,8 @@ mod local;
 mod queue;
 mod routing;
 mod runner;
+#[cfg(test)]
+mod testsupport;
 mod tools;
 mod upstream;
 mod web_search_process;

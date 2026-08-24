@@ -17,7 +17,7 @@ use crate::local::error::LocalError;
 ///
 /// # Errors
 /// Returns [`LocalError::InvalidDigest`] when the pin is not 64 hex characters.
-pub(super) fn parse_expected_digest(raw: &str) -> Result<String> {
+pub(crate) fn parse_expected_digest(raw: &str) -> Result<String> {
     let trimmed = raw.trim();
     if trimmed.len() != 64 {
         return Err(LocalError::InvalidDigest {
@@ -35,7 +35,7 @@ pub(super) fn parse_expected_digest(raw: &str) -> Result<String> {
 }
 
 /// Lowercase hex encoding of a finalized SHA-256 hasher.
-pub(super) fn hex_digest(hasher: Sha256) -> String {
+pub(crate) fn hex_digest(hasher: Sha256) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let bytes = hasher.finalize();
     let mut output = String::with_capacity(bytes.len() * 2);
