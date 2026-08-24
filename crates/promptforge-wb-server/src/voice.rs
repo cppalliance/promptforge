@@ -176,7 +176,8 @@ async fn stop_transcript(
 
 /// Starts a new take: clears the buffer, resets the segmenter and the
 /// final-pass pipeline, and spawns the interim loop when an engine is
-/// configured.
+/// configured. Returns the take's segment-completion receiver, which the
+/// session holds to keep the worker's sends from failing mid-take.
 fn begin_take(
     session: u64,
     engine: Option<&Arc<VoiceEngine>>,
@@ -185,12 +186,14 @@ fn begin_take(
     interim: &mut Option<tokio::task::JoinHandle<()>>,
     out: &tokio::sync::mpsc::Sender<Message>,
     status: &StatusBus,
-) {
+) -> Option<std::sync::mpsc::Receiver<String>> {
     lock_buffer(buffer).clear();
     segmenter.reset();
-    if let Some(engine) = engine {
-        engine.final_reset();
-    }
+    let segment_rx = engine.map(|engine| {
+        let (segment_tx, segment_rx) = std::sync::mpsc::channel();
+        engine.final_reset(segment_tx);
+        segment_rx
+    });
     stop_interim(interim);
     if let Some(engine) = engine {
         *interim = Some(spawn_interim_loop(
@@ -207,6 +210,7 @@ fn begin_take(
         Activity::General,
     );
     tracing::info!(session, "voice capture started");
+    segment_rx
 }
 
 /// Sends the take's `final` reply; a false return means the client is gone.
@@ -249,6 +253,8 @@ async fn run_session(
     let mut interim: Option<tokio::task::JoinHandle<()>> = None;
     let mut segmenter = Segmenter::new();
     let mut last_mic_pulse: Option<Instant> = None;
+    // The take's crystallized-segment reports, installed by each `start`.
+    let mut segment_rx: Option<std::sync::mpsc::Receiver<String>> = None;
 
     while let Some(received) = stream.next().await {
         match received {
@@ -290,7 +296,7 @@ async fn run_session(
                 "start" => {
                     frames = 0;
                     last_mic_pulse = None;
-                    begin_take(
+                    segment_rx = begin_take(
                         session,
                         engine.as_ref(),
                         &buffer,
@@ -310,6 +316,13 @@ async fn run_session(
                     let text =
                         stop_transcript(session, engine.as_deref(), &buffer, &segmenter, &status)
                             .await;
+                    // The take's crystallized segment texts are discarded
+                    // until the session wires them into the wire protocol;
+                    // `stop_transcript` has drained the worker's queue by
+                    // now, so this empties exactly this take's reports.
+                    if let Some(rx) = &segment_rx {
+                        while rx.try_recv().is_ok() {}
+                    }
                     tracing::info!(session, frames, "voice capture stopped");
                     if !send_final_reply(&out_tx, text, frames).await {
                         break;
