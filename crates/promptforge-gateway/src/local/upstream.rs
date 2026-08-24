@@ -11,7 +11,7 @@ use crate::error::GatewayError;
 use crate::local::error::LocalError;
 use crate::local::server::{LaunchOptions, ServerGuard};
 use crate::upstream::Upstream;
-use crate::wire::{ChatRequest, ChatResponse};
+use crate::wire::{ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse};
 
 /// Minimum gap between respawn attempts for one local child.
 const RESPAWN_COOLDOWN: Duration = Duration::from_secs(3);
@@ -180,12 +180,22 @@ impl LocalUpstream {
         Self::recover_if_dead(&self.inner)
     }
 
-    async fn forward(
+    /// POST `body` to the child's `{base_url}/{path}` with the per-attempt
+    /// loopback credential and return the success body bytes.
+    ///
+    /// The body read is byte-bounded; decoding is left to the caller so a
+    /// decode failure surfaces as a protocol error, never a transport death
+    /// that would trigger a spurious child respawn (UPSTREAM-003).
+    ///
+    /// # Errors
+    /// Returns [`GatewayError::UpstreamTransport`] on a transport failure and
+    /// [`GatewayError::UpstreamStatus`] with a truncated body on a non-success
+    /// child status.
+    async fn post_json(
         &self,
-        mut req: ChatRequest,
-        upstream_model: &str,
-    ) -> Result<ChatResponse, GatewayError> {
-        let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
+        path: &str,
+        body: &impl serde::Serialize,
+    ) -> Result<Vec<u8>, GatewayError> {
         let (base_url, api_key) = {
             let guard = self
                 .inner
@@ -197,11 +207,8 @@ impl LocalUpstream {
 
         let mut builder = self
             .http
-            .post(format!(
-                "{}/chat/completions",
-                base_url.trim_end_matches('/')
-            ))
-            .json(&req);
+            .post(format!("{}/{path}", base_url.trim_end_matches('/')))
+            .json(body);
         if !api_key.is_empty() {
             builder = builder.bearer_auth(&api_key);
         }
@@ -223,16 +230,49 @@ impl LocalUpstream {
             });
         }
 
-        // Byte-bounded read then decode. A decode failure is a protocol error,
-        // not a transport death, so `send` will not respawn the child on it
-        // (UPSTREAM-003): recovery below fires only on `UpstreamTransport`.
-        let bytes = crate::http_util::read_bytes_capped(response, crate::http_util::MAX_JSON_BODY)
+        crate::http_util::read_bytes_capped(response, crate::http_util::MAX_JSON_BODY)
             .await
-            .map_err(GatewayError::upstream_transport)?;
+            .map_err(GatewayError::upstream_transport)
+    }
+
+    async fn forward(
+        &self,
+        mut req: ChatRequest,
+        upstream_model: &str,
+    ) -> Result<ChatResponse, GatewayError> {
+        let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
+        let bytes = self.post_json("chat/completions", &req).await?;
         let mut parsed: ChatResponse =
             serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
         parsed.model = requested;
         Ok(parsed)
+    }
+
+    async fn forward_embeddings(
+        &self,
+        mut req: EmbeddingRequest,
+        upstream_model: &str,
+    ) -> Result<EmbeddingResponse, GatewayError> {
+        let requested = std::mem::replace(&mut req.model, upstream_model.to_string());
+        let bytes = self.post_json("embeddings", &req).await?;
+        let mut parsed: EmbeddingResponse =
+            serde_json::from_slice(&bytes).map_err(GatewayError::upstream_protocol)?;
+        parsed.model = requested;
+        Ok(parsed)
+    }
+
+    /// Run the dead-child recovery after a transport failure.
+    ///
+    /// Recovery runs on a plain OS thread so reqwest::blocking readiness (used
+    /// by [`ServerGuard::respawn`]) never nests a Tokio runtime inside the
+    /// gateway's async runtime.
+    async fn recover_on_transport(&self, error: GatewayError) -> RecoveryOutcome {
+        let inner = Arc::clone(&self.inner);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(LocalUpstream::recover_if_dead(&inner));
+        });
+        map_recovery_reply(rx.await, error)
     }
 }
 
@@ -246,16 +286,25 @@ impl Upstream for LocalUpstream {
         match self.forward(req.clone(), upstream_model).await {
             Ok(response) => Ok(response),
             Err(error) if matches!(error, GatewayError::UpstreamTransport(_)) => {
-                // Recover on a plain OS thread so reqwest::blocking readiness
-                // (used by ServerGuard::respawn) never nests a Tokio runtime
-                // inside the gateway's async runtime.
-                let inner = Arc::clone(&self.inner);
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                std::thread::spawn(move || {
-                    let _ = tx.send(LocalUpstream::recover_if_dead(&inner));
-                });
-                match map_recovery_reply(rx.await, error) {
+                match self.recover_on_transport(error).await {
                     RecoveryOutcome::Retry => self.forward(req, upstream_model).await,
+                    RecoveryOutcome::Failed(err) => Err(err),
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn send_embeddings(
+        &self,
+        req: EmbeddingRequest,
+        upstream_model: &str,
+    ) -> Result<EmbeddingResponse, GatewayError> {
+        match self.forward_embeddings(req.clone(), upstream_model).await {
+            Ok(response) => Ok(response),
+            Err(error) if matches!(error, GatewayError::UpstreamTransport(_)) => {
+                match self.recover_on_transport(error).await {
+                    RecoveryOutcome::Retry => self.forward_embeddings(req, upstream_model).await,
                     RecoveryOutcome::Failed(err) => Err(err),
                 }
             }

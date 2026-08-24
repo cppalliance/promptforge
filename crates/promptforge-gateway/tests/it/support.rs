@@ -23,6 +23,12 @@ pub(crate) const SCENARIO_MODEL_URL: &str =
 pub(crate) const SCENARIO_MODEL_SHA256: &str =
     "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031";
 
+/// Pinned tiny bge-small-en-v1.5 GGUF, used only by the ignored live-local
+/// embeddings test.
+pub(crate) const SCENARIO_EMBED_MODEL_URL: &str = "https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q8_0.gguf";
+pub(crate) const SCENARIO_EMBED_MODEL_SHA256: &str =
+    "ec38e8da142596baa913124ae50550de284b6916bf59577ef2f0cb9660c2f514";
+
 /// Per-phase timeout so a hung rendezvous fails fast instead of hanging CI.
 pub(crate) const PHASE_TIMEOUT: Duration = Duration::from_secs(10);
 

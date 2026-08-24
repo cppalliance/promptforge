@@ -29,6 +29,7 @@ fn options(think: bool) -> LaunchOptions {
         cache_type_v: "q4_0".to_owned(),
         think,
         chat_template_file: None,
+        embeddings: false,
     }
 }
 
@@ -116,6 +117,15 @@ fn respond(mut stream: TcpStream, model_alias: &str, required_api_key: Option<&s
             "200 OK",
             format!(
                 r#"{{"model":"{model_alias}","choices":[{{"index":0,"message":{{"role":"assistant","content":"ok"}}}}]}}"#
+            ),
+        )
+    } else if request.starts_with("POST /v1/embeddings ")
+        || request.starts_with("POST /embeddings ")
+    {
+        (
+            "200 OK",
+            format!(
+                r#"{{"object":"list","model":"{model_alias}","data":[{{"object":"embedding","index":0,"embedding":[0.1,0.2,0.3]}}],"usage":{{"prompt_tokens":2,"total_tokens":2}}}}"#
             ),
         )
     } else {
@@ -255,6 +265,19 @@ fn launch_args_emit_lane_parallel() {
     let rendered = display_invocation(Path::new("llama-server"), &args);
     assert!(rendered.contains("--parallel 3"));
     assert!(!rendered.contains("--parallel 1"));
+}
+
+#[test]
+fn launch_args_emit_embeddings_for_embedding_kind() {
+    let mut opts = options(false);
+    opts.embeddings = true;
+    let args = server_args(Path::new("embed.gguf"), 1, "alias", "key", &opts);
+    let rendered = display_invocation(Path::new("llama-server"), &args);
+    assert!(rendered.contains("--embeddings"));
+
+    let chat_args = server_args(Path::new("model.gguf"), 1, "alias", "key", &options(false));
+    let chat_rendered = display_invocation(Path::new("llama-server"), &chat_args);
+    assert!(!chat_rendered.contains("--embeddings"));
 }
 
 #[test]
@@ -592,6 +615,73 @@ fn local_upstream_send_respawns_dead_child_once() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     assert_eq!(log[0], (port, alias.clone(), key.clone()));
     assert_eq!(log[1], (port, alias, key));
+}
+
+#[test]
+fn local_upstream_send_embeddings_routes_through_child() {
+    // An embeddings request forwards to the child's `/v1/embeddings` and the
+    // response restores the caller's model name, same contract as chat.
+    use crate::local::upstream::LocalUpstream;
+    use crate::upstream::Upstream;
+    use crate::wire::{EmbeddingInput, EmbeddingRequest};
+    use serde_json::Map;
+
+    let port = free_port().expect("select free port");
+    let mut ports = VecDeque::from([port]);
+    let mut select_port = || {
+        ports.pop_front().ok_or_else(|| LocalError::Port {
+            operation: "unexpected test port selection",
+            source: std::io::Error::other("test port queue exhausted"),
+        })
+    };
+    let mut make_identity = || deterministic_identity(0);
+    let interrupted = AtomicBool::new(false);
+
+    let mut opts = options(false);
+    opts.embeddings = true;
+    let guard = ServerGuard::start_with(
+        Path::new("fake-llama-server"),
+        Path::new("pinned-embed.gguf"),
+        &opts,
+        &interrupted,
+        TEST_POLICY,
+        &mut select_port,
+        &mut make_identity,
+        &ChildSpawner::new(spawn_fake_child),
+    )
+    .expect("fake child should become ready");
+    let alias = guard.model_alias().to_owned();
+
+    let upstream = LocalUpstream::new(
+        guard,
+        PathBuf::from("fake-llama-server"),
+        PathBuf::from("pinned-embed.gguf"),
+        opts,
+        "bge-local".to_owned(),
+    );
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build test runtime");
+    let response = runtime
+        .block_on(upstream.send_embeddings(
+            EmbeddingRequest {
+                model: "bge-local".to_owned(),
+                input: EmbeddingInput::One("embed me".to_owned()),
+                encoding_format: None,
+                rest: Map::new(),
+            },
+            &alias,
+        ))
+        .expect("embeddings send should succeed through the child");
+
+    assert_eq!(response.model, "bge-local");
+    assert_eq!(response.data.len(), 1);
+    assert_eq!(
+        response.data[0].pointer("/embedding"),
+        Some(&serde_json::json!([0.1, 0.2, 0.3]))
+    );
 }
 
 #[test]
