@@ -8,7 +8,7 @@ This crate is one always-on service process. It accepts OpenAI-shaped chat compl
 
 Routing is one exact string match with a 404 on a miss - no prefixes, no aliases, no default model - and the request body is passed through with only `model` substituted, so a sampling parameter the gateway has never heard of reaches the backend anyway and the caller's model name comes back rather than the vendor's. Configuration is one TOML file that rejects an unknown key outright and expands `${VAR}` from the environment before it parses, so a deployment that forgot to export a credential fails at startup rather than serving with a blank one.
 
-What is not here is as load-bearing as what is: no streaming, no retries, no token budget, and no knowledge of prompts or runs. Per-endpoint concurrency limits and a fair waiting queue (`[queue]` / `[[endpoint]].concurrency`) are implemented; a full queue answers 503. Local generative models are served by a gateway-owned `llama-server` subprocess (not in-process FFI). The one process every LLM consumer depends on is deliberately the simplest one in the system.
+What is not here is as load-bearing as what is: no streaming, no retries, no token budget, and no knowledge of prompts or runs. Shared concurrency pools with bounded, fair waiting queues (`[[dominion]]`) are implemented; a full queue answers 503, or 429 under a fail-fast `reject` policy. Local generative models are served by a gateway-owned `llama-server` subprocess (not in-process FFI). The one process every LLM consumer depends on is deliberately the simplest one in the system.
 
 ## The key design choices
 
@@ -42,7 +42,7 @@ What is not here is as load-bearing as what is: no streaming, no retries, no tok
 
 ## Profiles (named configs with include and hot switch)
 
-A profile is a TOML file describing the active model catalog, endpoints, optional devices/lanes, and local models. The gateway runs one profile at a time.
+A profile is a TOML file describing the active model catalog, endpoints, optional dominions, and local models. The gateway runs one profile at a time.
 
 ```
 promptforge-gateway serve gateway.toml --profile analytical
@@ -58,10 +58,9 @@ include = ["base.toml"]
 
 - Paths are relative to the including file
 - Resolution is depth-first; max depth 16; cycles are `ConfigError`
-- Arrays (`endpoint` / `model` / `local_model` / `device`) merge by append; same `id` or `name` is replaced by the later (child) definition
-- A leaf file with only `[[device.lane]]` (no `[[device]]` in that file) parses as a table; those lanes attach to the parent device named by `lane.device`
+- Arrays (`endpoint` / `model` / `local_model` / `dominion`) merge by append; same `id` or `name` is replaced by the later (child) definition
 - Merge type errors include `path:line` when the header can be located in the overlay file
-- Scalars (`server.*`, `queue.*`, `local.cache_dir`) - later wins
+- Scalars (`server.*`, `local.cache_dir`) - later wins
 
 Admin routes (same bearer token as `/v1`):
 
@@ -73,36 +72,33 @@ Admin routes (same bearer token as `/v1`):
 
 `AppState` holds routing, token, web-search, and `LocalRuntime` behind `tokio::sync::RwLock` so switch can rebuild without restarting the HTTP listener. Bind address does not change on switch (restart required).
 
-Optional devices/lanes (Layer 3):
+Optional dominions (shared limits and VRAM budgets):
 
 ```toml
-[[device]]
+[[dominion]]
 id = "anthropic"
-type = "remote"
-concurrency = 10
+kind = "remote"
+max_concurrency = 10
 
-[[device]]
+[[dominion]]
 id = "local-gpu"
-type = "local"
-
-[[device.lane]]
-device = "local-gpu"
-id = "generative"
-concurrency = 1
+kind = "local"
+vram_gb = 24
 
 [[endpoint]]
 id = "anthropic"
-device = "anthropic"   # or keep endpoint-level concurrency =
+dominion = "anthropic"
 # ...
 
 [[local_model]]
 name = "qwen-local"
-device = "local-gpu"
-lane = "generative"
+dominion = "local-gpu"
+parallel = 1
+vram_gb = 14
 # ...
 ```
 
-Remote endpoints may still set `concurrency` directly (Layer 1). Local models default to concurrency 1 when device/lane are omitted. For a local model, that resolved lane concurrency is one knob: it is both the gateway admit limit and `llama-server --parallel`.
+Everything binds by explicit id, kind-checked at validation: an endpoint names a remote dominion, a local model names a local one. One runtime queue instance per dominion is `Arc`-shared by every binder, so the limit is truly shared. An endpoint or local model with no `dominion` is unlimited. For a local model, `parallel` (default 1) is one knob: it is both `llama-server --parallel` and, when no dominion is bound, the gateway admit limit. A local dominion's `vram_gb` is a co-residency budget: every bound model must declare its own estimate, and the estimates must sum within the budget, checked at load and at profile switch.
 
 ## Local generative models (`[[local_model]]`)
 
@@ -393,7 +389,7 @@ impl Config {
 
 `[tools]` carries one optional `[tools.web_search]` table, itself `deny_unknown_fields`, whose keys are tabulated with the route above. Absent, the search route answers 404 and everything else is unaffected.
 
-`validate` rejects a duplicate endpoint id; a duplicate model name; a model with an empty endpoint list; a model naming an endpoint that is not defined; `queue.max_depth` below 1; and an endpoint `concurrency` below 1 when present. `max_depth` is the number of *waiting* requests (not counting in-flight). An omitted `concurrency` means unlimited for that endpoint (queue is a pass-through). Every other check the unbuilt design describes - a model on an `anthropic` endpoint without `default_max_tokens`, an unknown pack name - is about configuration this crate does not parse. An endpoint id that no model references is not an error.
+`validate` rejects a duplicate endpoint id; a duplicate model name; a model with an empty endpoint list; a model naming an endpoint that is not defined; a dominion with a duplicate or empty id, `max_concurrency` or `max_queue` below 1, or `vram_gb` on a remote kind; a binding to an undefined or wrong-kind dominion; and a local dominion whose `vram_gb` budget is over-booked or incomplete. `max_queue` is the number of *waiting* requests (not counting in-flight). An endpoint with no `dominion` is unlimited (its queue is a pass-through). Every other check the unbuilt design describes - a model on an `anthropic` endpoint without `default_max_tokens`, an unknown pack name - is about configuration this crate does not parse. An endpoint id that no model references is not an error.
 
 The `${VAR}` interpolation is a load-time pass over the file's whole text rather than a per-field decoder, so it applies to any string value, and an unresolved variable fails the load before the TOML is parsed. That ordering is why a missing key is reported as a missing environment variable rather than as a type error somewhere further in.
 
