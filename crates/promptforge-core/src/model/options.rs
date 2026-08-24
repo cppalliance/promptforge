@@ -7,7 +7,6 @@ use std::sync::Mutex;
 use serde::Deserialize;
 
 use super::ModelId;
-use crate::dialects::{ToolDialectId, ToolsMode};
 use crate::{Error, Result};
 
 /// The largest sampling temperature the backend accepts.
@@ -103,16 +102,13 @@ pub struct ModelDescriptor {
     description: String,
     context: NonZeroU32,
     thinking: ThinkingMode,
-    tool_dialect: ToolDialectId,
 }
 
 impl ModelDescriptor {
     /// Builds a descriptor from its identity and catalog fields.
     ///
     /// The context window is a [`NonZeroU32`], so a zero-token window is
-    /// unrepresentable. Defaults `tool_dialect` to [`ToolDialectId::OpenAi`].
-    /// Use [`Self::with_dialect`] to override; the tools mode is always derived
-    /// from the dialect, never stored independently.
+    /// unrepresentable.
     ///
     /// # Examples
     ///
@@ -143,34 +139,7 @@ impl ModelDescriptor {
             description: description.into(),
             context,
             thinking,
-            tool_dialect: ToolDialectId::OpenAi,
         }
-    }
-
-    /// Sets the tool dialect. The tools mode is derived from it on demand.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::num::NonZeroU32;
-    /// use promptforge_core::model::{ModelDescriptor, ModelId, ThinkingMode};
-    /// use promptforge_core::dialects::{ToolDialectId, ToolsMode};
-    ///
-    /// let model = ModelDescriptor::new(
-    ///     ModelId::gateway("gemma-local")?,
-    ///     "A local gemma model",
-    ///     NonZeroU32::new(32_768).ok_or("context is non-zero")?,
-    ///     ThinkingMode::Never,
-    /// )
-    /// .with_dialect(ToolDialectId::Gemma3ToolCode);
-    /// assert_eq!(model.tool_dialect(), ToolDialectId::Gemma3ToolCode);
-    /// assert_eq!(model.tools_mode(), ToolsMode::Emulated);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    #[must_use]
-    pub fn with_dialect(mut self, dialect: ToolDialectId) -> Self {
-        self.tool_dialect = dialect;
-        self
     }
 
     /// Returns the stable identity.
@@ -195,21 +164,6 @@ impl ModelDescriptor {
     #[must_use]
     pub fn thinking(&self) -> ThinkingMode {
         self.thinking
-    }
-
-    /// Returns the tool-calling dialect for this model.
-    #[must_use]
-    pub fn tool_dialect(&self) -> ToolDialectId {
-        self.tool_dialect
-    }
-
-    /// Returns whether tool calls are native or emulated.
-    ///
-    /// Derived from [`Self::tool_dialect`]; the mode is never stored separately,
-    /// so it cannot drift from the canonical dialect.
-    #[must_use]
-    pub fn tools_mode(&self) -> ToolsMode {
-        self.tool_dialect.tools_mode()
     }
 }
 
@@ -273,24 +227,21 @@ pub(crate) struct ModelBinding {
     description: String,
     id: ModelId,
     invocation: ModelInvocation,
-    tool_dialect: ToolDialectId,
     context: NonZeroU32,
 }
 
 impl ModelBinding {
     /// Builds a binding atomically from every part a resolved model requires.
     ///
-    /// The `tool_dialect` and the non-zero `context` window are required
-    /// arguments (MODEL-006): there is no fabricated OpenAI default and no
-    /// zero-context sentinel patched in by a later setter, so a binding cannot
-    /// exist in a half-initialized state.
+    /// The non-zero `context` window is a required argument (MODEL-006): there
+    /// is no zero-context sentinel patched in by a later setter, so a binding
+    /// cannot exist in a half-initialized state.
     #[must_use]
     pub(crate) fn new(
         alias: impl Into<String>,
         description: impl Into<String>,
         id: ModelId,
         invocation: ModelInvocation,
-        tool_dialect: ToolDialectId,
         context: NonZeroU32,
     ) -> Self {
         Self {
@@ -298,7 +249,6 @@ impl ModelBinding {
             description: description.into(),
             id,
             invocation,
-            tool_dialect,
             context,
         }
     }
@@ -327,12 +277,6 @@ impl ModelBinding {
         &self.invocation
     }
 
-    /// Returns the tool dialect for this binding.
-    #[must_use]
-    pub(crate) fn tool_dialect(&self) -> ToolDialectId {
-        self.tool_dialect
-    }
-
     /// Returns the catalog context window size in tokens (always non-zero).
     #[must_use]
     pub(crate) fn context(&self) -> NonZeroU32 {
@@ -347,7 +291,6 @@ impl ModelBinding {
             temperature: self.invocation.temperature,
             max_tokens: self.invocation.max_tokens,
             thinking: self.invocation.thinking,
-            tool_dialect: self.tool_dialect,
         }
     }
 }
@@ -367,8 +310,6 @@ pub struct CompletionOptions {
     pub(crate) max_tokens: Option<NonZeroU32>,
     /// When set, emits `chat_template_kwargs.enable_thinking`.
     pub(crate) thinking: Option<bool>,
-    /// Which tool-calling dialect to use for this completion.
-    pub(crate) tool_dialect: ToolDialectId,
 }
 
 // No `Eq`: `temperature` is an `Option<f64>`, so equality is not reflexive for
@@ -376,17 +317,16 @@ pub struct CompletionOptions {
 // honor, breaking every `Eq`/`Hash` consumer's contract.
 
 impl CompletionOptions {
-    /// Builds options for `model` under the given tool-calling `dialect`, with no
-    /// temperature, token cap, or thinking switch.
+    /// Builds options for `model` with no temperature, token cap, or thinking
+    /// switch.
     ///
     /// # Examples
     ///
     /// ```
     /// use std::num::NonZeroU32;
     /// use promptforge_core::model::CompletionOptions;
-    /// use promptforge_core::dialects::ToolDialectId;
     ///
-    /// let options = CompletionOptions::new("analyst", ToolDialectId::OpenAi)
+    /// let options = CompletionOptions::new("analyst")
     ///     .with_temperature(0.2)?
     ///     .with_max_tokens(NonZeroU32::new(256).ok_or("max tokens is non-zero")?)
     ///     .with_thinking(false);
@@ -394,13 +334,12 @@ impl CompletionOptions {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
-    pub fn new(model: impl Into<String>, dialect: ToolDialectId) -> CompletionOptions {
+    pub fn new(model: impl Into<String>) -> CompletionOptions {
         CompletionOptions {
             model: model.into(),
             temperature: None,
             max_tokens: None,
             thinking: None,
-            tool_dialect: dialect,
         }
     }
 
@@ -548,14 +487,13 @@ mod tests {
             temperature: Some(Temperature(f64::NAN)),
             max_tokens: None,
             thinking: None,
-            tool_dialect: ToolDialectId::OpenAi,
         };
         assert_ne!(options, options.clone());
     }
 
     #[test]
     fn with_temperature_rejects_non_finite_and_out_of_range() {
-        let base = || CompletionOptions::new("m", ToolDialectId::OpenAi);
+        let base = || CompletionOptions::new("m");
         assert_eq!(
             base().with_temperature(f64::NAN),
             Err(TemperatureError::NotFinite)

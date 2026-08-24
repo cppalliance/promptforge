@@ -69,7 +69,6 @@ impl ModelResolver for PickerModelResolver<'_> {
                 Ok(ResolvedModel {
                     id,
                     invocation: ModelInvocation::from(opts),
-                    tool_dialect: descriptor.tool_dialect(),
                     context: descriptor.context(),
                 })
             }

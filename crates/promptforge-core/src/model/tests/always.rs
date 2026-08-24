@@ -47,7 +47,6 @@ fn models_always_returns_inspectable_object() {
                assert(bound.thinking == false)
                assert(bound.temperature == 0)
                assert(bound.max_tokens == 256)
-               assert(bound.dialect == "openai")
                local model = models.default("writer")
                assert(model.name == "writer")
                assert(model.model_id == "small")
@@ -55,8 +54,7 @@ fn models_always_returns_inspectable_object() {
                assert(model.context == 8192)
                assert(model.thinking == false)
                assert(model.temperature == 0)
-               assert(model.max_tokens == 256)
-               assert(model.dialect == "openai")"#,
+               assert(model.max_tokens == 256)"#,
     )
     .unwrap();
     assert_eq!(models.default.as_deref(), Some("writer"));
@@ -122,7 +120,6 @@ fn models_always_provides_completion_options_without_use() {
         temperature: Some(Temperature::new(0.0).expect("0.0 is valid")),
         max_tokens: None,
         thinking: Some(false),
-        tool_dialect: ToolDialectId::OpenAi,
     };
     assert_eq!(opts, Some(expected));
     vm.teardown(&NullObserver, "Section");
@@ -190,7 +187,6 @@ fn models_always_multi_arg_provides_completion_options() {
         temperature: Some(Temperature::new(0.0).expect("0.0 is valid")),
         max_tokens: None,
         thinking: Some(false),
-        tool_dialect: ToolDialectId::OpenAi,
     };
     assert_eq!(opts, Some(expected));
     vm.teardown(&NullObserver, "Section");

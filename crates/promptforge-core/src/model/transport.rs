@@ -6,7 +6,6 @@ use serde::Deserialize;
 
 use super::{CompletionError, ModelCatalog, ModelDescriptor, ModelId, ThinkingMode};
 use crate::Error;
-use crate::dialects::{ToolDialectId, ToolsMode};
 
 /// Wire shape of one entry from gateway `GET /v1/models`.
 #[derive(Debug, Deserialize)]
@@ -15,17 +14,6 @@ struct ModelsListEntry {
     description: String,
     context: u32,
     thinking: ThinkingMode,
-    #[serde(default = "default_tool_dialect")]
-    tool_dialect: ToolDialectId,
-    /// Legacy wire field. Read only to validate against the dialect-derived
-    /// mode; never retained, since [`ToolDialectId`] is the sole source of
-    /// truth for the tools mode.
-    #[serde(default)]
-    tools_mode: Option<ToolsMode>,
-}
-
-fn default_tool_dialect() -> ToolDialectId {
-    ToolDialectId::OpenAi
 }
 
 /// Wire shape of gateway `GET /v1/models`.
@@ -204,22 +192,12 @@ pub async fn fetch_model_catalog(
                 id.name()
             )))
         })?;
-        // A legacy `tools_mode` on the wire is validated against the mode the
-        // dialect derives, then discarded. A contradiction is a malformed
-        // catalog, not a second stored value that could drift.
-        if let Some(wire_mode) = entry.tools_mode {
-            let derived = entry.tool_dialect.tools_mode();
-            if wire_mode != derived {
-                return Err(CompletionError::from(Error::MalformedResponse(format!(
-                    "model {} wire tools_mode {wire_mode} contradicts dialect-derived {derived}",
-                    id.name()
-                ))));
-            }
-        }
-        descriptors.push(
-            ModelDescriptor::new(id, entry.description, context, entry.thinking)
-                .with_dialect(entry.tool_dialect),
-        );
+        descriptors.push(ModelDescriptor::new(
+            id,
+            entry.description,
+            context,
+            entry.thinking,
+        ));
     }
     ModelCatalog::new(descriptors).map_err(|error| {
         CompletionError::from(Error::MalformedResponse(format!(
@@ -240,69 +218,6 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
         addr
-    }
-
-    #[test]
-    fn models_list_entry_parses_dialect_fields() {
-        let json = serde_json::json!({
-            "id": "gemma-local",
-            "description": "A Gemma model",
-            "context": 32768,
-            "thinking": "never",
-            "tool_dialect": "gemma3_tool_code",
-            "tools_mode": "emulated"
-        });
-        let entry: ModelsListEntry = serde_json::from_value(json).unwrap();
-        assert_eq!(entry.tool_dialect, ToolDialectId::Gemma3ToolCode);
-        // tools_mode is derived from the dialect at runtime, not read from the wire.
-        assert_eq!(entry.tool_dialect.tools_mode(), ToolsMode::Emulated);
-    }
-
-    #[test]
-    fn models_list_entry_defaults_to_openai_native() {
-        let json = serde_json::json!({
-            "id": "remote",
-            "description": "A remote model",
-            "context": 8192,
-            "thinking": "never"
-        });
-        let entry: ModelsListEntry = serde_json::from_value(json).unwrap();
-        assert_eq!(entry.tool_dialect, ToolDialectId::OpenAi);
-        assert_eq!(entry.tool_dialect.tools_mode(), ToolsMode::Native);
-    }
-
-    #[tokio::test]
-    async fn fetch_model_catalog_rejects_a_wire_tools_mode_that_contradicts_the_dialect() {
-        use axum::Router;
-        use axum::routing::get;
-
-        // MODEL-008: a wire `tools_mode` is validated against the mode derived
-        // from `tool_dialect`. An OpenAI (native) dialect paired with an
-        // `emulated` wire mode is contradictory and must be refused as malformed
-        // rather than silently keeping one of the two.
-        async fn models() -> axum::Json<serde_json::Value> {
-            axum::Json(serde_json::json!({
-                "data": [{
-                    "id": "remote",
-                    "description": "a remote model",
-                    "context": 8192,
-                    "thinking": "never",
-                    "tool_dialect": "openai",
-                    "tools_mode": "emulated"
-                }]
-            }))
-        }
-        let app = Router::new().route("/models", get(models));
-        let addr = spawn_models(app).await;
-
-        let err = fetch_model_catalog(&format!("http://{addr}"), "tok")
-            .await
-            .expect_err("a contradictory wire tools_mode must be rejected");
-        assert_eq!(err.kind(), CompletionErrorKind::MalformedResponse);
-        assert!(
-            err.to_string().contains("contradicts"),
-            "the rejection must name the contradiction, got {err}"
-        );
     }
 
     #[tokio::test]

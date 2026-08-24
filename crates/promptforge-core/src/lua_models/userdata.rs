@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use mlua::{Lua, UserData, UserDataFields, UserDataMethods, Value};
 
-use crate::dialects::ToolDialectId;
 use crate::model::ModelBinding;
 
 /// Host hook that runs `handle:infer` from Lua via the executor's shared
@@ -111,16 +110,6 @@ impl LuaModelHandle {
             .max_tokens
             .map(std::num::NonZeroU32::get)
     }
-
-    /// Returns the tool-calling dialect id.
-    ///
-    /// Returns the closed [`ToolDialectId`] identity; the `String` allocation
-    /// happens only in the Lua userdata field callback, at the boundary that
-    /// actually needs a Lua string.
-    #[must_use]
-    pub(crate) fn dialect(&self) -> ToolDialectId {
-        self.binding.tool_dialect()
-    }
 }
 
 impl UserData for LuaModelHandle {
@@ -132,7 +121,6 @@ impl UserData for LuaModelHandle {
         fields.add_field_method_get("thinking", |_, this| Ok(this.thinking()));
         fields.add_field_method_get("temperature", |_, this| Ok(this.temperature()));
         fields.add_field_method_get("max_tokens", |_, this| Ok(this.max_tokens()));
-        fields.add_field_method_get("dialect", |_, this| Ok(this.dialect().to_string()));
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {

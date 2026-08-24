@@ -15,7 +15,6 @@ use promptforge_tool_picker::{Catalog, ToolDescriptor, ToolId as PickerToolId};
 use serde_json::Value;
 
 use crate::Result;
-use crate::dialects::ToolDialectId;
 
 mod error;
 mod ids;
@@ -209,8 +208,6 @@ pub(crate) struct ResolvedModel {
     pub(crate) id: ModelId,
     /// Frozen per-request fields from the bind's opts.
     pub(crate) invocation: ModelInvocation,
-    /// The tool dialect from the catalog entry.
-    pub(crate) tool_dialect: ToolDialectId,
     /// The catalog context window size in tokens (always non-zero).
     pub(crate) context: NonZeroU32,
 }

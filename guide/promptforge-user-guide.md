@@ -234,15 +234,13 @@ Clients discover available models by calling `GET /v1/models` with a bearer toke
       "parallel_tool_calls": true,
       "effort_levels": ["low", "high"],
       "default_effort": "low",
-      "adaptive_thinking": false,
-      "tool_dialect": "openai",
-      "tools_mode": "native"
+      "adaptive_thinking": false
     }
   ]
 }
 ```
 
-Each entry includes the model's kind, context window, thinking mode, capability metadata, and tool-calling dialect so clients can make binding decisions before sending a request. The flags (`images`, `parallel_tool_calls`, `adaptive_thinking`) and `effort_levels` are always present; the optional knobs (`max_output`, `default_temperature`, `default_effort`) appear only when configured.
+Each entry includes the model's kind, context window, thinking mode, and capability metadata so clients can make binding decisions before sending a request. The flags (`images`, `parallel_tool_calls`, `adaptive_thinking`) and `effort_levels` are always present; the optional knobs (`max_output`, `default_temperature`, `default_effort`) appear only when configured.
 
 A chat completion request names a model and provides messages:
 
@@ -278,7 +276,7 @@ For a non-streaming chat completion to such a model the gateway emulates the pro
 
 Recovery is warn-and-continue, never silent and never fatal: a recognized-but-malformed fence (unterminated, empty, an invalid call line, or trailing prose after the fence) yields an empty `content` plus a `gateway_warning` field on the message carrying the reason, and the recovery is logged at warn. `gateway_warning` is a gateway-specific extension on the OpenAI response shape; downstream clients should ignore unknown fields. The dialect uses content-fence parsing only - the gateway never sets `response_format: json_object`.
 
-Emulation applies to non-streaming completions only; a `stream: true` request is forwarded unchanged. The catalog entry for an emulated model reports `tool_dialect: "gemma3_tool_code"` and `tools_mode: "emulated"`.
+Emulation applies to non-streaming completions only; a `stream: true` request is forwarded unchanged.
 
 ### Streaming
 
@@ -687,7 +685,7 @@ When `sha256` is set, the downloaded file is verified against the digest.
 
 #### Tool-calling dialect detection
 
-After a local child reports ready, the gateway queries its `/props` endpoint and resolves a tool-calling dialect through promptforge-core's `ToolDialectRegistry`. The catalog advertises the resolved `tool_dialect` (e.g. `openai`, `gemma3_tool_code`) and `tools_mode` (`native` or `emulated`). A sidecar `.md` file beside the GGUF (with frontmatter and a Jinja chat template) provides fallback evidence when `/props` omits `chat_template`; live props always win. The probe runs for `kind = "chat"` children only: a non-chat child has no chat template to evidence a dialect, so its catalog entry carries the default `openai` dialect, same as a remote model.
+After a local child reports ready, the gateway queries its `/props` endpoint and resolves a tool-calling dialect from that evidence, hard-failing on ambiguous or absent evidence so a local model never silently defaults to an incorrect dialect. A sidecar `.md` file beside the GGUF (with frontmatter and a Jinja chat template) provides fallback evidence when `/props` omits `chat_template`; live props always win. The probe runs for `kind = "chat"` children only: a non-chat child has no chat template to evidence a dialect, so it carries the default `openai` dialect, same as a remote model. The resolved dialect is gateway-internal and selects how tool calls are emulated; it is not advertised in the catalog.
 
 #### Child supervision
 
@@ -989,13 +987,11 @@ local review = critic:infer("Critique this draft: " .. reply)
 
 #### Inspecting Model Properties
 
-After binding, a model handle's frozen properties are accessible from Lua: `name`, `model_id`, `description`, `context`, `thinking`, `temperature`, `max_tokens`, and `dialect`.
+After binding, a model handle's frozen properties are accessible from Lua: `name`, `model_id`, `description`, `context`, `thinking`, `temperature`, and `max_tokens`.
 
-#### Catalog and Dialects
+#### Model Catalog
 
 The library fetches a live model catalog from a gateway's `GET /v1/models` endpoint with bearer authentication. The caller provides a model catalog built from descriptors with identity, description, context window, and thinking mode (Always, Switchable, or Never).
-
-Two tool-calling dialects ship: OpenAI (native tool calls) and Gemma-3 tool_code (emulated via content fences). Dialect resolution is automatic from model catalog evidence - endpoint capabilities, chat template markers, model id, and source provenance.
 
 ---
 
@@ -1262,7 +1258,6 @@ Every public boundary returns its own typed error rather than one crate-wide err
 | `StoreError` | NotFound, Anchor, InvalidAnchor, InvalidPath, InvalidPattern, Backend | `is_not_found()`, `path()` |
 | `ToolError` | InvalidArguments, Backend, Transport, Cancelled, Other | `is_retryable()`, `is_cancelled()` |
 | `ParseError` | (by kind) | `kind()`, `span()` |
-| `DialectError` | NoMatch, Tie, Unknown | `kind()` |
 
 Backend error bodies are accessible through opt-in accessors but never leak into Display output.
 
