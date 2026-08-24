@@ -10,6 +10,23 @@
   --danger: #b0606a;
   --font-prose: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+  --status-bar-height: 24px;
+  --status-bar-bg: var(--bg-raised);
+  --status-bar-text: var(--text-dim);
+  --status-bar-text-error: #cf7f88;
+  --status-bar-padding-inline: 12px;
+  --status-bar-gap: 12px;
+  --progress-width: 96px;
+  --progress-height: 6px;
+  --progress-fill: #4caf7d;
+  --progress-track: rgba(255, 255, 255, 0.08);
+  --progress-glow: 4px;
+  --led-size: 10px;
+  --led-green: #4caf7d;
+  --led-amber: #d9a03f;
+  --led-off: rgba(255, 255, 255, 0.08);
+  --led-glow-radius: 6px;
+  --led-pulse-ms: 250ms;
 }
 
 * {
@@ -93,7 +110,7 @@ body {
 }
 
 /* The dockview column beside the sidebar: the dock fills it, the status bar
-   sits below. The status bar is an empty placeholder until step 4 fills it. */
+   sits below. */
 .dock-column {
   flex: 1;
   display: flex;
@@ -115,11 +132,48 @@ body {
   height: 100%;
 }
 
+/* The status bar: a permanent footer below the dock. The left text carries
+   the observer's current label; the right slot holds the progress bar or
+   the activity LED (never both - the slot's children are mutually
+   exclusive, driven by the hidden attribute). */
 .status-bar {
   flex: none;
-  height: 24px;
-  background: var(--bg-raised);
+  height: var(--status-bar-height);
+  display: flex;
+  align-items: center;
+  gap: var(--status-bar-gap);
+  padding-inline: var(--status-bar-padding-inline);
+  background: var(--status-bar-bg);
   border-top: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--status-bar-text);
+  user-select: none;
+}
+
+.status-bar__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-bar__text--error {
+  color: var(--status-bar-text-error);
+}
+
+.status-bar__slot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: var(--progress-width);
+}
+
+.status-bar__progress[hidden],
+.status-bar__led[hidden] {
+  display: none;
 }
 
 /* Voice UI: injected into murm-ui's form container by the voice plugin. */
