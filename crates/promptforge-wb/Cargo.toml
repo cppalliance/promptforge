@@ -13,5 +13,14 @@ description = "PromptForge Workbench desktop window shell"
 name = "promptforge-wb"
 path = "src/main.rs"
 
+[dependencies]
+anyhow.workspace = true
+promptforge-wb-server.workspace = true
+tao.workspace = true
+wry.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true
