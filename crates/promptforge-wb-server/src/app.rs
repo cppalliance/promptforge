@@ -88,8 +88,8 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(ui_index))
         .route("/app.js", get(ui_app_js))
+        .route("/app.css", get(ui_app_css))
         .route("/style.css", get(ui_style_css))
-        .route("/markdown-it.min.js", get(ui_markdown_it))
         .route("/pcm-worklet.js", get(ui_pcm_worklet))
         .route("/health", get(health))
         .route("/v1/models", get(models))
@@ -141,14 +141,15 @@ async fn ui_app_js() -> Response {
     ui_asset("app.js", "text/javascript; charset=utf-8")
 }
 
-/// Serves the chat UI's stylesheet.
-async fn ui_style_css() -> Response {
-    ui_asset("style.css", "text/css; charset=utf-8")
+/// Serves the stylesheet esbuild extracts from the bundle's CSS imports
+/// (the vendored murm-ui and dockview styles).
+async fn ui_app_css() -> Response {
+    ui_asset("app.css", "text/css; charset=utf-8")
 }
 
-/// Serves the vendored markdown-it 14.1.0 renderer.
-async fn ui_markdown_it() -> Response {
-    ui_asset("markdown-it.min.js", "text/javascript; charset=utf-8")
+/// Serves the chat UI's own stylesheet.
+async fn ui_style_css() -> Response {
+    ui_asset("style.css", "text/css; charset=utf-8")
 }
 
 /// Serves the AudioWorklet PCM capture processor.
@@ -676,8 +677,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn vendored_markdown_it_is_served_as_javascript() {
-        assert_ui_asset("/markdown-it.min.js", "text/javascript; charset=utf-8").await;
+    async fn bundled_app_css_is_served_as_css() {
+        assert_ui_asset("/app.css", "text/css; charset=utf-8").await;
     }
 
     #[tokio::test]
