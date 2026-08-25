@@ -1,0 +1,71 @@
+# PromptForge Workshop example configuration.
+#
+# The promptforge-ws desktop shell generates ~/.promptforge/workshop.toml
+# from a built-in template on first run, so no setup is needed there. This
+# file is the commented reference: copy it to workshop.toml and edit when
+# you want a configuration the template does not produce - beside the
+# shell's executable or in the current directory to shadow the profile
+# copy, or in the current directory for the promptforge-ws-server binary,
+# which reads workshop.toml from there (or workbench.toml if that is absent).
+#
+# String values support ${VAR} environment interpolation; $$ is a literal
+# $, and an unset variable interpolates to the empty string.
+
+[gateway]
+# Base URL of the PromptForge gateway.
+# Default when empty: "http://127.0.0.1:8081"
+base_url = "http://127.0.0.1:8081"
+# Bearer key for the gateway API. Empty sends no Authorization header.
+api_key = "${PROMPTFORGE_GATEWAY_API_KEY}"
+
+[tape]
+# Path of the JSONL session tape; one event per chat exchange.
+# Default: "tape.jsonl"
+path = "tape.jsonl"
+
+[server]
+# Address the workshop server binds to.
+# Default: "127.0.0.1:7910"
+bind = "127.0.0.1:7910"
+# When true, the server binary opens the system browser at its address once
+# serving. The desktop shell ignores this flag; it exists for the
+# browser-tab frame.
+# Default: false
+open_browser = false
+
+[voice]
+# Path to the GGML whisper model for streaming interim transcription.
+# Empty disables transcription until a source provides the model; the
+# /voice endpoint then captures and counts PCM but emits empty
+# transcripts. A missing file with interim_source set is downloaded
+# through the gateway cache once the gateway connects; a missing file
+# with no source degrades to voice disabled (with a status-bar note),
+# never a startup failure. Models come from
+# https://huggingface.co/ggerganov/whisper.cpp (for example
+# ggml-large-v3-turbo.bin for interim, ggml-large-v3.bin for final).
+interim_model = "models/ggml-large-v3-turbo.bin"
+# Path to the whisper model for the pipelined final pass over a take.
+# Empty falls back to one last interim-model window; a missing file with
+# no final_source drops just the final pass.
+final_model = "models/ggml-large-v3.bin"
+# URL the interim model is downloaded from through the gateway cache when
+# no local file exists.
+# Default: "" (no known source)
+interim_source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+# URL the final-pass model is downloaded from through the gateway cache
+# when no local file exists.
+# Default: "" (no known source)
+final_source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin"
+# Seconds of trailing audio each interim pass transcribes.
+# Default: 5
+window_seconds = 5
+# Milliseconds between interim passes while a take is recording.
+# Default: 800
+interval_ms = 800
+# Domain terms whisper is biased toward (for example project jargon the
+# model would otherwise mishear). The terms are formatted into a glossary
+# conditioning prompt on both the interim and final-pass workers; the
+# glossary is truncated to fit whisper's 224-token prompt budget, with a
+# warning logged when terms are dropped.
+# Default: [] (no biasing)
+# vocabulary = ["MCP", "GGUF", "Lua"]

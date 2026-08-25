@@ -26,20 +26,20 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --workspace --exclude promptforge-wb --exclude promptforge-wb-server --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude promptforge-ws --exclude promptforge-ws-server --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --locked --workspace --exclude promptforge-wb --exclude promptforge-wb-server --all-features
+        run: cargo test --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --all-features
 
       - name: Doctests
-        run: cargo test --workspace --exclude promptforge-wb --exclude promptforge-wb-server --doc
+        run: cargo test --workspace --exclude promptforge-ws --exclude promptforge-ws-server --doc
 
       - name: Docs
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --no-deps --all-features --exclude promptforge-wb --exclude promptforge-wb-server
+        run: cargo doc --workspace --no-deps --all-features --exclude promptforge-ws --exclude promptforge-ws-server
 
-  check-workbench:
+  check-workshop:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,14 +56,14 @@ jobs:
           node-version: 22
 
       - name: Install UI dependencies
-        working-directory: crates/promptforge-wb-server/ui
+        working-directory: crates/promptforge-ws-server/ui
         run: npm ci
 
-      - name: Clippy (workbench)
-        run: cargo clippy -p promptforge-wb -p promptforge-wb-server --all-targets -- -D warnings
+      - name: Clippy (workshop)
+        run: cargo clippy -p promptforge-ws -p promptforge-ws-server --all-targets -- -D warnings
 
-      - name: Test (workbench)
-        run: cargo test --locked -p promptforge-wb -p promptforge-wb-server
+      - name: Test (workshop)
+        run: cargo test --locked -p promptforge-ws -p promptforge-ws-server
 
   msrv:
     runs-on: ubuntu-latest
@@ -77,8 +77,8 @@ jobs:
 
       - name: Build and test on MSRV
         run: |
-          cargo build --locked --workspace --exclude promptforge-wb --exclude promptforge-wb-server --all-features
-          cargo test --locked --workspace --exclude promptforge-wb --exclude promptforge-wb-server --all-features
+          cargo build --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --all-features
+          cargo test --locked --workspace --exclude promptforge-ws --exclude promptforge-ws-server --all-features
 
   supply-chain:
     runs-on: ubuntu-latest

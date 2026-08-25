@@ -1,0 +1,30 @@
+[package]
+name = "promptforge-ws"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+description = "PromptForge Workshop desktop window shell"
+
+[[bin]]
+name = "promptforge-ws"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+promptforge-ws-server.workspace = true
+tao.workspace = true
+wry.workspace = true
+
+[features]
+default = []
+cuda = ["promptforge-ws-server/cuda"]
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
