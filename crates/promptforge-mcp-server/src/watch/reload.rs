@@ -85,7 +85,7 @@ enum ReloadErrorRepr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(
     not(test),
-    expect(
+    allow(
         dead_code,
         reason = "the watcher acts on a reload failure through Display and source; the classifier exists for the tests and for a future caller that must branch on the class"
     )
