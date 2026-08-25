@@ -481,17 +481,47 @@ body {
   flex: none;
 }
 
-/* Recording mic: a steady danger fill with a matching ring and bloom,
-   held on hover too so the state never flickers under the pointer. The
-   hover form needs :not(:disabled) to match the glow rule's specificity -
+/* Recording mic: a steady danger fill with a matching ring and bloom.
+   The hover form needs :not(:disabled) to match the glow rule's specificity -
    the mic also carries mur-form-icon-btn, whose hover would otherwise
    outrank this and strip the fill. */
-.voice-mic--recording,
-.voice-mic--recording:hover:not(:disabled) {
+.voice-mic--recording {
   color: var(--on-danger, #ffffff);
   background: var(--danger, #b0606a);
   border-radius: 50%;
   box-shadow:
     0 0 0 1px var(--danger, #b0606a),
     0 0 6px color-mix(in oklab, var(--danger, #b0606a) 55%, transparent);
+}
+
+.voice-mic--recording:hover:not(:disabled) {
+  color: var(--on-danger, #ffffff);
+  background: var(--danger, #b0606a);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 1px var(--danger, #b0606a),
+    0 0 8px color-mix(in oklab, var(--danger, #b0606a) 70%, transparent);
+}
+
+/* Send button hover: accent glow in both normal and generating states. */
+.mur-action-btn:hover:not(:disabled) {
+  box-shadow:
+    0 0 0 1px var(--hover-glow, #5b9cf5),
+    0 0 4px color-mix(in oklab, var(--hover-glow, #5b9cf5) 40%, transparent);
+}
+
+/* Composer overlap fix: make the form container participate in the column
+   flex flow so the scroll area shrinks to accommodate it. The embedded
+   workbench mode only - murm-ui's standalone keeps absolute positioning. */
+.mur-app-embedded .mur-chat-form-container {
+  position: relative;
+}
+
+.mur-app-embedded.mur-chat-empty .mur-chat-form-container {
+  bottom: auto;
+  transform: none;
+}
+
+.mur-app-embedded .mur-chat-history {
+  padding-bottom: 1rem;
 }

@@ -552,6 +552,216 @@ if (mic && input) {
   }
 }
 
+// Insert-at-cursor: with "ab" in the textarea and the cursor between a and
+// b, record an interim "X"; assert "aXb" and the cursor sits after X.
+if (mic && input) {
+  input.value = "ab";
+  input.setSelectionRange(1, 1);
+  const voiceSocketCount = chatSockets.filter((socket) => socket.url.endsWith("/voice")).length;
+  mic.click();
+  const openDeadline = Date.now() + 5000;
+  let takeSocket;
+  while (Date.now() < openDeadline) {
+    const voiceSockets = chatSockets.filter((socket) => socket.url.endsWith("/voice"));
+    if (voiceSockets.length > voiceSocketCount && typeof voiceSockets.at(-1).onmessage === "function") {
+      takeSocket = voiceSockets.at(-1);
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (!takeSocket) {
+    failures.push("insert-at-cursor: mic click did not open a /voice socket");
+  } else {
+    if (!input.readOnly) {
+      failures.push("insert-at-cursor: input.readOnly must be true during the take");
+    }
+    takeSocket.onmessage({ data: JSON.stringify({ type: "interim", committed: "X", tentative: "" }) });
+    if (input.value !== "aXb") {
+      failures.push(`insert-at-cursor: expected "aXb", got "${input.value}"`);
+    }
+    if (input.selectionStart !== 2) {
+      failures.push(`insert-at-cursor: cursor expected at 2, got ${input.selectionStart}`);
+    }
+    takeSocket.onmessage({ data: JSON.stringify({ type: "final", text: "Y" }) });
+    if (input.value !== "aYb") {
+      failures.push(`insert-at-cursor final: expected "aYb", got "${input.value}"`);
+    }
+    if (input.readOnly) {
+      failures.push("insert-at-cursor: readOnly not cleared after final");
+    }
+    // FakeWebSocket doesn't auto-fire onclose; trigger it so voice state resets.
+    takeSocket.onclose?.();
+  }
+}
+
+// Selection replacement: with "ab" fully selected, record an interim "X";
+// assert the box shows "X".
+if (mic && input) {
+  input.value = "ab";
+  input.setSelectionRange(0, 2);
+  const voiceSocketCount = chatSockets.filter((socket) => socket.url.endsWith("/voice")).length;
+  mic.click();
+  const openDeadline = Date.now() + 5000;
+  let takeSocket;
+  while (Date.now() < openDeadline) {
+    const voiceSockets = chatSockets.filter((socket) => socket.url.endsWith("/voice"));
+    if (voiceSockets.length > voiceSocketCount && typeof voiceSockets.at(-1).onmessage === "function") {
+      takeSocket = voiceSockets.at(-1);
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (!takeSocket) {
+    failures.push("selection-replace: mic click did not open a /voice socket");
+  } else {
+    takeSocket.onmessage({ data: JSON.stringify({ type: "interim", committed: "X", tentative: "" }) });
+    if (input.value !== "X") {
+      failures.push(`selection-replace: expected "X", got "${input.value}"`);
+    }
+    takeSocket.onclose?.();
+  }
+}
+
+// Discard on send: start recording, submit a chat, assert REC cleared, the
+// voice socket was closed, and a late final does not write into the textarea.
+if (mic && input && form && recEl) {
+  input.value = "";
+  input.dispatchEvent(new window.Event("input", { bubbles: true }));
+  const voiceSocketCount = chatSockets.filter((socket) => socket.url.endsWith("/voice")).length;
+  mic.click();
+  const openDeadline = Date.now() + 5000;
+  let discardSocket;
+  while (Date.now() < openDeadline) {
+    const voiceSockets = chatSockets.filter((socket) => socket.url.endsWith("/voice"));
+    if (voiceSockets.length > voiceSocketCount && typeof voiceSockets.at(-1).onmessage === "function") {
+      discardSocket = voiceSockets.at(-1);
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (!discardSocket) {
+    failures.push("discard-on-send: mic click did not open a /voice socket");
+  } else {
+    discardSocket.onmessage({ data: JSON.stringify({ type: "interim", committed: "hello", tentative: "" }) });
+    if (!recEl.classList.contains("status-bar__rec--active")) {
+      failures.push("discard-on-send: REC badge not lit before submit");
+    }
+    input.value = "send this";
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    const submitDeadline = Date.now() + 2000;
+    while (recEl.classList.contains("status-bar__rec--active") && Date.now() < submitDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    if (recEl.classList.contains("status-bar__rec--active")) {
+      failures.push("discard-on-send: REC badge not cleared after submit");
+    }
+    if (discardSocket.readyState !== FakeWebSocket.CLOSED) {
+      failures.push("discard-on-send: voice socket was not closed");
+    }
+    if (input.readOnly) {
+      failures.push("discard-on-send: readOnly not cleared after discard");
+    }
+    const valueBeforeLate = input.value;
+    discardSocket.onmessage?.({ data: JSON.stringify({ type: "final", text: "LATE FINAL" }) });
+    if (input.value !== valueBeforeLate) {
+      failures.push("discard-on-send: a late final frame wrote into the textarea after discard");
+    }
+  }
+}
+
+// readOnly during takes: assert readOnly is true during a take and false
+// after a discard.
+if (mic && input) {
+  input.value = "prefix";
+  input.setSelectionRange(6, 6);
+  const voiceSocketCount = chatSockets.filter((socket) => socket.url.endsWith("/voice")).length;
+  mic.click();
+  const openDeadline = Date.now() + 5000;
+  let takeSocket;
+  while (Date.now() < openDeadline) {
+    const voiceSockets = chatSockets.filter((socket) => socket.url.endsWith("/voice"));
+    if (voiceSockets.length > voiceSocketCount && typeof voiceSockets.at(-1).onmessage === "function") {
+      takeSocket = voiceSockets.at(-1);
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (!takeSocket) {
+    failures.push("readOnly-take: mic click did not open a /voice socket");
+  } else {
+    if (!input.readOnly) {
+      failures.push("readOnly-take: input.readOnly must be true during the take");
+    }
+    takeSocket.onmessage({ data: JSON.stringify({ type: "interim", committed: " world", tentative: "" }) });
+    if (input.value !== "prefix world") {
+      failures.push(`readOnly-take: expected "prefix world", got "${input.value}"`);
+    }
+    // Simulate stop via mic click (triggers stopVoice, then final arrives)
+    mic.click();
+    takeSocket.onmessage({ data: JSON.stringify({ type: "final", text: " world" }) });
+    if (input.readOnly) {
+      failures.push("readOnly-take: readOnly not cleared after final");
+    }
+    if (input.value !== "prefix world") {
+      failures.push(`readOnly-take: final text wrong, got "${input.value}"`);
+    }
+  }
+}
+
+// Multi-take composition: first take inserts "hello" at end, second take
+// inserts " world" at the new cursor position (after "hello").
+if (mic && input) {
+  input.value = "start";
+  input.setSelectionRange(5, 5);
+  const voiceSocketCount = chatSockets.filter((socket) => socket.url.endsWith("/voice")).length;
+  mic.click();
+  const openDeadline = Date.now() + 5000;
+  let take1Socket;
+  while (Date.now() < openDeadline) {
+    const voiceSockets = chatSockets.filter((socket) => socket.url.endsWith("/voice"));
+    if (voiceSockets.length > voiceSocketCount && typeof voiceSockets.at(-1).onmessage === "function") {
+      take1Socket = voiceSockets.at(-1);
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  if (!take1Socket) {
+    failures.push("multi-take: first mic click did not open a /voice socket");
+  } else {
+    take1Socket.onmessage({ data: JSON.stringify({ type: "final", text: " hello" }) });
+    if (input.value !== "start hello") {
+      failures.push(`multi-take: after take 1 expected "start hello", got "${input.value}"`);
+    }
+    take1Socket.onclose?.();
+    // Second take: cursor should be at position 11 ("start hello|")
+    const voiceSocketCount2 = chatSockets.filter((socket) => socket.url.endsWith("/voice")).length;
+    mic.click();
+    const openDeadline2 = Date.now() + 5000;
+    let take2Socket;
+    while (Date.now() < openDeadline2) {
+      const voiceSockets = chatSockets.filter((socket) => socket.url.endsWith("/voice"));
+      if (voiceSockets.length > voiceSocketCount2 && typeof voiceSockets.at(-1).onmessage === "function") {
+        take2Socket = voiceSockets.at(-1);
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    if (!take2Socket) {
+      failures.push("multi-take: second mic click did not open a /voice socket");
+    } else {
+      take2Socket.onmessage({ data: JSON.stringify({ type: "final", text: " world" }) });
+      if (input.value !== "start hello world") {
+        failures.push(`multi-take: after take 2 expected "start hello world", got "${input.value}"`);
+      }
+      if (input.readOnly) {
+        failures.push("multi-take: readOnly not cleared after second take");
+      }
+      take2Socket.onclose?.();
+    }
+  }
+}
+
 // Disconnect recovery: a dropped /ws socket resets the bar to its
 // reconnecting state, and the backoff opens a replacement socket (the
 // first retry waits one second).
