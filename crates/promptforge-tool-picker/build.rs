@@ -259,7 +259,7 @@ fn convert(name: &str, view: &TensorView<'_>) -> Result<OwnedTensor> {
     }
 
     let source = view.data();
-    if source.len() % 4 != 0 {
+    if !source.len().is_multiple_of(4) {
         bail!(
             "tensor {name} is F32 but its {} bytes are not a whole number of f32 values",
             source.len()
