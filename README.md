@@ -7,7 +7,7 @@
 
 A runtime that executes AI prompt pipelines defined in a single markdown file. The markdown is the program, the model is the CPU. YAML frontmatter for metadata, embedded Lua for logic, prose blocks for model instructions, and a credential-holding gateway that keeps vendor keys off the prompt process. Write a prompt, run it, get a result.
 
-![Workbench](images/banner-01.png)
+![Workshop](images/banner-01.png)
 
 ## What you get
 
@@ -112,8 +112,8 @@ flowchart LR
 | [promptforge-tool-picker](crates/promptforge-tool-picker) | Semantic tool resolution via sentence embeddings | [![Crates.io](https://img.shields.io/crates/v/promptforge-tool-picker.svg)](https://crates.io/crates/promptforge-tool-picker) |
 | [promptforge-webfetch](crates/promptforge-webfetch) | SSRF-safe web fetch tool for model-supplied URLs | [![Crates.io](https://img.shields.io/crates/v/promptforge-webfetch.svg)](https://crates.io/crates/promptforge-webfetch) |
 | [promptforge-dev](crates/promptforge-dev) | Interactive prompt development with watch mode | [![Crates.io](https://img.shields.io/crates/v/promptforge-dev.svg)](https://crates.io/crates/promptforge-dev) |
-| [promptforge-wb-server](crates/promptforge-wb-server) | Workbench HTTP server: chat relay, session tape, voice transcription | not published |
-| [promptforge-wb](crates/promptforge-wb) | Workbench desktop window shell (wry/tao) | not published |
+| [promptforge-ws-server](crates/promptforge-ws-server) | Workshop HTTP server: chat relay, session tape, voice transcription | not published |
+| [promptforge-ws](crates/promptforge-ws) | Workshop desktop window shell (wry/tao) | not published |
 
 ## Documentation
 
