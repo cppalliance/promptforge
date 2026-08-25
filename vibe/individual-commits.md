@@ -104,3 +104,7 @@ CI's Windows runner has no CUDA toolkit and no whisper fixtures, so 26 whisper t
 
 the reconnect-catalog test was the session's known flake, timing-sensitive under parallel load; the test logic was sound, so the timing assumption, not the test, was the defect. (assistant reasoned, user chose)
 
+## 2026-08-25 Add --workspace to the CI doc build
+
+without --workspace, cargo doc ignores --exclude flags, so the doc job documented crates it was meant to skip. (user supplied the exact diff)
+
