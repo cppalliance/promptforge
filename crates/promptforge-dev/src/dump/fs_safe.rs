@@ -177,8 +177,7 @@ fn create_dir_restricted(dir: &Path) -> io::Result<()> {
 }
 
 /// Creates (truncating) a file owner-only. On Unix the mode is set at creation;
-/// on Windows the ACL is applied separately once the file is closed
-/// ([`restrict_to_owner`]).
+/// on Windows the ACL is applied separately once the file is closed.
 fn create_restricted(path: &Path) -> io::Result<fs::File> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);

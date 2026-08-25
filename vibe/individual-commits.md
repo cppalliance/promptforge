@@ -108,3 +108,7 @@ the reconnect-catalog test was the session's known flake, timing-sensitive under
 
 without --workspace, cargo doc ignores --exclude flags, so the doc job documented crates it was meant to skip. (user supplied the exact diff)
 
+## 2026-08-25 Remove a broken doc link from create_restricted
+
+the doc comment referenced a planned Windows ACL helper that never existed; remove the stale link rather than create the helper. (user reported the CI failure, assistant reasoned)
+
