@@ -1,8 +1,11 @@
 // Push-to-talk voice capture over the /voice WebSocket: binary f32 PCM at
 // 16 kHz mono in, "start"/"stop" control words, and JSON text frames out.
-// An `interim` frame carries the append-only `committed` prefix and the
-// volatile `tentative` suffix; the textarea shows their concatenation live.
-// A `final` frame replaces it with the polished transcript.
+// Dictation behaves like typing at the cursor: each take captures the
+// selection at record start, splices committed+tentative into that range,
+// and sets readOnly so the user cannot disturb the insertion geometry.
+// A `final` frame replaces the inserted region with polished text and
+// releases readOnly; consecutive takes compose because the cursor position
+// is captured fresh each time.
 
 import type { StatusBar } from "./status-bar";
 
@@ -10,6 +13,10 @@ export interface VoiceElements {
   mic: HTMLButtonElement;
   status: HTMLDivElement;
   input: HTMLTextAreaElement;
+}
+
+export interface VoiceHandle {
+  discardIfRecording(): void;
 }
 
 interface VoiceSession {
@@ -20,10 +27,17 @@ interface VoiceSession {
   stream: MediaStream;
 }
 
-export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void {
+interface TakeState {
+  prefix: string;
+  suffix: string;
+}
+
+export function setupVoice(elements: VoiceElements, statusBar: StatusBar): VoiceHandle {
   const { mic, status, input } = elements;
   let voice: VoiceSession | null = null;
   let voiceStatusTimer = 0;
+  let suppressReplies = false;
+  let take: TakeState | null = null;
 
   function showVoiceStatus(text: string, isError: boolean): void {
     status.textContent = text;
@@ -50,13 +64,11 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
     input.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
-  function showInterim(text: string): void {
-    input.value = text;
-    notifyInput();
-  }
-
-  function clearInterim(): void {
-    input.value = "";
+  function spliceValue(text: string): void {
+    if (!take) return;
+    input.value = take.prefix + text + take.suffix;
+    const cursorPos = take.prefix.length + text.length;
+    input.setSelectionRange(cursorPos, cursorPos);
     notifyInput();
   }
 
@@ -73,9 +85,32 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
     session.ctx.close().catch(() => {});
   }
 
+  function finishTake(finalText: string): void {
+    if (!take) return;
+    input.value = take.prefix + finalText + take.suffix;
+    const cursorPos = take.prefix.length + finalText.length;
+    input.setSelectionRange(cursorPos, cursorPos);
+    take = null;
+    input.readOnly = false;
+    input.classList.remove("mur-chat-input--recording");
+    notifyInput();
+  }
+
+  function discardTake(): void {
+    if (!take) return;
+    input.value = take.prefix + take.suffix;
+    const cursorPos = take.prefix.length;
+    input.setSelectionRange(cursorPos, cursorPos);
+    take = null;
+    input.readOnly = false;
+    input.classList.remove("mur-chat-input--recording");
+    notifyInput();
+  }
+
   // Handles one server text message. Returns true when the take is over and
   // the socket should close.
   function handleVoiceMessage(data: unknown): boolean {
+    if (suppressReplies) return true;
     if (typeof data !== "string") {
       return true;
     }
@@ -92,33 +127,42 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
       msg = null;
     }
     if (msg && msg.type === "interim") {
-      // Committed is append-only within a take; tentative is the volatile
-      // suffix and legitimately shrinks as audio crystallizes, so the
-      // display follows the server unconditionally. A space joins the two
-      // only when the committed prefix does not already end in whitespace.
       const committed = typeof msg.committed === "string" ? msg.committed : "";
       const tentative = typeof msg.tentative === "string" ? msg.tentative : "";
       const gap = committed !== "" && tentative !== "" && !/\s$/.test(committed) ? " " : "";
-      showInterim(committed + gap + tentative);
+      spliceValue(committed + gap + tentative);
       return false;
     }
     if (msg && msg.type === "final") {
-      clearInterim();
-      const text = typeof msg.text === "string" ? msg.text.trim() : "";
+      const raw = typeof msg.text === "string" ? msg.text : "";
+      const text = raw.trimEnd();
       if (text !== "") {
-        input.value = text;
-        notifyInput();
+        finishTake(text);
         input.focus();
         showVoiceStatus("Transcript ready - edit, then send.", false);
       } else {
+        finishTake("");
         const frames = typeof msg.frames === "number" ? msg.frames : 0;
         showVoiceStatus(`No speech detected (${frames} PCM frames captured).`, false);
       }
       return true;
     }
     // Anything else is shown verbatim and ends the take.
+    finishTake("");
     showVoiceStatus(String(data), false);
     return true;
+  }
+
+  function beginTake(): void {
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    const value = input.value;
+    take = {
+      prefix: value.slice(0, start),
+      suffix: value.slice(end),
+    };
+    input.readOnly = true;
+    input.classList.add("mur-chat-input--recording");
   }
 
   async function startVoice(): Promise<void> {
@@ -164,6 +208,7 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
       const source = ctx.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(ctx, "pcm-capture");
       const session: VoiceSession = { ws, ctx, source, node, stream };
+      suppressReplies = false;
       node.port.onmessage = (event) => {
         if (voice === session && ws!.readyState === WebSocket.OPEN) {
           ws!.send(event.data);
@@ -179,6 +224,7 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
           voice = null;
           setRecording(false);
           statusBar.setRecording(false);
+          if (take) finishTake("");
           releaseAudio(session);
           showVoiceStatus("The voice connection dropped.", true);
         }
@@ -188,7 +234,7 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
       // keeps the graph pulling on every engine.
       node.connect(ctx.destination);
       voice = session;
-      clearInterim();
+      beginTake();
       ws.send("start");
       setRecording(true);
       statusBar.setRecording(true);
@@ -197,9 +243,6 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
       for (const track of stream.getTracks()) {
         track.stop();
       }
-      // A socket or context that was created before the failure outlives
-      // this function unless closed here; an open socket would hold the
-      // server's session task until the connection times out.
       if (ws) {
         ws.close();
       }
@@ -232,6 +275,19 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
     }
   }
 
+  function discardIfRecording(): void {
+    const session = voice;
+    if (!session) return;
+    suppressReplies = true;
+    voice = null;
+    releaseAudio(session);
+    session.ws.close();
+    discardTake();
+    setRecording(false);
+    statusBar.setRecording(false);
+    showVoiceStatus("Recording discarded.", false);
+  }
+
   mic.addEventListener("click", () => {
     if (voice) {
       stopVoice();
@@ -239,4 +295,6 @@ export function setupVoice(elements: VoiceElements, statusBar: StatusBar): void 
       void startVoice();
     }
   });
+
+  return { discardIfRecording };
 }

@@ -13,7 +13,7 @@ import type { ChatPlugin } from "./chat/core/types";
 import { ChatUI } from "./chat/main";
 import { MemoryStorage } from "./memory-storage";
 import { StatusBar } from "./status-bar";
-import { setupVoice } from "./voice";
+import { setupVoice, type VoiceHandle } from "./voice";
 import { WorkbenchProvider } from "./workbench-provider";
 import { type CatalogModel, WorkbenchSocket } from "./workbench-socket";
 
@@ -41,6 +41,7 @@ function selectedModel(): string {
 
 // The mic button joins murm-ui's composer through the plugin seam; the
 // voice status message sits below the form.
+let voiceHandle: VoiceHandle | null = null;
 const voicePlugin: ChatPlugin = {
   name: "voice",
   onInputMount({ container, form, input }) {
@@ -64,7 +65,10 @@ const voicePlugin: ChatPlugin = {
     status.setAttribute("aria-live", "polite");
     formContainer.appendChild(status);
 
-    setupVoice({ mic, status, input }, statusBar);
+    voiceHandle = setupVoice({ mic, status, input }, statusBar);
+  },
+  onUserSubmit() {
+    voiceHandle?.discardIfRecording();
   },
   // With no model selected there is nothing to send to; the old UI disabled
   // the send button in the same situation.
