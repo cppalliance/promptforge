@@ -5,10 +5,10 @@
 /local/
 /guide/book/
 *.env
-# Voice test fixtures, downloaded out of band (see design-promptforge-wb-1.md).
-/crates/promptforge-wb-server/tests/fixtures/
+# Voice test fixtures, downloaded out of band (see design-promptforge-ws-1.md).
+/crates/promptforge-ws-server/tests/fixtures/
 # UI build pipeline: npm install target and esbuild output (rebuilt by build.rs).
-/crates/promptforge-wb-server/ui/node_modules/
-/crates/promptforge-wb-server/ui/dist/
-# Workbench tape, written to the cwd when the server runs from the repo root.
+/crates/promptforge-ws-server/ui/node_modules/
+/crates/promptforge-ws-server/ui/dist/
+# Workshop tape, written to the cwd when the server runs from the repo root.
 /tape.jsonl

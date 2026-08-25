@@ -14,7 +14,7 @@ promptforge-core = { path = "crates/promptforge-core", version = "0.1.0" }
 promptforge-gateway-config = { path = "crates/promptforge-gateway-config", version = "0.1.0" }
 promptforge-webfetch = { path = "crates/promptforge-webfetch", version = "0.1.0" }
 promptforge-tool-picker = { path = "crates/promptforge-tool-picker", version = "0.1.0" }
-promptforge-wb-server = { path = "crates/promptforge-wb-server", version = "0.1.0" }
+promptforge-ws-server = { path = "crates/promptforge-ws-server", version = "0.1.0" }
 pulldown-cmark = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_yaml_ng = "0.10"
@@ -54,7 +54,7 @@ rmcp = { version = "3.1.0", features = [
 ] }
 tower = { version = "0.5", features = ["util"] }
 arc-swap = "1"
-# Serves the workbench UI: reads ui/dist from disk in debug builds, embeds it
+# Serves the workshop UI: reads ui/dist from disk in debug builds, embeds it
 # into the binary in release builds.
 rust-embed = "8"
 glob = "0.3"

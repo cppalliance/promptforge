@@ -568,7 +568,7 @@ When `sha256` is set, the downloaded file is verified against the digest.
 
 ### The blob cache API
 
-Three bearer-authenticated routes let a client (the workbench, for example) download arbitrary blobs into the same cache on demand:
+Three bearer-authenticated routes let a client (the workshop, for example) download arbitrary blobs into the same cache on demand:
 
 - `POST /v1/cache` with `{"source": "<http(s) URL>", "sha256": "<optional 64-hex pin>"}` ensures the blob is cached. A cache hit answers immediately with `200` JSON `{"path": "...", "status": "ready"}`. A miss answers with `200` `text/event-stream`: `data: {"status":"downloading","bytes":N,"total":N}` progress events (`total` is `null` when the server sent no Content-Length), terminated by `data: {"status":"ready","path":"..."}` or, on failure, `data: {"status":"error","message":"..."}`. A mid-stream failure is an SSE event, not an HTTP error, because the response is already committed.
 - `GET /v1/cache` returns `200` JSON `[{"source", "path", "sha256", "size_bytes"}, ...]` sorted by source.

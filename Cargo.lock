@@ -4027,18 +4027,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptforge-wb"
+name = "promptforge-ws"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "promptforge-wb-server",
+ "promptforge-ws-server",
  "tao",
  "tempfile",
  "wry",
 ]
 
 [[package]]
-name = "promptforge-wb-server"
+name = "promptforge-ws-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
