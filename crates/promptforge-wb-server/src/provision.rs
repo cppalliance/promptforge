@@ -474,6 +474,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn a_cache_hit_activates_the_engine_from_the_cached_paths() {
         let base_url = serve(Router::new().route("/v1/cache", post(mock_cache_ready))).await;
         let client = GatewayClient::new(&base_url, "").expect("client builds in tests");
@@ -511,6 +512,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn a_failed_attempt_reports_an_error_and_retries_on_reconnect() {
         let ready = Arc::new(AtomicBool::new(false));
         let base_url = serve(
@@ -587,6 +589,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn an_active_engine_is_not_reprovisioned() {
         let calls = Arc::new(AtomicBool::new(false));
         let seen = Arc::clone(&calls);
@@ -625,6 +628,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn a_download_stream_activates_the_engine_at_ready() {
         let base_url = serve(mock_cache_stream(
             "data: {\"status\":\"downloading\",\"bytes\":5,\"total\":12}\n\n",
@@ -759,6 +763,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn download_progress_flows_to_the_main_ws_status_feed() {
         // A mock cache answering with an SSE download stream: the first
         // sample has a null total (no Content-Length upstream), the second

@@ -96,3 +96,7 @@ on stopping dictation the edit box emptied for ~400ms before text returned, feel
 
 ## 2026-08-24 Add separator markers to the example prompts
 
+## 2026-08-24 Ignore the tests that require whisper fixtures
+
+CI's Windows runner has no CUDA toolkit and no whisper fixtures, so 26 whisper tests failed while 113 passed; #[ignore] matched how the codebase already handles the fixture dependency. (assistant reasoned, user approved)
+
