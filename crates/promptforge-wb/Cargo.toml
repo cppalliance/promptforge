@@ -19,6 +19,10 @@ promptforge-wb-server.workspace = true
 tao.workspace = true
 wry.workspace = true
 
+[features]
+default = []
+cuda = ["promptforge-wb-server/cuda"]
+
 [dev-dependencies]
 tempfile.workspace = true
 
