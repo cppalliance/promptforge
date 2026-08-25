@@ -183,6 +183,10 @@ pub struct VoiceConfig {
     pub window_seconds: u64,
     /// Milliseconds between interim passes while a take is recording.
     pub interval_ms: u64,
+    /// Domain terms whisper is biased toward (for example `MCP`, `GGUF`,
+    /// `Lua`), formatted into a glossary conditioning prompt on both
+    /// workers. Empty disables biasing.
+    pub vocabulary: Vec<String>,
 }
 
 impl Default for VoiceConfig {
@@ -194,6 +198,7 @@ impl Default for VoiceConfig {
             final_source: String::new(),
             window_seconds: DEFAULT_VOICE_WINDOW_SECONDS,
             interval_ms: DEFAULT_VOICE_INTERVAL_MS,
+            vocabulary: Vec::new(),
         }
     }
 }
@@ -410,6 +415,7 @@ api_key = "k"
         assert!(config.voice.final_source.is_empty());
         assert_eq!(config.voice.window_seconds, DEFAULT_VOICE_WINDOW_SECONDS);
         assert_eq!(config.voice.interval_ms, DEFAULT_VOICE_INTERVAL_MS);
+        assert!(config.voice.vocabulary.is_empty());
     }
 
     #[test]
@@ -460,6 +466,20 @@ interval_ms = 500
         );
         assert_eq!(config.voice.window_seconds, 8);
         assert_eq!(config.voice.interval_ms, 500);
+    }
+
+    #[test]
+    fn voice_section_parses_vocabulary() {
+        let raw = r#"
+[gateway]
+base_url = "http://127.0.0.1:8081"
+api_key = "k"
+
+[voice]
+vocabulary = ["MCP", "GGUF", "Lua"]
+"#;
+        let config = Config::from_toml_str(raw).expect("fixture parses");
+        assert_eq!(config.voice.vocabulary, ["MCP", "GGUF", "Lua"]);
     }
 
     #[test]

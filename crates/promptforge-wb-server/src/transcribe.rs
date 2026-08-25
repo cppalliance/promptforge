@@ -40,6 +40,18 @@ pub(crate) const MIN_WINDOW_SAMPLES: usize = SAMPLE_RATE / 2;
 /// from the front.
 const MAX_PROMPT_CHARS: usize = 800;
 
+/// Whisper's prompt budget in tokens: half the text context
+/// (`whisper_n_text_ctx / 2`). A prompt longer than this is truncated by
+/// whisper.cpp from the front, which would silently drop a glossary
+/// prefix, so prompts are fitted to the budget before being set.
+const MAX_PROMPT_TOKENS: usize = 224;
+
+/// Token budget for the glossary on the final-pass worker; the rest of the
+/// prompt budget is reserved for the segment-conditioning transcript. The
+/// interim worker passes no transcript and fits its glossary to the full
+/// budget.
+const GLOSSARY_TOKEN_BUDGET: usize = MAX_PROMPT_TOKENS / 2;
+
 /// Root-mean-square amplitude of a PCM buffer.
 #[expect(
     clippy::cast_precision_loss,
@@ -104,11 +116,14 @@ impl VoiceEngine {
                 "voice.window_seconds is too large".to_string(),
             ));
         };
-        let transcriber = Transcriber::load(&config.interim_model)?;
+        let transcriber = Transcriber::load(&config.interim_model, &config.vocabulary)?;
         let final_pass = if config.final_model.as_os_str().is_empty() {
             None
         } else {
-            Some(FinalTranscriber::load(&config.final_model)?)
+            Some(FinalTranscriber::load(
+                &config.final_model,
+                &config.vocabulary,
+            )?)
         };
         Ok(Self {
             transcriber,
@@ -251,13 +266,14 @@ impl Transcriber {
     /// Returns [`TranscribeError::LoadModel`] when the model file cannot be
     /// loaded and [`TranscribeError::SpawnWorker`] when the thread cannot be
     /// started.
-    fn load(model_path: &Path) -> Result<Self, TranscribeError> {
+    fn load(model_path: &Path, vocabulary: &[String]) -> Result<Self, TranscribeError> {
         let (job_tx, job_rx) = std::sync::mpsc::channel::<Job>();
         let (init_tx, init_rx) = std::sync::mpsc::sync_channel(1);
         let path = model_path.to_path_buf();
+        let vocabulary = vocabulary.to_vec();
         std::thread::Builder::new()
             .name("whisper-transcribe".to_string())
-            .spawn(move || worker_loop(&path, &job_rx, &init_tx))
+            .spawn(move || worker_loop(&path, &vocabulary, &job_rx, &init_tx))
             .map_err(TranscribeError::SpawnWorker)?;
         init_rx.recv().map_err(|_| TranscribeError::WorkerGone)??;
         Ok(Self { job_tx })
@@ -273,22 +289,29 @@ impl Transcriber {
     }
 }
 
-/// The worker thread's body: load the model, then transcribe jobs in arrival
-/// order until every sender is dropped.
+/// The worker thread's body: load the model, fit the glossary prompt, then
+/// transcribe jobs in arrival order until every sender is dropped.
 fn worker_loop(
     path: &Path,
+    vocabulary: &[String],
     job_rx: &std::sync::mpsc::Receiver<Job>,
     init_tx: &std::sync::mpsc::SyncSender<Result<(), TranscribeError>>,
 ) {
-    let Some((_ctx, mut state)) = load_state(path, init_tx) else {
+    let Some((ctx, mut state)) = load_state(path, init_tx) else {
         return;
     };
+    // The interim pass carries no transcript, so the glossary gets the full
+    // prompt budget.
+    let glossary = fit_glossary(&ctx, vocabulary, MAX_PROMPT_TOKENS);
     while let Ok(job) = job_rx.recv() {
         // The receiver may be gone (session closed mid-pass); the transcript
         // is computed anyway and the send failure ignored.
-        let _ = job
-            .reply
-            .send(transcribe_blocking(&mut state, &job.samples, None, true));
+        let _ = job.reply.send(transcribe_blocking(
+            &mut state,
+            &job.samples,
+            glossary.as_deref(),
+            true,
+        ));
     }
 }
 
@@ -324,17 +347,113 @@ fn load_state(
     }
 }
 
+/// The trailing `max` bytes of `text`, cut at a char boundary.
+fn tail_chars(text: &str, max: usize) -> &str {
+    let mut start = text.len().saturating_sub(max);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    &text[start..]
+}
+
 /// The trailing `MAX_PROMPT_CHARS` chars of `prompt` with null bytes
 /// stripped: whisper's prompt buffer is bounded, and `set_initial_prompt`
 /// panics on null bytes, which a model transcript could in principle
 /// contain.
 fn sanitize_prompt(prompt: &str) -> String {
     let cleaned: String = prompt.chars().filter(|&c| c != '\0').collect();
-    let mut start = cleaned.len().saturating_sub(MAX_PROMPT_CHARS);
-    while !cleaned.is_char_boundary(start) {
-        start += 1;
+    tail_chars(&cleaned, MAX_PROMPT_CHARS).to_string()
+}
+
+/// Formats `vocabulary` as a whisper conditioning prompt in glossary form:
+/// `Glossary: a, b, c.` Terms are trimmed and null bytes stripped (whisper
+/// tokenization rejects them); a vocabulary with no usable terms yields
+/// `None`. The glossary format is a soft probabilistic bias, and measurably
+/// outperforms a raw keyword list.
+pub(crate) fn glossary_prompt(vocabulary: &[String]) -> Option<String> {
+    let terms: Vec<String> = vocabulary
+        .iter()
+        .map(|term| {
+            term.trim()
+                .chars()
+                .filter(|&c| c != '\0')
+                .collect::<String>()
+        })
+        .filter(|term| !term.is_empty())
+        .collect();
+    if terms.is_empty() {
+        return None;
     }
-    cleaned[start..].to_string()
+    Some(format!("Glossary: {}.", terms.join(", ")))
+}
+
+/// Token count of `text` under the model's tokenizer, or `usize::MAX`
+/// when tokenization fails (for example on null bytes, though callers
+/// strip those first).
+///
+/// whisper-rs's `tokenize` cannot be asked "does this fit in N tokens":
+/// the underlying `whisper_tokenize` reports overflow by returning the
+/// required count, which the wrapper then passes to `Vec::set_len` on a
+/// buffer of only `max_tokens` capacity. Tokenizing with one slot per byte
+/// (an upper bound on the token count) and reading the real length
+/// sidesteps the overflow path entirely.
+fn token_count(ctx: &WhisperContext, text: &str) -> usize {
+    ctx.tokenize(text, text.len().max(1))
+        .map_or(usize::MAX, |tokens| tokens.len())
+}
+
+/// Fits the glossary prompt for `vocabulary` within `budget` whisper tokens
+/// (and the prompt char cap), dropping whole terms from the end until it
+/// fits. Returns `None` when the vocabulary has no usable terms or no term
+/// fits, and logs a warning when terms were dropped.
+fn fit_glossary(ctx: &WhisperContext, vocabulary: &[String], budget: usize) -> Option<String> {
+    let mut len = vocabulary.len();
+    let mut fitted = glossary_prompt(vocabulary)?;
+    while fitted.len() > MAX_PROMPT_CHARS || token_count(ctx, &fitted) > budget {
+        len -= 1;
+        if len == 0 {
+            tracing::warn!("no voice vocabulary term fits the prompt budget");
+            return None;
+        }
+        fitted = glossary_prompt(&vocabulary[..len])?;
+    }
+    if len < vocabulary.len() {
+        tracing::warn!(
+            kept = len,
+            dropped = vocabulary.len() - len,
+            "voice vocabulary truncated to fit whisper's prompt budget"
+        );
+    }
+    Some(fitted)
+}
+
+/// Builds the final pass's conditioning prompt: the fitted glossary
+/// followed by as much of the accumulated transcript's tail as fits within
+/// the char cap and whisper's 224-token prompt budget. The transcript trims
+/// from the front (its tail carries the continuity); the glossary is never
+/// trimmed here - it was fitted to its own budget at load.
+fn final_prompt(ctx: &WhisperContext, glossary: Option<&str>, transcript: &str) -> String {
+    let Some(glossary) = glossary else {
+        return sanitize_prompt(transcript);
+    };
+    let cleaned: String = transcript.chars().filter(|&c| c != '\0').collect();
+    let char_budget = MAX_PROMPT_CHARS.saturating_sub(glossary.len() + 1);
+    let mut tail = tail_chars(&cleaned, char_budget).trim_start();
+    loop {
+        if tail.is_empty() {
+            return glossary.to_string();
+        }
+        let combined = format!("{glossary} {tail}");
+        if token_count(ctx, &combined) <= MAX_PROMPT_TOKENS {
+            return combined;
+        }
+        // Drop the tail's first word and retry; a single oversized word is
+        // dropped whole, which ends the loop on the next iteration.
+        tail = match tail.find(char::is_whitespace) {
+            Some(index) => tail[index..].trim_start(),
+            None => "",
+        };
+    }
 }
 
 /// Runs one blocking whisper pass over `samples` and concatenates the
@@ -380,12 +499,17 @@ fn transcribe_blocking(
     Ok(text.trim().to_string())
 }
 
-/// One take's final-pass state: the large model's whisper state plus the
-/// take's accumulated transcript, which conditions each new segment so
-/// domain vocabulary and phrasing survive segmentation.
+/// One take's final-pass state: the large model's whisper context and state
+/// plus the take's accumulated transcript, which conditions each new
+/// segment so domain vocabulary and phrasing survive segmentation. The
+/// glossary prompt (fitted at load from `[voice].vocabulary`) biases every
+/// segment toward the configured domain terms.
 #[derive(Debug)]
 pub(crate) struct FinalPass {
+    ctx: WhisperContext,
     state: whisper_rs::WhisperState,
+    /// The fitted glossary prompt, `None` when no vocabulary is configured.
+    glossary: Option<String>,
     /// Every segment transcript so far, joined by single spaces.
     transcript: String,
     /// The conditioning prompt used on the most recent segment, kept so
@@ -394,14 +518,14 @@ pub(crate) struct FinalPass {
 }
 
 impl FinalPass {
-    /// Loads the final model from `path`.
+    /// Loads the final model from `path` and fits the vocabulary glossary.
     ///
     /// # Errors
     /// Returns [`TranscribeError::LoadModel`] when the model file cannot be
     /// loaded.
-    fn load(path: &Path) -> Result<Self, TranscribeError> {
+    fn load(path: &Path, vocabulary: &[String]) -> Result<Self, TranscribeError> {
         let (init_tx, init_rx) = std::sync::mpsc::sync_channel(1);
-        let Some((_ctx, state)) = load_state(path, &init_tx) else {
+        let Some((ctx, state)) = load_state(path, &init_tx) else {
             return match init_rx.recv() {
                 Ok(Err(error)) => Err(error),
                 // `load_state` reports every outcome on the channel before
@@ -410,8 +534,11 @@ impl FinalPass {
                 _ => Err(TranscribeError::WorkerGone),
             };
         };
+        let glossary = fit_glossary(&ctx, vocabulary, GLOSSARY_TOKEN_BUDGET);
         Ok(Self {
+            ctx,
             state,
+            glossary,
             transcript: String::new(),
             last_prompt: String::new(),
         })
@@ -448,7 +575,7 @@ impl FinalPass {
     fn transcribe_segment(&mut self, samples: &[f32]) -> Result<Option<String>, TranscribeError> {
         let mut segment = None;
         if samples.len() >= MIN_WINDOW_SAMPLES && !is_silence(samples) {
-            let prompt = self.transcript.clone();
+            let prompt = final_prompt(&self.ctx, self.glossary.as_deref(), &self.transcript);
             let text = transcribe_blocking(&mut self.state, samples, Some(&prompt), false)?;
             if !text.is_empty() {
                 if !self.transcript.is_empty() {
@@ -497,13 +624,14 @@ impl FinalTranscriber {
     /// Returns [`TranscribeError::LoadModel`] when the model file cannot be
     /// loaded and [`TranscribeError::SpawnWorker`] when the thread cannot be
     /// started.
-    fn load(model_path: &Path) -> Result<Self, TranscribeError> {
+    fn load(model_path: &Path, vocabulary: &[String]) -> Result<Self, TranscribeError> {
         let (job_tx, job_rx) = std::sync::mpsc::channel::<FinalJob>();
         let (init_tx, init_rx) = std::sync::mpsc::sync_channel(1);
         let path = model_path.to_path_buf();
+        let vocabulary = vocabulary.to_vec();
         std::thread::Builder::new()
             .name("whisper-final".to_string())
-            .spawn(move || final_worker_loop(&path, &job_rx, &init_tx))
+            .spawn(move || final_worker_loop(&path, &vocabulary, &job_rx, &init_tx))
             .map_err(TranscribeError::SpawnWorker)?;
         init_rx.recv().map_err(|_| TranscribeError::WorkerGone)??;
         Ok(Self { job_tx })
@@ -547,10 +675,11 @@ impl FinalTranscriber {
 /// arrival order until every sender is dropped.
 fn final_worker_loop(
     path: &Path,
+    vocabulary: &[String],
     job_rx: &std::sync::mpsc::Receiver<FinalJob>,
     init_tx: &std::sync::mpsc::SyncSender<Result<(), TranscribeError>>,
 ) {
-    let mut pass = match FinalPass::load(path) {
+    let mut pass = match FinalPass::load(path, vocabulary) {
         Ok(pass) => {
             let _ = init_tx.send(Ok(()));
             pass
@@ -765,6 +894,162 @@ mod tests {
     }
 
     #[test]
+    fn glossary_prompt_is_none_without_usable_terms() {
+        assert_eq!(glossary_prompt(&[]), None);
+        assert_eq!(glossary_prompt(&[String::new()]), None);
+        assert_eq!(glossary_prompt(&["  ".to_string()]), None);
+        assert_eq!(glossary_prompt(&["\0".to_string()]), None);
+    }
+
+    #[test]
+    fn glossary_prompt_formats_a_glossary() {
+        let vocabulary: Vec<String> = ["MCP", "GGUF", "Lua"].map(str::to_string).into();
+        assert_eq!(
+            glossary_prompt(&vocabulary),
+            Some("Glossary: MCP, GGUF, Lua.".to_string())
+        );
+    }
+
+    #[test]
+    fn glossary_prompt_cleans_terms() {
+        let vocabulary: Vec<String> = [" tokio ", "ax\0um", ""].map(str::to_string).into();
+        assert_eq!(
+            glossary_prompt(&vocabulary),
+            Some("Glossary: tokio, axum.".to_string())
+        );
+    }
+
+    #[test]
+    fn fit_glossary_keeps_a_vocabulary_that_fits() {
+        let ctx = WhisperContext::new_with_params(
+            fixtures::require_model(),
+            WhisperContextParameters::default(),
+        )
+        .expect("fixture model loads");
+        let vocabulary: Vec<String> = ["MCP", "GGUF", "Lua"].map(str::to_string).into();
+        let fitted =
+            fit_glossary(&ctx, &vocabulary, GLOSSARY_TOKEN_BUDGET).expect("a short glossary fits");
+        assert_eq!(fitted, "Glossary: MCP, GGUF, Lua.");
+    }
+
+    #[test]
+    fn fit_glossary_drops_terms_from_the_end_to_fit() {
+        let ctx = WhisperContext::new_with_params(
+            fixtures::require_model(),
+            WhisperContextParameters::default(),
+        )
+        .expect("fixture model loads");
+        let mut vocabulary: Vec<String> = ["MCP".to_string()].into();
+        for index in 0..200 {
+            vocabulary.push(format!("internationalization{index}"));
+        }
+        let fitted = fit_glossary(&ctx, &vocabulary, GLOSSARY_TOKEN_BUDGET)
+            .expect("the leading terms still fit");
+        assert!(
+            fitted.starts_with("Glossary: MCP, "),
+            "truncation keeps the leading terms: {fitted:?}"
+        );
+        assert!(
+            fitted.len() <= MAX_PROMPT_CHARS,
+            "the fitted glossary respects the char cap"
+        );
+        assert!(
+            token_count(&ctx, &fitted) <= GLOSSARY_TOKEN_BUDGET,
+            "the fitted glossary tokenizes within its budget: {fitted:?}"
+        );
+        let kept = fitted.matches(", ").count();
+        assert!(
+            kept < vocabulary.len(),
+            "terms were dropped to fit: {kept} of {}",
+            vocabulary.len()
+        );
+    }
+
+    #[test]
+    fn final_prompt_without_a_glossary_matches_sanitize() {
+        let ctx = WhisperContext::new_with_params(
+            fixtures::require_model(),
+            WhisperContextParameters::default(),
+        )
+        .expect("fixture model loads");
+        let transcript = "the quick brown fox ".repeat(100);
+        assert_eq!(
+            final_prompt(&ctx, None, &transcript),
+            sanitize_prompt(&transcript)
+        );
+    }
+
+    #[test]
+    fn final_prompt_prepends_the_glossary_and_caps_tokens() {
+        let ctx = WhisperContext::new_with_params(
+            fixtures::require_model(),
+            WhisperContextParameters::default(),
+        )
+        .expect("fixture model loads");
+        let glossary = "Glossary: MCP, GGUF, Lua.";
+        assert_eq!(
+            final_prompt(&ctx, Some(glossary), ""),
+            glossary,
+            "an empty transcript leaves the glossary alone"
+        );
+        let transcript = "the quick brown fox jumps over the lazy dog ".repeat(100);
+        let prompt = final_prompt(&ctx, Some(glossary), &transcript);
+        assert!(
+            prompt.starts_with(glossary),
+            "the glossary leads the prompt: {prompt:?}"
+        );
+        assert!(
+            prompt.len() <= MAX_PROMPT_CHARS,
+            "the combined prompt respects the char cap"
+        );
+        assert!(
+            token_count(&ctx, &prompt) <= MAX_PROMPT_TOKENS,
+            "the combined prompt tokenizes within whisper's budget"
+        );
+        assert!(
+            prompt.contains("lazy dog"),
+            "the transcript's tail survives the trim: {prompt:?}"
+        );
+    }
+
+    #[test]
+    fn final_pass_biases_segments_with_the_glossary() {
+        let vocabulary: Vec<String> = ["MCP", "GGUF"].map(str::to_string).into();
+        let mut pass = FinalPass::load(&fixtures::require_model(), &vocabulary)
+            .expect("final pass loads the fixture model");
+        let first = pass
+            .transcribe_segment(&fixtures::jfk_samples())
+            .expect("segment one transcribes")
+            .expect("segment one appended text");
+        assert!(
+            first.to_lowercase().contains("country"),
+            "segment one names the fixture's words: {first:?}"
+        );
+        assert!(
+            pass.last_prompt().starts_with("Glossary: MCP, GGUF."),
+            "the first segment was conditioned on the glossary: {:?}",
+            pass.last_prompt()
+        );
+        let second = pass
+            .transcribe_segment(&fixtures::jfk_samples())
+            .expect("segment two transcribes")
+            .expect("segment two appended text");
+        assert!(
+            second.to_lowercase().contains("country"),
+            "segment two names the fixture's words: {second:?}"
+        );
+        let prompt = pass.last_prompt();
+        assert!(
+            prompt.starts_with("Glossary: MCP, GGUF. "),
+            "the glossary leads the conditioning prompt: {prompt:?}"
+        );
+        assert!(
+            prompt.contains(&first),
+            "the transcript follows the glossary: {prompt:?}"
+        );
+    }
+
+    #[test]
     fn missing_final_model_fails_engine_construction() {
         let config = VoiceConfig {
             interim_model: fixtures::require_model(),
@@ -877,7 +1162,7 @@ mod tests {
 
     #[test]
     fn final_pass_conditions_each_segment_on_the_accumulated_transcript() {
-        let mut pass = FinalPass::load(&fixtures::require_model())
+        let mut pass = FinalPass::load(&fixtures::require_model(), &[])
             .expect("final pass loads the fixture model");
         let jfk = fixtures::jfk_samples();
 
@@ -928,7 +1213,7 @@ mod tests {
 
     #[test]
     fn final_pass_reset_forgets_the_accumulated_transcript() {
-        let mut pass = FinalPass::load(&fixtures::require_model())
+        let mut pass = FinalPass::load(&fixtures::require_model(), &[])
             .expect("final pass loads the fixture model");
         let jfk = fixtures::jfk_samples();
 
@@ -958,7 +1243,7 @@ mod tests {
 
     #[test]
     fn final_pass_skips_silence_without_touching_the_transcript() {
-        let mut pass = FinalPass::load(&fixtures::require_model())
+        let mut pass = FinalPass::load(&fixtures::require_model(), &[])
             .expect("final pass loads the fixture model");
         let segment = pass
             .transcribe_segment(&vec![0.0; SAMPLE_RATE * 2])
