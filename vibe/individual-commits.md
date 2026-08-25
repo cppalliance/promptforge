@@ -100,3 +100,7 @@ on stopping dictation the edit box emptied for ~400ms before text returned, feel
 
 CI's Windows runner has no CUDA toolkit and no whisper fixtures, so 26 whisper tests failed while 113 passed; #[ignore] matched how the codebase already handles the fixture dependency. (assistant reasoned, user approved)
 
+## 2026-08-24 Widen the reconnect-catalog test deadline and ignore it
+
+the reconnect-catalog test was the session's known flake, timing-sensitive under parallel load; the test logic was sound, so the timing assumption, not the test, was the defect. (assistant reasoned, user chose)
+
