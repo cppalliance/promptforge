@@ -824,6 +824,7 @@ mod tests {
     use crate::transcribe::fixtures;
 
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn transcribes_known_speech_fixture() {
         let config = VoiceConfig {
             interim_model: fixtures::require_model(),
@@ -920,6 +921,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn fit_glossary_keeps_a_vocabulary_that_fits() {
         let ctx = WhisperContext::new_with_params(
             fixtures::require_model(),
@@ -933,6 +935,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn fit_glossary_drops_terms_from_the_end_to_fit() {
         let ctx = WhisperContext::new_with_params(
             fixtures::require_model(),
@@ -966,6 +969,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn final_prompt_without_a_glossary_matches_sanitize() {
         let ctx = WhisperContext::new_with_params(
             fixtures::require_model(),
@@ -980,6 +984,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn final_prompt_prepends_the_glossary_and_caps_tokens() {
         let ctx = WhisperContext::new_with_params(
             fixtures::require_model(),
@@ -1013,6 +1018,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn final_pass_biases_segments_with_the_glossary() {
         let vocabulary: Vec<String> = ["MCP", "GGUF"].map(str::to_string).into();
         let mut pass = FinalPass::load(&fixtures::require_model(), &vocabulary)
@@ -1050,6 +1056,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn missing_final_model_fails_engine_construction() {
         let config = VoiceConfig {
             interim_model: fixtures::require_model(),
@@ -1069,6 +1076,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn final_pass_entry_points_are_no_ops_without_a_final_model() {
         let config = VoiceConfig {
             interim_model: fixtures::require_model(),
@@ -1085,6 +1093,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn final_submit_reports_the_segment_on_the_take_channel() {
         let config = VoiceConfig {
             interim_model: fixtures::require_model(),
@@ -1128,6 +1137,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn final_finish_with_a_silent_tail_returns_empty_after_draining() {
         let config = VoiceConfig {
             interim_model: fixtures::require_model(),
@@ -1161,6 +1171,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn final_pass_conditions_each_segment_on_the_accumulated_transcript() {
         let mut pass = FinalPass::load(&fixtures::require_model(), &[])
             .expect("final pass loads the fixture model");
@@ -1212,6 +1223,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn final_pass_reset_forgets_the_accumulated_transcript() {
         let mut pass = FinalPass::load(&fixtures::require_model(), &[])
             .expect("final pass loads the fixture model");
@@ -1242,6 +1254,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn final_pass_skips_silence_without_touching_the_transcript() {
         let mut pass = FinalPass::load(&fixtures::require_model(), &[])
             .expect("final pass loads the fixture model");

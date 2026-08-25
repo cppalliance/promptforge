@@ -686,6 +686,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn speech_fixture_produces_interim_and_final_transcripts() {
         let (url, _tape_dir) = spawn_voice_server(test_voice_config()).await;
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
@@ -742,6 +743,7 @@ mod tests {
     /// fallback's uncommitted slice would come back empty. The final reply
     /// must still name the fixture's words.
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn stop_without_a_final_model_keeps_audio_past_a_silence_gap() {
         let (url, _tape_dir) = spawn_voice_server(test_voice_config()).await;
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
@@ -787,6 +789,7 @@ mod tests {
     /// point at the tiny fixture model; production config selects large-v3
     /// for the final pass.
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn stop_frame_is_the_committed_prefix_plus_the_tail() {
         let voice = VoiceConfig {
             interim_model: fixtures::require_model(),
@@ -881,6 +884,7 @@ mod tests {
     /// must not transcribe the silent tail (whisper hallucinates on
     /// silence); the final frame is exactly the committed prefix.
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn stop_at_a_segment_boundary_returns_the_committed_prefix() {
         let voice = VoiceConfig {
             interim_model: fixtures::require_model(),
@@ -979,6 +983,7 @@ mod tests {
     /// tail's own text - must open with the last committed prefix, which a
     /// replace-instead-of-append regression would break.
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn interim_frames_carry_append_only_committed() {
         let voice = VoiceConfig {
             interim_model: fixtures::require_model(),
@@ -1066,6 +1071,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     async fn silence_produces_no_interims_and_an_empty_final() {
         let (url, _tape_dir) = spawn_voice_server(test_voice_config()).await;
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
