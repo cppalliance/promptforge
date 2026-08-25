@@ -74,3 +74,4 @@
 - [2026-08-24-3-voice-ux-fixes] semantic activity signals: Status activity describes model state, not transport identity - thinking, generating, recording, and general are distinct user meanings.
 - [2026-08-24-3-voice-ux-fixes] editable voice result: Final transcription replaces interim text in the normal auto-growing composer so the user can inspect and edit it before sending.
 - [2026-08-24-4-progressive-transcription] capped vocabulary bias: Domain vocabulary is a soft glossary prompt shared by interim and final decoding and truncated to the model prompt budget.
+- [2026-08-24-5-stop-recording-on-send] close without stop: A mid-recording submit closes the voice socket without requesting a final decode because the visible composer text is authoritative.
