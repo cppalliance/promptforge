@@ -26,26 +26,50 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude promptforge-wb --exclude promptforge-wb-server --all-targets --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --locked --workspace --all-features
+        run: cargo test --locked --workspace --exclude promptforge-wb --exclude promptforge-wb-server --all-features
 
       - name: Doctests
-        run: cargo test --workspace --doc
+        run: cargo test --workspace --exclude promptforge-wb --exclude promptforge-wb-server --doc
 
       - name: Docs
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --no-deps --all-features --exclude promptforge-wb --exclude promptforge-wb-server
+
+  check-workbench:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install UI dependencies
+        working-directory: crates/promptforge-wb-server/ui
+        run: npm ci
+
+      - name: Clippy (workbench)
+        run: cargo clippy -p promptforge-wb -p promptforge-wb-server --all-targets -- -D warnings
+
+      - name: Test (workbench)
+        run: cargo test --locked -p promptforge-wb -p promptforge-wb-server
 
   msrv:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Verify the declared MSRV (workspace.package.rust-version) instead of
-      # trusting it: build and test on exactly that toolchain.
       - uses: dtolnay/rust-toolchain@1.89.0
 
       - name: Cache cargo
@@ -53,8 +77,8 @@ jobs:
 
       - name: Build and test on MSRV
         run: |
-          cargo build --locked --workspace --all-features
-          cargo test --locked --workspace --all-features
+          cargo build --locked --workspace --exclude promptforge-wb --exclude promptforge-wb-server --all-features
+          cargo test --locked --workspace --exclude promptforge-wb --exclude promptforge-wb-server --all-features
 
   supply-chain:
     runs-on: ubuntu-latest
@@ -66,13 +90,8 @@ jobs:
       - name: Install cargo-deny and cargo-audit
         run: cargo install cargo-deny cargo-audit --locked
 
-      # Advisories, licenses, duplicate versions, and source policy (deny.toml).
       - name: cargo deny
         run: cargo deny check
 
-      # RUSTSEC vulnerability scan of the committed lockfile.
       - name: cargo audit
         run: cargo audit
-
-      # Unused-dependency hygiene: run `cargo machete` locally
-      # (`cargo install cargo-machete`) before adding or removing dependencies.
