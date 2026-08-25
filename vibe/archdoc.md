@@ -49,7 +49,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A66. Streaming holds admission for its full lifetime, cancels upstream work on disconnect, and validates chunks without whole-body buffering.
 
 
-- A70. The gateway alone downloads, verifies, lists, and deletes model artifacts while streaming progress to clients.
 
 
 - A72. Voice transcription publishes an append-only committed prefix plus a volatile bounded-window tail; empty tail updates cannot erase settled text.
@@ -58,6 +57,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A74. Voice takes replace a captured composer selection while editing is locked; submit discards the active take and every late frame.
 
 - A75. Gateway clients bound connection and buffered-request waits; streaming uses lifecycle cancellation instead of a whole-request deadline.
+
+- A76. Workshop uses workshop.toml canonically and accepts workbench.toml only as a migration fallback.
 
 ## Principles
 
