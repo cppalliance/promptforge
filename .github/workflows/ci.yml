@@ -37,7 +37,7 @@ jobs:
       - name: Docs
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --all-features --exclude promptforge-wb --exclude promptforge-wb-server
+        run: cargo doc --workspace --no-deps --all-features --exclude promptforge-wb --exclude promptforge-wb-server
 
   check-workbench:
     runs-on: windows-latest
