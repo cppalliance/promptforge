@@ -964,6 +964,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires whisper test fixtures (tests/fixtures/)"]
     fn a_missing_unsourced_final_model_drops_the_final_pass() {
         let status = StatusBus::new();
         let mut rx = status.subscribe();
