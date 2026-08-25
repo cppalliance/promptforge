@@ -19,6 +19,17 @@ use serde::{Deserialize, Serialize};
 /// seconds keeps the probe well under the heartbeat interval it serves.
 const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// TCP connect timeout applied to every request. A gateway that is down or
+/// unreachable should fail fast rather than hanging for the OS default (~21 s
+/// on Linux, ~75 s on Windows).
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Whole-request timeout for non-streaming operations: model catalog fetch,
+/// buffered chat completions, and the initial cache API handshake. Streaming
+/// responses (SSE chat and cache downloads) use no whole-request timeout
+/// since they can legitimately run for minutes.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// A non-streaming chat completion request forwarded to the gateway.
 ///
 /// This is the body accepted by the workbench's `POST /chat` and sent
@@ -214,6 +225,7 @@ impl GatewayClient {
     /// Returns [`GatewayError::Build`] if the TLS backend cannot initialize.
     pub fn new(base_url: &str, api_key: &str) -> Result<Self, GatewayError> {
         let http = reqwest::Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .map_err(|source| GatewayError::Build(Box::new(source)))?;
         Ok(Self {
@@ -264,6 +276,7 @@ impl GatewayClient {
     pub async fn list_models(&self) -> Result<GatewayResponse, GatewayError> {
         let response = self
             .authorize(self.http.get(format!("{}/v1/models", self.base_url)))
+            .timeout(REQUEST_TIMEOUT)
             .send()
             .await
             .map_err(|source| GatewayError::Transport(Box::new(source)))?;
@@ -290,6 +303,7 @@ impl GatewayClient {
                     .post(format!("{}/v1/chat/completions", self.base_url)),
             )
             .json(request)
+            .timeout(REQUEST_TIMEOUT)
             .send()
             .await
             .map_err(|source| GatewayError::Transport(Box::new(source)))?;
