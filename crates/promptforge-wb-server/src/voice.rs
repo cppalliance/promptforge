@@ -743,7 +743,7 @@ mod tests {
             .await
             .expect("send start");
         send_samples(&mut socket, &fixtures::jfk_samples()).await;
-        send_pcm(&mut socket, 16000).await;
+        send_pcm(&mut socket, 3 * 16000).await;
         socket
             .send(tungstenite::Message::Text("stop".into()))
             .await
@@ -767,7 +767,7 @@ mod tests {
     }
 
     /// The stop path's tail-only finish: two speech segments separated by a
-    /// silence gap (the jfk fixture, a second of zeros, then the fixture
+    /// silence gap (the jfk fixture, three seconds of zeros, then the fixture
     /// again). The first segment closes mid-take, crystallizes into the
     /// committed prefix, and is never transcribed again; the second is the
     /// unclosed tail, transcribed once on `stop`, conditioned on the first.
@@ -796,7 +796,7 @@ mod tests {
             .expect("send start");
         let jfk = fixtures::jfk_samples();
         send_samples(&mut socket, &jfk).await;
-        send_pcm(&mut socket, 16000).await;
+        send_pcm(&mut socket, 3 * 16000).await;
 
         // Wait for the first segment to crystallize into the committed
         // prefix; the timeout only bounds a broken pipeline.
@@ -890,7 +890,7 @@ mod tests {
             .expect("send start");
         let jfk = fixtures::jfk_samples();
         send_samples(&mut socket, &jfk).await;
-        send_pcm(&mut socket, 16000).await;
+        send_pcm(&mut socket, 3 * 16000).await;
 
         // Wait for the segment to close and crystallize; the timeout only
         // bounds a broken pipeline.
@@ -988,9 +988,9 @@ mod tests {
             .expect("send start");
         let jfk = fixtures::jfk_samples();
         send_samples(&mut socket, &jfk).await;
-        send_pcm(&mut socket, 16000).await;
+        send_pcm(&mut socket, 3 * 16000).await;
         send_samples(&mut socket, &jfk).await;
-        send_pcm(&mut socket, 16000).await;
+        send_pcm(&mut socket, 3 * 16000).await;
         send_samples(&mut socket, &jfk).await;
 
         // Collect interim frames until both segments have crystallized;

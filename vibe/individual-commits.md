@@ -86,3 +86,7 @@ one bundled commit of dictation-UX direction given verbatim by the user: interim
 
 whisper-rs-sys builds whisper.cpp with the static CRT while Rust links the dynamic CRT; the linker resolves it but warns, so /NODEFAULTLIB:LIBCMT is scoped to the MSVC target. (assistant reasoned)
 
+## 2026-08-24 Widen voice windows and lengthen silence threshold
+
+live transcription felt volatile against Cursor's crystallization behavior; the user said "just do it without a plan," and the key change was widening the segment-closing silence gap from 700ms to 2s to match. (user said, assistant reasoned)
+
