@@ -147,10 +147,10 @@ impl Default for ServerConfig {
 }
 
 /// Default sliding-window length for interim transcription, in seconds.
-pub const DEFAULT_VOICE_WINDOW_SECONDS: u64 = 5;
+pub const DEFAULT_VOICE_WINDOW_SECONDS: u64 = 15;
 
 /// Default interval between interim transcriptions, in milliseconds.
-pub const DEFAULT_VOICE_INTERVAL_MS: u64 = 800;
+pub const DEFAULT_VOICE_INTERVAL_MS: u64 = 500;
 
 /// Voice transcription settings: whisper model paths and the interim loop's
 /// window and cadence.

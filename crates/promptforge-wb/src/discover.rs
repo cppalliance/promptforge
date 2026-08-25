@@ -44,8 +44,8 @@ final_source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-l
 # paths below only to use local model files instead:
 # interim_model = "~/.promptforge/models/ggml-large-v3-turbo.bin"
 # final_model = "~/.promptforge/models/ggml-large-v3.bin"
-window_seconds = 5
-interval_ms = 800
+window_seconds = 15
+interval_ms = 500
 # Domain terms whisper is biased toward, passed as a glossary prompt:
 # vocabulary = ["MCP", "GGUF", "Lua"]
 "#;
