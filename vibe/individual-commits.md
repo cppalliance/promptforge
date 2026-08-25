@@ -90,3 +90,7 @@ whisper-rs-sys builds whisper.cpp with the static CRT while Rust links the dynam
 
 live transcription felt volatile against Cursor's crystallization behavior; the user said "just do it without a plan," and the key change was widening the segment-closing silence gap from 700ms to 2s to match. (user said, assistant reasoned)
 
+## 2026-08-24 Latch the interim display until the final worker
+
+on stopping dictation the edit box emptied for ~400ms before text returned, feeling unstable; the user proposed the latch shape ("would keeping 2 strings help?") and approved it once concurrent final passes were proven structurally impossible. (user said, assistant implemented)
+

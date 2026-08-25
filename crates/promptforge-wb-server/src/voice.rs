@@ -147,6 +147,13 @@ fn spawn_interim_loop(
     tokio::spawn(async move {
         let mut last_committed = String::new();
         let mut last_tentative = String::new();
+        // The latch: committed text at the time of the last non-empty
+        // tentative. When tentative goes empty (the segmenter advanced
+        // past speech but the final worker hasn't crystallized it yet),
+        // suppress the frame until committed grows past this snapshot.
+        // This prevents the brief empty-display gap between segment
+        // close and crystallization.
+        let mut committed_at_last_speech = String::new();
         loop {
             tokio::time::sleep(engine.interval()).await;
             let committed_text = {
@@ -169,20 +176,22 @@ fn spawn_interim_loop(
                     Activity::General,
                 );
                 match engine.transcribe(window).await {
-                    // `transcribe` returns trimmed text, so empty here means
-                    // a whitespace-only hallucination: report it as no
-                    // tentative text rather than sending whitespace.
                     Ok(text) => text,
                     Err(error) => {
-                        // A failed interim pass is transient - the next tick
-                        // retries - so it pulses at Debug rather than Error.
-                        // A committed-only change waits for that next tick.
                         status.debug("Transcription failed", error.to_string(), Activity::General);
                         tracing::warn!(session, %error, "interim transcription failed");
                         continue;
                     }
                 }
             };
+            if !tentative.is_empty() {
+                committed_at_last_speech.clone_from(&committed_text);
+            } else if committed_text.len() <= committed_at_last_speech.len() {
+                // Tentative is empty and committed hasn't grown past
+                // the snapshot: the final worker hasn't caught up yet.
+                // Hold the display at the previous frame.
+                continue;
+            }
             if committed_text == last_committed && tentative == last_tentative {
                 continue;
             }
