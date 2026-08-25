@@ -46,6 +46,8 @@ final_source = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-l
 # final_model = "~/.promptforge/models/ggml-large-v3.bin"
 window_seconds = 5
 interval_ms = 800
+# Domain terms whisper is biased toward, passed as a glossary prompt:
+# vocabulary = ["MCP", "GGUF", "Lua"]
 "#;
 
 /// Locates `workbench.toml`, searching beside the executable first, then

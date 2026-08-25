@@ -62,3 +62,10 @@ window_seconds = 5
 # Milliseconds between interim passes while a take is recording.
 # Default: 800
 interval_ms = 800
+# Domain terms whisper is biased toward (for example project jargon the
+# model would otherwise mishear). The terms are formatted into a glossary
+# conditioning prompt on both the interim and final-pass workers; the
+# glossary is truncated to fit whisper's 224-token prompt budget, with a
+# warning logged when terms are dropped.
+# Default: [] (no biasing)
+# vocabulary = ["MCP", "GGUF", "Lua"]
