@@ -17,9 +17,10 @@ use crate::transcribe::{self, SAMPLE_RATE};
 const FRAME_SAMPLES: usize = SAMPLE_RATE * 30 / 1000;
 
 /// Silence must persist this long after speech to close a segment: 700 ms,
-/// long enough to survive sentence-internal pauses, short enough that the
-/// final pass starts well before the user stops talking.
-const MIN_SILENCE_SAMPLES: usize = SAMPLE_RATE * 700 / 1000;
+/// long enough to survive sentence-internal pauses and natural breathing
+/// gaps (~2 s), short enough that the final pass starts well before the
+/// user stops talking.
+const MIN_SILENCE_SAMPLES: usize = SAMPLE_RATE * 2;
 
 /// Speech shorter than 250 ms is discarded as a click or cough rather than
 /// transcribed, where whisper would hallucinate a word for it.
@@ -147,7 +148,7 @@ mod tests {
 
     #[test]
     fn speech_closes_after_enough_silence() {
-        let buffer = take(&[speech(2), silence(2)]);
+        let buffer = take(&[speech(2), silence(3)]);
         let mut segmenter = Segmenter::new();
         let ranges = close_all(&mut segmenter, &buffer);
         assert_eq!(ranges.len(), 1, "one speech run closes one segment");
@@ -166,12 +167,8 @@ mod tests {
 
     #[test]
     fn a_short_pause_does_not_close_the_segment() {
-        // Half a second of silence is inside the 700 ms closing threshold.
-        let buffer = take(&[
-            speech(1),
-            silence(1).split_at(SAMPLE_RATE / 2).0.to_vec(),
-            speech(1),
-        ]);
+        // One second of silence is inside the 2 s closing threshold.
+        let buffer = take(&[speech(1), silence(1), speech(1)]);
         let mut segmenter = Segmenter::new();
         assert!(
             close_all(&mut segmenter, &buffer).is_empty(),
@@ -182,7 +179,7 @@ mod tests {
     #[test]
     fn clicks_shorter_than_min_speech_are_discarded() {
         // 100 ms of tone followed by a full closing silence.
-        let buffer = take(&[speech(1).split_at(SAMPLE_RATE / 10).0.to_vec(), silence(2)]);
+        let buffer = take(&[speech(1).split_at(SAMPLE_RATE / 10).0.to_vec(), silence(3)]);
         let mut segmenter = Segmenter::new();
         assert!(
             close_all(&mut segmenter, &buffer).is_empty(),
@@ -196,7 +193,7 @@ mod tests {
 
     #[test]
     fn two_speech_runs_close_as_two_segments() {
-        let buffer = take(&[speech(1), silence(1), speech(1), silence(1)]);
+        let buffer = take(&[speech(1), silence(3), speech(1), silence(3)]);
         let mut segmenter = Segmenter::new();
         let ranges = close_all(&mut segmenter, &buffer);
         assert_eq!(ranges.len(), 2, "each speech run closes its own segment");
@@ -212,7 +209,7 @@ mod tests {
         let mut buffer = speech(1);
         let mut segmenter = Segmenter::new();
         assert!(segmenter.poll(&buffer).is_none());
-        buffer.extend_from_slice(&silence(1));
+        buffer.extend_from_slice(&silence(3));
         let first = segmenter.poll(&buffer).expect("the segment closes");
         assert_eq!(first.start, 0);
         // Polling again without new audio returns nothing.
@@ -221,7 +218,7 @@ mod tests {
 
     #[test]
     fn reset_rewinds_for_a_new_take() {
-        let buffer = take(&[speech(1), silence(1)]);
+        let buffer = take(&[speech(1), silence(3)]);
         let mut segmenter = Segmenter::new();
         assert!(segmenter.poll(&buffer).is_some());
         segmenter.reset();
