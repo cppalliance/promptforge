@@ -420,6 +420,7 @@
 .mur-message.mur-message-assistant.mur-generating
 	.mur-message-blocks-wrapper
 	> .mur-block-text:last-child
+	> .mur-md-segment:last-child
 	> *:last-child::after {
 	content: "";
 	display: inline-block;
