@@ -17,6 +17,7 @@ import { MemoryStorage } from "./memory-storage";
 import { StatusBar } from "./status-bar";
 import { setupVoice, type VoiceHandle } from "./voice";
 import { setupWindowChrome } from "./window-chrome";
+import { setupWindowMenus } from "./window-menu";
 import { WorkshopProvider } from "./workshop-provider";
 import { type CatalogModel, WorkshopSocket } from "./workshop-socket";
 
@@ -113,6 +114,10 @@ const chat = new ChatUI({
   fullscreen: false,
   plugins: () => [voicePlugin, ThinkingPlugin(), ToolsPlugin()],
 });
+
+// The title-bar menus dispatch through one shared command set; the
+// keyboard shortcut step later calls the same commands.
+setupWindowMenus({ chat });
 
 function applyModel(): void {
   chat.engine.setRequestDefaults({ options: { model: selectedModel() } });

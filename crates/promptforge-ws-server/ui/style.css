@@ -238,6 +238,87 @@ body {
   display: none;
 }
 
+/* Application menu popovers: structural rules only, so the menus stay
+   usable and unobstructed until the title-bar skin step owns the look.
+   Popovers are absolutely positioned below the bar and never participate
+   in layout. */
+.window-titlebar__menus {
+  position: relative;
+}
+
+.window-titlebar__popover {
+  position: absolute;
+  top: 100%;
+  z-index: 100;
+  min-width: 180px;
+  padding: var(--space-xs, 4px) 0;
+  background: var(--bg-raised, #14161c);
+  border: 1px solid var(--border, #262a33);
+  border-radius: var(--radius, 6px);
+}
+
+.window-titlebar__popover[hidden] {
+  display: none;
+}
+
+.window-titlebar__item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-lg, 12px);
+  width: 100%;
+  padding: var(--space-sm, 6px) var(--space-lg, 12px);
+  background: none;
+  border: none;
+  color: var(--text, #d6d9e0);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.window-titlebar__item:hover {
+  background: var(--bg-hover, #1a1d25);
+}
+
+.window-titlebar__item:focus-visible {
+  outline: 1px solid var(--accent-dim, #5658a0);
+  outline-offset: -1px;
+  background: var(--bg-hover, #1a1d25);
+}
+
+.window-titlebar__item[aria-disabled="true"] {
+  color: var(--text-muted, #8b90a0);
+  cursor: default;
+}
+
+.window-titlebar__shortcut {
+  color: var(--text-muted, #8b90a0);
+}
+
+.window-titlebar__separator {
+  height: 1px;
+  margin: var(--space-xs, 4px) 0;
+  background: var(--border, #262a33);
+}
+
+/* About dialog: a centered modal over a dimmed backdrop. Structural only,
+   like the popovers above. */
+.about-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.about-dialog {
+  padding: var(--space-xl, 16px);
+  background: var(--bg-raised, #14161c);
+  border: 1px solid var(--border, #262a33);
+  border-radius: var(--radius, 6px);
+}
+
 .shell {
   display: flex;
   flex: 1;
