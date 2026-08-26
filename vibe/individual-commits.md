@@ -122,3 +122,7 @@ the user diagnosed the mic failure as CPU fallback and directed "hide the contro
 
 on Stop the client aborts and recycles the socket, so the server's terminal status frame never arrives and the thinking state persists; clear LED state client-side on abort and emit status.idle() server-side on disconnect. (user reported, assistant reasoned the two-sided fix)
 
+## 2026-08-26 Show the custom title bar in browser mode too
+
+the title bar carries the application menus, so hiding it in browser mode hid the menus; the bar stays visible everywhere and only the window controls remain desktop-only. (user flagged, assistant reasoned)
+

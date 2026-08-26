@@ -321,6 +321,12 @@ body {
   align-items: stretch;
 }
 
+/* Browser mode hides the cluster via the hidden attribute; the flex
+   display above would otherwise beat the UA [hidden] rule. */
+.window-titlebar__controls[hidden] {
+  display: none;
+}
+
 .window-titlebar__control {
   width: var(--titlebar-control-width, 46px);
   min-height: 24px;
