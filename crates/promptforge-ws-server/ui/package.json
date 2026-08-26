@@ -8,9 +8,22 @@
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node test/smoke.mjs && node test/markdown-blocks.mjs && node test/thinking-block.mjs && node test/tool-activity.mjs && node test/window-chrome.mjs && node test/window-menu.mjs && node test/titlebar-style.mjs && node test/workspace-drops.mjs && node test/workshop-zones.mjs"
+    "test": "node test/smoke.mjs && node test/markdown-blocks.mjs && node test/thinking-block.mjs && node test/tool-activity.mjs && node test/window-chrome.mjs && node test/window-menu.mjs && node test/titlebar-style.mjs && node test/workspace-drops.mjs && node test/workshop-zones.mjs && node test/editor-panel.mjs"
   },
   "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/lang-python": "^6.2.1",
+    "@codemirror/lang-rust": "^6.0.2",
+    "@codemirror/lang-yaml": "^6.1.3",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/legacy-modes": "^6.5.3",
+    "@codemirror/search": "^6.7.1",
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.9",
+    "@lezer/highlight": "^1.2.3",
+    "codemirror": "^6.0.2",
     "dockview": "^8.2.0",
     "marked": "^18.0.10"
   },
