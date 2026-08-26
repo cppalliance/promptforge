@@ -519,9 +519,37 @@ body {
   min-height: 0;
 }
 
-/* One panel fills the window; its tab bar is chrome, not information. */
-.dock .dv-tabs-and-actions-container {
+/* The layout lock gates the tab/drop affordances: while the dock carries
+   .dock--locked, the tab strip and the draggable void stay hidden and each
+   zone header keeps only its lock control; unlocking reveals them. */
+.dock--locked .dv-tabs-container,
+.dock--locked .dv-void-container {
   display: none;
+}
+
+/* The lock control on each zone header. */
+.layout-lock-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: var(--space-sm, 6px);
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius, 6px);
+  color: var(--text-muted, #8b90a0);
+  cursor: pointer;
+}
+
+.layout-lock-toggle:hover {
+  background: var(--bg-hover, #1a1d25);
+}
+
+.layout-lock-toggle:focus-visible {
+  outline: 1px solid var(--accent, #7c7fd4);
+  outline-offset: -1px;
 }
 
 .chat-panel {
@@ -638,9 +666,11 @@ body {
   border-bottom: 1px solid var(--border, #262a33);
 }
 
-/* The modified-time conflict dialog: a centered modal over a dimmed
-   backdrop, scoped to the editor panel, patterned on the About dialog. */
-.editor-conflict-overlay {
+/* The editor panel's modal dialogs (modified-time conflict and
+   unsaved-changes close prompt): a centered modal over a dimmed backdrop,
+   scoped to the panel, patterned on the About dialog. */
+.editor-conflict-overlay,
+.editor-close-overlay {
   position: absolute;
   inset: 0;
   z-index: 100;
@@ -650,7 +680,8 @@ body {
   background: rgba(0, 0, 0, 0.5);
 }
 
-.editor-conflict {
+.editor-conflict,
+.editor-close {
   max-width: 360px;
   padding: var(--space-xl, 16px);
   background: var(--bg-raised, #14161c);
@@ -658,26 +689,30 @@ body {
   border-radius: var(--radius, 6px);
 }
 
-.editor-conflict__title {
+.editor-conflict__title,
+.editor-close__title {
   margin: 0 0 var(--space-md, 8px);
   font-size: 14px;
   font-weight: 600;
   color: var(--text, #d6d9e0);
 }
 
-.editor-conflict__line {
+.editor-conflict__line,
+.editor-close__line {
   margin: 0 0 var(--space-lg, 12px);
   font-size: 13px;
   color: var(--text-muted, #8b90a0);
 }
 
-.editor-conflict__actions {
+.editor-conflict__actions,
+.editor-close__actions {
   display: flex;
   gap: var(--space-md, 8px);
   justify-content: flex-end;
 }
 
-.editor-conflict__button {
+.editor-conflict__button,
+.editor-close__button {
   padding: var(--space-sm, 6px) var(--space-lg, 12px);
   background: var(--bg, #0d0e12);
   color: var(--text, #d6d9e0);
@@ -688,21 +723,25 @@ body {
   cursor: pointer;
 }
 
-.editor-conflict__button:hover {
+.editor-conflict__button:hover,
+.editor-close__button:hover {
   background: var(--bg-hover, #1a1d25);
 }
 
-.editor-conflict__button:focus-visible {
+.editor-conflict__button:focus-visible,
+.editor-close__button:focus-visible {
   outline: 1px solid var(--accent-dim, #5658a0);
   outline-offset: 1px;
 }
 
-.editor-conflict__button--danger {
+.editor-conflict__button--danger,
+.editor-close__button--danger {
   border-color: var(--danger, #b0606a);
   color: var(--danger-text, #cf7f88);
 }
 
-.editor-conflict__button--danger:hover {
+.editor-conflict__button--danger:hover,
+.editor-close__button--danger:hover {
   background: var(--danger, #b0606a);
   color: var(--on-danger, #ffffff);
 }
