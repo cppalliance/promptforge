@@ -21,9 +21,8 @@
 :root {
   /* Surfaces */
   --bg: #0d0e12; /* window background, chat background */
-  --bg-raised: #14161c; /* raised surfaces: sidebar, status bar, cards */
+  --bg-raised: #14161c; /* raised surfaces: status bar, cards */
   --bg-hover: #1a1d25; /* hover washes and user message bubbles */
-  --bg-sidebar: var(--bg-raised, #14161c);
   --bg-composer: var(--bg, #0d0e12); /* the chat composer form */
 
   /* Text and borders */
@@ -50,9 +49,6 @@
   --space-lg: 12px;
   --space-xl: 16px;
   --radius: 6px;
-
-  /* Sidebar */
-  --sidebar-width: 220px;
 
   /* Status bar */
   --status-bar-height: 28px;
@@ -176,10 +172,9 @@
   background-color: var(--bg-composer, #0d0e12);
 }
 
-/* Hover glow: icon buttons and the picker trade murm-ui's background wash
+/* Hover glow: icon buttons trade murm-ui's background wash
    for a 1px accent ring plus a soft bloom. */
 .mur-form-icon-btn:hover:not(:disabled),
-.sidebar__picker:hover,
 .voice-mic:hover {
   background-color: transparent;
   box-shadow:
@@ -415,6 +410,18 @@ body {
   font-size: 12px;
 }
 
+/* Checkable rows (the Model menu): a fixed-width check column keeps the
+   labels aligned whether or not the row is the selected one. */
+.window-titlebar__item--checkable {
+  justify-content: flex-start;
+}
+
+.window-titlebar__item-check {
+  width: 1.2em;
+  flex: none;
+  color: var(--accent, #7c7fd4);
+}
+
 .window-titlebar__separator {
   height: 1px;
   margin: var(--space-xs, 4px) 0;
@@ -446,67 +453,7 @@ body {
   min-height: 0;
 }
 
-.sidebar {
-  width: var(--sidebar-width, 220px);
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md, 8px);
-  padding: var(--space-xl, 16px) var(--space-lg, 12px);
-  background: var(--bg-sidebar, #14161c);
-  border-right: 1px solid var(--border, #262a33);
-}
-
-.sidebar__brand {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text, #d6d9e0);
-  padding: var(--space-xs, 4px) var(--space-sm, 6px) var(--space-lg, 12px);
-  border-bottom: 1px solid var(--border, #262a33);
-  margin-bottom: var(--space-md, 8px);
-}
-
-.sidebar__picker-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted, #8b90a0);
-  padding: 0 var(--space-sm, 6px);
-}
-
-.sidebar__picker {
-  width: 100%;
-  padding: var(--space-sm, 6px) var(--space-md, 8px);
-  background: var(--bg, #0d0e12);
-  color: var(--text, #d6d9e0);
-  border: 1px solid var(--border, #262a33);
-  border-radius: var(--radius, 6px);
-  font-family: var(--font-prose, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
-  font-size: 13px;
-  outline: none;
-}
-
-.sidebar__picker:focus {
-  border-color: var(--accent-dim, #5658a0);
-}
-
-.sidebar__picker:disabled {
-  opacity: 0.5;
-}
-
-.sidebar__model-description {
-  font-size: 12px;
-  color: var(--text-muted, #8b90a0);
-  padding: 2px var(--space-sm, 6px);
-  overflow-wrap: anywhere;
-}
-
-.sidebar__model-description--error {
-  color: var(--danger-text, #cf7f88);
-}
-
-/* The dockview column beside the sidebar: the dock fills it. */
+/* The dockview column fills the shell: the dock fills it. */
 .dock-column {
   flex: 1;
   display: flex;

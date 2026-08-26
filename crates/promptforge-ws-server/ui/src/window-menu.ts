@@ -1,9 +1,11 @@
 // Application menus for the custom title bar: accessible HTML popovers
-// behind the File, Edit, Window, and Help buttons, not native menus. Every
-// command dispatches through the single WindowMenuCommands set built here,
-// so the popovers, future keyboard shortcuts, and any future menu surface
-// all call the same actions. The Window menu reuses the visible window
-// controls' command functions from window-chrome.ts.
+// behind the File, Edit, Model, Window, and Help buttons, not native
+// menus. Every command dispatches through the single WindowMenuCommands
+// set built here, so the popovers, future keyboard shortcuts, and any
+// future menu surface all call the same actions. The Window menu reuses
+// the visible window controls' command functions from window-chrome.ts.
+// The Model menu is dynamic: it rebuilds its rows from the catalog
+// surface on every open.
 //
 // Edit commands go through document.execCommand: WebView2 hosts the page
 // as application content with clipboard access, and execCommand preserves
@@ -36,12 +38,26 @@ export interface LayoutLockCommands {
   readonly toggle: () => void;
 }
 
-const MENU_ORDER = ["file", "edit", "window", "help"] as const;
+/** One catalog entry the Model menu lists. */
+export interface ModelMenuEntry {
+  readonly id: string;
+  readonly description?: string;
+}
+
+/** The catalog surface the dynamic Model menu reads and writes. */
+export interface ModelMenuSurface {
+  readonly getModels: () => readonly ModelMenuEntry[];
+  readonly getSelected: () => string;
+  readonly selectModel: (id: string) => void;
+}
+
+const MENU_ORDER = ["file", "edit", "model", "window", "help"] as const;
 type MenuId = (typeof MENU_ORDER)[number];
 
 const MENU_LABELS: Record<MenuId, string> = {
   file: "File",
   edit: "Edit",
+  model: "Model",
   window: "Window",
   help: "Help",
 };
@@ -71,7 +87,9 @@ interface MenuHandle {
   readonly id: MenuId;
   readonly button: HTMLButtonElement;
   readonly popover: HTMLElement;
-  readonly rows: readonly CommandRow[];
+  // Mutable: the Model menu rebuilds its rows from the catalog on every
+  // open, so the array cannot be frozen at build time.
+  readonly rows: CommandRow[];
 }
 
 /** The editable elements the Edit menu commands act on. */
@@ -128,6 +146,9 @@ function buildMenuItems(
     ],
     window: windowItems,
     help: [{ kind: "command", label: "About PromptForge", run: commands.showAbout }],
+    // The Model menu's rows are dynamic; rebuildModelRows fills them in
+    // from the catalog surface on every open.
+    model: [],
   };
 }
 
@@ -140,6 +161,7 @@ function buildMenuItems(
 export function setupWindowMenus(options: {
   readonly chat: ChatUI;
   readonly layoutLock?: LayoutLockCommands;
+  readonly modelMenu?: ModelMenuSurface;
 }): WindowMenuCommands {
   const navElement = document.querySelector<HTMLElement>(".window-titlebar__menus");
   if (!navElement) {
@@ -227,6 +249,35 @@ export function setupWindowMenus(options: {
     row.def.run();
   }
 
+  // One command row: a menuitem button with its label, an optional
+  // shortcut hint, and click dispatch through activateRow. extras runs
+  // before the label is appended, so leading affordances (the Model
+  // menu's check column) land before the label in layout order.
+  function buildCommandRow(
+    def: CommandItem,
+    extras?: (element: HTMLButtonElement) => void,
+  ): CommandRow {
+    const element = document.createElement("button");
+    element.type = "button";
+    element.className = "window-titlebar__item";
+    element.setAttribute("role", "menuitem");
+    element.setAttribute("aria-disabled", "true");
+    const label = document.createElement("span");
+    label.className = "window-titlebar__item-label";
+    label.textContent = labelOf(def);
+    extras?.(element);
+    element.appendChild(label);
+    if (def.shortcut) {
+      const shortcut = document.createElement("span");
+      shortcut.className = "window-titlebar__shortcut";
+      shortcut.textContent = def.shortcut;
+      element.appendChild(shortcut);
+    }
+    const row: CommandRow = { element, labelElement: label, def };
+    element.addEventListener("click", () => activateRow(row));
+    return row;
+  }
+
   function buildPopover(id: MenuId): MenuHandle {
     const button = nav.querySelector<HTMLButtonElement>(`[data-menu="${id}"]`);
     if (!button) {
@@ -246,28 +297,54 @@ export function setupWindowMenus(options: {
         popover.appendChild(separator);
         continue;
       }
-      const element = document.createElement("button");
-      element.type = "button";
-      element.className = "window-titlebar__item";
-      element.setAttribute("role", "menuitem");
-      element.setAttribute("aria-disabled", "true");
-      const label = document.createElement("span");
-      label.className = "window-titlebar__item-label";
-      label.textContent = labelOf(def);
-      element.appendChild(label);
-      if (def.shortcut) {
-        const shortcut = document.createElement("span");
-        shortcut.className = "window-titlebar__shortcut";
-        shortcut.textContent = def.shortcut;
-        element.appendChild(shortcut);
-      }
-      const row: CommandRow = { element, labelElement: label, def };
-      element.addEventListener("click", () => activateRow(row));
+      const row = buildCommandRow(def);
       rows.push(row);
-      popover.appendChild(element);
+      popover.appendChild(row.element);
     }
     button.insertAdjacentElement("afterend", popover);
     return { id, button, popover, rows };
+  }
+
+  // The Model menu's rows mirror the catalog at open time: one checkable
+  // radio row per model, the description as the tooltip, and a single
+  // disabled row when the catalog is empty or no surface was provided.
+  function rebuildModelRows(handle: MenuHandle): void {
+    const surface = options.modelMenu;
+    handle.popover.textContent = "";
+    handle.rows.length = 0;
+    const models = surface ? surface.getModels() : [];
+    const appendRow = (def: CommandItem, extras: (element: HTMLButtonElement) => void): void => {
+      const row = buildCommandRow(def, extras);
+      handle.rows.push(row);
+      handle.popover.appendChild(row.element);
+    };
+    if (!surface || models.length === 0) {
+      appendRow(
+        { kind: "command", label: "No models available", run: () => {}, enabled: () => false },
+        () => {},
+      );
+      return;
+    }
+    const selected = surface.getSelected();
+    for (const model of models) {
+      const isSelected = model.id === selected;
+      appendRow(
+        { kind: "command", label: model.id, run: () => surface.selectModel(model.id) },
+        (element) => {
+          element.classList.add("window-titlebar__item--checkable");
+          element.setAttribute("role", "menuitemradio");
+          element.setAttribute("aria-checked", isSelected ? "true" : "false");
+          if (model.description) {
+            element.title = model.description;
+          }
+          const check = document.createElement("span");
+          check.className = "window-titlebar__item-check";
+          check.setAttribute("aria-hidden", "true");
+          check.textContent = isSelected ? "✓" : "";
+          element.appendChild(check);
+        },
+      );
+    }
   }
 
   function focusRow(handle: MenuHandle, index: number): void {
@@ -280,6 +357,9 @@ export function setupWindowMenus(options: {
   function openMenu(id: MenuId, focusFirst: boolean): void {
     closeMenu();
     const handle = handleFor(id);
+    if (id === "model") {
+      rebuildModelRows(handle);
+    }
     refreshEnabled(handle);
     // Align the popover under its button; absolute positioning keeps the
     // bar's layout unchanged.

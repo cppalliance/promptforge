@@ -160,7 +160,7 @@ function emitStatus(overrides = {}) {
   });
 }
 // A scripted fetch stands in for the model catalog. The catalog answers with
-// one model so the picker enables and submission is unblocked; the Workshop
+// one model so it auto-selects and submission is unblocked; the Workshop
 // tree's boot fetch answers with an empty roots listing (no grants yet);
 // any other fetch - including the retired POST /chat SSE path - rejects
 // the test.
@@ -325,8 +325,8 @@ if (!titlebar) {
   const menuLabels = [...titlebar.querySelectorAll(".window-titlebar__menu")].map(
     (button) => button.textContent,
   );
-  if (menuLabels.join(",") !== "File,Edit,Window,Help") {
-    failures.push(`title bar menus are "${menuLabels.join(",")}", expected "File,Edit,Window,Help"`);
+  if (menuLabels.join(",") !== "File,Edit,Model,Window,Help") {
+    failures.push(`title bar menus are "${menuLabels.join(",")}", expected "File,Edit,Model,Window,Help"`);
   }
   for (const button of titlebar.querySelectorAll(".window-titlebar__menu")) {
     if (button.tagName !== "BUTTON") failures.push("a title bar menu is not a <button>");
@@ -354,25 +354,28 @@ if ("ipc" in window) {
   failures.push("browser mode must not require window.ipc");
 }
 
-// One chat round-trip: wait for the scripted catalog to enable the picker,
-// submit a message through the form, and assert the provider's chat frame
-// shape and the rendered assistant reply.
-const picker = window.document.getElementById("model-picker");
+// One chat round-trip: the boot catalog auto-selects its first entry, so
+// submitting a message sends a chat frame carrying that model id and the
+// rendered assistant reply lands in the history. submitChat returns the
+// frame the provider sent (undefined when submission stayed blocked).
 const form = window.document.querySelector(".mur-chat-form");
-const deadline = Date.now() + 5000;
-while (picker && picker.disabled && Date.now() < deadline) {
-  await new Promise((resolve) => setTimeout(resolve, 20));
-}
-if (!picker || picker.disabled) {
-  failures.push("scripted model catalog did not enable the picker");
-} else if (input && form && history) {
-  input.value = "Hello?";
+async function submitChat(text) {
+  const socket = chatSockets[0];
+  const repliesBefore = (history.textContent.match(/Hello back/g) || []).length;
+  input.value = text;
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
   form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
   const replyDeadline = Date.now() + 5000;
-  while (!history.textContent.includes("Hello back") && Date.now() < replyDeadline) {
+  while (
+    (history.textContent.match(/Hello back/g) || []).length === repliesBefore &&
+    Date.now() < replyDeadline
+  ) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
+  return socket?.chatFrame;
+}
+if (input && form && history) {
+  const request = await submitChat("Hello?");
   if (!history.textContent.includes("Hello back")) {
     failures.push("assistant reply did not render in the chat history");
   }
@@ -397,13 +400,14 @@ if (!picker || picker.disabled) {
       failures.push(`expected one persistent /ws socket, saw ${chatSockets.length}`);
     }
     if (!socket.url.endsWith("/ws")) failures.push(`chat socket opened the wrong URL: ${socket.url}`);
-    const request = socket.chatFrame;
     if (!request) {
       failures.push("no chat frame was sent on the socket");
     } else {
       if (request.type !== "chat") failures.push("the frame is not a chat frame");
       if (typeof request.id !== "number") failures.push("chat frame carried no numeric id");
-      if (request.model !== "test-model") failures.push("chat frame carried the wrong model");
+      if (request.model !== "test-model") {
+        failures.push("the boot catalog's first entry was not auto-selected");
+      }
       if ("stream" in request) failures.push("chat frame must not carry a stream flag");
       const first = request.messages?.[0];
       if (!first || first.role !== "user" || first.content !== "Hello?") {
@@ -414,28 +418,27 @@ if (!picker || picker.disabled) {
 }
 
 // Models frames: a pushed catalog (sent when the gateway comes back after
-// an outage) refreshes the picker without a fetch. A selection that
-// survives the new catalog is kept; one that vanished falls back to the
-// first entry.
+// an outage) refreshes the selection state without a fetch. A selection
+// that survives the new catalog is kept; one that vanished falls back to
+// the first entry. The pushed catalogs order the surviving entry second
+// so preservation is distinguishable from a plain first-entry fallback.
 function emitModels(models) {
   const socket = chatSockets[0];
   socket?.onmessage?.({ data: JSON.stringify({ type: "models", models }) });
 }
-if (picker && !picker.disabled) {
+if (input && form && history && chatSockets[0]?.chatFrame) {
   emitModels([
-    { id: "test-model", description: "scripted" },
     { id: "fresh-model", description: "pushed" },
+    { id: "test-model", description: "scripted" },
   ]);
-  const ids = [...picker.options].map((option) => option.value);
-  if (ids.join(",") !== "test-model,fresh-model") {
-    failures.push(`a models frame did not rebuild the picker: ${ids.join(",")}`);
-  }
-  if (picker.value !== "test-model") {
-    failures.push(`a surviving selection was not kept across the refresh: ${picker.value}`);
+  let request = await submitChat("still there?");
+  if (request?.model !== "test-model") {
+    failures.push(`a surviving selection was not kept across the refresh: ${request?.model}`);
   }
   emitModels([{ id: "fresh-model", description: "pushed" }]);
-  if (picker.value !== "fresh-model") {
-    failures.push(`a vanished selection did not fall back to the first entry: ${picker.value}`);
+  request = await submitChat("once more?");
+  if (request?.model !== "fresh-model") {
+    failures.push(`a vanished selection did not fall back to the first entry: ${request?.model}`);
   }
 }
 
