@@ -18,6 +18,27 @@ export interface VoiceHandle {
   discardIfRecording(): void;
 }
 
+/**
+ * Asks the server whether transcription can run on the GPU. CPU whisper is
+ * slow enough that the mic stays hidden instead. Any failure answers false:
+ * a take that stalls for half a minute reads as broken, not as available.
+ */
+export async function voiceGpuAvailable(): Promise<boolean> {
+  try {
+    const response = await fetch("/voice/capability");
+    if (!response.ok) {
+      return false;
+    }
+    const body: unknown = await response.json();
+    if (typeof body !== "object" || body === null || !("gpu" in body)) {
+      return false;
+    }
+    return Reflect.get(body, "gpu") === true;
+  } catch {
+    return false;
+  }
+}
+
 interface VoiceSession {
   ws: WebSocket;
   ctx: AudioContext;

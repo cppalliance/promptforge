@@ -232,6 +232,7 @@ pub fn router(state: AppState) -> Router {
         .route("/chat", post(chat))
         .route("/ws", get(chat_ws::upgrade))
         .route("/voice", get(voice::upgrade))
+        .route("/voice/capability", get(voice_capability))
         .route("/workspace/tree", get(workspace::tree))
         .route(
             "/workspace/file",
@@ -246,6 +247,16 @@ async fn health() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "application/json")],
         r#"{"status":"serving"}"#,
+    )
+}
+
+/// Reports whether voice transcription can run on the GPU, so the UI can
+/// hide the mic rather than offer a take that stalls on a CPU pass.
+async fn voice_capability() -> impl IntoResponse {
+    let gpu = crate::transcribe::gpu_transcription_available();
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        format!(r#"{{"gpu":{gpu}}}"#),
     )
 }
 
@@ -763,6 +774,25 @@ mod tests {
             .await
             .expect("the router is infallible");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn voice_capability_reports_the_build() {
+        let (state, _tape_dir) = state_for("http://127.0.0.1:1");
+        let request = Request::builder()
+            .uri("/voice/capability")
+            .body(Body::empty())
+            .expect("request builds");
+        let response = router(state)
+            .oneshot(request)
+            .await
+            .expect("the route answers");
+        assert_eq!(response.status(), StatusCode::OK);
+        let expected = crate::transcribe::gpu_transcription_available();
+        assert_eq!(
+            &body_bytes(response).await[..],
+            format!(r#"{{"gpu":{expected}}}"#).as_bytes()
+        );
     }
 
     #[tokio::test]
