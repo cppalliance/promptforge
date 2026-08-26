@@ -7,7 +7,6 @@ import "./chat/styles/input.css";
 import "dockview/dist/styles/dockview.css";
 
 import { createDockview, themeDark } from "dockview";
-import type { IContentRenderer } from "dockview";
 
 import type { ChatPlugin } from "./chat/core/types";
 import { ChatUI } from "./chat/main";
@@ -21,6 +20,8 @@ import { setupWindowMenus } from "./window-menu";
 import { setupWorkspaceDrops } from "./workspace-drops";
 import { WorkshopProvider } from "./workshop-provider";
 import { type CatalogModel, WorkshopSocket } from "./workshop-socket";
+import { createPanelComponent } from "./workshop/panel-types";
+import { initZones, openInZone } from "./workshop/zones";
 
 const pickerEl = document.getElementById("model-picker") as HTMLSelectElement;
 const descriptionEl = document.getElementById("model-description") as HTMLDivElement;
@@ -76,25 +77,13 @@ const voicePlugin: ChatPlugin = {
   isSubmitBlocked: () => !selectedModel(),
 };
 
-// The chat lives in dockview's single panel; the panel infrastructure is
-// what later stages hang the file tree and editor panes on. The tab bar is
-// hidden in style.css: with exactly one panel it is chrome, not information.
-class ChatPanel implements IContentRenderer {
-  readonly element = document.createElement("div");
-
-  constructor() {
-    this.element.className = "chat-panel";
-  }
-
-  init(): void {
-    const template = document.getElementById("chat-panel") as HTMLTemplateElement;
-    this.element.appendChild(template.content.cloneNode(true));
-  }
-}
-
+// Panels are created through the workshop registry: each component name
+// maps to a factory in panel-types, and openInZone places panels by zone
+// affinity (tree left, editors main, chat right). The tab bars stay hidden
+// in style.css and the dock stays locked until the layout step lands.
 const dockEl = document.getElementById("dock") as HTMLDivElement;
 const dock = createDockview(dockEl, {
-  createComponent: () => new ChatPanel(),
+  createComponent: createPanelComponent,
   theme: themeDark,
   singleTabMode: "fullwidth",
   disableFloatingGroups: true,
@@ -102,7 +91,10 @@ const dock = createDockview(dockEl, {
   locked: true,
   noPanelsOverlay: "emptyGroup",
 });
-dock.addPanel({ id: "chat", component: "chat", title: "Chat" });
+initZones(dock);
+openInZone("chat", {});
+const treePanel = openInZone("tree", {});
+treePanel.group.api.setSize({ width: 280 });
 
 const chatContainer = dockEl.querySelector(".mur-app");
 if (!chatContainer) {

@@ -528,6 +528,115 @@ body {
   height: 100%;
 }
 
+/* The Workshop file tree panel: one directory per level, folders before
+   files, disclosure chevrons on directories. Rows are real buttons. */
+.workshop-tree {
+  height: 100%;
+  overflow: auto;
+  padding: var(--space-xs, 4px) 0;
+  font-family: var(--font-prose, system-ui, sans-serif);
+  font-size: 13px;
+  color: var(--text, #d6d9e0);
+}
+
+.workshop-tree__list,
+.workshop-tree__children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.workshop-tree__children {
+  padding-left: var(--space-lg, 12px);
+}
+
+.workshop-tree__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm, 6px);
+  width: 100%;
+  padding: var(--space-xs, 4px) var(--space-md, 8px);
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workshop-tree__row:hover {
+  background: var(--bg-hover, #1a1d25);
+}
+
+.workshop-tree__row:focus-visible {
+  outline: 1px solid var(--accent-dim, #5658a0);
+  outline-offset: -1px;
+}
+
+.workshop-tree__row:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.workshop-tree__chevron {
+  flex: none;
+  color: var(--text-muted, #8b90a0);
+}
+
+.workshop-tree__row[aria-expanded="true"] .workshop-tree__chevron {
+  transform: rotate(90deg);
+}
+
+.workshop-tree__row--file {
+  padding-left: calc(var(--space-md, 8px) + var(--space-lg, 12px));
+}
+
+.workshop-tree__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workshop-tree__empty,
+.workshop-tree__error {
+  margin: var(--space-md, 8px);
+  font-size: 12px;
+  color: var(--text-muted, #8b90a0);
+}
+
+.workshop-tree__error {
+  color: var(--danger-text, #cf7f88);
+  list-style: none;
+}
+
+/* The step-13 editor placeholder: the path the panel was opened with.
+   Step 14 replaces it with the CodeMirror surface. */
+.editor-panel {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.editor-panel__placeholder {
+  margin: 0;
+  padding: 0 var(--space-xl, 16px);
+  font-family: var(--code-font, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--text-muted, #8b90a0);
+  overflow-wrap: anywhere;
+}
+
+.panel-unknown {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--danger-text, #cf7f88);
+  font-size: 12px;
+}
+
 /* The status bar: a permanent full-width footer below the shell. The left
    text carries the observer's current label; the right group holds the REC
    badge and the slot, which holds the progress bar or the activity LED

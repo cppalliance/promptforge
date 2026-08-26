@@ -160,12 +160,22 @@ function emitStatus(overrides = {}) {
   });
 }
 // A scripted fetch stands in for the model catalog. The catalog answers with
-// one model so the picker enables and submission is unblocked; any other
-// fetch - including the retired POST /chat SSE path - rejects the test.
+// one model so the picker enables and submission is unblocked; the Workshop
+// tree's boot fetch answers with an empty roots listing (no grants yet);
+// any other fetch - including the retired POST /chat SSE path - rejects
+// the test.
 globalThis.fetch = (url) => {
   if (url === "/v1/models") {
     return Promise.resolve(
       new Response(JSON.stringify({ data: [{ id: "test-model", description: "scripted" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  }
+  if (url === "/workspace/tree") {
+    return Promise.resolve(
+      new Response(JSON.stringify({ path: null, entries: [] }), {
         status: 200,
         headers: { "content-type": "application/json" },
       }),
@@ -180,6 +190,7 @@ for (const key of [
   "location",
   "localStorage",
   "HTMLElement",
+  "HTMLTemplateElement",
   "HTMLTextAreaElement",
   "HTMLButtonElement",
   "Node",
@@ -233,6 +244,9 @@ if (dock && !dock.querySelector(".dv-dockview")) {
 }
 if (!window.document.querySelector("#dock .dv-groupview")) {
   failures.push("dockview rendered no group for the chat panel");
+}
+if (!window.document.querySelector("#dock .workshop-tree")) {
+  failures.push("the Workshop tree panel did not mount in the dock");
 }
 if (!app) failures.push(".mur-app missing inside the dock");
 if (!history) failures.push(".mur-chat-history missing");
