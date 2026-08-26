@@ -85,8 +85,9 @@ export function setZoneOverride(panelId: string, zone: ZoneName): void {
 }
 
 /**
- * Binds the registry to the dock. User drags (possible once the layout
- * lock releases) flow back into the override map through onDidMovePanel.
+ * Binds the registry to the dock. User drags (always possible: the
+ * workbench is never locked) flow back into the override map through
+ * onDidMovePanel.
  */
 export function initZones(dockview: DockviewApi): void {
   dock = dockview;
