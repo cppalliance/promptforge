@@ -112,3 +112,5 @@ without --workspace, cargo doc ignores --exclude flags, so the doc job documente
 
 the doc comment referenced a planned Windows ACL helper that never existed; remove the stale link rather than create the helper. (user reported the CI failure, assistant reasoned)
 
+## 2026-08-25 Add the What PromptForge Is design document
+
