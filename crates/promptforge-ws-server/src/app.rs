@@ -216,6 +216,7 @@ pub fn router(state: AppState) -> Router {
         .route("/app.css", get(ui_app_css))
         .route("/style.css", get(ui_style_css))
         .route("/pcm-worklet.js", get(ui_pcm_worklet))
+        .route("/icons/promptforge-icon-1.png", get(ui_program_icon))
         .route("/health", get(health))
         .route("/v1/models", get(models))
         .route("/chat", post(chat))
@@ -281,6 +282,13 @@ async fn ui_style_css() -> Response {
 /// Serves the AudioWorklet PCM capture processor.
 async fn ui_pcm_worklet() -> Response {
     ui_asset("pcm-worklet.js", "text/javascript; charset=utf-8")
+}
+
+/// Serves the program icon shown in the custom title bar (the cold
+/// medallion frame; the heat stages are reserved for a future activity
+/// animation).
+async fn ui_program_icon() -> Response {
+    ui_asset("icons/promptforge-icon-1.png", "image/png")
 }
 
 /// Relays the gateway's model catalog to the caller verbatim.
@@ -700,6 +708,11 @@ mod tests {
     #[tokio::test]
     async fn pcm_worklet_is_served_as_javascript() {
         assert_ui_asset("/pcm-worklet.js", "text/javascript; charset=utf-8").await;
+    }
+
+    #[tokio::test]
+    async fn program_icon_is_served_as_png() {
+        assert_ui_asset("/icons/promptforge-icon-1.png", "image/png").await;
     }
 
     /// A plain GET to `/ws` without upgrade headers is rejected with 400,

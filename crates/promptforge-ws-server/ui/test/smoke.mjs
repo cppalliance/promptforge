@@ -262,6 +262,69 @@ if (app && !app.classList.contains("mur-chat-empty")) {
   failures.push("fresh mount is not in the empty-chat state");
 }
 
+// Custom window title bar: the markup is always present, but in browser
+// mode (no __PROMPTFORGE_DESKTOP__ flag) the bar stays hidden and the
+// module never touches window.ipc - the whole test runs with no ipc
+// bridge defined, so a passing run proves the inactive path is ipc-free.
+const titlebar = window.document.querySelector(".window-titlebar");
+if (!titlebar) {
+  failures.push("window title bar missing");
+} else {
+  if (titlebar.tagName !== "HEADER") {
+    failures.push("the window title bar is not a <header> landmark");
+  }
+  if (window.__PROMPTFORGE_DESKTOP__ !== undefined) {
+    failures.push("the smoke test must run without the desktop flag set");
+  }
+  if (!titlebar.hidden) {
+    failures.push("the title bar must stay hidden in browser mode");
+  }
+  const icon = titlebar.querySelector(".window-titlebar__icon");
+  if (!icon) {
+    failures.push("title bar program icon missing");
+  } else {
+    if (icon.getAttribute("src") !== "/icons/promptforge-icon-1.png") {
+      failures.push(`title bar icon src is "${icon.getAttribute("src")}"`);
+    }
+    if (icon.getAttribute("alt") !== "") {
+      failures.push("the decorative title bar icon must carry an empty alt");
+    }
+    if (!icon.getAttribute("width") || !icon.getAttribute("height")) {
+      failures.push("the title bar icon must carry width and height");
+    }
+  }
+  const menuLabels = [...titlebar.querySelectorAll(".window-titlebar__menu")].map(
+    (button) => button.textContent,
+  );
+  if (menuLabels.join(",") !== "File,Edit,Window,Help") {
+    failures.push(`title bar menus are "${menuLabels.join(",")}", expected "File,Edit,Window,Help"`);
+  }
+  for (const button of titlebar.querySelectorAll(".window-titlebar__menu")) {
+    if (button.tagName !== "BUTTON") failures.push("a title bar menu is not a <button>");
+  }
+  if (!titlebar.querySelector(".window-titlebar__drag")) {
+    failures.push("title bar drag region missing");
+  }
+  const controls = [...titlebar.querySelectorAll(".window-titlebar__control")];
+  const controlLabels = controls.map((button) => button.getAttribute("aria-label"));
+  if (controlLabels.join(",") !== "Minimize,Maximize,Close") {
+    failures.push(
+      `window controls are "${controlLabels.join(",")}", expected "Minimize,Maximize,Close"`,
+    );
+  }
+  for (const button of controls) {
+    if (button.tagName !== "BUTTON") {
+      failures.push(`window control "${button.getAttribute("aria-label")}" is not a <button>`);
+    }
+    if (!button.querySelector("svg")) {
+      failures.push(`window control "${button.getAttribute("aria-label")}" has no inline SVG glyph`);
+    }
+  }
+}
+if ("ipc" in window) {
+  failures.push("browser mode must not require window.ipc");
+}
+
 // One chat round-trip: wait for the scripted catalog to enable the picker,
 // submit a message through the form, and assert the provider's chat frame
 // shape and the rendered assistant reply.

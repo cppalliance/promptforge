@@ -230,6 +230,14 @@ body {
   margin: 0;
 }
 
+/* The custom window title bar is desktop-shell chrome: hidden by default
+   and revealed by window-chrome.ts only under the wry initialization flag.
+   Full styling lands with the title-bar skin step; this rule only keeps the
+   bar out of the browser layout. */
+.window-titlebar[hidden] {
+  display: none;
+}
+
 .shell {
   display: flex;
   flex: 1;

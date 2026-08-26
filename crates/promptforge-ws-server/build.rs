@@ -14,7 +14,12 @@ use std::process::{Command, ExitCode};
 
 /// Static UI files copied verbatim into `ui/dist/`. Mirrored in
 /// `ui/build.mjs`.
-const STATIC_FILES: &[&str] = &["index.html", "style.css", "pcm-worklet.js"];
+const STATIC_FILES: &[&str] = &[
+    "index.html",
+    "style.css",
+    "pcm-worklet.js",
+    "icons/promptforge-icon-1.png",
+];
 
 fn main() -> ExitCode {
     match run() {
@@ -138,7 +143,12 @@ fn warn_no_local_install(ui_dir: &Path) {
 fn copy_static(ui_dir: &Path, dist_dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dist_dir).map_err(|error| format!("create ui/dist: {error}"))?;
     for file in STATIC_FILES {
-        std::fs::copy(ui_dir.join(file), dist_dir.join(file))
+        let target = dist_dir.join(file);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("create ui/dist parent for {file}: {error}"))?;
+        }
+        std::fs::copy(ui_dir.join(file), &target)
             .map_err(|error| format!("copy ui/{file} into ui/dist: {error}"))?;
     }
     Ok(())
