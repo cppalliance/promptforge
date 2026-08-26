@@ -32,12 +32,6 @@ export interface WindowMenuCommands {
   readonly showAbout: () => void;
 }
 
-/** The layout-lock command surface the Window menu toggles through. */
-export interface LayoutLockCommands {
-  readonly isLocked: () => boolean;
-  readonly toggle: () => void;
-}
-
 /**
  * The agent surface the File menu dispatches through: New Agent opens a
  * fresh Agent tab; New Chat starts a new session on the active agent.
@@ -74,8 +68,7 @@ const MENU_LABELS: Record<MenuId, string> = {
 
 interface CommandItem {
   readonly kind: "command";
-  /** A string, or a function refreshed on every menu open (lock state). */
-  readonly label: string | (() => string);
+  readonly label: string;
   readonly shortcut?: string;
   readonly run: () => void;
   readonly enabled?: () => boolean;
@@ -117,27 +110,14 @@ function isEditable(element: Element | null): element is HTMLElement {
   return element.isContentEditable;
 }
 
-function labelOf(def: CommandItem): string {
-  return typeof def.label === "function" ? def.label() : def.label;
-}
-
 function buildMenuItems(
   commands: WindowMenuCommands,
   hasEditTarget: () => boolean,
-  layoutLock?: LayoutLockCommands,
 ): Record<MenuId, readonly MenuItem[]> {
   const windowItems: MenuItem[] = [
     { kind: "command", label: "Minimize", run: commands.minimizeWindow },
     { kind: "command", label: "Maximize/Restore", run: commands.toggleWindowMaximize },
   ];
-  if (layoutLock) {
-    windowItems.push({ kind: "separator" });
-    windowItems.push({
-      kind: "command",
-      label: () => (layoutLock.isLocked() ? "Unlock Layout" : "Lock Layout"),
-      run: layoutLock.toggle,
-    });
-  }
   return {
     file: [
       { kind: "command", label: "New Chat", run: commands.newChat },
@@ -171,7 +151,6 @@ function buildMenuItems(
  */
 export function setupWindowMenus(options: {
   readonly agents: AgentMenuCommands;
-  readonly layoutLock?: LayoutLockCommands;
   readonly modelMenu?: ModelMenuSurface;
 }): WindowMenuCommands {
   const navElement = document.querySelector<HTMLElement>(".window-titlebar__menus");
@@ -226,7 +205,7 @@ export function setupWindowMenus(options: {
     return commands;
   }
 
-  const items = buildMenuItems(commands, hasEditTarget, options.layoutLock);
+  const items = buildMenuItems(commands, hasEditTarget);
   const handles: MenuHandle[] = [];
   let openId: MenuId | null = null;
 
@@ -242,7 +221,7 @@ export function setupWindowMenus(options: {
     for (const row of handle.rows) {
       const enabled = row.def.enabled ? row.def.enabled() : true;
       row.element.setAttribute("aria-disabled", enabled ? "false" : "true");
-      row.labelElement.textContent = labelOf(row.def);
+      row.labelElement.textContent = row.def.label;
     }
   }
 
@@ -274,7 +253,7 @@ export function setupWindowMenus(options: {
     element.setAttribute("aria-disabled", "true");
     const label = document.createElement("span");
     label.className = "window-titlebar__item-label";
-    label.textContent = labelOf(def);
+    label.textContent = def.label;
     extras?.(element);
     element.appendChild(label);
     if (def.shortcut) {

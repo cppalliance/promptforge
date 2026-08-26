@@ -466,39 +466,6 @@ body {
   min-height: 0;
 }
 
-/* The layout lock gates the tab/drop affordances: while the dock carries
-   .dock--locked, the tab strip and the draggable void stay hidden and each
-   zone header keeps only its lock control; unlocking reveals them. */
-.dock--locked .dv-tabs-container,
-.dock--locked .dv-void-container {
-  display: none;
-}
-
-/* The lock control on each zone header. */
-.layout-lock-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  margin-right: var(--space-sm, 6px);
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius, 6px);
-  color: var(--text-muted, #8b90a0);
-  cursor: pointer;
-}
-
-.layout-lock-toggle:hover {
-  background: var(--bg-hover, #1a1d25);
-}
-
-.layout-lock-toggle:focus-visible {
-  outline: 1px solid var(--accent, #7c7fd4);
-  outline-offset: -1px;
-}
-
 .chat-panel {
   height: 100%;
 }
