@@ -14,12 +14,12 @@
 // guard keeps the command a no-op there.
 
 import { showAboutDialog } from "./about-dialog";
-import type { ChatUI } from "./chat/main";
 import { closeWindow, minimizeWindow, toggleWindowMaximize } from "./window-chrome";
 
 /** The actions every menu surface and keyboard shortcut dispatches through. */
 export interface WindowMenuCommands {
   readonly newChat: () => void;
+  readonly newAgent: () => void;
   readonly closeWindow: () => void;
   readonly undo: () => void;
   readonly redo: () => void;
@@ -36,6 +36,16 @@ export interface WindowMenuCommands {
 export interface LayoutLockCommands {
   readonly isLocked: () => boolean;
   readonly toggle: () => void;
+}
+
+/**
+ * The agent surface the File menu dispatches through: New Agent opens a
+ * fresh Agent tab; New Chat starts a new session on the active agent.
+ * The Agent panel controller satisfies this structurally.
+ */
+export interface AgentMenuCommands {
+  readonly newAgent: () => void;
+  readonly newChat: () => void;
 }
 
 /** One catalog entry the Model menu lists. */
@@ -131,6 +141,7 @@ function buildMenuItems(
   return {
     file: [
       { kind: "command", label: "New Chat", run: commands.newChat },
+      { kind: "command", label: "New Agent", run: commands.newAgent },
       { kind: "separator" },
       { kind: "command", label: "Close Window", shortcut: "Alt+F4", run: commands.closeWindow },
     ],
@@ -159,7 +170,7 @@ function buildMenuItems(
  * the command set is returned. Throws if the title-bar markup is missing.
  */
 export function setupWindowMenus(options: {
-  readonly chat: ChatUI;
+  readonly agents: AgentMenuCommands;
   readonly layoutLock?: LayoutLockCommands;
   readonly modelMenu?: ModelMenuSurface;
 }): WindowMenuCommands {
@@ -195,11 +206,10 @@ export function setupWindowMenus(options: {
   }
 
   const commands: WindowMenuCommands = {
-    newChat: () => {
-      void options.chat.engine.sessions.create().catch((error: unknown) => {
-        console.error("New Chat failed:", error);
-      });
-    },
+    // Wrapped, not aliased: the agent surface may be a class instance
+    // whose methods need their receiver.
+    newChat: () => options.agents.newChat(),
+    newAgent: () => options.agents.newAgent(),
     closeWindow,
     undo: () => runEditCommand("undo"),
     redo: () => runEditCommand("redo"),

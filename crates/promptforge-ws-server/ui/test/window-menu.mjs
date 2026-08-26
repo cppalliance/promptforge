@@ -2,8 +2,9 @@
 // dialog (src/about-dialog.ts). Bundles the TS modules with esbuild,
 // imports them via data URLs, and drives them against jsdom built from the
 // real index.html with the desktop flag set. Covers: menu opening,
-// one-menu-at-a-time, keyboard navigation and dismissal, New Chat
-// dispatch, the Window menu sharing the visible controls' command path,
+// one-menu-at-a-time, keyboard navigation and dismissal, New Chat and
+// New Agent dispatch through the agent surface, the Window menu sharing
+// the visible controls' command path,
 // the Window menu's layout-lock command and its state-tracking label,
 // the Model menu's dynamic catalog rows, selection marking, and empty
 // state, Edit target preservation and disabled commands, the About
@@ -58,14 +59,13 @@ function scenario({ desktop = true, layoutLock, modelMenu } = {}) {
     return true;
   };
   let created = 0;
-  const chat = {
-    engine: {
-      sessions: {
-        create: () => {
-          created += 1;
-          return Promise.resolve();
-        },
-      },
+  let agentsOpened = 0;
+  const agents = {
+    newChat: () => {
+      created += 1;
+    },
+    newAgent: () => {
+      agentsOpened += 1;
     },
   };
   globalThis.window = window;
@@ -75,7 +75,7 @@ function scenario({ desktop = true, layoutLock, modelMenu } = {}) {
   globalThis.HTMLInputElement = window.HTMLInputElement;
   globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
   globalThis.Node = window.Node;
-  const commands = setupWindowMenus({ chat, layoutLock, modelMenu });
+  const commands = setupWindowMenus({ agents, layoutLock, modelMenu });
   const menus = {};
   for (const button of window.document.querySelectorAll(".window-titlebar__menu")) {
     menus[button.dataset.menu] = button;
@@ -89,7 +89,7 @@ function scenario({ desktop = true, layoutLock, modelMenu } = {}) {
   const isOpen = (id) => !popoverOf(id).hidden;
   const keydown = (key) =>
     window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true }));
-  const stats = () => ({ created: created, execCalls: [...execCalls] });
+  const stats = () => ({ created, agentsOpened, execCalls: [...execCalls] });
   return { window, commands, menus, posted, execCalls, popoverOf, itemsOf, itemByLabel, isOpen, keydown, stats };
 }
 
@@ -154,8 +154,13 @@ function scenario({ desktop = true, layoutLock, modelMenu } = {}) {
   const { menus, itemByLabel, isOpen, posted, stats } = scenario();
   menus.file.click();
   itemByLabel("file", "New Chat").click();
-  check("New Chat dispatches sessions.create", stats().created === 1);
+  check("New Chat dispatches the agent surface's newChat", stats().created === 1);
   check("running a command closes the menu", !isOpen("file"));
+  menus.file.click();
+  itemByLabel("file", "New Agent").click();
+  check("New Agent dispatches the agent surface's newAgent", stats().agentsOpened === 1);
+  check("New Agent leaves the existing conversation alone", stats().created === 1);
+  check("running New Agent closes the menu", !isOpen("file"));
   menus.file.click();
   itemByLabel("file", "Close Window").click();
   check(
@@ -382,10 +387,13 @@ function scenario({ desktop = true, layoutLock, modelMenu } = {}) {
 {
   const { commands, stats } = scenario();
   check("setup returns the shared command set", typeof commands.newChat === "function" &&
+    typeof commands.newAgent === "function" &&
     typeof commands.minimizeWindow === "function" &&
     typeof commands.showAbout === "function");
   commands.newChat();
   check("the shared set dispatches New Chat", stats().created === 1);
+  commands.newAgent();
+  check("the shared set dispatches New Agent", stats().agentsOpened === 1);
 }
 
 // --- Browser mode: no popovers, commands still dispatch -----------------------

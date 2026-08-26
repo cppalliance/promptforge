@@ -1,8 +1,9 @@
 // Integration test for the workshop zone registry and file tree
 // (src/workshop/zones.ts, panel-types.ts, workshop-panel.ts). Bundles the
 // modules with esbuild, mounts a real Dockview dock in jsdom against the
-// real index.html, and drives the public API. Covers: Chat and Workshop
-// panels mount through the registry; the tree requests directory paths
+// real index.html, and drives the public API. Covers: Agent and Workshop
+// panels mount through the registry; multiple Agent panels coexist as
+// tabs with stable per-agent ids; the tree requests directory paths
 // from /workspace/tree and never file contents; openInZone places panels
 // by affinity and honors per-panel overrides; a zone group is rebuilt
 // after its last panel closes; tree expansion survives a panel reopen.
@@ -24,6 +25,7 @@ const bundle = await esbuild.build({
       export { createDockview, themeDark } from "dockview";
       export {
         initZones,
+        openAgentPanel,
         openInZone,
         panelIdFor,
         setZoneOverride,
@@ -192,6 +194,7 @@ const {
   createDockview,
   themeDark,
   initZones,
+  openAgentPanel,
   openInZone,
   panelIdFor,
   setZoneOverride,
@@ -233,22 +236,62 @@ const dock = createDockview(window.document.getElementById("dock"), {
 });
 initZones(dock);
 
-// --- Boot: Chat and Workshop mount through the registry --------------------
+// --- Boot: the first Agent and the Workshop mount through the registry -----
 
-const chatPanel = openInZone("chat", {});
+const chatPanel = openAgentPanel();
 const treePanel = openInZone("tree", {});
 await flush();
 
-check("boot opens exactly the chat and tree panels", dock.panels.length === 2);
-check("the chat panel mounts its .mur-app surface", !!window.document.querySelector("#dock .mur-app"));
+check("boot opens exactly the agent and tree panels", dock.panels.length === 2);
+check("the agent panel mounts its .mur-app surface", !!window.document.querySelector("#dock .mur-app"));
 check("the Workshop tree panel mounts", !!window.document.querySelector("#dock .workshop-tree"));
-check("chat opens in the right zone", zoneOfPanel(chatPanel) === "right");
+check("the agent opens in the right zone", zoneOfPanel(chatPanel) === "right");
 check("the tree opens in the left zone", zoneOfPanel(treePanel) === "left");
 check("boot renders two zone groups", dock.groups.length === 2);
 check(
-  "reopening an open panel activates it instead of duplicating",
-  openInZone("chat", {}) === chatPanel && dock.panels.length === 2,
+  "reopening a singleton panel activates it instead of duplicating",
+  openInZone("tree", {}) === treePanel && dock.panels.length === 2,
 );
+
+// --- Agent tabs: every New Agent is a fresh panel in the right bank --------
+
+const agentB = openAgentPanel();
+check("a second agent opens as a distinct panel", agentB !== chatPanel && dock.panels.length === 3);
+check(
+  "agent panels carry stable per-agent ids",
+  chatPanel.id.startsWith("chat:") && agentB.id.startsWith("chat:") && chatPanel.id !== agentB.id,
+);
+check(
+  "agent tabs default to the Agent title",
+  chatPanel.title === "Agent" && agentB.title === "Agent",
+);
+check(
+  "coexisting agents share the right-zone group as tabs",
+  agentB.group.id === chatPanel.group.id && dock.groups.length === 2,
+);
+check(
+  "the second agent mounts its own .mur-app surface",
+  agentB.view.content.element.querySelector(".mur-app") !== null &&
+    agentB.view.content.element.querySelector(".mur-app") !==
+      chatPanel.view.content.element.querySelector(".mur-app"),
+);
+check(
+  "panelIdFor honors a provided agent id",
+  panelIdFor("chat", { agentId: "fixed" }) === "chat:fixed",
+);
+check(
+  "panelIdFor generates unique agent ids without one",
+  panelIdFor("chat", {}) !== panelIdFor("chat", {}),
+);
+// A restored layout reopens an agent by its persisted id: same panel, no copy.
+const fixedAgent = openInZone("chat", { agentId: "fixed" });
+check(
+  "reopening an agent by id activates the same panel",
+  openInZone("chat", { agentId: "fixed" }) === fixedAgent && dock.panels.length === 4,
+);
+check("an agent opened by id lands in the right zone", zoneOfPanel(fixedAgent) === "right");
+dock.removePanel(fixedAgent);
+check("closing one agent leaves the others open", dock.panels.length === 3);
 
 // --- The tree requests paths, never file contents ---------------------------
 
