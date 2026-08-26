@@ -93,6 +93,8 @@ wry = "0.56"
 tao = "0.36"
 # Opens a URL in the system browser for the windowless server frame.
 open = "5"
+# Decodes the bundled program-icon PNG into RGBA for the tao window icon.
+png = "0.18"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
