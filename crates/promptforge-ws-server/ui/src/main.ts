@@ -16,6 +16,7 @@ import { ToolsPlugin } from "./chat/plugins/tools/tools-plugin";
 import { MemoryStorage } from "./memory-storage";
 import { StatusBar } from "./status-bar";
 import { setupVoice, type VoiceHandle } from "./voice";
+import { setupWindowChrome } from "./window-chrome";
 import { WorkshopProvider } from "./workshop-provider";
 import { type CatalogModel, WorkshopSocket } from "./workshop-socket";
 
@@ -30,6 +31,9 @@ if (!statusBarRoot) {
   throw new Error("DOM Error: .status-bar not found in the page.");
 }
 const statusBar = new StatusBar(statusBarRoot);
+// The custom title bar stays hidden in a plain browser; it only appears
+// when the desktop shell sets its initialization flag.
+setupWindowChrome();
 const workshopSocket = new WorkshopSocket();
 workshopSocket.onStatus((frame) => statusBar.render(frame));
 // A dropped socket means every in-flight status is stale; the bar returns

@@ -12,7 +12,7 @@ const uiDir = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(uiDir, "dist");
 
 // Mirrored in ../build.rs.
-const STATIC_FILES = ["index.html", "style.css", "pcm-worklet.js"];
+const STATIC_FILES = ["index.html", "style.css", "pcm-worklet.js", "icons/promptforge-icon-1.png"];
 
 const options = {
   entryPoints: [path.join(uiDir, "src", "main.ts")],
@@ -31,7 +31,11 @@ const options = {
 async function copyStatic() {
   await mkdir(distDir, { recursive: true });
   await Promise.all(
-    STATIC_FILES.map((file) => copyFile(path.join(uiDir, file), path.join(distDir, file))),
+    STATIC_FILES.map(async (file) => {
+      const target = path.join(distDir, file);
+      await mkdir(path.dirname(target), { recursive: true });
+      await copyFile(path.join(uiDir, file), target);
+    }),
   );
 }
 
