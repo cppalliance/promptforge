@@ -5,8 +5,10 @@
 // one-menu-at-a-time, keyboard navigation and dismissal, New Chat
 // dispatch, the Window menu sharing the visible controls' command path,
 // the Window menu's layout-lock command and its state-tracking label,
-// Edit target preservation and disabled commands, the About dialog's
-// focus trap and close, and the browser-mode skip of the popover wiring.
+// the Model menu's dynamic catalog rows, selection marking, and empty
+// state, Edit target preservation and disabled commands, the About
+// dialog's focus trap and close, and the browser-mode skip of the popover
+// wiring.
 // Run: node test/window-menu.mjs
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -42,7 +44,7 @@ function check(name, condition) {
 // Each scenario gets a fresh jsdom: the modules read the globals and
 // attach listeners to the DOM they find at call time. Pass desktop: false
 // to exercise the plain-browser path (no flag, no ipc bridge).
-function scenario({ desktop = true, layoutLock } = {}) {
+function scenario({ desktop = true, layoutLock, modelMenu } = {}) {
   const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/" });
   const { window } = dom;
   const posted = [];
@@ -73,7 +75,7 @@ function scenario({ desktop = true, layoutLock } = {}) {
   globalThis.HTMLInputElement = window.HTMLInputElement;
   globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
   globalThis.Node = window.Node;
-  const commands = setupWindowMenus({ chat, layoutLock });
+  const commands = setupWindowMenus({ chat, layoutLock, modelMenu });
   const menus = {};
   for (const button of window.document.querySelectorAll(".window-titlebar__menu")) {
     menus[button.dataset.menu] = button;
@@ -128,13 +130,13 @@ function scenario({ desktop = true, layoutLock } = {}) {
     window.document.activeElement === itemsOf("edit")[itemsOf("edit").length - 1],
   );
   keydown("ArrowRight");
-  check("Right opens the next menu", !isOpen("edit") && isOpen("window"));
+  check("Right opens the next menu", !isOpen("edit") && isOpen("model"));
   check(
-    "Right focuses the new menu's first command",
-    window.document.activeElement === itemsOf("window")[0],
+    "Right focuses the new menu's first row",
+    window.document.activeElement === itemsOf("model")[0],
   );
   keydown("ArrowLeft");
-  check("Left opens the previous menu", isOpen("edit") && !isOpen("window"));
+  check("Left opens the previous menu", isOpen("edit") && !isOpen("model"));
   keydown("Escape");
   check("Escape closes the menu", !isOpen("edit"));
   check(
@@ -265,6 +267,77 @@ function scenario({ desktop = true, layoutLock } = {}) {
   );
 }
 
+// --- Model menu: dynamic catalog rows ----------------------------------------
+
+{
+  let selected = "alpha";
+  const selections = [];
+  const catalog = [
+    { id: "alpha", description: "the alpha model" },
+    { id: "beta" },
+  ];
+  const { menus, itemsOf, isOpen } = scenario({
+    modelMenu: {
+      getModels: () => catalog,
+      getSelected: () => selected,
+      selectModel: (id) => {
+        selections.push(id);
+        selected = id;
+      },
+    },
+  });
+  menus.model.click();
+  check("the Model menu opens", isOpen("model"));
+  const rows = itemsOf("model");
+  const rowLabel = (row) => row.querySelector(".window-titlebar__item-label").textContent;
+  check(
+    "the Model menu lists the catalog entries",
+    rows.map(rowLabel).join(",") === "alpha,beta",
+  );
+  check(
+    "the selected model is announced checked",
+    rows[0].getAttribute("aria-checked") === "true" &&
+      rows[1].getAttribute("aria-checked") === "false",
+  );
+  check(
+    "the selected model shows the checkmark",
+    rows[0].querySelector(".window-titlebar__item-check").textContent === "✓" &&
+      rows[1].querySelector(".window-titlebar__item-check").textContent === "",
+  );
+  check(
+    "the model description becomes the row tooltip",
+    rows[0].title === "the alpha model",
+  );
+  rows[1].click();
+  check("clicking a model row dispatches selectModel", selections.join(",") === "beta");
+  check("selecting a model closes the menu", !isOpen("model"));
+  menus.model.click();
+  check(
+    "the rebuilt menu marks the new selection",
+    itemsOf("model")[1].getAttribute("aria-checked") === "true",
+  );
+}
+
+{
+  const { menus, itemsOf, isOpen } = scenario({
+    modelMenu: {
+      getModels: () => [],
+      getSelected: () => "",
+      selectModel: () => {},
+    },
+  });
+  menus.model.click();
+  const rows = itemsOf("model");
+  check(
+    "an empty catalog shows one disabled row",
+    rows.length === 1 &&
+      rows[0].querySelector(".window-titlebar__item-label").textContent === "No models available" &&
+      rows[0].getAttribute("aria-disabled") === "true",
+  );
+  rows[0].click();
+  check("clicking the empty-state row keeps the menu open", isOpen("model"));
+}
+
 // --- Help menu: About dialog --------------------------------------------------
 
 {
@@ -318,10 +391,14 @@ function scenario({ desktop = true, layoutLock } = {}) {
 // --- Browser mode: no popovers, commands still dispatch -----------------------
 
 {
-  const { window, commands, stats } = scenario({ desktop: false });
+  const { window, commands, menus, stats } = scenario({ desktop: false });
   check(
     "browser mode builds no popovers",
     window.document.querySelectorAll(".window-titlebar__popover").length === 0,
+  );
+  check(
+    "browser mode skips the Model popover like the others",
+    menus.model.nextElementSibling === menus.window,
   );
   commands.newChat();
   check("browser mode still returns a working command set", stats().created === 1);

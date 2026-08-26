@@ -26,8 +26,11 @@ import { createPanelComponent } from "./workshop/panel-types";
 import { installShortcuts } from "./workshop/shortcuts";
 import { initZones, openInZone } from "./workshop/zones";
 
-const pickerEl = document.getElementById("model-picker") as HTMLSelectElement;
-const descriptionEl = document.getElementById("model-description") as HTMLDivElement;
+// The model catalog lives in module state, not the DOM: the title-bar
+// Model menu reads it through the surface passed to setupWindowMenus, and
+// the selection writes the chat engine's request defaults.
+let modelCatalog: CatalogModel[] = [];
+let currentModel = "";
 
 // One persistent socket carries chat frames upstream and every downstream
 // JSON frame - chat replies and the observer's status updates, which the
@@ -49,10 +52,6 @@ workshopSocket.onStatus((frame) => statusBar.render(frame));
 // to its reconnecting state until the observer speaks again.
 workshopSocket.onDisconnect(() => statusBar.reset());
 workshopSocket.connect();
-
-function selectedModel(): string {
-  return pickerEl.value;
-}
 
 // The mic button joins murm-ui's composer through the plugin seam, but only
 // when the server can transcribe on a GPU; a CPU take stalls long enough to
@@ -84,7 +83,7 @@ const voicePlugin: ChatPlugin = {
   },
   // With no model selected there is nothing to send to; the old UI disabled
   // the send button in the same situation.
-  isSubmitBlocked: () => !selectedModel(),
+  isSubmitBlocked: () => !currentModel,
 };
 
 // Panels are created through the workshop registry: each component name
@@ -135,46 +134,38 @@ const chat = new ChatUI({
 });
 
 // The title-bar menus dispatch through one shared command set; the
-// keyboard shortcuts call the same workshop command functions.
+// keyboard shortcuts call the same workshop command functions. The Model
+// menu reads the catalog state through this surface and writes the
+// selection back into it.
 setupWindowMenus({
   chat,
   layoutLock: {
     isLocked: isLayoutLocked,
     toggle: () => setLayoutLocked(!isLayoutLocked()),
   },
+  modelMenu: {
+    getModels: () => modelCatalog,
+    getSelected: () => currentModel,
+    selectModel: (id) => {
+      currentModel = id;
+      applyModel();
+    },
+  },
 });
 
 function applyModel(): void {
-  chat.engine.setRequestDefaults({ options: { model: selectedModel() } });
+  chat.engine.setRequestDefaults({ options: { model: currentModel } });
 }
 
-function showDescription(): void {
-  const option = pickerEl.selectedOptions[0];
-  descriptionEl.textContent = (option && option.dataset.description) || "";
-}
-
-// Rebuilds the model picker from a catalog, keeping the user's selection
-// when it survives the refresh. Used by the boot fetch and by the pushed
-// catalogs the server sends when the gateway comes back.
+// Records a catalog, keeping the current selection when it survives the
+// refresh and falling back to the first entry (or none) when it does not.
+// Used by the boot fetch and by the pushed catalogs the server sends when
+// the gateway comes back.
 function renderModels(entries: CatalogModel[]): void {
-  const previous = pickerEl.value;
-  pickerEl.textContent = "";
-  if (entries.length === 0) {
-    pickerEl.appendChild(new Option("No models available", ""));
-    pickerEl.disabled = true;
-    return;
+  modelCatalog = entries;
+  if (!entries.some((entry) => entry.id === currentModel)) {
+    currentModel = entries[0]?.id ?? "";
   }
-  for (const entry of entries) {
-    const option = new Option(entry.id, entry.id);
-    option.dataset.description = entry.description || "";
-    pickerEl.appendChild(option);
-  }
-  if (entries.some((entry) => entry.id === previous)) {
-    pickerEl.value = previous;
-  }
-  pickerEl.disabled = false;
-  descriptionEl.classList.remove("sidebar__model-description--error");
-  showDescription();
   applyModel();
 }
 
@@ -187,21 +178,14 @@ async function loadModels(): Promise<void> {
     const catalog = (await response.json()) as { data?: CatalogModel[] };
     renderModels(Array.isArray(catalog.data) ? catalog.data : []);
   } catch (error) {
-    pickerEl.textContent = "";
-    pickerEl.appendChild(new Option("Model catalog unavailable", ""));
-    pickerEl.disabled = true;
-    descriptionEl.textContent = `Could not load the model catalog: ${(error as Error).message}`;
-    descriptionEl.classList.add("sidebar__model-description--error");
+    // The Model menu shows its empty state until a pushed catalog heals
+    // the failed boot fetch.
+    console.error("Could not load the model catalog:", error);
   }
 }
 
 // A pushed catalog means the gateway returned after an outage; refresh the
-// picker in place so a boot-time "Model catalog unavailable" heals itself.
+// catalog state in place so a boot-time failure heals itself.
 workshopSocket.onModels(renderModels);
-
-pickerEl.addEventListener("change", () => {
-  showDescription();
-  applyModel();
-});
 
 void loadModels();

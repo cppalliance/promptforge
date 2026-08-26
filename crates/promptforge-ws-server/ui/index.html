@@ -13,6 +13,7 @@
   <nav class="window-titlebar__menus" aria-label="Application menus">
     <button type="button" class="window-titlebar__menu" data-menu="file" aria-haspopup="menu" aria-expanded="false">File</button>
     <button type="button" class="window-titlebar__menu" data-menu="edit" aria-haspopup="menu" aria-expanded="false">Edit</button>
+    <button type="button" class="window-titlebar__menu" data-menu="model" aria-haspopup="menu" aria-expanded="false">Model</button>
     <button type="button" class="window-titlebar__menu" data-menu="window" aria-haspopup="menu" aria-expanded="false">Window</button>
     <button type="button" class="window-titlebar__menu" data-menu="help" aria-haspopup="menu" aria-expanded="false">Help</button>
   </nav>
@@ -40,14 +41,6 @@
   </div>
 </header>
 <div class="shell">
-  <aside class="sidebar">
-    <div class="sidebar__brand">PromptForge</div>
-    <label class="sidebar__picker-label" for="model-picker">Model</label>
-    <select id="model-picker" class="sidebar__picker" disabled>
-      <option>Loading&hellip;</option>
-    </select>
-    <div id="model-description" class="sidebar__model-description"></div>
-  </aside>
   <div class="dock-column">
     <div id="dock" class="dock"></div>
   </div>
