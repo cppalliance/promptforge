@@ -28,6 +28,8 @@ export class WorkshopTreePanel implements IContentRenderer {
 
   constructor() {
     this.element.className = "workshop-tree";
+    // Focusable so Ctrl+Shift+F can land on the tree even while it is empty.
+    this.element.tabIndex = -1;
     this.list.className = "workshop-tree__list";
   }
 
@@ -36,6 +38,12 @@ export class WorkshopTreePanel implements IContentRenderer {
     void this.loadRoots().catch((error: unknown) => {
       this.showError(this.list, error);
     });
+  }
+
+  /** Focuses the first tree row, or the tree itself while it is empty. */
+  focus(): void {
+    const row = this.element.querySelector<HTMLElement>(".workshop-tree__row");
+    (row ?? this.element).focus();
   }
 
   /** Renders the granted roots, from the session cache when present. */

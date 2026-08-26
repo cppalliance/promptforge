@@ -4,6 +4,7 @@
 // real index.html with the desktop flag set. Covers: menu opening,
 // one-menu-at-a-time, keyboard navigation and dismissal, New Chat
 // dispatch, the Window menu sharing the visible controls' command path,
+// the Window menu's layout-lock command and its state-tracking label,
 // Edit target preservation and disabled commands, the About dialog's
 // focus trap and close, and the browser-mode skip of the popover wiring.
 // Run: node test/window-menu.mjs
@@ -41,7 +42,7 @@ function check(name, condition) {
 // Each scenario gets a fresh jsdom: the modules read the globals and
 // attach listeners to the DOM they find at call time. Pass desktop: false
 // to exercise the plain-browser path (no flag, no ipc bridge).
-function scenario({ desktop = true } = {}) {
+function scenario({ desktop = true, layoutLock } = {}) {
   const dom = new JSDOM(html, { url: "http://127.0.0.1:7910/" });
   const { window } = dom;
   const posted = [];
@@ -72,7 +73,7 @@ function scenario({ desktop = true } = {}) {
   globalThis.HTMLInputElement = window.HTMLInputElement;
   globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
   globalThis.Node = window.Node;
-  const commands = setupWindowMenus({ chat });
+  const commands = setupWindowMenus({ chat, layoutLock });
   const menus = {};
   for (const button of window.document.querySelectorAll(".window-titlebar__menu")) {
     menus[button.dataset.menu] = button;
@@ -183,6 +184,45 @@ function scenario({ desktop = true } = {}) {
         JSON.stringify({ command: "toggle-maximize" }),
         JSON.stringify({ command: "toggle-maximize" }),
       ].join("|"),
+  );
+}
+
+// --- Window menu: the layout-lock command ------------------------------------
+
+{
+  const { menus, itemByLabel } = scenario();
+  menus.window.click();
+  check(
+    "the Window menu omits the lock command without a lock surface",
+    itemByLabel("window", "Unlock Layout") === undefined &&
+      itemByLabel("window", "Lock Layout") === undefined,
+  );
+}
+
+{
+  let locked = true;
+  let toggles = 0;
+  const { menus, itemByLabel, isOpen } = scenario({
+    layoutLock: {
+      isLocked: () => locked,
+      toggle: () => {
+        toggles += 1;
+        locked = !locked;
+      },
+    },
+  });
+  menus.window.click();
+  check(
+    "the lock command offers Unlock while locked",
+    itemByLabel("window", "Unlock Layout") !== undefined,
+  );
+  itemByLabel("window", "Unlock Layout").click();
+  check("the lock command dispatches the toggle", toggles === 1);
+  check("running the lock command closes the menu", !isOpen("window"));
+  menus.window.click();
+  check(
+    "the lock label tracks the unlocked state on reopen",
+    itemByLabel("window", "Lock Layout") !== undefined,
   );
 }
 
