@@ -26,6 +26,11 @@
 	color: var(--mur-text);
 }
 
+.mur-think-toggle:focus-visible {
+	outline: 2px solid var(--mur-focus-ring, currentColor);
+	outline-offset: 2px;
+}
+
 .mur-think-toggle svg {
 	transition: transform 0.2s;
 }
@@ -34,10 +39,11 @@
 	transform: rotate(90deg);
 }
 
-/* While reasoning streams, the label reads "Planning next moves..." with a
-   soft light-gray highlight sweeping across the dim base text. Only
-   background-position animates, so the shimmer stays on the compositor. */
-.mur-think-label--streaming {
+/* The prefill row reads "Planning next moves" with a soft light-gray
+   highlight sweeping across the dim base text. Only background-position
+   animates, so the shimmer stays on the compositor. The shimmer applies
+   only to prefill: the Thinking toggle label never shimmers. */
+.mur-think-label--prefill {
 	background-image: linear-gradient(
 		90deg,
 		var(--mur-text-muted) 35%,
@@ -62,7 +68,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.mur-think-label--streaming {
+	.mur-think-label--prefill {
 		animation: none;
 		background-image: none;
 		color: var(--mur-text-muted);
@@ -98,9 +104,10 @@
 	}
 }
 
-/* Synthetic grace-period row: shown only when streaming runs ~500ms with no
-   reasoning block yet. Non-interactive; mirrors the collapsed label row. */
-.mur-think-grace {
+/* Synthetic prefill row: shown immediately when generation starts, before
+   the first reasoning or content token. Non-interactive; mirrors the
+   collapsed label row. */
+.mur-think-prefill {
 	margin-bottom: 0.75rem;
 	padding: 0.25rem 0.5rem;
 	color: var(--mur-text-muted);
