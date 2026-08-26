@@ -85,6 +85,22 @@
   --rec-idle: #552222;
   --rec-active: #ff0000;
 
+  /* Window title bar (custom Windows chrome) */
+  --titlebar-height: 40px;
+  --titlebar-bg: var(--bg, #0d0e12);
+  --titlebar-foreground: var(--text, #d6d9e0);
+  --titlebar-divider: var(--border, #262a33); /* the one-pixel lower edge */
+  --titlebar-accent: var(--accent, #7c7fd4); /* focus/selection states only */
+  --titlebar-glyph: var(--text-muted, #8b90a0); /* window-control SVG strokes */
+  --titlebar-hover: var(--bg-hover, #1a1d25); /* neutral wash: menus, Minimize, Maximize */
+  --titlebar-control-width: 46px;
+  --titlebar-close-hover: var(--danger, #b0606a);
+  --titlebar-close-glyph-hover: var(--on-danger, #ffffff);
+  --titlebar-icon-size: 20px;
+  --titlebar-font-size: 13px;
+  --titlebar-popover-min-width: 200px;
+  --titlebar-popover-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+
   /* Scrollbars (applied globally below) */
   --scrollbar-width: 8px; /* thin; also the thumb's rounding diameter */
   --scrollbar-thumb: rgba(255, 255, 255, 0.16); /* translucent on any surface */
@@ -230,31 +246,129 @@ body {
   margin: 0;
 }
 
-/* The custom window title bar is desktop-shell chrome: hidden by default
-   and revealed by window-chrome.ts only under the wry initialization flag.
-   Full styling lands with the title-bar skin step; this rule only keeps the
-   bar out of the browser layout. */
+/* --------------------------------------------------------------------------
+   Custom window title bar (Windows desktop chrome). Hidden by default and
+   revealed by window-chrome.ts only under the wry initialization flag; the
+   [hidden] rule must keep winning over the base rule's display:flex, which
+   the attribute selector's extra specificity guarantees. The bar is a
+   fixed-height row in the body's column flex layout - icon, menus, drag
+   region, then the three window controls in Windows order - and the shell
+   below absorbs it without overlap. Hover states flip instantly like native
+   chrome, so nothing here animates.
+   -------------------------------------------------------------------------- */
+.window-titlebar {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: var(--titlebar-height, 40px);
+  background: var(--titlebar-bg, #0d0e12);
+  border-bottom: 1px solid var(--titlebar-divider, #262a33);
+  color: var(--titlebar-foreground, #d6d9e0);
+  font-size: var(--titlebar-font-size, 13px);
+  line-height: 1;
+  user-select: none;
+}
+
 .window-titlebar[hidden] {
   display: none;
 }
 
-/* Application menu popovers: structural rules only, so the menus stay
-   usable and unobstructed until the title-bar skin step owns the look.
-   Popovers are absolutely positioned below the bar and never participate
-   in layout. */
-.window-titlebar__menus {
-  position: relative;
+/* The program icon is decorative and noninteractive. */
+.window-titlebar__icon {
+  flex: none;
+  align-self: center;
+  width: var(--titlebar-icon-size, 20px);
+  height: var(--titlebar-icon-size, 20px);
+  margin-inline: var(--space-lg, 12px) var(--space-xs, 4px);
 }
 
+/* Menu buttons: text items flush with the bar's left edge. */
+.window-titlebar__menus {
+  position: relative; /* popover positioning context */
+  flex: none;
+  display: flex;
+  align-items: stretch;
+}
+
+.window-titlebar__menu {
+  padding: 0 var(--space-lg, 12px);
+  background: none;
+  border: none;
+  color: var(--titlebar-foreground, #d6d9e0);
+  font: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+
+.window-titlebar__menu:hover,
+.window-titlebar__menu[aria-expanded="true"] {
+  background: var(--titlebar-hover, #1a1d25);
+}
+
+.window-titlebar__menu:focus-visible {
+  outline: 1px solid var(--titlebar-accent, #7c7fd4);
+  outline-offset: -1px;
+}
+
+/* The empty center: the only surface that initiates a native drag. */
+.window-titlebar__drag {
+  flex: 1;
+  min-width: 0;
+  user-select: none;
+}
+
+/* Window controls: three equal-width buttons with centered glyphs. Hit
+   areas fill the bar's height; the min-height floor keeps them reachable
+   even if a skin shrinks the bar. */
+.window-titlebar__controls {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+}
+
+.window-titlebar__control {
+  width: var(--titlebar-control-width, 46px);
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--titlebar-glyph, #8b90a0);
+  cursor: pointer;
+  user-select: none;
+}
+
+.window-titlebar__control:focus-visible {
+  outline: 1px solid var(--titlebar-accent, #7c7fd4);
+  outline-offset: -1px;
+}
+
+.window-titlebar__control--minimize:hover,
+.window-titlebar__control--maximize:hover {
+  background: var(--titlebar-hover, #1a1d25);
+}
+
+.window-titlebar__control--close:hover {
+  background: var(--titlebar-close-hover, #b0606a);
+  color: var(--titlebar-close-glyph-hover, #ffffff);
+}
+
+/* Menu popovers: slightly raised near-black surfaces below the bar,
+   absolutely positioned so they never participate in layout. Rows are
+   compact - label left, shortcut right in muted text - and the purple
+   accent is reserved for the focus/selection ring. */
 .window-titlebar__popover {
   position: absolute;
   top: 100%;
   z-index: 100;
-  min-width: 180px;
+  min-width: var(--titlebar-popover-min-width, 200px);
   padding: var(--space-xs, 4px) 0;
   background: var(--bg-raised, #14161c);
   border: 1px solid var(--border, #262a33);
   border-radius: var(--radius, 6px);
+  box-shadow: var(--titlebar-popover-shadow, 0 6px 18px rgba(0, 0, 0, 0.5));
 }
 
 .window-titlebar__popover[hidden] {
@@ -264,15 +378,17 @@ body {
 .window-titlebar__item {
   display: flex;
   justify-content: space-between;
-  gap: var(--space-lg, 12px);
+  align-items: baseline;
+  gap: var(--space-xl, 16px);
   width: 100%;
-  padding: var(--space-sm, 6px) var(--space-lg, 12px);
+  padding: var(--space-xs, 4px) var(--space-lg, 12px);
   background: none;
   border: none;
   color: var(--text, #d6d9e0);
   font: inherit;
   text-align: left;
   cursor: pointer;
+  user-select: none;
 }
 
 .window-titlebar__item:hover {
@@ -280,7 +396,7 @@ body {
 }
 
 .window-titlebar__item:focus-visible {
-  outline: 1px solid var(--accent-dim, #5658a0);
+  outline: 1px solid var(--titlebar-accent, #7c7fd4);
   outline-offset: -1px;
   background: var(--bg-hover, #1a1d25);
 }
@@ -290,8 +406,13 @@ body {
   cursor: default;
 }
 
+.window-titlebar__item[aria-disabled="true"]:hover {
+  background: none;
+}
+
 .window-titlebar__shortcut {
   color: var(--text-muted, #8b90a0);
+  font-size: 12px;
 }
 
 .window-titlebar__separator {
