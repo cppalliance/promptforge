@@ -74,10 +74,28 @@ window.IntersectionObserver = class {
 window.Element.prototype.scrollTo = () => {};
 window.HTMLElement.prototype.scrollIntoView = () => {};
 
+// Opening a file mounts a real CodeMirror editor (step 14); jsdom has no
+// layout, so Range and element measurement get zero-rect shims. The test
+// never asserts editor geometry.
+const zeroRect = () => ({
+  x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0,
+  toJSON: () => ({}),
+});
+window.Range.prototype.getBoundingClientRect = zeroRect;
+window.Range.prototype.getClientRects = () => ({
+  length: 0,
+  item: () => null,
+  [Symbol.iterator]: [][Symbol.iterator],
+});
+window.HTMLElement.prototype.getClientRects = function getClientRects() {
+  return { length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] };
+};
+
 // A scripted workspace API. The roots listing carries one directory;
 // expanding it returns a folder and two files (folders first, as the
-// server orders them). Any other route - above all /workspace/file -
-// rejects, so an unexpected request fails the test loudly.
+// server orders them). /workspace/file serves a small text per path so
+// the step-14 editor panels can load; any other route rejects, so an
+// unexpected request fails the test loudly.
 const calls = [];
 const ROOT = "C:\\project";
 const LISTINGS = new Map([
@@ -109,6 +127,21 @@ const LISTINGS = new Map([
 ]);
 globalThis.fetch = async (url) => {
   calls.push(url);
+  if (typeof url === "string" && url.startsWith("/workspace/file")) {
+    const pathParam = new URL(url, "http://127.0.0.1:7910").searchParams.get("path");
+    if (pathParam !== null && pathParam.startsWith(ROOT)) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          path: pathParam,
+          size: 7,
+          modified_ms: 100,
+          text: `text of ${pathParam}`,
+        }),
+      };
+    }
+  }
   if (typeof url === "string" && url.startsWith("/workspace/tree")) {
     const query = url.includes("?") ? new URL(url, "http://127.0.0.1:7910").searchParams : null;
     const pathParam = query ? query.get("path") : null;
@@ -125,6 +158,7 @@ for (const key of [
   "navigator",
   "location",
   "localStorage",
+  "Window",
   "HTMLElement",
   "HTMLTemplateElement",
   "Node",
@@ -245,12 +279,16 @@ rowByText("a.txt").click();
 const editorA = dock.getPanel(panelIdFor("editor", { path: `${ROOT}\\a.txt` }));
 check("activating a file opens an editor panel", !!editorA);
 check("the editor opens in the main zone", editorA && zoneOfPanel(editorA) === "main");
-check(
-  "the editor placeholder shows the path it was opened with",
-  !!editorA && editorA.api && window.document.querySelector(".editor-panel")?.textContent.includes(`${ROOT}\\a.txt`),
-);
 check("a third zone group appears for main", dock.groups.length === 3);
-check("opening a file never requests its contents", fileCalls().length === 0);
+await flush();
+check(
+  "opening a file requests its contents through the workspace API",
+  fileCalls().includes(`/workspace/file?path=${encodeURIComponent(`${ROOT}\\a.txt`)}`),
+);
+check(
+  "the editor panel mounts its CodeMirror surface",
+  !!editorA && !!editorA.api && !!window.document.querySelector(".editor-panel .cm-editor"),
+);
 
 // A second editor lands within the same main group (affinity, not a new zone).
 const editorB = openInZone("editor", { path: `${ROOT}\\b.txt` });

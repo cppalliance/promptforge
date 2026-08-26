@@ -1,0 +1,276 @@
+// The EditorSurface contract and its CodeMirror 6 implementation. The
+// surface owns everything editor-concrete: the EditorView, the extension
+// set, the theme, lazy language modes, and dirty tracking. Panels, zones,
+// and the save flow are written against EditorSurface only - nothing else
+// in the app imports @codemirror/* directly. Dirty tracking is an
+// updateListener comparing the live document against the last opened or
+// saved text; markSaved resets that baseline after a successful write.
+
+import { basicSetup } from "codemirror";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { search } from "@codemirror/search";
+import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
+
+/** A document handed to the surface: the path it came from and its text. */
+export interface EditorDocument {
+  readonly path: string;
+  readonly text: string;
+}
+
+/**
+ * The editor abstraction the rest of the workshop is written against.
+ * Implementations own one document at a time; open replaces it.
+ */
+export interface EditorSurface {
+  /** The root element the panel mounts. */
+  readonly element: HTMLElement;
+  /** Loads a document, replacing any current one and resetting dirty state. */
+  open(document: EditorDocument): void;
+  /** The current editor text - what a save would write. */
+  text(): string;
+  /** Marks the current text as the saved baseline, clearing dirty state. */
+  markSaved(): void;
+  /** Whether the text differs from the last open or markSaved baseline. */
+  isDirty(): boolean;
+  /** Registers a listener fired on dirty-state transitions; returns an unsubscribe. */
+  onDirtyChange(listener: (dirty: boolean) => void): () => void;
+  focus(): void;
+  dispose(): void;
+}
+
+// The dark theme skins from the same :root tokens as the rest of the UI;
+// every var() carries the token's stock value as fallback.
+const promptforgeTheme = EditorView.theme(
+  {
+    "&": {
+      backgroundColor: "var(--bg, #0d0e12)",
+      color: "var(--text, #d6d9e0)",
+      height: "100%",
+      fontSize: "13px",
+    },
+    ".cm-content": {
+      fontFamily: 'var(--code-font, ui-monospace, "Cascadia Code", Consolas, monospace)',
+      caretColor: "var(--text, #d6d9e0)",
+    },
+    ".cm-cursor, .cm-dropCursor": {
+      borderLeftColor: "var(--text, #d6d9e0)",
+    },
+    ".cm-gutters": {
+      backgroundColor: "var(--bg-raised, #14161c)",
+      color: "var(--text-muted, #8b90a0)",
+      border: "none",
+      borderRight: "1px solid var(--border, #262a33)",
+    },
+    ".cm-activeLineGutter": {
+      backgroundColor: "var(--bg-hover, #1a1d25)",
+    },
+    ".cm-activeLine": {
+      backgroundColor: "var(--bg-hover, #1a1d25)",
+    },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+      backgroundColor: "var(--accent-dim, #5658a0)",
+    },
+    "&.cm-focused": {
+      outline: "1px solid var(--accent-dim, #5658a0)",
+      outlineOffset: "-1px",
+    },
+    ".cm-searchMatch": {
+      backgroundColor: "var(--accent-dim, #5658a0)",
+      outline: "1px solid var(--accent, #7c7fd4)",
+    },
+    ".cm-searchMatch-selected": {
+      backgroundColor: "var(--accent, #7c7fd4)",
+    },
+    ".cm-panels": {
+      backgroundColor: "var(--bg-raised, #14161c)",
+      color: "var(--text, #d6d9e0)",
+    },
+    ".cm-panels input, .cm-panels button": {
+      backgroundColor: "var(--bg, #0d0e12)",
+      color: "var(--text, #d6d9e0)",
+      border: "1px solid var(--border, #262a33)",
+      borderRadius: "var(--radius, 6px)",
+    },
+  },
+  { dark: true },
+);
+
+// Syntax colors drawn from the palette: accent for keywords and headings,
+// the LED green/amber for strings and literals, muted gray for comments
+// and punctuation. Every value stays at or above 4.5:1 on --bg.
+const promptforgeHighlight = HighlightStyle.define([
+  { tag: [tags.keyword, tags.modifier, tags.controlKeyword], color: "var(--accent, #7c7fd4)" },
+  { tag: [tags.string, tags.special(tags.string)], color: "var(--led-green, #4caf7d)" },
+  { tag: [tags.number, tags.bool, tags.atom, tags.null], color: "var(--led-amber, #d9a03f)" },
+  { tag: [tags.comment, tags.blockComment], color: "var(--text-muted, #8b90a0)", fontStyle: "italic" },
+  { tag: [tags.typeName, tags.className, tags.tagName], color: "var(--accent, #7c7fd4)" },
+  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "var(--text, #d6d9e0)" },
+  { tag: [tags.propertyName, tags.attributeName], color: "var(--text, #d6d9e0)" },
+  { tag: [tags.operator, tags.punctuation, tags.separator], color: "var(--text-muted, #8b90a0)" },
+  { tag: tags.heading, color: "var(--accent, #7c7fd4)", fontWeight: "bold" },
+  { tag: tags.link, color: "var(--accent, #7c7fd4)", textDecoration: "underline" },
+  { tag: tags.emphasis, fontStyle: "italic" },
+  { tag: tags.strong, fontWeight: "bold" },
+  { tag: tags.strikethrough, textDecoration: "line-through" },
+  { tag: tags.invalid, color: "var(--danger-text, #cf7f88)" },
+]);
+
+/** The lowercase file extension of a path, or null when it has none. */
+function extensionOf(path: string): string | null {
+  const name = path.split(/[\\/]/).filter(Boolean).pop();
+  if (name === undefined) {
+    return null;
+  }
+  const dot = name.lastIndexOf(".");
+  return dot <= 0 ? null : name.slice(dot + 1).toLowerCase();
+}
+
+/**
+ * The language mode for a file extension, loaded on demand. First-party
+ * packs cover JavaScript/TypeScript, Python, Rust, JSON, Markdown, and
+ * YAML; TOML comes through the legacy-modes stream parser. Unknown
+ * extensions get plain text. (The single-file esbuild bundle inlines
+ * these dynamic imports; the structure keeps the load boundary explicit.)
+ */
+async function languageFor(path: string): Promise<Extension | null> {
+  switch (extensionOf(path)) {
+    case "js":
+    case "mjs":
+    case "cjs":
+    case "jsx": {
+      const { javascript } = await import("@codemirror/lang-javascript");
+      return javascript({ jsx: true });
+    }
+    case "ts":
+    case "mts":
+    case "cts": {
+      const { javascript } = await import("@codemirror/lang-javascript");
+      return javascript({ typescript: true });
+    }
+    case "tsx": {
+      const { javascript } = await import("@codemirror/lang-javascript");
+      return javascript({ typescript: true, jsx: true });
+    }
+    case "py": {
+      const { python } = await import("@codemirror/lang-python");
+      return python();
+    }
+    case "rs": {
+      const { rust } = await import("@codemirror/lang-rust");
+      return rust();
+    }
+    case "json": {
+      const { json } = await import("@codemirror/lang-json");
+      return json();
+    }
+    case "md":
+    case "markdown": {
+      const { markdown } = await import("@codemirror/lang-markdown");
+      return markdown();
+    }
+    case "yaml":
+    case "yml": {
+      const { yaml } = await import("@codemirror/lang-yaml");
+      return yaml();
+    }
+    case "toml": {
+      const { toml } = await import("@codemirror/legacy-modes/mode/toml");
+      return StreamLanguage.define(toml);
+    }
+    default:
+      return null;
+  }
+}
+
+/** The CodeMirror 6 EditorSurface. */
+export class CodeMirrorSurface implements EditorSurface {
+  readonly element = document.createElement("div");
+  private view: EditorView | null = null;
+  private savedText = "";
+  private dirty = false;
+  private readonly listeners = new Set<(dirty: boolean) => void>();
+  private readonly language = new Compartment();
+  // Discards a lazy language load that resolves after a newer open().
+  private openGeneration = 0;
+
+  constructor() {
+    this.element.className = "editor-surface";
+  }
+
+  open(document: EditorDocument): void {
+    this.openGeneration += 1;
+    const generation = this.openGeneration;
+    this.view?.destroy();
+    this.savedText = document.text;
+    this.view = new EditorView({
+      parent: this.element,
+      state: EditorState.create({
+        doc: document.text,
+        extensions: [
+          basicSetup,
+          search(),
+          promptforgeTheme,
+          syntaxHighlighting(promptforgeHighlight),
+          this.language.of([]),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              this.setDirty(update.state.doc.toString() !== this.savedText);
+            }
+          }),
+        ],
+      }),
+    });
+    this.setDirty(false);
+    void languageFor(document.path)
+      .then((mode) => {
+        if (mode !== null && generation === this.openGeneration && this.view !== null) {
+          this.view.dispatch({ effects: this.language.reconfigure(mode) });
+        }
+      })
+      .catch(() => {
+        // A failed language load leaves the document as plain text.
+      });
+  }
+
+  text(): string {
+    return this.view?.state.doc.toString() ?? "";
+  }
+
+  markSaved(): void {
+    this.savedText = this.text();
+    this.setDirty(false);
+  }
+
+  isDirty(): boolean {
+    return this.dirty;
+  }
+
+  onDirtyChange(listener: (dirty: boolean) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  focus(): void {
+    this.view?.focus();
+  }
+
+  dispose(): void {
+    this.view?.destroy();
+    this.view = null;
+    this.listeners.clear();
+  }
+
+  private setDirty(dirty: boolean): void {
+    if (dirty === this.dirty) {
+      return;
+    }
+    this.dirty = dirty;
+    for (const listener of this.listeners) {
+      listener(dirty);
+    }
+  }
+}
