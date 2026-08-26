@@ -49,6 +49,9 @@ workshopSocket.onStatus((frame) => statusBar.render(frame));
 // A dropped socket means every in-flight status is stale; the bar returns
 // to its reconnecting state until the observer speaks again.
 workshopSocket.onDisconnect(() => statusBar.reset());
+// An aborted chat recycles the socket, so no terminal status frame for it
+// ever arrives; the bar clears its own activity LED instead.
+workshopSocket.onAbort(() => statusBar.clearActivity());
 workshopSocket.connect();
 
 // The mic button joins murm-ui's composer through the plugin seam, but only

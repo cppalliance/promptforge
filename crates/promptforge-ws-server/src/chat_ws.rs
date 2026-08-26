@@ -256,6 +256,10 @@ async fn relay_chat(
                 if !send_frame(out, delta).await {
                     finish.error = Some("client disconnected mid-stream".to_string());
                     finish.record().await;
+                    // The dead client is gone, but any other subscriber
+                    // still watches the observer: return it to Ready
+                    // rather than leaving a stale activity LED.
+                    status.idle();
                     return;
                 }
             }
@@ -719,6 +723,11 @@ mod tests {
         )
         .await;
         let (url, tape_dir, _state) = spawn_chat_server(&base_url).await;
+        // A second session observes the status bus: the dead client's
+        // terminal update must still reach every remaining subscriber.
+        let (mut observer, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("connect an observer to /ws");
         let (mut socket, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("connect to /ws");
@@ -728,6 +737,21 @@ mod tests {
         // Drop the socket without a close handshake; the server notices when
         // a later delta send fails.
         drop(socket);
+
+        // The observer sees the relay return to Ready once the failed send
+        // ends the stream, rather than keeping a stale activity LED.
+        let idle = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let frame = read_frame(&mut observer).await;
+                if frame["type"] == "status" && frame["label"] == "Ready" {
+                    break frame;
+                }
+            }
+        })
+        .await
+        .expect("the observer sees the idle status after the disconnect");
+        assert_eq!(idle["activity"], "general");
+        assert_eq!(idle["severity"], "info");
 
         // The tape write follows the failed send, so poll for it.
         let mut events: Vec<serde_json::Value> = Vec::new();
