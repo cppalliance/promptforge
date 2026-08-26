@@ -77,3 +77,5 @@
 - [2026-08-24-5-stop-recording-on-send] close without stop: A mid-recording submit closes the voice socket without requesting a final decode because the visible composer text is authoritative.
 - [2026-08-24-6-ci-and-hygiene-fixes] platform-aware CI: Portable crates and native Workshop crates require separate platform and feature verification lanes.
 - [2026-08-25-1-rename-workbench-to-workshop] lexical rename guard: Product abbreviation changes must not rewrite WebSocket route, feature, or local-variable tokens.
+- [2026-08-26-1-remove-voice-status-line] zone affinity: Panel types have default zones, user placement persists, and the status bar stays outside the dock.
+- [2026-08-26-1-remove-voice-status-line] auditable agent feed: Reasoning and tool activity remain inspectable without allowing transient rows to shift the composer.
