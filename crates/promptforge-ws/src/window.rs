@@ -7,12 +7,14 @@
 //! gesture. `run` uses tao's `run_return` so control comes back after the
 //! loop exits and the caller can shut the server down cleanly.
 
+use std::path::{Path, PathBuf};
+
 use anyhow::Context as _;
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::platform::run_return::EventLoopExtRunReturn;
 use tao::window::{Icon, WindowBuilder};
-use wry::{PermissionKind, PermissionResponse, WebView, WebViewBuilder};
+use wry::{DragDropEvent, PermissionKind, PermissionResponse, WebView, WebViewBuilder};
 
 /// The cold medallion program icon, embedded so the installed binary
 /// carries no asset files. Frames 2-5 stay on disk for a future activity
@@ -64,6 +66,18 @@ pub(crate) enum WindowCommand {
     ToggleMaximize,
     /// Close the window; the loop exits and the server shuts down.
     Close,
+}
+
+/// A user event delivered to the tao event loop. Both the IPC handler and
+/// the drag-drop handler run on webview threads without access to the tao
+/// `Window` or the `WebView`, so their payloads travel through an
+/// `EventLoopProxy` and run on the event loop thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ShellEvent {
+    /// A command from the custom title bar.
+    Command(WindowCommand),
+    /// Real OS paths dropped onto the webview from Explorer.
+    FileDrop(Vec<PathBuf>),
 }
 
 /// Parses one IPC envelope (`{"command": "..."}`) into a window command.
@@ -136,13 +150,55 @@ fn dispatch_maximized(webview: &WebView, maximized: bool) {
     }
 }
 
+/// Renders a dropped OS path for the browser event: the path's own text
+/// with any Windows verbatim (`\\?\`) prefix stripped, so the page hands
+/// the workspace API the same spelling Explorer shows. The verbatim UNC
+/// form (`\\?\UNC\server\share`) collapses to the plain UNC spelling
+/// (`\\server\share`). Separators stay native - the workspace server runs
+/// on this same machine and canonicalizes whatever it receives.
+#[must_use]
+pub(crate) fn normalize_dropped_path(path: &Path) -> String {
+    let text = path.to_string_lossy().into_owned();
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{unc}");
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(stripped) => stripped.to_owned(),
+        None => text,
+    }
+}
+
+/// Dispatches the `promptforge:file-drop` event carrying the normalized
+/// dropped paths. The page grants each path through the workspace HTTP
+/// API; the shell never reads file bytes merely because a file was
+/// dragged onto the window.
+fn dispatch_file_drop(webview: &WebView, paths: &[PathBuf]) {
+    let normalized: Vec<String> = paths
+        .iter()
+        .map(|path| normalize_dropped_path(path))
+        .collect();
+    let detail = match serde_json::to_string(&normalized) {
+        Ok(detail) => detail,
+        Err(error) => {
+            eprintln!("could not encode the dropped paths: {error}");
+            return;
+        }
+    };
+    let script = format!(
+        "window.dispatchEvent(new CustomEvent(\"promptforge:file-drop\", {{detail: {{paths: {detail}}}}}));"
+    );
+    if let Err(error) = webview.evaluate_script(&script) {
+        eprintln!("could not dispatch the file-drop event: {error}");
+    }
+}
+
 /// Runs the window's event loop until the user closes the window, then
 /// returns.
 ///
 /// # Errors
 /// Returns an error if the window or the webview cannot be created.
 pub(crate) fn run(url: &str) -> anyhow::Result<()> {
-    let event_loop = EventLoopBuilder::<WindowCommand>::with_user_event().build();
+    let event_loop = EventLoopBuilder::<ShellEvent>::with_user_event().build();
     let builder = WindowBuilder::new()
         .with_title("PromptForge")
         .with_window_icon(window_icon());
@@ -155,6 +211,7 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
         .context("create the workshop window")?;
 
     let proxy = event_loop.create_proxy();
+    let drop_proxy = event_loop.create_proxy();
     let webview = WebViewBuilder::new()
         .with_url(url)
         .with_initialization_script("window.__PROMPTFORGE_DESKTOP__ = true;")
@@ -162,9 +219,22 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
             let Some(command) = parse_window_command(request.body()) else {
                 return;
             };
-            if let Err(error) = proxy.send_event(command) {
+            if let Err(error) = proxy.send_event(ShellEvent::Command(command)) {
                 eprintln!("could not forward the window command to the event loop: {error}");
             }
+        })
+        .with_drag_drop_handler(move |event| {
+            // Only the drop carries paths worth granting; enter, over, and
+            // leave are cursor feedback the shell does not need.
+            if let DragDropEvent::Drop { paths, .. } = event
+                && let Err(error) = drop_proxy.send_event(ShellEvent::FileDrop(paths))
+            {
+                eprintln!("could not forward the dropped paths to the event loop: {error}");
+            }
+            // Take over the drop so the webview never navigates to a
+            // dropped file; the page learns the paths through the
+            // promptforge:file-drop event instead.
+            true
         })
         .with_permission_handler(|kind| match kind {
             PermissionKind::Microphone => PermissionResponse::Allow,
@@ -190,19 +260,26 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
                 event: WindowEvent::CloseRequested,
                 ..
             }
-            | Event::UserEvent(WindowCommand::Close) => *control_flow = ControlFlow::Exit,
+            | Event::UserEvent(ShellEvent::Command(WindowCommand::Close)) => {
+                *control_flow = ControlFlow::Exit;
+            }
             Event::WindowEvent {
                 event: WindowEvent::Resized(..),
                 ..
             } => dispatch_maximized(&webview, window.is_maximized()),
-            Event::UserEvent(WindowCommand::Drag) => {
+            Event::UserEvent(ShellEvent::Command(WindowCommand::Drag)) => {
                 if let Err(error) = window.drag_window() {
                     eprintln!("could not start the native window drag: {error}");
                 }
             }
-            Event::UserEvent(WindowCommand::Minimize) => window.set_minimized(true),
-            Event::UserEvent(WindowCommand::ToggleMaximize) => {
+            Event::UserEvent(ShellEvent::Command(WindowCommand::Minimize)) => {
+                window.set_minimized(true);
+            }
+            Event::UserEvent(ShellEvent::Command(WindowCommand::ToggleMaximize)) => {
                 window.set_maximized(!window.is_maximized());
+            }
+            Event::UserEvent(ShellEvent::FileDrop(paths)) => {
+                dispatch_file_drop(&webview, &paths);
             }
             _ => {}
         }
@@ -212,9 +289,11 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::{
         ICON_PNG, Navigation, WindowCommand, classify_navigation, decode_png_rgba,
-        parse_window_command,
+        normalize_dropped_path, parse_window_command,
     };
 
     #[test]
@@ -306,5 +385,33 @@ mod tests {
         ] {
             assert_eq!(classify_navigation(url), Navigation::Allow, "{url}");
         }
+    }
+
+    #[test]
+    fn dropped_paths_keep_backslashes_spaces_and_unicode() {
+        for path in [
+            r"C:\Users\Vinnie\Documents\project",
+            r"C:\Users\Vinnie\My Documents\file name.txt",
+            "C:\\Users\\Vinnie\\caf\u{e9} \u{4e2d}\u{6587}.txt",
+            r"D:\src\promptforge\crates",
+        ] {
+            assert_eq!(normalize_dropped_path(Path::new(path)), path, "{path}");
+        }
+    }
+
+    #[test]
+    fn dropped_paths_shed_the_verbatim_prefix() {
+        assert_eq!(
+            normalize_dropped_path(Path::new(r"\\?\C:\Users\Vinnie\file.txt")),
+            r"C:\Users\Vinnie\file.txt"
+        );
+        assert_eq!(
+            normalize_dropped_path(Path::new("\\\\?\\D:\\src\\caf\u{e9}.txt")),
+            "D:\\src\\caf\u{e9}.txt"
+        );
+        assert_eq!(
+            normalize_dropped_path(Path::new(r"\\?\UNC\server\share\file.txt")),
+            r"\\server\share\file.txt"
+        );
     }
 }
