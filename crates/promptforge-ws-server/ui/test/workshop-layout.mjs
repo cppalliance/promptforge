@@ -23,6 +23,7 @@ const bundle = await esbuild.build({
       export { createDockview, themeDark } from "dockview";
       export {
         initZones,
+        openAgentPanel,
         openInZone,
         panelIdFor,
         zoneOfPanel,
@@ -190,6 +191,7 @@ const {
   createDockview,
   themeDark,
   initZones,
+  openAgentPanel,
   openInZone,
   panelIdFor,
   zoneOfPanel,
@@ -264,15 +266,14 @@ check("the layout lock starts engaged", isLayoutLocked());
 check("the dock carries the locked class", dockEl.classList.contains("dock--locked"));
 check("empty storage has nothing to restore", restoreLayout(dock) === false);
 
-openInZone("chat", {});
+const chatPanel = openAgentPanel();
 const treePanel = openInZone("tree", {});
 treePanel.group.api.setSize({ width: 280 });
-openInZone("chat", {});
 await flush();
 
 check("the default layout mounts chat and tree", dock.panels.length === 2);
 check("main stays empty until a document opens", dock.groups.length === 2);
-check("chat opens right, the tree left", zoneOfPanel(dock.getPanel("chat")) === "right" && zoneOfPanel(treePanel) === "left");
+check("chat opens right, the tree left", zoneOfPanel(chatPanel) === "right" && zoneOfPanel(treePanel) === "left");
 check(
   "every zone header carries a lock control",
   window.document.querySelectorAll("#dock .layout-lock-toggle").length === 2,
@@ -329,11 +330,11 @@ initZones(dock2);
 initLayoutLock(dock2, dockEl2);
 check("the persisted layout restores", restoreLayout(dock2) === true);
 await flush();
-check("the chat panel is restored through its factory", !!dock2.getPanel("chat"));
+check("the agent panel is restored through its factory", !!dock2.getPanel(chatPanel.id));
 check("the tree panel is restored through its factory", !!dock2.getPanel("tree"));
 check("the editor panel is restored through its factory", !!dock2.getPanel(editorAId));
 check("restored panels land in their zones",
-  zoneOfPanel(dock2.getPanel("chat")) === "right" &&
+  zoneOfPanel(dock2.getPanel(chatPanel.id)) === "right" &&
     zoneOfPanel(dock2.getPanel("tree")) === "left" &&
     zoneOfPanel(dock2.getPanel(editorAId)) === "main");
 check("the restored editor mounted its surface",
@@ -410,7 +411,7 @@ window.localStorage.setItem(LAYOUT_STORAGE_KEY, "not json{");
 const dock3 = createDock(window.document.createElement("div"));
 initZones(dock3);
 check("corrupt storage fails the restore", restoreLayout(dock3) === false);
-openInZone("chat", {});
+openAgentPanel();
 openInZone("tree", {});
 check("the corrupt-storage fallback mounts the default layout", dock3.panels.length === 2);
 
@@ -437,7 +438,7 @@ window.localStorage.setItem(
 const dock5 = createDock(window.document.createElement("div"));
 initZones(dock5);
 check("an unloadable layout fails the restore", restoreLayout(dock5) === false);
-openInZone("chat", {});
+openAgentPanel();
 openInZone("tree", {});
 check("the unloadable-layout fallback mounts the default layout", dock5.panels.length === 2);
 window.localStorage.removeItem(LAYOUT_STORAGE_KEY);

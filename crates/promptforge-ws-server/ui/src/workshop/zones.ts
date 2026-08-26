@@ -15,6 +15,7 @@ import type {
   IDockviewPanel,
 } from "dockview";
 
+import { uuidv7 } from "../chat/utils/uuid";
 import { PANEL_TYPES, isPanelType, type PanelType } from "./panel-types";
 
 export const ZONE_NAMES = ["left", "main", "right"] as const;
@@ -31,11 +32,19 @@ const zoneGroups = new Map<ZoneName, string>();
 // reopened panel returns to the user's chosen zone; step 15 persists it.
 const zoneOverrides = new Map<string, ZoneName>();
 
-/** The panel id for one open: singletons by type, editors keyed by path. */
+/**
+ * The panel id for one open: the tree is a singleton, editors key by
+ * path, and agent chats key by a stable per-agent id - the one provided
+ * in params (a restored layout recreating its tab) or a fresh uuid.
+ */
 export function panelIdFor(type: PanelType, params: PanelParams): string {
   if (type === "editor") {
     const path = params.path;
     return `editor:${typeof path === "string" ? path : ""}`;
+  }
+  if (type === "chat") {
+    const agentId = params.agentId;
+    return `chat:${typeof agentId === "string" && agentId !== "" ? agentId : uuidv7()}`;
   }
   return type;
 }
@@ -169,6 +178,15 @@ export function openInZone(type: PanelType, params: PanelParams): IDockviewPanel
   });
   zoneGroups.set(zone, panel.group.id);
   return panel;
+}
+
+/**
+ * Opens a NEW Agent panel with a fresh id and activates its tab. Unlike
+ * openInZone, this never reuses an existing panel: every call adds
+ * another tab to the right zone's bank.
+ */
+export function openAgentPanel(): IDockviewPanel {
+  return openInZone("chat", { agentId: uuidv7() });
 }
 
 /** Narrows a string to a declared zone name. */
