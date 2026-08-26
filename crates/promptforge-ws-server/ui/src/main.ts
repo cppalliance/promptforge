@@ -9,10 +9,8 @@ import "dockview/dist/styles/dockview.css";
 import { createDockview, themeDark } from "dockview";
 
 import type { ChatPlugin } from "./chat/core/types";
-import { ChatUI } from "./chat/main";
 import { ThinkingPlugin } from "./chat/plugins/thinking/thinking-plugin";
 import { ToolsPlugin } from "./chat/plugins/tools/tools-plugin";
-import { MemoryStorage } from "./memory-storage";
 import { StatusBar } from "./status-bar";
 import { setupVoice, voiceGpuAvailable, type VoiceHandle } from "./voice";
 import { setupWindowChrome } from "./window-chrome";
@@ -20,6 +18,7 @@ import { setupWindowMenus } from "./window-menu";
 import { setupWorkspaceDrops } from "./workspace-drops";
 import { WorkshopProvider } from "./workshop-provider";
 import { type CatalogModel, WorkshopSocket } from "./workshop-socket";
+import { AgentController } from "./workshop/agent-controller";
 import { createLockHeaderControl, initLayoutLock, isLayoutLocked, setLayoutLocked } from "./workshop/layout-lock";
 import { restoreLayout, startLayoutPersistence } from "./workshop/layout-persistence";
 import { createPanelComponent } from "./workshop/panel-types";
@@ -56,35 +55,38 @@ workshopSocket.connect();
 // The mic button joins murm-ui's composer through the plugin seam, but only
 // when the server can transcribe on a GPU; a CPU take stalls long enough to
 // read as broken, so the control stays hidden instead. Voice messages paint
-// the status bar directly.
-let voiceHandle: VoiceHandle | null = null;
-const voicePlugin: ChatPlugin = {
-  name: "voice",
-  onInputMount({ form, input }) {
-    void voiceGpuAvailable().then((gpu) => {
-      if (!gpu) {
-        return;
-      }
-      const mic = document.createElement("button");
-      mic.type = "button";
-      mic.className = "voice-mic mur-form-icon-btn";
-      mic.title = "Push to talk";
-      mic.setAttribute("aria-label", "Push to talk");
-      mic.setAttribute("aria-pressed", "false");
-      mic.innerHTML =
-        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>';
-      form.insertBefore(mic, form.querySelector(".mur-form-footer-right"));
+// the status bar directly. Each Agent tab gets its own plugin instance -
+// the handle is per-tab so recording in one tab never touches another.
+function createVoicePlugin(): ChatPlugin {
+  let voiceHandle: VoiceHandle | null = null;
+  return {
+    name: "voice",
+    onInputMount({ form, input }) {
+      void voiceGpuAvailable().then((gpu) => {
+        if (!gpu) {
+          return;
+        }
+        const mic = document.createElement("button");
+        mic.type = "button";
+        mic.className = "voice-mic mur-form-icon-btn";
+        mic.title = "Push to talk";
+        mic.setAttribute("aria-label", "Push to talk");
+        mic.setAttribute("aria-pressed", "false");
+        mic.innerHTML =
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>';
+        form.insertBefore(mic, form.querySelector(".mur-form-footer-right"));
 
-      voiceHandle = setupVoice({ mic, input }, statusBar);
-    });
-  },
-  onUserSubmit() {
-    voiceHandle?.discardIfRecording();
-  },
-  // With no model selected there is nothing to send to; the old UI disabled
-  // the send button in the same situation.
-  isSubmitBlocked: () => !currentModel,
-};
+        voiceHandle = setupVoice({ mic, input }, statusBar);
+      });
+    },
+    onUserSubmit() {
+      voiceHandle?.discardIfRecording();
+    },
+    // With no model selected there is nothing to send to; the old UI disabled
+    // the send button in the same situation.
+    isSubmitBlocked: () => !currentModel,
+  };
+}
 
 // Panels are created through the workshop registry: each component name
 // maps to a factory in panel-types, and openInZone places panels by zone
@@ -104,41 +106,41 @@ const dock = createDockview(dockEl, {
 });
 initZones(dock);
 initLayoutLock(dock, dockEl);
+
+// The Agent controller observes the dock: every Agent panel that appears
+// (New Agent, or a restored layout recreating its tabs) gets its own
+// ChatUI with isolated session and plugin state, and closing a tab
+// destroys only that agent. All agents share one provider - the workshop
+// socket multiplexes concurrent chat streams by request id - and the
+// shared model selection, broadcast through applyModel. The controller
+// must exist before restoreLayout so restored tabs mount their chats.
+const agents = new AgentController({
+  dock,
+  provider: new WorkshopProvider(workshopSocket),
+  plugins: () => [createVoicePlugin(), ThinkingPlugin(), ToolsPlugin()],
+  getModel: () => currentModel,
+});
+
 // Restore the persisted layout; any failure falls back to the known-good
-// default: tree left, chat right, main empty until a document opens.
+// default: tree left, one Agent right, main empty until a document opens.
 // Panels re-create through their factories - only identity is stored.
 if (!restoreLayout(dock)) {
-  openInZone("chat", {});
+  agents.newAgent();
   const treePanel = openInZone("tree", {});
   treePanel.group.api.setSize({ width: 280 });
 }
-// ChatUI mounts on the chat panel's surface, so the panel must exist even
-// when a restored layout no longer carries one.
-openInZone("chat", {});
+// A restored layout that carries no Agent panel still gets one.
+agents.ensureAgent();
 startLayoutPersistence(dock);
 installShortcuts(dock);
-
-const chatContainer = dockEl.querySelector(".mur-app");
-if (!chatContainer) {
-  throw new Error("DOM Error: the chat panel did not mount its .mur-app container.");
-}
-
-const chat = new ChatUI({
-  container: chatContainer as HTMLElement,
-  provider: new WorkshopProvider(workshopSocket),
-  storage: new MemoryStorage(),
-  enableSidebar: false,
-  routing: false,
-  fullscreen: false,
-  plugins: () => [voicePlugin, ThinkingPlugin(), ToolsPlugin()],
-});
 
 // The title-bar menus dispatch through one shared command set; the
 // keyboard shortcuts call the same workshop command functions. The Model
 // menu reads the catalog state through this surface and writes the
-// selection back into it.
+// selection back into it. File > New Chat targets the active agent;
+// File > New Agent opens a fresh tab.
 setupWindowMenus({
-  chat,
+  agents,
   layoutLock: {
     isLocked: isLayoutLocked,
     toggle: () => setLayoutLocked(!isLayoutLocked()),
@@ -154,7 +156,7 @@ setupWindowMenus({
 });
 
 function applyModel(): void {
-  chat.engine.setRequestDefaults({ options: { model: currentModel } });
+  agents.applyModel(currentModel);
 }
 
 // Records a catalog, keeping the current selection when it survives the

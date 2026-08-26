@@ -36,7 +36,7 @@ export const PANEL_TYPES = {
   chat: {
     type: "chat",
     defaultZone: "right",
-    title: "Chat",
+    title: "Agent",
     factory: (): IContentRenderer => new ChatPanel(),
   },
 } as const satisfies Record<string, PanelTypeEntry>;
