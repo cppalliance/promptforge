@@ -43,6 +43,21 @@ function postWindowCommand(command: WindowCommand): void {
   ipc.postMessage(JSON.stringify(envelope));
 }
 
+/** Minimizes the window. Shared by the visible control and the Window menu. */
+export function minimizeWindow(): void {
+  postWindowCommand(WindowCommand.Minimize);
+}
+
+/** Toggles between maximized and restored. Shared by the visible control, the drag region double-click, and the Window menu. */
+export function toggleWindowMaximize(): void {
+  postWindowCommand(WindowCommand.ToggleMaximize);
+}
+
+/** Closes the window. Shared by the visible control and the File menu. */
+export function closeWindow(): void {
+  postWindowCommand(WindowCommand.Close);
+}
+
 /** Reads the maximized flag out of the native event, validating the detail. */
 function readMaximized(event: Event): boolean | null {
   if (!(event instanceof CustomEvent)) {
@@ -58,8 +73,8 @@ function readMaximized(event: Event): boolean | null {
 /**
  * Reveals the custom title bar and wires its window controls when running
  * inside the desktop shell; a no-op in a plain browser, where the bar stays
- * hidden and `window.ipc` is never touched. The menu buttons are inert
- * placeholders here - step 7 wires the popovers.
+ * hidden and `window.ipc` is never touched. The menu buttons are wired to
+ * their popovers by `setupWindowMenus` in window-menu.ts.
  */
 export function setupWindowChrome(): void {
   const bar = document.querySelector<HTMLElement>(".window-titlebar");
@@ -84,9 +99,9 @@ export function setupWindowChrome(): void {
 
   bar.hidden = false;
 
-  minimize.addEventListener("click", () => postWindowCommand(WindowCommand.Minimize));
-  maximize.addEventListener("click", () => postWindowCommand(WindowCommand.ToggleMaximize));
-  close.addEventListener("click", () => postWindowCommand(WindowCommand.Close));
+  minimize.addEventListener("click", minimizeWindow);
+  maximize.addEventListener("click", toggleWindowMaximize);
+  close.addEventListener("click", closeWindow);
 
   // Only the empty center drags; the buttons handle their own presses.
   drag.addEventListener("pointerdown", (event) => {
