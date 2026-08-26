@@ -69,7 +69,10 @@ export class MessageNode {
 
 	private renderLoading(msg: Message, isGenerating: boolean, error: string | null) {
 		const hasVisibleBlocks = this.activeBlocks.size > 0;
-		const isLoading = isGenerating && !error && msg.role === "assistant" && !hasVisibleBlocks;
+		// A plugin (e.g. thinking) may own the empty assistant loading state;
+		// when one does, the generic three-dot fallback never renders.
+		const pluginOwnsLoading = this.config.plugins.some((plugin) => plugin.ownsEmptyLoadingState === true);
+		const isLoading = isGenerating && !error && msg.role === "assistant" && !hasVisibleBlocks && !pluginOwnsLoading;
 
 		if (isLoading) {
 			if (!this.loadingEl) {
