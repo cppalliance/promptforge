@@ -20,7 +20,10 @@ import { setupWindowMenus } from "./window-menu";
 import { setupWorkspaceDrops } from "./workspace-drops";
 import { WorkshopProvider } from "./workshop-provider";
 import { type CatalogModel, WorkshopSocket } from "./workshop-socket";
+import { createLockHeaderControl, initLayoutLock, isLayoutLocked, setLayoutLocked } from "./workshop/layout-lock";
+import { restoreLayout, startLayoutPersistence } from "./workshop/layout-persistence";
 import { createPanelComponent } from "./workshop/panel-types";
+import { installShortcuts } from "./workshop/shortcuts";
 import { initZones, openInZone } from "./workshop/zones";
 
 const pickerEl = document.getElementById("model-picker") as HTMLSelectElement;
@@ -79,11 +82,13 @@ const voicePlugin: ChatPlugin = {
 
 // Panels are created through the workshop registry: each component name
 // maps to a factory in panel-types, and openInZone places panels by zone
-// affinity (tree left, editors main, chat right). The tab bars stay hidden
-// in style.css and the dock stays locked until the layout step lands.
+// affinity (tree left, editors main, chat right). The layout boots
+// locked; the Window menu and each zone header's lock control release it,
+// revealing the tab/drop affordances style.css gates on .dock--locked.
 const dockEl = document.getElementById("dock") as HTMLDivElement;
 const dock = createDockview(dockEl, {
   createComponent: createPanelComponent,
+  createRightHeaderActionComponent: createLockHeaderControl,
   theme: themeDark,
   singleTabMode: "fullwidth",
   disableFloatingGroups: true,
@@ -92,9 +97,20 @@ const dock = createDockview(dockEl, {
   noPanelsOverlay: "emptyGroup",
 });
 initZones(dock);
+initLayoutLock(dock, dockEl);
+// Restore the persisted layout; any failure falls back to the known-good
+// default: tree left, chat right, main empty until a document opens.
+// Panels re-create through their factories - only identity is stored.
+if (!restoreLayout(dock)) {
+  openInZone("chat", {});
+  const treePanel = openInZone("tree", {});
+  treePanel.group.api.setSize({ width: 280 });
+}
+// ChatUI mounts on the chat panel's surface, so the panel must exist even
+// when a restored layout no longer carries one.
 openInZone("chat", {});
-const treePanel = openInZone("tree", {});
-treePanel.group.api.setSize({ width: 280 });
+startLayoutPersistence(dock);
+installShortcuts(dock);
 
 const chatContainer = dockEl.querySelector(".mur-app");
 if (!chatContainer) {
@@ -112,8 +128,14 @@ const chat = new ChatUI({
 });
 
 // The title-bar menus dispatch through one shared command set; the
-// keyboard shortcut step later calls the same commands.
-setupWindowMenus({ chat });
+// keyboard shortcuts call the same workshop command functions.
+setupWindowMenus({
+  chat,
+  layoutLock: {
+    isLocked: isLayoutLocked,
+    toggle: () => setLayoutLocked(!isLayoutLocked()),
+  },
+});
 
 function applyModel(): void {
   chat.engine.setRequestDefaults({ options: { model: selectedModel() } });

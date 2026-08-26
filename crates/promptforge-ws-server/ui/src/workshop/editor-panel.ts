@@ -8,6 +8,7 @@
 
 import type { DockviewPanelApi, GroupPanelPartInitParameters, IContentRenderer } from "dockview";
 
+import { showPanelDialog } from "./editor-dialog";
 import { CodeMirrorSurface, type EditorSurface } from "./editor-surface";
 import {
   fetchFile,
@@ -37,9 +38,6 @@ function filePathParam(params: Record<string, unknown>): string | null {
 function baseName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
-
-const FOCUSABLE_SELECTOR =
-  'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 export class EditorPanel implements IContentRenderer {
   readonly element = document.createElement("div");
@@ -148,103 +146,91 @@ export class EditorPanel implements IContentRenderer {
   }
 
   /**
-   * The modified-time conflict modal, patterned on the About dialog: an
-   * overlay, a role="dialog" surface, a Tab focus trap, Escape dismissal,
-   * and focus return. Reload discards the editor's text for the on-disk
-   * text; Overwrite re-reads the fresh token and writes the editor's text
-   * over the file.
+   * The modified-time conflict modal. Reload discards the editor's text
+   * for the on-disk text; Overwrite re-reads the fresh token and writes
+   * the editor's text over the file.
    */
   private showConflictDialog(): void {
-    if (this.element.querySelector(".editor-conflict-overlay") !== null) {
+    showPanelDialog({
+      host: this.element,
+      classPrefix: "editor-conflict",
+      titleId: "editor-conflict-title",
+      title: "File changed on disk",
+      message: `${this.title} was modified outside the editor. Reload the on-disk text, or overwrite the file with your changes.`,
+      buttons: [
+        {
+          label: "Reload",
+          run: () => {
+            if (this.path !== null) {
+              void this.load(this.path).catch((error: unknown) => {
+                this.showError(error);
+              });
+            }
+          },
+        },
+        {
+          label: "Overwrite",
+          danger: true,
+          run: () => {
+            void this.overwrite().catch((error: unknown) => {
+              this.showError(error);
+            });
+          },
+        },
+      ],
+    });
+  }
+
+  /**
+   * Close entry point for the Ctrl+W shortcut: a clean panel closes
+   * immediately; a dirty panel opens the unsaved-changes dialog instead
+   * of silently losing edits.
+   */
+  requestClose(): void {
+    if (!this.surface.isDirty()) {
+      this.panelApi?.close();
       return;
     }
-    const invoker = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    this.showCloseDialog();
+  }
 
-    const overlay = document.createElement("div");
-    overlay.className = "editor-conflict-overlay";
-
-    const dialog = document.createElement("section");
-    dialog.className = "editor-conflict";
-    dialog.setAttribute("role", "dialog");
-    dialog.setAttribute("aria-modal", "true");
-    dialog.setAttribute("aria-labelledby", "editor-conflict-title");
-
-    const title = document.createElement("h2");
-    title.id = "editor-conflict-title";
-    title.className = "editor-conflict__title";
-    title.textContent = "File changed on disk";
-
-    const message = document.createElement("p");
-    message.className = "editor-conflict__line";
-    message.textContent = `${this.title} was modified outside the editor. Reload the on-disk text, or overwrite the file with your changes.`;
-
-    const actions = document.createElement("div");
-    actions.className = "editor-conflict__actions";
-
-    const reload = document.createElement("button");
-    reload.type = "button";
-    reload.className = "editor-conflict__button";
-    reload.textContent = "Reload";
-
-    const overwrite = document.createElement("button");
-    overwrite.type = "button";
-    overwrite.className = "editor-conflict__button editor-conflict__button--danger";
-    overwrite.textContent = "Overwrite";
-
-    actions.append(reload, overwrite);
-    dialog.append(title, message, actions);
-    overlay.appendChild(dialog);
-
-    const dismiss = (): void => {
-      document.removeEventListener("keydown", onKeydown, true);
-      overlay.remove();
-      invoker?.focus();
-    };
-
-    const onKeydown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        dismiss();
-        return;
-      }
-      if (event.key !== "Tab") {
-        return;
-      }
-      const focusable = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)];
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (!first || !last) {
-        event.preventDefault();
-        return;
-      }
-      const active = document.activeElement;
-      const outside = !active || !dialog.contains(active);
-      if (event.shiftKey && (outside || active === first)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (outside || active === last)) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    reload.addEventListener("click", () => {
-      dismiss();
-      if (this.path !== null) {
-        void this.load(this.path).catch((error: unknown) => {
-          this.showError(error);
-        });
-      }
+  /**
+   * The unsaved-changes modal. Save writes and closes only when the write
+   * succeeds; Discard closes without writing; Cancel keeps the panel.
+   */
+  private showCloseDialog(): void {
+    showPanelDialog({
+      host: this.element,
+      classPrefix: "editor-close",
+      titleId: "editor-close-title",
+      title: "Unsaved changes",
+      message: `${this.title} has unsaved changes. Save before closing, or discard them.`,
+      buttons: [
+        {
+          label: "Save",
+          run: () => {
+            void this.save()
+              .then(() => {
+                // A failed or conflicted save leaves the panel open.
+                if (!this.surface.isDirty()) {
+                  this.panelApi?.close();
+                }
+              })
+              .catch((error: unknown) => {
+                this.showError(error);
+              });
+          },
+        },
+        {
+          label: "Discard",
+          danger: true,
+          run: () => {
+            this.panelApi?.close();
+          },
+        },
+        { label: "Cancel", run: () => undefined },
+      ],
     });
-    overwrite.addEventListener("click", () => {
-      dismiss();
-      void this.overwrite().catch((error: unknown) => {
-        this.showError(error);
-      });
-    });
-    document.addEventListener("keydown", onKeydown, true);
-    this.element.appendChild(overlay);
-    reload.focus();
   }
 
   /**

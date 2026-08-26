@@ -170,3 +170,57 @@ export function openInZone(type: PanelType, params: PanelParams): IDockviewPanel
   zoneGroups.set(zone, panel.group.id);
   return panel;
 }
+
+/** Narrows a string to a declared zone name. */
+function isZoneName(name: string): name is ZoneName {
+  return (ZONE_NAMES as readonly string[]).includes(name);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The persisted placement state: live zone groups and user overrides. */
+export interface ZoneState {
+  readonly zones: Record<string, string>;
+  readonly overrides: Record<string, string>;
+}
+
+/** Snapshots the zone map and placement overrides for layout persistence. */
+export function serializeZoneState(): ZoneState {
+  return {
+    zones: Object.fromEntries(zoneGroups),
+    overrides: Object.fromEntries(zoneOverrides),
+  };
+}
+
+/**
+ * Replaces the zone map and overrides from persisted state. Entries
+ * naming unknown zones or carrying non-string values are dropped; stale
+ * group ids self-heal because openInZone rebuilds a zone whose group no
+ * longer exists.
+ */
+export function restoreZoneState(zones: unknown, overrides: unknown): void {
+  zoneGroups.clear();
+  zoneOverrides.clear();
+  if (isRecord(zones)) {
+    for (const [name, groupId] of Object.entries(zones)) {
+      if (isZoneName(name) && typeof groupId === "string") {
+        zoneGroups.set(name, groupId);
+      }
+    }
+  }
+  if (isRecord(overrides)) {
+    for (const [panelId, zone] of Object.entries(overrides)) {
+      if (typeof zone === "string" && isZoneName(zone)) {
+        zoneOverrides.set(panelId, zone);
+      }
+    }
+  }
+}
+
+/** Clears all zone state; the default-layout fallback starts from blank. */
+export function resetZones(): void {
+  zoneGroups.clear();
+  zoneOverrides.clear();
+}
