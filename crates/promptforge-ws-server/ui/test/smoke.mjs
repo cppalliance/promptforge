@@ -97,7 +97,7 @@ class FakeWebSocket {
     this.chatFrame = frame;
     const frames = [
       { type: "delta", content: "Hello", id: frame.id },
-      { type: "delta", content: " back", id: frame.id },
+      { type: "delta", content: " back [docs](https://example.com/)", id: frame.id },
       { type: "done", id: frame.id },
     ];
     for (const reply of frames) {
@@ -283,6 +283,19 @@ if (!picker || picker.disabled) {
   }
   if (!history.textContent.includes("Hello back")) {
     failures.push("assistant reply did not render in the chat history");
+  }
+  // Sanitized anchors open externally: the sanitizer must stamp
+  // target="_blank" and rel="noopener" on every rendered link.
+  const replyLink = history.querySelector('a[href="https://example.com/"]');
+  if (!replyLink) {
+    failures.push("the assistant reply's markdown link did not render as an anchor");
+  } else {
+    if (replyLink.getAttribute("target") !== "_blank") {
+      failures.push('a sanitized anchor is missing target="_blank"');
+    }
+    if (replyLink.getAttribute("rel") !== "noopener") {
+      failures.push('a sanitized anchor is missing rel="noopener"');
+    }
   }
   const socket = chatSockets[0];
   if (!socket) {
