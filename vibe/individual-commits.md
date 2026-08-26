@@ -114,3 +114,7 @@ the doc comment referenced a planned Windows ACL helper that never existed; remo
 
 ## 2026-08-25 Add the What PromptForge Is design document
 
+## 2026-08-26 Hide the mic unless transcription can run on a GPU
+
+the user diagnosed the mic failure as CPU fallback and directed "hide the controls entirely"; the server exposes a /voice/capability probe and the UI hides the mic rather than offering an unusable slow take. (user said, assistant reasoned the mechanism)
+
