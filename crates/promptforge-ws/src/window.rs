@@ -11,8 +11,13 @@ use anyhow::Context as _;
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::platform::run_return::EventLoopExtRunReturn;
-use tao::window::WindowBuilder;
+use tao::window::{Icon, WindowBuilder};
 use wry::{PermissionKind, PermissionResponse, WebView, WebViewBuilder};
+
+/// The cold medallion program icon, embedded so the installed binary
+/// carries no asset files. Frames 2-5 stay on disk for a future activity
+/// animation.
+const ICON_PNG: &[u8] = include_bytes!("../assets/icons/promptforge-icon-1.png");
 
 /// What the shell does with a URL the webview wants to navigate to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +83,47 @@ pub(crate) fn parse_window_command(payload: &str) -> Option<WindowCommand> {
     }
 }
 
+/// Decodes a PNG into 32bpp RGBA pixels plus its dimensions. Only 8-bit
+/// RGBA output is accepted, matching the bundled asset, so the pixel format
+/// handed to `Icon::from_rgba` is fixed at compile time by the asset.
+///
+/// # Errors
+/// Returns an error if the PNG cannot be decoded or is not 8-bit RGBA.
+fn decode_png_rgba(png_bytes: &[u8]) -> anyhow::Result<(Vec<u8>, u32, u32)> {
+    let mut reader = png::Decoder::new(std::io::Cursor::new(png_bytes))
+        .read_info()
+        .context("read the program icon header")?;
+    let capacity = reader
+        .output_buffer_size()
+        .context("the program icon has no image frame")?;
+    let mut pixels = vec![0; capacity];
+    let info = reader
+        .next_frame(&mut pixels)
+        .context("decode the program icon frame")?;
+    anyhow::ensure!(
+        info.color_type == png::ColorType::Rgba && info.bit_depth == png::BitDepth::Eight,
+        "the program icon must be 8-bit RGBA"
+    );
+    pixels.truncate(info.buffer_size());
+    Ok((pixels, info.width, info.height))
+}
+
+/// Builds the tao window icon from the bundled PNG. On any decode or
+/// conversion failure it logs and returns `None`, so a bad asset never
+/// blocks startup - the window just keeps the OS default icon.
+fn window_icon() -> Option<Icon> {
+    let result = decode_png_rgba(ICON_PNG).and_then(|(pixels, width, height)| {
+        Icon::from_rgba(pixels, width, height).map_err(Into::into)
+    });
+    match result {
+        Ok(icon) => Some(icon),
+        Err(error) => {
+            eprintln!("could not load the program icon, using the default: {error}");
+            None
+        }
+    }
+}
+
 /// Dispatches the `promptforge:maximized` event the title bar listens for,
 /// keeping the maximize/restore glyph in sync. Every maximize path (button,
 /// double-click, Windows Snap, restore) surfaces in the loop as a resize.
@@ -97,7 +143,9 @@ fn dispatch_maximized(webview: &WebView, maximized: bool) {
 /// Returns an error if the window or the webview cannot be created.
 pub(crate) fn run(url: &str) -> anyhow::Result<()> {
     let event_loop = EventLoopBuilder::<WindowCommand>::with_user_event().build();
-    let builder = WindowBuilder::new().with_title("PromptForge");
+    let builder = WindowBuilder::new()
+        .with_title("PromptForge")
+        .with_window_icon(window_icon());
     // The custom HTML title bar replaces the native frame on Windows;
     // macOS and Linux keep their decorated windows.
     #[cfg(target_os = "windows")]
@@ -164,7 +212,26 @@ pub(crate) fn run(url: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Navigation, WindowCommand, classify_navigation, parse_window_command};
+    use super::{
+        ICON_PNG, Navigation, WindowCommand, classify_navigation, decode_png_rgba,
+        parse_window_command,
+    };
+
+    #[test]
+    fn the_bundled_icon_decodes_to_128px_rgba() {
+        let (pixels, width, height) = match decode_png_rgba(ICON_PNG) {
+            Ok(decoded) => decoded,
+            Err(error) => panic!("the bundled program icon must decode: {error}"),
+        };
+        assert_eq!((width, height), (128, 128));
+        assert_eq!(pixels.len(), 128 * 128 * 4);
+    }
+
+    #[test]
+    fn non_png_bytes_fail_to_decode() {
+        assert!(decode_png_rgba(b"not a png").is_err());
+        assert!(decode_png_rgba(b"").is_err());
+    }
 
     #[test]
     fn each_valid_command_parses_to_its_variant() {
