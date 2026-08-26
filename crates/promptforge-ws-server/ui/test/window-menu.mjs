@@ -7,7 +7,7 @@
 // the visible controls' command path, the Model menu's dynamic catalog
 // rows, selection marking, and empty state, Edit target preservation and
 // disabled commands, the About dialog's focus trap and close, and the
-// browser-mode skip of the popover wiring.
+// browser-mode popover wiring with inert native window commands.
 // Run: node test/window-menu.mjs
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -355,20 +355,29 @@ function scenario({ desktop = true, modelMenu } = {}) {
   check("the shared set dispatches New Agent", stats().agentsOpened === 1);
 }
 
-// --- Browser mode: no popovers, commands still dispatch -----------------------
+// --- Browser mode: popovers wired, native window commands inert --------------
 
 {
-  const { window, commands, menus, stats } = scenario({ desktop: false });
+  const { window, commands, menus, itemByLabel, isOpen, posted, stats } = scenario({ desktop: false });
   check(
-    "browser mode builds no popovers",
-    window.document.querySelectorAll(".window-titlebar__popover").length === 0,
+    "browser mode builds every popover",
+    window.document.querySelectorAll(".window-titlebar__popover").length === 5,
   );
+  menus.file.click();
+  check("clicking File opens its popover in browser mode", isOpen("file"));
+  itemByLabel("file", "New Chat").click();
+  check("browser mode commands dispatch", stats().created === 1);
+  check("running a command closes the menu in browser mode", !isOpen("file"));
+  menus.window.click();
+  itemByLabel("window", "Minimize").click();
+  menus.file.click();
+  itemByLabel("file", "Close Window").click();
   check(
-    "browser mode skips the Model popover like the others",
-    menus.model.nextElementSibling === menus.window,
+    "native window commands no-op without the IPC bridge",
+    posted.length === 0 && !("ipc" in window),
   );
   commands.newChat();
-  check("browser mode still returns a working command set", stats().created === 1);
+  check("browser mode still returns a working command set", stats().created === 2);
 }
 
 if (failures.length > 0) {
