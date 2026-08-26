@@ -51,7 +51,6 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 
 
 
-- A72. Voice transcription publishes an append-only committed prefix plus a volatile bounded-window tail; empty tail updates cannot erase settled text.
 
 - A74. Voice takes replace a captured composer selection while editing is locked; submit discards the active take and every late frame.
 
@@ -60,6 +59,8 @@ PromptForge is a Rust system for executing Markdown prompt pipelines and Lua age
 - A76. Workshop uses workshop.toml canonically and accepts workbench.toml only as a migration fallback.
 
 - A77. Workshop file APIs canonicalize every path and confine access to roots explicitly granted for the current session.
+
+- A78. Each Agent panel owns an isolated chat and plugin lifecycle; only transport and selected-model services are shared.
 
 ## Principles
 
