@@ -104,6 +104,23 @@ export class StatusBar {
     this.text.classList.toggle("status-bar__text--error", severity === "error");
   }
 
+  /**
+   * Clears every LED activity state - sustained and pulsed - and applies
+   * the idle lens. Only the LED is touched: the text, tooltip, progress,
+   * and REC badge belong to other flows. Used when a chat is aborted,
+   * because the recycled socket never sees the server's terminal status
+   * frame for the aborted chat.
+   */
+  clearActivity(): void {
+    this.sustained = null;
+    this.lit.clear();
+    if (this.ledTimer !== null) {
+      clearTimeout(this.ledTimer);
+      this.ledTimer = null;
+    }
+    this.applyLed();
+  }
+
   /** Lights or dims the REC badge with the mic's recording state. */
   setRecording(on: boolean): void {
     this.rec.classList.toggle("status-bar__rec--active", on);

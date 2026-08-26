@@ -68,6 +68,7 @@ export class WorkshopSocket {
   private readonly statusHandlers = new Set<(frame: StatusFrame) => void>();
   private readonly modelsHandlers = new Set<(models: CatalogModel[]) => void>();
   private readonly disconnectHandlers = new Set<() => void>();
+  private readonly abortHandlers = new Set<() => void>();
 
   constructor(private readonly url: string = defaultUrl()) {}
 
@@ -94,6 +95,15 @@ export class WorkshopSocket {
   }
 
   /**
+   * Registers a handler fired when an in-flight chat is aborted. The
+   * recycled socket cannot see the server's terminal status frame for the
+   * aborted chat, so listeners must clear local activity state themselves.
+   */
+  onAbort(handler: () => void): void {
+    this.abortHandlers.add(handler);
+  }
+
+  /**
    * Sends one id-tagged chat frame and resolves when its `done` frame
    * arrives. Rejects on an `error` frame, or on a socket close before any
    * content streamed; a close after content started resolves, mirroring an
@@ -117,6 +127,9 @@ export class WorkshopSocket {
         if (!this.pending.has(id)) return;
         this.settle(id, (chat) => chat.resolve());
         this.reopen();
+        for (const handler of this.abortHandlers) {
+          handler();
+        }
       };
       const finish = (): void => signal.removeEventListener("abort", onAbort);
       this.pending.set(id, {
