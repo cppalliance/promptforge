@@ -7,15 +7,19 @@
 	margin-top: 0;
 }
 
+.mur-tool-folded[hidden] {
+	display: none;
+}
+
 .mur-agent-run-steps .mur-tool {
 	margin: 0;
 }
 
-.mur-tool-summary {
-	display: inline-grid;
-	grid-template-columns: auto minmax(0, 1fr) auto;
+/* Run header: chevron plus the one-line status window. */
+.mur-tool-run-toggle {
+	display: flex;
 	align-items: center;
-	width: auto;
+	width: 100%;
 	max-width: 100%;
 	gap: 0.35rem;
 	padding: 0.18rem 0.28rem;
@@ -28,38 +32,136 @@
 	text-align: left;
 }
 
-.mur-tool-chevron {
-	display: inline-flex;
-	color: var(--mur-text-muted);
-	opacity: 0;
-	transition: opacity 0.15s ease;
+.mur-tool-run-toggle:hover {
+	background-color: var(--mur-hover-bg);
+	color: var(--mur-text);
 }
 
-.mur-tool-summary:hover .mur-tool-chevron,
-.mur-tool-summary:focus-visible .mur-tool-chevron,
-.mur-tool-summary[aria-expanded="true"] .mur-tool-chevron {
+.mur-tool-run-chevron {
+	display: inline-flex;
+	flex: 0 0 auto;
+	color: var(--mur-text-muted);
+	opacity: 0.65;
+	transition:
+		opacity 0.15s ease,
+		transform 0.15s ease;
+}
+
+.mur-tool-run-toggle:hover .mur-tool-run-chevron,
+.mur-tool-run-toggle:focus-visible .mur-tool-run-chevron,
+.mur-tool-run-toggle[aria-expanded="true"] .mur-tool-run-chevron {
 	opacity: 1;
 }
 
-.mur-agent-run-steps .mur-tool-summary {
-	min-height: var(--mur-agent-run-control-height, 1.5rem);
-	padding-top: 0.125rem;
-	padding-bottom: 0.125rem;
-}
-
-.mur-agent-run-steps .mur-tool-chevron {
-	opacity: 0.65;
-}
-
-.mur-tool-chevron svg {
+.mur-tool-run-chevron svg {
 	transition: transform 0.15s ease;
 }
 
-.mur-tool-summary[aria-expanded="true"] .mur-tool-chevron svg {
+.mur-tool-run-toggle[aria-expanded="true"] .mur-tool-run-chevron svg {
 	transform: rotate(90deg);
 }
 
-.mur-tool-title {
+/* The one-line autoscrolling status window: fixed height, overflow hidden,
+   so activity lines scroll through it without ever changing the feed's
+   layout. Only transform animates. */
+.mur-tool-run-window {
+	position: relative;
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 1.45em;
+	overflow: hidden;
+	font-size: 0.8rem;
+	line-height: 1.45;
+}
+
+.mur-tool-run-line {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	color: var(--mur-text-muted);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	transform: translateY(0);
+}
+
+.mur-tool-run-line--enter {
+	transform: translateY(100%);
+}
+
+.mur-tool-run-line--go {
+	transform: translateY(0);
+	transition: transform 0.18s ease;
+}
+
+.mur-tool-run-line--exit.mur-tool-run-line--go {
+	transform: translateY(-100%);
+}
+
+/* Expanded: the preserved activity log. Scrolls internally past the cap,
+   pinned to the newest row until the user scrolls up. */
+.mur-tool-run-log {
+	margin: 0.18rem 0 0.35rem 0.7rem;
+	padding: 0.2rem 0 0.2rem 0.65rem;
+	border-left: 1px solid var(--mur-border);
+	max-height: min(360px, 45vh);
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+
+.mur-tool-row-toggle {
+	display: inline-grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: center;
+	width: 100%;
+	max-width: 100%;
+	gap: 0.35rem;
+	padding: 0.18rem 0.28rem;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+	font: inherit;
+	text-align: left;
+}
+
+.mur-tool-row-toggle:hover {
+	background-color: var(--mur-hover-bg);
+}
+
+.mur-tool-row-icon {
+	width: 1.1em;
+	color: var(--mur-text-muted);
+	font-size: 0.78rem;
+	line-height: 1;
+	text-align: center;
+}
+
+.mur-tool-row-icon--done {
+	color: var(--mur-success, #4caf7d);
+}
+
+.mur-tool-row-icon--error {
+	color: var(--mur-danger-text, #cf7f88);
+}
+
+.mur-tool-row-spinner {
+	display: inline-block;
+	width: 0.7em;
+	height: 0.7em;
+	border: 1.5px solid var(--mur-text-muted);
+	border-top-color: transparent;
+	border-radius: 50%;
+	animation: mur-tool-spin 0.8s linear infinite;
+}
+
+@keyframes mur-tool-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.mur-tool-row-label {
 	min-width: 0;
 	overflow: hidden;
 	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -69,26 +171,28 @@
 	white-space: nowrap;
 }
 
-.mur-tool-status {
-	width: 1.1em;
+.mur-tool-row-chevron {
+	display: inline-flex;
 	color: var(--mur-text-muted);
-	font-size: 0.78rem;
-	line-height: 1;
-	text-align: center;
+	opacity: 0;
+	transition: opacity 0.15s ease;
 }
 
-.mur-tool-preview {
-	margin-left: 1.45rem;
-	padding: 0.15rem 0.3rem 0.2rem;
-	color: var(--mur-text-muted);
-	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-	font-size: 0.76rem;
-	line-height: 1.45;
-	white-space: pre-wrap;
-	word-break: break-word;
+.mur-tool-row-toggle:hover .mur-tool-row-chevron,
+.mur-tool-row-toggle:focus-visible .mur-tool-row-chevron,
+.mur-tool-row-toggle[aria-expanded="true"] .mur-tool-row-chevron {
+	opacity: 1;
 }
 
-.mur-tool-details {
+.mur-tool-row-chevron svg {
+	transition: transform 0.15s ease;
+}
+
+.mur-tool-row-toggle[aria-expanded="true"] .mur-tool-row-chevron svg {
+	transform: rotate(90deg);
+}
+
+.mur-tool-row-details {
 	margin: 0.18rem 0 0.35rem 0.7rem;
 	padding: 0.2rem 0 0.2rem 0.65rem;
 	border-left: 1px solid var(--mur-border);
@@ -118,4 +222,34 @@
 	padding: 0.45rem;
 	white-space: pre-wrap;
 	word-break: break-word;
+}
+
+.mur-tool-run-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
+.mur-agent-run-steps .mur-tool-run-toggle,
+.mur-agent-run-steps .mur-tool-row-toggle {
+	min-height: var(--mur-agent-run-control-height, 1.5rem);
+	padding-top: 0.125rem;
+	padding-bottom: 0.125rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.mur-tool-run-line--go {
+		transition: none;
+	}
+
+	.mur-tool-row-spinner {
+		animation: none;
+	}
 }
