@@ -97,6 +97,13 @@ export class StatusBar {
     }, this.pulseMs());
   }
 
+  /** Shows a locally-originated message (e.g. voice capture errors). The next observer frame overwrites it. */
+  showLocal(label: string, severity: "info" | "error"): void {
+    this.text.textContent = label;
+    this.root.title = "";
+    this.text.classList.toggle("status-bar__text--error", severity === "error");
+  }
+
   /** Lights or dims the REC badge with the mic's recording state. */
   setRecording(on: boolean): void {
     this.rec.classList.toggle("status-bar__rec--active", on);

@@ -39,12 +39,12 @@ function selectedModel(): string {
   return pickerEl.value;
 }
 
-// The mic button joins murm-ui's composer through the plugin seam; the
-// voice status message sits below the form.
+// The mic button joins murm-ui's composer through the plugin seam; voice
+// messages paint the status bar directly.
 let voiceHandle: VoiceHandle | null = null;
 const voicePlugin: ChatPlugin = {
   name: "voice",
-  onInputMount({ container, form, input }) {
+  onInputMount({ form, input }) {
     const mic = document.createElement("button");
     mic.type = "button";
     mic.className = "voice-mic mur-form-icon-btn";
@@ -55,17 +55,7 @@ const voicePlugin: ChatPlugin = {
       '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10a7 7 0 0 0 14 0"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>';
     form.insertBefore(mic, form.querySelector(".mur-form-footer-right"));
 
-    const formContainer = container.querySelector(".mur-chat-form-container");
-    if (!formContainer) {
-      throw new Error("DOM Error: .mur-chat-form-container not found inside the container.");
-    }
-    const status = document.createElement("div");
-    status.className = "voice-status";
-    status.setAttribute("role", "status");
-    status.setAttribute("aria-live", "polite");
-    formContainer.appendChild(status);
-
-    voiceHandle = setupVoice({ mic, status, input }, statusBar);
+    voiceHandle = setupVoice({ mic, input }, statusBar);
   },
   onUserSubmit() {
     voiceHandle?.discardIfRecording();
