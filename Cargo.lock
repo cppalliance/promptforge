@@ -4027,13 +4027,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptforge-webfetch"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "encoding_rs",
+ "flate2",
+ "futures-util",
+ "htmd",
+ "ipnet",
+ "mime",
+ "promptforge-core",
+ "readabilityrs",
+ "reqwest 0.12.28",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "promptforge-ws"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "open",
  "promptforge-ws-server",
+ "serde_json",
  "tao",
  "tempfile",
+ "url",
  "wry",
 ]
 
@@ -4061,28 +4086,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "whisper-rs",
-]
-
-[[package]]
-name = "promptforge-webfetch"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum",
- "encoding_rs",
- "flate2",
- "futures-util",
- "htmd",
- "ipnet",
- "mime",
- "promptforge-core",
- "readabilityrs",
- "reqwest 0.12.28",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "url",
 ]
 
 [[package]]
