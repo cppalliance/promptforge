@@ -171,7 +171,7 @@ const dock = createDockview(window.document.getElementById("dock"), {
   singleTabMode: "fullwidth",
   disableFloatingGroups: true,
   hideBorders: true,
-  locked: true,
+  locked: false,
   noPanelsOverlay: "emptyGroup",
 });
 initZones(dock);

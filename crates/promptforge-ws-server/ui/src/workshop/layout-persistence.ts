@@ -1,25 +1,22 @@
 // Layout persistence: the dock's serialized layout plus the zone
 // registry's placement memory, written to localStorage under one
-// versioned key. Writes are debounced off onDidLayoutChange; a lock
-// toggle is not a layout change, so it saves immediately on its own
-// subscription. Only identity is stored - panels re-create through their
-// registered factories on load. A restore that fails for any reason
-// (bad JSON, a schema version bump, a fromJSON throw) clears the dock
-// and reports failure so the caller boots the known-good default layout.
+// versioned key. Writes are debounced off onDidLayoutChange. Only
+// identity is stored - panels re-create through their registered
+// factories on load. A restore that fails for any reason (bad JSON, a
+// schema version bump, a fromJSON throw) clears the dock and reports
+// failure so the caller boots the known-good default layout.
 
 import type { DockviewApi, SerializedDockview } from "dockview";
 
-import { isLayoutLocked, onLayoutLockChange, setLayoutLocked } from "./layout-lock";
 import { resetZones, restoreZoneState, serializeZoneState } from "./zones";
 
 export const LAYOUT_STORAGE_KEY = "promptforge.workshop.layout";
-export const LAYOUT_SCHEMA_VERSION = 1;
+export const LAYOUT_SCHEMA_VERSION = 2;
 
 const SAVE_DEBOUNCE_MS = 250;
 
 /** The storage envelope after validation: the dock layout plus our fields. */
 interface PersistedLayout {
-  readonly locked: boolean;
   readonly zones: unknown;
   readonly overrides: unknown;
   readonly layout: SerializedDockview;
@@ -51,14 +48,10 @@ function parsePersisted(raw: string): PersistedLayout | null {
   if (body.version !== LAYOUT_SCHEMA_VERSION) {
     return null;
   }
-  if (typeof body.locked !== "boolean") {
-    return null;
-  }
   if (!isSerializedLayout(body.layout)) {
     return null;
   }
   return {
-    locked: body.locked,
     zones: body.zones,
     overrides: body.overrides,
     layout: body.layout,
@@ -71,7 +64,6 @@ export function persistLayout(dock: DockviewApi): void {
     const state = serializeZoneState();
     const envelope = {
       version: LAYOUT_SCHEMA_VERSION,
-      locked: isLayoutLocked(),
       zones: state.zones,
       overrides: state.overrides,
       layout: dock.toJSON(),
@@ -84,10 +76,9 @@ export function persistLayout(dock: DockviewApi): void {
 
 /**
  * Restores the persisted layout into the dock: panels re-create through
- * their registered factories, the zone map and overrides come back with
- * them, and the lock state reapplies. Returns false when there is nothing
- * to restore or anything fails - the caller then builds the default
- * layout onto a clean dock.
+ * their registered factories, and the zone map and overrides come back
+ * with them. Returns false when there is nothing to restore or anything
+ * fails - the caller then builds the default layout onto a clean dock.
  */
 export function restoreLayout(dock: DockviewApi): boolean {
   let raw: string | null;
@@ -116,14 +107,13 @@ export function restoreLayout(dock: DockviewApi): boolean {
     return false;
   }
   restoreZoneState(persisted.zones, persisted.overrides);
-  setLayoutLocked(persisted.locked);
   return true;
 }
 
 /**
  * Starts persistence for the running session: layout changes save
- * debounced, lock changes save immediately. Call once, after the boot
- * layout (restored or default) is in place.
+ * debounced. Call once, after the boot layout (restored or default) is
+ * in place.
  */
 export function startLayoutPersistence(dock: DockviewApi): void {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -135,8 +125,5 @@ export function startLayoutPersistence(dock: DockviewApi): void {
       timer = null;
       persistLayout(dock);
     }, SAVE_DEBOUNCE_MS);
-  });
-  onLayoutLockChange(() => {
-    persistLayout(dock);
   });
 }

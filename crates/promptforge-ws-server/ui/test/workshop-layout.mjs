@@ -1,13 +1,13 @@
-// Integration test for layout boot, lock, persistence, and shortcuts
-// (src/workshop/layout-lock.ts, layout-persistence.ts, shortcuts.ts, the
-// zone-state serialization in zones.ts, and EditorPanel.requestClose).
-// Bundles the modules with esbuild, mounts real Dockview docks in jsdom
-// against the real index.html, and drives the public API. Covers: the
-// lock starts engaged; unlocking calls updateOptions and reveals the
-// gated affordances; the layout survives a reload (serialize -> restore);
-// corrupt, version-mismatched, and unloadable layouts fall back to
-// defaults; each shortcut dispatches its command; the status bar never
-// enters the serialized layout. Run: node test/workshop-layout.mjs
+// Integration test for layout boot, persistence, and shortcuts
+// (src/workshop/layout-persistence.ts, shortcuts.ts, the zone-state
+// serialization in zones.ts, and EditorPanel.requestClose). Bundles the
+// modules with esbuild, mounts real Dockview docks in jsdom against the
+// real index.html, and drives the public API. Covers: the layout
+// survives a reload (serialize -> restore); the envelope carries no
+// lock state; schema version 1 snapshots are rejected; corrupt,
+// version-mismatched, and unloadable layouts fall back to defaults;
+// each shortcut dispatches its command; the status bar never enters the
+// serialized layout. Run: node test/workshop-layout.mjs
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -29,12 +29,6 @@ const bundle = await esbuild.build({
         zoneOfPanel,
       } from "./src/workshop/zones.ts";
       export { createPanelComponent } from "./src/workshop/panel-types.ts";
-      export {
-        initLayoutLock,
-        isLayoutLocked,
-        setLayoutLocked,
-        createLockHeaderControl,
-      } from "./src/workshop/layout-lock.ts";
       export {
         restoreLayout,
         persistLayout,
@@ -196,10 +190,6 @@ const {
   panelIdFor,
   zoneOfPanel,
   createPanelComponent,
-  initLayoutLock,
-  isLayoutLocked,
-  setLayoutLocked,
-  createLockHeaderControl,
   restoreLayout,
   persistLayout,
   startLayoutPersistence,
@@ -227,12 +217,11 @@ function createDock(element) {
   window.document.body.appendChild(element);
   return createDockview(element, {
     createComponent: createPanelComponent,
-    createRightHeaderActionComponent: createLockHeaderControl,
     theme: themeDark,
     singleTabMode: "fullwidth",
     disableFloatingGroups: true,
     hideBorders: true,
-    locked: true,
+    locked: false,
     noPanelsOverlay: "emptyGroup",
   });
 }
@@ -240,64 +229,35 @@ function createDock(element) {
 const editorAId = panelIdFor("editor", { path: FILE_A });
 const editorBId = panelIdFor("editor", { path: FILE_B });
 
-// --- Boot: the lock starts engaged, the default layout is three-zone ------
+// --- Boot: the default layout is three-zone, always unlocked --------------
 
 const dockEl = window.document.getElementById("dock");
-const updateCalls = [];
 const dock = createDockview(dockEl, {
   createComponent: createPanelComponent,
-  createRightHeaderActionComponent: createLockHeaderControl,
   theme: themeDark,
   singleTabMode: "fullwidth",
   disableFloatingGroups: true,
   hideBorders: true,
-  locked: true,
+  locked: false,
   noPanelsOverlay: "emptyGroup",
 });
-const originalUpdate = dock.updateOptions.bind(dock);
-dock.updateOptions = (options) => {
-  updateCalls.push(options);
-  return originalUpdate(options);
-};
 initZones(dock);
-initLayoutLock(dock, dockEl);
 
-check("the layout lock starts engaged", isLayoutLocked());
-check("the dock carries the locked class", dockEl.classList.contains("dock--locked"));
 check("empty storage has nothing to restore", restoreLayout(dock) === false);
 
-const chatPanel = openAgentPanel();
 const treePanel = openInZone("tree", {});
 treePanel.group.api.setSize({ width: 280 });
+const chatPanel = openAgentPanel();
 await flush();
 
-check("the default layout mounts chat and tree", dock.panels.length === 2);
+check("the default layout mounts tree and chat", dock.panels.length === 2);
 check("main stays empty until a document opens", dock.groups.length === 2);
-check("chat opens right, the tree left", zoneOfPanel(chatPanel) === "right" && zoneOfPanel(treePanel) === "left");
-check(
-  "every zone header carries a lock control",
-  window.document.querySelectorAll("#dock .layout-lock-toggle").length === 2,
-);
+check("the tree opens left, chat right", zoneOfPanel(treePanel) === "left" && zoneOfPanel(chatPanel) === "right");
 
-// The lock never blocks app placement: an editor opens while locked.
+// App placement: an editor opens into the main zone.
 const editorA = openInZone("editor", { path: FILE_A });
 await flush();
-check("app placement works while locked", zoneOfPanel(editorA) === "main");
-
-// --- Unlocking: updateOptions fires and the gated class lifts -------------
-
-const lockButton = window.document.querySelector("#dock .layout-lock-toggle");
-check("the lock control announces itself", lockButton?.getAttribute("aria-label") === "Unlock layout");
-lockButton.click();
-check("the header control unlocks the layout", !isLayoutLocked());
-check("unlocking calls dock.updateOptions({ locked: false })",
-  updateCalls.some((options) => options.locked === false));
-check("unlocking lifts the locked class, revealing the tab affordances",
-  !dockEl.classList.contains("dock--locked"));
-check("the control reflects the unlocked state",
-  lockButton.getAttribute("aria-label") === "Lock layout");
-setLayoutLocked(true);
-check("relocking restores the locked class", dockEl.classList.contains("dock--locked"));
+check("app placement lands the editor in main", zoneOfPanel(editorA) === "main");
 
 // --- Persistence: the envelope is versioned and carries placement ---------
 
@@ -305,8 +265,8 @@ persistLayout(dock);
 const raw = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
 check("the layout persists to localStorage", raw !== null);
 const envelope = JSON.parse(raw);
-check("the envelope carries the schema version", envelope.version === 1);
-check("the envelope carries the lock state", envelope.locked === true);
+check("the envelope carries the schema version", envelope.version === 2);
+check("the envelope carries no lock state", !("locked" in envelope));
 check("the envelope carries zones and overrides",
   typeof envelope.zones === "object" && typeof envelope.overrides === "object");
 check("the envelope records the zone groups",
@@ -327,7 +287,6 @@ check("the status bar never enters the serialized layout",
 const dockEl2 = window.document.createElement("div");
 const dock2 = createDock(dockEl2);
 initZones(dock2);
-initLayoutLock(dock2, dockEl2);
 check("the persisted layout restores", restoreLayout(dock2) === true);
 await flush();
 check("the agent panel is restored through its factory", !!dock2.getPanel(chatPanel.id));
@@ -340,7 +299,7 @@ check("restored panels land in their zones",
 check("the restored editor mounted its surface",
   !!dock2.getPanel(editorAId).view.content.element.querySelector(".cm-editor"));
 
-// Debounced writes off onDidLayoutChange; immediate writes on lock toggle.
+// Debounced writes off onDidLayoutChange.
 startLayoutPersistence(dock2);
 window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
 openInZone("editor", { path: FILE_B });
@@ -350,13 +309,8 @@ check("layout changes persist debounced", debounced !== null);
 check("the debounced write carries the new panel",
   debounced !== null &&
     Object.keys(JSON.parse(debounced).layout.panels).includes(editorBId));
-window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
-setLayoutLocked(false);
-const lockWrite = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
-check("a lock toggle persists immediately", lockWrite !== null);
-check("the lock write carries the new lock state",
-  lockWrite !== null && JSON.parse(lockWrite).locked === false);
-setLayoutLocked(true);
+check("the debounced write carries no lock state",
+  debounced !== null && !("locked" in JSON.parse(debounced)));
 
 // --- Shortcuts: one keydown listener dispatching to the commands ----------
 
@@ -415,21 +369,20 @@ openAgentPanel();
 openInZone("tree", {});
 check("the corrupt-storage fallback mounts the default layout", dock3.panels.length === 2);
 
-// A schema version mismatch.
+// A schema version 1 snapshot (the locked-era envelope) is rejected.
 window.localStorage.setItem(
   LAYOUT_STORAGE_KEY,
-  JSON.stringify({ version: 999, locked: false, zones: {}, overrides: {}, layout: { grid: {} } }),
+  JSON.stringify({ version: 1, locked: false, zones: {}, overrides: {}, layout: { grid: {} } }),
 );
 const dock4 = createDock(window.document.createElement("div"));
 initZones(dock4);
-check("a version mismatch fails the restore", restoreLayout(dock4) === false);
+check("a version 1 snapshot fails the restore", restoreLayout(dock4) === false);
 
 // A structurally valid envelope whose layout fromJSON rejects.
 window.localStorage.setItem(
   LAYOUT_STORAGE_KEY,
   JSON.stringify({
-    version: 1,
-    locked: false,
+    version: 2,
     zones: {},
     overrides: {},
     layout: { grid: { root: { type: "leaf", data: [] } } },

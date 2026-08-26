@@ -19,7 +19,6 @@ import { setupWorkspaceDrops } from "./workspace-drops";
 import { WorkshopProvider } from "./workshop-provider";
 import { type CatalogModel, WorkshopSocket } from "./workshop-socket";
 import { AgentController } from "./workshop/agent-controller";
-import { createLockHeaderControl, initLayoutLock, isLayoutLocked, setLayoutLocked } from "./workshop/layout-lock";
 import { restoreLayout, startLayoutPersistence } from "./workshop/layout-persistence";
 import { createPanelComponent } from "./workshop/panel-types";
 import { installShortcuts } from "./workshop/shortcuts";
@@ -90,22 +89,20 @@ function createVoicePlugin(): ChatPlugin {
 
 // Panels are created through the workshop registry: each component name
 // maps to a factory in panel-types, and openInZone places panels by zone
-// affinity (tree left, editors main, chat right). The layout boots
-// locked; the Window menu and each zone header's lock control release it,
-// revealing the tab/drop affordances style.css gates on .dock--locked.
+// affinity (tree left, editors main, chat right). The workbench is always
+// unlocked: user drags rearrange panels at any time, and the zone
+// registry records the placement overrides.
 const dockEl = document.getElementById("dock") as HTMLDivElement;
 const dock = createDockview(dockEl, {
   createComponent: createPanelComponent,
-  createRightHeaderActionComponent: createLockHeaderControl,
   theme: themeDark,
   singleTabMode: "fullwidth",
   disableFloatingGroups: true,
   hideBorders: true,
-  locked: true,
+  locked: false,
   noPanelsOverlay: "emptyGroup",
 });
 initZones(dock);
-initLayoutLock(dock, dockEl);
 
 // The Agent controller observes the dock: every Agent panel that appears
 // (New Agent, or a restored layout recreating its tabs) gets its own
@@ -122,12 +119,13 @@ const agents = new AgentController({
 });
 
 // Restore the persisted layout; any failure falls back to the known-good
-// default: tree left, one Agent right, main empty until a document opens.
-// Panels re-create through their factories - only identity is stored.
+// default: the tree anchors the left zone first, then one Agent opens
+// right, and main stays empty until a document opens. Panels re-create
+// through their factories - only identity is stored.
 if (!restoreLayout(dock)) {
-  agents.newAgent();
   const treePanel = openInZone("tree", {});
   treePanel.group.api.setSize({ width: 280 });
+  agents.newAgent();
 }
 // A restored layout that carries no Agent panel still gets one.
 agents.ensureAgent();
@@ -141,10 +139,6 @@ installShortcuts(dock);
 // File > New Agent opens a fresh tab.
 setupWindowMenus({
   agents,
-  layoutLock: {
-    isLocked: isLayoutLocked,
-    toggle: () => setLayoutLocked(!isLayoutLocked()),
-  },
   modelMenu: {
     getModels: () => modelCatalog,
     getSelected: () => currentModel,
