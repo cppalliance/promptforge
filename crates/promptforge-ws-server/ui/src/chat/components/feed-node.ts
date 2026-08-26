@@ -1,4 +1,5 @@
 import type { Message, RenderConfig } from "../core/types";
+import { formatDuration } from "../utils/format";
 import { ICON_CHEVRON } from "../utils/icons";
 import {
 	type FeedAgentRunItem,
@@ -8,6 +9,7 @@ import {
 	isAgentRunItem,
 } from "./feed-items";
 import { MessageNode } from "./message-node";
+import { TurnFooter } from "./turn-footer";
 
 export interface FeedNodeUpdateContext {
 	messages: readonly Message[];
@@ -31,18 +33,31 @@ class MessageFeedNode implements FeedNode {
 	public readonly type = "message";
 	public readonly el: HTMLElement;
 	private readonly messageNode: MessageNode;
+	private footer?: TurnFooter;
 
 	constructor(message: Message, config: RenderConfig) {
 		this.messageNode = new MessageNode(message, config);
 		this.el = this.messageNode.el;
+		if (message.role === "assistant") {
+			this.footer = new TurnFooter(message);
+			this.el.appendChild(this.footer.el);
+		}
 	}
 
 	public update(item: FeedItem, ctx: FeedNodeUpdateContext): void {
 		if (isAgentRunItem(item)) return;
 		updateMessageNode(this.messageNode, item, ctx);
+		if (this.footer) {
+			this.footer.update(item);
+			this.footer.el.hidden = item.id === ctx.generatingMessageId;
+			if (this.el.lastElementChild !== this.footer.el) {
+				this.el.appendChild(this.footer.el);
+			}
+		}
 	}
 
 	public destroy(): void {
+		this.footer?.destroy();
 		this.messageNode.destroy();
 	}
 }
@@ -55,6 +70,7 @@ class AgentRunFeedNode implements FeedNode {
 
 	private userNode?: MessageNode;
 	private userMessageId?: string;
+	private footer?: TurnFooter;
 
 	constructor(
 		item: FeedAgentRunItem,
@@ -71,15 +87,28 @@ class AgentRunFeedNode implements FeedNode {
 
 		this.renderUserMessage(item.userMessage, ctx);
 		this.renderSegments(item.segments, ctx);
+		this.renderFooter(item, ctx);
 	}
 
 	public destroy(): void {
+		this.footer?.destroy();
 		this.userNode?.destroy();
 		for (const node of this.segmentNodes.values()) {
 			node.destroy();
 		}
 		this.segmentNodes.clear();
 		this.el.remove();
+	}
+
+	private renderFooter(item: FeedAgentRunItem, ctx: FeedNodeUpdateContext): void {
+		if (!this.footer) {
+			this.footer = new TurnFooter(item.finalMessage, item.durationMs);
+		}
+		this.footer.update(item.finalMessage, item.durationMs);
+		if (this.el.lastElementChild !== this.footer.el) {
+			this.el.appendChild(this.footer.el);
+		}
+		this.footer.el.hidden = ctx.generatingMessageId !== null && runContainsMessage(item, ctx.generatingMessageId);
 	}
 
 	private renderUserMessage(message: Message, ctx: FeedNodeUpdateContext): void {
@@ -287,6 +316,11 @@ function messageNodeKey(message: Message): string {
 	return `${message.id}:${message.blocks.map((block) => block.id).join(",")}`;
 }
 
+function runContainsMessage(item: FeedAgentRunItem, messageId: string): boolean {
+	if (item.userMessage.id === messageId || item.finalMessage.id === messageId) return true;
+	return item.stepMessages.some((message) => message.id === messageId);
+}
+
 function clearMessageNodes(nodes: Map<string, MessageNode>): void {
 	for (const node of nodes.values()) {
 		node.destroy();
@@ -335,16 +369,4 @@ function isReasoningOnlySegment(segment: FeedAgentRunWorkSegment): boolean {
 
 function pluralize(label: string, count: number): string {
 	return count === 1 ? label : `${label}s`;
-}
-
-function formatDuration(durationMs: number): string {
-	const safeDurationMs = Math.max(0, durationMs);
-	if (safeDurationMs < 1000) return `${Math.round(safeDurationMs)}ms`;
-
-	const totalSeconds = Math.round(safeDurationMs / 1000);
-	if (totalSeconds < 60) return `${totalSeconds}s`;
-
-	const minutes = Math.floor(totalSeconds / 60);
-	const seconds = totalSeconds % 60;
-	return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
 }

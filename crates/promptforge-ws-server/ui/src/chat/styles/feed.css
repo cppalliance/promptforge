@@ -476,3 +476,110 @@
 	border-left: 4px solid var(--mur-danger);
 	color: var(--mur-danger);
 }
+
+/* Model-turn footer: quiet icon row below a completed assistant turn */
+
+.mur-turn-footer {
+	display: flex;
+	align-items: center;
+	gap: 0.125rem;
+	width: 100%;
+	margin-top: 0.25rem;
+	color: var(--mur-text-muted);
+}
+
+.mur-turn-footer[hidden] {
+	display: none;
+}
+
+.mur-turn-footer-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.5rem;
+	height: 1.5rem;
+	padding: 0;
+	background: none;
+	border: none;
+	border-radius: 0.25rem;
+	color: var(--mur-text-muted);
+	cursor: pointer;
+	transition:
+		background-color 0.15s,
+		color 0.15s;
+}
+
+.mur-turn-footer-button:hover {
+	background-color: var(--mur-hover-bg);
+	color: var(--mur-text);
+}
+
+.mur-turn-footer-button:focus-visible {
+	outline: 2px solid var(--mur-focus-ring, currentColor);
+	outline-offset: 1px;
+	color: var(--mur-text);
+}
+
+.mur-turn-footer-stamp {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	margin-left: 0.25rem;
+	padding: 0.125rem 0.25rem;
+	border-radius: 0.25rem;
+	font-size: 0.75rem;
+	line-height: 1rem;
+	color: var(--mur-text-muted);
+	cursor: default;
+}
+
+.mur-turn-footer-stamp:focus-visible {
+	outline: 2px solid var(--mur-focus-ring, currentColor);
+	outline-offset: 1px;
+}
+
+.mur-turn-footer-stamp time {
+	font: inherit;
+	color: inherit;
+}
+
+.mur-turn-footer-tooltip {
+	position: absolute;
+	bottom: calc(100% + 6px);
+	left: 0;
+	z-index: 30;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 6px 9px;
+	background: #16181d;
+	color: #e8eaee;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 6px;
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+	font-size: 0.75rem;
+	line-height: 1rem;
+	white-space: nowrap;
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	transition: opacity 0.15s;
+}
+
+.mur-turn-footer-stamp:hover .mur-turn-footer-tooltip,
+.mur-turn-footer-stamp:focus-visible .mur-turn-footer-tooltip,
+.mur-turn-footer-stamp:focus-within .mur-turn-footer-tooltip {
+	opacity: 1;
+	visibility: visible;
+}
+
+.mur-turn-footer-tooltip-duration {
+	color: #a9b0bc;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.mur-turn-footer-button,
+	.mur-turn-footer-tooltip {
+		transition: none;
+	}
+}
