@@ -1,13 +1,14 @@
-// Custom window title bar for the Windows desktop shell. The bar stays
-// hidden in a plain browser; only the wry initialization flag reveals it.
-// Every control sends a narrow, typed command through the wry IPC bridge -
-// the shell (step 9) parses and validates the payload before any native
-// window operation runs.
+// Custom window title bar. The bar is always shown, in the desktop shell
+// and in a plain browser, because it carries the application menus; only
+// the native window controls (drag region, minimize/maximize/close) are
+// desktop-only, since they need the wry IPC bridge. Every control sends a
+// narrow, typed command through that bridge - the shell (step 9) parses
+// and validates the payload before any native window operation runs.
 
 declare global {
   interface Window {
     // Set by the wry initialization script in the desktop shell; absent in
-    // a plain browser, where the custom title bar never appears.
+    // a plain browser, where the native window controls stay hidden.
     __PROMPTFORGE_DESKTOP__?: boolean;
     // The wry IPC bridge; only present in the desktop shell.
     ipc?: { postMessage(message: string): void };
@@ -33,9 +34,10 @@ const MAXIMIZED_EVENT = "promptforge:maximized";
 
 function postWindowCommand(command: WindowCommand): void {
   const ipc = window.ipc;
-  // Unreachable in the desktop shell, where wry always installs the bridge
-  // alongside the flag that reveals the bar; a missing bridge means the flag
-  // was set by hand, and dropping the command beats throwing from a click.
+  // Reached in a plain browser, where the Window menu's native commands
+  // have no bridge to carry them; dropping the command beats throwing
+  // from a click. In the desktop shell wry always installs the bridge
+  // alongside the flag.
   if (!ipc) {
     return;
   }
@@ -71,17 +73,30 @@ function readMaximized(event: Event): boolean | null {
 }
 
 /**
- * Reveals the custom title bar and wires its window controls when running
- * inside the desktop shell; a no-op in a plain browser, where the bar stays
- * hidden and `window.ipc` is never touched. The menu buttons are wired to
- * their popovers by `setupWindowMenus` in window-menu.ts.
+ * Reveals the custom title bar in every mode: the bar carries the
+ * application menus, so it must show in a plain browser too. The drag
+ * region, the window controls, and the maximized-event listener are wired
+ * only inside the desktop shell; in a browser the control cluster is
+ * hidden instead, since the commands would have no IPC bridge to reach.
+ * The menu buttons are wired to their popovers by `setupWindowMenus` in
+ * window-menu.ts.
  */
 export function setupWindowChrome(): void {
   const bar = document.querySelector<HTMLElement>(".window-titlebar");
   if (!bar) {
     throw new Error("DOM Error: .window-titlebar not found in the page.");
   }
+  const controls = bar.querySelector<HTMLElement>(".window-titlebar__controls");
+  if (!controls) {
+    throw new Error("DOM Error: the title bar is missing its window-control cluster.");
+  }
+
+  bar.hidden = false;
+
   if (window.__PROMPTFORGE_DESKTOP__ !== true) {
+    // No native window exists for the buttons to act on; showing them
+    // would present dead controls.
+    controls.hidden = true;
     return;
   }
   const drag = bar.querySelector<HTMLElement>(".window-titlebar__drag");
@@ -96,8 +111,6 @@ export function setupWindowChrome(): void {
   if (!maximizeGlyph || !restoreGlyph) {
     throw new Error("DOM Error: the maximize control is missing its glyphs.");
   }
-
-  bar.hidden = false;
 
   minimize.addEventListener("click", minimizeWindow);
   maximize.addEventListener("click", toggleWindowMaximize);

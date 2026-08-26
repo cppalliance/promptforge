@@ -300,10 +300,12 @@ if (app && !app.classList.contains("mur-chat-empty")) {
   failures.push("fresh mount is not in the empty-chat state");
 }
 
-// Custom window title bar: the markup is always present, but in browser
-// mode (no __PROMPTFORGE_DESKTOP__ flag) the bar stays hidden and the
-// module never touches window.ipc - the whole test runs with no ipc
-// bridge defined, so a passing run proves the inactive path is ipc-free.
+// Custom window title bar: the bar carries the application menus, so it
+// must be visible after boot even in browser mode (no
+// __PROMPTFORGE_DESKTOP__ flag); only the native window-control cluster
+// hides, and the module never touches window.ipc - the whole test runs
+// with no ipc bridge defined, so a passing run proves the menu path is
+// ipc-free.
 const titlebar = window.document.querySelector(".window-titlebar");
 if (!titlebar) {
   failures.push("window title bar missing");
@@ -314,8 +316,14 @@ if (!titlebar) {
   if (window.__PROMPTFORGE_DESKTOP__ !== undefined) {
     failures.push("the smoke test must run without the desktop flag set");
   }
-  if (!titlebar.hidden) {
-    failures.push("the title bar must stay hidden in browser mode");
+  if (titlebar.hidden) {
+    failures.push("the title bar must be visible after boot in browser mode");
+  }
+  const controlsCluster = titlebar.querySelector(".window-titlebar__controls");
+  if (!controlsCluster) {
+    failures.push("title bar window-control cluster missing");
+  } else if (!controlsCluster.hidden) {
+    failures.push("the window-control cluster must stay hidden in browser mode");
   }
   const icon = titlebar.querySelector(".window-titlebar__icon");
   if (!icon) {
@@ -339,6 +347,22 @@ if (!titlebar) {
   }
   for (const button of titlebar.querySelectorAll(".window-titlebar__menu")) {
     if (button.tagName !== "BUTTON") failures.push("a title bar menu is not a <button>");
+  }
+  const popovers = titlebar.querySelectorAll(".window-titlebar__popover");
+  if (popovers.length !== 5) {
+    failures.push(`browser mode built ${popovers.length} menu popovers, expected 5`);
+  }
+  const fileButton = titlebar.querySelector('[data-menu="file"]');
+  if (fileButton) {
+    fileButton.click();
+    const filePopover = fileButton.nextElementSibling;
+    if (!filePopover || !filePopover.classList.contains("window-titlebar__popover") || filePopover.hidden) {
+      failures.push("clicking the File menu button does not open its popover in browser mode");
+    }
+    if (fileButton.getAttribute("aria-expanded") !== "true") {
+      failures.push("the open File menu button is not announced expanded");
+    }
+    fileButton.click();
   }
   if (!titlebar.querySelector(".window-titlebar__drag")) {
     failures.push("title bar drag region missing");

@@ -1,11 +1,12 @@
 // Unit test for the custom window title bar (src/window-chrome.ts). Bundles
 // the TS module with esbuild, imports it via a data URL, and drives it
-// against jsdom built from the real index.html. Covers: the bar stays
-// hidden and ipc-free without the desktop flag; a missing bar throws; under
-// the flag the bar is revealed and each control posts its typed command
-// envelope; the drag region only drags on the primary button; double-click
-// toggles maximize; and the promptforge:maximized event switches the glyph
-// and aria-label while malformed details are ignored.
+// against jsdom built from the real index.html. Covers: without the desktop
+// flag the bar is revealed but the control cluster hides and ipc stays
+// untouched; a missing bar throws; under the flag the bar is revealed and
+// each control posts its typed command envelope; the drag region only drags
+// on the primary button; double-click toggles maximize; and the
+// promptforge:maximized event switches the glyph and aria-label while
+// malformed details are ignored.
 // Run: node test/window-chrome.mjs
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -52,11 +53,13 @@ function scenario({ desktop }) {
   return { window, bar: window.document.querySelector(".window-titlebar"), posted };
 }
 
-// --- Browser mode: no flag, no ipc, nothing wired ---------------------------
+// --- Browser mode: bar visible for the menus, native controls hidden --------
 
 {
   const { window, bar } = scenario({ desktop: false });
-  check("browser mode keeps the bar hidden", bar.hidden === true);
+  check("browser mode reveals the bar", bar.hidden === false);
+  const controls = bar.querySelector(".window-titlebar__controls");
+  check("browser mode hides the window-control cluster", controls.hidden === true);
   check("browser mode never installs window.ipc", !("ipc" in window));
 }
 
@@ -80,6 +83,10 @@ function scenario({ desktop }) {
 {
   const { window, bar, posted } = scenario({ desktop: true });
   check("desktop mode reveals the bar", bar.hidden === false);
+  check(
+    "desktop mode keeps the window-control cluster visible",
+    bar.querySelector(".window-titlebar__controls").hidden === false,
+  );
 
   const commandsAfterClick = (command) => {
     posted.length = 0;

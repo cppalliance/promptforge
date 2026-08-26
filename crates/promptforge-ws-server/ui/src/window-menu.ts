@@ -1,11 +1,14 @@
 // Application menus for the custom title bar: accessible HTML popovers
 // behind the File, Edit, Model, Window, and Help buttons, not native
-// menus. Every command dispatches through the single WindowMenuCommands
-// set built here, so the popovers, future keyboard shortcuts, and any
-// future menu surface all call the same actions. The Window menu reuses
-// the visible window controls' command functions from window-chrome.ts.
-// The Model menu is dynamic: it rebuilds its rows from the catalog
-// surface on every open.
+// menus. The menus exist in both the desktop shell and a plain browser,
+// since the title bar is always visible; only the native window commands
+// (Window menu's Minimize/Maximize, File menu's Close Window) are inert
+// in a browser, where no IPC bridge carries them. Every command
+// dispatches through the single WindowMenuCommands set built here, so
+// the popovers, future keyboard shortcuts, and any future menu surface
+// all call the same actions. The Window menu reuses the window command
+// functions from window-chrome.ts. The Model menu is dynamic: it
+// rebuilds its rows from the catalog surface on every open.
 //
 // Edit commands go through document.execCommand: WebView2 hosts the page
 // as application content with clipboard access, and execCommand preserves
@@ -145,9 +148,10 @@ function buildMenuItems(
 
 /**
  * Builds the shared command set and wires the title-bar menu buttons to
- * their popovers. The popovers only exist in the desktop shell, where the
- * bar is visible; in a plain browser the DOM wiring is skipped and only
- * the command set is returned. Throws if the title-bar markup is missing.
+ * their popovers, in the desktop shell and in a plain browser alike.
+ * Native window commands (Minimize, Maximize/Restore, Close Window)
+ * no-op without the IPC bridge; every other command works in both modes.
+ * Throws if the title-bar markup is missing.
  */
 export function setupWindowMenus(options: {
   readonly agents: AgentMenuCommands;
@@ -200,10 +204,6 @@ export function setupWindowMenus(options: {
     toggleWindowMaximize,
     showAbout: showAboutDialog,
   };
-
-  if (window.__PROMPTFORGE_DESKTOP__ !== true) {
-    return commands;
-  }
 
   const items = buildMenuItems(commands, hasEditTarget);
   const handles: MenuHandle[] = [];
