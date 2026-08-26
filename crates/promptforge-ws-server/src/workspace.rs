@@ -733,10 +733,7 @@ mod tests {
             matches!(error, WorkspaceError::OutsideGrants),
             "expected OutsideGrants, got {error:?}"
         );
-        assert!(
-            !target.exists(),
-            "nothing may be written outside the grant"
-        );
+        assert!(!target.exists(), "nothing may be written outside the grant");
     }
 
     #[test]
