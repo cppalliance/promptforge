@@ -1,7 +1,6 @@
-import { marked } from "marked";
 import type { ActionButtonDef, BlockRenderContext, ContentBlock, Message, RenderConfig } from "../core/types";
-import { el, syncDOMChildren } from "../utils/dom";
-import { renderSafeHTML } from "../utils/html";
+import { StreamingMarkdownRenderer } from "../markdown-blocks";
+import { el } from "../utils/dom";
 
 const MARKDOWN_THROTTLE_MS = 70;
 
@@ -9,6 +8,7 @@ interface BlockState {
 	container: HTMLElement;
 	textCache: string | null;
 	renderSeq: number;
+	markdown: StreamingMarkdownRenderer | null;
 	timer?: number;
 }
 
@@ -62,6 +62,7 @@ export class MessageNode {
 		this.isDestroyed = true;
 		for (const state of this.activeBlocks.values()) {
 			if (state.timer !== undefined) clearTimeout(state.timer);
+			state.markdown?.destroy();
 		}
 		this.el.remove();
 	}
@@ -98,7 +99,7 @@ export class MessageNode {
 			if (!state) {
 				const container = el("div", `mur-content-block mur-block-${block.type}`);
 				container.dataset.blockId = block.id;
-				state = { container, textCache: null, renderSeq: 0 };
+				state = { container, textCache: null, renderSeq: 0, markdown: null };
 				isNew = true;
 			}
 			const container = state.container;
@@ -162,6 +163,7 @@ export class MessageNode {
 			if (!visibleBlockIds.has(id)) {
 				state.container.remove();
 				if (state.timer) clearTimeout(state.timer);
+				state.markdown?.destroy();
 				this.activeBlocks.delete(id);
 			}
 		}
@@ -180,7 +182,7 @@ export class MessageNode {
 				state.timer = undefined;
 			}
 			state.renderSeq++;
-			void this.applyMarkdown(block.id, block.text, state.renderSeq);
+			void this.applyMarkdown(state, block.text, true, state.renderSeq);
 			return;
 		}
 
@@ -189,7 +191,7 @@ export class MessageNode {
 		state.timer = window.setTimeout(() => {
 			state.timer = undefined;
 			state.renderSeq++;
-			void this.applyMarkdown(block.id, block.text, state.renderSeq);
+			void this.applyMarkdown(state, block.text, false, state.renderSeq);
 		}, MARKDOWN_THROTTLE_MS);
 	}
 
@@ -203,19 +205,15 @@ export class MessageNode {
 		}
 	}
 
-	private async applyMarkdown(blockId: string, content: string, seq: number) {
+	private async applyMarkdown(state: BlockState, content: string, finalize: boolean, seq: number) {
 		try {
-			const html = await marked.parse(content);
-			const state = this.activeBlocks.get(blockId);
+			const renderer = (state.markdown ??= new StreamingMarkdownRenderer(
+				state.container,
+				this.config.highlighter,
+			));
+			await renderer.render(content, finalize);
 
-			if (this.isDestroyed || !state || seq !== state.renderSeq) return;
-
-			const nextContent = document.createElement("div");
-			await renderSafeHTML(nextContent, html, this.config.highlighter);
-
-			if (this.isDestroyed || !state || seq !== state.renderSeq) return;
-
-			syncDOMChildren(state.container, nextContent);
+			if (this.isDestroyed || seq !== state.renderSeq) return;
 
 			state.textCache = content;
 		} catch (error) {

@@ -8,7 +8,7 @@
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node test/smoke.mjs"
+    "test": "node test/smoke.mjs && node test/markdown-blocks.mjs"
   },
   "dependencies": {
     "dockview": "^8.2.0",
